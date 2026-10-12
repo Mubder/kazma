@@ -1,0 +1,21 @@
+{
+  "/health/live": {
+    "http_status": 200,
+    "body": {
+      "status": "alive",
+      "timestamp": 1791794887.1241665,
+      "build": {
+        "commit": "b413b5d4",
+        "started_at": 1791745824.4612534
+      }
+    }
+  },
+  "/health/activity": {
+    "http_status": 200,
+    "body": {
+      "active_turns": 0,
+      "pending_approvals": 0,
+      "idle": true
+    }
+  }
+}

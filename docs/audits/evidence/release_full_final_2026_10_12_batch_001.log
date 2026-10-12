@@ -1,0 +1,102 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 804 items / 1 skipped
+
+kazma-gateway\kazma_gateway_tests\adapters\test_slack_bus.py ...         [  0%]
+kazma-gateway\kazma_gateway_tests\adapters\test_telegram_bus.py ...      [  0%]
+kazma-gateway\kazma_gateway_tests\test_gateway_ux.py ..............      [  2%]
+kazma-gateway\kazma_gateway_tests\test_swarm_approval_callbacks.py ..... [  3%]
+........                                                                 [  4%]
+kazma-gateway\kazma_gateway_tests\test_telegram_reactions.py ........... [  5%]
+..                                                                       [  5%]
+kazma-tui\kazma_tui_tests\test_app_async.py ......................       [  8%]
+kazma-tui\kazma_tui_tests\test_chat.py ......................            [ 11%]
+kazma-tui\kazma_tui_tests\test_comprehensive.py ........................ [ 14%]
+..............                                                           [ 15%]
+kazma-tui\kazma_tui_tests\test_css_and_mount.py ........                 [ 16%]
+kazma-tui\kazma_tui_tests\test_dashboard.py ............................ [ 20%]
+...................................                                      [ 24%]
+kazma-tui\kazma_tui_tests\test_foundation.py .......s...                 [ 26%]
+kazma-tui\kazma_tui_tests\test_header_footer.py .............            [ 27%]
+kazma-tui\kazma_tui_tests\test_integration_flows.py .................... [ 30%]
+..............                                                           [ 31%]
+kazma-ui\kazma_ui_tests\test_active_turns.py ............                [ 33%]
+kazma-ui\kazma_ui_tests\test_mcp_ui.py ....                              [ 33%]
+kazma-ui\kazma_ui_tests\test_unit.py .....................               [ 36%]
+tests\integration\test_agent_uses_graph.py ...                           [ 36%]
+tests\integration\test_cron_and_adapters.py ........                     [ 37%]
+tests\integration\test_graph_roundtrip.py ..                             [ 38%]
+tests\test_acquisition_accounting.py ...........                         [ 39%]
+tests\test_acquisition_credits.py .............                          [ 41%]
+tests\test_acquisition_dns.py .................                          [ 43%]
+tests\test_acquisition_durable_controls.py ............................. [ 46%]
+.                                                                        [ 47%]
+tests\test_acquisition_operations.py .................                   [ 49%]
+tests\test_acquisition_parser.py ...................                     [ 51%]
+tests\test_acquisition_postgres.py ssss                                  [ 51%]
+tests\test_acquisition_provider_usage.py .......................         [ 54%]
+tests\test_acquisition_resources.py ........................             [ 57%]
+tests\test_acquisition_surfaces.py ...                                   [ 58%]
+tests\test_active_turns.py ..................                            [ 60%]
+tests\test_adapter_burst_ordering.py ...                                 [ 60%]
+tests\test_admin_decision.py ..........                                  [ 62%]
+tests\test_agent_handler_concurrency.py ................                 [ 64%]
+tests\test_agent_self_improvement.py ..............                      [ 65%]
+tests\test_agent_skill_integrity.py ..........                           [ 67%]
+tests\test_agent_skills.py ...........................                   [ 70%]
+tests\test_agent_turn.py .......                                         [ 71%]
+tests\test_agentdojo_bench.py ..sssss............ss.........s..sss...... [ 76%]
+....                                                                     [ 76%]
+tests\test_agents_active_model.py .                                      [ 77%]
+tests\test_alert_dispatcher_upgrade.py .....                             [ 77%]
+tests\test_alert_install_button.py ..................                    [ 79%]
+tests\test_alpine_templates.py ........                                  [ 80%]
+tests\test_answer_format.py ............................................ [ 86%]
+.......................                                                  [ 89%]
+tests\test_answer_quality.py ......................                      [ 92%]
+tests\test_answer_quality_monitor.py .........................           [ 95%]
+tests\test_api_route_callers.py ............................             [ 98%]
+tests\test_app_bootstrap_errors.py ..                                    [ 98%]
+tests\test_approval_event_semantic.py ....                               [ 99%]
+tests\test_approval_is_honoured_everywhere.py .....                      [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+kazma-gateway/kazma_gateway_tests/test_gateway_ux.py::TestTypingIndicator::test_discord_typing_indicator_fires
+  G:\GitHubRepos\kazma\kazma-gateway\kazma_gateway\adapters\discord.py:827: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    resp.raise_for_status()
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+kazma-ui/kazma_ui_tests/test_mcp_ui.py::test_add_server_forwards_sse_bearer_auth_and_trust
+  kazma-ui\kazma_ui_tests\test_mcp_ui.py:39: PytestWarning: The test <Function test_add_server_forwards_sse_bearer_auth_and_trust> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.asyncio
+
+kazma-ui/kazma_ui_tests/test_unit.py::TestConfigSchema::test_telegram_consistency_check
+  G:\GitHubRepos\kazma\kazma-ui\kazma_ui_tests\test_unit.py:306: PydanticDeprecatedSince20: The `copy` method is deprecated; use `model_copy` instead. See the docstring of `BaseModel.copy` for details about how to handle `include` and `exclude`. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    swarm=KazmaConfig.model_fields['swarm'].default_factory().copy(update={
+
+kazma-ui/kazma_ui_tests/test_unit.py::TestConfigSchema::test_telegram_consistency_check
+  G:\GitHubRepos\kazma\kazma-ui\kazma_ui_tests\test_unit.py:309: PydanticDeprecatedSince20: The `copy` method is deprecated; use `model_copy` instead. See the docstring of `BaseModel.copy` for details about how to handle `include` and `exclude`. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    connectors=KazmaConfig.model_fields['connectors'].default_factory().copy(update={
+
+kazma-ui/kazma_ui_tests/test_unit.py::TestConfigSchema::test_telegram_consistency_check
+  G:\GitHubRepos\kazma\kazma-ui\kazma_ui_tests\test_unit.py:318: PydanticDeprecatedSince20: The `copy` method is deprecated; use `model_copy` instead. See the docstring of `BaseModel.copy` for details about how to handle `include` and `exclude`. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    swarm=KazmaConfig.model_fields['swarm'].default_factory().copy(update={
+
+kazma-ui/kazma_ui_tests/test_unit.py::TestConfigSchema::test_telegram_consistency_check
+  G:\GitHubRepos\kazma\kazma-ui\kazma_ui_tests\test_unit.py:321: PydanticDeprecatedSince20: The `copy` method is deprecated; use `model_copy` instead. See the docstring of `BaseModel.copy` for details about how to handle `include` and `exclude`. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    connectors=KazmaConfig.model_fields['connectors'].default_factory().copy(update={
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========== 788 passed, 17 skipped, 7 warnings in 79.04s (0:01:19) ============

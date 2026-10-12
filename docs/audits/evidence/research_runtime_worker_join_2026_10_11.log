@@ -1,0 +1,10 @@
+........................................................................ [ 41%]
+........................................................................ [ 83%]
+............................                                             [100%]
+============================== warnings summary ===============================
+tests/test_research_crawl_recovery.py::test_research_jobs_do_not_appear_or_resume_as_kb_jobs
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+172 passed, 1 warning in 125.16s (0:02:05)

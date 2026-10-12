@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 import logging
 import re
 from collections import OrderedDict
@@ -996,7 +997,7 @@ async def _try_kb_command(
         else:
             kb_store.update_library(lib_id, seed_url=url)
 
-        job_id = f"{lib_id}:{thread_id}"
+        job_id = f"{lib_id}:{thread_id}:{uuid.uuid4().hex}"
 
         def _kb_job_set(payload: dict[str, Any]) -> None:
             """In-memory + durable ConfigStore snapshot (survives restart)."""
@@ -1020,7 +1021,7 @@ async def _try_kb_command(
 
             final_msg = ""
             try:
-                async for update in ingest_site(lib_id, url, max_pages=max_pages):
+                async for update in ingest_site(lib_id, url, max_pages=max_pages, job_id=job_id):
                     _kb_job_set({
                         "phase": update.phase,
                         "discovered": update.discovered,
@@ -1085,7 +1086,7 @@ async def _try_kb_command(
                 f"⚠️ Library `{lib_id}` has no seed_url to refresh from.",
             )
             return True
-        job_id = f"{lib_id}:{thread_id}:refresh"
+        job_id = f"{lib_id}:{thread_id}:refresh:{uuid.uuid4().hex}"
         row = {
             "phase": "refreshing",
             "library_id": lib_id,
@@ -1106,7 +1107,7 @@ async def _try_kb_command(
 
             final_msg = ""
             try:
-                async for update in ingest_site(lib_id, seed):
+                async for update in ingest_site(lib_id, seed, job_id=job_id):
                     snap = {
                         "phase": update.phase,
                         "library_id": lib_id,
@@ -1180,20 +1181,13 @@ async def _try_kb_command(
             )
             return True
         lib_id = slugify_library_id(tokens[1])
-        job = None
-        for jid, jv in _kb_jobs.items():
-            if jid.startswith(lib_id + ":"):
-                job = jv
-                break
-        if job is None:
-            try:
-                from kazma_core.stores.kb_jobs import list_jobs as _list_kb_jobs
+        from kazma_core.web_acquire.result import AcquisitionError
 
-                for row in _list_kb_jobs(library_id=lib_id):
-                    job = row
-                    break
-            except Exception:
-                pass
+        try:
+            job = await _kb_status_job(lib_id)
+        except AcquisitionError as exc:
+            await _send_model_reply(msg, store, manager, thread_id, f'⚠️ {exc}')
+            return True
         if job is None:
             lib = kb_store.get_library(lib_id)
             if lib is None:
@@ -1216,7 +1210,8 @@ async def _try_kb_command(
             f"fetched={job.get('fetched', 0)} "
             f"ingested={job.get('ingested', 0)} "
             f"failed={job.get('failed', 0)}\n"
-            + (f"current: {job.get('current_url', '')}" if job.get("current_url") else ""),
+            + (f"current: {job.get('current_url', '')}" if job.get("current_url") else "")
+            + _kb_acquisition_status(job),
         )
         return True
 
@@ -2534,3 +2529,52 @@ async def _try_x_command(
 
     await _send(f"Unknown subcommand `{sub}`. Try `/x help`.")
     return True
+
+
+def _kb_acquisition_status(job):
+    evidence = job.get('acquisition')
+    if not evidence:
+        return ''
+    receipt = evidence.get('last_receipt') or {}
+    lines = [f"Durable job: {job.get('job_id')}; status={evidence.get('status', 'unknown')}; "
+        f"pending={evidence['pending']}; ambiguous={evidence['ambiguous']}",
+        f"Discovery uncertain={evidence.get('metadata_ambiguous', 0) + evidence.get('discovery_ambiguous', 0)}; "
+        f"limited={evidence.get('discovery_limited', False)}",
+        f"Service: {receipt.get('backend', 'unknown')}; charges for these requests: unavailable."]
+    allowance = evidence.get('allowances')
+    for observation in (evidence.get('usage') or {}).get('observations', []):
+        lines.append(f"Provider=jina; reported tokens={observation['reported']}; scope=observed service response; charges unavailable.")
+    if allowance:
+        lines.append(f"Request reservations (upper bound): job={allowance['job_reserved'] if allowance['job_reserved'] is not None else 'unknown'}/{allowance['job_limit']}; "
+            f"installation UTC day={allowance['day_reserved']}/{allowance['day_limit']}")
+    for balance in evidence.get('provider_balances') or []:
+        value = balance['remaining'] if balance.get('fresh') else 'unavailable'
+        lines.append(f"Provider={balance['provider']}; account credits={value}; status={balance['status']}; "
+            f"observed_at={balance.get('observed_at') or 'unknown'}; fresh={bool(balance.get('fresh'))}")
+    return '\n' + '\n'.join(lines)
+
+
+async def _kb_status_job(lib_id):
+    job = None
+    from kazma_core.web_acquire.crawl_jobs import inspect_jobs, projection
+    from kazma_core.web_acquire.result import AcquisitionError
+
+    durable = await asyncio.to_thread(inspect_jobs)
+    latest = max((row for row in durable if row['library_id'] == lib_id),
+                 key=lambda row: row['updated_at'], default=None)
+    if latest is not None:
+        job = await asyncio.to_thread(projection, latest['job_id'])
+    for jid, jv in _kb_jobs.items():
+        if job is None and jid.startswith(lib_id + ":"):
+            job = jv
+            break
+    if job is None:
+        try:
+            from kazma_core.stores.kb_jobs import list_jobs as _list_kb_jobs
+
+            for row in _list_kb_jobs(library_id=lib_id):
+                job = row
+                break
+        except Exception:
+            pass
+    return job

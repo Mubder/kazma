@@ -14,6 +14,7 @@ from textual.containers import VerticalScroll, Container
 from textual.widgets import SelectionList, Static, Button, Label, Input, Select
 
 from kazma_tui.themes.theme_manager import ThemeManager
+from kazma_tui.acquisition_status import AcquisitionStatus
 from kazma_tui.widgets.confirm_dialog import ConfirmDialog
 
 __all__ = ["SettingsPanel"]
@@ -216,6 +217,9 @@ class SettingsPanel(VerticalScroll):
             self._last_saved[key] = self._read_config(key, default)
 
         yield Static("  SETTINGS  ·  features · memory · safety", classes="section-label")
+
+        with Container(classes="settings-section"):
+            yield AcquisitionStatus(language=self.theme_manager.language)
 
         # Feature Toggles Section
         with Container(classes="settings-section"):

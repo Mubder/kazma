@@ -1,0 +1,61 @@
+{
+  "url": "https://example.com/",
+  "ok": true,
+  "final_url": "https://example.com/",
+  "backend": "httpx",
+  "http_status": 200,
+  "error_code": null,
+  "error": null,
+  "transient": false,
+  "quality": "usable",
+  "char_count": 156,
+  "latency_ms": 2228.6,
+  "wire_bytes": 400,
+  "decoded_bytes": 577,
+  "truncated": false,
+  "truncation_reasons": [],
+  "links_count": 0,
+  "links_complete": true,
+  "cache_hit": false,
+  "attempts": [
+    {
+      "backend": "httpx",
+      "url": "https://example.com/",
+      "outcome": "response",
+      "latency_ms": 77.8,
+      "final_url": "https://example.com/",
+      "http_status": 200,
+      "error_code": null,
+      "error": null,
+      "transient": false,
+      "remote": false,
+      "wire_bytes": 400,
+      "decoded_bytes": 577,
+      "truncated": false,
+      "usage": null
+    }
+  ],
+  "usage": null,
+  "credits": null,
+  "robots": {
+    "mode": "enforced",
+    "checks": [
+      {
+        "metadata_requests": 1,
+        "origin": "https://example.com:443",
+        "status": "missing",
+        "http_status": 404,
+        "checked_at": "2026-10-12T13:34:16.563513+00:00",
+        "cached": true,
+        "backend": "httpx",
+        "proxy_used": false,
+        "usage": null,
+        "credits": null
+      }
+    ]
+  },
+  "browser_process": null,
+  "mode": "local_only",
+  "isolated_local_store": true,
+  "hosted_attempts": 0
+}

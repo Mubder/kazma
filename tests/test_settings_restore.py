@@ -112,6 +112,24 @@ def test_a_backup_never_holds_a_secret(store) -> None:
     assert json.loads(held["mcp.servers"])[0]["env"]["GITHUB_TOKEN"] == "****"
 
 
+def test_acquisition_effects_and_spent_allowances_survive_settings_restore(store):
+    current = {
+        "acquisition.allowances": {"days": {"fixture-day": {"reserved": 12}}},
+        "acquisition.allowances_revision": 7,
+        "acquisition.crawls": {"fixture-job": {"status": "interrupted", "pages": {"one": "completed"}}},
+        "acquisition.crawls_revision": 9,
+    }
+    for key, value in current.items():
+        store.set(key, value, category="acquisition")
+    held = yaml.safe_load(sr.backup_text(store))["settings"]
+    assert current.keys().isdisjoint(held)
+    # An older or hand-edited backup must not rewind request reservations or
+    # replace completed effects with an empty journal.
+    old = {sr.BACKUP_MARKER: 1, "settings": {key: 0 if isinstance(value, int) else {} for key, value in current.items()}}
+    _restore(store, yaml.safe_dump(old))
+    assert {key: store.get(key) for key in current} == current
+
+
 # ── the restore ─────────────────────────────────────────────────────────────
 
 

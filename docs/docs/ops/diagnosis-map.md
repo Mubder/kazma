@@ -80,7 +80,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | File tools “outside workspace” | `_get_workspace()` precedence only | Do not reimplement in IdeService | §8 Workspace |
 | Memory forgets / search ≠ chat recall | `recall()` empty / FTS drift / embedder down | Dashboard V2 health; `fts_health`; not a V1 adapter | §9 Memory |
 | Empty `web_search` | SearXNG URL + JSON format | Backend chain notes in tool output | §10 Research |
-| Thin `read_url` / bot wall | Recovery cascade Firecrawl→Jina→Playwright | Keys / `KAZMA_JINA_READER=0`; pin-IP when no proxy | §10 Research |
+| Thin `read_url` / bot wall | HTTP → local Chromium → explicitly allowed hosted recovery | Acquisition mode + allowlist; keys alone grant nothing; pin-IP when direct | §10 Research |
 | Stale KB hits after docs shrink | Smart re-index: page hash skip vs purge-on-change; gone-URL prune | `KnowledgeIndex.index` / `purge_source` / site prune | §10 Knowledge |
 | KB inject empty / wrong tenant | `list_auto_inject_libraries` + `kb_mode=inject` federated RRF | `KAZMA_KB_AUTO_INJECT`, smart search, archive flag | §10 Knowledge |
 | Swarm task stuck “paused” | HITL C checkpoint manager | Not A or B | §4 C |
@@ -376,7 +376,7 @@ Audit: [`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blo
 | Element | Cascade / order | Config |
 |---------|-----------------|--------|
 | `web_search` | SearXNG → DDG → Bing → Wikipedia | `KAZMA_SEARXNG_URL`, ConfigStore `search.searxng_url`, compose profile `search` :8088 |
-| `read_url` / KB ingest | SSRF-validate → Firecrawl → Jina (opt-in) → httpx (pin-IP if no proxy) → recovery Firecrawl→Jina→Playwright | `KAZMA_FETCH_BACKEND`, `KAZMA_FIRECRAWL_*`, `KAZMA_JINA_READER` (`1` to opt in); never pin through `proxy=` |
+| `read_url` / KB ingest | SSRF-validate → local httpx (pin-IP) → local Chromium → permitted hosted fallback | `KAZMA_ACQUISITION_MODE` + `KAZMA_ACQUISITION_REMOTE_PROVIDERS`; credentials are separate; never pin through permitted `proxy=` |
 
 KB ingest and research use **`kazma_core.web_acquire`** (`fetch_text` / `search` / `crawl` profiles) over the shared recovery ladder in `read_url` — one I/O stack, product sinks stay separate.
 

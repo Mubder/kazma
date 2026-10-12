@@ -1,0 +1,3 @@
+exit=0
+{"host_namespace": "net:[4026531833]", "exit": 0, "stdout": "{\"namespace\": \"net:[4026533244]\", \"interfaces\": [\"lo\"]}\n", "stderr": ""}
+

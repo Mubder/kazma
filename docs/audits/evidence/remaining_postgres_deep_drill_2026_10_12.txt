@@ -1,0 +1,74 @@
+"""Additional bounded PostgreSQL deep-pipeline crash drills; disposable Docker only."""
+import asyncio,json,os,runpy,sys,tempfile
+from pathlib import Path
+import pytest
+from kazma_core import config_store
+from kazma_core.security.process_budget import run_bounded
+from kazma_core.web_acquire import crawl_jobs
+from kazma_core.tools import research_pipeline as pipeline
+ROOT=Path.cwd()
+helpers=runpy.run_path(str(ROOT/'tests/test_research_pipeline_recovery.py'))
+source=(ROOT/'docs/audits/evidence/research_postgres_2026_10_11.py').read_text().replace('research_durability_postgres_2026_10_11.log','remaining_postgres_deep_2026_10_12.log')
+existing={'__name__':'owned_postgres'}
+exec(compile(source,'owned_postgres','exec'),existing)
+original=existing['run_pytest']
+def drills(args,timeout):
+    code,output=original(args,timeout)
+    if code:
+        return code,output
+    with tempfile.TemporaryDirectory(prefix='kazma-pg-deep-', ignore_cleanup_errors=True) as temp:
+        scratch=Path(temp)
+        os.environ.update(KAZMA_DATA_DIR=str(scratch/'data'),KAZMA_USER_HOME=str(scratch/'home'),KAZMA_OPS_ALERTS='0')
+        (scratch/'data').mkdir()
+        (scratch/'home').mkdir()
+        core=str(ROOT/'kazma-core')
+        for stage in ('plan','source'):
+            root=scratch/stage
+            child=f"""
+import sys,os,runpy,asyncio
+from pathlib import Path
+sys.path.insert(0,{core!r})
+import pytest
+from kazma_core import config_store
+from kazma_core.tools import research_pipeline as pipeline
+helpers=runpy.run_path({str(ROOT/'tests/test_research_pipeline_recovery.py')!r})
+store=config_store.ConfigStore({str(scratch/'unused-child.db')!r})
+assert store._use_postgres()
+helpers['install'](pytest.MonkeyPatch(),Path({str(root)!r}),store,[],crash={stage!r},published=True)
+asyncio.run(pipeline.run_research_pipeline('fixture topic',**helpers['OPTIONS']))
+"""
+            allowed={'path','systemroot','windir','temp','tmp','kazma_db_backend','kazma_database_url','kazma_test_allow_real_db','kazma_data_dir','kazma_user_home','kazma_ops_alerts'}
+            receipt=run_bounded([sys.executable,'-I','-X','utf8','-c',child],env={k:v for k,v in os.environ.items() if k.lower() in allowed},timeout=60,memory_bytes=1024**3,output_bytes=32768,text=True)
+            assert receipt.returncode==23,receipt.stdout+receipt.stderr
+            store=config_store.ConfigStore(str(scratch/'unused-parent.db'))
+            assert store._use_postgres()
+            mp=pytest.MonkeyPatch()
+            calls=[]
+            try:
+                helpers['install'](mp,root,store,calls)
+                row,=crawl_jobs._read()[1].values()
+                source=root/row['policy']['output']/'src-02.md'
+                before=source.read_bytes() if stage=='source' else None
+                result=asyncio.run(pipeline.run_research_pipeline('fixture topic',**helpers['OPTIONS'],resume_job_id=row['job_id']))
+                if stage=='plan':
+                    assert result.startswith('Error:') and 'uncertain' in result and not calls,result
+                else:
+                    assert result.startswith('# Deep research partial'),result
+                    assert calls==[helpers['URLS'][2],'synthesis'],calls
+                    assert source.read_bytes()==before
+                output+=f'\nPostgreSQL deep pipeline {stage} process-death drill passed.\n'
+                store.batch_set([(crawl_jobs._KEY,{},crawl_jobs._CATEGORY),(crawl_jobs._REVISION,0,crawl_jobs._CATEGORY),('acquisition.artifacts',{},'acquisition_artifacts'),('acquisition.artifacts_revision',0,'acquisition_artifacts')])
+            finally:
+                mp.undo()
+                store.close()
+        config_store.reset_config_store(close=True)
+    return 0,output
+existing['main'].__globals__['run_pytest']=drills
+try:
+    result=existing['main']()
+finally:
+    evidence=ROOT/'docs/audits/evidence/remaining_postgres_deep_2026_10_12.log'
+    if evidence.exists():
+        # Preserve the earlier receipt: this wrapper's main uses a renamed target below.
+        pass
+raise SystemExit(result)

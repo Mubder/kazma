@@ -1,0 +1,38 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 600.0s
+timeout method: thread
+timeout func_only: False
+collected 8 items
+
+tests\e2e\test_pages_load_clean.py ........                              [100%]
+
+============================== warnings summary ===============================
+tests/e2e/test_pages_load_clean.py::test_every_page_loads_clean
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/e2e/test_pages_load_clean.py::test_every_page_loads_clean
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\uvicorn\protocols\websockets\websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+tests/e2e/test_pages_load_clean.py::test_every_page_loads_clean
+tests/e2e/test_pages_load_clean.py::test_every_page_loads_clean
+tests/e2e/test_pages_load_clean.py::test_every_page_survives_a_restart
+tests/e2e/test_pages_load_clean.py::test_every_page_survives_a_restart
+tests/e2e/test_pages_load_clean.py::test_every_page_survives_its_apis_failing
+tests/e2e/test_pages_load_clean.py::test_every_page_survives_its_apis_failing
+tests/e2e/test_pages_load_clean.py::test_the_alert_banner_shows_what_the_store_holds
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\websockets\legacy\server.py:1178: DeprecationWarning: remove second argument of ws_handler
+    warnings.warn("remove second argument of ws_handler", DeprecationWarning)
+
+tests/e2e/test_pages_load_clean.py::test_negative_control_a_poller_reading_the_error_page_is_caught
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\aiosqlite\core.py:127: DeprecationWarning: There is no current event loop
+    future = asyncio.get_event_loop().create_future()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 8 passed, 10 warnings in 505.84s (0:08:25) ==================

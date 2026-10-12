@@ -110,16 +110,21 @@ def _parse_json_blob(text: str) -> dict[str, Any] | None:
 
 
 async def _llm_json(system: str, user: str, *, max_tokens: int = 1200) -> str:
-    from kazma_core.model_registry import get_model_registry
-
-    reg = get_model_registry()
-    client = reg.get_client()
-    model = None
-    try:
-        profile = reg.get_active_profile() or {}
-        model = profile.get("model")
-    except Exception:
-        pass
+    from kazma_core.web_acquire.research_llm import resolved_route
+    from kazma_core.web_acquire.crawl_jobs import call
+    route = await call(resolved_route)
+    if route is not None:
+        client, model, frozen_failover = route
+    else:
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        client = reg.get_client()
+        model = None
+        try:
+            model = (reg.get_active_profile() or {}).get('model')
+        except Exception:
+            pass
+        frozen_failover = None
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -136,6 +141,7 @@ async def _llm_json(system: str, user: str, *, max_tokens: int = 1200) -> str:
         max_attempts=2,
         max_tokens=max_tokens,
         label="research-planner",
+        frozen_failover=frozen_failover,
     )
     if hasattr(result, "content"):
         return str(result.content or "")

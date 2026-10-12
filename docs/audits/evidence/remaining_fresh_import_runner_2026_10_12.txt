@@ -1,0 +1,23 @@
+import os,sys,tempfile
+from pathlib import Path
+from kazma_core.security.process_budget import run_bounded
+from scripts.check_fresh_imports import product_modules
+root=Path.cwd()
+with tempfile.TemporaryDirectory(prefix='kazma-fresh-imports-') as temp:
+ scratch=Path(temp)
+ allowed={'path','systemroot','windir','temp','tmp','userprofile','appdata','localappdata'}
+ env={k:v for k,v in os.environ.items() if k.lower() in allowed}
+ env.update(PYTHONIOENCODING='utf-8',OMP_NUM_THREADS='2',MKL_NUM_THREADS='2',OPENBLAS_NUM_THREADS='2',PYTEST_CURRENT_TEST='fresh-import-qualification',KAZMA_DATA_DIR=str(scratch/'data'),KAZMA_USER_HOME=str(scratch/'home'),KAZMA_SKILLS_HOME=str(scratch/'skills'))
+ env['PYTHONPATH']=';'.join(str(p) for p in [root,*[root/part for part in ['kazma-core','kazma-ui','kazma-gateway','kazma-cli','kazma-tui','kazma-skills']]])
+ modules=product_modules(); outputs=[]; failed=False
+ for offset in range(0,len(modules),25):
+  batch=modules[offset:offset+25]
+  program='import psutil,runpy,sys;psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS);sys.argv='+repr([str(root/'scripts/check_fresh_imports.py'),'--jobs','1',*batch])+';runpy.run_path(sys.argv[0],run_name="__main__")'
+  result=run_bounded([sys.executable,'-X','utf8','-c',program],env=env,timeout=300,output_bytes=1024**2,memory_bytes=3*1024**3,text=True)
+  output='batch='+str(offset//25)+' exit='+str(result.returncode)+'\n'+result.stdout+'\n'+result.stderr
+  outputs.append(output); failed=failed or result.returncode!=0
+  (root/'docs/audits/evidence/remaining_fresh_imports_all_2026_10_12.log').write_text('\n'.join(outputs),encoding='utf-8')
+  print(output,flush=True)
+ summary='enumerated_modules='+str(len(modules))+' batches='+str(len(outputs))+' exit='+str(int(failed))
+ with (root/'docs/audits/evidence/remaining_fresh_imports_all_2026_10_12.log').open('a',encoding='utf-8') as receipt: receipt.write('\n'+summary+'\n')
+ print(summary);raise SystemExit(int(failed))

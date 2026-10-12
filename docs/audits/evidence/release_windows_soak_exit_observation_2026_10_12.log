@@ -1,0 +1,28 @@
+{"platform": "windows", "exit": 1, "error": null, "elapsed_s": 26.0, "memory_limit_bytes": 3221225472, "cpu_rate": 2000, "tree_closed": true}
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+[browser] graceful close exceeded five seconds; terminating owned process tree
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_browser_soak.py", line 126, in <module>
+    asyncio.run(main())
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_browser_soak.py", line 58, in main
+    assert not child.is_running() or child.status()==psutil.STATUS_ZOMBIE,(child.pid,child.name())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: (11496, 'chrome-headless-shell.exe')

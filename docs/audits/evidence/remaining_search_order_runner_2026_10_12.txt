@@ -1,0 +1,9 @@
+import json,sys
+from pathlib import Path
+from scripts.fast_test import run_pytest
+base=Path(r'G:\GitHubRepos\kazma\.git\worktrees\kazma')
+files=json.loads((base/'remaining_final_regression_files.json').read_text())
+files=files[files.index('tests/test_origin_scheduler.py'):files.index('tests/test_search_http_worker.py')+1]
+code,output=run_pytest(['-p','remaining_search_diagnostics',*files,'--timeout=120','--tb=short','--maxfail=1'],600)
+Path('docs/audits/evidence/remaining_search_order_diagnosis_2026_10_12.log').write_text(output,encoding='utf-8')
+print(output[-9000:]);raise SystemExit(code)

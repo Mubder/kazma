@@ -1,0 +1,49 @@
+"""Stop only the owned pytest tree if this shared machine loses memory headroom."""
+import threading,time
+import psutil
+
+def install(runner):
+    original_run=runner.run_pytest
+    original_start=runner._start
+    def guarded(args,timeout):
+        deadline=time.monotonic()+900
+        while psutil.virtual_memory().available < 8*1024**3:
+            if time.monotonic()>deadline:
+                return 124,'RESOURCE GUARD: insufficient free memory before launch; no pytest started'
+            print('RESOURCE GUARD: waiting for 8 GiB free memory before the next owned test process',flush=True)
+            time.sleep(30)
+        stopped=threading.Event()
+        tripped=threading.Event()
+        active=[]
+        lock=threading.Lock()
+        class SerializedTree:
+            def __init__(self,tree): self.tree=tree
+            def kill(self):
+                with lock: self.tree.kill()
+            def close(self):
+                with lock: self.tree.close()
+        def start(command,env):
+            proc,tree=original_start(command,env)
+            safe=SerializedTree(tree)
+            active.append((proc,safe))
+            return proc,safe
+        def watch():
+            low=0
+            while not stopped.wait(1):
+                low=low+1 if psutil.virtual_memory().available < 4*1024**3 else 0
+                if low>=3 and active and active[0][0].poll() is None:
+                    tripped.set()
+                    active[0][1].kill()
+                    return
+        runner._start=start
+        thread=threading.Thread(target=watch,daemon=True)
+        thread.start()
+        try:
+            code,output=original_run(args,timeout)
+            if tripped.is_set(): return 124,output+'\nRESOURCE GUARD: owned pytest tree stopped below 4 GiB free; not a measured pass'
+            return code,output
+        finally:
+            stopped.set();thread.join(5)
+            runner._start=original_start
+            assert not thread.is_alive()
+    runner.run_pytest=guarded

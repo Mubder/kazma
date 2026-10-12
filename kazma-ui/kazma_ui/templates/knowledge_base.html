@@ -10,6 +10,7 @@
 <script>
   window.__KB_STRINGS = {
     chunks: {{ t('knowledge.chunks') | tojson }},
+    credits_unavailable: {{ t('knowledge.credits_unavailable') | tojson }},
     chunks_count: {{ plural_forms('knowledge.chunks_count') | tojson }},
     auto_inject: {{ t('knowledge.auto_inject') | tojson }},
     auto_inject_on: {{ t('knowledge.auto_inject_on') | tojson }},
@@ -105,6 +106,51 @@
         <strong style="display:inline-flex;align-items:center;gap:6px;"><span class="ki" x-html="KazmaIcons.get(jobIcon())" aria-hidden="true"></span><span x-text="jobTitle()"></span></strong>
       </div>
       <div translate="no" style="font-size:0.88rem;color:var(--text-secondary);" x-text="activeJob.message || ''"></div>
+      <div role="status" translate="no" x-show="activeJob.poll_error" x-text="activeJob.poll_error" x-cloak></div>
+      <button class="btn btn-secondary btn-sm" x-show="activeJob.resume_available" @click="resumeCrawl()" x-cloak>{{ t('knowledge.resume') }}</button>
+      <template x-if="activeJob.acquisition">
+        <div style="margin-top:6px;font-size:0.8rem;">
+          <div>{{ t('knowledge.acquisition_pending') }}: <bdi x-text="activeJob.acquisition.pending"></bdi> · {{ t('knowledge.acquisition_ambiguous') }}: <bdi x-text="activeJob.acquisition.ambiguous"></bdi></div>
+          <div>{{ t('knowledge.discovery_uncertain') }}: <bdi x-text="KazmaFormat.number((activeJob.acquisition.metadata_ambiguous || 0) + (activeJob.acquisition.discovery_ambiguous || 0))"></bdi></div>
+          <template x-if="activeJob.acquisition.last_receipt">
+            <div>
+              {{ t('knowledge.acquisition_backend') }}: <bdi translate="no" x-text="activeJob.acquisition.last_receipt.backend"></bdi>
+              <div>{{ t('knowledge.acquisition_attempts') }}: <bdi translate="no" x-text="(activeJob.acquisition.last_receipt.attempts || []).map(a => a.backend + ': ' + (a.error_code || a.outcome)).join(' · ')"></bdi></div>
+            </div>
+          </template>
+          <div>{{ t('knowledge.acquisition_unknown') }}</div>
+          <template x-if="activeJob.acquisition.usage">
+            <div>
+              <div>{{ t('knowledge.usage_observations') }}</div>
+              <template x-for="(observation, index) in activeJob.acquisition.usage.observations" :key="index">
+                <div><bdi translate="no">Jina Reader</bdi> · {{ t('knowledge.reported_token_usage') }}: <bdi x-text="KazmaFormat.number(observation.reported)"></bdi></div>
+              </template>
+            </div>
+          </template>
+          <template x-if="activeJob.acquisition.allowances">
+            <div>
+              <div>{{ t('knowledge.allowance_unit') }}</div>
+              <div>{{ t('knowledge.allowance_job') }}: <bdi x-text="(activeJob.acquisition.allowances.job_reserved == null ? '—' : KazmaFormat.number(activeJob.acquisition.allowances.job_reserved)) + ' / ' + KazmaFormat.number(activeJob.acquisition.allowances.job_limit)"></bdi></div>
+              <div>{{ t('knowledge.allowance_day') }}: <bdi x-text="KazmaFormat.number(activeJob.acquisition.allowances.day_reserved) + ' / ' + KazmaFormat.number(activeJob.acquisition.allowances.day_limit)"></bdi></div>
+            </div>
+          </template>
+          <template x-if="activeJob.acquisition.provider_balances">
+            <div>
+              <template x-for="balance in activeJob.acquisition.provider_balances" :key="balance.provider">
+                <div>
+                  <bdi translate="no" x-text="balance.provider"></bdi> ·
+                  <span x-text="balance.fresh ? KazmaFormat.number(balance.remaining) : S.credits_unavailable"></span>
+                  <bdi translate="no" x-text="balance.status"></bdi>
+                  <span x-show="balance.observed_at" x-cloak x-text="balance.observed_at ? KazmaFormat.dateTime(new Date(balance.observed_at * 1000)) : ''"></span>
+                  <a x-show="balance.dashboard" x-cloak :href="balance.dashboard" target="_blank" rel="noopener noreferrer">{{ t('knowledge.provider_dashboard') }}</a>
+                </div>
+              </template>
+              <button class="btn btn-secondary btn-sm" x-show="activeJob.acquisition.provider_balances[0].status !== 'disabled' && activeJob.acquisition.provider_balances[0].status !== 'not_configured'" x-cloak :disabled="!!_creditsAbort" @click="refreshCredits()">{{ t('knowledge.credits_refresh') }}</button>
+              <div>{{ t('knowledge.credits_scope') }}</div>
+            </div>
+          </template>
+        </div>
+      </template>
       <div style="margin-top:6px;font-size:0.8rem;color:var(--text-secondary);">
         {{ t('knowledge.job_discovered') }}: <span x-text="activeJob.discovered || 0"></span> ·
         {{ t('knowledge.job_fetched') }}: <span x-text="activeJob.fetched || 0"></span> ·

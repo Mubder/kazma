@@ -1,0 +1,73 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 771 items
+
+tests\test_router.py ....................                                [  2%]
+tests\test_routes_exist_when_built.py ..                                 [  2%]
+tests\test_routing.py .............                                      [  4%]
+tests\test_routing_engine.py .....                                       [  5%]
+tests\test_routing_unification.py .                                      [  5%]
+tests\test_runtime_ownership.py .....sssss                               [  6%]
+tests\test_runtime_writer_fence.py ...s.                                 [  7%]
+tests\test_s32_stream_duplication.py ...                                 [  7%]
+tests\test_s4_coverage_gaps.py ..................                        [  9%]
+tests\test_safe_xml.py .....                                             [ 10%]
+tests\test_saved_drafts_readback.py ...................                  [ 13%]
+tests\test_schedule_conflict_reason.py ...............................   [ 17%]
+tests\test_scheduled_api.py .........                                    [ 18%]
+tests\test_scheduler_cadence.py ............                             [ 19%]
+tests\test_scripts_have_no_english.py .................................. [ 24%]
+.......                                                                  [ 25%]
+tests\test_scripts_keep_their_translator.py ...                          [ 25%]
+tests\test_search_http_worker.py .............                           [ 27%]
+tests\test_search_sdk_worker.py ......                                   [ 28%]
+tests\test_searxng_discovery.py .....                                    [ 28%]
+tests\test_secret_scan.py ..............................                 [ 32%]
+tests\test_secrets_are_never_blanked.py ............                     [ 34%]
+tests\test_security_headers.py ......                                    [ 34%]
+tests\test_security_linter.py .............................              [ 38%]
+tests\test_security_policy_file.py ..                                    [ 38%]
+tests\test_security_report_sources.py ............                       [ 40%]
+tests\test_security_scan_scope.py .....                                  [ 41%]
+tests\test_semantic_compact.py ....                                      [ 41%]
+tests\test_send_approval_request.py ....                                 [ 42%]
+tests\test_send_results_read.py ...........                              [ 43%]
+tests\test_sensitive_key_classification.py ............................. [ 47%]
+.                                                                        [ 47%]
+tests\test_serve_env.py .                                                [ 47%]
+tests\test_service_facade.py ..............................              [ 51%]
+tests\test_service_supervision.py ...................................... [ 56%]
+....................................................                     [ 63%]
+tests\test_session_directory.py ...........                              [ 64%]
+tests\test_session_manager.py .............................              [ 68%]
+tests\test_session_manager_merge_race.py ...                             [ 68%]
+tests\test_session_spool.py ......s..                                    [ 69%]
+tests\test_session_store.py ............                                 [ 71%]
+tests\test_session_tenant_binding.py .......                             [ 72%]
+tests\test_session_ttl.py ...                                            [ 72%]
+tests\test_setting_writes_validated.py ....................              [ 75%]
+tests\test_settings.py ................................................. [ 81%]
+................................................                         [ 87%]
+tests\test_settings_initial_cloak.py .                                   [ 88%]
+tests\test_settings_restart_via_guard.py .......                         [ 88%]
+tests\test_settings_restore.py ................................          [ 93%]
+tests\test_settings_restore_classes.py .....................             [ 95%]
+tests\test_settings_split.py .....                                       [ 96%]
+tests\test_setup_api.py ....                                             [ 97%]
+tests\test_shared_approvals.py ....                                      [ 97%]
+tests\test_shared_store_peers.py ...................                     [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 764 passed, 7 skipped, 1 warning in 230.45s (0:03:50) ============

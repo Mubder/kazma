@@ -1,0 +1,26 @@
+kazma_core.tools.research_readiness: exit=0
+
+
+kazma_core.web_acquire.operations: exit=0
+
+
+kazma_cli.acquisition: exit=0
+
+
+kazma_cli.main: exit=0
+
+
+kazma_cli.completions: exit=0
+
+
+kazma_tui.acquisition_status: exit=0
+
+
+kazma_tui.widgets.settings_panel: exit=1
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'kazma_tui.widgets.settings_panel'
+
+kazma_tui.app: exit=0
+

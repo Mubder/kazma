@@ -389,7 +389,7 @@ TOOL_WRITES: dict[str, Write] = {
     "knowledge_ingest_url": Write(
         ("settings.db",), ("knowledge_list_libraries", "knowledge_search")),
     "knowledge_ingest_site": Write(
-        ("settings.db",), ("knowledge_list_libraries", "knowledge_search")),
+        ("settings.db",), ("knowledge_list_libraries", "knowledge_search", "research_readiness")),
     "config_save": Write(("settings.db",), ("config_read",)),
     "request_path_access": Write(("settings.db",), ("config_read",)),
     "vault_store": Write(("vault.db",), ("vault_list",)),
@@ -403,6 +403,7 @@ TOOL_WRITES: dict[str, Write] = {
     "dispatch_swarm": Write(("swarm_tasks.db",), ("check_swarm_task",)),
     "spawn_agent": Write(("none",), note="the sub-agent's answer is the tool result"),
     "spawn_agents": Write(("none",), note="the sub-agents' answers are the tool result"),
+    "cancel_research_session": Write(("research_sessions.db",), ("research_session_status",)),
     "start_deep_research": Write(
         ("research_sessions.db",), ("list_research_papers",),
         also=(Write(("workspace",), ("file_read",)),)),

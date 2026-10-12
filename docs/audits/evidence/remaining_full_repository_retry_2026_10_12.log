@@ -1,0 +1,47 @@
+[fast-test] 1011 test files in 1 chunks (1 requested, timeout 14400s/chunk)
+[fast-test] chunk 00: OK 14435p/13f (1011 files)
+
+[fast-test] TOTALS in 3520s: 2 deselected, 13 failed, 14435 passed, 63 skipped
+
+[fast-test] 13 failing tests:
+  FAILED kazma-tui/kazma_tui_tests/test_header_footer.py::TestEnglishOnlySource::test_no_arabic_in_new_tui_files
+  FAILED kazma-tui/kazma_tui_tests/test_integration_flows.py::TestEnglishOnlyComprehensive::test_all_ui_strings_are_english
+  FAILED tests/test_api_route_callers.py::test_every_api_route_has_a_caller_or_a_reason
+  FAILED tests/test_api_route_callers.py::test_every_api_route_method_has_a_caller_or_a_reason
+  FAILED tests/test_audit_2026_08_29_regressions.py::test_shell_exec_still_allows_ordinary_commands
+  FAILED tests/test_durable_crawls.py::test_recovery_survives_real_process_death_without_replaying_unknown_effects
+  FAILED tests/test_orphan_modules.py::test_every_product_module_is_reached
+  FAILED tests/test_settings_restore_classes.py::test_every_key_the_code_writes_is_named_by_a_rule
+  FAILED tests/test_sqlite_kept_connections.py::test_every_explicit_begin_rolls_back_on_error
+  FAILED tests/test_store_registry.py::test_every_state_changing_tool_declares_its_readback
+  FAILED tests/test_tool_paths.py::test_no_tool_resolves_its_path_against_the_process_cwd
+  FAILED tests/test_ui_audit_fixes.py::test_shipped_native_capability_descriptions_cover_both_languages
+  FAILED tests/test_unbound_local_imports.py::test_no_function_reads_an_import_on_a_path_that_skipped_it
+
+[fast-test] failure tracebacks (per-chunk FAILURES sections):
+================================== FAILURES ===================================
+____________ TestEnglishOnlySource.test_no_arabic_in_new_tui_files ____________
+kazma-tui\kazma_tui_tests\test_header_footer.py:211: in test_no_arabic_in_new_tui_files
+    assert not match, (
+E   AssertionError: acquisition_status.py contains Arabic/RTL character at position 938: 'ت'
+E   assert not <re.Match object; span=(938, 939), match='ت'>
+---------------------------- Captured stdout setup ----------------------------
+06:35:48 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+06:35:48 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19646\test_no_arabic_in_new_tui_file0\chat_sessions.db
+06:35:48 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19646\test_no_arabic_in_new_tui_file0\settings.db
+06:35:48 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+06:35:48 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19646\test_no_arabic_in_new_tui_file0\settings.db
+06:35:48 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+----------------------------- Captured log setup ------------------------------
+INFO     kazma_core.db.sqlite_columns:sqlite_columns.py:69 [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+INFO     kazma_ui.session_manager:session_manager.py:269 [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19646\test_no_arabic_in_new_tui_file0\chat_sessions.db
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19646\test_no_arabic_in_new_tui_file0\settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19646\test_no_arabic_in_new_tui_file0\settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+________ TestEnglishOnlyComprehensive.test_all_ui_strings_are_english _________
+kazma-tui\kazma_tui_tests\test_integration_flows.py:446: in test_all_ui_strings_are_english
+    pytest.fail(
+E   Failed: acquisition_status.py contains non-English character U+062A at position 938
+---------------------------- Captured stdout setup ----------------------------
+06:35:49 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) up

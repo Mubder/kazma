@@ -1,0 +1,1 @@
+FAILED: lifecycle workload requested 300 seconds plus startup/cleanup, while run_bounded clamps the whole owned process tree to 300 seconds. TimeoutExpired after 300 seconds; no terminal lifecycle tally. This is not a passing profile. Follow-up workload is 240 seconds inside the unchanged process ceiling.

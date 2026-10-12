@@ -25,6 +25,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "tool.desc.critique_synthesis_gaps": {"en": "Identify evidence gaps in a research synthesis.", "ar": "تحديد فجوات الأدلة في خلاصة البحث."},
     "tool.desc.list_research_papers": {"en": "List the available research papers.", "ar": "عرض الأوراق البحثية المتاحة."},
     "tool.desc.research_readiness": {"en": "Check whether deep research is ready to run.", "ar": "التحقق من جاهزية البحث المتعمق للتنفيذ."},
+    "tool.desc.cancel_research_session": {"en": "Cancel a running research session and wait for its workers to stop.", "ar": "إلغاء جلسة بحث جارية وانتظار توقف عملياتها."},
+    "tool.desc.research_session_status": {"en": "Inspect saved research progress, errors and acquisition usage.", "ar": "عرض تقدم البحث المحفوظ والأخطاء واستخدام خدمات الجلب."},
     "tool.desc.start_deep_research": {"en": "Start a deep research task.", "ar": "بدء مهمة بحث متعمق."},
     "tool.desc.mcp_list_resources": {"en": "List resources exposed by connected MCP servers.", "ar": "عرض الموارد التي توفرها خوادم MCP المتصلة."},
     "tool.desc.mcp_read_resource": {"en": "Read a resource from a connected MCP server.", "ar": "قراءة مورد من خادم MCP متصل."},

@@ -1,0 +1,23 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 87 items
+
+tests\test_docs_anchors.py ........                                      [  9%]
+tests\test_docs_file_refs.py ...                                         [ 12%]
+tests\test_docs_sidebar.py ..                                            [ 14%]
+tests\test_docs_mdx_safe.py ...                                          [ 18%]
+tests\test_website_pages.py ...                                          [ 21%]
+tests\test_cli_docs.py ....                                              [ 26%]
+tests\test_debt_ratchet.py .....                                         [ 32%]
+tests\test_static_gates.py ............................................. [ 83%]
+.............                                                            [ 98%]
+tests\test_metrics_receipt_current.py .                                  [100%]
+
+======================== 87 passed in 77.49s (0:01:17) ========================

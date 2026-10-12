@@ -1,0 +1,18 @@
+...................................................................s.... [ 82%]
+...F...........                                                          [100%]
+================================== FAILURES ===================================
+_____________________ test_exception_debt_only_goes_down ______________________
+tests\test_debt_ratchet.py:163: in test_exception_debt_only_goes_down
+    assert not shrank, (
+E   AssertionError: Debt went down � lock it in by lowering BASELINE in this file:
+E       blind_except: set to 3506 (was 3507)
+E   assert not {'blind_except': (3506, 3507)}
+============================== warnings summary ===============================
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_debt_ratchet.py::test_exception_debt_only_goes_down - Asser...
+1 failed, 85 passed, 1 skipped, 57 deselected, 1 warning in 60.74s (0:01:00)

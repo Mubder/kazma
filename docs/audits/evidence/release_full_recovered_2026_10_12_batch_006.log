@@ -1,0 +1,70 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 563 items
+
+tests\test_document_platform_tools_phase8.py .....                       [  0%]
+tests\test_document_processor_security.py .......                        [  2%]
+tests\test_document_repository_pg_quota.py ss                            [  2%]
+tests\test_document_sandbox.py .......                                   [  3%]
+tests\test_document_worker.py ....                                       [  4%]
+tests\test_documentation_redirects.py ...                                [  4%]
+tests\test_documents_api_phase8.py .................                     [  7%]
+tests\test_documents_config.py ...                                       [  8%]
+tests\test_documents_models.py ..........                                [ 10%]
+tests\test_documents_repository.py ......                                [ 11%]
+tests\test_documents_storage.py ..........                               [ 13%]
+tests\test_docx_rtl_visual.py ...........                                [ 15%]
+tests\test_draft_discard.py ..........                                   [ 16%]
+tests\test_drill_pg_restore_containerised.py .....                       [ 17%]
+tests\test_drill_restic_lock_handling.py .........                       [ 19%]
+tests\test_drill_tells_loss_from_emptiness.py ..........                 [ 21%]
+tests\test_durable_config_outage.py ................                     [ 23%]
+tests\test_durable_crawls.py .................                           [ 26%]
+tests\test_durable_gate_decisions.py ....                                [ 27%]
+tests\test_e2b_temporal.py ...........                                   [ 29%]
+tests\test_e2e.py ..............                                         [ 32%]
+tests\test_editor_assets_offline.py ................                     [ 34%]
+tests\test_effect_journal.py ....................                        [ 38%]
+tests\test_ego_anchor.py ...................                             [ 41%]
+tests\test_email_api_security.py .........                               [ 43%]
+tests\test_email_disconnect_csrf.py ..........                           [ 45%]
+tests\test_email_extra_accounts.py .........................             [ 49%]
+tests\test_email_fail_closed.py .....................                    [ 53%]
+tests\test_email_imap_pop.py .........                                   [ 55%]
+tests\test_email_list_ids.py ...                                         [ 55%]
+tests\test_email_manager.py ........                                     [ 57%]
+tests\test_email_oauth_browser.py .........                              [ 58%]
+tests\test_email_oauth_refresh_lock.py ...                               [ 59%]
+tests\test_email_polish.py .........                                     [ 60%]
+tests\test_embedder_rebuild_route.py ..                                  [ 61%]
+tests\test_endpoint_transport.py ........                                [ 62%]
+tests\test_english_counts.py ...........                                 [ 64%]
+tests\test_entity_count_repair.py ....                                   [ 65%]
+tests\test_env_loading.py ..........                                     [ 66%]
+tests\test_env_reference.py ......                                       [ 68%]
+tests\test_error_coverage.py ....................                        [ 71%]
+tests\test_error_redaction.py .........                                  [ 73%]
+tests\test_eval_pack.py ................................................ [ 81%]
+....................................                                     [ 88%]
+tests\test_evaluation_review.py .............                            [ 90%]
+tests\test_event_loop_fixes.py ..................                        [ 93%]
+tests\test_eventloop_identity.py ...                                     [ 94%]
+tests\test_execution_policy_failures.py ..........                       [ 95%]
+tests\test_execution_recovery_scope.py ..................                [ 99%]
+tests\test_extract_salvage.py ....                                       [ 99%]
+tests\test_f0_hitl_app_graph_spike.py .                                  [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 561 passed, 2 skipped, 1 warning in 419.66s (0:06:59) ============

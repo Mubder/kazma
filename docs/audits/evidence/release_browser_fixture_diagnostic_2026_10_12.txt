@@ -1,0 +1,22 @@
+import ast,json,os,sys,tempfile
+from pathlib import Path
+from kazma_core.security.child_env import tool_child_env
+from kazma_core.security.process_budget import run_bounded
+
+root=Path.cwd()
+parsed=ast.parse((root/'tests/test_browser_driver_budget.py').read_text(encoding='utf-8'))
+test=next(n for n in parsed.body if isinstance(n,ast.FunctionDef) and n.name=='test_killing_server_process_also_ends_its_real_browser_tree')
+script=next(ast.literal_eval(n.value) for n in test.body if isinstance(n,ast.Assign)
+            and any(isinstance(t,ast.Name) and t.id=='script' for t in n.targets))
+os.environ['KAZMA_BROWSER_NETWORK_MODE']='compatibility'
+with tempfile.TemporaryDirectory(prefix='kazma-fixture-diagnostic-',ignore_cleanup_errors=True) as temporary:
+    path=Path(temporary)
+    env=tool_child_env({key:str(path/name) for key,name in [('KAZMA_DATA_DIR','data'),('KAZMA_USER_HOME','home'),('KAZMA_SKILLS_HOME','skills')]})
+    assert 'KAZMA_BROWSER_NETWORK_MODE' not in env
+    result=run_bounded([sys.executable,'-I','-c',script,str(path/'marker.json')],env=env,timeout=12,output_bytes=32*1024,text=True)
+    receipt={'exit':result.returncode,'compatibility_filtered':True,'marker_exists':(path/'marker.json').exists(),
+             'strict_refusal_observed':'This host has no qualified implementation; launch refused' in result.stderr}
+    assert result.returncode!=0 and receipt['strict_refusal_observed'] and not receipt['marker_exists'],receipt
+    output=json.dumps(receipt)+'\n'+result.stderr
+    (root/'docs/audits/evidence/release_browser_fixture_diagnostic_2026_10_12.log').write_text(output,encoding='utf-8')
+    print(json.dumps(receipt))

@@ -1,0 +1,78 @@
+exit=0
+{"cycle": 10, "elapsed_s": 40.2, "max_sampled_owned_rss_bytes": 287162368, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 20, "elapsed_s": 74.3, "max_sampled_owned_rss_bytes": 353685504, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 30, "elapsed_s": 109.4, "max_sampled_owned_rss_bytes": 353685504, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 40, "elapsed_s": 143.8, "max_sampled_owned_rss_bytes": 414511104, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 50, "elapsed_s": 178.3, "max_sampled_owned_rss_bytes": 414511104, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 60, "elapsed_s": 212.4, "max_sampled_owned_rss_bytes": 414511104, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"profile": "bounded_browser_lifecycle", "ok": true, "cycles": 69, "pages": 138, "elapsed_s": 243.5, "max_sampled_owned_rss_bytes": 414511104, "initial_threads": 5, "final_threads": 3, "network_mode": "compatibility", "external_requests": 0, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.

@@ -1,0 +1,17 @@
+"""Refresh metrics using the repository's owned, low-priority collection worker."""
+import subprocess
+from scripts import fast_test as runner,generate_metrics as generator
+from release_memory_guard import install
+install(runner)
+original=subprocess.run
+def owned(command,*args,**kwargs):
+ if isinstance(command,list) and command[1:3]==['-m','pytest']:
+  code,output=runner.run_pytest(command[3:],kwargs['timeout'])
+  return subprocess.CompletedProcess(command,code,output,'')
+ return original(command,*args,**kwargs)
+subprocess.run=owned
+try:
+ code=generator.main(['--write','--require-collected'])
+finally:
+ subprocess.run=original
+raise SystemExit(code)

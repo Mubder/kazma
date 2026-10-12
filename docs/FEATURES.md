@@ -83,8 +83,8 @@ Every line below describes that setup.
 | Convert, split, merge and redact documents; generate reports as Word, PDF or HTML with correct Arabic typography | Shipped | `/documents` |
 | Deep web research with sources: search, read, crawl, summarize | Shipped | `/research` |
 | Web search through SearXNG (self-hosted metasearch, in the Docker setup) | Shipped | `tools/web_search.py` |
-| Reading hard pages through Firecrawl, Jina or a real browser | Opt-in — keys / Playwright | `tools/read_url.py` |
-| Scraping through a rotating residential proxy | Opt-in | Settings → System → Proxy |
+| Reading hard pages with local Chromium; optional hosted Firecrawl/Jina recovery | Local-only default; hosted mode + allowlist + credentials required | `tools/read_url.py` |
+| Scraping through a rotating residential proxy | Opt-in — acquisition mode + proxy allowlist permission + Settings | Settings → System → Proxy |
 | Image generation (Pollinations with no key; DALL-E, Stability, Flux with keys) and image understanding | Shipped | `tools/image_gen.py` |
 
 ## Work on code

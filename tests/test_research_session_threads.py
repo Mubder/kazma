@@ -119,7 +119,7 @@ async def test_cancel_from_a_worker_thread_cancels_on_the_runs_loop(rs):
     out = await asyncio.to_thread(rs.cancel_session, s.id)
     await _settle()
 
-    assert out is not None and out.status == "cancelled"
+    assert out is not None and out.status == "cancelling"
     assert run.cancelled_on == [threading.get_ident()]
 
 

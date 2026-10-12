@@ -1,0 +1,6 @@
+{
+  "hook_cwd_independent": true,
+  "test_directory_unchanged": true,
+  "observed_pass_count": 50,
+  "product_sources_changed": false
+}

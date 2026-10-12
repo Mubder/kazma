@@ -2,10 +2,9 @@
 
 Tiered fetch (public web, not anti-bot invincible):
 
-    1. Optional pre-backends when opted in (Firecrawl key / ``KAZMA_JINA_READER=1``).
-    2. httpx fast path with browser-like UA + trafilatura extraction.
-    3. **Hard-page recovery** on bot walls / empty extracts:
-       Firecrawl (if key) → Jina Reader (unless ``KAZMA_JINA_READER=0``) → Playwright.
+    1. httpx fast path with browser-like UA + trafilatura extraction.
+    2. Local Chromium recovery on bot walls / empty extracts.
+    3. Hosted recovery only under explicit acquisition policy + provider allowlist.
 
 Research features
 -----------------
@@ -16,12 +15,14 @@ Research features
 * **Chunks:** ``list_research_chunks`` / ``read_research_chunk`` /
   ``summarize_research_file`` for map-style research without flooding context.
 
-SSRF-safe (validate URL + redirects). Knowledge ingest reuses ``_fetch_full_text``.
+Validate public URLs and actual redirects. Knowledge ingest uses the typed
+``web_acquire.fetch_text`` façade; the legacy text adapter shares its ladder.
 """
 
 from __future__ import annotations
 
 import asyncio
+import httpx
 import hashlib
 import logging
 import os
@@ -30,10 +31,22 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable
+from dataclasses import replace
 
 from kazma_core.safety.prompt_fence import fence_untrusted
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.install_hint import extra_install_hint
+from kazma_core.errors import redact_secrets
+from kazma_core.web_acquire.policy import acquisition_policy, AcquisitionPolicyError
+from kazma_core.web_acquire.scope import (
+    AcquisitionScope, AcquisitionScopeError, active_scope, require_scope,
+)
+from kazma_core.web_acquire.result import AcquisitionError, ExtractSaveResult, FetchResult, FetchErrorCode
+from kazma_core.web_acquire.trace import AttemptSpan, FetchTrace, active_trace, classify_failure
+from kazma_core.web_acquire.parser import parse_document
+from kazma_core.web_acquire import dns_worker
+from kazma_core.web_acquire import provider_usage
 
 __all__ = [
     "DEFAULT_CHUNK_SIZE",
@@ -52,6 +65,7 @@ logger = logging.getLogger(__name__)
 # Default window for a single read_url response (env-overridable).
 _DEFAULT_MAX = 16_000
 _HARD_MAX = 100_000  # single-window absolute ceiling
+_HARD_BODY_MAX = 20_000_000
 _CACHE_MAX_ENTRIES = 32
 _CACHE_TTL_S = 900  # 15 minutes
 
@@ -91,7 +105,7 @@ _HTTP_HEADERS = {
         "image/avif,image/webp,*/*;q=0.8"
     ),
     "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Encoding": "gzip, deflate",
     "Cache-Control": "no-cache",
     "Upgrade-Insecure-Requests": "1",
 }
@@ -99,12 +113,9 @@ _HTTP_HEADERS = {
 
 def _random_ua() -> str:
     """A rotated User-Agent for retry attempts (defeats UA-based blocking)."""
-    try:
-        from kazma_core.proxy.client import random_user_agent
+    from kazma_core.proxy.client import random_user_agent
 
-        return random_user_agent()
-    except Exception:  # noqa: BLE001 — UA rotation is best-effort
-        return _BROWSER_UA
+    return random_user_agent()
 
 
 def _fetch_max_bytes() -> int:
@@ -114,7 +125,7 @@ def _fetch_max_bytes() -> int:
     a gzip bomb would otherwise be fully decoded into memory by ``response.text``.
     """
     try:
-        return max(65_536, int(os.environ.get("KAZMA_FETCH_MAX_BYTES", "5000000") or "5000000"))
+        return min(_HARD_BODY_MAX, max(65_536, int(os.environ.get("KAZMA_FETCH_MAX_BYTES", "5000000") or "5000000")))
     except ValueError:
         return 5_000_000
 
@@ -168,8 +179,8 @@ def _is_json_payload(content_type: str, body: str) -> bool:
 # Firecrawl process-wide cooldown: when the API starts returning 429, parallel
 # read_url fan-outs (domain sweeps batch 4-8 URLs) each burn 1.5+3+4.5s of
 # backoff against an already-limited quota. After two consecutive 429-exhausted
-# attempts, skip Firecrawl entirely for 5 minutes and let the ladder fall
-# through to direct httpx (2026-08-21 domain-sweep incident).
+# attempts, skip Firecrawl entirely for 5 minutes. Local HTTP/Chromium still
+# run first (2026-08-21 domain-sweep incident; local-first policy 2026-10-10).
 _FIRECRAWL_COOLDOWN: dict[str, float] = {"until": 0.0}
 
 
@@ -179,60 +190,44 @@ def _firecrawl_in_cooldown() -> bool:
     return _time.monotonic() < _FIRECRAWL_COOLDOWN["until"]
 
 
-async def _get_capped(client: Any, url: str, max_bytes: int) -> tuple[Any, str, bool]:
-    """GET *url* with a streamed, byte-capped body read.
+async def _get_capped(
+    client: Any, url: str, max_bytes: int, *,
+    validated_ips: tuple[str, ...] = (), via_proxy: bool = False,
+    require_peer: bool = False,
+) -> tuple[Any, str, bool]:
+    """Shared bounded GET; connected-peer evidence survives stream closure."""
+    from kazma_core.web_acquire.http import read_capped
 
-    Returns ``(response, text, truncated)``. Checks the Content-Length header
-    first (fast reject of huge bodies), then streams at most *max_bytes* of
-    decoded content. The response is fully closed before returning.
-    """
-    import httpx as _httpx
+    require_scope(url)
+    with AttemptSpan("httpx", url, remote=via_proxy) as attempt:
+        trace = active_trace.get()
 
-    truncated = False
-    try:
-        stream_cm = client.stream("GET", url)
-    except Exception:
-        stream_cm = None
-    if stream_cm is None or not hasattr(stream_cm, "__aenter__"):
-        # Fallback for clients/mocks without a true async stream context
-        # manager: plain GET, cap applied after decode.
-        response = await client.get(url)
-        full = response.text or ""
-        truncated = len(full.encode("utf-8", "replace")) > max_bytes
-        return response, full[:max_bytes], truncated
-    async with stream_cm as response:
-        # Fast reject: declared length over the cap → truncate at cap rather
-        # than reading the whole body.
-        try:
-            declared = int(response.headers.get("content-length") or 0)
-        except ValueError:
-            declared = 0
-        if declared > max_bytes:
-            truncated = True
-        chunks: list[bytes] = []
-        read = 0
-        async for chunk in response.aiter_bytes(65_536):
-            chunks.append(chunk)
-            read += len(chunk)
-            if read >= max_bytes:
-                truncated = True
-                break
-        raw = b"".join(chunks)[:max_bytes]
-        # Decode respecting the response charset where possible.
-        encoding = response.charset_encoding or "utf-8"
-        try:
-            text = raw.decode(encoding, errors="replace")
-        except (LookupError, UnicodeDecodeError):
-            text = raw.decode("utf-8", errors="replace")
-        # Build a lightweight stand-in response for downstream logic that
-        # reads .status_code / .headers / .text / .raise_for_status().
-        out = _httpx.Response(
-            status_code=response.status_code,
-            headers=response.headers,
-            request=response.request,
+        def observed(response):
+            # Retain headers/status even if a later body read/decode fails.
+            attempt.response(response.status_code, final_url=url)
+            if trace is not None:
+                trace.http_source = FetchResult(
+                    ok=False, url=trace.url, final_url=url, backend="httpx",
+                    http_status=response.status_code, meta={"proxy_used": via_proxy})
+
+        response, text, truncated = await read_capped(
+            client, url, max_bytes, validated_ips=validated_ips,
+            via_proxy=via_proxy, require_peer=require_peer,
+            observe_response=observed,
         )
-        out._content = raw  # httpx reads .text from _content
-        return out, text, truncated
+        attempt.response(response.status_code, final_url=url, truncated=truncated,
+                         wire_bytes=response.extensions.get("kazma_wire_bytes"),
+                         decoded_bytes=response.extensions.get("kazma_decoded_bytes"))
+        if trace is not None:
+            trace.http_source = FetchResult(
+                ok=response.status_code < 400, url=trace.url, final_url=url,
+                backend="httpx", http_status=response.status_code,
+                wire_bytes=response.extensions.get("kazma_wire_bytes"),
+                decoded_bytes=response.extensions.get("kazma_decoded_bytes"),
+                truncated=truncated, truncation_reasons=("body_limit",) if truncated else (),
+                meta={"proxy_used": via_proxy},
+            )
+        return response, text, truncated
 
 _BOT_DETECTION_MARKERS = (
     "cloudflare",
@@ -267,23 +262,49 @@ _JS_SHELL_MARKERS = (
 )
 
 # url -> (full_text, timestamp)
-_full_text_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
+_full_text_cache: OrderedDict[str, tuple[FetchResult, float]] = OrderedDict()
 
 
 def _cache_get(url: str) -> str | None:
+    result = _cache_result_get(url)
+    return result.text if result is not None else None
+
+
+def _cache_namespace(result=None):
+    from kazma_core.web_acquire.robots import active_robots
+
+    context = active_robots.get()
+    mode = result.meta.get('robots', {}).get('mode') if result is not None else None
+    enforced = mode == 'enforced' if mode is not None else bool(context is not None and context.enforce())
+    profile = active_trace.get().profile if active_trace.get() is not None else "generic"
+    return acquisition_policy().cache_namespace + "|" + profile + ("|robots|" if enforced else "|manual|")
+
+
+def _cache_result_get(url: str) -> FetchResult | None:
+    # Legacy cached strings have no redirect provenance to establish scope.
+    if active_scope.get() is not None:
+        return None
+    url = _cache_namespace() + url
     item = _full_text_cache.get(url)
     if not item:
         return None
-    text, ts = item
+    result, ts = item
     if time.time() - ts > _CACHE_TTL_S:
         _full_text_cache.pop(url, None)
         return None
     _full_text_cache.move_to_end(url)
-    return text
+    return replace(result, cache_hit=True, attempts=(), meta=dict(result.meta))
 
 
 def _cache_put(url: str, text: str) -> None:
-    _full_text_cache[url] = (text, time.time())
+    _cache_result_put(url, FetchResult(ok=True, url=url, text=text, char_count=len(text)))
+
+
+def _cache_result_put(url: str, result: FetchResult) -> None:
+    if active_scope.get() is not None:
+        return
+    url = _cache_namespace(result) + url
+    _full_text_cache[url] = (replace(result, meta=dict(result.meta)), time.time())
     _full_text_cache.move_to_end(url)
     while len(_full_text_cache) > _CACHE_MAX_ENTRIES:
         _full_text_cache.popitem(last=False)
@@ -295,12 +316,16 @@ def clear_url_cache() -> None:
 
 
 def _friendly_error(exc: Exception, url: str = "") -> str:
-    if isinstance(exc, ConnectionError):
+    import httpx
+
+    if isinstance(exc, (ConnectionError, httpx.ConnectError)):
         return f"Error: Could not connect to {url}. Check the URL and your internet connection."
-    if isinstance(exc, TimeoutError):
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
         return f"Error: Request to {url} timed out. The server may be slow or unreachable."
     if isinstance(exc, OSError):
         return f"Error: Network error while fetching {url} — {exc}"
+    if isinstance(exc, (httpx.ReadError, httpx.RemoteProtocolError)):
+        return f"Error: Connection interrupted while reading {url}. Retry when the server is reachable."
 
     exc_name = type(exc).__name__
     if "HTTPStatusError" in exc_name:
@@ -377,59 +402,26 @@ def _looks_like_js_shell(html: str) -> bool:
 
 
 def _strip_html_fallback(html: str) -> str:
-    """stdlib-only extract when trafilatura is missing or returns nothing."""
-    # Drop script/style blocks first
-    cleaned = re.sub(
-        r"(?is)<(script|style|noscript|svg|iframe)[^>]*>.*?</\1>",
-        " ",
-        html,
-    )
-    # Prefer body if present
-    body_m = re.search(r"(?is)<body[^>]*>(.*)</body>", cleaned)
-    chunk = body_m.group(1) if body_m else cleaned
-    text = re.sub(r"(?is)<br\s*/?>", "\n", chunk)
-    text = re.sub(r"(?is)</(p|div|h[1-6]|li|tr|section|article)>", "\n", text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    # Unescape a few common entities
-    text = (
-        text.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", '"')
-    )
-    text = re.sub(r"[ \t]+\n", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]{2,}", " ", text)
-    return text.strip()
+    from kazma_core.web_acquire.html_extract import strip_html_fallback
+
+    return strip_html_fallback(html)
 
 
 def _extract_text(html: str) -> str:
     """Extract readable text; always try a plain-HTML fallback for static pages."""
-    text = ""
-    try:
-        import trafilatura
+    trace = active_trace.get()
+    if trace is not None and trace.profile == "knowledge":
+        from kazma_core.web_acquire.document import extract_knowledge_document
 
-        text = trafilatura.extract(
-            html,
-            include_links=True,
-            include_tables=True,
-            favor_recall=True,
-            include_comments=False,
-        ) or ""
-    except ImportError:
-        text = ""
-    except Exception:
-        text = ""
+        document = extract_knowledge_document(html, _HARD_MAX)
+        trace.extract_truncated, trace.dynamic_tabs = document.truncated, document.dynamic_tabs
+        return document.text
+    from kazma_core.web_acquire.html_extract import extract_article
 
-    text = (text or "").strip()
-    # Trafilatura often returns None/empty for minimal static pages (example.com).
-    # Fall back to a simple strip that still recovers title + body text.
-    if len(text) < MIN_USEFUL_CHARS:
-        fallback = _strip_html_fallback(html)
-        if len(fallback) > len(text):
-            text = fallback
-    return text[:_HARD_MAX].strip()
+    text, truncated = extract_article(html, _HARD_MAX)
+    if trace is not None:
+        trace.extract_truncated = truncated
+    return text
 
 
 def _is_thin_extraction(text: str, html: str) -> bool:
@@ -513,88 +505,59 @@ def _slice_window(
 
 
 async def _fetch_with_playwright(url: str) -> str | None:
-    try:
-        from playwright.async_api import async_playwright  # noqa: F401
-    except ImportError:
-        return None
+    from kazma_core.playwright_loop import run_in_browser_loop
 
-    # Run on the dedicated browser loop (kazma_core.playwright_loop) — the
-    # server's SelectorEventLoop cannot spawn Playwright's Node driver on
-    # Windows (asyncio.create_subprocess_exec → NotImplementedError).
     try:
-        from kazma_core.playwright_loop import run_in_browser_loop
+        with AttemptSpan("chromium", url) as attempt:
+            try:
+                from playwright.async_api import TimeoutError as BrowserTimeoutError
+            except ImportError as exc:
+                attempt.fail(FetchErrorCode.UNAVAILABLE, str(exc))
+                logger.debug("[read_url] optional Playwright is unavailable: %s", exc)
+                return None
 
-        return await run_in_browser_loop(_fetch_with_playwright_impl(url))
-    except Exception as exc:
-        logger.debug("[read_url] Playwright fetch failed: %s", exc)
-        return None
+            trace = active_trace.get()
+            if trace is not None:
+                trace.browser_source = None
+            try:
+                text = await run_in_browser_loop(_fetch_with_playwright_impl(url))
+            except BrowserTimeoutError as exc:
+                attempt.fail(FetchErrorCode.TIMEOUT, str(exc))
+                attempt.fields["transient"] = True
+                return None
+            source = trace.browser_source if trace is not None else None
+            if source is not None:
+                attempt.fields.update(final_url=source.final_url, http_status=source.http_status,
+                                      truncated=source.truncated)
+                attempt.remote = bool(source.meta.get("proxy_used"))
+            if text:
+                attempt.fields["outcome"] = "success"
+                if trace is not None:
+                    trace.recovered_source = source or FetchResult(ok=True, url=url, backend="chromium")
+            else:
+                attempt.fail(source.error_code if source and source.error_code else FetchErrorCode.EMPTY,
+                             source.error if source and source.error else "Chromium produced no readable content.")
+                attempt.fields["transient"] = bool(source and source.transient)
+            return text
+    except AcquisitionError as exc:
+        trace = active_trace.get()
+        if trace is not None:
+            trace.browser_source = FetchResult(ok=False, url=url, backend="chromium",
+                error_code=exc.code, error=str(exc), transient=exc.transient, quality="failed")
+        raise
+
 
 
 async def _fetch_with_playwright_impl(url: str) -> str | None:
-    """Playwright fetch body — must run on the dedicated browser loop."""
-    from playwright.async_api import async_playwright
+    """Compatibility body on the browser loop; one shared typed renderer."""
+    from kazma_core.web_acquire.browser import render_document
 
-    try:
-        # Route Chromium through Settings → Proxy Provider when configured
-        try:
-            from kazma_core.proxy.client import playwright_proxy
-
-            pw_proxy = playwright_proxy()
-        except Exception:
-            pw_proxy = None
-
-        async with async_playwright() as p:
-            launch_kwargs: dict = {
-                "headless": True,
-                "args": [
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                ],
-            }
-            if pw_proxy:
-                launch_kwargs["proxy"] = pw_proxy
-            browser = await p.chromium.launch(**launch_kwargs)
-            try:
-                context = await browser.new_context(
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=_BROWSER_UA,
-                    locale="en-US",
-                    timezone_id="America/New_York",
-                )
-                await context.add_init_script(
-                    """
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                    window.chrome = { runtime: {} };
-                    """
-                )
-                from kazma_core.security.browser_egress import install_async_browser_egress
-
-                await install_async_browser_egress(context)
-                page = await context.new_page()
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                await page.wait_for_timeout(2000)
-                html = await page.content()
-                text = _extract_text(html)
-                if not text or len(text) < MIN_USEFUL_CHARS:
-                    body = await page.inner_text("body")
-                    if body and body.strip():
-                        text = body.strip()
-                if text and text.strip():
-                    logger.info(
-                        "[read_url] Playwright stealth fetch succeeded for %s (%d chars)",
-                        url,
-                        len(text),
-                    )
-                    return text.strip()
-                return None
-            finally:
-                await browser.close()
-    except Exception as exc:
-        logger.debug("[read_url] Playwright fetch failed: %s", exc)
-        return None
+    trace = active_trace.get()
+    document = await render_document(url, challenge=_looks_like_bot_block,
+                                     profile=trace.profile if trace is not None else "generic")
+    if trace is not None:
+        trace.browser_source = document.result
+    return document.result.text if document.result.ok else None
 
 
 def _jina_hard_disabled() -> bool:
@@ -616,126 +579,146 @@ def _jina_explicit_opt_in() -> bool:
 
 
 async def _try_jina_reader(url: str) -> str | None:
-    """Jina Reader proxy (``r.jina.ai``).
+    """Policy-gated hosted Reader; each attempted service call is observed."""
+    from kazma_core.web_acquire.robots import active_robots
 
-    Used when explicitly enabled (``KAZMA_JINA_READER=1``), when
-    ``KAZMA_FETCH_BACKEND=jina``, or as a **last-resort recovery** after
-    local httpx/Playwright fail (unless hard-disabled with ``=0``).
-    """
-    if _jina_hard_disabled():
+    robot_context = active_robots.get()
+    if robot_context is not None and robot_context.enforce():
         return None
-    try:
-        import httpx
-        from kazma_core.security.ssrf import validate_url
+    if active_scope.get() is not None:
+        return None
+    if not acquisition_policy().permits("jina") or _jina_hard_disabled():
+        return None
+    from kazma_core.security.ssrf import validate_url
+    from kazma_core.web_acquire.http import read_response_capped
+    from kazma_core.web_acquire.origins import origin_scheduler
+    from kazma_core.web_acquire import accounting
+    from kazma_core.web_acquire.endpoint_transport import EndpointAsyncTransport
 
-        await asyncio.to_thread(validate_url, url, block_unresolved=True)
-        # Proxy is public; still SSRF-check the *target* URL above.
-        jina_url = f"https://r.jina.ai/{url}"
+    try:
+        await dns_worker.validate_public_url(url, validator=validate_url)
         token = (os.environ.get("JINA_API_KEY") or os.environ.get("KAZMA_JINA_API_KEY") or "").strip()
-        headers = {
-            "Accept": "text/plain",
-            "User-Agent": _BROWSER_UA,
-            "X-Return-Format": "markdown",
-        }
+        from kazma_core.web_acquire.provider_usage import jina_token_budget
+        headers = {"Accept": "text/plain", "User-Agent": _BROWSER_UA,
+                   "Accept-Encoding": "gzip, deflate", "X-Return-Format": "markdown",
+                   "X-Token-Budget": str(jina_token_budget())}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        # Direct to Jina (third-party API holds the target fetch). Scraping
-        # proxy is for target-site egress; do not force API keys through it.
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True, verify=shared_ssl_context()) as client:
-            r = await client.get(jina_url, headers=headers)
-            if r.status_code == 200 and r.text and len(r.text.strip()) > 50:
-                logger.info("[read_url] Jina Reader ok for %s (%d chars)", url, len(r.text))
-                return r.text.strip()
-            logger.debug("[read_url] Jina status %s for %s", r.status_code, url)
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=False, trust_env=False,
+                                     transport=EndpointAsyncTransport(verify=shared_ssl_context()),
+                                     event_hooks=accounting.httpx_hooks('jina', token, asynchronous=True),
+                                     verify=shared_ssl_context()) as client:
+            with AttemptSpan("jina", url, remote=True) as attempt:
+                async with origin_scheduler().request_many(url, 'https://r.jina.ai/'):
+                    async with client.stream("GET", f"https://r.jina.ai/{url}", headers=headers) as response:
+                        attempt.response(response.status_code, usage=provider_usage._from_jina(response.headers))
+                        from kazma_core.web_acquire.crawl_jobs import call
+                        await call(origin_scheduler().observe, 'https://r.jina.ai/', response.status_code, response.headers)
+                        r, body, truncated = await read_response_capped(response, _fetch_max_bytes())
+                attempt.response(r.status_code, decoded_bytes=len(r.content), truncated=truncated,
+                                 wire_bytes=r.extensions.get("kazma_wire_bytes"))
+                if truncated:
+                    attempt.fail(FetchErrorCode.LIMIT, "Jina response exceeded the acquisition body limit.")
+                    return None
+                if r.status_code != 200:
+                    return None
+                text = body.strip()
+                if len(text) <= 50:
+                    attempt.fail(FetchErrorCode.EMPTY, "Jina returned no useful extract.")
+                    return None
+                attempt.fields["outcome"] = "success"
+                trace = active_trace.get()
+                if trace is not None:
+                    trace.recovered_source = FetchResult(
+                        ok=True, url=trace.url, backend="jina", quality="unverified",
+                        meta={"service_http_status": r.status_code, "service_decoded_bytes": len(r.content)},
+                        truncated=len(text) > _HARD_MAX,
+                        truncation_reasons=("text_limit",) if len(text) > _HARD_MAX else (),
+                    )
+                return text[:_HARD_MAX]
+    except AcquisitionError:
+        raise
     except Exception as exc:
         logger.debug("[read_url] Jina Reader failed: %s", exc)
     return None
 
 
 async def _try_firecrawl(url: str) -> str | None:
-    """Optional Firecrawl API when ``KAZMA_FIRECRAWL_API_KEY`` is set.
+    """Policy-gated service; attempts, failures and retry requests stay distinct."""
+    from kazma_core.web_acquire.robots import active_robots
 
-    Retries once on HTTP 429 / 502 / 503 with a short backoff — bulk KB
-    crawls of 200+ pages routinely trip Firecrawl rate limits mid-job.
-    """
+    robot_context = active_robots.get()
+    if robot_context is not None and robot_context.enforce():
+        return None
+    if active_scope.get() is not None or not acquisition_policy().permits("firecrawl"):
+        return None
     api_key = (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip()
-    if not api_key:
+    if not api_key or _firecrawl_in_cooldown():
         return None
-    if _firecrawl_in_cooldown():
-        logger.debug("[read_url] Firecrawl skipped — rate-limit cooldown active")
-        return None
+    from kazma_core.security.ssrf import validate_url
+    from kazma_core.web_acquire.http import read_response_capped
+    from kazma_core.web_acquire.origins import origin_scheduler
+
     base = (os.environ.get("KAZMA_FIRECRAWL_URL") or "https://api.firecrawl.dev").rstrip("/")
+    from kazma_core.web_acquire import accounting
+    from kazma_core.web_acquire.endpoint_transport import EndpointAsyncTransport
     try:
-        import asyncio
-
-        import httpx
-        from kazma_core.security.ssrf import validate_url
-
-        await asyncio.to_thread(validate_url, url, block_unresolved=True)
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        body = {"url": url, "formats": ["markdown", "html"]}
-        # Direct to Firecrawl API (same rationale as Jina — not target egress).
-        async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
-            last_status = 0
-            for attempt in range(3):
-                r = await client.post(
-                    f"{base}/v1/scrape",
-                    headers=headers,
-                    json=body,
-                )
-                last_status = r.status_code
-                if r.status_code in (429, 502, 503) and attempt < 2:
-                    # Honor Retry-After when present; otherwise exponential backoff.
-                    ra = r.headers.get("Retry-After")
-                    try:
-                        delay = float(ra) if ra else (1.5 * (attempt + 1))
-                    except ValueError:
-                        delay = 1.5 * (attempt + 1)
-                    delay = min(max(delay, 0.5), 20.0)
-                    logger.info(
-                        "[read_url] Firecrawl %s for %s — retry in %.1fs (attempt %d)",
-                        r.status_code, url, delay, attempt + 1,
-                    )
-                    await asyncio.sleep(delay)
+        await dns_worker.validate_public_url(url, validator=validate_url)
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+                   "Accept-Encoding": "gzip, deflate"}
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False, verify=shared_ssl_context(),
+                transport=EndpointAsyncTransport(verify=shared_ssl_context()),
+                event_hooks=accounting.httpx_hooks('firecrawl', base + api_key, asynchronous=True)) as client:
+            for retry in range(3):
+                with AttemptSpan("firecrawl", url, remote=True) as attempt:
+                    async with origin_scheduler().request_many(url, base):
+                        async with client.stream("POST", f"{base}/v1/scrape", headers=headers,
+                                                 json={"url": url, "formats": ["markdown"]}) as response:
+                            attempt.response(response.status_code)
+                            from kazma_core.web_acquire.crawl_jobs import call
+                            await call(origin_scheduler().observe, base, response.status_code, response.headers)
+                            r, _, truncated = await read_response_capped(response, _fetch_max_bytes())
+                    attempt.response(r.status_code, decoded_bytes=len(r.content), truncated=truncated,
+                                     wire_bytes=r.extensions.get("kazma_wire_bytes"))
+                    if truncated:
+                        attempt.fail(FetchErrorCode.LIMIT, "Firecrawl response exceeded the acquisition body limit.")
+                        return None
+                    if r.status_code == 200:
+                        try:
+                            data = r.json()
+                            if not isinstance(data, dict) or data.get("success") is False:
+                                raise ValueError("Scrape was not successful.")
+                            payload = data.get("data") or data
+                            text = payload.get("markdown") or payload.get("content") or payload.get("text") or ""
+                            if not isinstance(text, str):
+                                raise ValueError("Extract must be text.")
+                        except (ValueError, AttributeError, TypeError):
+                            attempt.fail(FetchErrorCode.PROVIDER_RESPONSE, "Firecrawl returned an invalid scrape response.")
+                            return None
+                        if len(text.strip()) <= 50:
+                            attempt.fail(FetchErrorCode.EMPTY, "Firecrawl returned no useful extract.")
+                            return None
+                        attempt.fields["outcome"] = "success"
+                        trace = active_trace.get()
+                        if trace is not None:
+                            trace.recovered_source = FetchResult(
+                                ok=True, url=trace.url, backend="firecrawl", quality="unverified",
+                                meta={"service_http_status": r.status_code, "service_decoded_bytes": len(r.content)},
+                                truncated=len(text.strip()) > _HARD_MAX,
+                                truncation_reasons=("text_limit",) if len(text.strip()) > _HARD_MAX else (),
+                            )
+                        return text.strip()[:_HARD_MAX]
+                if r.status_code in (429, 502, 503) and retry < 2:
+                    # The origin scheduler retains the complete server delay;
+                    # a local retry must never shorten it to fit this call.
+                    await asyncio.sleep(1.5 * (retry + 1))
                     continue
-                if r.status_code != 200:
-                    if r.status_code == 429:
-                        # Exhausted the retry budget against a rate-limited
-                        # API — cool the rung down process-wide so parallel
-                        # fan-outs stop burning 4.5s of backoff per URL
-                        # (2026-08-21 domain-sweep incident).
-                        import time as _time
-
-                        _FIRECRAWL_COOLDOWN["until"] = _time.monotonic() + 300.0
-                        logger.warning(
-                            "[read_url] Firecrawl rate-limited — cooling down for 300s"
-                        )
-                    logger.debug(
-                        "[read_url] Firecrawl status %s for %s", r.status_code, url
-                    )
-                    return None
-                data = r.json()
-                payload = data.get("data") or data
-                text = (
-                    payload.get("markdown")
-                    or payload.get("content")
-                    or payload.get("text")
-                    or ""
-                )
-                if text and len(str(text).strip()) > 50:
-                    logger.info(
-                        "[read_url] Firecrawl ok for %s (%d chars)",
-                        url, len(str(text)),
-                    )
-                    return str(text).strip()
-                logger.debug(
-                    "[read_url] Firecrawl empty body for %s (status %s)",
-                    url, last_status,
-                )
+                if r.status_code == 429:
+                    _FIRECRAWL_COOLDOWN["until"] = time.monotonic() + 300.0
+                    logger.warning("[read_url] Firecrawl rate-limited — cooling down for 300s")
                 return None
+    except AcquisitionError:
+        raise
     except Exception as exc:
         logger.debug("[read_url] Firecrawl failed: %s", exc)
     return None
@@ -770,85 +753,188 @@ def _is_registry_or_api_url(url: str) -> bool:
 
 
 async def _fetch_via_optional_backends(url: str) -> str | None:
-    """Try stronger optional backends before local httpx.
-
-    ``KAZMA_FETCH_BACKEND``: auto | httpx | jina | firecrawl
-    - auto: firecrawl (if key) → jina (if explicitly opted in) → None (caller uses httpx)
-    - Hard-site recovery after local failure uses :func:`_recover_hard_page`.
-    """
-    backend = (os.environ.get("KAZMA_FETCH_BACKEND") or "auto").strip().lower()
-    if backend == "httpx":
-        return None
-    if _is_registry_or_api_url(url) and backend == "auto":
-        # JSON APIs answer faster and cleaner via direct httpx — skip the
-        # scraping backends entirely (their ~1s overhead per call was the
-        # gap between the promised ~300ms and the observed ~1.5s per name).
-        logger.debug("[read_url] registry/API fast-path for %s — direct httpx", url)
-        return None
-    if backend == "firecrawl":
-        return await _try_firecrawl(url)
-    if backend == "jina":
-        return await _try_jina_reader(url)
-    # auto — only *opt-in* backends before the cheap httpx path
-    if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
-        text = await _try_firecrawl(url)
-        if text:
-            return text
-    if _jina_explicit_opt_in():
-        text = await _try_jina_reader(url)
-        if text:
-            return text
+    """Compatibility hook: acquisition always starts locally now."""
     return None
 
 
 async def _recover_hard_page(url: str, *, why: str = "") -> str | None:
-    """Last-resort cascade for bot walls / empty extracts.
-
-    Order: Firecrawl (key) → Jina (unless hard-disabled) → Playwright.
-    """
-    logger.info("[read_url] Hard-page recovery for %s (%s)", url, why or "unspecified")
-    if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
+    """Local browser first; explicitly permitted hosted fallbacks afterwards."""
+    policy = acquisition_policy()
+    trace = active_trace.get()
+    if trace is not None:
+        trace.recovered_source = None
+    logger.info("[read_url] Hard-page recovery for %s (%s), policy=%s", url, why or "unspecified", policy.mode)
+    text = await _fetch_with_playwright(url)
+    if text:
+        if trace is not None and trace.recovered_source is None:
+            trace.recovered_source = FetchResult(ok=True, url=trace.url, backend="chromium")
+        return text
+    if trace is not None and trace.browser_source is not None and trace.browser_source.error_code in (
+        FetchErrorCode.LOGIN, FetchErrorCode.SECURITY, FetchErrorCode.SCOPE,
+        FetchErrorCode.POLICY, FetchErrorCode.LIMIT, FetchErrorCode.REDIRECT, FetchErrorCode.ROUTING, FetchErrorCode.THROTTLED, FetchErrorCode.ROBOTS, FetchErrorCode.ROBOTS_UNAVAILABLE,
+    ):
+        source = trace.browser_source
+        raise AcquisitionError(source.error_code, source.error or "Browser acquisition was refused.",
+                               transient=source.transient)
+    if _is_registry_or_api_url(url):
+        return None
+    backend = (os.environ.get("KAZMA_FETCH_BACKEND") or "auto").strip().lower()
+    # Legacy selections can narrow the policy, never broaden it.
+    if backend == "httpx":
+        return None
+    if policy.permits("firecrawl") and backend in ("auto", "firecrawl"):
         text = await _try_firecrawl(url)
         if text:
             return text
-    if not _jina_hard_disabled():
-        text = await _try_jina_reader(url)
-        if text:
-            return text
-    text = await _fetch_with_playwright(url)
-    if text:
-        return text
+    if policy.permits("jina") and backend in ("auto", "jina") and not _jina_hard_disabled():
+        return await _try_jina_reader(url)
     return None
 
 
-async def _fetch_full_text(url: str) -> str:
-    """Fetch and extract full page text (no window truncate). Errors start with 'Error:'."""
-    cached = _cache_get(url)
+def _failed(code: FetchErrorCode, message: str, *, transient: bool = False) -> FetchResult:
+    trace = active_trace.get()
+    source = (trace.browser_source if trace.browser_source is not None and trace.browser_source.error_code == code
+              else trace.http_source) if trace is not None else None
+    source = source or FetchResult(ok=False, url=trace.url if trace is not None else "")
+    return replace(source, ok=False, text="", error=redact_secrets(message.removeprefix("Error: ")),
+                   error_code=code, transient=transient, quality="failed")
+
+
+def _failed_exception(exc: BaseException, url: str = "") -> FetchResult:
+    code, transient = classify_failure(exc)
+    message = str(exc) if code in (FetchErrorCode.POLICY, FetchErrorCode.SECURITY,
+                                   FetchErrorCode.SCOPE, FetchErrorCode.INVALID_URL, FetchErrorCode.LOGIN,
+                                   FetchErrorCode.ROUTING, FetchErrorCode.THROTTLED, FetchErrorCode.ROBOTS, FetchErrorCode.ROBOTS_UNAVAILABLE) else _friendly_error(exc, url)
+    return _failed(code, message, transient=transient)
+
+
+def _succeeded(text: str, *, recovery: bool = False, quality: str = "usable") -> FetchResult:
+    trace = active_trace.get()
+    source = None if trace is None else (trace.recovered_source if recovery else trace.http_source)
+    source = source or FetchResult(ok=True, url=trace.url if trace is not None else "")
+    if recovery and source.quality == "unverified":
+        quality = "unverified"
+    if quality == "json" and source.truncated:
+        return _failed(FetchErrorCode.LIMIT, "JSON response exceeded the body limit; incomplete JSON was refused.")
+    if source.truncated and quality != "json":
+        quality = "partial"
+    return replace(source, ok=True, text=text, error=None, error_code=None, transient=False,
+                   quality=quality, char_count=len(text),
+                   links_complete=True if quality == "json" else source.links_complete)
+
+
+async def fetch_result(
+    url: str, *, purpose: str = "generic", scope_check: Callable[[str], bool] | None = None,
+) -> FetchResult:
+    """Typed entry to the single bounded ladder; legacy text is an adapter."""
+    started = time.perf_counter()
+    trace = FetchTrace(url=(url or "").strip(),
+                       profile="knowledge" if purpose == "kb" else "discovery" if purpose == "kb_discovery" else "generic")
+    from kazma_core.web_acquire.origins import origin_delay
+
+    delay_token = origin_delay.set(max(origin_delay.get(), 0.3 if purpose in {'crawl', 'kb', 'kb_discovery'} else 0))
+    trace_token = active_trace.set(trace)
+    from kazma_core.web_acquire.robots import crawl_policy, robots_evidence
+
+    try:
+        with crawl_policy(purpose=purpose):
+            result = await _bounded_fetch_result(trace.url, scope_check=scope_check)
+            result.meta = {**result.meta, 'robots': robots_evidence()}
+        result = replace(result, url=trace.url, purpose=purpose,
+                         char_count=len(result.text),
+                         latency_ms=round((time.perf_counter() - started) * 1000, 1),
+                         attempts=tuple(trace.attempts),
+                         usage=provider_usage._summary([(i, attempt.usage) for i, attempt in enumerate(trace.attempts) if attempt.remote]))
+        result.meta = {**result.meta, "profile": trace.profile}
+        if scope_check is None and result.ok and not result.cache_hit and not result.truncated:
+            _cache_result_put(trace.url, result)
+            if result.final_url:
+                _cache_result_put(result.final_url, result)
+        return result
+    finally:
+        active_trace.reset(trace_token)
+        origin_delay.reset(delay_token)
+
+
+async def _fetch_full_text(url: str, *, scope_check: Callable[[str], bool] | None = None) -> str:
+    result = await fetch_result(url, scope_check=scope_check)
+    return result.legacy_text()
+
+
+async def _bounded_fetch_result(
+    url: str, *, scope_check: Callable[[str], bool] | None = None,
+) -> FetchResult:
+    """Bound the complete ladder, including DNS, retries and local rendering."""
+    try:
+        deadline = float(os.environ.get("KAZMA_FETCH_DEADLINE_SECONDS", "90"))
+        if not 1 <= deadline <= 300:
+            raise ValueError
+    except ValueError:
+        return _failed(FetchErrorCode.POLICY, "KAZMA_FETCH_DEADLINE_SECONDS must be between 1 and 300.")
+    scope = AcquisitionScope(scope_check) if scope_check is not None else None
+    token = active_scope.set(scope)
+    try:
+        try:
+            async with asyncio.timeout(deadline):
+                from kazma_core.web_acquire.policy import policy_scope
+                from kazma_core.web_acquire.accounting import remote_scope
+
+                policy = acquisition_policy()  # validate before admission
+                with policy_scope(policy), remote_scope():
+                    from kazma_core.web_acquire.robots import require_robots
+
+                    await require_robots(url)  # enforce current rules before cache reuse or admission
+                    cached = _cache_result_get(url)
+                    if cached is not None:
+                        return cached
+                    from kazma_core.web_acquire import resources
+
+                    async with await resources.acquisition_capacity().acquire():
+                        text = await _fetch_full_text_impl(url)
+                    if scope is not None and scope.violation:
+                        return _failed(FetchErrorCode.SCOPE, scope.violation)
+                    return text
+        except AcquisitionScopeError as exc:
+            return _failed(FetchErrorCode.SCOPE, str(exc))
+        except TimeoutError:
+            return _failed(FetchErrorCode.DEADLINE,
+                           f"Acquisition deadline exceeded ({deadline:g}s); unfinished work was cancelled.",
+                           transient=True)
+        except Exception as exc:
+            return _failed_exception(exc, url)
+    finally:
+        active_scope.reset(token)
+
+
+async def _fetch_full_text_impl(url: str) -> FetchResult:
+    """Single typed ladder implementation; never infer failure from content."""
+    if not url:
+        return _failed(FetchErrorCode.INVALID_URL, "No URL provided.")
+    try:
+        acquisition_policy()
+    except AcquisitionPolicyError as exc:
+        return _failed_exception(exc, url)
+    cached = _cache_result_get(url)
     if cached is not None:
         return cached
 
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
+    require_scope(url)
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
 
-        validated_ips = await asyncio.to_thread(validate_url, url, block_unresolved=True) or ()
+        validated_ips = await dns_worker.validate_public_url(url, validator=validate_url) or ()
     except SSRFError as exc:
-        return f"Error: {exc}"
+        return _failed_exception(exc, url)
     except ValueError as exc:
-        return f"Error: Invalid URL — {exc}"
+        return _failed(FetchErrorCode.INVALID_URL, f"Error: Invalid URL — {exc}")
 
     # Optional anti-bot / JS-heavy backends (not invincible; improves hard sites)
     opt = await _fetch_via_optional_backends(url)
     if opt:
-        _cache_put(url, opt)
-        return opt
-
-    try:
-        import httpx
-    except ImportError:
-        return "Error: httpx package not installed. Run: pip install httpx"
+        return _succeeded(opt, recovery=True)
 
     html = ""
     status_code = 0
@@ -865,7 +951,8 @@ async def _fetch_full_text(url: str) -> str:
         _host = (_urlparse(url).hostname or "").lower()
         if _host and validated_ips:
             _pins[_host] = validated_ips[0]
-        _via_proxy = bool(get_active_proxy_url())
+        _proxy_url = get_active_proxy_url()
+        _via_proxy = bool(_proxy_url)
 
         async with get_scraping_client(
             follow_redirects=False,
@@ -873,9 +960,13 @@ async def _fetch_full_text(url: str) -> str:
             headers=dict(_HTTP_HEADERS),
             rotate_ua=True,
             pin_hosts=_pins if _pins and not _via_proxy else None,
+            proxy=_proxy_url,
         ) as client:
             _max_bytes = _fetch_max_bytes()
-            response, html_raw, _trunc = await _get_capped(client, final_url, _max_bytes)
+            response, html_raw, _trunc = await _get_capped(
+                client, final_url, _max_bytes, validated_ips=validated_ips,
+                via_proxy=_via_proxy, require_peer=True,
+            )
             try:
                 assert_peer_public(
                     response,
@@ -884,7 +975,7 @@ async def _fetch_full_text(url: str) -> str:
                     via_proxy=_via_proxy,
                 )
             except SSRFError as exc:
-                return f"Error: {exc}"
+                return _failed_exception(exc, url)
             # Retry with backoff on 429/403 (bot wall) AND 5xx (transient)
             # origin errors) — industry-standard: a 502/503 deserves one or
             # two retries with jitter before the recovery cascade fires.
@@ -901,12 +992,12 @@ async def _fetch_full_text(url: str) -> str:
                 )
                 await _asyncio.sleep(delay)
                 # Rotate UA (+ proxy exit IP when configured) for the retry.
-                try:
-                    if getattr(client, "headers", None) is not None:
-                        client.headers["user-agent"] = _random_ua()
-                except Exception:
-                    pass
-                response, html_raw, _trunc = await _get_capped(client, final_url, _max_bytes)
+                if getattr(client, "headers", None) is not None:
+                    client.headers["user-agent"] = _random_ua()
+                response, html_raw, _trunc = await _get_capped(
+                    client, final_url, _max_bytes, validated_ips=validated_ips,
+                    via_proxy=_via_proxy, require_peer=True,
+                )
                 try:
                     assert_peer_public(
                         response,
@@ -915,7 +1006,7 @@ async def _fetch_full_text(url: str) -> str:
                         via_proxy=_via_proxy,
                     )
                 except SSRFError as exc:
-                    return f"Error: {exc}"
+                    return _failed_exception(exc, url)
             for _ in range(3):
                 if response.status_code not in (301, 302, 303, 307, 308):
                     break
@@ -924,18 +1015,22 @@ async def _fetch_full_text(url: str) -> str:
                     break
                 if not redirect_url.startswith(("http://", "https://")):
                     redirect_url = str(httpx.URL(final_url).join(redirect_url))
+                require_scope(redirect_url)
                 try:
                     from kazma_core.security.ssrf import SSRFError, validate_url
 
-                    validated_ips = await asyncio.to_thread(validate_url, redirect_url, block_unresolved=True) or ()
+                    validated_ips = await dns_worker.validate_public_url(redirect_url, validator=validate_url) or ()
                 except SSRFError as exc:
-                    return f"Error: Redirect blocked (SSRF): {exc}"
+                    return _failed(FetchErrorCode.SECURITY, f"Error: Redirect blocked (SSRF): {exc}")
                 except ValueError as exc:
-                    return f"Error: Redirect target invalid — {exc}"
+                    return _failed(FetchErrorCode.INVALID_URL, f"Error: Redirect target invalid — {exc}")
                 _rh = (_urlparse(redirect_url).hostname or "").lower()
                 if _rh and validated_ips and not _via_proxy:
                     _pins[_rh] = validated_ips[0]
-                response, html_raw, _trunc = await _get_capped(client, redirect_url, _max_bytes)
+                response, html_raw, _trunc = await _get_capped(
+                    client, redirect_url, _max_bytes, validated_ips=validated_ips,
+                    via_proxy=_via_proxy, require_peer=True,
+                )
                 try:
                     assert_peer_public(
                         response,
@@ -944,8 +1039,11 @@ async def _fetch_full_text(url: str) -> str:
                         via_proxy=_via_proxy,
                     )
                 except SSRFError as exc:
-                    return f"Error: Redirect blocked (SSRF): {exc}"
+                    return _failed(FetchErrorCode.SECURITY, f"Error: Redirect blocked (SSRF): {exc}")
                 final_url = redirect_url
+
+            if response.status_code in (301, 302, 303, 307, 308):
+                return _failed(FetchErrorCode.REDIRECT, "Error: Redirect limit exceeded or redirect Location missing.")
 
             # Content-type gate: binary payloads (PDF, images, archives) are
             # not text-extractable — fail fast with a clear pointer instead of
@@ -959,11 +1057,9 @@ async def _fetch_full_text(url: str) -> str:
                 _ct = ""
             if status_code < 400:
                 if not _is_textual_content_type(_ct):
-                    return (
-                        f"Error: URL returned non-text content ({_ct or 'unknown'}) — "
+                    return _failed(FetchErrorCode.UNSUPPORTED_CONTENT, f"Error: URL returned non-text content ({_ct or 'unknown'}) — "
                         "not extractable as a page. If this is a document you need, "
-                        "save it with read_url_to_file or add a document-ingest path."
-                    )
+                        "save it with read_url_to_file or add a document-ingest path.")
 
             html = html_raw
             if _trunc:
@@ -977,9 +1073,11 @@ async def _fetch_full_text(url: str) -> str:
             # launches Playwright (~10s) for what was a fast API call
             # (RDAP / oEmbed / Twitter info.json). Return the JSON as text.
             if status_code < 400 and _is_json_payload(_ct, html):
-                _cache_put(url, html)
-                _cache_put(final_url, html)
-                return html
+                return _succeeded(html, quality="json")
+
+            if (not _ct or "html" in _ct.lower()) and (await parse_document(html, final_url, login_only=True))['login']:
+                return _failed(FetchErrorCode.LOGIN, "The page requires login; credentials were not supplied. "
+                               "Use a public page or an explicitly supported authenticated source.")
 
             if _looks_like_bot_block(html, status_code):
                 logger.info(
@@ -992,19 +1090,14 @@ async def _fetch_full_text(url: str) -> str:
                     final_url, why=f"bot_wall status={status_code}"
                 )
                 if recovered:
-                    _cache_put(url, recovered)
-                    _cache_put(final_url, recovered)
-                    return recovered
-                if status_code >= 400:
-                    return (
-                        f"Error: Server returned HTTP {status_code} for {final_url} "
+                    return _succeeded(recovered, recovery=True)
+                return _failed(FetchErrorCode.CHALLENGE, f"Error: Server returned HTTP {status_code} for {final_url} "
                         "(bot protection or access denied). "
-                        "Recovery tried Firecrawl/Jina/Playwright. "
-                        "Set ``KAZMA_FIRECRAWL_API_KEY``, ensure Jina is not disabled "
-                        "(``KAZMA_JINA_READER=0``), or install Playwright "
+                        "Local recovery did not yield readable content. "
+                        "Hosted services require explicit acquisition policy permission. "
+                        "Check Chromium installation "
                         f"(the web extra: {extra_install_hint('web')}; then "
-                        "`playwright install chromium`)."
-                    )
+                        "`playwright install chromium`).")
 
             if status_code >= 400 and not _looks_like_bot_block(html, status_code):
                 # JSON APIs answer with status codes: RDAP returns **404 with
@@ -1016,18 +1109,12 @@ async def _fetch_full_text(url: str) -> str:
                 # plausibly fix (403/429 bot walls, 5xx) — a 404/410 means
                 # the resource does not exist.
                 if _is_json_payload(_ct, html):
-                    _cache_put(url, html)
-                    _cache_put(final_url, html)
-                    return (
-                        f"[HTTP {status_code} — JSON response returned as-is]\n{html}"
-                    )
+                    return _succeeded(html, quality="json")
                 if status_code in (404, 410):
-                    return (
-                        f"Error: HTTP {status_code} for {final_url} — the resource "
+                    return _failed(FetchErrorCode.HTTP, f"Error: HTTP {status_code} for {final_url} — the resource "
                         "does not exist (no recovery attempted: a browser cannot "
                         "invent a missing page). If this was a registry/availability "
-                        "check, 404 usually means FREE/unregistered."
-                    )
+                        "check, 404 usually means FREE/unregistered.")
                 try:
                     response.raise_for_status()
                 except Exception as exc:
@@ -1036,34 +1123,48 @@ async def _fetch_full_text(url: str) -> str:
                         final_url, why=f"http_{status_code}"
                     )
                     if recovered:
-                        _cache_put(url, recovered)
-                        _cache_put(final_url, recovered)
-                        return recovered
-                    return _friendly_error(exc, final_url)
+                        return _succeeded(recovered, recovery=True)
+                    return _failed_exception(exc, final_url)
 
-    except ConnectionError:
+    except (ConnectionError, httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as exc:
         recovered = await _recover_hard_page(final_url, why="connection_error")
         if recovered:
-            _cache_put(url, recovered)
-            _cache_put(final_url, recovered)
-            return recovered
-        return _friendly_error(ConnectionError(), final_url)
-    except TimeoutError:
+            return _succeeded(recovered, recovery=True)
+        return _failed_exception(exc, final_url)
+    except (TimeoutError, httpx.TimeoutException) as exc:
         recovered = await _recover_hard_page(final_url, why="timeout")
         if recovered:
-            _cache_put(url, recovered)
-            _cache_put(final_url, recovered)
-            return recovered
-        return _friendly_error(TimeoutError(), final_url)
+            return _succeeded(recovered, recovery=True)
+        return _failed_exception(exc, final_url)
     except OSError as exc:
-        return _friendly_error(exc, final_url)
+        return _failed_exception(exc, final_url)
     except Exception as exc:
-        return _friendly_error(exc, final_url)
+        return _failed_exception(exc, final_url)
 
-    text = _extract_text(html)
+    is_html = not _ct or "html" in _ct.lower()
+    if is_html:
+        trace = active_trace.get()
+        parsed = await parse_document(html, final_url, profile='knowledge' if trace and trace.profile == 'knowledge' else 'generic')
+        text, links, links_complete = parsed['text'], parsed['links'], parsed['links_complete']
+    else:
+        text = html[:_HARD_MAX]
+        links, links_complete = (), True
+    trace = active_trace.get()
+    if trace is not None and trace.http_source is not None:
+        text_capped = trace.extract_truncated if is_html else len(html) > _HARD_MAX
+        reasons = trace.http_source.truncation_reasons + (("text_limit",) if text_capped else ())
+        trace.http_source = replace(trace.http_source, truncated=bool(reasons),
+                                    truncation_reasons=reasons, links=links,
+                                    links_complete=links_complete and not trace.http_source.truncated)
 
-    # Escalate for true bot walls / empty SPA shells — not short static pages.
-    if not tried_playwright and _should_try_playwright(html, status_code, extracted=text):
+    # Knowledge needs lazy tab panels; discovery needs SPA navigation even
+    # when an initial static article is already readable.
+    enrich_tabs = bool(trace and trace.profile == "knowledge" and trace.dynamic_tabs)
+    enrich_links = bool(trace and trace.profile == "discovery" and is_html and any(
+        marker in html[:16000].lower() for marker in
+        ("_next/static", "__next", "docusaurus", "gitbook", "gatsby", "data-reactroot", "app-root")))
+    if not tried_playwright and (enrich_tabs or enrich_links or _should_try_playwright(html, status_code, extracted=text)):
+        tried_playwright = True
         logger.info(
             "[read_url] Thin/empty extract or JS shell for %s (%d chars text / %d html)",
             final_url,
@@ -1073,30 +1174,29 @@ async def _fetch_full_text(url: str) -> str:
         recovered = await _recover_hard_page(
             final_url, why=f"thin_extract text={len(text)} html={len(html)}"
         )
-        if recovered and len(recovered) > len(text):
-            _cache_put(url, recovered)
-            _cache_put(final_url, recovered)
-            return recovered
+        if recovered and (enrich_tabs or enrich_links or len(recovered) > len(text)):
+            return _succeeded(recovered, recovery=True)
+        if enrich_tabs:
+            return _failed(FetchErrorCode.UNAVAILABLE,
+                           "Dynamic documentation panels could not be verified. Check local Chromium; incomplete tabs were not indexed.")
+        if enrich_links and trace is not None and trace.http_source is not None:
+            source = trace.http_source
+            trace.http_source = replace(source, truncated=True, links_complete=False,
+                                        truncation_reasons=source.truncation_reasons + ("navigation_enrichment_unavailable",))
 
     if not text:
         if not tried_playwright:
             recovered = await _recover_hard_page(final_url, why="empty_extract")
             if recovered:
-                _cache_put(url, recovered)
-                _cache_put(final_url, recovered)
-                return recovered
-        return (
-            f"Error: Could not extract readable content from {final_url}. "
+                return _succeeded(recovered, recovery=True)
+        return _failed(FetchErrorCode.EMPTY, f"Error: Could not extract readable content from {final_url}. "
             "The page may be empty, require JavaScript, or block automated access. "
-            "Tried hard-page recovery (Firecrawl/Jina/Playwright). "
-            "Set ``KAZMA_FIRECRAWL_API_KEY``, leave Jina enabled, "
-            f"or install the web extra ({extra_install_hint('web')}) "
-            "and run `playwright install chromium`."
-        )
+            "Local recovery did not yield readable content. "
+            "Hosted services require explicit acquisition policy permission. "
+            f"Check the web extra ({extra_install_hint('web')}) "
+            "and run `playwright install chromium`.")
 
-    _cache_put(url, text)
-    _cache_put(final_url, text)
-    return text
+    return _succeeded(text, quality="thin" if is_html and _is_thin_extraction(text, html) else "usable")
 
 
 async def read_url(
@@ -1122,16 +1222,17 @@ async def read_url(
         return "Error: No URL provided."
 
     url = str(url).strip()
-    full = await _fetch_full_text(url)
-    if full.startswith("Error:"):
-        return full
+    result = await fetch_result(url, purpose="chat")
+    if not result.ok:
+        return result.legacy_text() + "\n" + result.notice()
+    full = result.text
     window = _slice_window(full, offset=int(offset or 0), max_chars=max_chars)
     # Fenced as untrusted (audit F-09). A fetched page is the single largest
     # source of attacker-controlled text in the system, and it used to reach
     # the model raw — despite the README claiming all retrieved context is
     # fenced. The window header stays outside the fence so paging metadata is
     # still readable as our own output.
-    return fence_untrusted(window, source=f"web:{url}")
+    return result.notice() + "\n" + fence_untrusted(window, source=f"web:{result.final_url or url}")
 
 
 def _workspace_root() -> Path:
@@ -1143,9 +1244,8 @@ def _workspace_root() -> Path:
     return _get_workspace().resolve()
 
 
-# Public alias — the shared recovery ladder's SoT entry point. Consumers
-# (web_acquire.fetch façade, KB ingest fallback) must import THIS name;
-# the underscored original stays for backward compatibility.
+# Public legacy text adapter. New product consumers use fetch_result (typed)
+# through web_acquire.fetch_text; both enter exactly the same ladder.
 fetch_full_text = _fetch_full_text
 
 
@@ -1194,60 +1294,84 @@ def _safe_workspace_path(rel_or_name: str | None, url: str) -> Path | str:
 _safe_research_path = _safe_workspace_path
 
 
-async def read_url_to_file(url: str, path: str | None = None) -> str:
-    """Fetch a public URL and save the **full extract** inside the workspace.
+async def save_url_extract(
+    url: str, path: str | None = None, *, allow_partial: bool = False, receipt_cb=None,
+) -> ExtractSaveResult:
+    """Acquire once and atomically publish without clobbering workspace files."""
+    from kazma_core.ide.workspace_scope import workspace_path_scope
+    from kazma_core.web_acquire.crawl_jobs import call
 
-    Args:
-        url: Public URL.
-        path: Optional path **relative to workspace** (any subfolder).
-            Bare filenames go under ``KAZMA_RESEARCH_DIR`` (default ``research/``).
-            Auto-generated when omitted.
-
-    Returns:
-        Success message with path, char count, and suggested next tools.
-    """
-    if not url or not str(url).strip():
-        return "Error: No URL provided."
-
-    url = str(url).strip()
-    full = await _fetch_full_text(url)
-    if full.startswith("Error:"):
-        return full
-
-    target = await asyncio.to_thread(_safe_workspace_path, path, url)
-    if isinstance(target, str):
-        return target
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # This is a deliberate second write path that bypasses file_write / the
-    # HITL gate (the research workflow fetches a URL into the workspace). To
-    # keep it from silently clobbering an existing workspace file, refuse to
-    # overwrite — the caller can pass a fresh path (audit finding §10B).
-    if target.exists():
-        return (
-            f"Refusing to overwrite existing file `{target.name}`. "
-            "Use a different path, or open file_write to save the fetched "
-            "content under an approval-gated path."
-        )
-    header = (
-        f"# Source: {url}\n"
-        f"# Saved: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"
-        f"# Chars: {len(full)}\n\n"
-    )
-    target.write_text(header + full, encoding="utf-8")
-    rel = target.name
     try:
-        rel = str(target.relative_to((await asyncio.to_thread(_workspace_root))))
-    except ValueError:
-        pass
+        root = await call(_workspace_root)
+    except OSError as exc:
+        result = FetchResult(ok=False, url=url, error=f'Workspace unavailable ({type(exc).__name__}); acquisition was not started.',
+                             error_code=FetchErrorCode.WORKSPACE)
+        return ExtractSaveResult(result, error=result.error, error_code=result.error_code)
+    async with workspace_path_scope(root):
+        return await _save_url_extract(url, path, allow_partial=allow_partial, root=root, receipt_cb=receipt_cb)
 
+
+async def _save_url_extract(url, path, *, allow_partial, root, receipt_cb=None):
+    from kazma_core.web_acquire.crawl_jobs import call
+
+    result = await fetch_result((url or "").strip(), purpose="research_save")
+    if receipt_cb is not None:
+        await receipt_cb(result)  # durable evidence must commit before publication
+    if not result.ok:
+        return ExtractSaveResult(result, error=result.error, error_code=result.error_code)
+    if result.truncated and not allow_partial:
+        return ExtractSaveResult(result, error="Partial acquisition was not saved as a complete research source.",
+                                 error_code=FetchErrorCode.LIMIT)
+    try:
+        target = await call(_safe_workspace_path, path, url)
+        if isinstance(target, str):
+            return ExtractSaveResult(result, error=target.removeprefix("Error: "),
+                                     error_code=FetchErrorCode.WORKSPACE)
+        if await call(target.exists):
+            return ExtractSaveResult(result, error=f"Refusing to overwrite existing file `{target.name}`. Use a different path.",
+                                     error_code=FetchErrorCode.EXISTS)
+        header = (
+            f"# Source: {result.final_url or url}\n"
+            f"# Requested source: {url}\n"
+            f"# Backend: {result.backend or 'unknown'}\n"
+            f"# Partial: {result.truncated}\n"
+            f"# Limits: {', '.join(result.truncation_reasons) or 'none observed'}\n"
+            f"# Saved: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"
+            f"# Chars: {len(result.text)}\n\n"
+        )
+        from kazma_core.tools.research_files import create_extract
+
+        await call(create_extract, target, header + result.text)
+    except FileExistsError:
+        return ExtractSaveResult(result, error="Refusing to overwrite an existing extract. Use a different path.",
+                                 error_code=FetchErrorCode.EXISTS)
+    except OSError as exc:
+        logger.warning("[read_url] extract save failed: %s", exc)
+        return ExtractSaveResult(result, error=f"Could not save extract ({type(exc).__name__}). Check workspace storage.",
+                                 error_code=FetchErrorCode.STORAGE)
+    try:
+        relative = str(target.relative_to(root))
+    except ValueError:
+        relative = str(target)
+    return ExtractSaveResult(result, path=relative, absolute_path=str(target),
+                             saved_bytes=len((header + result.text).encode("utf-8")))
+
+
+async def read_url_to_file(url: str, path: str | None = None) -> str:
+    """Save a public extract without overwriting; report partial content visibly."""
+    saved = await save_url_extract(url, path=path, allow_partial=True)
+    if not saved.ok:
+        return f"Error: {saved.error or 'Could not save extract.'}\n{saved.acquisition.notice()}"
+    full, rel = saved.acquisition.text, saved.path
     n_chunks = max(1, (len(full) + DEFAULT_CHUNK_SIZE - 1) // DEFAULT_CHUNK_SIZE)
+    extent = "partial" if saved.acquisition.truncated else "full"
     return (
-        f"Saved full extract ({len(full)} chars) → `{rel}`\n"
+        f"Saved {extent} extract ({len(full)} chars) → `{rel}`\n"
+        f"{saved.acquisition.notice()}\n"
         f"Suggested next steps:\n"
         f"- list_research_chunks(path='{rel}')  # ~{n_chunks} chunks @ {DEFAULT_CHUNK_SIZE} chars\n"
         f"- read_research_chunk(path='{rel}', chunk_index=0)\n"
-        f"- digest_research_file(path='{rel}')  # full multi-chunk digest (context-safe)\n"
+        f"- digest_research_file(path='{rel}')  # multi-chunk digest (context-safe)\n"
         f"- summarize_research_file(path='{rel}')  # lighter outline\n"
         f"- Or page: read_url(url, offset=0) then offset=N"
     )
@@ -1273,7 +1397,8 @@ def _load_research_body(path: str) -> tuple[str, Path] | str:
     lines = text.splitlines()
     body_start = 0
     for i, line in enumerate(lines):
-        if line.startswith("# Source:") or line.startswith("# Saved:") or line.startswith("# Chars:"):
+        if line.startswith(("# Source:", "# Requested source:", "# Backend:", "# Partial:",
+                            "# Limits:", "# Crawl seed:", "# Depth:", "# Saved:", "# Chars:")):
             body_start = i + 1
             continue
         if body_start and line.strip() == "":

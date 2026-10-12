@@ -1,0 +1,76 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 628 items / 1 skipped
+
+tests\test_shell_child_home.py ...                                       [  0%]
+tests\test_shell_glued_options.py ....................                   [  3%]
+tests\test_shipped_config_defaults.py ...............                    [  6%]
+tests\test_shutdown_builds_nothing.py ....                               [  6%]
+tests\test_side_effects.py ....................                          [  9%]
+tests\test_sidebar_model_display.py .............                        [ 11%]
+tests\test_sidebar_shows_every_destination.py .......                    [ 13%]
+tests\test_singleton_isolation.py ................                       [ 15%]
+tests\test_site_metrics_sync.py ..............                           [ 17%]
+tests\test_skill_checksum.py .........                                   [ 19%]
+tests\test_skill_integrity_shown.py .......                              [ 20%]
+tests\test_skill_review_workflow.py .....                                [ 21%]
+tests\test_skill_switches.py ........                                    [ 22%]
+tests\test_skill_validation.py ..............                            [ 24%]
+tests\test_slack_adapter.py ......................                       [ 28%]
+tests\test_slack_approval_disclosure.py .......                          [ 29%]
+tests\test_slash_admin_gate.py ...                                       [ 29%]
+tests\test_slash_help_and_menu.py ....                                   [ 30%]
+tests\test_slash_turns.py .....                                          [ 31%]
+tests\test_snapshot_retention_actually_prunes.py ......                  [ 32%]
+tests\test_snapshot_rewind_payload.py ..                                 [ 32%]
+tests\test_soft_nav_page_scripts.py ..........                           [ 34%]
+tests\test_source_grounding.py ......                                    [ 35%]
+tests\test_sqlite_column_migrations.py ..........                        [ 36%]
+tests\test_sqlite_kept_connections.py .........                          [ 38%]
+tests\test_sse_bridge.py ....                                            [ 38%]
+tests\test_sse_chat.py ............................                      [ 43%]
+tests\test_sse_delivery_v2.py ...............                            [ 45%]
+tests\test_sse_event_contract.py ....                                    [ 46%]
+tests\test_sse_graph_coherence.py ...                                    [ 46%]
+tests\test_sse_segment_break.py .                                        [ 46%]
+tests\test_ssrf_cors.py ................................................ [ 54%]
+.....................                                                    [ 57%]
+tests\test_ssrf_pin_authority.py ........                                [ 59%]
+tests\test_stale_settings_db_notice.py .......                           [ 60%]
+tests\test_static_gates.py ............................................. [ 67%]
+.............                                                            [ 69%]
+tests\test_still_not_doing.py ......                                     [ 70%]
+tests\test_storage_backend_recovery_contract.py ..                       [ 70%]
+tests\test_store_registry.py ...............................             [ 75%]
+tests\test_streaming_last_event_id_scope.py .                            [ 75%]
+tests\test_sub_agent.py .............                                    [ 77%]
+tests\test_suggestions.py .........................................      [ 84%]
+tests\test_summarizer.py .............                                   [ 86%]
+tests\test_supervisor.py .............................s..                [ 91%]
+tests\test_supervisor_watch.py ......                                    [ 92%]
+tests\test_swallowed_errors_reported.py ........                         [ 93%]
+tests\test_swarm_admission_hop.py ...                                    [ 94%]
+tests\test_swarm_api.py ....................                             [ 97%]
+tests\test_swarm_auto_worker.py ............                             [ 99%]
+tests\test_swarm_blackboard.py ....                                      [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_sub_agent.py::TestMaxConcurrent::test_semaphore_limits
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\stash.py:108: RuntimeWarning: coroutine 'TestMaxConcurrent.test_semaphore_limits.<locals>.slow_graph' was never awaited
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========== 627 passed, 2 skipped, 2 warnings in 385.70s (0:06:25) ============

@@ -1,0 +1,213 @@
+[fast-test] 1007 test files in 8 chunks (8 requested, timeout 1260s/chunk)
+[fast-test] chunk 07: OK 1777p/0f (125 files)
+[fast-test] chunk 02: OK 1423p/0f (126 files)
+[fast-test] chunk 01: OK 1847p/0f (126 files)
+[fast-test] chunk 05: OK 1690p/0f (126 files)
+[fast-test] chunk 06: OK 1843p/0f (126 files)
+[fast-test] chunk 03: OK 1838p/0f (126 files)
+[fast-test] chunk 04: OK 2089p/0f (126 files)
+[fast-test] chunk 00: exit=124 1826p/0f (126 files)
+[fast-test] chunk 00 timed out (exit=124) — recovering its 126 files
+[fast-test] --- chunk 00: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1833 items / 2 deselected / 1831 selected
+  | kazma-core\kazma_core_tests\integration\test_multi_platform.py ......... [  0%]
+  | ...............                                                          [  1%]
+  | kazma-core\tests\test_empty_answer_recovery.py ....                      [  1%]
+  | kazma-core\tests\test_max_iter_synthesis.py .......                      [  1%]
+  | kazma-core\tests\test_memory_priority_batch.py ........                  [  2%]
+  | kazma-core\tests\test_memory_v2_phase_a.py ....                          [  2%]
+  | kazma-core\tests\test_steer_buffers.py ...............                   [  3%]
+  | kazma-gateway\kazma_gateway_tests\adapters\test_gateway_consumer.py ..   [  3%]
+  | kazma-tui\kazma_tui_tests\test_chat.py ......................            [  4%]
+  | kazma-ui\kazma_ui_tests\test_mcp_ui.py ....                              [  4%]
+  | tests\test_acquisition_dns.py .................                          [  5%]
+  | tests\test_admin_decision.py ..........                                  [  6%]
+  | tests\test_alert_dispatcher_upgrade.py .....                             [  6%]
+  | tests\test_approval_event_semantic.py ....                               [  6%]
+  | tests\test_async_routes_on_the_loop.py ....                              [  7%]
+  | tests\test_audit_2026_09_04_wave3.py ........                            [  7%]
+  | tests\test_audit_a_remaining.py ....                                     [  7%]
+  | tests\test_audit_followthrough.py ...............                        [  8%]
+  | tests\test_audit_wave8.py ........                                       [  9%]
+  | tests\test_backup_cadence_and_retention.py .....                         [  9%]
+  | tests\test_browser_boot_policy.py ..                                     [  9%]
+  | tests\test_calendar_card_providers.py ....                               [  9%]
+  | tests\test_chaos_routes.py ........                                      [ 10%]
+  | tests\test_chat_key_resolution.py ..........                             [ 10%]
+  | tests\test_checkpoint_serde.py .........                                 [ 11%]
+  | tests\test_cli_commands.py ............................................. [ 13%]
+  | ........................................................................ [ 17%]
+  | .......                                                                  [ 17%]
+  | tests\test_commitment_authorize.py ......                                [ 18%]
+  | tests\test_commitment_g1_latency.py ..                                   [ 18%]
+  | tests\test_commitment_tool_worker_gate.py ...                            [ 18%]
+  | tests\test_config_store_cache_scope.py ....                              [ 18%]
+  | tests\test_config_write_race.py ....................                     [ 19%]
+  | tests\test_cron.py ................................                      [ 21%]
+  | tests\test_dashboard_capabilities.py ..                                  [ 21%]
+  | tests\test_database_read_roles_other.py ss                               [ 21%]
+  | tests\test_delivery_routing.py ....................                      [ 22%]
+  | tests\test_discord_gateway_resume.py ........                            [ 23%]
+  | tests\test_docs_sidebar.py ..                                            [ 23%]
+  | tests\test_document_ingestion_phase8.py ........                         [ 23%]
+  | tests\test_document_operations_phase9.py ............................... [ 25%]
+  | ......                                                                   [ 25%]
+  | tests\test_documents_api_phase8.py .................                     [ 26%]
+  | tests\test_drill_restic_lock_handling.py .........                       [ 27%]
+  | tests\test_effect_journal.py ....................                        [ 28%]
+  | tests\test_email_manager.py ........                                     [ 28%]
+  | tests\test_env_loading.py ..........                                     [ 29%]
+  | tests\test_execution_policy_failures.py ..........                       [ 29%]
+  | tests\test_file_checkpoints.py ....                                      [ 30%]
+  | tests\test_frames_name_their_turn.py .....                               [ 30%]
+  | tests\test_gateway_recursion_partial.py .....                            [ 30%]
+  | tests\test_github_client.py .......................                      [ 31%]
+  | tests\test_guard_integration.py .......................                  [ 33%]
+  | tests\test_handoff_guards.py ...                                         [ 33%]
+  | tests\test_history_row_fields.py ....                                    [ 33%]
+  | tests\test_hitl_gate_swarm_pipeline.py .....                             [ 33%]
+  | tests\test_hitl_supersede.py ....                                        [ 34%]
+  | tests\test_hub_validator.py .............                                [ 34%]
+  | tests\test_ide_read_raw.py ..........                                    [ 35%]
+  | tests\test_injection_live_harness.py ................................... [ 37%]
+  | ...............................                                          [ 38%]
+  | tests\test_intent_engine_entities.py ......                              [ 39%]
+  | tests\test_js_suite.py ................................................. [ 41%]
+  | ...........                                                              [ 42%]
+  | tests\test_kb_smart_reindex.py .........                                 [ 42%]
+  | tests\test_knowledge_store.py ................                           [ 43%]
+  | tests\test_lifecycle_start_card.py ..................................    [ 45%]
+  | tests\test_llm_rate_limit.py .....                                       [ 45%]
+  | tests\test_loop_breaker_live_path.py .....                               [ 46%]
+  | tests\test_mcp_binding_recovery.py ......                                [ 46%]
+  | tests\test_mcp_oauth.py .........                                        [ 47%]
+  | tests\test_mcp_tool_server.py ..............................             [ 48%]
+  | tests\test_memory_entity_counts.py .....                                 [ 48%]
+  | tests\test_memory_graph_clean.py ........................                [ 50%]
+  | tests\test_memory_mirror_sync.py .....................ss                 [ 51%]
+  | tests\test_memory_summary_recall.py ...............                      [ 52%]
+  | tests\test_micro_consolidation_off_loop.py ..                            [ 52%]
+  | tests\test_model_registry_store.py ........                              [ 52%]
+  | tests\test_native_slash_commands.py .................................... [ 54%]
+  | ..........................................................               [ 58%]
+  | tests\test_node_context_scope.py ..                                      [ 58%]
+  | tests\test_outbound_attachment_policy.py ........                        [ 58%]
+  | tests\test_path_refresh.py ...........s.....                             [ 59%]
+  | tests\test_pg_dump_reported_not_assumed.py ........                      [ 59%]
+  | tests\test_platform_gate_identity.py ...                                 [ 60%]
+  | tests\test_procedural_recorder_worker.py .....                           [ 60%]
+  | tests\test_project_init.py .................                             [ 61%]
+  | tests\test_provider_test_key_resolution.py ............                  [ 61%]
+  | tests\test_rate_feedback.py .......                                      [ 62%]
+  | tests\test_refreshed_grants.py ..............................            [ 64%]
+  | tests\test_replay_router_getters.py ...                                  [ 64%]
+  | tests\test_research_planner.py ......                                    [ 64%]
+  | tests\test_research_task_delete.py ...                                   [ 64%]
+  | tests\test_restore_drill_scheduled.py .........                          [ 65%]
+  | tests\test_router.py ....................                                [ 66%]
+  | tests\test_s4_coverage_gaps.py ..................                        [ 67%]
+  | tests\test_search_http_worker.py .............                           [ 67%]
+  | tests\test_security_report_sources.py ............                       [ 68%]
+  | tests\test_service_supervision.py ...................................... [ 70%]
+  | ....................................................                     [ 73%]
+  | tests\test_setting_writes_validated.py ....................              [ 74%]
+  | tests\test_shared_approvals.py ....                                      [ 74%]
+  | tests\test_sidebar_shows_every_destination.py .......                    [ 75%]
+  | tests\test_slack_adapter.py ......................                       [ 76%]
+  | tests\test_source_grounding.py ......                                    [ 76%]
+  | tests\test_sse_graph_coherence.py ...                                    [ 76%]
+  | tests\test_store_registry.py ...............................             [ 78%]
+  | tests\test_swarm_admission_hop.py ...                                    [ 78%]
+  | tests\test_swarm_dispatch_integration.py .......                         [ 79%]
+  | tests\test_swarm_metrics_tracing.py .................................... [ 81%]
+  | ..............                                                           [ 81%]
+  | tests\test_swarm_sse.py ..................................               [ 83%]
+  | tests\test_swarm_worker_tools.py .........                               [ 84%]
+  | tests\test_task_store_backends.py .........                              [ 84%]
+  | tests\test_telegram_slack_receive_and_test.py .......................... [ 86%]
+  | ...............                                                          [ 86%]
+  | tests\test_text_newlines.py .................                            [ 87%]
+  | tests\test_tone_adapter.py ..............................                [ 89%]
+  | tests\test_tools_quickwins.py ...................                        [ 90%]
+  | tests\test_truncation_retry.py ....                                      [ 90%]
+  | tests\test_turn_delivery_cqrs.py .......................                 [ 92%]
+  | tests\test_turn_notes.py ................                                [ 92%]
+  | tests\test_typing_keepalive.py .                                         [ 92%]
+  | tests\test_ui_six_improvements.py .........                              [ 93%]
+  | tests\test_unrestricted_unified.py .......                               [ 93%]
+  | tests\test_ux003_ui_bugs.py ................                             [ 94%]
+  | tests\test_vision_analyze.py ......................                      [ 95%]
+  | tests\test_web_acquisition_results.py ........................           [ 97%]
+  | tests\test_web_session_cache.py .....                                    [ 97%]
+  | tests\test_workspace_delete.py ....                                      [ 97%]
+  | tests\test_ws_chat_telemetry.py ....                                     [ 97%]
+  | tests\test_x_composer_restore_length.py ................                 [ 98%]
+  | tests\test_x_post_proposal_gate.py .....                                 [ 99%]
+  | tests\test_x_recovery_drill.py .                                         [ 99%]
+  | tests\test_x_studio.py ................                                  [100%]
+  | ============================== warnings summary ===============================
+  | .venv\Lib\site-packages\starlette\testclient.py:53
+  |   G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+  |     _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+  | kazma-ui/kazma_ui_tests/test_mcp_ui.py::test_add_server_forwards_sse_bearer_auth_and_trust
+  |   kazma-ui\kazma_ui_tests\test_mcp_ui.py:39: PytestWarning: The test <Function test_add_server_forwards_sse_bearer_auth_and_trust> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+  |     @pytest.mark.asyncio
+  | tests/test_audit_a_remaining.py::test_turn_model_pin_roundtrip
+  |   G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-233 (_connection_worker_thread)
+  |   Traceback (most recent call last):
+  |     File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\aiosqlite\core.py", line 66, in _connection_worker_thread
+  |       future.get_loop().call_soon_threadsafe(set_result, future, result)
+  |     File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 844, in call_soon_threadsafe
+  |       self._check_closed()
+  |     File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 545, in _check_closed
+  |       raise RuntimeError('Event loop is closed')
+  |   RuntimeError: Event loop is closed
+  |   During handling of the above exception, another exception occurred:
+  |   Traceback (most recent call last):
+  |     File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+  |       self.run()
+  |     File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1012, in run
+  |       self._target(*self._args, **self._kwargs)
+  |     File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\aiosqlite\core.py", line 75, in _connection_worker_thread
+  |       future.get_loop().call_soon_threadsafe(set_exception, future, e)
+  |     File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 844, in call_soon_threadsafe
+  |       self._check_closed()
+  |     File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 545, in _check_closed
+  |       raise RuntimeError('Event loop is closed')
+  |   RuntimeError: Event loop is closed
+  |   Enable tracemalloc to get traceback where the object was allocated.
+  |   See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+  |     warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+  | tests/test_vision_analyze.py::TestUrlImage::test_url_download_and_analyze
+  | tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_content_length_too_large_raises
+  | tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_stream_bytes_exceed_limit_raises
+  | tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_no_content_length_small_file_succeeds
+  | tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_content_length_within_limit_succeeds
+  |   G:\GitHubRepos\kazma\kazma-core\kazma_core\security\ssrf.py:254: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  |     peer = peer_ip_from_response(response)
+  |   Enable tracemalloc to get traceback where the object was allocated.
+  |   See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+  | tests/test_vision_analyze.py::TestUrlImage::test_url_download_and_analyze
+  | tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_content_length_too_large_raises
+  | tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_stream_bytes_exceed_limit_raises
+  | tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_no_content_length_small_file_succeeds
+  | tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_content_length_within_limit_succeeds
+  |   G:\GitHubRepos\kazma\kazma-core\kazma_core\tools\vision_analyze.py:220: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  |     assert_peer_public(resp, url=fetch_url)
+  |   Enable tracemalloc to get traceback where the object was allocated.
+  |   See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+  | -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+  | === 1826 passed, 5 skipped, 2 deselected, 13 warnings in 1249.40s (0:20:49) ===
+  | RUNNER: chunk timed out
+[fast-test] chunk 00 ran out of time — re-running its 126 files as 8 parallel pieces
+
+[fast-test] TOTALS in 1647s: 4 deselected, 16159 passed, 67 skipped

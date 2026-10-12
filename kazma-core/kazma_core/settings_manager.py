@@ -585,14 +585,21 @@ class SettingsManager:
 
     async def test_proxy(self) -> dict[str, Any]:
         """Health-check the active proxy provider. Returns {success, exit_ip?}."""
-        from kazma_core.proxy.registry import get_proxy_provider
+        import asyncio
 
-        # Force a fresh provider read so a just-saved config is picked up.
+        from kazma_core.proxy.base import probe_proxy
+        from kazma_core.proxy.client import get_active_proxy_url
+        from kazma_core.web_acquire.policy import acquisition_policy
+        from kazma_core.web_acquire.result import AcquisitionError
+
+        if not acquisition_policy().permits('proxy'):
+            return {'success': False, 'error': 'Proxy testing is disabled by acquisition policy.'}
         try:
-            provider = get_proxy_provider()
-        except Exception as exc:  # noqa: BLE001
-            return {"success": False, "error": f"Provider init failed: {exc}"}
-        return await provider.test()
+            proxy_url = await asyncio.to_thread(get_active_proxy_url)
+        except AcquisitionError as exc:
+            return {'success': False, 'error': str(exc)}
+        return await probe_proxy(proxy_url)
+
 
     # ══════════════════════════════════════════════════════════════════
     # EMBEDDER (memory vector model — Web UI Embedder settings page)

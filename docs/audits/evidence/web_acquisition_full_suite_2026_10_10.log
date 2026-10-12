@@ -1,0 +1,275 @@
+[fast-test] 982 test files in 8 chunks (8 requested, timeout 1230s/chunk)
+[fast-test] chunk 01: OK 1640p/2f (123 files)
+[fast-test] chunk 00: OK 1482p/1f (123 files)
+[fast-test] chunk 04: OK 1950p/1f (123 files)
+[fast-test] chunk 06: OK 1806p/0f (122 files)
+[fast-test] chunk 05: OK 1746p/0f (123 files)
+[fast-test] chunk 02: OK 2003p/2f (123 files)
+[fast-test] chunk 07: exit=124 0p/0f (122 files)
+[fast-test] chunk 03: OK 1698p/0f (123 files)
+[fast-test] chunk 07 timed out (exit=124) � recovering its 122 files
+[fast-test] --- chunk 07: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1591 items
+  | kazma-core\tests\test_embedder.py ...........                            [  0%]
+  | kazma-core\tests\test_language_lock.py ......                            [  1%]
+  | kazma-core\tests\test_memory_p2_wave.py .....                            [  1%]
+  | kazma-core\tests\test_memory_v2_phase5.py ..........                     [  2%]
+  | kazma-core\tests\test_shell_exec_cd_hint.py .                            [  2%]
+  | kazma-gateway\kazma_gateway_tests\adapters\test_documents_commands.py .. [  2%]
+  | ..                                                                       [  2%]
+  | kazma-tui\kazma_tui_tests\test_app_async.py ......................       [  3%]
+  | kazma-ui\kazma_ui_tests\test_active_turns.py ............                [  4%]
+  | tests\test_adapter_burst_ordering.py ...                                 [  4%]
+  | tests\test_agents_active_model.py .                                      [  4%]
+  | tests\test_app_bootstrap_errors.py ..                                    [  4%]
+  | tests\test_arabic_text.py .............................................. [  7%]
+  | .....................                                                    [  9%]
+  | tests\test_audit_2026_09_04_wave2.py .......                             [  9%]
+  | tests\test_audit_2026_09_17_regressions.py ...............               [ 10%]
+  | tests\test_audit_fixes.py .............                                  [ 11%]
+  | tests\test_audit_wave7.py .............                                  [ 12%]
+  | tests\test_backup_alerting.py ...........                                [ 12%]
+  | tests\test_browser_boot_policy.py ..                                     [ 12%]
+  | tests\test_calendar_connector.py ...................                     [ 14%]
+  | tests\test_chat_adapters_follow_settings.py ...................          [ 15%]
+  | tests\test_chat_session_routes_off_loop.py ..                            [ 15%]
+  | tests\test_checkpoint_timeout_deferral.py ...                            [ 15%]
+  | tests\test_cli_docs.py ....                                              [ 15%]
+  | tests\test_commitment_authorize_remind.py ......                         [ 16%]
+  | tests\test_commitment_modes.py ......                                    [ 16%]
+  | tests\test_compaction.py ........................                        [ 18%]
+  | tests\test_config_store_close_race.py ......                             [ 18%]
+  | tests\test_context_indicator.py ......                                   [ 18%]
+  | tests\test_cron_store_write_lock.py ...                                  [ 19%]
+  | tests\test_dashboard_metrics.py ...                                      [ 19%]
+  | tests\test_date_guard_word_match.py ..........                           [ 19%]
+  | tests\test_dependency_scanner.py ..............                          [ 20%]
+  | tests\test_dispatch_helpers.py .......                                   [ 21%]
+  | tests\test_document_actions_phase8.py ...........                        [ 21%]
+  | tests\test_document_jobs_pg_idempotency.py sss                           [ 22%]
+  | tests\test_document_platform_tools_phase8.py .....                       [ 22%]
+  | tests\test_documents_models.py ..........                                [ 23%]
+  | tests\test_durable_config_outage.py ................                     [ 24%]
+  | tests\test_email_disconnect_csrf.py ..........                           [ 24%]
+  | tests\test_email_polish.py .........                                     [ 25%]
+  | tests\test_eval_pack.py ................................................ [ 28%]
+  | ....................................                                     [ 30%]
+  | tests\test_failover_cache_reset.py ..                                    [ 30%]
+  | tests\test_file_tools.py .........                                       [ 31%]
+  | tests\test_gateway.py .................................................. [ 34%]
+  | ...                                                                      [ 34%]
+  | tests\test_genai_otel_spans.py ......................................... [ 37%]
+  | .                                                                        [ 37%]
+  | tests\test_github_status_cache.py .......                                [ 37%]
+  | tests\test_gw061_bugfixes.py .............                               [ 38%]
+  | tests\test_hard_page_recovery.py .....                                   [ 38%]
+  | tests\test_hitl_card_readability.py ...............................      [ 40%]
+  | tests\test_hitl_grouped_approval_disclosure.py ...                       [ 40%]
+  | tests\test_hub_cli.py ................                                   [ 41%]
+  | tests\test_i18n_keys_exist.py ...                                        [ 42%]
+  | tests\test_importer_atomicity.py ..                                      [ 42%]
+  | tests\test_instant_reply_frames.py ..                                    [ 42%]
+  | tests\test_intent_research.py ........                                   [ 42%]
+  | tests\test_kazma_guard_reload.py ..........                              [ 43%]
+  | tests\test_knowledge_ingest.py ......................                    [ 44%]
+  | tests\test_leftovers_except_g.py .....                                   [ 45%]
+  | tests\test_llm_gateway.py ...............                                [ 46%]
+  | tests\test_login_throttle.py .........                                   [ 46%]
+  | tests\test_mcp_asset_cache_busting.py .                                  [ 46%]
+  | tests\test_mcp_hitl.py .....................................             [ 49%]
+  | tests\test_mcp_servers_store.py .........................                [ 50%]
+  | tests\test_memory_current_facts.py ..........                            [ 51%]
+  | tests\test_memory_forget.py ....................                         [ 52%]
+  | tests\test_memory_legacy_copies.py ......                                [ 52%]
+  | tests\test_memory_remember_and_small_talk.py ........................... [ 54%]
+  | ...                                                                      [ 54%]
+  | tests\test_metrics.py ...                                                [ 54%]
+  | tests\test_model_provider_spelling.py ..........                         [ 55%]
+  | tests\test_multi_tenant_isolation.py .                                   [ 55%]
+  | tests\test_no_repeated_dict_keys.py ...                                  [ 55%]
+  | tests\test_orphan_modules.py ...                                         [ 56%]
+  | tests\test_path_grants.py ......                                         [ 56%]
+  | tests\test_pg_bridge_docker_env.py ...                                   [ 56%]
+  | tests\test_plan_mode.py .............                                    [ 57%]
+  | tests\test_postgres_suite.py ........                                    [ 57%]
+  | tests\test_project_files.py ...........                                  [ 58%]
+  | tests\test_provider_probe_model.py .......                               [ 59%]
+  | tests\test_rate_feedback.py .......                                      [ 59%]
+  | tests\test_refreshed_grants.py ..............................            [ 61%]
+  | tests\test_replay_router_getters.py ...                                  [ 61%]
+  | tests\test_research_r1.py .......                                        [ 61%]
+  | tests\test_restic_repo.py .............................................  [ 64%]
+  | tests\test_resume_chokepoint.py ..                                       [ 64%]
+  | tests\test_routing_engine.py .....                                       [ 65%]
+  | tests\test_schedule_conflict_reason.py ...............................   [ 67%]
+  | tests\test_security_headers.py ......                                    [ 67%]
+  | tests\test_sensitive_key_classification.py ............................. [ 69%]
+  | .                                                                        [ 69%]
+  | tests\test_session_store.py ............                                 [ 70%]
+  | tests\test_settings_restore_classes.py .................                 [ 71%]
+  | tests\test_shutdown_builds_nothing.py ....                               [ 71%]
+  | tests\test_skill_review_workflow.py .....                                [ 71%]
+  | tests\test_snapshot_retention_actually_prunes.py ......                  [ 72%]
+  | tests\test_sse_chat.py ............................                      [ 73%]
+  | tests\test_static_gates.py ............................................. [ 76%]
+  | .............                                                            [ 77%]
+  | tests\test_supervisor.py .............................s..                [ 79%]
+  | tests\test_swarm_conditional_pattern.py ..............                   [ 80%]
+  | tests\test_swarm_handoff.py .................                            [ 81%]
+  | tests\test_swarm_recovery_no_replay.py .                                 [ 81%]
+  | tests\test_swarm_task_stream_ends.py .........                           [ 82%]
+  | tests\test_task_ledger.py ..................                             [ 83%]
+  | tests\test_telegram_offset_commit.py .........                           [ 83%]
+  | tests\test_template_plural_language.py ...                               [ 84%]
+  | tests\test_test_fail_continue.py ...                                     [ 84%]
+  | tests\test_time_travel_concurrency.py ..                                 [ 84%]
+  | tests\test_tool_paths.py ................................                [ 86%]
+  | tests\test_tracing_console.py ...                                        [ 86%]
+  | tests\test_tui_session_load.py ........                                  [ 87%]
+  | tests\test_turn_ledger_abc.py ........................                   [ 88%]
+  | tests\test_turn_step_detail.py ......................                    [ 90%]
+  | tests\test_ui_double_wiring.py ..                                        [ 90%]
+  | tests\test_unified_turn_block_phase0.py ..................               [ 91%]
+  | tests\test_url_password_round_trip.py .........                          [ 91%]
+  | tests\test_vector_store_probe.py ....................................... [ 94%]
+  | ....ss                                                                   [ 94%]
+  | tests\test_voice_ws_pipeline.py ..................................       [ 96%]
+  | tests\test_web_session_cache.py .....                                    [ 97%]
+  | tests\test_workspace_delete.py ....                                      [ 97%]
+  | tests\test_ws_chat_telemetry.py ....                                     [ 97%]
+  | tests\test_x_composer_restore_length.py ................                 [ 98%]
+  | tests\test_x_post_proposal_gate.py .....                                 [ 98%]
+  | tests\test_x_recovery_drill.py .                                         [ 98%]
+  | tests\test_x_studio.py ................                                  [100%]
+  | RUNNER: chunk timed out
+[fast-test] chunk 07 ran out of time � re-running its 122 files as 8 parallel pieces
+
+[fast-test] TOTALS in 1432s: 2 deselected, 6 failed, 13910 passed, 59 skipped
+
+[fast-test] 6 failing tests:
+  FAILED tests/test_debt_ratchet.py::test_exception_debt_only_goes_down
+  FAILED tests/test_debt_ratchet.py::test_structural_debt_only_goes_down
+  FAILED tests/test_metrics_receipt_current.py::test_shipped_collection_receipt_matches_current_inputs
+  FAILED tests/test_ssrf_cors.py::TestReadUrlSSRFIntegration::test_read_url_allows_public
+  FAILED tests/test_tools_quickwins.py::TestReadUrlEdgeCases::test_read_url_connection_error
+  FAILED tests/test_tools_quickwins.py::TestReadUrlEdgeCases::test_read_url_timeout
+
+[fast-test] failure tracebacks (per-chunk FAILURES sections):
+================================== FAILURES ===================================
+_____________________ test_exception_debt_only_goes_down ______________________
+tests\test_debt_ratchet.py:163: in test_exception_debt_only_goes_down
+    assert not shrank, (
+E   AssertionError: Debt went down � lock it in by lowering BASELINE in this file:
+E       blind_except: set to 3538 (was 3545)
+E       silent_except: set to 443 (was 444)
+E   assert not {'blind_except': (3538, 3545), 'silent_except': (443, 444)}
+---------------------------- Captured stdout setup ----------------------------
+19:16:26 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+19:16:26 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19206\test_exception_debt_only_goes_0\chat_sessions.db
+19:16:26 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19206\test_exception_debt_only_goes_0\settings.db
+19:16:26 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+19:16:26 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19206\test_exception_debt_only_goes_0\settings.db
+19:16:26 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+19:16:26 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19206\test_exception_debt_only_goes_0\test_registry.db
+19:16:26 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+19:16:26 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19206\test_exception_debt_only_goes_0\test_registry.db
+19:16:26 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+19:16:26 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+19:16:26 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+19:16:26 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+19:16:26 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+19:16:26 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+19:16:26 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+19:16:26 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+19:16:26 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+19:16:26 INFO kazma_core.model_reg
+
+================================== FAILURES ===================================
+___________ test_shipped_collection_receipt_matches_current_inputs ____________
+tests\test_metrics_receipt_current.py:17: in test_shipped_collection_receipt_matches_current_inputs
+    assert receipt["input_sha256"] == generator.collection_fingerprint(), (
+E   AssertionError: Collection inputs changed: stage new source/test files, then run python scripts/generate_metrics.py --write --require-collected and stage its outputs.
+E   assert 'aa826c23a718...8c1146d09fc5c' == '504a97ab1382...47a913585fa0b'
+E     
+E     - 504a97ab1382decd24470f238948569edb13e76a7a1ef8d35f147a913585fa0b
+E     + aa826c23a71848a9216b60802505705e699ef48c5285bbd9eef8c1146d09fc5c
+---------------------------- Captured stdout setup ----------------------------
+19:24:27 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+19:24:27 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19209\test_shipped_collection_receip0\chat_sessions.db
+19:24:27 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19209\test_shipped_collection_receip0\settings.db
+19:24:27 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+19:24:27 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19209\test_shipped_collection_receip0\settings.db
+19:24:27 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+19:24:27 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19209\test_shipped_collection_receip0\test_registry.db
+19:24:27 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+19:24:27 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19209\test_shipped_collection_receip0\test_registry.db
+19:24:27 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+19:24:27 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+19:24:27 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+19:24:27 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+19:24:27 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+19:24:27 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+19:24:27 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: x
+
+================================== FAILURES ===================================
+___________ TestReadUrlSSRFIntegration.test_read_url_allows_public ____________
+tests\test_ssrf_cors.py:319: in test_read_url_allows_public
+    assert "Hello" in result
+E   assert 'Hello' in "Error: Failed to read https://example.com � 'coroutine' object does not support the asynchronous context manager protocol"
+---------------------------- Captured stdout setup ----------------------------
+19:27:29 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+19:27:29 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19205\test_read_url_allows_public0\chat_sessions.db
+19:27:29 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19205\test_read_url_allows_public0\settings.db
+19:27:29 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+19:27:29 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19205\test_read_url_allows_public0\settings.db
+19:27:29 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+19:27:29 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19205\test_read_url_allows_public0\test_registry.db
+19:27:29 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+19:27:29 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19205\test_read_url_allows_public0\test_registry.db
+19:27:29 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ollama
+19:27:29 INFO kazma_core.model_registry_store: [ModelRegis
+
+================================== FAILURES ===================================
+_____________ TestReadUrlEdgeCases.test_read_url_connection_error _____________
+tests\test_tools_quickwins.py:492: in test_read_url_connection_error
+    assert "Could not connect" in result
+E   assert 'Could not connect' in "Error: Failed to read https://down.example.com � 'coroutine' object does not support the asynchronous context manager protocol"
+---------------------------- Captured stdout setup ----------------------------
+19:30:55 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+19:30:55 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19212\test_read_url_connection_error0\chat_sessions.db
+19:30:55 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19212\test_read_url_connection_error0\settings.db
+19:30:55 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+19:30:55 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19212\test_read_url_connection_error0\settings.db
+19:30:55 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+19:30:55 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19212\test_read_url_connection_error0\test_registry.db
+19:30:55 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+19:30:55 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19212\test_read_url_connection_error0\test_registry.db
+19:30:55 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+19:30:55 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ollama
+19:30

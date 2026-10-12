@@ -539,13 +539,26 @@ Save is disabled for any provider/connector until **Test Connection** succeeds (
 
 **Cause:** DuckDuckGo rate limits; Bing HTML fallback is fragile.
 
-**Fix:** Run SearXNG and set `KAZMA_SEARXNG_URL`. Optionally raise reliability with `KAZMA_JINA_READER=1` or `KAZMA_FIRECRAWL_API_KEY` for **page fetch**, not search.
+**Fix:** Run SearXNG and set `KAZMA_SEARXNG_URL`. Page acquisition has a separate local-only policy; hosted services require explicit mode and provider allowlist permission. See [Web research](web-research).
 
 ### 12.3 Bot wall / empty extract
 
 **Cause:** CDN challenge or JS SPA shell.
 
-**Fix:** Install Playwright (`pip install -e ".[web]"` + `playwright install chromium`). Or enable Jina/Firecrawl backends. Not all sites can be opened automatically.
+**Fix:** Install Playwright (`pip install -e ".[web]"` + `playwright install chromium`). Hosted Jina/Firecrawl require explicit acquisition mode and provider allowlist permission in addition to credentials. Not all sites can be opened automatically.
+
+An interrupted KB crawl can be reopened on the Knowledge page. Resume continues
+pending work under the original policy and skips requests/indexing effects whose
+outcome is uncertain. Completed metadata/BFS/page receipts survive reconnect;
+an incomplete discovery result stays visibly partial. `/kb status <library_id>`
+and `research_readiness(job_id=...)` expose the retained job without re-fetching.
+
+`resource_limit` can mean that durable job/day request allowance was exhausted;
+failed and uncertain remote requests still consume it. Check the shown upper-bound
+reservations, storage readiness and configured limits before retrying. A provider
+balance is separate: explicitly refresh Firecrawl credits to observe its account
+balance, fresh for five minutes. Stale/unsupported balances and per-request
+charges remain unavailable. Ordinary status polling does not query providers.
 
 ### 12.4 Dashboard Total Cost / Tokens show `$0` / `0` after a chat turn
 

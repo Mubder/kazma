@@ -1,0 +1,84 @@
+{"platform": "linux", "exit": 1, "error": null, "elapsed_s": 1783.9, "memory_limit_bytes": 3221225472, "cpu_rate": 2000, "tree_closed": true}
+{"family": 2, "host_loopback_refused": true, "errno": 101}
+{"family": 10, "host_loopback_refused": true, "errno": 99}
+
+{"cycle": 10, "elapsed_s": 34.4, "max_sampled_owned_rss_bytes": 538234880, "owner_rss_bytes": 56762368, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 20, "elapsed_s": 68.7, "max_sampled_owned_rss_bytes": 538632192, "owner_rss_bytes": 55988224, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 30, "elapsed_s": 102.9, "max_sampled_owned_rss_bytes": 542748672, "owner_rss_bytes": 64098304, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 40, "elapsed_s": 137.2, "max_sampled_owned_rss_bytes": 542748672, "owner_rss_bytes": 68050944, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 50, "elapsed_s": 171.7, "max_sampled_owned_rss_bytes": 542748672, "owner_rss_bytes": 69087232, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 60, "elapsed_s": 205.9, "max_sampled_owned_rss_bytes": 542748672, "owner_rss_bytes": 68132864, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 70, "elapsed_s": 240.0, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 68214784, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 80, "elapsed_s": 274.3, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 72286208, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 90, "elapsed_s": 308.6, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 79048704, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 100, "elapsed_s": 342.9, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 76759040, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 110, "elapsed_s": 377.1, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 76820480, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 120, "elapsed_s": 411.5, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 76943360, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 130, "elapsed_s": 446.0, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 79249408, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 140, "elapsed_s": 480.9, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 91574272, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 150, "elapsed_s": 530.7, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 86888448, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 160, "elapsed_s": 570.3, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 86904832, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 170, "elapsed_s": 613.5, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 86937600, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 180, "elapsed_s": 647.9, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 86953984, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 190, "elapsed_s": 682.5, "max_sampled_owned_rss_bytes": 644247552, "owner_rss_bytes": 90804224, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 200, "elapsed_s": 716.8, "max_sampled_owned_rss_bytes": 646791168, "owner_rss_bytes": 91516928, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 210, "elapsed_s": 751.8, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 92061696, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 220, "elapsed_s": 786.4, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 92086272, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 230, "elapsed_s": 820.9, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 92147712, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 240, "elapsed_s": 855.4, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 92160000, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 250, "elapsed_s": 903.2, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 100446208, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 260, "elapsed_s": 941.7, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96149504, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 270, "elapsed_s": 980.4, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96129024, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 280, "elapsed_s": 1014.9, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96129024, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 290, "elapsed_s": 1063.2, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96116736, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 300, "elapsed_s": 1101.8, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96952320, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 310, "elapsed_s": 1139.3, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 98443264, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 320, "elapsed_s": 1173.9, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96866304, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 330, "elapsed_s": 1208.6, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96866304, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 340, "elapsed_s": 1243.5, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96854016, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 350, "elapsed_s": 1278.1, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 96845824, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 360, "elapsed_s": 1312.8, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 99889152, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 370, "elapsed_s": 1347.4, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 98328576, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 380, "elapsed_s": 1382.1, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 98340864, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 390, "elapsed_s": 1416.7, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 98328576, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 400, "elapsed_s": 1451.2, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 98308096, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 410, "elapsed_s": 1485.9, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 98295808, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 420, "elapsed_s": 1520.5, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 102588416, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 430, "elapsed_s": 1555.3, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 99401728, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 440, "elapsed_s": 1589.9, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 99364864, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 450, "elapsed_s": 1624.6, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 99328000, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 460, "elapsed_s": 1659.2, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 99315712, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 470, "elapsed_s": 1702.0, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 99315712, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 480, "elapsed_s": 1745.0, "max_sampled_owned_rss_bytes": 650711040, "owner_rss_bytes": 99262464, "owner_threads": 2, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+qualification_exit=1
+qualification_cgroup_removed=true
+
+Traceback (most recent call last):
+  File "/mnt/g/GitHubRepos/kazma/.git/worktrees/kazma/release_browser_soak.py", line 145, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/mnt/g/GitHubRepos/kazma/.git/worktrees/kazma/release_browser_soak.py", line 59, in main
+    peak=max(peak,sum(p.memory_info().rss for p in observed if p.is_running()))
+                  ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/g/GitHubRepos/kazma/.git/worktrees/kazma/release_browser_soak.py", line 59, in <genexpr>
+    peak=max(peak,sum(p.memory_info().rss for p in observed if p.is_running()))
+                      ~~~~~~~~~~~~~^^
+  File "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/runtime/lib/python3.14/site-packages/psutil/_common.py", line 377, in wrapper
+    raise err from None
+  File "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/runtime/lib/python3.14/site-packages/psutil/_common.py", line 375, in wrapper
+    return fun(self)
+  File "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/runtime/lib/python3.14/site-packages/psutil/__init__.py", line 1138, in memory_info
+    return self._proc.memory_info()
+           ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/runtime/lib/python3.14/site-packages/psutil/_pslinux.py", line 1598, in wrapper
+    raise NoSuchProcess(pid, name) from err
+psutil.NoSuchProcess: process no longer exists (pid=51121)

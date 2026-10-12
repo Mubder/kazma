@@ -177,6 +177,9 @@ _CHUNK_COUNT_SQL = (
 )
 
 
+_MAX_KNOWLEDGE_BYTES = 1024**3
+
+
 class KnowledgeStore:
     """SQLite-backed store for Knowledge Libraries and their chunks.
 
@@ -209,6 +212,13 @@ class KnowledgeStore:
             )
             self._conn.row_factory = sqlite3.Row
             apply_sqlite_pragmas(self._conn)
+            page_size = self._conn.execute('PRAGMA page_size').fetchone()[0]
+            pages = _MAX_KNOWLEDGE_BYTES // page_size
+            actual = self._conn.execute(f'PRAGMA max_page_count={pages}').fetchone()[0]
+            if actual > pages:
+                self._conn.close()
+                self._conn = None
+                raise sqlite3.DatabaseError('Knowledge database exceeds its 1GiB storage ceiling; compact or export retained versions before ingest.')
         return self._conn
 
     def _init_db(self) -> None:
@@ -270,7 +280,8 @@ class KnowledgeStore:
             # Re-check under the lock: another process may have migrated while
             # we waited for it, and rebuilding a second time is pure risk.
             if _has_folded():
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 return
             conn.execute("DROP TABLE IF EXISTS knowledge_chunks_fts")
             conn.execute(_FTS_SCHEMA.strip().rstrip(';'))
@@ -287,7 +298,8 @@ class KnowledgeStore:
             logger.info("[KnowledgeStore] FTS rebuild complete (%d chunks)", len(rows))
         except sqlite3.Error:
             try:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
             except sqlite3.Error:
                 pass
             logger.warning(
@@ -402,7 +414,8 @@ class KnowledgeStore:
                 )
                 conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
         logger.info("[KnowledgeStore] Created library %r tenant=%s", lib_id, tenant_id)
         return self.get_library(lib_id)  # type: ignore[return-value]
@@ -478,7 +491,8 @@ class KnowledgeStore:
                 conn.execute("COMMIT")
                 return cur.rowcount > 0
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
 
     def get_library(self, library_id: str) -> dict[str, Any] | None:
@@ -545,7 +559,8 @@ class KnowledgeStore:
                 )
                 conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
         return self.get_library(library_id)
 
@@ -569,7 +584,8 @@ class KnowledgeStore:
                 conn.execute("COMMIT")
                 deleted = cur.rowcount > 0
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
         if deleted:
             logger.info("[KnowledgeStore] Deleted library %r (+ chunks via cascade)", library_id)
@@ -586,7 +602,8 @@ class KnowledgeStore:
                 )
                 conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
 
     def list_auto_inject_libraries(self) -> list[dict[str, Any]]:
@@ -839,7 +856,8 @@ class KnowledgeStore:
                 )
                 conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
         return {
             "published": True,
@@ -891,7 +909,8 @@ class KnowledgeStore:
                 )
                 conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
         return identifiers
 
@@ -990,7 +1009,8 @@ class KnowledgeStore:
                 )
                 conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
         try:
             from kazma_core.memory.unified_index import upsert_unified
@@ -1160,7 +1180,8 @@ class KnowledgeStore:
                 conn.execute("COMMIT")
                 return cur.rowcount
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
 
     def all_library_ids(self) -> list[str]:

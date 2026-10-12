@@ -1,0 +1,78 @@
+Collecting playwright==1.61.0
+  Downloading playwright-1.61.0-py3-none-manylinux1_x86_64.whl.metadata (3.3 kB)
+Collecting httpx
+  Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting psutil
+  Downloading psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl.metadata (22 kB)
+Collecting pyee<14,>=13 (from playwright==1.61.0)
+  Downloading pyee-13.0.1-py3-none-any.whl.metadata (3.0 kB)
+Collecting greenlet<4.0.0,>=3.1.1 (from playwright==1.61.0)
+  Downloading greenlet-3.5.6-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+Collecting typing-extensions (from pyee<14,>=13->playwright==1.61.0)
+  Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting anyio (from httpx)
+  Downloading anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+Collecting certifi (from httpx)
+  Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+Collecting httpcore==1.* (from httpx)
+  Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Collecting idna (from httpx)
+  Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+Collecting h11>=0.16 (from httpcore==1.*->httpx)
+  Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Downloading playwright-1.61.0-py3-none-manylinux1_x86_64.whl (47.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 47.4/47.4 MB 17.6 MB/s  0:00:02
+Downloading greenlet-3.5.6-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (670 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 670.8/670.8 kB 18.3 MB/s  0:00:00
+Downloading pyee-13.0.1-py3-none-any.whl (15 kB)
+Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+Downloading psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl (155 kB)
+Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Downloading anyio-4.15.1-py3-none-any.whl (132 kB)
+Downloading idna-3.20-py3-none-any.whl (69 kB)
+Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+Installing collected packages: typing-extensions, psutil, idna, h11, greenlet, certifi, pyee, httpcore, anyio, playwright, httpx
+
+Successfully installed anyio-4.15.1 certifi-2026.7.22 greenlet-3.5.6 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.20 playwright-1.61.0 psutil-7.2.2 pyee-13.0.1 typing-extensions-4.16.0
+Downloading Chrome for Testing 149.0.7827.55 (playwright chromium v1228) from https://cdn.playwright.dev/builds/cft/149.0.7827.55/linux64/chrome-linux64.zip
+|                                                                                |   0% of 177 MiB
+|■■■■■■■■                                                                        |  10% of 177 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 177 MiB
+Chrome for Testing 149.0.7827.55 (playwright chromium v1228) downloaded to /home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/browsers/chromium-1228
+Downloading FFmpeg (playwright ffmpeg v1011) from https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip
+|                                                                                |   0% of 2.3 MiB
+|■■■■■■■■                                                                        |  10% of 2.3 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 2.3 MiB
+FFmpeg (playwright ffmpeg v1011) downloaded to /home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/browsers/ffmpeg-1011
+Downloading Chrome Headless Shell 149.0.7827.55 (playwright chromium-headless-shell v1228) from https://cdn.playwright.dev/builds/cft/149.0.7827.55/linux64/chrome-headless-shell-linux64.zip
+|                                                                                |   0% of 114.2 MiB
+|■■■■■■■■                                                                        |  10% of 114.2 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 114.2 MiB
+Chrome Headless Shell 149.0.7827.55 (playwright chromium-headless-shell v1228) downloaded to /home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/browsers/chromium_headless_shell-1228
+{"runtime": "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84", "ready": true}

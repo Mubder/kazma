@@ -1,0 +1,30 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 196 items
+
+tests\test_x_reply_style.py .................................            [ 16%]
+tests\test_x_safety_recovery.py .................                        [ 25%]
+tests\test_x_scheduled.py ...........................                    [ 39%]
+tests\test_x_shadow.py ...........                                       [ 44%]
+tests\test_x_studio.py ................                                  [ 53%]
+tests\test_x_subject_policy.py ..................................        [ 70%]
+tests\test_x_threads.py .............                                    [ 77%]
+tests\test_x_verification.py ................................            [ 93%]
+tests\test_yolo_sweep.py ...                                             [ 94%]
+tests\test_yolo_ttl.py ...                                               [ 96%]
+tests\unit\test_agent.py .......                                         [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 196 passed, 1 warning in 41.26s =======================

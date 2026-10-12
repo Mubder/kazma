@@ -1,0 +1,24 @@
+FULL batch 11/21: 50 files
+{"batch": 10, "exit": 0, "counts": {"passed": 695, "skipped": 2}, "measured": true, "failures": []}
+FULL batch 12/21: 50 files
+{"batch": 11, "exit": 1, "counts": {"passed": 813, "failed": 1}, "measured": true, "failures": ["tests/test_metrics_receipt_current.py::test_shipped_collection_receipt_matches_current_inputs"]}
+FULL batch 13/21: 50 files
+{"batch": 12, "exit": 124, "counts": {}, "measured": false, "failures": []}
+FULL batch 14/21: 50 files
+RESOURCE GUARD: waiting for 8 GiB free memory before the next owned test process
+{"batch": 13, "exit": 0, "counts": {"passed": 631, "skipped": 7}, "measured": true, "failures": []}
+FULL batch 15/21: 50 files
+{"batch": 14, "exit": 0, "counts": {"passed": 764, "skipped": 7}, "measured": true, "failures": []}
+FULL batch 16/21: 50 files
+{"batch": 15, "exit": 0, "counts": {"passed": 627, "skipped": 2}, "measured": true, "failures": []}
+FULL batch 17/21: 50 files
+{"batch": 16, "exit": 0, "counts": {"passed": 787}, "measured": true, "failures": []}
+FULL batch 18/21: 50 files
+{"batch": 17, "exit": 0, "counts": {"passed": 591}, "measured": true, "failures": []}
+FULL batch 19/21: 50 files
+{"batch": 18, "exit": 0, "counts": {"passed": 811, "skipped": 4}, "measured": true, "failures": []}
+FULL batch 20/21: 50 files
+{"batch": 19, "exit": 0, "counts": {"passed": 740}, "measured": true, "failures": []}
+FULL batch 21/21: 11 files
+{"batch": 20, "exit": 0, "counts": {"passed": 196}, "measured": true, "failures": []}
+{"status": "complete", "totals": {"passed": 13628, "skipped": 57, "failed": 1}, "exit": 1, "elapsed_s": 2745.2}

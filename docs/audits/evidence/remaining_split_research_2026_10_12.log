@@ -1,0 +1,45 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0 -- G:\GitHubRepos\kazma\.venv\Scripts\python.exe
+rootdir: C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 60.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 87 items
+
+tests/test_acquisition_durable_controls.py::test_origin_cooldown_survives_new_scheduler_and_redirect PASSED [  1%]
+tests/test_acquisition_durable_controls.py::test_origin_cross_owner_capacity_and_release PASSED [  2%]
+tests/test_acquisition_durable_controls.py::test_server_delay_never_cleared_by_older_success[999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999] PASSED [  3%]
+tests/test_acquisition_durable_controls.py::test_server_delay_never_cleared_by_older_success[120] PASSED [  4%]
+tests/test_acquisition_durable_controls.py::test_persisted_robots_rules_reused_without_http PASSED [  5%]
+tests/test_acquisition_durable_controls.py::test_interrupted_robots_lookup_denies_until_retry PASSED [  6%]
+tests/test_acquisition_durable_controls.py::test_storage_unavailable_refuses_origin_before_dispatch PASSED [  8%]
+tests/test_acquisition_durable_controls.py::test_session_history_bound_is_visible_and_archive_does_not_release PASSED [  9%]
+tests/test_acquisition_durable_controls.py::test_fresh_process_session_recovery_never_replays_completed_or_uncertain_work[plan] PASSED [ 10%]
+tests/test_acquisition_durable_controls.py::test_fresh_process_session_recovery_never_replays_completed_or_uncertain_work[terminal] PASSED [ 11%]
+tests/test_acquisition_durable_controls.py::test_frozen_failover_does_not_follow_settings_changed_during_primary PASSED [ 12%]
+tests/test_acquisition_durable_controls.py::test_strict_browser_refuses_unqualified_windows_before_driver_start PASSED [ 13%]
+tests/test_acquisition_durable_controls.py::test_money_cap_cannot_dispatch_unknown_charges[0] PASSED [ 14%]
+tests/test_acquisition_durable_controls.py::test_money_cap_cannot_dispatch_unknown_charges[1.25] PASSED [ 16%]
+tests/test_acquisition_durable_controls.py::test_money_cap_cannot_dispatch_unknown_charges[NaN] PASSED [ 17%]
+tests/test_acquisition_durable_controls.py::test_money_cap_cannot_dispatch_unknown_charges[-1] PASSED [ 18%]
+tests/test_acquisition_durable_controls.py::test_money_cap_cannot_dispatch_unknown_charges[invalid] PASSED [ 19%]
+tests/test_acquisition_durable_controls.py::test_jina_budget_has_finite_provider_enforced_ceiling[500-True] PASSED [ 20%]
+tests/test_acquisition_durable_controls.py::test_jina_budget_has_finite_provider_enforced_ceiling[50000-True] PASSED [ 21%]
+tests/test_acquisition_durable_controls.py::test_jina_budget_has_finite_provider_enforced_ceiling[50001-False] PASSED [ 22%]
+tests/test_acquisition_durable_controls.py::test_jina_budget_has_finite_provider_enforced_ceiling[0-False] PASSED [ 24%]
+tests/test_acquisition_durable_controls.py::test_jina_budget_has_finite_provider_enforced_ceiling[\u0661\u0662-False] PASSED [ 25%]
+tests/test_acquisition_durable_controls.py::test_retained_storage_accounts_legacy_reports_before_admitting_output PASSED [ 26%]
+tests/test_acquisition_durable_controls.py::test_settled_storage_survives_journal_eviction FAILED [ 27%]
+
+================================== FAILURES ===================================
+_______________ test_settled_storage_survives_journal_eviction ________________
+tests\test_acquisition_durable_controls.py:249: in test_settled_storage_survives_journal_eviction
+    assert before['retained_directories'] == 2 and 0 < before['reserved_bytes'] < 1024**2
+E   assert (3 == 2)
+=========================== short test summary info ===========================
+FAILED tests/test_acquisition_durable_controls.py::test_settled_storage_survives_journal_eviction - assert (3 == 2)
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+======================== 1 failed, 23 passed in 4.80s =========================

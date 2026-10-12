@@ -30,6 +30,8 @@ Security:
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
+import uuid
 from collections import OrderedDict
 import logging
 from datetime import UTC, datetime
@@ -38,6 +40,8 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 from kazma_core.background import spawn_background
 from kazma_core.errors import safe_error
+from kazma_core.web_acquire.result import AcquisitionError
+from kazma_core.playwright_loop import finish_owned
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +122,9 @@ def _bootstrap_jobs() -> None:
     _kb_jobs_bootstrapped = True
     try:
         from kazma_core.stores.kb_jobs import list_jobs, mark_stale_jobs_interrupted
+        from kazma_core.web_acquire.crawl_jobs import recover
 
+        recover()
         mark_stale_jobs_interrupted()
         loaded = 0
         for row in list_jobs():
@@ -313,6 +319,9 @@ def create_kb_router() -> APIRouter:
 
     @router.post("/ingest")
     async def ingest(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        return await _ingest(payload)
+
+    async def _ingest(payload, *, kind='site'):
         lib_id = (payload.get("library_id") or "").strip()
         url = (payload.get("url") or "").strip()
         mode = (payload.get("mode") or "page").strip().lower()
@@ -363,63 +372,120 @@ def create_kb_router() -> APIRouter:
                 return {"ok": False, "error": safe_error(exc)}
 
         # mode == "site" → background job.
-        job_id = f"{lib_id}:{datetime.now(UTC).strftime('%H%M%S%f')}"
-        await _record_job(
-            job_id,
-            {
-                "phase": "starting",
-                "library_id": lib_id,
-                "url": url,
-                "started_at": datetime.now(UTC).isoformat(),
-            },
-        )
+        resume_id = payload.get('resume_job_id')
+        job_id = resume_id or f"{lib_id}:{uuid.uuid4().hex}"
+        from kazma_core.stores.knowledge_ingest import _prepare_ingest_site
+        from kazma_core.web_acquire.crawl_jobs import call
 
-        async def _run() -> None:
-            from kazma_core.stores.knowledge_ingest import ingest_site
+        try:
+            prepared = await _prepare_ingest_site(lib_id, url, max_pages=max_pages, job_id=job_id, resume=bool(resume_id))
+        except AcquisitionError as exc:
+            return {'ok': False, 'error': safe_error(exc)}
+        dispatched = False
+        try:
+            await call(prepared[0].update, lambda row: row.update(kind=kind))
+            await _record_job(
+                job_id,
+                {
+                    "phase": "starting",
+                    "library_id": lib_id,
+                    "url": url,
+                    "kind": kind,
+                    "started_at": datetime.now(UTC).isoformat(),
+                },
+            )
 
-            try:
-                async for update in ingest_site(lib_id, url, max_pages=max_pages):
+            async def _run() -> None:
+                from kazma_core.stores.knowledge_ingest import ingest_site
+
+                try:
+                    async with aclosing(ingest_site(lib_id, url, max_pages=max_pages, job_id=job_id, resume=bool(resume_id), _prepared=prepared)) as updates:
+                        async for update in updates:
+                            snap = dict(_kb_api_jobs.get(job_id) or {})
+                            snap.update(
+                                {
+                                    "phase": update.phase,
+                                    "discovered": update.discovered,
+                                    "fetched": update.fetched,
+                                    "ingested": update.ingested,
+                                    "skipped": update.skipped,
+                                    "failed": update.failed,
+                                    "pages_unchanged": getattr(update, "pages_unchanged", 0) or 0,
+                                    "pruned_urls": getattr(update, "pruned_urls", 0) or 0,
+                                    "current_url": update.current_url,
+                                    "message": update.message,
+                                    "errors": list(update.errors or []),
+                                    "library_id": lib_id,
+                                    "url": url,
+                                }
+                            )
+                            await _record_job(job_id, snap)
+                    snap = dict(_kb_api_jobs.get(job_id) or {})
+                    snap["finished_at"] = datetime.now(UTC).isoformat()
+                    if snap.get("phase") not in ("error", "interrupted"):
+                        snap.setdefault("phase", "done")
+                    await _record_job(job_id, snap)
+                except Exception as exc:
+                    logger.exception("[kb_api] site ingest failed")
                     snap = dict(_kb_api_jobs.get(job_id) or {})
                     snap.update(
                         {
-                            "phase": update.phase,
-                            "discovered": update.discovered,
-                            "fetched": update.fetched,
-                            "ingested": update.ingested,
-                            "skipped": update.skipped,
-                            "failed": update.failed,
-                            "pages_unchanged": getattr(update, "pages_unchanged", 0) or 0,
-                            "pruned_urls": getattr(update, "pruned_urls", 0) or 0,
-                            "current_url": update.current_url,
-                            "message": update.message,
-                            "errors": list(update.errors or []),
-                            "library_id": lib_id,
-                            "url": url,
+                            "phase": "error",
+                            "message": safe_error(exc),
+                            "finished_at": datetime.now(UTC).isoformat(),
                         }
                     )
                     await _record_job(job_id, snap)
-                snap = dict(_kb_api_jobs.get(job_id) or {})
-                snap["finished_at"] = datetime.now(UTC).isoformat()
-                if snap.get("phase") not in ("error", "interrupted"):
-                    snap.setdefault("phase", "done")
-                await _record_job(job_id, snap)
-            except Exception as exc:
-                logger.exception("[kb_api] site ingest failed")
-                snap = dict(_kb_api_jobs.get(job_id) or {})
-                snap.update(
-                    {
-                        "phase": "error",
-                        "message": safe_error(exc),
-                        "finished_at": datetime.now(UTC).isoformat(),
-                    }
-                )
-                await _record_job(job_id, snap)
 
-        spawn_background(_run(), name=f"kb-ingest-url:{job_id}")
-        return {"ok": True, "mode": "site", "job_id": job_id}
+                finally:
+                    def release_unclaimed():
+                        job = prepared[0]
+                        try:
+                            if job.read()['status'] == 'running':
+                                job.finish('interrupted')
+                        except AcquisitionError as exc:
+                            if exc.code != 'policy_error':
+                                raise
+                    await finish_owned(call(release_unclaimed))
+
+            spawn_background(_run(), name=f"kb-ingest-url:{job_id}")
+            dispatched = True
+            return {"ok": True, "mode": "site", "job_id": job_id}
+        finally:
+            if not dispatched:
+                await finish_owned(call(prepared[0].finish, 'interrupted'))
+
+    @router.post('/services/firecrawl/credits/refresh')
+    async def refresh_firecrawl_credits() -> dict[str, Any]:
+        from kazma_core.web_acquire.credits import refresh_firecrawl_balance
+
+        try:
+            return {'ok': True, 'balances': await refresh_firecrawl_balance()}
+        except AcquisitionError as exc:
+            return {'ok': False, 'error': safe_error(exc)}
+
+    @router.get('/jobs')
+    def durable_jobs() -> dict[str, Any]:
+        from kazma_core.web_acquire.crawl_jobs import inspect_jobs
+
+        try:
+            return {'ok': True, 'jobs': sorted((row for row in inspect_jobs() if row['kind'] in {'site', 'refresh'}),
+                key=lambda row: row['updated_at'], reverse=True)}
+        except AcquisitionError as exc:
+            return {'ok': False, 'error': safe_error(exc)}
 
     @router.get("/jobs/{job_id}")
     def job_status(job_id: str) -> dict[str, Any]:
+        from kazma_core.web_acquire.crawl_jobs import projection
+
+        try:
+            durable = projection(job_id)
+        except AcquisitionError as exc:
+            return {'ok': False, 'error': safe_error(exc)}
+        if durable is not None:
+            if durable['kind'] not in {'site', 'refresh'}:
+                return {'ok': False, 'error': 'This job belongs to research; inspect acquisition readiness.'}
+            return {'ok': True, 'job': durable}
         job = _kb_api_jobs.get(job_id)
         if not job:
             try:
@@ -437,6 +503,24 @@ def create_kb_router() -> APIRouter:
                 ),
             }
         return {"ok": True, "job": job}
+
+    @router.post('/jobs/{job_id}/resume')
+    async def resume_job(job_id: str) -> dict[str, Any]:
+        from kazma_core.web_acquire.crawl_jobs import call, inspect_jobs, recover
+
+        try:
+            await call(recover)
+            row = await call(inspect_jobs, job_id)
+            if row is None or row['status'] != 'interrupted':
+                return {'ok': False, 'error': 'Only an interrupted durable crawl can resume.'}
+            if row.get('kind', 'site') not in {'site', 'refresh'}:
+                return {'ok': False, 'error': 'Research crawls resume through crawl_site with identical options.'}
+            if not await asyncio.to_thread(lambda: _store().get_library(row['library_id'])):
+                return {'ok': False, 'error': 'The crawl library no longer exists.'}
+            return await _ingest({'mode': 'site', 'library_id': row['library_id'], 'url': row['seed'],
+                'max_pages': row['policy']['max_pages'], 'resume_job_id': job_id}, kind=row.get('kind', 'site'))
+        except AcquisitionError as exc:
+            return {'ok': False, 'error': safe_error(exc)}
 
     # ── Search (UI "Test search") ───────────────────────────────────────
 
@@ -478,63 +562,6 @@ def create_kb_router() -> APIRouter:
         seed = lib.get("seed_url") or ""
         if not seed:
             return {"ok": False, "error": "Library has no seed_url to refresh from"}
-        # Re-ingest as a background site crawl.  Per-chunk content_hash dedup
-        # means only changed pages are actually re-indexed.
-        job_id = f"{library_id}:refresh:{datetime.now(UTC).strftime('%H%M%S%f')}"
-        await _record_job(
-            job_id,
-            {
-                "phase": "starting",
-                "library_id": library_id,
-                "url": seed,
-                "kind": "refresh",
-                "started_at": datetime.now(UTC).isoformat(),
-            },
-        )
-
-        async def _run() -> None:
-            from kazma_core.stores.knowledge_ingest import ingest_site
-
-            try:
-                async for update in ingest_site(library_id, seed):
-                    snap = {
-                        "phase": update.phase,
-                        "library_id": library_id,
-                        "url": seed,
-                        "kind": "refresh",
-                        "discovered": update.discovered,
-                        "fetched": update.fetched,
-                        "ingested": update.ingested,
-                        "skipped": update.skipped,
-                        "failed": update.failed,
-                        "pages_unchanged": getattr(update, "pages_unchanged", 0) or 0,
-                        "pruned_urls": getattr(update, "pruned_urls", 0) or 0,
-                        "current_url": update.current_url,
-                        "message": update.message,
-                        "errors": list(update.errors or []),
-                        "started_at": _kb_api_jobs.get(job_id, {}).get("started_at"),
-                    }
-                    await _record_job(job_id, snap)
-                done = dict(_kb_api_jobs.get(job_id, {}))
-                done["finished_at"] = datetime.now(UTC).isoformat()
-                if done.get("phase") not in ("error", "done"):
-                    done["phase"] = "done"
-                await _record_job(job_id, done)
-            except Exception as exc:
-                logger.exception("[kb_api] refresh failed")
-                await _record_job(
-                    job_id,
-                    {
-                        "phase": "error",
-                        "library_id": library_id,
-                        "url": seed,
-                        "kind": "refresh",
-                        "message": safe_error(exc),
-                        "finished_at": datetime.now(UTC).isoformat(),
-                    },
-                )
-
-        spawn_background(_run(), name=f"kb-ingest-site:{job_id}")
-        return {"ok": True, "job_id": job_id}
+        return await _ingest({'mode': 'site', 'library_id': library_id, 'url': seed}, kind='refresh')
 
     return router

@@ -10,6 +10,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
+import psutil
 import sqlite3
 import threading
 import time
@@ -19,6 +21,9 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Awaitable, Iterator
+from kazma_core.web_acquire.research_runtime import bounded_session
+from kazma_core.web_acquire.crawl_jobs import call
+from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
 __all__ = [
     "ResearchSession",
@@ -68,6 +73,17 @@ def suppress_chat_recording() -> Iterator[None]:
 _SUBS: dict[str, list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]]] = {}
 _SUBS_LOCK = threading.Lock()
 _RUNNING: dict[str, asyncio.Task] = {}
+_RUNNING_LOCK = threading.RLock()
+_SETTLING: set[str] = set()
+
+
+class ResearchSessionBusyError(RuntimeError):
+    """A running session must remain inspectable until its owner finishes."""
+
+
+def _running_task(session_id: str):
+    with _RUNNING_LOCK:
+        return _RUNNING.get(session_id)
 
 
 def _on_loop(loop: asyncio.AbstractEventLoop) -> bool:
@@ -123,7 +139,7 @@ class ResearchSession:
     id: str
     topic: str
     depth: str = "deep"
-    status: str = "pending"  # pending|running|done|error|cancelled
+    status: str = "pending"  # pending|running|cancelling|interrupted|partial|done|error|cancelled
     stage: str = "queued"
     message: str = ""
     log: list[str] = field(default_factory=list)
@@ -153,6 +169,8 @@ def _db_path() -> Path:
 def _conn() -> sqlite3.Connection:
     c = sqlite3.connect(str(_db_path()), check_same_thread=False)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA busy_timeout=5000")
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS research_sessions (
@@ -240,6 +258,73 @@ def _row_to_session(r: sqlite3.Row) -> ResearchSession:
     )
 
 
+_MAX_SESSIONS = 256
+_MAX_SESSION_BYTES = 128 * 1024**2
+
+
+def _history_admission(connection):
+    count, size = connection.execute("SELECT COUNT(*), COALESCE(SUM(length(CAST(log_json AS BLOB))+length(CAST(summary AS BLOB))+length(CAST(meta_json AS BLOB))+length(CAST(error AS BLOB))+length(CAST(topic AS BLOB))),0) FROM research_sessions").fetchone()
+    if count >= _MAX_SESSIONS or size >= _MAX_SESSION_BYTES - 2 * 1024**2:
+        raise AcquisitionError(FetchErrorCode.LIMIT, 'Research history is full (256 sessions / 128MiB); remove settled history before starting more work. Archiving does not release storage.')
+
+
+def _bounded_session_row(session):
+    if len(session.topic) > 2000 or len(json.dumps(session.meta).encode('utf-8')) > 64 * 1024:
+        raise AcquisitionError(FetchErrorCode.LIMIT, 'Research session topic or metadata exceeds its storage budget.')
+    session.summary = session.summary[:200_000]
+    session.log = [str(entry)[:1024] for entry in session.log[-200:]]
+    session.error, session.message = session.error[:2000], session.message[:2000]
+
+
+def _process_owner():
+    return [os.getpid(), psutil.Process().create_time()]
+
+
+def _reconcile_sessions(connection):
+    from kazma_core.web_acquire.crawl_jobs import _alive
+
+    rows = connection.execute("SELECT id, status, meta_json FROM research_sessions WHERE status IN ('pending','running','cancelling')").fetchmany(_MAX_SESSIONS + 1)
+    changed = False
+    for row in rows:
+        meta = json.loads(row['meta_json'] or '{}')
+        owner = meta.get('process_owner') if isinstance(meta, dict) else None
+        if owner is None or not _alive(owner):
+            message = 'Research process ended; inspect the saved job and explicitly resume. Uncertain effects are never replayed.'
+            connection.execute("UPDATE research_sessions SET status='interrupted', stage='interrupted', message=?, updated_at=? WHERE id=? AND status=? AND meta_json=?",
+                (message, time.time(), row['id'], row['status'], row['meta_json']))
+            changed = True
+    if changed:
+        connection.commit()
+
+
+def _claim_session(session_id, owner, root):
+    connection = _conn()
+    try:
+        _reconcile_sessions(connection)
+        connection.execute('BEGIN IMMEDIATE')
+        row = connection.execute('SELECT * FROM research_sessions WHERE id=?', (session_id,)).fetchone()
+        if row is None:
+            raise AcquisitionError(FetchErrorCode.POLICY, 'Research session was not found.')
+        session = _row_to_session(row)
+        if session.status != 'interrupted':
+            raise ResearchSessionBusyError('Only an interrupted research session may resume; live or terminal work was refused.')
+        meta = dict(session.meta)
+        if not meta.get('durable_job_id'):
+            raise AcquisitionError(FetchErrorCode.POLICY, 'This older session has no durable job; inspect its report before deliberately starting a new run.')
+        if meta.get('workspace') != str(root):
+            raise AcquisitionError(FetchErrorCode.WORKSPACE, 'Switch to the original research workspace before resuming this session.')
+        meta['process_owner'] = owner
+        connection.execute("UPDATE research_sessions SET status='pending', stage='queued', error='', meta_json=?, updated_at=? WHERE id=?", (json.dumps(meta), time.time(), session_id))
+        connection.commit()
+        return _row_to_session(connection.execute('SELECT * FROM research_sessions WHERE id=?', (session_id,)).fetchone())
+    finally:
+        try:
+            if connection.in_transaction:
+                connection.rollback()
+        finally:
+            connection.close()
+
+
 def create_session(
     topic: str,
     *,
@@ -259,10 +344,13 @@ def create_session(
         max_sources=max(2, min(15, int(max_sources or 8))),
         created_at=now,
         updated_at=now,
-        meta=meta or {},
+        meta={**(meta or {}), "process_owner": _process_owner()},
     )
     c = _conn()
     try:
+        c.execute('BEGIN IMMEDIATE')
+        _bounded_session_row(sess)
+        _history_admission(c)
         c.execute(
             """
             INSERT INTO research_sessions
@@ -294,13 +382,18 @@ def create_session(
         )
         c.commit()
     finally:
-        c.close()
+        try:
+            if c.in_transaction:
+                c.rollback()
+        finally:
+            c.close()
     return sess
 
 
 def get_session(session_id: str) -> ResearchSession | None:
     c = _conn()
     try:
+        _reconcile_sessions(c)
         r = c.execute(
             "SELECT * FROM research_sessions WHERE id=?", (session_id,)
         ).fetchone()
@@ -320,6 +413,7 @@ def list_sessions(
     """
     c = _conn()
     try:
+        _reconcile_sessions(c)
         where = ""
         params: list[Any] = []
         if archived is not None:
@@ -349,21 +443,20 @@ def archive_session(session_id: str, archived: bool = True) -> ResearchSession |
 
 
 def delete_session(session_id: str) -> bool:
-    """Delete a session row. Cancels it first when still running.
-
-    Returns True when a row was removed.
-    """
+    """Delete settled history; request cancellation and refuse active deletion."""
+    with _RUNNING_LOCK:
+        if session_id in _RUNNING:
+            cancel_session(session_id)
+            raise ResearchSessionBusyError(
+                "Research cancellation is still in progress; retry deletion after cleanup."
+            )
     sess = get_session(session_id)
     if sess is None:
         return False
-    if sess.status in ("running", "pending"):
-        try:
-            cancel_session(session_id)
-        except Exception:
-            logger.debug("[research_session] cancel-before-delete failed", exc_info=True)
+    if sess.status in ("running", "pending", "cancelling"):
+        cancel_session(session_id)
     with _SUBS_LOCK:
         _SUBS.pop(session_id, None)
-    _RUNNING.pop(session_id, None)
     c = _conn()
     try:
         cur = c.execute("DELETE FROM research_sessions WHERE id=?", (session_id,))
@@ -374,15 +467,31 @@ def delete_session(session_id: str) -> bool:
 
 
 def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
-    sess = get_session(session_id)
-    if not sess:
-        return None
-    for k, v in fields.items():
-        if hasattr(sess, k) and k not in ("id", "created_at"):
-            setattr(sess, k, v)
-    sess.updated_at = time.time()
     c = _conn()
     try:
+        # Read and write under one SQLite writer transaction: a stale progress
+        # writer cannot undo a cancellation or a terminal commit.
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute("SELECT * FROM research_sessions WHERE id=?", (session_id,)).fetchone()
+        if row is None:
+            return None
+        sess = _row_to_session(row)
+        requested = fields.get("status", sess.status)
+        terminal = {"done", "partial", "error", "cancelled", "interrupted"}
+        blocked = (sess.status in terminal and requested != sess.status) or (
+            sess.status == "cancelling" and requested != "cancelled"
+        )
+        if blocked:
+            fields = {k: v for k, v in fields.items() if k == "archived"}
+        for k, v in fields.items():
+            if hasattr(sess, k) and k not in ("id", "created_at"):
+                setattr(sess, k, v)
+        _bounded_session_row(sess)
+        size = c.execute("SELECT COALESCE(SUM(length(CAST(log_json AS BLOB))+length(CAST(summary AS BLOB))+length(CAST(meta_json AS BLOB))+length(CAST(error AS BLOB))+length(CAST(topic AS BLOB))),0) FROM research_sessions WHERE id != ?", (session_id,)).fetchone()[0]
+        incoming = len(json.dumps(sess.log).encode()) + len(sess.summary.encode()) + len(json.dumps(sess.meta).encode()) + len(sess.error.encode()) + len(sess.topic.encode())
+        if size + incoming > _MAX_SESSION_BYTES:
+            raise AcquisitionError(FetchErrorCode.LIMIT, 'Research session storage budget exhausted; retained history must be reviewed.')
+        sess.updated_at = max(time.time(), sess.updated_at + 0.000001)
         c.execute(
             """
             UPDATE research_sessions SET
@@ -398,7 +507,7 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
                 sess.status,
                 sess.stage,
                 sess.message,
-                json.dumps(sess.log[-200:]),
+                json.dumps([str(entry)[:1024] for entry in sess.log[-200:]]),
                 sess.report_path,
                 sess.summary,
                 sess.error,
@@ -414,7 +523,11 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
         )
         c.commit()
     finally:
-        c.close()
+        try:
+            if c.in_transaction:
+                c.rollback()
+        finally:
+            c.close()
     # Broadcast
     event = {
         "type": "progress",
@@ -461,44 +574,51 @@ def unsubscribe_progress(session_id: str, q: asyncio.Queue) -> None:
 
 
 def cancel_session(session_id: str) -> ResearchSession | None:
-    """Cancel a running session (best-effort). Returns updated session or None.
+    """Request cancellation; terminal cancellation acknowledges joined cleanup."""
+    with _RUNNING_LOCK:
+        sess = get_session(session_id)
+        if not sess or sess.status in ("done", "partial", "error", "cancelled", "interrupted", "cancelling"):
+            return sess
+        task = _RUNNING.get(session_id)
+        if task is not None:
+            final = update_session(
+                session_id, status="cancelling", stage="cancelling",
+                message="Cancellation requested; waiting for cleanup", error="",
+            )
+            if not task.done() and session_id not in _SETTLING:
+                _cancel_on_its_loop(task)
+            return final
+        owner = sess.meta.get('process_owner')
+        if owner and owner[0] != os.getpid():
+            from kazma_core.web_acquire.crawl_jobs import _alive
+            if _alive(owner):
+                raise ResearchSessionBusyError('This research session is owned by another live process; cancel it through that owner.')
+        # No execution owner exists in this process (for example an unstarted
+        # row). This does not resume work or repeat effects after a restart.
+        return _complete_cancellation(session_id)
 
-    Callable from any thread: the run is cancelled on its own loop.
-    """
-    sess = get_session(session_id)
-    if not sess:
-        return None
-    if sess.status in ("done", "error", "cancelled"):
-        return sess
-    task = _RUNNING.get(session_id)
-    if task is not None and not task.done():
-        _cancel_on_its_loop(task)
-    update_session(
-        session_id,
-        status="cancelled",
-        stage="cancelled",
-        message="Cancelled by user",
-        error="",
+
+def _complete_cancellation(session_id: str) -> ResearchSession | None:
+    final = update_session(
+        session_id, status="cancelled", stage="cancelled",
+        message="Cancelled", error="",
     )
-    final = get_session(session_id) or sess
-    _publish(
-        session_id,
-        {
-            "type": "done",
-            "session_id": session_id,
-            "status": "cancelled",
-            "session": final.to_dict(),
-        },
-    )
+    if final:
+        _publish(session_id, {
+            "type": "done", "session_id": session_id,
+            "status": final.status, "session": final.to_dict(),
+        })
     return final
 
 
+@bounded_session(lambda session: _running_task(session.id))
 async def start_deep_research(
     topic: str,
     *,
     depth: str = "deep",
     max_sources: int = 8,
     export_docx: bool = False,
+    resume_session_id: str | None = None,
 ) -> ResearchSession:
     """Create session and run pipeline in background task.
 
@@ -506,20 +626,35 @@ async def start_deep_research(
     thread: this runs on the event loop, and the progress callback fires
     for every pipeline message (AGENTS §35).
     """
-    sess = await asyncio.to_thread(create_session, topic, depth=depth, max_sources=max_sources)
+    from kazma_core.workspace.binding import resolve_active_root
+    root = await call(resolve_active_root)
+    if resume_session_id is not None:
+        sess = await call(_claim_session, resume_session_id, _process_owner(), root,
+            on_cancel=lambda claimed: _complete_cancellation(claimed.id))
+        export_docx = bool(sess.meta.get('export_docx'))
+    else:
+        sess = await call(create_session, topic, depth=depth, max_sources=max_sources,
+            meta=dict(workspace=str(Path(root).resolve()), export_docx=export_docx),
+            on_cancel=lambda created: update_session(created.id, status='cancelled', stage='cancelled', message='Cancelled before background dispatch'))
     if not sess.topic:
-        await asyncio.to_thread(update_session, sess.id, status="error", error="topic required", stage="error")
-        return await asyncio.to_thread(get_session, sess.id) or sess
+        await call(update_session, sess.id, status="error", error="topic required", stage="error")
+        return await call(get_session, sess.id) or sess
 
     async def _run() -> None:
-        await asyncio.to_thread(update_session,
-            sess.id, status="running", stage="start", message="Starting pipeline…"
-        )
-
         import re
+        from kazma_core.web_acquire.research_pipeline_job import pipeline_observer, completed_summary
+
+        async def link(job):
+            current = await call(get_session, sess.id)
+            meta = dict(current.meta)
+            meta.update(durable_job_id=job.job.job_id, workspace=str(job.root))
+            linked = await call(update_session, sess.id, meta=meta)
+            if linked.status != 'running' or linked.meta.get('durable_job_id') != job.job.job_id:
+                raise asyncio.CancelledError
+        observer_token = pipeline_observer.set(link)
 
         async def progress_cb(stage: str, message: str) -> None:
-            s = await asyncio.to_thread(get_session, sess.id)
+            s = await call(get_session, sess.id)
             log = list(s.log) if s else []
             log.append(f"[{stage}] {message}")
             fields: dict[str, Any] = {
@@ -536,18 +671,24 @@ async def start_deep_research(
             src_m = re.search(r"(\d+)\s+sources", message or "", re.I)
             if src_m:
                 fields["sources"] = int(src_m.group(1))
-            await asyncio.to_thread(update_session, sess.id, **fields)
+            await call(update_session, sess.id, **fields)
 
         try:
+            await call(update_session,
+                sess.id, status="running", stage="start", message="Starting pipeline…"
+            )
             from kazma_core.tools.research_pipeline import run_research_pipeline
 
-            result = await run_research_pipeline(
-                sess.topic,
-                depth=sess.depth,
-                max_sources=sess.max_sources,
-                progress_cb=progress_cb,
-                export_docx=export_docx,
-            )
+            result = await call(completed_summary, sess.meta['durable_job_id'], root) if resume_session_id else None
+            if result is None:
+                result = await run_research_pipeline(
+                    sess.topic,
+                    depth=sess.depth,
+                    max_sources=sess.max_sources,
+                    progress_cb=progress_cb,
+                    export_docx=export_docx,
+                    **({'resume_job_id': sess.meta['durable_job_id']} if resume_session_id else {}),
+                )
             report_path = ""
             sources = 0
             m = re.search(r"\*\*Report:\*\*\s*`([^`]+)`", result or "")
@@ -556,7 +697,7 @@ async def start_deep_research(
             m2 = re.search(r"\*\*Sources acquired:\*\*\s*(\d+)", result or "")
             if m2:
                 sources = int(m2.group(1))
-            cur = await asyncio.to_thread(get_session, sess.id)
+            cur = await call(get_session, sess.id)
             if not report_path and cur and cur.report_path:
                 report_path = cur.report_path
             if not sources and cur and cur.sources:
@@ -580,11 +721,11 @@ async def start_deep_research(
                     from kazma_core.tools.research_pipeline import resolve_report_file
 
                     scored = None
-                    target = await asyncio.to_thread(
+                    target = await call(
                         resolve_report_file, report_path, stored=True
                     )
                     if target is not None:
-                        scored = await asyncio.to_thread(score_report_file, target)
+                        scored = await call(score_report_file, target)
                     if scored is not None:
                         rubric_score = float(scored.score)
                         rubric_ok = bool(scored.ok)
@@ -595,7 +736,7 @@ async def start_deep_research(
             if (result or "").startswith("Error:"):
                 log = list(cur.log) if cur else []
                 log.append(result[:500])
-                await asyncio.to_thread(update_session,
+                await call(update_session,
                     sess.id,
                     status="error",
                     stage="error",
@@ -607,36 +748,33 @@ async def start_deep_research(
                     rubric_ok=rubric_ok,
                 )
             else:
-                await asyncio.to_thread(update_session,
+                partial = (result or '').startswith('# Deep research partial')
+                await call(update_session,
                     sess.id,
-                    status="done",
-                    stage="done",
-                    message="Complete",
+                    status="partial" if partial else "done",
+                    stage="partial" if partial else "done",
+                    message="Partial; inspect missing or uncertain sources" if partial else "Complete",
                     summary=(result or "")[:8000],
                     report_path=report_path,
                     sources=sources,
                     rubric_score=rubric_score,
                     rubric_ok=rubric_ok,
                 )
-            final = await asyncio.to_thread(get_session, sess.id)
-            _publish(
-                sess.id,
-                {
-                    "type": "done",
-                    "session_id": sess.id,
-                    "status": final.status if final else "done",
+            final = await call(get_session, sess.id)
+            if final and final.status == "cancelling":
+                # Even a pipeline that suppresses CancelledError cannot turn a
+                # previously accepted cancellation into a success.
+                await call(_complete_cancellation, sess.id)
+            else:
+                _publish(sess.id, {
+                    "type": "done", "session_id": sess.id,
+                    "status": final.status if final else "error",
                     "session": final.to_dict() if final else None,
-                },
-            )
+                })
         except asyncio.CancelledError:
-            cur = await asyncio.to_thread(get_session, sess.id)
-            if cur and cur.status != "cancelled":
-                await asyncio.to_thread(update_session,
-                    sess.id,
-                    status="cancelled",
-                    stage="cancelled",
-                    message="Cancelled",
-                )
+            # Pipeline/native workers have joined before control reaches here.
+            # call() also joins this terminal commit under repeated cancellation.
+            await call(_complete_cancellation, sess.id)
             raise
         except Exception as exc:
             logger.exception("[research_session] pipeline failed")
@@ -644,14 +782,17 @@ async def start_deep_research(
             brief = str(exc)[:200]
             if "Error:" in brief:
                 brief = brief.split("Error:", 1)[-1].strip()[:200]
-            await asyncio.to_thread(update_session,
+            await call(update_session,
                 sess.id,
                 status="error",
                 stage="error",
                 error=str(exc)[:2000],
                 message=f"Failed: {brief}" if brief else "Pipeline failed",
             )
-            err_sess = await asyncio.to_thread(get_session, sess.id)
+            err_sess = await call(get_session, sess.id)
+            if err_sess and err_sess.status == "cancelling":
+                await call(_complete_cancellation, sess.id)
+                return
             _publish(
                 sess.id,
                 {
@@ -662,10 +803,40 @@ async def start_deep_research(
                 },
             )
         finally:
-            _RUNNING.pop(sess.id, None)
+            pipeline_observer.reset(observer_token)
+            with _RUNNING_LOCK:
+                _RUNNING.pop(sess.id, None)
 
     task = asyncio.create_task(_run())
-    _RUNNING[sess.id] = task
+    with _RUNNING_LOCK:
+        _RUNNING[sess.id] = task
+
+    def observed(completed):
+        if not completed.cancelled() and completed.exception() is not None:
+            logger.error('[research_session] background task ended before terminal persistence: %s',
+                         type(completed.exception()).__name__)
+
+    async def settle_unstarted():
+        try:
+            await call(_complete_cancellation, sess.id)
+        finally:
+            with _RUNNING_LOCK:
+                _RUNNING.pop(sess.id, None)
+                _SETTLING.discard(sess.id)
+
+    def finished(completed):
+        # Cancellation before the first coroutine step bypasses its try/finally.
+        # Transfer ownership to a joined terminal writer; bounded_session keeps
+        # its lease through this replacement task too.
+        with _RUNNING_LOCK:
+            if _RUNNING.get(sess.id) is completed:
+                _SETTLING.add(sess.id)
+                cleanup = asyncio.create_task(settle_unstarted())
+                _RUNNING[sess.id] = cleanup
+                cleanup.add_done_callback(observed)
+        observed(completed)
+
+    task.add_done_callback(finished)
     return sess
 
 
@@ -699,6 +870,7 @@ def record_chat_research(
     sid = session_id or f"rs_chat_{hashlib.md5((topic or '').encode(), usedforsecurity=False).hexdigest()[:12]}" if topic else f"rs_chat_{uuid.uuid4().hex[:12]}"
     c = _conn()
     try:
+        c.execute('BEGIN IMMEDIATE')
         cur = c.execute("SELECT * FROM research_sessions WHERE id = ?", (sid,))
         row = cur.fetchone()
         if row:
@@ -718,6 +890,7 @@ def record_chat_research(
                 new_summary = result_text[:_CHAT_RESULT_MAX]
                 if not sess.summary or len(new_summary) > len(sess.summary):
                     sess.summary = new_summary
+            c.rollback()
             update_session(sess.id, status=sess.status, stage=sess.stage, message=sess.message, sources=sess.sources, summary=sess.summary)
             return sess
         else:
@@ -735,6 +908,8 @@ def record_chat_research(
                 updated_at=now,
                 meta=meta or {"source": "chat", "tool": tool_name},
             )
+            _bounded_session_row(sess)
+            _history_admission(c)
             c.execute(
                 """
                 INSERT INTO research_sessions
@@ -767,5 +942,9 @@ def record_chat_research(
             c.commit()
             return sess
     finally:
-        c.close()
+        try:
+            if c.in_transaction:
+                c.rollback()
+        finally:
+            c.close()
 

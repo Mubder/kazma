@@ -403,6 +403,11 @@ def test_crawlers_assert_the_connected_peer():
         "kazma-core/kazma_core/tools/read_url.py",
     ):
         src = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        if "fetch_public" in src:
+            # Discovery delegates to the shared bounded/pinned GET layer.
+            # Behavioral coverage: test_web_acquisition_safety.py exercises
+            # redirect dispatch and actual httpcore peer metadata.
+            src += (REPO_ROOT / "kazma-core/kazma_core/web_acquire/http.py").read_text(encoding="utf-8")
         assert "assert_peer_public" in src, (
             f"{rel} validates the URL before connecting but never checks the "
             "peer it reached, so DNS rebinding walks straight through "

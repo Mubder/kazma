@@ -1,0 +1,77 @@
+........................................................................ [ 27%]
+....................................s................................... [ 54%]
+........................................................................ [ 82%]
+................+++++++++++++++++++++++++++++++++++ Timeout +++++++++++++++++++++++++++++++++++
+~~~~~~~~~~~~~~~~~~~~~~~~~ Stack of MainThread (55460) ~~~~~~~~~~~~~~~~~~~~~~~~~
+  File "<string>", line 22, in <module>
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 201, in main
+    return _main(args=args, plugins=plugins, prog="pytest.main()")
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 229, in _main
+    ret: ExitCode | int = config.hook.pytest_cmdline_main(config=config)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\main.py", line 377, in pytest_cmdline_main
+    return wrap_session(config, _main)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\main.py", line 330, in wrap_session
+    session.exitstatus = doit(config, session) or 0
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\main.py", line 384, in _main
+    config.hook.pytest_runtestloop(session=session)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\main.py", line 408, in pytest_runtestloop
+    item.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 118, in pytest_runtest_protocol
+    runtestprotocol(item, nextitem=nextitem)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 139, in runtestprotocol
+    reports.append(call_and_report(item, "call", log))
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 249, in call_and_report
+    call = CallInfo.from_call(
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 361, in from_call
+    result: TResult | None = func()
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 250, in <lambda>
+    lambda: runtest_hook(item=item, **kwds),
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 184, in pytest_runtest_call
+    item.runtest()
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\python.py", line 1707, in runtest
+    self.ihook.pytest_pyfunc_call(pyfuncitem=self)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\python.py", line 167, in pytest_pyfunc_call
+    result = testfunction(**testargs)
+  File "C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma\tests\test_debt_ratchet.py", line 600, in test_structural_debt_only_goes_down
+    found = structural_debt()
+  File "C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma\tests\test_debt_ratchet.py", line 595, in structural_debt
+    "functions_over_complexity_50": complex_functions(product),
+  File "C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma\tests\test_debt_ratchet.py", line 552, in complex_functions
+    for node in ast.walk(tree):
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\ast.py", line 379, in walk
+    todo.extend(iter_child_nodes(node))
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\ast.py", line 274, in iter_child_nodes
+    for name, field in iter_fields(node):
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\ast.py", line 264, in iter_fields
+    yield field, getattr(node, field)
++++++++++++++++++++++++++++++++++++ Timeout +++++++++++++++++++++++++++++++++++

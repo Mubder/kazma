@@ -1,0 +1,34 @@
+"""Read-only live rollout preflight; contains no credentials or user file contents."""
+import json,os,subprocess,time
+from pathlib import Path
+import httpx
+root=Path.cwd();live=Path('C:/Users/balfa/kazma')
+def git(folder,*args):
+ result=subprocess.run(['git','-C',str(folder),*args],capture_output=True,text=True,timeout=30,check=True)
+ return result.stdout.strip()
+changed=set(git(root,'diff','--name-only','9796e53fbd66bb1ce827f9ccb90bf1e11f58fe53','HEAD').splitlines())
+if not changed:changed=set(git(root,'diff','--name-only','HEAD').splitlines())
+untracked=set(git(live,'ls-files','--others','--exclude-standard').splitlines())
+tracked_paths={name.casefold() for name in git(live,'ls-files').splitlines()}
+collisions=set()
+for name in changed:
+ target=live/name
+ if os.path.lexists(target) and name.casefold() not in tracked_paths: collisions.add(name)
+ for parent in target.parents:
+  if parent==live: break
+  if parent.is_file(): collisions.add(name)
+collisions=sorted(collisions)
+tracked=git(live,'status','--porcelain=v1','-uno')
+with httpx.Client(trust_env=False,timeout=10) as client:
+ activity=client.get('http://127.0.0.1:9090/health/activity');activity.raise_for_status()
+ health=client.get('http://127.0.0.1:9090/health/live');health.raise_for_status()
+ ready=client.get('http://127.0.0.1:9090/health/ready')
+output={'observed_at':time.time(),'tracked_clean':not tracked,'untracked_collisions':collisions,
+ 'live_head':git(live,'rev-parse','HEAD'),'candidate_head':git(root,'rev-parse','HEAD'),
+ 'live_http':health.status_code,'ready_http':ready.status_code,'served_build':health.json().get('build'),
+ 'activity':activity.json()}
+assert ready.status_code==200,'Live readiness must be healthy before rollout'
+assert not tracked,'Live tracked files changed; plain pull is not allowed'
+assert not collisions,'Candidate paths collide with untracked live files'
+(root/'docs/audits/evidence/release_rollout_preflight_2026_10_12.log').write_text(json.dumps(output,indent=2)+'\n',encoding='utf-8')
+print(json.dumps(output,indent=2))

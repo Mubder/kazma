@@ -1,0 +1,15 @@
+"""Select this crawler audit's public receipts and explicitly referenced evidence."""
+import json,re
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[3]
+FOLDER=ROOT/'docs/audits/evidence'
+PREFIXES=('remaining_','release_','browser_linux_','dns_linux_','parser_search_linux_','research_postgres_','acquisition_')
+DATES=('2026_10_10','2026_10_11','2026_10_12')
+def selected_files():
+ text='\n'.join((ROOT/name).read_text(encoding='utf-8') for name in ('docs/audits/AUDIT_WEB_ACQUISITION_2026-10-10.md','docs/audits/WEB_ACQUISITION_IMPLEMENTATION_2026-10-10.md'))
+ cited=set(re.findall(r'[A-Za-z0-9_.-]+\.(?:log|json|txt|py)',text))
+ return sorted(p for p in FOLDER.iterdir() if p.is_file() and p.suffix in {'.log','.json','.txt','.py'} and any(date in p.name for date in DATES) and (p.name.startswith(PREFIXES) or p.name in cited))
+if __name__=='__main__':
+ files=selected_files()
+ (ROOT/'.git/worktrees/kazma/release_publication_selection.json').write_text(json.dumps([p.relative_to(ROOT).as_posix() for p in files],indent=2)+'\n')
+ print(json.dumps({'selected_artifacts':len(files),'total_bytes':sum(p.stat().st_size for p in files)}))

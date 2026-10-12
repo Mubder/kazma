@@ -1,0 +1,74 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 755 items
+
+tests\test_intent_engine_entities.py ......                              [  0%]
+tests\test_intent_engine_heuristics.py ................................. [  5%]
+...................                                                      [  7%]
+tests\test_intent_engine_policy.py ..............                        [  9%]
+tests\test_intent_engine_tier2.py .......                                [ 10%]
+tests\test_intent_research.py ........                                   [ 11%]
+tests\test_intent_router.py .............                                [ 13%]
+tests\test_interactive.py ....................................           [ 18%]
+tests\test_journal_frame_parity.py ...                                   [ 18%]
+tests\test_js_suite.py ................................................. [ 24%]
+.............                                                            [ 26%]
+tests\test_js_suites.py ................................................ [ 32%]
+....................                                                     [ 35%]
+tests\test_json_echo_format.py ......................................... [ 41%]
+........                                                                 [ 42%]
+tests\test_kazma_count.py ....                                           [ 42%]
+tests\test_kazma_guard_reload.py ..........                              [ 43%]
+tests\test_kb_api_routes.py .......                                      [ 44%]
+tests\test_kb_jobs.py ..                                                 [ 45%]
+tests\test_kb_recovery_browser.py ....                                   [ 45%]
+tests\test_kb_smart_reindex.py .........                                 [ 46%]
+tests\test_kept_connection_error_paths.py ........                       [ 47%]
+tests\test_knowledge_acquisition_profile.py ........                     [ 49%]
+tests\test_knowledge_agent_tools.py ...                                  [ 49%]
+tests\test_knowledge_chunker.py .........                                [ 50%]
+tests\test_knowledge_index.py ...........                                [ 52%]
+tests\test_knowledge_ingest.py .......................                   [ 55%]
+tests\test_knowledge_meaning_search.py .....................             [ 57%]
+tests\test_knowledge_store.py ................                           [ 60%]
+tests\test_kubernetes_runtime_contract.py .                              [ 60%]
+tests\test_langfuse_enable.py .....                                      [ 60%]
+tests\test_language_lock_quoting.py ........                             [ 61%]
+tests\test_language_system.py .......................................... [ 67%]
+...................                                                      [ 69%]
+tests\test_lazy_package_exports.py ....                                  [ 70%]
+tests\test_leftovers_except_g.py .....                                   [ 71%]
+tests\test_legacy_backfill_cli.py .....                                  [ 71%]
+tests\test_lifecycle_start_card.py ..................................    [ 76%]
+tests\test_light_version_bump.py .....                                   [ 76%]
+tests\test_live_agent_evaluation.py .........                            [ 78%]
+tests\test_live_client_pairing.py ....                                   [ 78%]
+tests\test_live_llm_resolution.py ............................           [ 82%]
+tests\test_livekit_duplex.py ........                                    [ 83%]
+tests\test_llm_gateway.py ...............                                [ 85%]
+tests\test_llm_provider.py .......................                       [ 88%]
+tests\test_llm_rate_limit.py .....                                       [ 89%]
+tests\test_llm_shared_ssl_context.py ......                              [ 89%]
+tests\test_llm_stream.py ...............                                 [ 91%]
+tests\test_llm_tool_count_limit.py .............                         [ 93%]
+tests\test_loadtest_routes.py .........                                  [ 94%]
+tests\test_logging_rotation.py ...                                       [ 95%]
+tests\test_login_throttle.py .........                                   [ 96%]
+tests\test_long_task.py ..............                                   [ 98%]
+tests\test_loop_breaker_live_path.py .....                               [ 98%]
+tests\test_loop_stall_second_pass.py ........                            [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 755 passed, 1 warning in 188.45s (0:03:08) ==================

@@ -1,0 +1,42 @@
+[
+  {
+    "module": "kazma_core.web_acquire.research_runtime",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.resources",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.tools.research_pipeline",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.tools.research_session",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.tools.read_url",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.tools.research_readiness",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.tools.web_research",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_ui.research_panel.routes",
+    "code": 0,
+    "stderr": ""
+  }
+]

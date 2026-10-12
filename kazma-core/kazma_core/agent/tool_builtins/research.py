@@ -77,15 +77,21 @@ def register_research_tools(registry: Any) -> None:
         description=(
             "Check research readiness: verifies search backends, fetch ladder, and "
             "pipeline prerequisites are operational. Use to diagnose why research "
-            "is failing before launching a deep run."
+            "is failing before launching a deep run. job_id reads a durable crawl. "
+            "refresh_credits explicitly queries Firecrawl's team balance (policy/allowance gated); default reads cached evidence only."
         ),
         category="research",
     )
-    async def research_readiness(probe_search: bool = False) -> str:
+    async def research_readiness(probe_search: bool = False, job_id: str = "", refresh_credits: bool = False) -> str:
         try:
-            from kazma_core.tools.research_readiness import research_readiness as _ready
+            if refresh_credits:
+                from kazma_core.web_acquire.credits import refresh_firecrawl_balance
 
-            report = _ready(probe_search=bool(probe_search))
+                await refresh_firecrawl_balance()
+            from kazma_core.tools.research_readiness import research_readiness as _ready
+            import asyncio
+
+            report = await asyncio.to_thread(_ready, probe_search=bool(probe_search), job_id=job_id or None)
             return json.dumps(report, ensure_ascii=False, indent=2, default=str)
         except Exception as exc:
             return f"Error: readiness check failed — {exc}"
@@ -94,17 +100,37 @@ def register_research_tools(registry: Any) -> None:
             "Start a deep research session in the background: runs the full "
             "research pipeline (plan → search → fetch → digest → synthesize) "
             "and returns a session id to poll for progress. Prefer this over "
-            "run_research_pipeline for long tasks."
+            "run_research_pipeline for long tasks. To resume an interrupted saved session, "
+            "pass resume_session_id with its ID; live/terminal work and uncertain required stages refuse replay."
         ),
         category="research",
     )
     async def start_deep_research(
-        topic: str, depth: str = "deep", max_sources: int = 8, export_docx: bool = False
+        topic: str = "", depth: str = "deep", max_sources: int = 8, export_docx: bool = False, resume_session_id: str = ""
     ) -> str:
         try:
             from kazma_core.tools.research_session import start_deep_research as _start
 
-            sess = await _start(topic, depth=depth, max_sources=max_sources, export_docx=export_docx)
+            sess = await _start(topic, depth=depth, max_sources=max_sources, export_docx=export_docx, resume_session_id=resume_session_id or None)
             return json.dumps(sess.to_dict(), ensure_ascii=False, indent=2, default=str)
         except Exception as exc:
             return f"Error: starting deep research failed — {exc}"
+
+    @registry.register(description="Inspect a saved background research session, or list recent sessions. Reads local state; no provider requests.", category="research")
+    async def research_session_status(session_id: str = "", limit: int = 20) -> str:
+        from kazma_core.tools import research_session as sessions
+        from kazma_core.web_acquire.crawl_jobs import call
+
+        if session_id:
+            session = await call(sessions.get_session, session_id)
+            return json.dumps(session.to_dict() if session else {"error": "not found"}, ensure_ascii=False, default=str)
+        rows = await call(sessions.list_sessions, limit=max(1, min(50, limit)))
+        return json.dumps([row.to_dict() for row in rows], ensure_ascii=False, default=str)
+
+    @registry.register(description="Request cancellation of a background research session. Cancelling remains visible until owned cleanup completes.", category="research")
+    async def cancel_research_session(session_id: str) -> str:
+        from kazma_core.tools.research_session import cancel_session
+        from kazma_core.web_acquire.crawl_jobs import call
+
+        session = await call(cancel_session, session_id)
+        return json.dumps(session.to_dict() if session else {"error": "not found"}, ensure_ascii=False, default=str)

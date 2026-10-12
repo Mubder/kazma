@@ -4,16 +4,14 @@ Maintains a single shared Playwright browser instance + a persistent page
 across calls for efficiency. The first ``browser_navigate`` boots Playwright;
 subsequent tools reuse the live page.
 
-Runs on Playwright's **sync API inside ``asyncio.to_thread`` worker threads**.
-Kazma's server runs a Windows ``SelectorEventLoop`` (forced by psycopg — see
-``kazma_core/eventloop.py``), on which ``asyncio.create_subprocess_exec``
-raises ``NotImplementedError``. Playwright's transport needs exactly that call
-to spawn its Node driver — even the sync API creates its own loop via
-``asyncio.new_event_loop()``, which would inherit the selector policy. So the
-boot temporarily installs a Proactor policy (``_proactor_policy_for_boot``)
-while ``sync_playwright().start()`` creates its loop; the loop survives the
-policy restore and drives all later page operations. All page operations are
-serialized by a module lock (one page = one actor).
+Uses the bounded acquisition browser owner and CDP/HTTPX broker.
+Its async Playwright objects stay on a dedicated browser loop; the compatibility
+facade runs from joined worker calls. No global event-loop policy switch or
+unrestricted sync driver is used. Calls have one owner and eight queued slots;
+HTTP uses bounded public DNS, peer checks, origin scheduling and policy-gated
+proxy accounting. Browser lifetime/resource limits are shared with acquisition.
+Mutating HTTP is admitted only on this native automation path, through its
+existing tool/HITL gates; crawler rendering remains read-only.
 
 Requires ``playwright`` (``pip install playwright && playwright install``).
 All tool functions return a friendly install-hint string if Playwright is
@@ -79,42 +77,42 @@ def _proactor_policy_for_boot():
         asyncio.set_event_loop_policy(prev)
 
 
-async def _run_sync(fn: Any, *args: Any, **kwargs: Any) -> Any:
-    """Run a blocking Playwright op on a worker thread.
+from kazma_core.web_acquire.resources import _CapacityPool
+_NATIVE_CALLS = _CapacityPool('interactive browser calls', 1, 8)
 
-    ``asyncio.to_thread`` keeps the server's SelectorEventLoop out of the
-    subprocess-spawning path entirely (see module docstring).
-    """
-    return await asyncio.to_thread(fn, *args, **kwargs)
+
+async def _run_sync(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Serialize bounded native operations; join cleanup under cancellation."""
+    from kazma_core.playwright_loop import finish_owned
+    from kazma_core.web_acquire.crawl_jobs import call
+    lease = await _NATIVE_CALLS.acquire()
+    try:
+        work = asyncio.create_task(asyncio.to_thread(fn, *args, **kwargs))
+        receipt = asyncio.gather(work, return_exceptions=True)
+        try:
+            result, = await asyncio.shield(receipt)
+        except asyncio.CancelledError:
+            page = _state.get('page')
+            if page is not None and hasattr(page, 'interrupt'):
+                page.interrupt()
+            await finish_owned(receipt)
+            await finish_owned(call(_close_sync))
+            raise
+        if isinstance(result, BaseException):
+            raise result
+        return result
+    finally:
+        lease.release()
 
 
 def _ensure_page_sync() -> Any:
-    """Boot Playwright (if needed) and return the shared page, or raise."""
+    """Compatibility facade; all HTTP uses the owned CDP/HTTPX broker."""
     with _state_lock:
-        if _state["page"] is not None:
-            return _state["page"]
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError:
-            raise RuntimeError(_install_hint()) from None
-        with _proactor_policy_for_boot():
-            pw = sync_playwright().start()
-            try:
-                browser = pw.chromium.launch(headless=True)
-                page = browser.new_page()
-                context = getattr(page, "context", None)
-                if context is not None:
-                    from kazma_core.security.browser_egress import install_sync_browser_egress
-
-                    install_sync_browser_egress(context)
-            except Exception:
-                # Don't leak a half-booted driver if launch/new_page fails.
-                try:
-                    pw.stop()
-                except Exception:
-                    logger.debug("[browser] stop after failed launch", exc_info=True)
-                raise
-        _state.update(playwright=pw, browser=browser, page=page)
+        if _state['page'] is not None:
+            return _state['page']
+        from kazma_core.web_acquire.interactive import open_page
+        page = open_page()
+        _state.update(page=page, browser=None, playwright=None)
         return page
 
 
@@ -125,6 +123,13 @@ def _close_sync() -> None:
         browser = _state.get("browser")
         pw = _state.get("playwright")
         if page is not None:
+            from kazma_core.web_acquire.interactive import PageFacade
+            if isinstance(page, PageFacade):
+                # Preserve the owner/handles on uncertain cleanup; do not open
+                # another native browser over a quarantined process tree.
+                page.close()
+                _state.update(playwright=None, browser=None, page=None)
+                return
             try:
                 page.close()
             except Exception:
@@ -178,8 +183,13 @@ def _screenshot_sync(full_page: bool) -> str:
     page = _ensure_page_sync()
     with _state_lock:
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        dest = SCREENSHOT_DIR / f"browser_{int(time.time())}.png"
-        page.screenshot(path=str(dest), full_page=full_page)
+        import uuid
+        from kazma_core.web_acquire.output_allowance import reserve
+        dest = SCREENSHOT_DIR / f'browser_{uuid.uuid4().hex}.png'
+        image = page.screenshot(full_page=full_page)
+        reserve(dest, len(image))
+        with dest.open('xb') as stream:
+            stream.write(image)
     return str(dest)
 
 
@@ -270,7 +280,8 @@ async def browser_navigate(url: str) -> str:
     try:
         from kazma_core.security.ssrf import validate_url
 
-        await asyncio.to_thread(validate_url, url, block_unresolved=True)
+        from kazma_core.web_acquire.dns_worker import validate_public_url
+        await validate_public_url(url, validator=validate_url)
     except Exception as exc:
         return f"Error: URL blocked by security policy — {exc}"
 

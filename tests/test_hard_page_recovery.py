@@ -1,4 +1,4 @@
-"""Hard-page recovery cascade (Firecrawl → Jina → Playwright) for read_url."""
+"""Local Chromium precedes explicitly permitted hosted page recovery."""
 
 from __future__ import annotations
 
@@ -44,9 +44,11 @@ async def test_recover_hard_page_order(monkeypatch):
 
     async def pw(url):
         order.append("playwright")
-        return "PW"
+        return None
 
     monkeypatch.setenv("KAZMA_FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setenv("KAZMA_ACQUISITION_MODE", "local_first_with_remote_fallback")
+    monkeypatch.setenv("KAZMA_ACQUISITION_REMOTE_PROVIDERS", "firecrawl,jina")
     monkeypatch.delenv("KAZMA_JINA_READER", raising=False)
     monkeypatch.setattr(ru, "_try_firecrawl", fire)
     monkeypatch.setattr(ru, "_try_jina_reader", jina)
@@ -54,7 +56,7 @@ async def test_recover_hard_page_order(monkeypatch):
 
     out = await ru._recover_hard_page("https://example.com/hard", why="bot")
     assert out and out.startswith("JINA BODY")
-    assert order == ["firecrawl", "jina"]  # stop after jina success
+    assert order == ["playwright", "firecrawl", "jina"]
 
 
 @pytest.mark.asyncio
@@ -83,38 +85,23 @@ async def test_recover_skips_jina_when_disabled(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_full_text_uses_recovery_on_bot_wall(monkeypatch):
     """httpx returns challenge HTML → recovery path runs."""
+    from types import SimpleNamespace
+    import httpx
 
-    class _Resp:
-        status_code = 403
-        text = (
+    def blocked(request):
+        # A real response/stream exercises the shared bounded reader. Earlier
+        # get-only stubs implicitly selected its unbounded mock fallback.
+        peer = SimpleNamespace(get_extra_info=lambda _: ("93.184.216.34", 443))
+        return httpx.Response(403, text=(
             "<html><body>Just a moment... checking your browser "
             "cf-browser-verification cloudflare</body></html>"
-        )
-        headers: dict = {}
-
-        def raise_for_status(self):
-            raise RuntimeError("403")
-
-    class _Client:
-        def __init__(self, *a, **k):
-            self.headers = {"user-agent": "test"}
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def get(self, url):
-            return _Resp()
+        ), request=request, extensions={"network_stream": peer})
 
     async def no_opt(u):
         return None
 
     async def recover(url, *, why=""):
         return "# Recovered markdown\n\n" + ("content " * 20)
-
-    import httpx
 
     # Bypass SSRF for unit test (public-looking host). The stub must accept
     # the guard's keyword arguments and return the validated-IP tuple the
@@ -123,13 +110,11 @@ async def test_fetch_full_text_uses_recovery_on_bot_wall(monkeypatch):
     # raised TypeError inside the production call rather than failing here.
     monkeypatch.setattr(
         "kazma_core.security.ssrf.validate_url",
-        lambda u, **_kw: (),
+        lambda u, **_kw: ("93.184.216.34",),
     )
-    # get_scraping_client builds the real client; patch it + httpx for safety
-    monkeypatch.setattr(httpx, "AsyncClient", _Client)
     monkeypatch.setattr(
         "kazma_core.proxy.client.get_scraping_client",
-        lambda **k: _Client(),
+        lambda **k: httpx.AsyncClient(transport=httpx.MockTransport(blocked)),
     )
     monkeypatch.setattr(ru, "_fetch_via_optional_backends", no_opt)
     monkeypatch.setattr(ru, "_recover_hard_page", recover)

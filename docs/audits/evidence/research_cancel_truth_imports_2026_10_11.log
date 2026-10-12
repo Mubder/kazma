@@ -1,0 +1,26 @@
+[
+  {
+    "module": "kazma_core.tools.research_session",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.research_runtime",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "module": "kazma_ui.research_panel.routes",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "module": "kazma_ui.i18n.catalog.research",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

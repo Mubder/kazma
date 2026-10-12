@@ -1,0 +1,4 @@
+kazma_core.web_acquire.research_pipeline_job: exit 0
+kazma_core.web_acquire.crawl_jobs: exit 0
+kazma_core.tools.research_pipeline: exit 0
+kazma_core.tools.read_url: exit 0

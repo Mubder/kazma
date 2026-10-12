@@ -1,0 +1,13 @@
+import json,sys
+from pathlib import Path
+from scripts.fast_test import run_pytest
+from scripts.generate_metrics import collection_fingerprint
+base=Path(r'G:\GitHubRepos\kazma\.git\worktrees\kazma')
+files=json.loads((base/'remaining_final_regression_files.json').read_text())
+before=collection_fingerprint()
+diagnostics=['-p','remaining_search_diagnostics'] if '--diagnostics' in sys.argv else []
+code,output=run_pytest([*diagnostics,*files,'--timeout=120','--tb=short'],1800)
+after=collection_fingerprint()
+assert before==after,(before,after)
+Path('docs/audits/evidence/remaining_regression_final_2026_10_12.log').write_text('input_sha256='+before+'\n'+output,encoding='utf-8')
+print(output[-16000:]);raise SystemExit(code)

@@ -2099,6 +2099,14 @@
             </div>
         </div>
 
+        <div class="settings-group" id="acquisition-operations">
+            <h3>{{ t('research.ui.acquisition_title') }}</h3>
+            <p>{{ t('research.ui.acquisition_hint') }}</p>
+            <button class="btn btn-secondary" @click="inspectAcquisition(false)" :disabled="acquisitionBusy">{{ t('research.ui.read_cached_status') }}</button>
+            <button class="btn btn-secondary" @click="inspectAcquisition(true)" :disabled="acquisitionBusy">{{ t('research.ui.refresh_credits') }}</button>
+            <pre x-text="acquisitionText" style="white-space:pre-wrap;overflow-wrap:anywhere;" aria-live="polite"></pre>
+        </div>
+
         <!-- Logging -->
         <div class="settings-group">
             <h3>{{ t('settings.logging_title') }}</h3>

@@ -1,0 +1,12 @@
+........................................................................ [ 29%]
+........................................................................ [ 58%]
+........................................................................ [ 87%]
+..............................                                           [100%]
+============================== warnings summary ===============================
+tests/test_ssrf_cors.py::TestCORSMiddleware::test_default_origins_do_not_trust_localhost_development_ports
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+246 passed, 1 warning in 142.51s (0:02:22)
+

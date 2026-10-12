@@ -1,0 +1,18 @@
+{
+  "observed_at": 1791806465.752079,
+  "tracked_clean": true,
+  "untracked_collisions": [],
+  "live_head": "b413b5d433e57188ea26b7873296ee2b26301149",
+  "candidate_head": "9796e53fbd66bb1ce827f9ccb90bf1e11f58fe53",
+  "live_http": 200,
+  "ready_http": 200,
+  "served_build": {
+    "commit": "b413b5d4",
+    "started_at": 1791745824.4612534
+  },
+  "activity": {
+    "active_turns": 0,
+    "pending_approvals": 0,
+    "idle": true
+  }
+}

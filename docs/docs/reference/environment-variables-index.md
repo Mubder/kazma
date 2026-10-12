@@ -11,11 +11,14 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**265** variables are read by the product code; **265** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**273** variables are read by the product code; **273** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
 |----------|-----------------|---------|-----------|
+| `KAZMA_ACQUISITION_MAX_COST_USD` | (none) | `kazma_core.web_acquire.accounting`, `kazma_core.web_acquire.research_pipeline_job` | yes |
+| `KAZMA_ACQUISITION_MODE` | `"local_only"` | `kazma_core.web_acquire.policy` | yes |
+| `KAZMA_ACQUISITION_REMOTE_PROVIDERS` | `""` | `kazma_core.web_acquire.policy` | yes |
 | `KAZMA_ALLOW_PRIVATE_LLM` | (none) | `kazma_core.models.discovery` | yes |
 | `KAZMA_ALLOW_YOLO` | (none) | `kazma_core.safety.yolo` | yes |
 | `KAZMA_API_KEY` | `""` | `kazma_core.llm_provider`, `kazma_core.model_registry`, `kazma_ui.app` | yes |
@@ -28,6 +31,8 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_BASE_URL` | (none) | `kazma_core.ide.env_context`, `kazma_core.runtime.local_api` | yes |
 | `KAZMA_BOT_EMAIL` | `""` | `kazma_core.git_identity` | yes |
 | `KAZMA_BOT_NAME` | `""` | `kazma_core.git_identity` | yes |
+| `KAZMA_BROWSER_CGROUP_ROOT` | (none) | `kazma_core.web_acquire.browser_cgroup` | yes |
+| `KAZMA_BROWSER_NETWORK_MODE` | `"required"` | `kazma_core.web_acquire.policy`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_BUS_BRIDGE` | (none) | `kazma_core.safety.bus_bridge` | yes |
 | `KAZMA_CALENDAR_PROVIDER` | `"auto"` | `kazma_skills.native.calendar.router` | yes |
 | `KAZMA_CHAOS_ENABLED` | `""` | `kazma_core.chaos.__init__`, `kazma_ui.routes_chaos` | yes |
@@ -48,7 +53,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CORS_ORIGINS` | (none) | `kazma_ui.browser_origins` | yes |
 | `KAZMA_CRAWL_MAX_DEPTH` | `5` | `kazma_core.tools.web_research` | yes |
 | `KAZMA_CRAWL_MAX_PAGES` | `50` | `kazma_core.tools.web_research` | yes |
-| `KAZMA_CRAWL_RESPECT_ROBOTS` | `"0"` | `kazma_core.tools.web_research` | yes |
+| `KAZMA_CRAWL_RESPECT_ROBOTS` | `"1"` | `kazma_core.web_acquire.research_pipeline_job`, `kazma_core.web_acquire.robots` | yes |
 | `KAZMA_CRON_STALE_HOURS` | (none) | `kazma_core.cron.scheduler` | yes |
 | `KAZMA_CUA_PLANNER` | `"1"` | `kazma_core.tools.computer_use_planners` | yes |
 | `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | yes |
@@ -84,10 +89,11 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_ENV_FILE` | (none) | `kazma_core.env_files` | yes |
 | `KAZMA_EXPORTS_DIR` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_FETCH_BACKEND` | (none) | `kazma_core.tools.read_url` | yes |
+| `KAZMA_FETCH_DEADLINE_SECONDS` | `"90"` | `kazma_core.tools.read_url` | yes |
 | `KAZMA_FETCH_MAX_BYTES` | `"5000000"` | `kazma_core.tools.read_url` | yes |
 | `KAZMA_FILE_CHECKPOINTS_DB` | (none) | `kazma_core.ide.file_checkpoints` | yes |
-| `KAZMA_FIRECRAWL_API_KEY` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.tools.research_readiness` | yes |
-| `KAZMA_FIRECRAWL_URL` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url` | yes |
+| `KAZMA_FIRECRAWL_API_KEY` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.tools.research_readiness` +1 | yes |
+| `KAZMA_FIRECRAWL_URL` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.web_acquire.credits` | yes |
 | `KAZMA_FTS5_PATH` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_GATEWAY_ADMINS` | (none) | `kazma_gateway.allowlists` | yes |
 | `KAZMA_GATEWAY_STRICT_ALLOWLIST` | (none) | `kazma_gateway.chat_adapters` | yes |
@@ -116,6 +122,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_INTENT_TIER2` | (none) | `kazma_core.agent.intent.config` | yes |
 | `KAZMA_JINA_API_KEY` | (none) | `kazma_core.tools.read_url` | yes |
 | `KAZMA_JINA_READER` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.tools.research_readiness` | yes |
+| `KAZMA_JINA_TOKEN_BUDGET` | `"50000"` | `kazma_core.web_acquire.provider_usage`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_JWT_SECRET` | `""` | `kazma_ui.auth` | yes |
 | `KAZMA_KB_AUTO_INJECT` | (none) | `kazma_core.stores.knowledge_index` | yes |
 | `KAZMA_KB_AUTO_INJECT_TOP_K` | (none) | `kazma_core.stores.knowledge_index` | yes |
@@ -127,11 +134,11 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_KB_SMART_SEARCH` | (none) | `kazma_core.stores.knowledge_index` | yes |
 | `KAZMA_KNOWLEDGE_GRAPH_DB` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_LANGFUSE` | `""` | `kazma_core.tracing.langfuse_enable` | yes |
-| `KAZMA_LITELLM` | (none) | `kazma_core.llm_gateway` | yes |
-| `KAZMA_LITELLM_FALLBACK_DIRECT` | (none) | `kazma_core.llm_gateway` | yes |
-| `KAZMA_LITELLM_KEY` | (none) | `kazma_core.llm_gateway` | yes |
-| `KAZMA_LITELLM_LOCAL` | (none) | `kazma_core.llm_gateway` | yes |
-| `KAZMA_LITELLM_URL` | (none) | `kazma_core.llm_gateway` | yes |
+| `KAZMA_LITELLM` | (none) | `kazma_core.llm_gateway`, `kazma_core.web_acquire.research_pipeline_job` | yes |
+| `KAZMA_LITELLM_FALLBACK_DIRECT` | (none) | `kazma_core.llm_gateway`, `kazma_core.web_acquire.research_pipeline_job` | yes |
+| `KAZMA_LITELLM_KEY` | (none) | `kazma_core.llm_gateway`, `kazma_core.web_acquire.research_pipeline_job` | yes |
+| `KAZMA_LITELLM_LOCAL` | (none) | `kazma_core.llm_gateway`, `kazma_core.web_acquire.research_pipeline_job` | yes |
+| `KAZMA_LITELLM_URL` | (none) | `kazma_core.llm_gateway`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_LLM_STREAM` | (none) | `kazma_core.llm_stream` | yes |
 | `KAZMA_LOG_FILE` | (none) | `kazma_core.paths`, `kazma_core.settings_manager` | yes |
 | `KAZMA_LOG_FORMAT` | (none) | `kazma_core.logging_config` | yes |
@@ -163,7 +170,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_MIGRATE_CHECK_PORT` | (none) | `kazma_core.migration.importer` | yes |
 | `KAZMA_MISSION_MAX_ROUNDS` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_MISSION_RECURSION` | (none) | `kazma_core.agent.long_task` | yes |
-| `KAZMA_MODEL` | `""` | `kazma_core.model_registry`, `kazma_ui.app` | yes |
+| `KAZMA_MODEL` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
 | `KAZMA_MULTI_USER` | (none) | `kazma_core.security.platform_rbac`, `kazma_ui.auth` | yes |
 | `KAZMA_NEO4J_DEFAULT` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_NEO4J_PASSWORD` | (none) | `kazma_core.memory.backends` | yes |
@@ -199,28 +206,29 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PRODUCTION` | `""` | `kazma_core.agent.tool_builtins.system`, `kazma_core.documents.config`, `kazma_core.mcp.manager` +10 | yes |
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
 | `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
-| `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_ui.app` | yes |
+| `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
 | `KAZMA_PUBLIC_URL` | `""` | `kazma_core.ide.env_context`, `kazma_core.migration.exporter`, `kazma_core.security.hardening` +5 | yes |
 | `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |
+| `KAZMA_REMOTE_DAY_REQUESTS` | `"1024"` | `kazma_core.web_acquire.accounting` | yes |
+| `KAZMA_REMOTE_JOB_REQUESTS` | `"256"` | `kazma_core.web_acquire.accounting` | yes |
 | `KAZMA_REMOTE_PARSE` | (none) | `kazma_core.documents.extract_salvage` | yes |
 | `KAZMA_REPLICA_AFFINITY` | (none) | `kazma_ui.replica_affinity` | yes |
 | `KAZMA_REPLICA_ID` | (none) | `kazma_ui.replica_affinity` | yes |
-| `KAZMA_RESEARCH_ALLOW_THIN` | (none) | `kazma_core.tools.research_pipeline` | yes |
-| `KAZMA_RESEARCH_DIGEST_MAX` | (none) | `kazma_core.tools.read_url` | yes |
+| `KAZMA_RESEARCH_ALLOW_THIN` | (none) | `kazma_core.tools.research_pipeline`, `kazma_core.web_acquire.research_pipeline_job` | yes |
+| `KAZMA_RESEARCH_DIGEST_MAX` | (none) | `kazma_core.tools.read_url`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESEARCH_DIR` | (none) | `kazma_core.tools.read_url` | yes |
-| `KAZMA_RESEARCH_EXPORT_DOCX` | (none) | `kazma_core.tools.research_pipeline` | yes |
-| `KAZMA_RESEARCH_GAP_LOOP` | `True` | `kazma_core.tools.research_pipeline`, `kazma_core.tools.research_planner` | yes |
+| `KAZMA_RESEARCH_EXPORT_DOCX` | (none) | `kazma_core.tools.research_pipeline`, `kazma_core.web_acquire.research_pipeline_job` | yes |
+| `KAZMA_RESEARCH_GAP_LOOP` | `True` | `kazma_core.tools.research_pipeline`, `kazma_core.tools.research_planner`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESEARCH_LLM_CRITIC` | `True` | `kazma_core.tools.research_planner` | yes |
-| `KAZMA_RESEARCH_LLM_PLANNER` | `True` | `kazma_core.tools.research_planner` | yes |
+| `KAZMA_RESEARCH_LLM_PLANNER` | `True` | `kazma_core.tools.research_planner`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESEARCH_MIN_SOURCES` | (none) | `kazma_core.agent.research_policy` | yes |
-| `KAZMA_RESEARCH_PREFLIGHT_LIVE` | (none) | `kazma_core.tools.research_readiness` | yes |
 | `KAZMA_RESEARCH_ROUTE` | (none) | `kazma_core.agent.research_policy` | yes |
 | `KAZMA_RESEARCH_SOFT_NUDGE` | (none) | `kazma_core.agent.research_policy` | yes |
-| `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | `kazma_core.tools.research_synthesize` | yes |
+| `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | `kazma_core.tools.research_synthesize`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESTIC_PASSWORD` | `""` | `kazma_core.backup.restic_repo` | yes |
 | `KAZMA_RUNTIME_HA` | `"0"` | `kazma_core.runtime_ownership`, `kazma_core.stores.workspaces` | yes |
-| `KAZMA_SEARXNG_URL` | (none) | `kazma_core.tools.research_readiness`, `kazma_core.tools.web_search` | yes |
+| `KAZMA_SEARXNG_URL` | (none) | `kazma_core.tools.research_readiness`, `kazma_core.tools.web_search`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_SECRET` | `""` | `kazma_cli.main`, `kazma_core.config_store`, `kazma_core.runtime.local_api` +4 | yes |
 | `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | yes |
 | `KAZMA_SEMANTIC_CACHE` | (none) | `kazma_ui.app` | yes |

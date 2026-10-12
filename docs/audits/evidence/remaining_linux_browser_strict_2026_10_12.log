@@ -1,0 +1,71 @@
+exit=1
+{"case": "aggregate_memory", "ok": true, "limits": {"memory.max": "134217728", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "task_limit", "ok": true, "limits": {"memory.max": "268435456", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "hard_lifetime", "ok": true, "limits": {"memory.max": "268435456", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "parent_death", "ok": true, "tasks_observed": 3}
+qualification_exit=1
+qualification_cgroup_removed=true
+
+Traceback (most recent call last):
+  File "/mnt/c/Users/balfa/.codex/worktrees/acquisition-research-durability/kazma/docs/audits/evidence/browser_linux_boundary_2026_10_11.py", line 200, in <module>
+    asyncio.run(chromium())
+    ~~~~~~~~~~~^^^^^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/mnt/c/Users/balfa/.codex/worktrees/acquisition-research-durability/kazma/docs/audits/evidence/browser_linux_boundary_2026_10_11.py", line 111, in chromium
+    await owner._start_impl()
+  File "/mnt/c/Users/balfa/.codex/worktrees/acquisition-research-durability/kazma/kazma-core/kazma_core/web_acquire/browser.py", line 104, in _start_impl
+    await self._launch_impl()
+  File "/mnt/c/Users/balfa/.codex/worktrees/acquisition-research-durability/kazma/kazma-core/kazma_core/web_acquire/browser.py", line 120, in _launch_impl
+    self.browser = await self.pw.chromium.launch(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+              "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/balfa/.codex/worktrees/acquisition-research-durability/kazma/docs/audits/evidence/browser_linux_boundary_2026_10_11.py", line 105, in launch
+    return await original_launch(browser_type, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/runtime/lib/python3.14/site-packages/playwright/async_api/_generated.py", line 16546, in launch
+    await self._impl_obj.launch(
+    ...<17 lines>...
+    )
+  File "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/runtime/lib/python3.14/site-packages/playwright/_impl/_browser_type.py", line 97, in launch
+    await self._channel.send(
+        "launch", TimeoutSettings.launch_timeout, params
+    )
+  File "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/runtime/lib/python3.14/site-packages/playwright/_impl/_connection.py", line 69, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/runtime/lib/python3.14/site-packages/playwright/_impl/_connection.py", line 563, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TargetClosedError: BrowserType.launch: Target page, context or browser has been closed
+Browser logs:
+Chromium sandboxing failed!
+================================
+To avoid the sandboxing issue, do either of the following:
+  - (preferred): Configure your environment to support sandboxing
+  - (alternative): Launch Chromium without sandbox using 'chromiumSandbox: false' option
+================================
+
+Call log:
+  - <launching> /home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/chromium-with-native-libraries --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --proxy-server=http://127.0.0.1:45981 --proxy-bypass-list=<-loopback> --disable-blink-features=AutomationControlled --disable-dev-shm-usage --disable-quic --disable-background-networking --force-webrtc-ip-handling-policy=disable_non_proxied_udp --host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1 --user-data-dir=/tmp/playwright_chromiumdev_profile-eGdjAD --remote-debugging-pipe --no-startup-window
+  - <launched> pid=765
+  - [pid=765][err] [1012/003926.589615:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:101] Running as root without --no-sandbox is not supported. See https://crbug.com/638180.
+  - [pid=765] <gracefully close start>
+  - [pid=765] <kill>
+  - [pid=765] <will force kill>
+  - [pid=765] <process did exit: exitCode=1, signal=null>
+  - [pid=765] starting temporary directories cleanup
+  - [pid=765] finished temporary directories cleanup
+  - [pid=765] <gracefully close end>
+

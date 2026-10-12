@@ -81,6 +81,11 @@ def main() -> None:
 
         sys.exit(_run_doctor(sys.argv[2:]))
 
+    elif cmd == "acquisition":
+        from kazma_cli.acquisition import run as _run_acquisition
+
+        sys.exit(_run_acquisition(sys.argv[2:]))
+
     elif cmd == "serve":
         port = int(sys.argv[2]) if len(sys.argv) > 2 else 9090
         _run_serve(port)
@@ -127,6 +132,7 @@ def main() -> None:
         print("Commands:")
         print("  status     Show Kazma status")
         print("  doctor     Check provider/model resolution (which model, where, will it work)")
+        print("  acquisition  Inspect cached crawler errors, usage and credits")
         print("  serve      Start the WebUI server (default port 9090)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")

@@ -1,0 +1,16 @@
+import pytest
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item,call):
+ outcome=yield
+ report=outcome.get_result()
+ if call.when!='call' or not call.excinfo or 'test_repeated_cancel_retains_real_http_worker_until_cleanup' not in item.nodeid: return
+ for entry in call.excinfo.traceback:
+  values=entry.frame.f_locals
+  if 'task' not in values or 'marker' not in values: continue
+  task=values['task']
+  detail={'done':task.done(),'cancelled':task.cancelled(),'marker_exists':values['marker'].exists(),'children':len(values.get('children',[]))}
+  if task.done() and not task.cancelled():
+   try: detail['terminal_result']=repr(task.result())
+   except BaseException as error: detail['terminal_exception']=repr(error)
+  detail['pool']=values['pool'].snapshot()
+  report.sections.append(('search fixture diagnosis',repr(detail)))

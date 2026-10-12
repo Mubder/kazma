@@ -1,0 +1,35 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 824 items
+
+tests\test_package_update_on_a_guarded_install.py ...................... [  2%]
+..............                                                           [  4%]
+tests\test_path_grants.py ......                                         [  5%]
+tests\test_path_refresh.py ...........s.....                             [  7%]
+tests\test_path_rewrite.py ..                                            [  7%]
+tests\test_pdf_verification.py .....                                     [  8%]
+tests\test_perf_fixes.py ...........................                     [ 11%]
+tests\test_permissions.py ........................                       [ 14%]
+tests\test_personalities.py ..........................                   [ 17%]
+tests\test_pg_backup.py .................                                [ 19%]
+tests\test_pg_bridge_docker_env.py ...                                   [ 19%]
+tests\test_pg_dump_reported_not_assumed.py ........                      [ 20%]
+tests\test_pg_nul_safe.py ......                                         [ 21%]
+tests\test_pg_pool_recovery.py ...ssss                                   [ 22%]
+tests\test_pg_store_dual_backend.py ....s                                [ 22%]
+tests\test_phase2_remaining.py ....                                      [ 23%]
+tests\test_pipeline_sandbox.py .........                                 [ 24%]
+tests\test_plan_fence.py ................................                [ 28%]
+tests\test_plan_mode.py .............                                    [ 29%]
+tests\test_platform_gate_identity.py ...                                 [ 30%]
+tests\test_platform_rbac.py ......                                       [ 31%]
+tests\test_platform_ux_modules.py ........                               [ 32%]
+tests\test_portability.py .......
+RESOURCE GUARD: owned pytest tree stopped below 4 GiB free; not a measured pass

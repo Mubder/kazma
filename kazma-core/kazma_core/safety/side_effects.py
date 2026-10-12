@@ -218,6 +218,8 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "critique_synthesis_gaps": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "list_research_papers": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "research_readiness": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "research_session_status": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "cancel_research_session": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH, None, ()),
     "start_deep_research": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),
     # swarm / sub-agents
     "spawn_agent": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),

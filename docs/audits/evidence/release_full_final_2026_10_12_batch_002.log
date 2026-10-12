@@ -1,0 +1,104 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 763 items
+
+tests\test_approval_reattaches_the_stream.py .......                     [  0%]
+tests\test_approval_storage_outage_route.py ...                          [  1%]
+tests\test_approve_decides_one_gate.py ...................               [  3%]
+tests\test_arabic_i18n.py .................                              [  6%]
+tests\test_arabic_single_home.py ......                                  [  6%]
+tests\test_arabic_text.py .............................................. [ 12%]
+.....................                                                    [ 15%]
+tests\test_async_routes_on_the_loop.py ....                              [ 16%]
+tests\test_atomic_update_does_not_deadlock.py ..........                 [ 17%]
+tests\test_attachment_path_identity.py ...............                   [ 19%]
+tests\test_audit_2026_08_29_regressions.py ............................. [ 23%]
+......                                                                   [ 23%]
+tests\test_audit_2026_08_31_strengthen.py ..............                 [ 25%]
+tests\test_audit_2026_09_04_regressions.py ....                          [ 26%]
+tests\test_audit_2026_09_04_wave1.py .........                           [ 27%]
+tests\test_audit_2026_09_04_wave2.py .......                             [ 28%]
+tests\test_audit_2026_09_04_wave3.py ........                            [ 29%]
+tests\test_audit_2026_09_04_wave4.py ............                        [ 31%]
+tests\test_audit_2026_09_04_wave5.py ............                        [ 32%]
+tests\test_audit_2026_09_04_wave6.py ...........                         [ 34%]
+tests\test_audit_2026_09_04_wave7.py ............                        [ 35%]
+tests\test_audit_2026_09_16_approval_privilege.py ..........             [ 36%]
+tests\test_audit_2026_09_16_regressions.py ...................           [ 39%]
+tests\test_audit_2026_09_17_regressions.py ...............               [ 41%]
+tests\test_audit_a_remaining.py ....                                     [ 41%]
+tests\test_audit_b_remaining.py .......                                  [ 42%]
+tests\test_audit_c_remaining.py ......                                   [ 43%]
+tests\test_audit_d_remaining.py ..                                       [ 43%]
+tests\test_audit_deep_structure_fixes.py ...........................     [ 47%]
+tests\test_audit_deployment_io.py .............................          [ 51%]
+tests\test_audit_f_remaining.py ...                                      [ 51%]
+tests\test_audit_fixes.py .............                                  [ 53%]
+tests\test_audit_followthrough.py ...............                        [ 55%]
+tests\test_audit_full_backlog_2026_09_30.py .......................      [ 58%]
+tests\test_audit_literal_search.py ...                                   [ 58%]
+tests\test_audit_logger.py ...............                               [ 60%]
+tests\test_audit_systematic_followthrough.py .........                   [ 61%]
+tests\test_audit_wave4.py ....                                           [ 62%]
+tests\test_audit_wave6.py ..................                             [ 64%]
+tests\test_audit_wave7.py .............                                  [ 66%]
+tests\test_audit_wave8.py ........                                       [ 67%]
+tests\test_auth_disabled_behind_proxy.py ......                          [ 68%]
+tests\test_auth_middleware.py .......................................... [ 73%]
+........................................................................ [ 83%]
+..................................                                       [ 87%]
+tests\test_authority.py ................                                 [ 89%]
+tests\test_authorization_flow.py ................                        [ 91%]
+tests\test_auto_attach_containment.py ..                                 [ 92%]
+tests\test_background_drain_bounded.py ....                              [ 92%]
+tests\test_backup_alerting.py ...........                                [ 94%]
+tests\test_backup_cadence_and_retention.py .....                         [ 94%]
+tests\test_backup_reports_the_real_loss.py ......                        [ 95%]
+tests\test_backup_silent_failures.py .................                   [ 97%]
+tests\test_backup_tmp_leak.py .................                          [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_audit_2026_09_04_wave4.py::TestWave4FrontendAudit::test_m23_canonical_escape_html
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-281 (_connection_worker_thread)
+  
+  Traceback (most recent call last):
+    File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\aiosqlite\core.py", line 66, in _connection_worker_thread
+      future.get_loop().call_soon_threadsafe(set_result, future, result)
+    File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 844, in call_soon_threadsafe
+      self._check_closed()
+    File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 545, in _check_closed
+      raise RuntimeError('Event loop is closed')
+  RuntimeError: Event loop is closed
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\aiosqlite\core.py", line 75, in _connection_worker_thread
+      future.get_loop().call_soon_threadsafe(set_exception, future, e)
+    File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 844, in call_soon_threadsafe
+      self._check_closed()
+    File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 545, in _check_closed
+      raise RuntimeError('Event loop is closed')
+  RuntimeError: Event loop is closed
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 763 passed, 2 warnings in 84.07s (0:01:24) ==================

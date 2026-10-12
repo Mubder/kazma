@@ -1,0 +1,236 @@
+{
+  "status": "complete",
+  "owner_pid": 37236,
+  "started": 1791793933.8614936,
+  "chunks": 1,
+  "math_threads": 2,
+  "input_sha256": "74bcdb2a47115eb449e2f14a919722664c89addb88fa27c342b5d7f000013312",
+  "results": [
+    {
+      "file": "tests/e2e/test_chat_delete_forget.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_chunked_stream_browser.py",
+      "exit": 0,
+      "counts": {
+        "passed": 3
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_dashboard_session_table.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_delivery_v2_e2e.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_e2e_playwright.py",
+      "exit": 0,
+      "counts": {
+        "passed": 2
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_hitl_view_model.py",
+      "exit": 0,
+      "counts": {
+        "passed": 2
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_instant_reply_closes.py",
+      "exit": 0,
+      "counts": {
+        "passed": 2
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_layout_widths.py",
+      "exit": 0,
+      "counts": {
+        "passed": 2
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_memory_playwright.py",
+      "exit": 0,
+      "counts": {
+        "passed": 3
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_new_chat_button.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_pages_load_clean.py",
+      "exit": 0,
+      "counts": {
+        "passed": 8
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_pages_read_in_arabic.py",
+      "exit": 0,
+      "counts": {
+        "passed": 5
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_plan_fence_reload.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_session_list_loading.py",
+      "exit": 0,
+      "counts": {
+        "passed": 3
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_session_switch_resume.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_settings_restore_browser.py",
+      "exit": 0,
+      "counts": {
+        "passed": 2
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_smoke.py",
+      "exit": 0,
+      "counts": {
+        "passed": 2
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_soft_nav_into_chat.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_step_detail_clamp.py",
+      "exit": 0,
+      "counts": {
+        "passed": 2
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_text_follows_its_language.py",
+      "exit": 0,
+      "counts": {
+        "passed": 6
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_turn_notes_route.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_unified_turn_app_graph.py",
+      "exit": 0,
+      "counts": {
+        "passed": 9
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_unified_turn_browser.py",
+      "exit": 0,
+      "counts": {
+        "passed": 12
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_unified_turn_concurrency.py",
+      "exit": 0,
+      "counts": {
+        "passed": 3
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_unified_turn_many_gates.py",
+      "exit": 0,
+      "counts": {
+        "passed": 2
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_unified_turn_recovery.py",
+      "exit": 0,
+      "counts": {
+        "passed": 4
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_unified_turn_restart.py",
+      "exit": 0,
+      "counts": {
+        "passed": 3
+      },
+      "measured": true
+    },
+    {
+      "file": "tests/e2e/test_x_studio_browser.py",
+      "exit": 0,
+      "counts": {
+        "passed": 1
+      },
+      "measured": true
+    }
+  ],
+  "finished": 1791796045.3983505,
+  "final_input_sha256": "74bcdb2a47115eb449e2f14a919722664c89addb88fa27c342b5d7f000013312"
+}

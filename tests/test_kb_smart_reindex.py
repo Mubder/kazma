@@ -216,10 +216,10 @@ def crawl(kb, monkeypatch: pytest.MonkeyPatch):
 
     pages = [f"https://docs.example/tree/{name}" for name in ("a", "b", "c")]
 
-    async def discover(seed, on_progress=None):
+    async def discover(seed, on_progress=None, **kwargs):
         return list(pages)
 
-    async def extract(url):
+    async def extract(url, **kwargs):
         return f"# Page {url[-1]}\n\n" + f"content for page {url} " * 20, "ok", ""
 
     monkeypatch.setattr(index, "index", index_chunks)

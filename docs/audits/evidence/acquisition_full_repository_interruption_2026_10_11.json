@@ -1,0 +1,14 @@
+{
+  "recorded_at": "2026-10-11T19:16:30.348417+00:00",
+  "status": "interrupted_unmeasured",
+  "full_suite_deferred": "User requires being asked before full suite; will close resource-heavy applications first. Focused tests remain authorized.",
+  "log_text": "[fast-test] 1008 test files in 8 chunks (8 requested, timeout 1260s/chunk)\n",
+  "log_sha256": "689f6de222cbaf3f126adfdbdb69c2b31a8b4d1157a8d60a4ed0bde1dc925eaa",
+  "saved_operations_files": 23,
+  "windows_event_1001": {
+    "local_time": "2026-10-11T22:07:03.8082763+03:00",
+    "bugcheck": "0x000000d1",
+    "dump": "C:/WINDOWS/Minidump/101126-14468-01.dmp"
+  },
+  "cause": "Not established; OS event does not prove that test resource usage caused the crash."
+}

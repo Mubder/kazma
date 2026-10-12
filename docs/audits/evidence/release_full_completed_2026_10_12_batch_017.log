@@ -1,0 +1,78 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 591 items
+
+tests\test_templates_have_no_english.py ..                               [  0%]
+tests\test_temporal_execution_recovery.py ...........                    [  2%]
+tests\test_temporal_local_drill.py ..                                    [  2%]
+tests\test_tenant_context_isolation.py ........                          [  3%]
+tests\test_tenant_middleware.py .......                                  [  5%]
+tests\test_terminal_clarify.py .....                                     [  5%]
+tests\test_terminal_reply_authority.py ..........                        [  7%]
+tests\test_test_fail_continue.py ...                                     [  8%]
+tests\test_text_display.py ................                              [ 10%]
+tests\test_text_follows_its_language.py ..........                       [ 12%]
+tests\test_text_newlines.py .................                            [ 15%]
+tests\test_thread_ownership_routes.py .........                          [ 16%]
+tests\test_thread_route_policy.py ..                                     [ 17%]
+tests\test_threat_model_accuracy.py ..................................   [ 23%]
+tests\test_time_travel.py ............................                   [ 27%]
+tests\test_time_travel_concurrency.py ..                                 [ 28%]
+tests\test_token_counter.py ....                                         [ 28%]
+tests\test_tokenizers.py ..........................                      [ 33%]
+tests\test_tone_adapter.py ..............................                [ 38%]
+tests\test_tool_activity_identity.py ....                                [ 38%]
+tests\test_tool_arg_validation.py ......                                 [ 39%]
+tests\test_tool_hooks.py ................                                [ 42%]
+tests\test_tool_loop_breaker.py ....                                     [ 43%]
+tests\test_tool_paths.py ................................                [ 48%]
+tests\test_tool_schema.py ...............                                [ 51%]
+tests\test_tools_catalog.py .....                                        [ 52%]
+tests\test_tools_quickwins.py ...................                        [ 55%]
+tests\test_topic_drift_embed_and_stub.py ........                        [ 56%]
+tests\test_topic_shift_focus.py .........                                [ 58%]
+tests\test_tracestore.py ...........                                     [ 60%]
+tests\test_tracing.py ................                                   [ 62%]
+tests\test_tracing_console.py ...                                        [ 63%]
+tests\test_transcript_recall.py ...........                              [ 65%]
+tests\test_truncated_tool_call.py ..                                     [ 65%]
+tests\test_truncation_retry.py ....                                      [ 66%]
+tests\test_ttl_env_parsing.py ..................                         [ 69%]
+tests\test_tts_voice_matches_language.py ............................... [ 74%]
+.......                                                                  [ 75%]
+tests\test_tui_event_attributes.py ..                                    [ 75%]
+tests\test_tui_labels.py .........                                       [ 77%]
+tests\test_tui_session_load.py ........                                  [ 78%]
+tests\test_tui_traces_panel.py ...                                       [ 79%]
+tests\test_turn_assets_ship.py ...............                           [ 81%]
+tests\test_turn_delivery_cqrs.py .......................                 [ 85%]
+tests\test_turn_document.py .........................                    [ 90%]
+tests\test_turn_durable_presentation.py ..........                       [ 91%]
+tests\test_turn_input.py ...                                             [ 92%]
+tests\test_turn_input_continuity.py .......                              [ 93%]
+tests\test_turn_ledger_abc.py ........................                   [ 97%]
+tests\test_turn_liveness_invariant.py ...........                        [ 99%]
+tests\test_turn_memory_row.py ....                                       [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_tenant_middleware.py::test_tenant_middleware_bearer_jwt_verified
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_tenant_middleware.py::test_tenant_middleware_bearer_jwt_verified
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 591 passed, 3 warnings in 118.52s (0:01:58) =================

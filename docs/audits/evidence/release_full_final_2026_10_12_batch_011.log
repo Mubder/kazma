@@ -1,0 +1,75 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 814 items
+
+tests\test_memory_rehydrate.py .................                         [  2%]
+tests\test_memory_relevance.py ....................                      [  4%]
+tests\test_memory_remember_and_small_talk.py ........................... [  7%]
+...                                                                      [  8%]
+tests\test_memory_routes_tenant_scope.py ............................... [ 12%]
+.............................................                            [ 17%]
+tests\test_memory_summary_recall.py ...............                      [ 19%]
+tests\test_memory_tenant_isolation.py ....                               [ 19%]
+tests\test_memory_tool_provenance.py ........                            [ 20%]
+tests\test_memory_topic_summaries.py ...............................     [ 24%]
+tests\test_memory_v2_graph_route.py ........                             [ 25%]
+tests\test_memory_v2_tenant_routes.py ..                                 [ 25%]
+tests\test_metrics.py ...                                                [ 26%]
+tests\test_metrics_receipt_current.py .                                  [ 26%]
+tests\test_micro_consolidation_off_loop.py ..                            [ 26%]
+tests\test_microsoft_mail_address.py ......                              [ 27%]
+tests\test_migration_bundle.py ........                                  [ 28%]
+tests\test_model_fallback_notice.py ...........                          [ 29%]
+tests\test_model_modality.py ....                                        [ 30%]
+tests\test_model_profiles.py .......................                     [ 33%]
+tests\test_model_provider_spelling.py ..........                         [ 34%]
+tests\test_model_registry.py ........................................... [ 39%]
+                                                                         [ 39%]
+tests\test_model_registry_store.py ........                              [ 40%]
+tests\test_model_selection_pipeline.py ................................. [ 44%]
+                                                                         [ 44%]
+tests\test_model_switch_service.py ...............                       [ 46%]
+tests\test_models_route.py .....................                         [ 49%]
+tests\test_module_attribute_refs.py ..                                   [ 49%]
+tests\test_module_stubs.py .....                                         [ 49%]
+tests\test_multi_tenant_isolation.py .                                   [ 50%]
+tests\test_narration_is_not_the_answer.py ..........                     [ 51%]
+tests\test_native_slash_commands.py .................................... [ 55%]
+..........................................................               [ 62%]
+tests\test_neo4j_backup.py ...................                           [ 65%]
+tests\test_no_cwd_data_dir_fallback.py ......                            [ 65%]
+tests\test_no_llm_response_replay.py ....                                [ 66%]
+tests\test_no_owner_identity_in_product.py ..                            [ 66%]
+tests\test_no_pypi_kazma.py ............................................ [ 71%]
+.......                                                                  [ 72%]
+tests\test_no_repeated_dict_keys.py ...                                  [ 73%]
+tests\test_no_vendor_model_is_invented.py .......                        [ 74%]
+tests\test_node_context_scope.py ..                                      [ 74%]
+tests\test_offsite_fallback.py ..........                                [ 75%]
+tests\test_oidc.py ....................                                  [ 78%]
+tests\test_ops_alert_delivery.py ..................                      [ 80%]
+tests\test_ops_alerts.py ........................                        [ 83%]
+tests\test_order_independence.py ............                            [ 84%]
+tests\test_origin_scheduler.py .....................................     [ 89%]
+tests\test_orphan_modules.py ...                                         [ 89%]
+tests\test_outbound_attachment_policy.py ........                        [ 90%]
+tests\test_output_routing.py .........................                   [ 93%]
+tests\test_p123_remaining.py ............                                [ 95%]
+tests\test_p3_features.py .....                                          [ 95%]
+tests\test_pacing.py .................................                   [ 99%]
+tests\test_package_namespaces.py ..                                      [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 814 passed, 1 warning in 227.33s (0:03:47) ==================

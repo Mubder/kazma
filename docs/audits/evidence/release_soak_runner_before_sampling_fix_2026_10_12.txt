@@ -1,0 +1,122 @@
+"""Thirty-minute continuous browser ownership probe in one contained process."""
+import ast, json, os, subprocess, sys, tempfile, threading, time
+from pathlib import Path
+from kazma_core.security.process_budget import _start_process
+
+root = Path.cwd()
+base = root / '.git/worktrees/kazma'
+duration = 1800
+source = (base / 'remaining_browser_lifecycle.py').read_text(encoding='utf-8')
+source = source.replace('Four-minute bounded', 'Thirty-minute continuous bounded')
+source = source.replace('started<240', f'started<{duration}')
+source = source.replace('cycles<=100', 'cycles<=1000')
+source = source.replace("'pool':browser_capacity().snapshot()", "'owner_rss_bytes':psutil.Process().memory_info().rss,'owner_threads':psutil.Process().num_threads(),'pool':browser_capacity().snapshot()")
+# A classified cleanup deadline is observable failure evidence. Continue only
+# after independent ownership assertions prove successful forced cleanup.
+source = source.replace('from kazma_core.web_acquire.resources import browser_capacity',
+    'from kazma_core.web_acquire.resources import browser_capacity\nfrom kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode')
+source = source.replace('    cycles=0', '    cycles=0\n    controlled_cleanup_deadlines=0')
+source = source.replace('            observed=[]', '            observed=[]\n            cleanup_deadline=None')
+source = source.replace('                await owner._close_impl()', """                try:
+                    await owner._close_impl()
+                except AcquisitionError as exc:
+                    if exc.code != FetchErrorCode.LIMIT or str(exc) != 'Local browser graceful cleanup exceeded five seconds; its contained process tree was terminated and capacity released.':
+                        raise
+                    cleanup_deadline=exc""")
+source = source.replace('            assert owner._driver is owner._capacity_lease is None',
+    '            assert group is not None and group.closed\n            assert owner._driver is owner._capacity_lease is None\n            assert owner.context is owner.browser is owner.pw is owner._deny_server is None')
+source = source.replace('            cycles+=1', """            if cleanup_deadline is not None:
+                controlled_cleanup_deadlines+=1
+                print(json.dumps({'event':'controlled_cleanup_deadline','cycle':cycles+1,'error_code':str(cleanup_deadline.code),'reason':str(cleanup_deadline),'cleanup_verified':True}),flush=True)
+            cycles+=1""")
+source = source.replace('            for child in observed:', """            gone,alive=await asyncio.to_thread(psutil.wait_procs,observed,timeout=3)
+            assert not alive and len(gone)==len(observed),[(p.pid,p.name()) for p in alive]
+            for child in observed:""")
+source = source.replace("'profile':'bounded_browser_lifecycle'", "'controlled_cleanup_deadlines':controlled_cleanup_deadlines,'profile':'bounded_browser_lifecycle'")
+source = source.replace('scratch=Path(sys.argv[2])', """scratch=Path(sys.argv[2])
+from kazma_core.web_acquire import browser_driver as diagnostic_driver
+_original_terminate=diagnostic_driver._Transport._terminate
+def diagnostic_terminate(transport):
+    caught=[]
+    def trace(frame,event,arg):
+        if event=='exception' and frame.f_code.co_name=='_terminate':
+            kind,error,_=arg
+            caught.append({'type':kind.__name__,'reason':str(error),'line':frame.f_lineno})
+        return trace
+    sys.settrace(trace)
+    try:
+        return _original_terminate(transport)
+    finally:
+        sys.settrace(None)
+        if caught:
+            print(json.dumps({'event':'teardown_diagnostic','exceptions':caught,'tree_closed':transport.tree.closed,'driver_returncode':transport.proc.poll(),'pipe_threads_alive':[t.name for t in transport._threads if t.is_alive()]}),flush=True)
+diagnostic_driver._Transport._terminate=diagnostic_terminate""")
+probe = base / 'release_browser_soak.py'
+probe.write_text(source, encoding='utf-8')
+allowed = {'path','systemroot','windir','temp','tmp','userprofile','appdata','localappdata'}
+env = {k:v for k,v in os.environ.items() if k.lower() in allowed}
+env.update(OMP_NUM_THREADS='2', MKL_NUM_THREADS='2', OPENBLAS_NUM_THREADS='2', PYTHONIOENCODING='utf-8')
+
+def run(command, name):
+    started = time.monotonic()
+    proc, tree = _start_process(command, env=env, memory_bytes=3*1024**3, cpu_rate=2000)
+    buffers = [bytearray(), bytearray()]
+    overflow = threading.Event()
+    lock = threading.Lock()
+    def drain(stream, index):
+        while chunk := stream.read1(8192):
+            with lock:
+                if sum(map(len,buffers)) + len(chunk) > 128*1024:
+                    overflow.set()
+                    return
+                buffers[index].extend(chunk)
+            if index == 0:
+                print(chunk.decode('utf-8','replace'),end='',flush=True)
+    threads = [threading.Thread(target=drain,args=(stream,i),daemon=True)
+               for i,stream in enumerate((proc.stdout,proc.stderr))]
+    for thread in threads: thread.start()
+    proc.stdin.close()
+    code = 1
+    failure = None
+    try:
+        while proc.poll() is None:
+            if overflow.is_set(): raise RuntimeError('Soak output budget exceeded')
+            if time.monotonic()-started > duration+180: raise TimeoutError('Soak lifetime budget exceeded')
+            time.sleep(.25)
+        code = proc.returncode
+    except BaseException as exc:
+        failure = repr(exc)
+    finally:
+        tree.close()
+        proc.wait(timeout=5)
+        for thread in threads: thread.join(5)
+        for stream in (proc.stdout,proc.stderr): stream.close()
+    assert not any(thread.is_alive() for thread in threads), 'Soak output readers did not close'
+    output = buffers[0].decode('utf-8','replace')
+    errors = buffers[1].decode('utf-8','replace')
+    receipt = {'platform':name,'exit':code,'error':failure,'elapsed_s':round(time.monotonic()-started,1),
+               'memory_limit_bytes':3*1024**3,'cpu_rate':2000,'tree_closed':tree.closed}
+    log = json.dumps(receipt)+'\n'+output+'\n'+errors
+    (root / f'docs/audits/evidence/release_{name}_soak_2026_10_12.log').write_text(log,encoding='utf-8')
+    print(log,flush=True)
+    if failure or overflow.is_set(): raise RuntimeError(failure or 'output overflow')
+    return code
+
+if '--linux' in sys.argv:
+    parsed = ast.parse((root/'docs/audits/evidence/browser_linux_harness_2026_10_11.py').read_text(encoding='utf-8'))
+    script = next(ast.literal_eval(n.value) for n in parsed.body if isinstance(n,ast.Assign)
+                  and any(isinstance(t,ast.Name) and t.id=='ROOT_PROBE' for t in n.targets))
+    script = script.replace('timeout=100', f'timeout={duration+90}')
+    def linux(path): return '/mnt/'+path.drive[0].lower()+path.as_posix()[2:]
+    command = ['wsl.exe','-d','Ubuntu','-u','root','--exec','/usr/bin/timeout','-k','2',str(duration+120),
+               '/usr/bin/python3','-I','-c',script,
+               '/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84',
+               linux(probe),linux(root/'kazma-core')]
+    raise SystemExit(run(command,'linux'))
+else:
+    with tempfile.TemporaryDirectory(prefix='kazma-release-soak-',ignore_cleanup_errors=True) as temporary:
+        scratch = Path(temporary)
+        env.update(KAZMA_DATA_DIR=str(scratch/'data'),KAZMA_USER_HOME=str(scratch/'home'),
+                   KAZMA_SKILLS_HOME=str(scratch/'skills'),KAZMA_BROWSER_NETWORK_MODE='compatibility')
+        program = 'import psutil,runpy,sys;psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS);sys.argv='+repr([str(probe),str(root/'kazma-core'),str(scratch)])+';runpy.run_path(sys.argv[0],run_name="__main__")'
+        raise SystemExit(run([sys.executable,'-I','-X','utf8','-c',program],'windows'))

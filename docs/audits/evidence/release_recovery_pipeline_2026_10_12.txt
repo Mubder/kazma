@@ -1,0 +1,59 @@
+"""Continue serial release qualification after the active E2E owner exits."""
+import json,os,subprocess,sys,threading,time
+from pathlib import Path
+import psutil
+from scripts import fast_test,generate_metrics
+
+root=Path.cwd(); base=root/'.git/worktrees/kazma'; folder=root/'docs/audits/evidence'
+status=base/'release_completion_status.json'
+expected=generate_metrics.collection_fingerprint()
+meta={'status':'waiting_for_e2e','owner_pid':os.getpid(),'input_sha256':expected,'stages':[]}
+def save(): status.write_text(json.dumps(meta,indent=2)+'\n',encoding='utf-8')
+save()
+probe=folder/'release_document_order_probe_2026_10_12.log'
+while not probe.exists(): time.sleep(2)
+from scripts.fast_test import _parse_summary
+counts=_parse_summary(probe.read_text(encoding='utf-8'))
+assert counts and not counts.get('failed') and not counts.get('error'), 'Diagnostic batch requires repair'
+for name,script,args,budget in [('full','release_full_recovered.py',[],6000),
+                                 ('windows_soak','release_soak_runner.py',[],2100),
+                                 ('linux_soak','release_soak_runner.py',['--linux'],2100),
+                                 ('public_http','release_local_http_smoke.py',[],120),
+                                 ('acceptance','release_verify_receipts.py',[],120)]:
+    assert generate_metrics.collection_fingerprint()==expected
+    while psutil.virtual_memory().available < 8*1024**3:
+        print('Waiting for 8 GiB free memory before '+name,flush=True)
+        time.sleep(30)
+    meta['status']=name;save();print('RELEASE STAGE '+name,flush=True)
+    proc,tree=fast_test._start([sys.executable,str(base/script),*args],fast_test.pytest_env())
+    output=[];limit=512*1024;total=[0];overflow=threading.Event();lock=threading.Lock()
+    def drain(stream):
+        for line in iter(stream.readline,''):
+            with lock:
+                total[0]+=len(line.encode('utf-8'))
+                if total[0]>limit:
+                    overflow.set();return
+                output.append(line)
+            print(line,end='',flush=True)
+    readers=[threading.Thread(target=drain,args=(stream,),daemon=True) for stream in (proc.stdout,proc.stderr)]
+    for reader in readers: reader.start()
+    started=time.monotonic()
+    try:
+        while proc.poll() is None:
+            if overflow.is_set(): raise RuntimeError('Release output budget exceeded')
+            if time.monotonic()-started>budget: raise TimeoutError('Release stage deadline exceeded: '+name)
+            time.sleep(.5)
+        code=proc.returncode
+    finally:
+        tree.close()
+        proc.wait(timeout=5)
+        for reader in readers: reader.join(5)
+        for stream in (proc.stdout,proc.stderr): stream.close()
+    assert not any(reader.is_alive() for reader in readers)
+    (folder/f'release_pipeline_{name}_2026_10_12.log').write_text(''.join(output),encoding='utf-8')
+    row={'stage':name,'exit':code,'elapsed_s':round(time.monotonic()-started,1)}
+    meta['stages'].append(row);save();print(json.dumps(row),flush=True)
+    if code:
+        meta['status']='failed';save();raise SystemExit(code)
+    assert generate_metrics.collection_fingerprint()==expected
+meta['status']='complete';save();print('RELEASE QUALIFICATION COMPLETE',flush=True)

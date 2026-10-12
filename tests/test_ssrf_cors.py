@@ -9,7 +9,7 @@ SSRF tests cover:
   - Public IPs / hostnames are allowed
 
 CORS tests cover:
-  - Default origins allow localhost:8000 and 127.0.0.1:8000
+  - Default origins refuse localhost:8000 and 127.0.0.1:8000
   - Arbitrary origins are NOT reflected in Access-Control-Allow-Origin
   - KAZMA_CORS_ORIGINS env var overrides defaults
   - Preflight (OPTIONS) requests receive correct CORS headers
@@ -300,21 +300,29 @@ class TestReadUrlSSRFIntegration:
 
     @pytest.mark.asyncio
     async def test_read_url_allows_public(self):
-        """Public URLs must still work (fetch mocked)."""
+        """Public URLs work through the streaming client with peer evidence."""
+        import httpx
+        from types import SimpleNamespace
+        from kazma_core.tools.read_url import read_url, clear_url_cache
+
         html = "<html><body><p>Hello</p></body></html>"
-        mock_response = MagicMock()
-        mock_response.text = html
-        mock_response.raise_for_status = MagicMock()
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            from kazma_core.tools.read_url import read_url
-
-            result = await read_url("https://example.com")
+        def respond(request):
+            peer = SimpleNamespace(get_extra_info=lambda name: ("93.184.216.34", 443))
+            return httpx.Response(200, text=html, headers={"content-type": "text/html"},
+                                  extensions={"network_stream": peer})
+        def client(**kwargs):
+            assert kwargs["pin_hosts"] == {"example.com": "93.184.216.34"}
+            return httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        clear_url_cache()
+        with (
+            patch("kazma_core.security.ssrf.validate_url", return_value=("93.184.216.34",)),
+            patch("kazma_core.proxy.client.get_active_proxy_url", return_value=None),
+            patch("kazma_core.proxy.client.get_scraping_client", side_effect=client),
+        ):
+            try:
+                result = await read_url("https://example.com")
+            finally:
+                clear_url_cache()
 
         assert "Hello" in result
 
@@ -379,6 +387,16 @@ class TestVisionAnalyzeSSRFIntegration:
 
 class TestCORSMiddleware:
     """CORS headers must only be present for allowed origins."""
+
+    @pytest.fixture(autouse=True)
+    def _no_external_runtime_bootstrap(self, monkeypatch):
+        # Exercise real middleware/lifespan without model downloads or the
+        # shipped npx filesystem-server bootstrap, neither of which is CORS.
+        from kazma_core.agent_runner import KazmaAgent
+        from kazma_core.memory import embedder
+
+        monkeypatch.setattr(embedder, 'get_embedder', lambda: None)
+        monkeypatch.setattr(KazmaAgent, 'get_mcp_servers_config', lambda self: [])
 
     def test_default_origins_do_not_trust_localhost_development_ports(self):
         """Another local service is not implicitly a credentialed client."""

@@ -1,0 +1,57 @@
+[
+  {
+    "module": "kazma_core.web_acquire.parser",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.browser",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.browser_driver",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.browser_network",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.accounting",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.discovery_metadata",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.endpoint_transport",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.links",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.stores.knowledge_ingest",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.settings_restore",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_gateway.agent_handler.commands",
+    "exit": 0,
+    "detail": ""
+  }
+]

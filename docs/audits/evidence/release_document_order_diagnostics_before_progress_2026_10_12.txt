@@ -1,0 +1,29 @@
+import dataclasses,json,time,uuid
+from pathlib import Path
+import pytest
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    if not item.path.name.startswith("test_document"):
+        yield
+        return
+    from kazma_core.documents import service
+    original=service.run_isolated_subprocess
+    def inspect(request):
+        stamp=Path.cwd()/".git/worktrees/kazma"/("parser_stack_"+uuid.uuid4().hex+".log")
+        command=list(request.command)
+        if "-c" in command:
+            i=command.index("-c")+1
+            command[i]="import faulthandler;_fh=open("+repr(str(stamp))+",'w');faulthandler.dump_traceback_later(10,repeat=True,file=_fh);"+command[i]
+        print("PARSER_START "+json.dumps({"test":item.nodeid,"stack":stamp.name,"timeout":request.timeout_seconds}),flush=True)
+        start=time.monotonic()
+        (Path.cwd()/".git/worktrees/kazma/release_parser_current.json").write_text(json.dumps({"test":item.nodeid,"stack":str(stamp),"started":time.time()}),encoding="utf-8")
+        try:
+            result=original(dataclasses.replace(request,command=tuple(command)))
+            print("PARSER_END "+json.dumps({"test":item.nodeid,"seconds":round(time.monotonic()-start,3),"timed_out":result.timed_out,"exit":result.returncode,"stderr":result.stderr.decode('utf-8','replace')[:4000]}),flush=True)
+            return result
+        finally:
+            if stamp.exists() and stamp.stat().st_size==0: stamp.unlink()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(service,"run_isolated_subprocess",inspect)
+        yield

@@ -1,0 +1,27 @@
+import ast,hashlib,json,os,stat,subprocess,sys,tempfile,time
+from pathlib import Path
+from types import SimpleNamespace
+class Error(Exception): pass
+core=Path(sys.argv[1]);old=Path(sys.argv[2])
+def owner(source,root):
+    tree=ast.parse(source.read_text(encoding='utf-8'))
+    cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='_PipelineJob')
+    cls.body=[n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in {'__init__','checked','file_ref','restore','_read_artifact'}]
+    space=dict(Path=Path,hashlib=hashlib,json=json,os=os,stat=stat,_MAX_FILE=24*1024**2,_MAX_VALUE=512*1024,AcquisitionError=Error,FetchErrorCode=SimpleNamespace(STORAGE='storage',LIMIT='limit',WORKSPACE='workspace'))
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[cls],type_ignores=[])),str(source),'exec'),space)
+    return space['_PipelineJob'](None,root,root,'fixture')
+if len(sys.argv)>3:
+    root=Path(sys.argv[3]);owner(old,root).file_ref(root/'pipe');sys.exit(99)
+with tempfile.TemporaryDirectory(prefix='kazma-fifo-') as temp:
+    root=Path(temp);os.mkfifo(root/'pipe')
+    try:
+        subprocess.run([sys.executable,'-I',__file__,str(core),str(old),str(root)],timeout=1,capture_output=True)
+    except subprocess.TimeoutExpired:
+        print('negative_control_old_fifo_read_blocks=true',flush=True)
+    else: raise AssertionError('Old FIFO witness did not block')
+    start=time.monotonic()
+    try: owner(core/'kazma_core/web_acquire/research_pipeline_job.py',root).file_ref(root/'pipe')
+    except Error: pass
+    else: raise AssertionError('Nonregular file accepted')
+    assert time.monotonic()-start<1
+    print('fixed_fifo_read_refused_without_blocking=true',flush=True)

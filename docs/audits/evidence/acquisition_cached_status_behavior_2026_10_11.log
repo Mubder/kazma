@@ -1,0 +1,22 @@
+..............FF.................................                        [100%]
+================================== FAILURES ===================================
+________ test_real_terminal_widget_reads_cached_usage_and_relabels[en] ________
+tests\test_acquisition_operations.py:189: in test_real_terminal_widget_reads_cached_usage_and_relabels
+    assert not panel.query_one('#acquisition-result', Static).markup
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'Static' object has no attribute 'markup'
+________ test_real_terminal_widget_reads_cached_usage_and_relabels[ar] ________
+tests\test_acquisition_operations.py:189: in test_real_terminal_widget_reads_cached_usage_and_relabels
+    assert not panel.query_one('#acquisition-result', Static).markup
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'Static' object has no attribute 'markup'
+============================== warnings summary ===============================
+tests/test_acquisition_operations.py::test_cached_readiness_does_not_probe_even_with_legacy_live_environment[api]
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_acquisition_operations.py::test_real_terminal_widget_reads_cached_usage_and_relabels[en]
+FAILED tests/test_acquisition_operations.py::test_real_terminal_widget_reads_cached_usage_and_relabels[ar]
+2 failed, 47 passed, 1 warning in 28.15s

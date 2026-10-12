@@ -1838,6 +1838,11 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
         "list_research_chunks": True,
         # Writes to disk and returns OUR path/byte-count receipt, not the body.
         "read_url_to_file": False,
+        # Internal typed service APIs, not registered agent tools. They retain
+        # raw content for extraction/storage; read_url/chunk tools fence it
+        # when it crosses the model boundary.
+        "fetch_result": False,
+        "save_url_extract": False,
     },
     "kazma-skills/kazma_skills/native/email_manager/tools.py": {
         # The owner's own account list: names they chose, addresses their
@@ -1923,6 +1928,7 @@ SECURITY_ENV_MARKERS = (
 #: kill-switch among them. A switch is here when some value of it turns a
 #: protection off or widens who or what is trusted.
 SECURITY_ENV_NAMES = (
+    "KAZMA_ACQUISITION_MODE", "KAZMA_ACQUISITION_REMOTE_PROVIDERS",
     "KAZMA_WS_ORIGIN_CHECK", "KAZMA_WS_EXTRA_ORIGINS", "KAZMA_OPAQUE_SESSIONS",
     "KAZMA_RATE_LIMIT_ENABLED", "KAZMA_TENANT_FILTER", "KAZMA_SESSION_OPEN_TAKEOVER",
     "KAZMA_MCP_INHERIT_ENV", "KAZMA_ALLOW_PRIVATE_LLM",

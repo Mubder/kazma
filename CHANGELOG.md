@@ -1,5 +1,191 @@
 # CHANGELOG
 
+## Web acquisition safety foundation (2026-10-10 through 2026-10-12)
+
+The entries below retain implementation-time findings. Later work supersedes
+some outstanding items recorded in earlier entries. Current release results and
+limits are in `docs/audits/WEB_ACQUISITION_IMPLEMENTATION_2026-10-10.md` and
+`docs/KNOWN_GAPS.md`; historical test failures remain preserved.
+
+- Supported-route release qualification (2026-10-12): complete serial campaign
+  coverage with documented recovery (14,447 unit passes/63 skips, 84 fresh browser
+  E2E passes), a continuous strict Linux browser profile (30 minutes, 522 cycles,
+  1,044 local pages, no cleanup deadlines), real Windows strict refusal and a
+  public HTTPX extraction with robots enforcement and zero hosted attempts.
+  Windows compatibility endurance failed and remains unqualified; unknown
+  third-party charges and earlier timing failures stay explicit in the report.
+  Final documentation/policy gates passed (87 checks); guarded rollout is pending.
+
+- Durable deep-research stages (2026-10-11): journal ownership before planning,
+  search, acquisition, synthesis and publication using the shared crawl CAS store.
+  Return a job ID for explicit resume with matching scope and verified artifact
+  hashes. Preserve uncertain source effects with a visible partial report; refuse
+  failed/uncertain required-stage replay. Commit acquisition evidence before file
+  publication and expose stage uncertainty in cached status. Background session
+  reconciliation, retention, in-flight model scope and full qualification remain open.
+
+- Research cancellation truth (2026-10-11): show `cancelling` until owned pipeline
+  workers finish; retain rows/subscribers during cleanup and refuse active deletion
+  with typed HTTP 409. Transactional updates prevent stale progress from undoing
+  cancellation or terminal results. Pre-start cancellation keeps its capacity lease
+  through terminal persistence. English/Arabic UI waits for the terminal receipt
+  and reconnects to cancelling sessions. Pipeline restart recovery remains open.
+  A PC reboot interrupted the latest full test run; it has no measured result.
+  The owner subsequently authorized full qualification; its later receipts are
+  recorded in the implementation report.
+
+- Cached acquisition operations (2026-10-11): add `kazma acquisition status`
+  and an explicit TUI Settings read, with English/Arabic saved job errors,
+  reported usage, request reservations and credit freshness. Cached readiness
+  ignores the legacy live-probe environment flag and runs in a read-only
+  diagnostic scope. Explicit live search remains available. Hide configured
+  search URL credentials and retain one TUI worker through cancellation cleanup.
+  Full-test recovery now counts a timed-out chunk's recovered files once while
+  preserving its observed failures. A fresh complete qualification run is required.
+- Research publication budget (2026-10-11): reserve remaining source slots before
+  concurrent acquisitions so actual files obey `max_sources`. Replace failed
+  candidates within that budget, keep filenames unique across gap fills, and
+  atomically persist every batch's source receipts. Stop on receipt storage or
+  preflight failure before further acquisition. Cached readiness exposes earlier
+  jobs' reported usage after switching back to local-only; unknown charges remain
+  unknown. Durable pipeline restart recovery remains open.
+- Research execution admission (2026-10-11): bound direct pipelines and background
+  sessions before planning/creation, freeze workspace and acquisition/robots
+  policy, and keep leases until actual work ends. Report saturated starts as typed
+  503 errors. Add a cooperative 30-minute pipeline deadline, unique report folders,
+  joined preflight/store/path/scoring/publication workers and workspace-pinned
+  standalone saves. Pipeline restart recovery and native filesystem deadlines
+  remain open.
+- Durable research crawling (2026-10-11): `crawl_site` owns page effects in the
+  shared bounded journal before fetching or publishing. Explicit `resume_job_id`
+  requires identical workspace/options/policy and continues pending pages;
+  completed and uncertain effects are preserved. Commit receipts before saves,
+  settle summaries/frontier atomically and join cancellation through publication
+  and terminal commits. Report capped/uncertain coverage as partial. Research
+  jobs stay out of KB operations; readiness inspects both kinds. Research
+  pipelines, durable scheduling and full release qualification remain open.
+- Provider usage and research bounds follow-up (2026-10-11): retain Jina's reported
+  response tokens before body consumption, including zero, failure and cancellation.
+  Cache reads make no new usage; charges and unsupported balances remain unknown.
+  Bound/deduplicate research frontiers, preserve DNS failure types, refuse automatic
+  partial publication and pin saves to the starting workspace. Test-runner isolation
+  now refuses unmeasured exits that previously disappeared from totals.
+- Bounded subprocess cancellation (2026-10-11): join the actual worker's native
+  process/pipe cleanup before acknowledging cancellation, including repeated
+  cancellation. A real-child regression holds cleanup open and demonstrates the
+  original early-return defect. Production execution/resource limits are unchanged.
+- Recovery qualification follow-up (2026-10-11): Settings backup/restore keeps
+  spent allowances and crawl effects in place. A failed browser finalizer runs
+  once and retains its watchdog until native cleanup; failed Playwright
+  handshakes are joined and observed. Sitemap XML uses the owned parser child,
+  with entity refusal and explicit frontier limits. Repository qualification
+  remains in progress; targeted checks do not establish release readiness.
+- Durable recovery and remote allowances (2026-10-11): reserve finite job/day
+  requests in the existing settings backend before proxy/Jina/Firecrawl effects.
+  Failed and uncertain requests retain reservations. KB admission owns its job
+  before the API reports acceptance; page, BFS and metadata receipts survive
+  interruption without replaying uncertain effects. Preserve `.md`, slash,
+  matrix-parameter and query identity. Bound retained jobs/frontiers/ledger data.
+  Research-pipeline durability and durable origin/robots scheduling remain open.
+- Credit visibility (2026-10-11): add an explicit metered Firecrawl team-balance
+  refresh, account identity and five-minute freshness. Ordinary status reads use
+  cached evidence. Unsupported balances and per-request charges stay unknown.
+  Web recovery/allowances/credits render in English and Arabic; chat `/kb status`
+  reports retained evidence. Financial spend caps and remaining operations
+  surfaces are still required work.
+- Resolver/parser/search containment follow-up (2026-10-11): use owned resolver
+  children for async and sync proxy endpoints and hosted async transport, keeping
+  CONNECT authority and verified TLS SNI. Isolate HTML/sitemap XML extraction and fixed HTTP
+  search in bounded children; refuse opaque DDGS proxy requests before dispatch.
+  Native browser automation and legacy synchronous validation remain
+  outside the complete boundary.
+- Fix settings raw-read locking (2026-10-11): hold the existing ConfigStore lock
+  through the live SQLite statement in `_stored_raw`, including secret/dict
+  preparation before a batch. Concurrent crawl/accounting first writers exposed
+  an unprotected native-handle race. A traced-statement negative control protects
+  the fix; SQLite processes and distinct PostgreSQL connections qualify CAS.
+- Acquisition target DNS (2026-10-11): move public-target and redirect validation
+  to bounded credential-free resolver children, preserving all-address SSRF
+  checks. Bound admission, memory, output and runtime; join process/pipes and
+  validator threads on cancellation. Retain uncertain cleanup, quarantine its
+  capacity visibly and retry cleanup on later validation. Windows process and
+  Linux kernel probes cover this boundary. See the containment follow-up above
+  for endpoint DNS, HTML parsing and HTTP search; broader qualification remains open.
+- Browser process limits (2026-10-11): contain the owned Playwright driver and
+  Chromium before launch, with aggregate memory/CPU/process budgets, bounded
+  protocol traffic, a hard owner lifetime and parent-death termination. Force
+  hung browser cleanup after five seconds; verify descendants ended before
+  releasing capacity. Linux requires a delegated cgroup v2 and refuses an
+  unrestricted launch. Overall Python HTTP/XML cleanup and install storage,
+  OS network isolation and native browser migration remain open.
+- Robots follow-up (2026-10-11): default automated crawl/KB/research saves to
+  bounded raw KazmaBot checks before content, redirects, browser assets and
+  cache reuse. Missing 404/410 differs from failed/malformed checks, which
+  refuse crawling. Show explicit opt-out and metadata/proxy receipts; separate
+  manual/crawler caches and preserve job policy across KB progress updates.
+  Conservatively refuse cross-origin robots redirects and hosted navigation
+  without per-request enforcement. Full conformance/durable policy qualification
+  remains open.
+- Origin scheduling follow-up (2026-10-11): share HTTPX/Chromium/hosted origin
+  admission and cooldowns across jobs, with bounded queues/table and crawl
+  spacing. Honor complete Retry-After integer/date values, including redirected
+  requests; never shorten Firecrawl's server delay to 20 seconds. Refuse pending
+  requests visibly with `origin_throttled`. Durable scheduling, sync search and
+  native-browser integration remain open.
+- Proxy safety follow-up (2026-10-11): resolve a coherent live config snapshot;
+  refuse broken selected routes with `proxy_routing_error` instead of direct
+  fallback. Bound Settings proxy probes and honor local-only policy. Run DDGS
+  in an isolated, resource-bounded child so ambient proxy variables cannot
+  replace the selected route. Search cancellation joins the child and prevents
+  further backends. See the allowance/credit follow-up above; observed charges
+  and financial spend caps remain open.
+
+- Bound process-wide acquisition/browser admission across threads and event
+  loops, with FIFO queues, 30-second admission waits and reserved capacity for
+  crawlers holding browsers. Report saturation before dispatch. Join browser
+  finalizers on cancellation/timeout and quarantine incomplete teardown in
+  readiness. See the browser process follow-up above for hard OS boundaries;
+  whole-install job/storage and non-browser worker limits remain outstanding.
+- Broker Chromium HTTP at the CDP request boundary: validate each redirect hop,
+  preserve relative assets/cookies, check the live peer, and bound request and
+  decoded-byte fanout. Deny native fallback through a job-owned local proxy.
+  The old route guard did not cover all HTTP redirects; native browser-tool
+  migration and OS-level containment remain required audit work.
+- Use one scoped acquisition path for KB text and links. Preserve hidden code,
+  tables and supported lazy tab panels; refuse partial/error JSON indexing.
+  Keep query-dependent pages distinct and refuse hosted discovery without
+  enforceable scope. Separate article, discovery and knowledge cache profiles.
+- Return typed acquisition outcomes to chat, research and KB: actual backend,
+  final URL/status, attempts, observed bytes, limits and quality. Literal page
+  text beginning `Error:` remains content. Hosted origin provenance and credits
+  stay explicitly unknown when unsupported. Failed chat reads and crawl indexes
+  show attempt/service receipts; research retains evidence in `sources.json`.
+- Extract crawl links from the same acquired document as its text. Refuse
+  clipped JSON, partial automatic research saves and partial KB indexing.
+  Mark explicit partial saves. Reject observed login screens without remote
+  recovery; escaped examples and ordinary login links remain usable content.
+- Stream hosted scrape responses through the bounded gzip/deflate decoder,
+  refuse clipped service payloads, and cap operator body limits at 20MB.
+- Preserve retained Knowledge pages during incomplete or sparse refreshes;
+  discovery absence no longer authorizes deletion. Report all-page failures as
+  failures and retain their reasons. Join discovery work when a job is cancelled.
+- Validate actual GET redirect chains, pin each direct hop, and check connected
+  peer evidence before reading bodies. Bound gzip/deflate allocation as well as
+  response size; reject missing pins, target credentials and unsupported encodings.
+- Pin sockets without merging TLS connection pools for different hostnames
+  sharing an IP. Retain connection-specific pin evidence across keep-alive reuse.
+- Publish saved extracts atomically without overwriting existing files. Show
+  per-page storage/network failures in research crawl indexes.
+- Enforce research domain scope during the content fetch and top-level browser
+  navigation. Refuse cached/hosted content without enforceable redirect provenance.
+- Give KB jobs their own lazily launched browser contexts, block service workers,
+  retain Chromium's sandbox, and cancel browser work across the Windows loop bridge.
+- Default acquisition to local-only. HTTP and local Chromium precede hosted
+  recovery; remote services/proxies require explicit mode and provider allowlist.
+  Add a whole-ladder deadline and honest readiness fields for unavailable usage
+  and credit accounting. Durable budgets/usage UI, crawl resume, origin scheduling,
+  durable robots policy and full browser network isolation remain open audit work.
+
 ## Finalized gateway replies and documentation sync (2026-10-10)
 
 - Deliver the shared graph's final answer without adding cultural greetings or

@@ -1,0 +1,9 @@
+{"observed_unix": 1791776667.2023787, "elapsed_s": 699.2, "available_bytes": 36538224640, "owned_rss_bytes": 2925031424, "owned_processes": 3, "owned_cpu_s": 456.625}
+{"observed_unix": 1791777128.9767394, "elapsed_s": 1161.0, "available_bytes": 34815782912, "owned_rss_bytes": 1021276160, "owned_processes": 3, "owned_cpu_s": 566.890625}
+{"observed_unix": 1791777397.681852, "elapsed_s": 1429.7, "available_bytes": 34938662912, "owned_rss_bytes": 2278113280, "owned_processes": 7, "owned_cpu_s": 655.265625}
+{"observed_unix": 1791777720.2945757, "elapsed_s": 1752.3, "available_bytes": 36076244992, "owned_rss_bytes": 1798500352, "owned_processes": 3, "owned_cpu_s": 751.671875}
+{"observed_unix": 1791777958.5229645, "elapsed_s": 1990.6, "available_bytes": 34646642688, "owned_rss_bytes": 2912940032, "owned_processes": 3, "owned_cpu_s": 911.328125}
+{"observed_unix": 1791778143.2748747, "elapsed_s": 2175.3, "available_bytes": 34775371776, "owned_rss_bytes": 2475872256, "owned_processes": 3, "owned_cpu_s": 992.796875}
+{"observed_unix": 1791778510.9793715, "elapsed_s": 2543.0, "available_bytes": 34971394048, "owned_rss_bytes": 2840653824, "owned_processes": 3, "owned_cpu_s": 1276.765625}
+{"observed_unix": 1791778747.4010444, "elapsed_s": 2779.4, "available_bytes": 34427822080, "owned_rss_bytes": 2059988992, "owned_processes": 3, "owned_cpu_s": 1463.5}
+{"observed_unix": 1791779152.3268704, "elapsed_s": 3184.4, "available_bytes": 34402963456, "owned_rss_bytes": 2960756736, "owned_processes": 3, "owned_cpu_s": 1797.25}

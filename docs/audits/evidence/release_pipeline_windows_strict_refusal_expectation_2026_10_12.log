@@ -1,0 +1,48 @@
+Traceback (most recent call last):
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_windows_strict_refusal.py", line 14, in verify
+    try:await owner._start_impl()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser.py", line 104, in _start_impl
+    await self._launch_impl()
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser.py", line 119, in _launch_impl
+    self.pw = await self._driver.start()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser_driver.py", line 275, in start
+    raise self.task.exception()
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 312, in run
+    await self._transport.connect()
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser_driver.py", line 90, in connect
+    self.proc, self.tree = await asyncio.shield(self.launch)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser_driver.py", line 46, in _start_driver
+    command = network_command([*compute_driver_executable(), 'run-driver'])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser_isolation.py", line 18, in network_command
+    raise AcquisitionError(FetchErrorCode.UNAVAILABLE, 'Strict local browser rendering requires OS network isolation. This host has no qualified implementation; launch refused. HTTP extraction remains available. KAZMA_BROWSER_NETWORK_MODE=compatibility is an explicit weaker operator mode.')
+kazma_core.web_acquire.result.AcquisitionError: Strict local browser rendering requires OS network isolation. This host has no qualified implementation; launch refused. HTTP extraction remains available. KAZMA_BROWSER_NETWORK_MODE=compatibility is an explicit weaker operator mode.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_windows_strict_refusal.py", line 24, in <module>
+    reason=asyncio.run(verify())
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_windows_strict_refusal.py", line 17, in verify
+    assert 'strict' in str(error).lower() and 'windows' in str(error).lower()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

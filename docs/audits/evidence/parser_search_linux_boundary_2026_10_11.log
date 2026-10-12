@@ -1,0 +1,47 @@
+{
+  "platform": "linux",
+  "python": "3.14.4",
+  "passed": 10,
+  "receipts": [
+    {
+      "probe": "actual_arabic_knowledge_parser",
+      "passed": true
+    },
+    {
+      "probe": "parser_independent_kernel_deadline",
+      "passed": true
+    },
+    {
+      "probe": "actual_owned_xml_parser",
+      "passed": true
+    },
+    {
+      "probe": "xml_entity_refused",
+      "passed": true
+    },
+    {
+      "probe": "xml_independent_kernel_deadline",
+      "passed": true
+    },
+    {
+      "probe": "actual_bing_http_parser",
+      "passed": true
+    },
+    {
+      "probe": "search_native_dns_kernel_deadline",
+      "passed": true
+    },
+    {
+      "probe": "search_wire_budget",
+      "passed": true
+    },
+    {
+      "probe": "sdk_independent_kernel_deadline",
+      "passed": true
+    },
+    {
+      "probe": "search_repeated_cancel_joins_real_child",
+      "passed": true
+    }
+  ]
+}

@@ -1,0 +1,290 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 180.0s
+timeout method: thread
+timeout func_only: False
+collected 1 item
+
+tests\e2e\test_pages_read_in_arabic.py F                                 [100%]
+
+================================== FAILURES ===================================
+____________________ test_research_results_read_in_arabic _____________________
+tests\e2e\test_pages_read_in_arabic.py:269: in test_research_results_read_in_arabic
+    pg.wait_for_function(
+G:\GitHubRepos\kazma\.git\worktrees\kazma\remaining_arabic_diagnostics.py:19: in wait
+    try:return original_wait(page,*a,**k)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\sync_api\_generated.py:12594: in wait_for_function
+    self._sync(
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_page.py:1144: in wait_for_function
+    return await self._main_frame.wait_for_function(**locals_to_params(locals()))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_frame.py:932: in wait_for_function
+    await self._channel.send("waitForFunction", self._timeout, params)
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py:69: in send
+    return await self._connection.wrap_api_call(
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py:563: in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E   playwright._impl._errors.TimeoutError: Page.wait_for_function: Timeout 30000ms exceeded.
+---------------------------- Captured stdout setup ----------------------------
+08:17:41 INFO kazma_core.logging_config: Logging initialised: level=INFO file=C:\Users\balfa\AppData\Local\Temp\kazma-test-log-jbh8bs2l\kazma.log rotation=daily retention=7d
+08:17:41 INFO kazma_ui.app: [env] No .env file found on the ladder
+08:17:41 INFO kazma_ui.app: [startup] Process priority kept as started (CPU below normal, memory 2, I/O 2): KAZMA_PROCESS_PRIORITY=keep
+08:17:41 INFO kazma_core.config_store: Batch set: 1 keys updated atomically
+08:17:41 INFO kazma_core.config_store: [ConfigStore] Reconciling 96 new keys from merged YAML into SQLite
+08:17:41 INFO kazma_core.config_store: Batch set: 96 keys updated atomically
+08:17:41 INFO kazma_core.config_store: Setting updated: workspace.selected_path = 'C:\\Users\\balfa\\AppData\\Local\\Temp\\tmp0kyl71f6' (category=workspace)
+08:17:41 INFO kazma_core.config_store: [ConfigStore] Hot-reloaded configurations from new root: C:\Users\balfa\AppData\Local\Temp\tmp0kyl71f6
+08:17:41 INFO kazma_ui.app: [App] Aligned ConfigStore with active workspace root: C:\Users\balfa\AppData\Local\Temp\tmp0kyl71f6
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ollama
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: lm-studio
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: nvidia
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: mistral
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: together
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: cohere
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: fireworks
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: perplexity
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ai21
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: azure
+08:17:41 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: bedrock
+08:17:41 INFO kazma_core.config_store: Setting updated: providers.list = [{'name': 'custom', 'display_name': 'Unified turn harness', 'base_url': 'http... (category=providers)
+08:17:41 INFO kazma_core.memory.embedder: [Embedder] Using local: BAAI/bge-m3 (dim=1024)
+08:17:46 WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+08:17:53 INFO kazma_core.memory.embedder: [Embedder:local] Loaded BAAI/bge-m3
+08:17:53 INFO kazma_ui.app: [Memory] V2 embedder ready (LocalSentenceTransformerEmbedder, dim=1024, sample=1024)
+08:17:53 INFO kazma_core.llm_provider: LLMProvider initialized: base_url=http://127.0.0.1:1/v1 model=openai/harness-model
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: advanced_web_crawler
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: arabic_bilingual_nlp
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: browser_automation
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: calendar
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: chat_platform_dispatcher
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: code-review
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: code_analyzer_linter
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: database_client
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: document_generator
+08:17:53 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: document_platform
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: document_processor
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: email_manager
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: environment_bootstrapper
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: fix-lint
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: git_github_manager
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: refactor-file
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: secret_vault
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: system_health_monitor
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: task_scheduler_cron
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: visual_interpreter_generator
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: write-tests
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: x_publisher
+08:17:54 INFO kazma_core.agent.tool_builtins.external: Registered 161 built-in tools
+08:17:54 INFO kazma_core.agent.tool_builtins: Registered 161 built-in tools
+08:17:54 INFO kazma_core.tracing: Tracing backend: console (stdout logging only)
+08:17:54 INFO kazma_core.agent_runner: Memory system: using VectorMemory singleton (ChromaDB/FTS5)
+08:17:54 INFO kazma_core.agent_runner: ContextAuthority wired for V2 recall (memory_store deferred to V2)
+08:17:54 INFO kazma_core.cultural_context_enrichment: [Cultural] System prompt enriched: Ramadan=False Eid=False NationalDay=False
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: advanced_web_crawler
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: arabic_bilingual_nlp
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: browser_automation
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: calendar
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: chat_platform_dispatcher
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: code-review
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: code_analyzer_linter
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: database_client
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: document_generator
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: document_platform
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: document_processor
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: email_manager
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: environment_bootstrapper
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: fix-lint
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: git_github_manager
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: refactor-file
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: secret_vault
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: system_health_monitor
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: task_scheduler_cron
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: visual_interpreter_generator
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: write-tests
+08:17:54 INFO kazma_skills.native_loader: [NativeSkillLoader] Successfully loaded native skill: x_publisher
+08:17:54 INFO kazma_core.agent.tool_builtins.external: Registered 161 built-in tools
+08:17:54 INFO kazma_core.agent.tool_builtins: Registered 161 built-in tools
+08:17:54 INFO kazma_core.agent_runner: Kazma agent initialized: kazma v0.11.0+g9796e53 (model=openai/harness-model, url=http://127.0.0.1:1/v1)
+08:17:54 INFO kazma_core.workspace.binding: [WorkspaceBinding] root=C:\Users\balfa\AppData\Local\Temp\tmp0kyl71f6 reason=app_boot
+08:17:54 INFO kazma_ui.app: [Workspace] Configured to C:\Users\balfa\AppData\Local\Temp\tmp0kyl71f6
+08:17:54 INFO kazma_ui.app: [CORS] allow_origins=[]
+08:17:54 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) workspace_id to swarm_tasks
+08:17:54 INFO kazma_ui.app: [Swarm] SwarmManager initialized from C:\Users\balfa\AppData\Local\Temp\tmp0kyl71f6\kazma.yaml — 0 worker(s)
+08:17:54 INFO kazma_core.swarm.registry: [WorkerRegistry] No registry file at C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19685\test_research_results_read_in_0\test_swarm_registry.json — starting empty
+08:17:54 INFO kazma_ui.app: [Swarm] Restored paused tasks from TaskStore
+08:17:54 INFO kazma_gateway.chat_adapters: [Gateway] No Telegram token -- Telegram adapter not started
+08:17:54 INFO kazma_gateway.chat_adapters: [Gateway] Discord is switched off (connectors.discord.enabled) -- not started
+08:17:54 INFO kazma_gateway.chat_adapters: [Gateway] Slack is switched off (connectors.slack.enabled) -- not started
+08:17:54 INFO kazma_gateway.gateway: Suggestion manager registered
+08:17:54 INFO kazma_ui.app: [Gateway] Suggestions wired (enabled=True)
+08:17:54 INFO kazma_ui.app: [Gateway] Brain handler registered (live graph_getter)
+08:17:54 INFO kazma_ui.app: [SubAgent] Manager initialized (max_concurrent=3)
+08:17:54 INFO kazma_ui.app: [Cron] Scheduler initialized (graph_builder wired)
+08:17:54 INFO kazma_ui.app: [SaaS] multi-user / tenant API mounted at /api/saas
+08:17:54 INFO kazma_ui.app: Providers & Connectors router mounted at /api/providers, /api/connectors, /api/models/profiles
+08:17:54 INFO kazma_ui.app: SSE chat router mounted at /api/chat/stream
+08:17:54 INFO kazma_ui.app: WebSocket chat gateway router mounted at /ws/chat/{session_id}
+08:17:54 INFO kazma_ui.app: Chat upload router mounted at /api/chat/upload
+08:17:54 INFO kazma_ui.app: Voice API router mounted at /api/voice
+08:17:54 INFO kazma_ui.app: Voice streaming WebSocket mounted at /ws/voice
+08:17:54 INFO kazma_ui.app: Telemetry SSE router mounted at /api/telemetry/stream
+08:17:54 INFO kazma_ui.app: Models router mounted at /api/models, /api/ollama/*
+08:17:54 INFO kazma_ui.app: Workspace API router mounted at /api/workspace/*
+08:17:54 INFO kazma_ui.app: IDE API router mounted at /api/ide/*
+08:17:54 INFO kazma_core.config_store: Batch set: 2 keys updated atomically
+08:17:54 INFO kazma_ui.app: Knowledge Base API router mounted at /api/kb/*
+08:17:54 INFO kazma_ui.app: [Memory] Admin UI routes mounted at /memory
+08:17:54 INFO kazma_ui.app: Email API router mounted at /api/email/*
+08:17:54 INFO kazma_ui.app: Calendar API router mounted at /api/calendar/*
+08:17:54 INFO kazma_ui.app: X API router mounted at /api/x/*
+08:17:54 INFO kazma_ui.app: X auto-reply router mounted at /api/x/reply/*
+08:17:54 INFO kazma_ui.app: Scheduled router mounted at /scheduled, /api/scheduled/*
+08:17:54 INFO kazma_ui.app: [Documents] API router mounted at /api/documents/*
+08:17:54 INFO kazma_ui.app: [Replay] Time-travel API mounted at /api/replay/*
+08:17:54 INFO kazma_ui.app: [Research] API mounted at /api/research/*
+08:17:54 INFO kazma_ui.swarm_panel: [Swarm] SSE streaming router mounted at /api/swarm/tasks/{id}/stream
+08:17:54 INFO kazma_ui.app: [Swarm] Swarm Panel mounted at /api/swarm/*, /swarm
+08:17:54 INFO kazma_ui.app: [Gateway] Monitor router mounted at /api/gateway/*
+08:17:54 INFO kazma_ui.app: [Metrics] Prometheus /metrics endpoint mounted
+08:17:54 INFO kazma_ui.routes_direct.misc: [routes_direct] Workspace select/tree router mounted at /api/workspace/select, /api/workspace/tree
+08:17:54 INFO kazma_ui.routes_direct.misc: [routes_direct] Workspaces router mounted at /api/workspaces
+08:17:54 INFO kazma_ui.routes_direct.misc: [routes_direct] Git router mounted at /api/git/status
+08:17:54 INFO kazma_ui.routes_direct.misc: [routes_direct] GitHub router mounted at /api/github
+08:17:54 INFO kazma_ui.routes_direct.misc: [routes_direct] Bookmarks router mounted at /api/bookmarks
+08:17:54 INFO kazma_ui.routes_direct.misc: [routes_direct] Visual pipeline router mounted at /api/pipelines
+08:17:54 INFO kazma_ui.routes_direct.misc: [routes_direct] Commitment soul-confirm router mounted at /api/commitment
+08:17:54 INFO kazma_ui.routes_chaos: [routes_chaos] Chaos endpoints disabled (set KAZMA_CHAOS_ENABLED=true to enable)
+08:17:54 INFO kazma_core.config_store: Setting updated: system.lifecycle.last_boot_epoch = 1791782274.5259242 (category=internal)
+08:17:54 INFO kazma_ui.app: [Swarm] Maintenance loop started
+08:17:54 INFO kazma_ui.app: [app] Liveness heartbeat started
+08:17:54 INFO kazma_core.workspace.mcp_rebind: [MCP-Rebind] workspace rebind installed
+08:17:54 INFO kazma_core.mcp.manager: [MCP] Starting stdio server 'filesystem': ['npx', '-y', '@modelcontextprotocol/server-filesystem', 'C:\\Users\\balfa\\AppData\\Local\\Temp\\tmp0kyl71f6']
+08:17:55 INFO kazma_core.mcp.manager: [MCP] Connected to 'filesystem' (stdio, pid=19120, tools=14)
+08:17:55 INFO kazma_core.agent_runner: MCP server 'filesystem': 14 tools
+08:17:55 INFO kazma_ui.app: [App] Connected 14 MCP tool(s) from kazma.yaml
+08:17:55 INFO kazma_core.eventloop: [eventloop] running loop=ProactorEventLoop
+08:17:55 CRITICAL kazma_core.eventloop: [eventloop] Windows ProactorEventLoop is active. psycopg async (AsyncPostgresSaver) cannot connect on this loop, so LangGraph checkpoints fall back to SQLite. Start via `kazma serve` or `python -m kazma_ui` — not `python -m uvicorn` (uvicorn 0.36+ hardcodes Proactor on Windows).
+08:17:55 INFO kazma_core.mcp.reconnect: [MCP-reconnect] supervisor started (every 30s)
+08:17:55 INFO kazma_core.checkpoints_shared: [checkpoints_shared] shared AsyncSqliteSaver for C:\Users\balfa\AppData\Local\Temp\tmp0kyl71f6\checkpoints.db
+08:17:55 INFO kazma_gateway.stores.checkpoint: [Checkpoint] CheckpointManager initialized at C:\Users\balfa\AppData\Local\Temp\tmp0kyl71f6\checkpoints.db (per-thread locking)
+08:17:55 INFO kazma_ui.app: [Checkpoint] checkpointer initialized: AsyncSqliteSaver
+08:17:55 INFO kazma_ui.app: [App] Graph recompiled on model switch (model=openai/harness-model)
+08:17:55 INFO kazma_ui.app: [Checkpoint] Graph recompiled with checkpointer
+08:17:55 INFO kazma_ui.app: [HITL] Pending approvals endpoint linked to checkpointed graph
+08:17:55 INFO kazma_ui.app: [HITL] Approval-timeout watchdog started
+08:17:55 INFO kazma_ui.app: [Checkpoint] Brain handler re-registered with live graph_getter
+08:17:55 INFO kazma_gateway.gateway: Starting gateway with 0 adapter(s): []
+08:17:55 INFO kazma_gateway.gateway: Gateway started — bus active (maxsize=100)
+08:17:55 INFO kazma_ui.app: [Gateway] Started — adapters: [], queue maxsize=100
+warning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.
+08:17:57 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) tenant_id to knowledge_libraries
+08:17:57 INFO kazma_ui.hitl_timeout: [HITL-WD] Approval-timeout watchdog started
+08:17:57 INFO kazma_ui.turn_liveness: [turn-liveness] watchdog started (grace=600s, heal=False)
+08:17:57 INFO kazma_gateway.gateway: Message consumer started
+08:17:57 INFO kazma_core.documents.ingestion: [documents.ingestion] worker pool started concurrency=2
+08:17:57 INFO kazma_ui.app: [Documents] ingestion coordinator started
+08:17:57 INFO kazma_ui.app: [Documents] retention/GC maintenance loop scheduled
+08:17:57 INFO kazma_core.memory.worker_bootstrap: [memory_worker] V2 task handlers registered
+08:17:57 INFO kazma_core.memory.task_queue: [task_queue] worker started (concurrency=2)
+08:17:57 INFO kazma_core.memory.worker_bootstrap: [memory_worker] background schedulers not started (pytest); set KAZMA_TEST_BACKGROUND_SCHEDULERS=1 to override
+08:17:57 INFO kazma_ui.app: [Memory] V2 durable worker started
+08:17:57 INFO kazma_ui.app: [TimeTravel] snapshot maintenance loop scheduled (24h cadence)
+08:17:57 INFO kazma_ui.app: [Alerts] periodic health watchdog started (5m cadence)
+08:17:57 INFO kazma_core.observability.alerts: [alerts] periodic health watchdog started (every 300s)
+08:17:57 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) tenant_id, delivery_target to cron_jobs
+08:17:57 INFO kazma_core.cron.scheduler: [CronStore] Initialized at C:\Users\balfa\AppData\Local\Temp\tmp0kyl71f6\cron.db
+08:17:57 INFO kazma_core.cron.scheduler: [CronScheduler] Started (poll_interval=30s max_concurrent=4)
+08:17:57 INFO kazma_ui.app: [Cron] Scheduler started
+08:17:57 INFO kazma_core.x_api.scheduled_fire: [x-schedule] fire loop started (poll_interval=30s)
+08:17:57 INFO kazma_ui.app: [X] Scheduled-post fire loop started
+08:17:57 INFO kazma_ui.app: [X] Mentions poller not started (auto-reply off)
+08:17:57 INFO kazma_core.lifecycle_notifier: [LifecycleNotifier] Start card (Kazma started, success) sent to no route; adapters: 0, not connected: none
+08:17:57 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) operation_id, operation_version to x_scheduled_posts
+---------------------------- Captured stderr setup ----------------------------
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 391/391 [00:00<00:00, 86807.80it/s]
+----------------------------- Captured log setup ------------------------------
+WARNING  kazma_core.config_store:config_store.py:1541 [ConfigStore] Sensitive key llm.api_key stored in PLAINTEXT — no vault is configured. Set KAZMA_VAULT_KEY to encrypt secrets at rest (this warning logs once per process).
+WARNING  kazma_core.paths:paths.py:406 [paths] Dual Kazma homes detected: legacy=C:\Users\balfa\.kazma and project=C:\Users\balfa\AppData\Local\Temp\kazma-test-home-pfuejsm0. Runtime uses the project home only. Safe to archive/delete legacy after confirming hub/skills live under the project path. Clone dir ~/kazma-repos is separate (Switch Repo clones).
+---------------------------- Captured stdout call -----------------------------
+ARABIC_RESEARCH_DIAGNOSTIC {"events": [["response", 200, "http://127.0.0.1:13683/api/research/tasks?page=1&page_size=50&archived=false"], ["response", 200, "http://127.0.0.1:13683/api/research/sessions?limit=30"], ["response", 200, "http://127.0.0.1:13683/api/research/papers?limit=50"], ["response", 200, "http://127.0.0.1:13683/api/research/sessions/rs_de15fd8ff64440fb"], ["response", 404, "http://127.0.0.1:13683/api/research/papers/file?path=research%2Freports%2Fagentdojo.md"], ["response", 200, "http://127.0.0.1:13683/api/research/tasks?page=1&page_size=50&archived=true"], ["response", 200, "http://127.0.0.1:13683/api/research/sessions?limit=50&archived=true"], ["response", 200, "http://127.0.0.1:13683/api/research/tasks?page=1&page_size=50&archived=false"], ["response", 200, "http://127.0.0.1:13683/api/research/sessions?limit=30"], ["response", 200, "http://127.0.0.1:13683/api/research/papers?limit=50"], ["response", 200, "http://127.0.0.1:13683/api/research/tasks?page=1&page_size=50&archived=false"], ["response", 200, "http://127.0.0.1:13683/api/research/sessions?limit=30"], ["response", 200, "http://127.0.0.1:13683/api/research/papers?limit=50"]], "data_dir": "C:\\Users\\balfa\\AppData\\Local\\Temp\\tmp0kyl71f6", "db_path": "C:\\Users\\balfa\\AppData\\Local\\Temp\\tmp0kyl71f6\\research_sessions.db", "local_sessions": [["rs_cf6c349f61df4598", "done"], ["rs_db69909974b04144", "error"], ["rs_de15fd8ff64440fb", "done"]], "research_dom": "[\u0645\u062d\u0627\u062f\u062b\u0629] Latest LangGraph release notes\u062c\u0644\u0633\u0629 \u00b7 \u062a\u0645 \u00b7 \u0627\u0643\u062a\u0645\u0644 \u00b7 4 \u0645\u0635\u0627\u062f\u0631 \u00b7 \u0627\u0644\u062a\u0642\u064a\u064a\u0645 62 \u0631\u0627\u0633\u0628 \u00b7 \u0642\u0628\u0644 31 \u062b\u0627\u0646\u064a\u0629\u062a\u0645[\u0645\u062e\u062a\u0635\u0631] Kuwait AI adoption in 2026\u062c\u0644\u0633\u0629 \u00b7 \u062e\u0637\u0623 \u00b7 \u062c\u0644\u0628 \u0627\u0644\u0635\u0641\u062d\u0627\u062a \u00b7 \u0645\u0635\u062f\u0631\u0627\u0646 \u00b7 \u0642\u0628\u0644 31 \u062b\u0627\u0646\u064a\u0629\u062e\u0637\u0623[\u0639\u0645\u064a\u0642] What does the AgentDojo prompt-injection benchmark measure?\u062c\u0644\u0633\u0629 \u00b7 \u062a\u0645 \u00b7 \u062a\u0645 \u00b7 3 \u0645\u0635\u0627\u062f\u0631 \u00b7 \u0627\u0644\u062a\u0642\u064a\u064a\u0645 100 \u0646\u0627\u062c\u062d \u00b7 \u0642\u0628\u0644 31 \u062b\u0627\u0646\u064a\u0629\u062a\u0645MD", "browser_state": {"research": true, "cards": 3}, "api_status": 200, "api_body": "{\"ok\":true,\"sessions\":[{\"id\":\"rs_cf6c349f61df4598\",\"topic\":\"Latest LangGraph release notes\",\"depth\":\"chat\",\"status\":\"done\",\"stage\":\"complete\",\"message\":\"Queued\",\"log\":[],\"report_path\":\"\",\"summary\":\"LangGraph adds durable streams.\",\"error\":\"\",\"sources\":4,\"max_sources\":8,\"rubric_score\":62.0,\"rubric_ok\":false,\"created_at\":1791782277.4415221,\"updated_at\":1791782277.4455252,\"meta\":{\"process_owner\":[32020,1791782258.8379145]},\"archived\":false},{\"id\":\"rs_db69909974b04144\",\"topic\":\"Kuwait AI adoption in 2026\",\"depth\":\"brief\",\"status\":\"error\",\"stage\":\"acquire\",\"message\":\"Search provider unavailable\",\"log\":[],\"report_path\":\"\",\"summary\":\"\",\"error\":\"Search provider unavailable\",\"sources\":2,\"max_sources\":8,\"rubric_score\":null,\"rubric_ok\":null,\"created_at\":1791782277.4350169,\"updated_at\":1791782277.4395168,\"meta\":{\"process_owner\":[32020,1791782258.8379145]},\"archived\":false},{\"id\":\"rs_de15fd8ff64440fb\",\"topic\":\"What does the AgentDojo prompt-injection benchmark measure?\",\"depth\":\"deep\",\"status\":\"done\",\"stage\":\"done\",\"message\":\"Queued\",\"log\":[],\"report_path\":\"research/reports/agentdojo.md\",\"summary\":\"AgentDojo measures how often an agent follows injected instructions.\",\"error\":\"\",\"sources\":3,\"max_sources\":8,\"rubric_score\":100.0,\"rubric_ok\":true,\"created_at\":1791782277.4230063,\"updated_at\":1791782277.4325163,\"meta\":{\"process_owner\":[32020,1791782258.8379145]},\"archived\":false}],\"count\":3}"}
+-------------------------- Captured stdout teardown ---------------------------
+08:18:29 INFO kazma_core.config_store: Setting updated: system.lifecycle.last_shutdown_epoch = 1791782309.7246084 (category=internal)
+08:18:29 INFO kazma_core.shutdown: Shutdown signal sent — terminating all streams
+08:18:29 INFO kazma_ui.app: [app] signal_shutdown() fired
+08:18:29 INFO kazma_core.background: [bg] draining 3 background task(s) (3 never-ending, cancelled)
+08:18:29 INFO kazma_core.documents.ingestion: [documents.ingestion] worker pool stopped
+08:18:29 INFO kazma_ui.app: [Documents] ingestion coordinator stopped
+08:18:29 INFO kazma_core.cron.scheduler: [CronScheduler] Stopped
+08:18:29 INFO kazma_ui.app: [app] Cron scheduler stopped
+08:18:29 INFO kazma_core.x_api.scheduled_fire: [x-schedule] fire loop stopped
+08:18:29 INFO kazma_core.swarm.engine: [SwarmEngine] all workers stopped
+08:18:29 INFO kazma_ui.app: [app] Swarm engine drained
+08:18:29 INFO kazma_core.mcp.manager: [MCP] Terminated stdio process 'filesystem'
+08:18:29 INFO kazma_core.tracing: Tracer shut down (backend=console)
+08:18:29 INFO kazma_core.agent_runner: Kazma agent shut down.
+08:18:29 INFO kazma_ui.app: [app] Agent shut down cleanly
+08:18:29 INFO kazma_ui.app: [app] Checkpointer closed
+08:18:29 INFO kazma_ui.app: [app] Swarm TaskStore closed
+08:18:29 INFO kazma_ui.app: [app] SessionManager closed cleanly
+08:18:29 INFO kazma_gateway.gateway: Gateway shutting down...
+08:18:29 INFO kazma_gateway.gateway: Message consumer stopped
+08:18:29 INFO kazma_gateway.gateway: Gateway stopped cleanly
+08:18:29 INFO kazma_ui.app: [Gateway] Stopped cleanly
+08:18:29 INFO kazma_ui.app: [SwarmBus] Adapters closed cleanly
+08:18:29 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+08:18:29 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\kazma-test-data-8dq3xww5\chat_sessions_test_32020.db
+---------------------------- Captured log teardown ----------------------------
+INFO     kazma_core.config_store:config_store.py:1869 Setting updated: system.lifecycle.last_shutdown_epoch = 1791782309.7246084 (category=internal)
+INFO     kazma_core.shutdown:shutdown.py:54 Shutdown signal sent — terminating all streams
+INFO     kazma_ui.app:app.py:2234 [app] signal_shutdown() fired
+INFO     kazma_core.background:background.py:134 [bg] draining 3 background task(s) (3 never-ending, cancelled)
+INFO     kazma_core.documents.ingestion:ingestion.py:285 [documents.ingestion] worker pool stopped
+INFO     kazma_ui.app:app.py:2335 [Documents] ingestion coordinator stopped
+INFO     kazma_core.cron.scheduler:scheduler.py:814 [CronScheduler] Stopped
+INFO     kazma_ui.app:app.py:2348 [app] Cron scheduler stopped
+INFO     kazma_core.x_api.scheduled_fire:scheduled_fire.py:72 [x-schedule] fire loop stopped
+INFO     kazma_core.swarm.engine:engine.py:708 [SwarmEngine] all workers stopped
+INFO     kazma_ui.app:app.py:2383 [app] Swarm engine drained
+INFO     kazma_core.mcp.manager:manager.py:790 [MCP] Terminated stdio process 'filesystem'
+INFO     kazma_core.tracing:__init__.py:420 Tracer shut down (backend=console)
+INFO     kazma_core.agent_runner:agent_runner.py:1302 Kazma agent shut down.
+INFO     kazma_ui.app:app.py:2391 [app] Agent shut down cleanly
+INFO     kazma_ui.app:app.py:2405 [app] Checkpointer closed
+INFO     kazma_ui.app:app.py:2451 [app] Swarm TaskStore closed
+INFO     kazma_ui.app:app.py:2488 [app] SessionManager closed cleanly
+INFO     kazma_gateway.gateway:gateway.py:743 Gateway shutting down...
+INFO     kazma_gateway.gateway:gateway.py:942 Message consumer stopped
+INFO     kazma_gateway.gateway:gateway.py:784 Gateway stopped cleanly
+INFO     kazma_ui.app:app.py:2504 [Gateway] Stopped cleanly
+INFO     kazma_ui.app:app.py:2520 [SwarmBus] Adapters closed cleanly
+INFO     kazma_core.db.sqlite_columns:sqlite_columns.py:69 [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+INFO     kazma_ui.session_manager:session_manager.py:269 [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\kazma-test-data-8dq3xww5\chat_sessions_test_32020.db
+============================== warnings summary ===============================
+tests/e2e/test_pages_read_in_arabic.py::test_research_results_read_in_arabic
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/e2e/test_pages_read_in_arabic.py::test_research_results_read_in_arabic
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\uvicorn\protocols\websockets\websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/e2e/test_pages_read_in_arabic.py::test_research_results_read_in_arabic
+======================= 1 failed, 2 warnings in 48.83s ========================

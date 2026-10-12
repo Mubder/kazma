@@ -1,0 +1,110 @@
+tests/js/test_settings_mixins.js: exit=0
+ok   the mixins declare getters (the scan works)
+ok   cronTzCommon is still a getter on the component
+ok   cronTzAll is still a getter on the component
+ok   cronTzGroups is still a getter on the component
+ok   filteredSkills is still a getter on the component
+ok   filteredTools is still a getter on the component
+ok   pkgMemoryLayerRows is still a getter on the component
+ok   filteredPkgCore is still a getter on the component
+ok   offsiteActiveProviderLabel is still a getter on the component
+ok   filteredPkgCore lists every package with no search
+ok   filteredPkgCore filters on the search
+ok   init is wrapped and callable
+ok   conflictLine reads the conflict
+ok   negative control: Object.assign leaves no getter
+
+tests/js/test_research_cancel.js: exit=0
+✔ en: cancel waits for terminal receipt (2.9747ms)
+✔ en: original closed stream early (1.6731ms)
+✔ en: reopened cancelling session attaches to progress (0.5271ms)
+✔ ar: cancel waits for terminal receipt (0.4969ms)
+✔ ar: original closed stream early (0.5381ms)
+✔ ar: reopened cancelling session attaches to progress (0.4918ms)
+✔ en: interrupted inspection requires explicit resume (0.6467ms)
+✔ ar: interrupted inspection requires explicit resume (0.542ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10.6587
+
+tests/js/test_research_i18n.js: exit=0
+ok   the page's i18n resolves a catalog entry, a flat string and a missing key
+ok   negative control: the old one-liner fails
+all ok
+
+tests/js/test_research_session_tag.js: exit=0
+OK sessionTag is extractable
+OK a brief run is Brief
+OK a deep run is Deep
+OK a chat search is Chat
+OK an old row without depth: chat by its id
+OK an old row without depth: otherwise Deep
+OK no id is not a chat search
+OK the tag follows the page language
+OK ...for deep runs too
+OK ...and brief ones
+OK a missing translation falls back to English
+OK control: the old tag called a Brief run Deep
+all passed
+
+tests/js/test_settings_saves_report_truth.js: exit=0
+ok   the component has save methods (the scan works)
+ok   the validating list names a real method: saveModelProfile
+ok   the validating list names a real method: saveHubProvider
+ok   the validating list names a real method: saveHubConnector
+ok   the validating list names a real method: saveHubProfile
+ok   the validating list names a real method: saveMcpServer
+ok   the validating list names a real method: saveGmailProtocol
+ok   the validating list names a real method: saveMsProtocol
+ok   the validating list names a real method: saveGmailOAuthClient
+ok   the validating list names a real method: saveGmail
+ok   the validating list names a real method: saveMsClient
+ok   saveModel reports what the server said
+ok   saveModelDefault reports what the server said
+ok   saveModelProfile refuses before calling the server (needs a profile name)
+ok   saveAdapterRouting reports what the server said
+ok   saveHubProvider refuses before calling the server (needs a name and a base URL)
+ok   saveHubConnector refuses before calling the server (needs a connector name)
+ok   saveHubProfile refuses before calling the server (needs a profile name)
+ok   saveAgent reports what the server said
+ok   saveSafety reports what the server said
+ok   saveContext reports what the server said
+ok   saveNonstop reports what the server said
+ok   saveTenantMode reports what the server said
+ok   saveAboutMe reports what the server said
+ok   saveMemoryKbMerge reports what the server said
+ok   saveMemoryBackends reports what the server said
+ok   saveLogging reports what the server said
+ok   saveSwarmRetention reports what the server said
+ok   saveCheckpointRetention reports what the server said
+ok   saveDocuments reports what the server said
+ok   saveProxy reports what the server said
+ok   saveEmbedder reports what the server said
+ok   saveTurnNotify reports what the server said
+ok   saveTimeTravel reports what the server said
+ok   saveCronTimezone reports what the server said
+ok   saveMcpServer refuses before calling the server (needs a server name)
+ok   saveVoiceSettings reports what the server said
+ok   saveGmailProtocol refuses before calling the server (needs an email and an app password)
+ok   saveMsProtocol refuses before calling the server (needs an email and a password)
+ok   saveGmailOAuthClient refuses before calling the server (needs a Google client id and secret)
+ok   saveGmail refuses before calling the server (needs an email and an app password)
+ok   saveMsClient refuses before calling the server (needs an Azure client id)
+ok   saveXCredentials reports what the server said
+ok   saveXReply reports what the server said
+ok   saveAppearance reports what the server said
+ok   saveShortcut reports what the server said
+ok   saveBackupRetention reports what the server said
+ok   saveOffsite reports what the server said
+ok   negative control: a save whose success line throws is caught
+all ok
+[settings] appearance saved; applying it to this page failed: TypeError: root.style.setProperty is not a function
+    at Object._applyAccentColor (settings_ops.js:130:24)
+    at Object.saveAppearance (settings_ops.js:86:22)
+    at async runSaves (C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma\tests\js\test_settings_saves_report_truth.js:119:7)
+    at async C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma\tests\js\test_settings_saves_report_truth.js:138:19

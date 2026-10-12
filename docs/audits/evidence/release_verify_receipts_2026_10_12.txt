@@ -1,0 +1,62 @@
+"""Require terminal, measured release evidence before committing/deploying."""
+import json
+from pathlib import Path
+from scripts.generate_metrics import collection_fingerprint
+
+root=Path.cwd(); folder=root/'docs/audits/evidence'; expected=collection_fingerprint()
+unit=json.loads((folder/'release_full_accepted_2026_10_12.json').read_text())
+e2e=json.loads((folder/'release_e2e_2026_10_12.json').read_text())
+for report in (unit,e2e):
+    assert report['status']=='complete'
+    assert report['input_sha256']==report['final_input_sha256']==expected
+    assert all(r['exit']==0 and r['measured'] for r in report['results'])
+assert len(unit['results'])==21 and unit['test_files']==1011 and unit['exit']==0
+files=[p for row in unit['results'] for p in row['files']]
+assert len(files)==len(set(files))==1011
+assert len(e2e['results'])==28
+e2e_count=sum(row['counts'].get('passed',0) for row in e2e['results'])
+assert e2e_count==84
+profiles=[]
+for name in ('linux',):
+    log=(folder/f'release_{name}_soak_2026_10_12.log').read_text()
+    lines=log.splitlines(); header=json.loads(lines[0])
+    assert header['exit']==0 and header['error'] is None and header['tree_closed']
+    rows=[]
+    for line in lines[1:]:
+        try: rows.append(json.loads(line))
+        except ValueError: pass
+    result=next(row for row in rows if row.get('profile')=='bounded_browser_lifecycle')
+    assert result['ok'] and result['elapsed_s']>=1800 and result['external_requests']==0
+    assert result['pages']==result['cycles']*2 and result['pool']['active']==result['pool']['quarantined']==0
+    cleanup_events=[row for row in rows if row.get('event')=='controlled_cleanup_deadline']
+    assert result['controlled_cleanup_deadlines']==len(cleanup_events)
+    assert all(row['cleanup_verified'] and row['error_code']=='resource_limit' for row in cleanup_events)
+    assert len({row['cycle'] for row in cleanup_events})==len(cleanup_events)
+    if name=='linux':
+        assert 'qualification_cgroup_removed=true' in log
+        assert {row['family'] for row in rows if row.get('host_loopback_refused')}=={2,10}
+        assert result['network_mode']=='required'
+    else: assert result['network_mode']=='compatibility'
+    profiles.append(dict(platform=name,**result))
+windows=json.loads((folder/'release_windows_strict_refusal_2026_10_12.log').read_text())
+assert windows['ok'] and windows['status']=='refused_before_child_launch' and windows['new_children']==0
+assert windows['mode']=='required' and windows['product_limits_changed'] is False
+assert windows['pool']['active']==windows['pool']['quarantined']==0
+failed_windows=(folder/'release_windows_soak_diagnostic_2026_10_12.log').read_text()
+failed_header=json.loads(failed_windows.splitlines()[0])
+assert failed_header['exit']!=0 and failed_header['tree_closed']
+assert 'TimeoutExpired' in failed_windows and 'timed out after 5 seconds' in failed_windows
+profiles.append({'platform':'windows','strict':windows['status'],'compatibility_endurance':'failed_unqualified','failure_receipt':'release_windows_soak_diagnostic_2026_10_12.log','observation':'Node process-exit wait exceeded five seconds after contained termination; capacity quarantined.','default_browser_mode':'required','local_http':'qualified_separately'})
+credits=json.loads((folder/'release_firecrawl_live_2026_10_12.log').read_text())
+assert credits['status']=='observed' and credits['fresh'] and credits['remaining_is_finite_number']
+assert credits['live_policy_changed'] is False
+http=json.loads((folder/'release_local_http_smoke_2026_10_12.log').read_text())
+assert http['ok'] and http['backend']=='httpx' and http['hosted_attempts']==0 and not http['truncated']
+assert http['robots']['mode']=='enforced'
+assert unit['qualification']=='complete_serial_campaign_with_preserved_unmeasured_batch_recovery'
+output={'status':'qualified_supported_routes_with_limits','windows_compatibility_endurance':'failed_unqualified','qualification':unit['qualification'],'observed_unresolved_flakes':unit['observed_unresolved_flakes'],'prior_complete_run':'release_full_final_2026_10_12.json','prior_run_unresolved_timing_failures':['test_document_generation_phase7.py::test_generation_manifest_roundtrip_arabic_and_collision_safe_export','test_kb_api_routes.py::test_site_ingest_records_progress_off_the_loop'],'input_sha256':expected,'unit':unit['totals'],'unit_files':len(files),
+        'e2e_passed':e2e_count,'e2e_files':28,'profiles':profiles,
+        'live_credit_adapter':'observed_in_isolated_store','per_request_charges':'unknown',
+        'public_http_smoke':'local_only_httpx_with_robots'}
+(folder/'release_acceptance_2026_10_12.log').write_text(json.dumps(output,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
+print(json.dumps(output,indent=2,ensure_ascii=False))

@@ -144,9 +144,9 @@ def kb(monkeypatch: pytest.MonkeyPatch):
     async def ingest_url(lib_id, url):
         return SimpleNamespace(pages_fetched=1, chunks_new=1, chunks_skipped=0, errors=[])
 
-    async def ingest_site(lib_id, url, max_pages=None):
+    async def ingest_site(lib_id, url, max_pages=None, **kwargs):
         for phase in ("crawling", "done"):
-            yield SimpleNamespace(
+            yield knowledge_ingest.ProgressUpdate(
                 phase=phase, discovered=1, fetched=1, ingested=1, skipped=0, failed=0,
                 pages_unchanged=0, pruned_urls=0, current_url=url, message="", errors=[],
             )
@@ -154,7 +154,7 @@ def kb(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(knowledge, "get_knowledge_store", lambda: store)
     monkeypatch.setattr(knowledge_index, "get_knowledge_index", lambda: index)
     monkeypatch.setattr(knowledge_ingest, "ingest_url", ingest_url)
-    monkeypatch.setattr(knowledge_ingest, "ingest_site", ingest_site)
+    monkeypatch.setattr(knowledge_ingest, "_ingest_site_impl", ingest_site)
     monkeypatch.setattr(kb_jobs, "upsert_job", upsert_job)
     monkeypatch.setattr(kb_jobs, "get_job", get_job)
     monkeypatch.setattr(kb_api, "_kb_jobs_bootstrapped", True)

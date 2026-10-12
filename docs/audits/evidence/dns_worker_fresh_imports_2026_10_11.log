@@ -1,0 +1,42 @@
+[
+  {
+    "module": "kazma_core.web_acquire.dns_worker",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.http",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.browser_network",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.resources",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "module": "kazma_core.security.ssrf",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "module": "kazma_core.security.process_budget",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "module": "kazma_core.tools.read_url",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "module": "kazma_core.tools.research_readiness",
+    "exit": 0,
+    "output": ""
+  }
+]

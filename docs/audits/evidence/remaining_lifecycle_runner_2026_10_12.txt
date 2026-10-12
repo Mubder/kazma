@@ -1,0 +1,24 @@
+import ast,os,sys,tempfile
+from pathlib import Path
+from kazma_core.security.process_budget import run_bounded
+ROOT=Path.cwd();base=Path(r'G:\GitHubRepos\kazma\.git\worktrees\kazma')
+allowed={'path','systemroot','windir','temp','tmp','userprofile','appdata','localappdata'}
+env={k:v for k,v in os.environ.items() if k.lower() in allowed}
+env.update(OMP_NUM_THREADS='2',MKL_NUM_THREADS='2',OPENBLAS_NUM_THREADS='2',PYTHONIOENCODING='utf-8')
+if '--linux' in sys.argv:
+    tree=ast.parse((ROOT/'docs/audits/evidence/browser_linux_harness_2026_10_11.py').read_text(encoding='utf-8'))
+    script=next(ast.literal_eval(n.value) for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='ROOT_PROBE' for t in n.targets))
+    script=script.replace('timeout=100','timeout=270')
+    def linux(p): return '/mnt/'+p.drive[0].lower()+p.as_posix()[2:]
+    cmd=['wsl.exe','-d','Ubuntu','-u','root','--exec','/usr/bin/timeout','-k','2','285','/usr/bin/python3','-I','-c',script,'/home/balfa/.cache/kazma-browser-qualification-494866d8d64245159c10ebab204aec84',linux(base/'remaining_browser_lifecycle.py'),linux(ROOT/'kazma-core')]
+    result=run_bounded(cmd,env=env,timeout=300,output_bytes=128*1024,memory_bytes=1024**3,text=True)
+    name='linux'
+else:
+    with tempfile.TemporaryDirectory(prefix='kazma-browser-lifecycle-') as temp:
+        scratch=Path(temp);env.update(KAZMA_DATA_DIR=str(scratch/'data'),KAZMA_USER_HOME=str(scratch/'home'),KAZMA_SKILLS_HOME=str(scratch/'skills'),KAZMA_BROWSER_NETWORK_MODE='compatibility')
+        program='import psutil,runpy,sys;psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS);sys.argv='+repr([str(base/'remaining_browser_lifecycle.py'),str(ROOT/'kazma-core'),str(scratch)])+';runpy.run_path(sys.argv[0],run_name="__main__")'
+        result=run_bounded([sys.executable,'-I','-X','utf8','-c',program],env=env,timeout=300,output_bytes=128*1024,memory_bytes=3*1024**3,text=True)
+    name='windows'
+output='exit='+str(result.returncode)+'\n'+result.stdout+'\n'+result.stderr
+(ROOT/'docs/audits/evidence'/('remaining_'+name+'_browser_lifecycle_2026_10_12.log')).write_text(output,encoding='utf-8')
+print(output);raise SystemExit(result.returncode)

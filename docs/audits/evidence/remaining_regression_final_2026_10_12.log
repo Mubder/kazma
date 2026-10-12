@@ -1,0 +1,95 @@
+input_sha256=6f500d98f9b42db9b44c9e3abe238c3bc18805ceba655056ba4b4674dda394e7
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 1106 items
+
+tests\test_acquisition_accounting.py ...........                         [  0%]
+tests\test_acquisition_credits.py .............                          [  2%]
+tests\test_acquisition_dns.py .................                          [  3%]
+tests\test_acquisition_durable_controls.py ............................. [  6%]
+.                                                                        [  6%]
+tests\test_acquisition_operations.py .................                   [  7%]
+tests\test_acquisition_parser.py ...................                     [  9%]
+tests\test_acquisition_postgres.py ssss                                  [ 10%]
+tests\test_acquisition_provider_usage.py .......................         [ 12%]
+tests\test_acquisition_resources.py ........................             [ 14%]
+tests\test_acquisition_surfaces.py ...                                   [ 14%]
+tests\test_api_route_callers.py ............................             [ 17%]
+tests\test_audit_2026_08_29_regressions.py ............................. [ 19%]
+......                                                                   [ 20%]
+tests\test_audit_systematic_followthrough.py .........                   [ 21%]
+tests\test_browser_acquisition_broker.py ....................            [ 22%]
+tests\test_browser_boot_policy.py ..                                     [ 23%]
+tests\test_browser_driver_budget.py ..............                       [ 24%]
+tests\test_browser_egress_every_context.py .                             [ 24%]
+tests\test_browser_origin_policy.py ...................                  [ 26%]
+tests\test_docs_anchors.py ........                                      [ 26%]
+tests\test_docs_file_refs.py ...                                         [ 27%]
+tests\test_docs_sidebar.py ..                                            [ 27%]
+tests\test_durable_crawls.py .................                           [ 28%]
+tests\test_fast_test_runner.py ....................................      [ 32%]
+tests\test_generate_metrics.py ....................                      [ 33%]
+tests\test_imports.py ...............                                    [ 35%]
+tests\test_js_suites.py ................................................ [ 39%]
+....................                                                     [ 41%]
+tests\test_leftovers_except_g.py .....                                   [ 41%]
+tests\test_metrics_receipt_current.py .                                  [ 41%]
+tests\test_module_attribute_refs.py ..                                   [ 42%]
+tests\test_module_stubs.py .....                                         [ 42%]
+tests\test_origin_scheduler.py .....................................     [ 45%]
+tests\test_orphan_modules.py ...                                         [ 46%]
+tests\test_proxy_routing_safety.py ..................................... [ 49%]
+...                                                                      [ 49%]
+tests\test_proxy_scraping_coverage.py .........                          [ 50%]
+tests\test_read_url_hardening.py ...........                             [ 51%]
+tests\test_research_cancel_truth.py .....                                [ 52%]
+tests\test_research_crawl_bounds.py ..........                           [ 52%]
+tests\test_research_crawl_recovery.py .................                  [ 54%]
+tests\test_research_pipeline_recovery.py ............................... [ 57%]
+....                                                                     [ 57%]
+tests\test_research_planner.py ......                                    [ 58%]
+tests\test_research_policy_and_kb_harden.py ............                 [ 59%]
+tests\test_research_r1.py .......                                        [ 59%]
+tests\test_research_read_url.py ........                                 [ 60%]
+tests\test_research_report_paths.py .........s....                       [ 61%]
+tests\test_research_runtime.py ..............................            [ 64%]
+tests\test_research_session.py ..............                            [ 65%]
+tests\test_research_session_threads.py ......                            [ 66%]
+tests\test_research_task_delete.py ...                                   [ 66%]
+tests\test_search_http_worker.py .............                           [ 67%]
+tests\test_search_sdk_worker.py ......                                   [ 68%]
+tests\test_settings_restore_classes.py .....................             [ 70%]
+tests\test_sqlite_kept_connections.py .........                          [ 71%]
+tests\test_ssrf_pin_authority.py ........                                [ 71%]
+tests\test_static_gates.py ............................................. [ 75%]
+.............                                                            [ 77%]
+tests\test_store_registry.py ...............................             [ 79%]
+tests\test_swallowed_errors_reported.py ........                         [ 80%]
+tests\test_tool_paths.py ................................                [ 83%]
+tests\test_tools_quickwins.py ...................                        [ 85%]
+tests\test_ui_audit_fixes.py ....                                        [ 85%]
+tests\test_unbound_local_imports.py ...........                          [ 86%]
+tests\test_web_acquire.py ......                                         [ 87%]
+tests\test_web_acquisition_policy.py ............                        [ 88%]
+tests\test_web_acquisition_results.py ........................           [ 90%]
+tests\test_web_acquisition_safety.py ................................... [ 93%]
+...........                                                              [ 94%]
+tests\test_web_acquisition_scope.py ......                               [ 95%]
+tests\test_web_robots.py ............................................... [ 99%]
+....                                                                     [ 99%]
+tests\test_website_pages.py ...                                          [100%]
+
+============================== warnings summary ===============================
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========== 1101 passed, 5 skipped, 1 warning in 345.23s (0:05:45) ============

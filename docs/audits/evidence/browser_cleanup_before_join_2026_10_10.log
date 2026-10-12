@@ -1,0 +1,19 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+___________ test_cancel_does_not_return_before_owned_async_cleanup ____________
+tests\test_acquisition_resources.py:46: in test_cancel_does_not_return_before_owned_async_cleanup
+    assert not task.done(), "Cancellation returned while owned browser cleanup was still running"
+E   AssertionError: Cancellation returned while owned browser cleanup was still running
+E   assert not True
+E    +  where True = <built-in method done of _asyncio.Task object at 0x000002831CAFA2C0>()
+E    +    where <built-in method done of _asyncio.Task object at 0x000002831CAFA2C0> = <Task cancelled name='Task-2' coro=<run_in_browser_loop() done, defined at G:\GitHubRepos\kazma\kazma-core\kazma_core\playwright_loop.py:67>>.done
+_________ test_bridge_deadline_joins_cleanup_before_reporting_timeout _________
+tests\test_acquisition_resources.py:70: in test_bridge_deadline_joins_cleanup_before_reporting_timeout
+    assert cleaned.is_set()
+E   assert False
+E    +  where False = is_set()
+E    +    where is_set = <threading.Event at 0x2831cd91e80: unset>.is_set
+=========================== short test summary info ===========================
+FAILED tests/test_acquisition_resources.py::test_cancel_does_not_return_before_owned_async_cleanup
+FAILED tests/test_acquisition_resources.py::test_bridge_deadline_joins_cleanup_before_reporting_timeout
+2 failed in 0.57s

@@ -8,6 +8,15 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "research.ui.acquisition_title": {"en": "Web acquisition usage and errors", "ar": "استخدام جلب الويب وأخطاؤه"},
+    "research.ui.acquisition_hint": {"en": "Status reads saved evidence locally. Refresh credits explicitly contacts Firecrawl when permitted; unavailable balances and charges stay unknown.", "ar": "تقرأ الحالة الأدلة المحفوظة محلياً. يتصل تحديث الرصيد بـ Firecrawl عند السماح؛ تبقى الأرصدة والرسوم غير المتاحة مجهولة."},
+    "research.ui.read_cached_status": {"en": "Read cached status", "ar": "قراءة الحالة المحفوظة"},
+    "research.ui.refresh_credits": {"en": "Refresh Firecrawl credits", "ar": "تحديث رصيد Firecrawl"},
+    "research.ui.status_unavailable": {"en": "Status unavailable; inspect storage and provider errors.", "ar": "الحالة غير متاحة؛ راجع أخطاء التخزين والمزود."},
+    "research.ui.resume": {"en": "Resume", "ar": "استئناف"},
+    "research.ui.resume_failed": {"en": "Resume failed", "ar": "تعذر الاستئناف"},
+    "research.ui.state_interrupted": {"en": "Interrupted; explicit resume required", "ar": "توقف البحث؛ يلزم استئناف صريح"},
+    "research.ui.state_partial": {"en": "Partial; inspect missing sources", "ar": "بحث جزئي؛ راجع المصادر الناقصة"},
     "research.about_browse": {
         "ar": "<strong>تصفّح</strong> أوراق المسار والجلسات الحية ومخرجات بحث السرب.",
         "en": "<strong>Browse</strong> pipeline papers, live sessions, and swarm research outputs.",
@@ -375,6 +384,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "research.ui.state_failed": {
         "ar": "فشل",
         "en": "failed",
+    },
+    "research.ui.cancelling": {
+        "ar": "جارٍ الإلغاء؛ بانتظار اكتمال التنظيف…",
+        "en": "Cancelling; waiting for cleanup…",
+    },
+    "research.ui.state_cancelling": {
+        "ar": "جارٍ الإلغاء",
+        "en": "cancelling",
     },
     "research.ui.state_cancelled": {
         "ar": "أُلغي",

@@ -1,0 +1,23 @@
+"""Failure-only diagnostics for the existing document-generation timeout."""
+import json
+import pytest
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    if item.path.name != 'test_document_generation_phase7.py':
+        yield
+        return
+    from kazma_core.documents import service
+    original = service.run_isolated_subprocess
+    def inspect(request):
+        result = original(request)
+        if result.timed_out:
+            print('DOCUMENT_TIMEOUT_DIAGNOSTIC='+json.dumps({
+                'test':item.nodeid,'configured_timeout':request.timeout_seconds,
+                'duration':result.duration_seconds,'returncode':result.returncode,
+                'stdout':result.stdout.decode('utf-8','replace')[:1000],
+                'stderr':result.stderr.decode('utf-8','replace')[:4000]}),flush=True)
+        return result
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(service,'run_isolated_subprocess',inspect)
+        yield

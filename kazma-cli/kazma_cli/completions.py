@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 SUBCMDS = [
     "serve", "status", "help", "completion", "wizard", "hub", "docs",
-    "project", "gateway", "swarm", "update", "migrate", "ask", "acp", "mcp",
+    "project", "gateway", "swarm", "update", "migrate", "ask", "acp", "mcp", "acquisition",
 ]
 FLAGS = [
     "--model", "--provider", "--yolo", "--verbose", "--no-banner",

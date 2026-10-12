@@ -1,0 +1,79 @@
+..................................................................F..... [  9%]
+...............................sss...................................... [ 19%]
+........................................................................ [ 28%]
+........................................................................ [ 38%]
+........................................................................ [ 48%]
+........................................FF.............................. [ 57%]
+...........................................................s............ [ 67%]
+..............................................................F......... [ 76%]
+........................................................................ [ 86%]
+.........F.F............................................................ [ 96%]
+.............................                                            [100%]
+================================== FAILURES ===================================
+_____ test_knowledge_disk_ceiling_refuses_growth_and_preserves_prior_rows _____
+tests\test_acquisition_durable_controls.py:319: in test_knowledge_disk_ceiling_refuses_growth_and_preserves_prior_rows
+    with pytest.raises(sqlite3.DatabaseError, match='full'):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'full'
+E     Actual message: 'cannot rollback - no transaction is active'
+_ test_actual_process_death_preserves_completed_and_uncertain_publication[False] _
+tests\test_research_crawl_recovery.py:84: in test_actual_process_death_preserves_completed_and_uncertain_publication
+    assert requests == [TWO]
+E   AssertionError: assert [] == ['https://doc...mple/two?q=2']
+E     
+E     Right contains one more item: 'https://docs.example/two?q=2'
+E     Use -v to get more diff
+_ test_actual_process_death_preserves_completed_and_uncertain_publication[True] _
+tests\test_research_crawl_recovery.py:84: in test_actual_process_death_preserves_completed_and_uncertain_publication
+    assert requests == [TWO]
+E   AssertionError: assert [] == ['https://doc...mple/two?q=2']
+E     
+E     Right contains one more item: 'https://docs.example/two?q=2'
+E     Use -v to get more diff
+___________ test_cancel_joins_real_worker_and_prevents_next_backend ___________
+tests\test_search_sdk_worker.py:103: in test_cancel_joins_real_worker_and_prevents_next_backend
+    await asyncio.sleep(0.01)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\tasks.py:665: in sleep
+    return await future
+           ^^^^^^^^^^^^
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\test_search_sdk_worker.py:101: in test_cancel_joins_real_worker_and_prevents_next_backend
+    async with asyncio.timeout(10):
+               ^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+___________ test_recrawl_preserves_user_edit_and_reports_save_error ___________
+tests\test_web_acquisition_safety.py:243: in test_recrawl_preserves_user_edit_and_reports_save_error
+    assert "save_error" in report and "exist" in report.lower()
+E   AssertionError: assert ('save_error' in 'Error: Managed output already has a retained or uncertain reservation; choose a new path.\nDurable job: 0a46766ee4fe4229b436d721820a3d99. Acquisition stopped; inspect readiness before retrying.')
+___________ test_atomic_extract_publication_preserves_existing_file ___________
+tests\test_web_acquisition_safety.py:264: in test_atomic_extract_publication_preserves_existing_file
+    create_extract(target, "replacement")
+kazma-core\kazma_core\tools\research_files.py:20: in create_extract
+    reserve(target, len(text.encode('utf-8')))
+kazma-core\kazma_core\web_acquire\output_allowance.py:26: in reserve
+    mutate('outputs', change, entries=256)
+kazma-core\kazma_core\web_acquire\durable_state.py:28: in mutate
+    result = change(table)
+             ^^^^^^^^^^^^^
+kazma-core\kazma_core\web_acquire\output_allowance.py:22: in change
+    raise AcquisitionError(FetchErrorCode.LIMIT, 'Managed output already has a retained or uncertain reservation; choose a new path.')
+E   kazma_core.web_acquire.result.AcquisitionError: Managed output already has a retained or uncertain reservation; choose a new path.
+============================== warnings summary ===============================
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_acquisition_durable_controls.py::test_knowledge_disk_ceiling_refuses_growth_and_preserves_prior_rows
+FAILED tests/test_research_crawl_recovery.py::test_actual_process_death_preserves_completed_and_uncertain_publication[False]
+FAILED tests/test_research_crawl_recovery.py::test_actual_process_death_preserves_completed_and_uncertain_publication[True]
+FAILED tests/test_search_sdk_worker.py::test_cancel_joins_real_worker_and_prevents_next_backend
+FAILED tests/test_web_acquisition_safety.py::test_recrawl_preserves_user_edit_and_reports_save_error
+FAILED tests/test_web_acquisition_safety.py::test_atomic_extract_publication_preserves_existing_file
+6 failed, 739 passed, 4 skipped, 1 warning in 175.62s (0:02:55)

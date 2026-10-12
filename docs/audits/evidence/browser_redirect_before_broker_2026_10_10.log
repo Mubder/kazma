@@ -1,0 +1,9 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__ test_actual_http_redirect_is_blocked_before_browser_contacts_destination ___
+tests\test_browser_acquisition_broker.py:92: in test_actual_http_redirect_is_blocked_before_browser_contacts_destination
+    assert "/escape" not in native_hits + broker_hits
+E   AssertionError: assert '/escape' not in (['/start', '/escape'] + [])
+=========================== short test summary info ===========================
+FAILED tests/test_browser_acquisition_broker.py::test_actual_http_redirect_is_blocked_before_browser_contacts_destination
+1 failed in 3.98s

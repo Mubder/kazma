@@ -1,0 +1,7 @@
+{
+  "samples": 35,
+  "minimum_available_gib": 22.95,
+  "maximum_owned_rss_gib": 2.48,
+  "maximum_owned_private_gib": 3.53,
+  "low_headroom_snapshots": 0
+}

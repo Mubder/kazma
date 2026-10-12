@@ -1565,22 +1565,26 @@ class ConfigStore(_ChangeNotices):
                 if key in self._cache and self._cache_fresh(key):
                     cached = self._cache[key]
                     return None if cached is _MISSING else cached
-            if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    return None
-                row = pool.execute_one(
-                    "SELECT value FROM kazma_settings WHERE key = %s", (key,)
-                )
-                if row is None:
-                    return None
-                value = row["value"]
-                return json.loads(value) if isinstance(value, str) else value
-            conn = self._get_conn()
-            row = conn.execute(
-                "SELECT value FROM settings WHERE key = ?", (key,)
-            ).fetchone()
-            return json.loads(row["value"]) if row is not None else None
+                # The raw-value read participates in dict/secret preparation
+                # BEFORE batch_set takes its transaction lock. Keep the live
+                # statement protected too: another prepare/write/close could
+                # otherwise use the same sqlite handle and statement cache.
+                if self._use_postgres():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        return None
+                    row = pool.execute_one(
+                        "SELECT value FROM kazma_settings WHERE key = %s", (key,)
+                    )
+                    if row is None:
+                        return None
+                    value = row["value"]
+                    return json.loads(value) if isinstance(value, str) else value
+                conn = self._get_conn()
+                row = conn.execute(
+                    "SELECT value FROM settings WHERE key = ?", (key,)
+                ).fetchone()
+                return json.loads(row["value"]) if row is not None else None
         except Exception:
             logger.debug("[ConfigStore] raw read failed for %s", key, exc_info=True)
             return None
@@ -2242,7 +2246,7 @@ class ConfigStore(_ChangeNotices):
             if self._use_postgres():
                 pool = self._pg_pool()
                 if pool is None:
-                    return {}
+                    raise RuntimeError("Postgres pool unavailable; settings category cannot be read")
                 rows = pool.execute(
                     "SELECT key, value FROM kazma_settings WHERE category = %s",
                     (category,),

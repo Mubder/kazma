@@ -1,0 +1,19 @@
+........................................................................ [ 44%]
+..........................F............................................. [ 88%]
+..................                                                       [100%]
+================================== FAILURES ===================================
+_____________________ test_structural_debt_only_goes_down _____________________
+tests\test_debt_ratchet.py:604: in test_structural_debt_only_goes_down
+    assert not grew, (
+E   AssertionError: New structural debt (see this module's docstring for each kind and its fix):
+E       patched_value_imports: 73 > baseline 72; newest entries: ['kazma-ui/kazma_ui/sse_chat/__init__.py:123 kazma_ui.active_turns.is_turn_running', 'kazma-ui/kazma_ui/sse_chat/_streaming.py:449 kazma_ui.active_turns.is_turn_running', 'kazma-ui/kazma_ui/swarm_sse.py:35 kazma_core.swarm.engine.get_swarm_engine']
+E   assert not {'patched_value_imports': (73, 72)}
+============================== warnings summary ===============================
+tests/test_acquisition_operations.py::test_cached_readiness_does_not_probe_even_with_legacy_live_environment[api]
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_debt_ratchet.py::test_structural_debt_only_goes_down - Asse...
+1 failed, 161 passed, 1 warning in 146.47s (0:02:26)

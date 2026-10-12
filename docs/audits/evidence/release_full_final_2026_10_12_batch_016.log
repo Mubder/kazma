@@ -1,0 +1,73 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 787 items
+
+tests\test_swarm_breaker_reset.py ....                                   [  0%]
+tests\test_swarm_conditional_pattern.py ..............                   [  2%]
+tests\test_swarm_consult_pattern.py .......                              [  3%]
+tests\test_swarm_cross_flows.py ..........................               [  6%]
+tests\test_swarm_dispatch_integration.py .......                         [  7%]
+tests\test_swarm_dynamic_spawning.py ...........................         [ 10%]
+tests\test_swarm_engine_core.py ...............                          [ 12%]
+tests\test_swarm_fallback_chains.py ......................               [ 15%]
+tests\test_swarm_fan_out_pattern.py .............                        [ 17%]
+tests\test_swarm_handoff.py .................                            [ 19%]
+tests\test_swarm_hitl_checkpoints.py ..................                  [ 21%]
+tests\test_swarm_manager.py ...........................                  [ 25%]
+tests\test_swarm_metrics_tracing.py .................................... [ 29%]
+..............                                                           [ 31%]
+tests\test_swarm_notify.py ...............                               [ 33%]
+tests\test_swarm_page_result_fields.py ..                                [ 33%]
+tests\test_swarm_paused_task_endings.py ..................               [ 35%]
+tests\test_swarm_pipeline_pattern.py ......                              [ 36%]
+tests\test_swarm_recovery_no_replay.py .                                 [ 36%]
+tests\test_swarm_reliability.py .............................            [ 40%]
+tests\test_swarm_safety_yolo.py .....                                    [ 41%]
+tests\test_swarm_sse.py ..................................               [ 45%]
+tests\test_swarm_task_model.py ........                                  [ 46%]
+tests\test_swarm_task_retention.py ...........................           [ 49%]
+tests\test_swarm_task_store.py ...........................               [ 53%]
+tests\test_swarm_task_store_api.py .........                             [ 54%]
+tests\test_swarm_task_stream_ends.py .........                           [ 55%]
+tests\test_swarm_timeout_validation_concurrency.py ..................... [ 58%]
+..............................                                           [ 62%]
+tests\test_swarm_ui_panel.py ........................................... [ 67%]
+..............                                                           [ 69%]
+tests\test_swarm_worker_tools.py .........                               [ 70%]
+tests\test_sync_tool_context.py .                                        [ 70%]
+tests\test_system_install_allowlist.py .......                           [ 71%]
+tests\test_target_id_routing.py .........                                [ 72%]
+tests\test_task_control.py .....                                         [ 73%]
+tests\test_task_ledger.py ..................                             [ 75%]
+tests\test_task_lifecycle.py ...                                         [ 75%]
+tests\test_task_queue_lease.py ......                                    [ 76%]
+tests\test_task_store_backends.py .........                              [ 77%]
+tests\test_task_store_workspace.py .                                     [ 77%]
+tests\test_telegram_callbacks.py ....                                    [ 78%]
+tests\test_telegram_format.py ........................                   [ 81%]
+tests\test_telegram_keyboards.py ....                                    [ 81%]
+tests\test_telegram_offset_commit.py .........                           [ 83%]
+tests\test_telegram_parse.py .......                                     [ 83%]
+tests\test_telegram_send.py .....                                        [ 84%]
+tests\test_telegram_slack_receive_and_test.py .......................... [ 87%]
+...............                                                          [ 89%]
+tests\test_telegram_stt.py ..                                            [ 90%]
+tests\test_telegram_voice.py ...................                         [ 92%]
+tests\test_telemetry.py .............................                    [ 96%]
+tests\test_template_compile.py ...........................               [ 99%]
+tests\test_template_plural_language.py ...                               [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================== 787 passed, 1 warning in 79.05s (0:01:19) ==================

@@ -25,8 +25,8 @@ The pipeline:
        └─ BFS + Playwright link-walk fallback (path-prefix scoped)
 
     per page →
-       ├─ static:  _fetch_full_text(url)   (tiered: Jina/Firecrawl/httpx/Playwright)
-       └─ tabbed:  Playwright full-DOM extraction (hidden panels included)
+       └─ fetch_text(url, purpose="kb", scope_check=...)
+          (shared static/hidden-panel extraction and bounded local tab rendering)
 
     chunk_markdown_doc → KnowledgeIndex.index (SQLite + ChromaDB + FTS5)
 
@@ -34,14 +34,18 @@ The ingestion runs as a background ``asyncio`` task that yields progress
 records (discovered / fetched / ingested / failed / current_url) which the
 UI and the ``/kb`` slash commands surface live.
 
-The fetch tiering reuses :func:`kazma_core.web_acquire.fetch_text` (shared with research)
-(SSRF-safe, with optional Jina/Firecrawl/Playwright fallbacks) so we do
-not reinvent extraction.  The Playwright *full-DOM* extractor is new and
-lives here because trafilatura's "main visible article" assumption is
-wrong for tabbed doc sites.
+Text and link discovery use :func:`kazma_core.web_acquire.fetch_text` with
+explicit scope. Knowledge extraction retains hidden panels and captures each
+supported lazy tab through the shared bounded renderer. Hosted discovery is
+refused when navigation scope cannot be enforced; no second KB text ladder
+may bypass a failed or partial shared acquisition.
 """
 
 from __future__ import annotations
+
+from kazma_core.web_acquire.origins import polite_requests
+from kazma_core.web_acquire.robots import crawl_policy, robots_for_job
+from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
 import asyncio
 import logging
@@ -52,23 +56,13 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, AsyncIterator
-from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 from kazma_core.stores.knowledge import get_knowledge_store
 from kazma_core.stores.knowledge_chunker import chunk_markdown_doc, chunk_to_dict
 from kazma_core.stores.knowledge_index import get_knowledge_index
 from kazma_core.http_tls import shared_ssl_context
-# Prefer public web_acquire façade (shared recovery ladder with research)
-try:
-    from kazma_core.web_acquire import fetch_text as _web_fetch_text
-except Exception:  # pragma: no cover
-    _web_fetch_text = None  # type: ignore[assignment]
-# Fallback: the ladder's PUBLIC entry point (private _fetch_full_text is an
-# implementation detail — renaming it must not break KB import-time).
-try:
-    from kazma_core.tools.read_url import fetch_full_text as _ladder_fetch
-except Exception:  # pragma: no cover
-    _ladder_fetch = None  # type: ignore[assignment]
+from kazma_core.web_acquire import fetch_text as _web_fetch_text
 
 __all__ = [
     "IngestResult",
@@ -179,20 +173,17 @@ def _jina_hard_disabled() -> bool:
 
 
 def _kb_jina_fallback_allowed() -> bool:
-    """Whether KB may call free ``r.jina.ai`` when local fetch is bot-walled.
+    """Hosted Jina requires policy permission; legacy flags only veto it."""
+    from kazma_core.web_acquire.policy import acquisition_policy
 
-    Default **on**: Meta/Cloudflare doc sites are unreadable via httpx/Playwright
-    alone, and a full-tree crawl is the whole point of this module.  Opt out
-    with ``KAZMA_JINA_READER=0`` or ``KAZMA_KB_JINA_FALLBACK=0``.
-    """
-    if _jina_hard_disabled():
+    if not acquisition_policy().permits("jina") or _jina_hard_disabled():
         return False
     raw = (os.environ.get("KAZMA_KB_JINA_FALLBACK") or "").strip().lower()
     if raw in ("0", "false", "no", "off"):
         return False
     if raw in ("1", "true", "yes", "on"):
         return True
-    return True  # default allow for KB path only
+    return True  # provider was explicitly allowed by acquisition policy above
 
 # Below which an extract is considered "thin" and we retry with the
 # Playwright full-DOM extractor (likely a tabbed / JS doc page).
@@ -223,6 +214,7 @@ class ProgressUpdate:
     message: str = ""
     errors: list[str] = field(default_factory=list)  # per-page failure reasons
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    job_id: str = ""
 
 
 @dataclass
@@ -244,8 +236,9 @@ class IngestResult:
 def _normalize_url(base: str, href: str) -> str | None:
     if not href or href.startswith(("#", "mailto:", "javascript:", "tel:", "data:")):
         return None
-    abs_url = urljoin(base, href)
-    abs_url, _frag = urldefrag(abs_url)
+    from kazma_core.web_acquire.links import resolve_document_url
+
+    abs_url = resolve_document_url(base, href)
     parsed = urlparse(abs_url)
     if parsed.scheme not in ("http", "https"):
         return None
@@ -255,29 +248,29 @@ def _normalize_url(base: str, href: str) -> str | None:
 
 
 def _canonical_page_url(url: str) -> str:
-    """Normalize a URL for de-duplication during discovery.
+    """Drop fragments and fold authority case, preserving resource identity.
 
-    - strip fragments
-    - lowercase host
-    - strip trailing slash (except root)
-    - strip trailing ``.md`` (Firecrawl /map sometimes returns source-file
-      paths that 404 as HTML pages)
+    A slash, .md suffix, matrix parameter, query order or escape can select
+    different content. Only an observed redirect may establish an alias.
     """
     if not url:
         return ""
-    abs_url, _frag = urldefrag(url.strip())
-    parsed = urlparse(abs_url)
+    abs_url = url.strip().partition('#')[0]
+    try:
+        parsed = urlparse(abs_url)
+        if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+            return ''
+        parsed.port  # refuse malformed authorities before storing a frontier
+    except ValueError:
+        return ''
     if parsed.scheme not in ("http", "https"):
-        return abs_url
-    path = parsed.path or "/"
-    # Source-file suffix → page path (Meta map returns .../access-tokens.md).
-    if path.lower().endswith(".md"):
-        path = path[:-3]
-    if path != "/" and path.endswith("/"):
-        path = path[:-1]
-    netloc = (parsed.netloc or "").lower()
-    # Drop query for de-dup (login?next=... noise); keep path identity.
-    return f"{parsed.scheme}://{netloc}{path}"
+        return ''
+    if any(ord(char) < 32 or ord(char) == 127 for char in abs_url):
+        return ''
+    rest = abs_url[abs_url.index('://') + 3 + len(parsed.netloc):]
+    if not rest or rest.startswith('?'):
+        rest = '/' + rest
+    return f'{parsed.scheme}://{parsed.netloc.lower()}{rest}'
 
 
 def _llms_txt_urls_for_seed(seed: str) -> list[str]:
@@ -311,19 +304,23 @@ def _urls_from_llms_txt(text: str, base_url: str) -> list[str]:
 async def _llms_txt_discover(seed: str) -> list[str]:
     """Fetch /llms-full.txt then /llms.txt and harvest linked pages.
 
-    Fail-open: a missing or tiny file is not an error. Never raises.
+    Missing/tiny files contribute no links. Durable storage/budget failures
+    stop discovery; an interrupted metadata request is not blindly replayed.
     """
     found: list[str] = []
+    from kazma_core.web_acquire.discovery_metadata import _acquire
+
     for url in _llms_txt_urls_for_seed(seed):
-        try:
-            text, final = await _http_get_text(url, timeout=15.0)
-        except Exception:
+        async def acquire():
+            text, final = await _http_get_text(url, timeout=15.0, scope_check=lambda target: _in_scope(seed, target, "domain"))
+            pages = (_urls_from_llms_txt(text, final or url)
+                     if text and len(text) >= 40 and not _looks_like_bot_block_html(text) else [])
+            return dict(pages=list(dict.fromkeys(pages)), children=[], bytes=len((text or '').encode('utf-8')))
+
+        result = await _acquire(url, acquire)
+        if result is None:
             continue
-        if not text or len(text) < 40:
-            continue
-        if _looks_like_bot_block_html(text):
-            continue
-        pages = _urls_from_llms_txt(text, final or url)
+        pages = result['pages']
         if pages:
             logger.info(
                 "[kb_discover] %s contributed %d URLs", url, len(pages)
@@ -470,7 +467,8 @@ def _in_scope(seed_url: str, candidate: str, mode: str) -> bool:
 # ── Discovery: sitemap-first, BFS fallback ──────────────────────────────────
 
 
-async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None, str]:
+@polite_requests()
+async def _http_get_text(url: str, *, timeout: float = 20.0, scope_check=None) -> tuple[str | None, str]:
     """Lightweight GET.  Returns (text, final_url).  None text on failure.
 
     Transparently handles gzip/deflate Content-Encoding AND ``.gz`` URLs
@@ -478,106 +476,139 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
     ``sitemap.xml.gz`` even though the response is the raw gzip bytes).
     """
     try:
-        import gzip
+        from kazma_core.web_acquire.http import fetch_public
 
-        from kazma_core.proxy.client import get_scraping_client
-        from kazma_core.security.ssrf import SSRFError, resolve_redirects, validate_url
+        limit = 5_000_000
+        with crawl_policy(purpose='kb_discovery'):
+            result = await fetch_public(url, timeout=timeout, max_bytes=limit, scope=scope_check,
+                                        headers={"User-Agent": _BROWSER_UA, "Accept-Encoding": "gzip, deflate"})
+        final = result.url
+        if result.response.status_code >= 400 or result.truncated:
+            return None, final
+        if urlparse(final).path.lower().endswith(".gz"):
+            from kazma_core.web_acquire.http import decompress_gzip
 
-        await asyncio.to_thread(validate_url, url, block_unresolved=True)
-        # Sitemap/robots discovery uses the same Proxy Provider as page fetch.
-        # Redirects are resolved with every hop SSRF-checked, then fetched with
-        # redirects OFF (audit F-08). Validating only the *final* URL still let
-        # a public -> internal -> public chain reach an internal service.
-        async with get_scraping_client(
-            follow_redirects=False,
-            timeout=timeout,
-            headers={
-                "User-Agent": _BROWSER_UA,
-                "Accept-Encoding": "gzip, deflate",
-            },
-            rotate_ua=True,
-        ) as client:
-            try:
-                target = await resolve_redirects(client, url, timeout=timeout)
-            except SSRFError:
-                return None, url
-            except Exception:
-                target = url
-            r = await client.get(target)
-            # Post-connect peer check (audit 2026-09-16 F-6): everything above
-            # resolves DNS before the socket exists, so a rebinding host passes
-            # it. read_url has asserted the real peer since F-08; KB ingest,
-            # which crawls whole sites, did not.
-            from kazma_core.proxy.client import get_active_proxy_url
-            from kazma_core.security.ssrf import assert_peer_public
-
-            try:
-                assert_peer_public(r, url=target, via_proxy=bool(get_active_proxy_url()))
-            except SSRFError as exc:
-                logger.warning("[kb_discover] peer blocked for %s: %s", url, exc)
-                return None, url
-            final = str(r.url)
-            try:
-                await asyncio.to_thread(validate_url, final, block_unresolved=True)
-            except SSRFError:
-                return None, url
-            if r.status_code >= 400:
-                return None, final
-            content = r.content or b""
-            # Case 1: URL ends in .gz → content is raw gzip bytes regardless
-            # of Content-Encoding.  Decompress and inspect.
-            if final.lower().endswith(".gz"):
-                try:
-                    decompressed = gzip.decompress(content).decode("utf-8", errors="replace")
-                    if decompressed.lstrip().startswith("<"):
-                        return decompressed, final
-                except Exception as exc:
-                    logger.debug("[kb_discover] .gz decompress failed %s: %s", final, exc)
-                # Decompression failed or didn't yield XML — likely a bot-walled
-                # HTML error page returned for a .gz URL.  Drop it.
-                return None, final
-            # Case 2: response body (httpx already decompresses Content-Encoding
-            # for us, so r.text is plain text).
-            return r.text or "", final
+            # Content-Encoding may already have removed the gzip envelope.
+            text = (await asyncio.to_thread(decompress_gzip, result.response.content, limit)
+                    if result.response.content.startswith(b"\x1f\x8b") else result.text)
+            return (text if text.lstrip().startswith("<") else None), final
+        return result.text, final
+    except AcquisitionError as exc:
+        if exc.code in {FetchErrorCode.STORAGE, FetchErrorCode.LIMIT, FetchErrorCode.POLICY, FetchErrorCode.ROUTING}:
+            raise
+        logger.debug("[kb_discover] GET failed: %s", exc.code)
+        return None, url
     except Exception as exc:
         logger.debug("[kb_discover] GET %s failed: %s", url, exc)
         return None, url
 
 
-async def _fetch_sitemaps(seed_url: str) -> list[str]:
+class _SitemapDocuments(list):
+    def __init__(self):
+        super().__init__()
+        self.pages = []
+
+
+async def _sitemap_links(text, final, docs, *, on_progress):
+    from kazma_core.web_acquire import crawl_jobs
+    from kazma_core.web_acquire.parser import parse_sitemap
+    from kazma_core.web_acquire.links import resolve_document_url
+
+    result = dict(pages=[], children=[], bytes=len((text or '').encode('utf-8')))
+    if not text:
+        return result
+    parsed = await parse_sitemap(text, final)
+    if parsed['kind'] == 'invalid':
+        await _safe_progress(on_progress, 'invalid/unsafe sitemap ignored')
+        return result
+    kind = parsed['kind']
+    if kind == 'urlset':
+        result['pages'] = parsed['urls']
+        # Keep the historical raw-document API for standalone discovery users.
+        # Durable jobs retain parsed links only, never multi-megabyte bodies.
+        if crawl_jobs.current_crawl.get() is None:
+            docs.append(text)
+    elif kind == 'sitemapindex':
+        result['children'] = list(dict.fromkeys(resolve_document_url(final, url) for url in parsed['urls']))
+    return result
+
+
+async def _fetch_sitemaps(seed_url: str, *, on_progress: Any = None) -> list[str]:
     """Collect sitemap URLs from robots.txt + well-known locations.
 
-    Returns the raw XML text of every sitemap we could fetch (index or
-    leaf).  Parsing happens in :func:`_extract_urls_from_sitemap`.
+    Follow indexes recursively; return leaf documents only. Bound the frontier,
+    depth, total XML bytes and elapsed time independently of page-fetch caps.
     """
+    from kazma_core.web_acquire.discovery_metadata import _acquire
+
     parsed = urlparse(seed_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     candidates: list[str] = []
 
     # 1. robots.txt Sitemap: directives (authoritative).
-    robots_txt, _ = await _http_get_text(f"{origin}/robots.txt", timeout=10.0)
-    if robots_txt:
-        for line in robots_txt.splitlines():
-            line = line.strip()
-            if line.lower().startswith("sitemap:"):
-                sitemap_url = line.split(":", 1)[1].strip()
-                if sitemap_url:
-                    candidates.append(sitemap_url)
+    metadata_scope = lambda target: _in_scope(seed_url, target, "domain")
+    async def robots():
+        text, _ = await _http_get_text(f"{origin}/robots.txt", timeout=10.0, scope_check=metadata_scope)
+        children = [line.split(':', 1)[1].strip() for line in (text or '').splitlines()
+                    if line.strip().lower().startswith('sitemap:')]
+        return dict(pages=[], children=list(dict.fromkeys(child for child in children if child)), bytes=len((text or '').encode('utf-8')))
+
+    control = await _acquire(f"{origin}/robots.txt", robots)
+    if control is not None:
+        candidates.extend(control['children'])
 
     # 2. Well-known sitemap locations.
     for path in ("/sitemap.xml", "/sitemap_index.xml", "/docs/sitemap.xml", "/docs/sitemap-index.xml"):
         candidates.append(f"{origin}{path}")
 
-    # Fetch each candidate once, keep non-empty XML.
     seen: set[str] = set()
-    docs: list[str] = []
-    for url in candidates:
-        if url in seen:
-            continue
-        seen.add(url)
-        text, _ = await _http_get_text(url, timeout=15.0)
-        if text and (text.lstrip().startswith("<") or "<?xml" in text[:80]):
-            docs.append(text)
+    docs = _SitemapDocuments()
+    queue = deque((url, 0) for url in dict.fromkeys(candidates[:64]))
+    queued = {url for url, _ in queue}
+    total_bytes = 0
+    limited = len(candidates) > 64
+    try:
+        async with asyncio.timeout(60):
+            while queue and len(seen) < 64:
+                url, depth = queue.popleft()
+                if url in seen:
+                    continue
+                seen.add(url)
+                async def acquire():
+                    text, final = await _http_get_text(url, timeout=15.0, scope_check=metadata_scope)
+                    return await _sitemap_links(text, final, docs, on_progress=on_progress)
+
+                result = await _acquire(url, acquire)
+                if result is None:
+                    limited = True
+                    continue
+                size = result['bytes']
+                if total_bytes + size > 20_000_000:
+                    limited = True
+                    break
+                total_bytes += size
+                docs.pages.extend(result['pages'])
+                if result['children']:
+                    if depth >= 4:
+                        limited = True
+                        continue
+                    for child in result['children']:
+                        if child in queued:
+                            continue
+                        if len(queued) >= 64:
+                            limited = True
+                            break
+                        queued.add(child)
+                        queue.append((child, depth + 1))
+    except TimeoutError:
+        limited = True
+    if limited or queue:
+        from kazma_core.web_acquire import crawl_jobs
+
+        job = crawl_jobs.current_crawl.get()
+        if job is not None:
+            await crawl_jobs.call(job.update, lambda row: row.update(metadata_limited=True))
+        await _safe_progress(on_progress, "partial sitemap discovery: time, document, depth or XML byte limit reached; retained pages are preserved")
     return docs
 
 
@@ -600,6 +631,10 @@ async def _firecrawl_map_site(
     Response shape (per Firecrawl OpenAPI spec):
         {"success": bool, "links": [{"url": "...", "title": "...", ...}, ...]}
     """
+    from kazma_core.web_acquire.policy import acquisition_policy
+
+    if not acquisition_policy().permits("firecrawl"):
+        return None
     api_key = (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip()
     if not api_key:
         return None
@@ -608,7 +643,9 @@ async def _firecrawl_map_site(
         import httpx
         from kazma_core.security.ssrf import validate_url
 
-        await asyncio.to_thread(validate_url, seed_url, block_unresolved=True)
+        from kazma_core.web_acquire.dns_worker import validate_public_url
+
+        await validate_public_url(seed_url, validator=validate_url)
         # ``search`` ranks URLs by relevance; omit it for section-root maps
         # so Firecrawl returns the full URL set rather than a seed-ranked
         # slice.  ``limit`` caps the result set; we scope/filter locally.
@@ -623,7 +660,12 @@ async def _firecrawl_map_site(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=45.0, verify=shared_ssl_context()) as client:
+        from kazma_core.web_acquire import accounting
+        from kazma_core.web_acquire.endpoint_transport import EndpointAsyncTransport
+
+        async with httpx.AsyncClient(timeout=45.0, trust_env=False, verify=shared_ssl_context(),
+                transport=EndpointAsyncTransport(verify=shared_ssl_context()),
+                event_hooks=accounting.httpx_hooks('firecrawl', base + api_key, asynchronous=True)) as client:
             # Firecrawl has historically shipped both /v1 and /v2 of the
             # map endpoint (the scrape side is on /v1 in this codebase and
             # works).  Try /v1/map first (matches the working scrape path),
@@ -712,6 +754,7 @@ def _extract_urls_from_sitemap(xml_text: str) -> list[str]:
     return urls
 
 
+@robots_for_job("kb_discovery")
 async def kb_discover_pages(
     seed_url: str,
     *,
@@ -720,11 +763,8 @@ async def kb_discover_pages(
 ) -> list[str]:
     """Discover the full set of in-scope URLs for a library.
 
-    Strategy (first *non-sparse* result wins):
-      0. Firecrawl ``/v1/map`` (seed + parent-section retry for leaf pages)
-      1. Sitemap (robots.txt + well-known)
-      2. Jina Reader seed-expand (markdown link harvest — works on Meta)
-      3. BFS link-walk (Playwright / httpx / Jina per page)
+    Local sitemaps, llms.txt and BFS run before explicitly permitted hosted
+    mapping/seed expansion. Sparse discovery never authorizes data deletion.
 
     ``on_progress`` is an optional **plain async** callable ``async (msg) -> None``
     receiving a short human-readable status string (e.g. ``"fetching
@@ -735,6 +775,9 @@ async def kb_discover_pages(
     """
     if not seed_url.strip():
         return []
+    from kazma_core.web_acquire.policy import acquisition_policy
+
+    policy = acquisition_policy()
     seed = seed_url.strip()
     if not seed.startswith(("http://", "https://")):
         seed = "https://" + seed
@@ -743,6 +786,15 @@ async def kb_discover_pages(
         scope_mode = "tree"
     if scope_mode == "exact":
         return [_canonical_page_url(seed) or seed]
+    from kazma_core.web_acquire import crawl_jobs
+
+    checkpoint = crawl_jobs.current_crawl.get()
+    if checkpoint is not None:
+        saved = await crawl_jobs.call(checkpoint.read)
+        if saved.get('discovery') is not None:
+            retained = saved['discovery'].get('extra', [])
+            resumed = await _bfs_discover(seed, scope_mode, on_progress=on_progress)
+            return _order_urls_seed_first(seed, [url for url in resumed + retained if _in_scope(seed, url, scope_mode)])
 
     def _scope_and_order(raw: list[str]) -> list[str]:
         in_scope = [
@@ -769,49 +821,30 @@ async def kb_discover_pages(
             f"llms.txt contributed {len(llms_urls)} URLs",
         )
 
+    discovered: list[str] = []
     def _with_llms(raw: list[str] | None) -> list[str]:
         merged: list[str] = []
         if raw:
             merged.extend(raw)
         if llms_urls:
             merged.extend(llms_urls)
+        merged.extend(discovered)
         return merged
 
-    # ── 0. Firecrawl /v1/map (strongest tier for bot-walled sites) ───
-    # Runs server-side on Firecrawl's browser farm, so the target's bot
-    # wall never sees us.  Purpose-built for "enumerate every URL on a
-    # site without scraping content" — exactly the discovery problem.
-    # IMPORTANT: leaf pages (Meta .../whatsapp/overview) return a sparse
-    # 3-URL set; we re-map the section parent and refuse sparse results
-    # so later tiers (Jina expand) still run.
-    if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
-        await _safe_progress(on_progress, "querying Firecrawl /v1/map for site URLs…")
-        mapped = await _firecrawl_map_discover(seed)
-        if mapped:
-            mapped = _with_llms(mapped)
-            await _safe_progress(on_progress, f"Firecrawl returned {len(mapped)} URLs; scoping…")
-            ordered = _scope_and_order(mapped)
-            if ordered and not _is_sparse_discovery(seed, ordered):
-                logger.info(
-                    "[kb_discover] Firecrawl /v1/map yielded %d in-scope URLs for %s",
-                    len(ordered), seed,
-                )
-                return ordered
-            await _safe_progress(
-                on_progress,
-                f"Firecrawl map sparse ({len(ordered)} in-scope after filter); falling back",
-            )
-        else:
-            await _safe_progress(on_progress, "Firecrawl /v1/map unavailable/failed; falling back to sitemap")
+    await _safe_progress(on_progress, f"acquisition policy: {policy.mode}; trying local discovery first")
 
     # ── 1. Sitemap discovery ─────────────────────────────────────────
     await _safe_progress(on_progress, "fetching robots.txt + sitemaps…")
-    discovered: list[str] = []
-    sitemap_docs = await _fetch_sitemaps(seed)
-    if sitemap_docs:
+    sitemap_docs = await _fetch_sitemaps(seed, on_progress=on_progress)
+    if getattr(sitemap_docs, 'pages', None) is not None:
+        discovered.extend(sitemap_docs.pages)
+    if sitemap_docs or discovered:
         await _safe_progress(on_progress, f"parsing {len(sitemap_docs)} sitemap doc(s)…")
-        for doc in sitemap_docs:
-            discovered.extend(_extract_urls_from_sitemap(doc))
+        if not hasattr(sitemap_docs, 'pages'):
+            from kazma_core.web_acquire.parser import parse_sitemap
+
+            for doc in sitemap_docs:
+                discovered.extend((await parse_sitemap(doc, seed))['urls'])
         ordered = _scope_and_order(_with_llms(discovered))
         if ordered and not _is_sparse_discovery(seed, ordered):
             logger.info(
@@ -823,32 +856,7 @@ async def kb_discover_pages(
     else:
         await _safe_progress(on_progress, "no sitemap reachable; falling back")
 
-    # ── 2. Jina seed-expand (nav links from bot-walled SPA pages) ─────
-    # One Jina fetch of the Meta overview page yields ~360 in-scope
-    # WhatsApp doc links from the sidebar nav.  Requires Jina opt-in or
-    # the KB last-resort fallback (default on; disable with
-    # KAZMA_JINA_READER=0).
-    if _jina_opt_in() or _kb_jina_fallback_allowed():
-        await _safe_progress(on_progress, "expanding seed via Jina Reader (nav link harvest)…")
-        jina_links = await _jina_expand_seed(seed)
-        if jina_links:
-            ordered = _scope_and_order(_with_llms(jina_links))
-            if ordered and not _is_sparse_discovery(seed, ordered):
-                logger.info(
-                    "[kb_discover] Jina seed-expand yielded %d in-scope URLs for %s",
-                    len(ordered), seed,
-                )
-                await _safe_progress(
-                    on_progress,
-                    f"Jina seed-expand found {len(ordered)} in-scope URLs",
-                )
-                return ordered
-            await _safe_progress(on_progress, "Jina seed-expand sparse; falling back to link-walk")
-        else:
-            await _safe_progress(on_progress, "Jina seed-expand unavailable; falling back to link-walk")
-
-    # llms.txt alone can be a complete corpus when map/sitemap/Jina
-    # were sparse after scoping (or Firecrawl was not configured).
+    # llms.txt alone may be enough when local sitemaps were sparse.
     if llms_urls:
         ordered = _scope_and_order(llms_urls)
         if ordered and not _is_sparse_discovery(seed, ordered):
@@ -858,14 +866,23 @@ async def kb_discover_pages(
             )
             return ordered
 
-    # ── 3. BFS link-walk fallback (Playwright / httpx / Jina) ─────────
+    # ── 2. Local BFS link-walk fallback ─────────
     await _safe_progress(on_progress, "rendering seed page to discover nav links…")
+    if checkpoint is not None:
+        await crawl_jobs.call(checkpoint.discovery, dict(stage='bfs', queue=[[seed, 0]], known=[seed],
+            ordered=[], extra=_scope_and_order(_with_llms([]))[:1000],
+            ambiguous=[], inflight=None, visited=0, limited=False))
     bfs_urls = await _bfs_discover(seed, scope_mode, on_progress=on_progress)
     if bfs_urls and not _is_sparse_discovery(seed, bfs_urls):
-        return _order_urls_seed_first(seed, _with_llms(bfs_urls))
+        return _scope_and_order(_with_llms(bfs_urls))
+    # Hosted map/seed services do not provide enforceable navigation scope.
+    # Post-fetch URL filtering cannot undo an out-of-scope remote acquisition.
+    if policy.permits("firecrawl") or policy.permits("jina"):
+        await _safe_progress(on_progress, "hosted discovery refused: provider cannot enforce this crawl's navigation scope")
+
     if bfs_urls:
         # Sparse but non-empty — still better than seed-only.
-        return _order_urls_seed_first(seed, _with_llms(bfs_urls))
+        return _scope_and_order(_with_llms(bfs_urls))
     # BFS also found nothing usable — the seed page itself was unfetchable
     # (likely bot-walled).  Tell the user why this dropped to "just the
     # seed" so they know to enable a fetch backend rather than seeing an
@@ -873,7 +890,7 @@ async def kb_discover_pages(
     await _safe_progress(
         on_progress,
         "link-walk found no nav links (seed page unreadable — site is likely "
-        "bot-walled; enable KAZMA_FIRECRAWL_API_KEY or KAZMA_JINA_READER=1)",
+        "bot-walled; check Chromium installation and acquisition policy)",
     )
     return [_canonical_page_url(seed) or seed]
 
@@ -915,59 +932,66 @@ async def _bfs_discover(
     *,
     on_progress: Any = None,
 ) -> list[str]:
-    """BFS link-walk using Playwright / httpx / Jina for SPA nav links."""
-    max_pages = _kb_max_pages()
-    max_depth = _kb_max_depth()
+    """Use links from the same scoped typed acquisition as the page text."""
+    from kazma_core.web_acquire import crawl_jobs
+
+    checkpoint = crawl_jobs.current_crawl.get()
+    saved = await crawl_jobs.call(checkpoint.read) if checkpoint is not None else None
+    max_pages = saved['policy']['max_pages'] if saved else _kb_max_pages()
+    max_depth = saved['policy'].get('max_depth', _kb_max_depth()) if saved else _kb_max_depth()
+    seed = _canonical_page_url(seed)
     queue: deque[tuple[str, int]] = deque([(seed, 0)])
-    seen: set[str] = set()
+    queued = {seed}
     ordered: list[str] = []
-    while queue and len(ordered) < max_pages:
-        url, depth = queue.popleft()
-        key = _canonical_page_url(url)
-        if key in seen:
-            continue
-        seen.add(key)
-        await _safe_progress(on_progress, f"link-walk depth {depth}: {url[:80]}")
-        doc = await _fetch_discovery_document(url, depth=depth)
-        if not doc:
-            continue
-        ordered.append(key)
-        if depth < max_depth:
-            for href in _extract_links_from_text(doc, url):
-                href_key = _canonical_page_url(href)
-                if not href_key or href_key in seen:
+    visited = 0
+    work_cap = max_pages * 4
+    limited = False
+    state = saved.get('discovery') if saved else None
+    if state is not None:
+        queue = deque((url, depth) for url, depth in state['queue'])
+        queued, ordered = set(state['known']), list(state['ordered'])
+        visited, limited = state['visited'], state['limited']
+    async def persist(inflight=None):
+        if checkpoint is not None:
+            await crawl_jobs.call(checkpoint.discovery, dict(stage='bfs', queue=[list(node) for node in queue],
+                known=sorted(queued), ordered=ordered, extra=(state or {}).get('extra', []),
+                ambiguous=(state or {}).get('ambiguous', []), inflight=inflight, visited=visited, limited=limited))
+    checker = lambda target: _in_scope(seed, target, scope_mode)
+    async with _pw_browser_scope():
+        while queue and len(ordered) < max_pages and visited < work_cap:
+            url, depth = queue.popleft()
+            visited += 1
+            await persist([url, depth])  # claim before acquisition; never replay an uncertain effect
+            await _safe_progress(on_progress, f"link-walk depth {depth}: {url[:80]}")
+            result = await _web_fetch_text(url, purpose="kb_discovery", scope_check=checker)
+            if not result.ok:
+                await persist()
+                if result.error_code in {FetchErrorCode.STORAGE, FetchErrorCode.LIMIT, FetchErrorCode.POLICY, FetchErrorCode.ROUTING}:
+                    raise AcquisitionError(result.error_code, result.error or 'Discovery acquisition refused.')
+                await _safe_progress(on_progress, f"link-walk failed: {url}: {result.error or result.error_code}")
+                continue
+            ordered.append(_canonical_page_url(result.final_url or url))
+            if result.truncated or not result.links_complete:
+                await _safe_progress(on_progress, f"partial link discovery: {url}; {', '.join(result.truncation_reasons) or 'link completeness unavailable'}")
+            if depth >= max_depth:
+                limited |= bool(result.links)
+                await persist()
+                continue
+            for href in result.links:
+                key = _canonical_page_url(href)
+                if not key or key in queued or _is_infra_url(href) or not checker(href):
                     continue
-                if _is_infra_url(href) or not _in_scope(seed, href, scope_mode):
-                    continue
-                queue.append((href_key, depth + 1))
-    return ordered
+                if len(queued) >= work_cap:
+                    limited = True
+                    break
+                queued.add(key)
+                queue.append((key, depth + 1))
+            await persist()
+    if limited or queue:
+        await _safe_progress(on_progress, "partial link discovery: page, depth or frontier limit reached; retained pages are not a deletion manifest")
+    return list(dict.fromkeys(ordered))
 
 
-async def _fetch_discovery_document(url: str, *, depth: int) -> str | None:
-    """Fetch page content for link discovery (HTML or markdown).
-
-    Tiered: Playwright (depth 0) → httpx → Jina (opt-in / last-resort).
-    Returns raw HTML or markdown text suitable for link extraction.
-    """
-    # Depth 0 (seed) prefers Playwright; deeper pages try static first.
-    first = _fetch_html_playwright if depth == 0 else _fetch_html_raw
-    second = _fetch_html_raw if depth == 0 else _fetch_html_playwright
-    html = await first(url)
-    if not html or _looks_like_bot_block_html(html):
-        html = await second(url)
-    if html and not _looks_like_bot_block_html(html):
-        return html
-    # Bot-walled: try Jina for markdown (nav links survive conversion).
-    if _jina_opt_in() or _kb_jina_fallback_allowed():
-        try:
-            from kazma_core.web_acquire.fetch import jina_reader
-
-            text = await jina_reader(url)
-            if text and len(text) >= MIN_USEFUL_CHARS:
-                return text
-        except Exception as exc:
-            logger.debug("[kb_discover] Jina discovery fetch failed %s: %s", url, exc)
-    return None
 
 
 def _extract_links_from_html(html: str, base_url: str) -> list[str]:
@@ -1071,276 +1095,54 @@ async def _fetch_html_playwright(url: str) -> str | None:
 
 # ── Page extraction (static + tabbed/JS) ────────────────────────────────────
 
-# Optional shared Playwright browser for multi-page crawl jobs (one launch
-# per ingest_site instead of launch-per-page). Set via ``_pw_browser_scope``.
-_pw_shared: dict[str, Any] = {"browser": None, "context": None, "pw": None}
-
-
-class _pw_browser_scope:
-    """Async context manager: reuse one Chromium for a crawl job.
-
-    The Playwright objects are created/used on the dedicated browser loop
-    (``kazma_core.playwright_loop``) — the server's SelectorEventLoop cannot
-    spawn the Node driver on Windows.
-    """
-
-    async def __aenter__(self) -> "_pw_browser_scope":
-        try:
-            from playwright.async_api import async_playwright  # noqa: F401
-        except ImportError:
-            return self
-        try:
-            from kazma_core.playwright_loop import run_in_browser_loop
-
-            await run_in_browser_loop(self._start_impl())
-        except Exception as exc:
-            logger.debug("[kb_ingest] shared Playwright launch failed: %s", exc)
-        return self
-
-    async def _start_impl(self) -> None:
-        from playwright.async_api import async_playwright
-
-        try:
-            from kazma_core.proxy.client import playwright_proxy
-
-            pw_proxy = playwright_proxy()
-        except Exception:
-            pw_proxy = None
-        pw = await async_playwright().start()
-        launch_kwargs: dict = {
-            "headless": True,
-            "args": [
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-            ],
-        }
-        if pw_proxy:
-            launch_kwargs["proxy"] = pw_proxy
-        browser = await pw.chromium.launch(**launch_kwargs)
-        ctx = await browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=_BROWSER_UA,
-            locale="en-US",
-            timezone_id="America/New_York",
-        )
-        await ctx.add_init_script(
-            """
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            window.chrome = { runtime: {} };
-            """
-        )
-        _pw_shared["pw"] = pw
-        _pw_shared["browser"] = browser
-        _pw_shared["context"] = ctx
-
-    async def __aexit__(self, *exc: Any) -> None:
-        ctx = _pw_shared.get("context")
-        browser = _pw_shared.get("browser")
-        pw = _pw_shared.get("pw")
-        _pw_shared["context"] = None
-        _pw_shared["browser"] = None
-        _pw_shared["pw"] = None
-
-        async def _close_impl() -> None:
-            for obj, meth in ((ctx, "close"), (browser, "close"), (pw, "stop")):
-                if obj is None:
-                    continue
-                try:
-                    await getattr(obj, meth)()
-                except Exception:
-                    pass
-
-        try:
-            from kazma_core.playwright_loop import run_in_browser_loop
-
-            await run_in_browser_loop(_close_impl())
-        except Exception:
-            logger.debug("[kb_ingest] shared Playwright teardown failed", exc_info=True)
+# Compatibility names share the real acquisition owner/context; no parallel
+# browser launch or network continuation lives in the KB layer.
+from kazma_core.web_acquire.browser import BrowserJob as _pw_browser_scope
+from kazma_core.web_acquire.browser import current_browser_job as _pw_scope
 
 
 async def _render_with_playwright(url: str, *, want_text: bool) -> str | None:
-    """Render a URL with stealth Chromium; reuse shared browser when scoped.
+    from kazma_core.playwright_loop import run_in_browser_loop
 
-    Runs on the dedicated browser loop (``kazma_core.playwright_loop``) —
-    the server's SelectorEventLoop cannot spawn Playwright's Node driver on
-    Windows.
-
-    Args:
-        want_text: ``False`` → raw HTML (link discovery).
-                   ``True`` → full-DOM textContent (hidden tabs included).
-    """
-    try:
-        from kazma_core.playwright_loop import run_in_browser_loop
-
-        return await run_in_browser_loop(
-            _render_with_playwright_impl(url, want_text=want_text)
-        )
-    except Exception as exc:
-        logger.debug("[kb_ingest] Playwright render failed %s: %s", url, exc)
-        return None
+    return await run_in_browser_loop(_render_with_playwright_impl(url, want_text=want_text))
 
 
 async def _render_with_playwright_impl(url: str, *, want_text: bool) -> str | None:
-    """Playwright render body — must run on the dedicated browser loop."""
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
+    from kazma_core.web_acquire.browser import render_document
+    from kazma_core.tools.read_url import _looks_like_bot_block
+
+    document = await render_document(url, challenge=_looks_like_bot_block,
+                                     profile="knowledge" if want_text else "discovery")
+    if not document.result.ok:
+        logger.debug('[kb] local render refused: %s', document.result.error)
         return None
-
-    shared_ctx = _pw_shared.get("context")
-    owns_browser = False
-    browser = None
-    ctx = shared_ctx
-    pw = None
-
-    try:
-        if ctx is None:
-            owns_browser = True
-            try:
-                from kazma_core.proxy.client import playwright_proxy
-
-                pw_proxy = playwright_proxy()
-            except Exception:
-                pw_proxy = None
-            pw = await async_playwright().start()
-            launch_kwargs: dict = {
-                "headless": True,
-                "args": [
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                ],
-            }
-            if pw_proxy:
-                launch_kwargs["proxy"] = pw_proxy
-            browser = await pw.chromium.launch(**launch_kwargs)
-            ctx = await browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent=_BROWSER_UA,
-                locale="en-US",
-                timezone_id="America/New_York",
-            )
-            await ctx.add_init_script(
-                """
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                window.chrome = { runtime: {} };
-                """
-            )
-
-        from kazma_core.security.browser_egress import install_async_browser_egress
-
-        await install_async_browser_egress(ctx)
-        page = await ctx.new_page()
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            try:
-                await page.wait_for_function(
-                    f"() => (document.body && (document.body.innerText || '').length) >= {MIN_USEFUL_CHARS}",
-                    timeout=20000,
-                )
-            except Exception:
-                logger.debug("[kb_ingest] Playwright content wait failed for %s", url)
-                return None
-
-            if not want_text:
-                html = await page.content()
-                if _looks_like_bot_block_html(html):
-                    return None
-                return html
-
-            try:
-                await _click_tabs(page)
-            except Exception as exc:
-                logger.debug("[kb_ingest] tab click pass skipped: %s", exc)
-            text = await page.evaluate(
-                """() => {
-                    const root = document.body || document.documentElement;
-                    return root ? (root.textContent || '') : '';
-                }"""
-            )
-            if not text or len(text) < MIN_USEFUL_CHARS:
-                return None
-            text = re.sub(r"[ \t]+\n", "\n", text)
-            text = re.sub(r"\n{3,}", "\n\n", text)
-            return text.strip()
-        finally:
-            try:
-                await page.close()
-            except Exception:
-                pass
-    except Exception as exc:
-        logger.debug("[kb_ingest] Playwright render failed %s: %s", url, exc)
-        return None
-    finally:
-        if owns_browser:
-            for obj, meth in ((ctx, "close"), (browser, "close"), (pw, "stop")):
-                if obj is None:
-                    continue
-                try:
-                    await getattr(obj, meth)()
-                except Exception:
-                    pass
+    return document.result.text if want_text else document.html
 
 
-async def _extract_page(url: str) -> tuple[str | None, str, str]:
-    """Extract markdown from one page.
+async def _extract_page(url: str, *, scope_check=None) -> tuple[str | None, str, str]:
+    """One scoped knowledge-profile acquisition; never start a second ladder.
 
-    Tiered:
-      1. ``fetch_full_text`` (Jina → Firecrawl → httpx+trafilatura → Playwright).
-      2. If (1) returns thin content, an error stub, or fails on what looks
-         like a bot-walled JS/tab page, fall back to Playwright full-DOM
-         extraction (hidden panels included).
-
-    Returns ``(markdown_or_None, status, reason)`` where:
-      status is one of ``"ok"``, ``"thin"``, ``"empty"``, ``"error"``;
-      reason is a short human-readable diagnostic (empty when ok).  The
-      reason is what surfaces in the job's failed-URL log so the user can
-      tell *why* a page failed (bot-wall vs. Chromium-missing vs. timeout)
-      instead of seeing an opaque "1 failed".
+    The shared boundary owns static/hidden-panel extraction, local rendering,
+    deadlines and policy. Partial or failed results never reach the index.
     """
-    if _web_fetch_text is not None:
-        fr = await _web_fetch_text(url, purpose="kb")
-        text = fr.text if fr.ok or fr.text else (f"Error: {fr.error}" if fr.error else "Error: empty")
-    elif _ladder_fetch is not None:
-        text = await _ladder_fetch(url)
-    else:
-        return None, "error", "no fetch backend available (web_acquire + read_url)"
-    # Only treat *Error:* strings as hard failures — never re-scan extracted
-    # plain text with HTML bot-wall heuristics (false-positive on example.com).
-    if isinstance(text, str) and text.startswith("Error:"):
-        err_msg = text[6:].strip() or text
-        pw_reason = _check_playwright_available()
-        if pw_reason:
-            return None, "error", f"{err_msg}; Playwright unavailable ({pw_reason})"
-        pw = await _render_with_playwright(url, want_text=True)
-        if pw and len(pw) >= MIN_USEFUL_CHARS:
-            return pw, "ok", ""
-        return None, "error", (
-            f"{err_msg}. Optional backends: KAZMA_FIRECRAWL_API_KEY, "
-            "KAZMA_JINA_READER=1, or `playwright install chromium`"
-        )
-    text = (text or "").strip()
+    checker = scope_check or (lambda target: _in_scope(url, target, "domain"))
+    fr = await _web_fetch_text(url, purpose="kb", scope_check=checker)
+    from kazma_core.web_acquire.crawl_jobs import call, current_crawl
+
+    job = current_crawl.get()
+    if job is not None:
+        await call(job.receipt, fr)
+    if fr.truncated:
+        return None, "error", f"Acquisition resource limit ({', '.join(fr.truncation_reasons)}); partial content was not indexed."
+    if not fr.ok or (fr.http_status is not None and fr.http_status >= 400):
+        return None, "error", fr.error or f"Acquisition failed (HTTP {fr.http_status}); no page was indexed."
+    text = (fr.text or "").strip()
+    if not text:
+        return None, "empty", "Acquisition produced no readable content."
     if len(text) < MIN_USEFUL_CHARS:
-        # Short but real content (static pages) is still usable for ingest
-        words = len(text.split())
-        if words >= 8:
+        if len(text.split()) >= 8:
             return text, "ok", f"short static page ({len(text)} chars)"
-        pw_reason = _check_playwright_available()
-        if pw_reason:
-            if not text:
-                return None, "empty", f"empty extract; Playwright unavailable ({pw_reason})"
-            return text, "thin", f"thin extract ({len(text)} chars); Playwright unavailable ({pw_reason})"
-        pw = await _render_with_playwright(url, want_text=True)
-        if pw and len(pw) > len(text):
-            return pw, "ok", ""
-        if not text:
-            return None, "empty", "empty extract after all tiers"
-        return text, "thin", f"thin extract ({len(text)} chars) — likely a JS-only page"
+        return None, "error", f"Insufficient readable content ({len(text)} chars); no page was indexed."
     return text, "ok", ""
 
 
@@ -1389,29 +1191,6 @@ async def _extract_playwright_full_dom(url: str) -> str | None:
     working.  New code should call ``_render_with_playwright`` directly.
     """
     return await _render_with_playwright(url, want_text=True)
-
-
-async def _click_tabs(page: Any) -> None:
-    """Best-effort: click role=tab / tablist controls so panels render.
-
-    Doc sites commonly render only the active tab's content into the DOM
-    on first paint; clicking each tab forces the others into the DOM so
-    the subsequent ``textContent`` pull captures them.  Failures are
-    swallowed — the full-DOM pull still catches content already in DOM.
-    """
-    # Use the Playwright role selector; clicks are silent if no matches.
-    for selector in ("[role=tab]", "button[aria-selected]", ".tab-button", "[data-tab]"):
-        try:
-            locs = page.locator(selector)
-            count = await locs.count()
-            for i in range(min(count, 30)):  # cap to avoid runaway clicks
-                try:
-                    await locs.nth(i).click(timeout=1500)
-                    await page.wait_for_timeout(150)
-                except Exception:
-                    continue
-        except Exception:
-            continue
 
 
 # ── Ingestion: single page + whole tree ─────────────────────────────────────
@@ -1464,7 +1243,9 @@ async def ingest_url(
     try:
         from kazma_core.security.ssrf import validate_url
 
-        await asyncio.to_thread(validate_url, url, block_unresolved=True)
+        from kazma_core.web_acquire.dns_worker import validate_public_url
+
+        await validate_public_url(url, validator=validate_url)
     except Exception as exc:
         result.errors.append(f"SSRF/invalid URL {url}: {exc}")
         result.failed_urls.append(url)
@@ -1518,25 +1299,15 @@ def _store_page(
 def _prune_gone_urls(
     index: Any, store: Any, library_id: str, seed_url: str, pages: list[str]
 ) -> int:
-    """Drop in-scope URLs that discovery no longer finds; refresh the chunk count.
+    """Refresh the chunk count without inferring deletion from discovery.
 
     Blocking (SQLite + vector store): called through ``asyncio.to_thread``.
     """
     pruned_urls = 0
-    try:
-        discovered_set = set(pages)
-        existing = set(store.list_source_urls(library_id))
-        scope_mode = _kb_scope_mode()
-        candidates = {
-            u for u in existing if u and _in_scope(seed_url, u, scope_mode)
-        }
-        pruned_urls = index.prune_sources_not_in(
-            library_id,
-            discovered_set,
-            candidate_urls=candidates,
-        )
-    except Exception as exc:
-        logger.debug("[kb_ingest] gone-URL prune skipped: %s", exc)
+    # Discovery is not an authoritative deletion manifest. Even a successful
+    # sitemap/map can omit pages; a page cap, bot wall or sparse fallback makes
+    # absence weaker still. Keep retained content until explicit removal or
+    # independently verified deletion, never infer deletion from this list.
 
     # Persist final chunk_count on the library row (index() also updates it,
     # but this is the authoritative post-crawl value).
@@ -1547,11 +1318,84 @@ def _prune_gone_urls(
     return pruned_urls
 
 
+async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=None, resume=False):
+    from kazma_core.web_acquire import crawl_jobs
+    from kazma_core.web_acquire.policy import acquisition_policy
+
+    policy = acquisition_policy()
+    with crawl_policy(purpose="kb") as robots:
+        respect = robots.enforce()
+    cap = _kb_max_pages()
+    try:
+        if isinstance(max_pages, bool):
+            raise ValueError
+        page_cap = max(1, min(cap, int(max_pages or cap)))
+    except (ValueError, TypeError, OverflowError):
+        raise AcquisitionError(FetchErrorCode.POLICY, 'max_pages must be an integer; crawl admission refused.') from None
+    snapshot = dict(mode=policy.mode, providers=sorted(policy.providers), robots=respect,
+        scope=_kb_scope_mode(), max_pages=page_cap, max_depth=_kb_max_depth(), delay_ms=_kb_delay_ms())
+    job = await crawl_jobs.call(crawl_jobs.start, library_id, seed_url, snapshot, job_id=job_id,
+        resume=resume, on_cancel=lambda created: created.finish('interrupted'))
+    return job, policy, respect, page_cap
+
+
 async def ingest_site(
     library_id: str,
     seed_url: str,
     *,
     max_pages: int | None = None,
+    job_id: str | None = None,
+    resume: bool = False,
+    _prepared=None,
+) -> AsyncIterator[ProgressUpdate]:
+    """Run a durable crawl; an explicit resume skips settled/ambiguous pages."""
+    from kazma_core.web_acquire import crawl_jobs
+    from kazma_core.web_acquire.policy import acquisition_policy, policy_scope
+    from kazma_core.playwright_loop import finish_owned
+
+    try:
+        job, policy, respect, page_cap = _prepared or await _prepare_ingest_site(
+            library_id, seed_url, max_pages=max_pages, job_id=job_id, resume=resume)
+    except AcquisitionError as exc:
+        if exc.code != FetchErrorCode.POLICY:
+            raise
+        yield ProgressUpdate(phase='error', message=f'{exc.code.value}: {exc}', errors=[f'{exc.code.value}: {exc}'])
+        return
+    iterator = _ingest_site_impl(library_id, seed_url, max_pages=page_cap, checkpoint=job)
+    status = 'interrupted'
+    try:
+        while True:
+            token = crawl_jobs.current_crawl.set(job)
+            try:
+                with policy_scope(policy), crawl_policy(respect=respect):
+                    update = await anext(iterator)
+            except StopAsyncIteration:
+                break
+            finally:
+                crawl_jobs.current_crawl.reset(token)
+            update.job_id = job.job_id
+            await crawl_jobs.call(job.progress, update)
+            if update.phase in ('done', 'error'):
+                status = 'failed' if update.phase == 'error' else 'partial' if update.failed else 'completed'
+                if status == 'completed':
+                    row = await crawl_jobs.call(job.read)
+                    state = row.get('discovery') or {}
+                    if row.get('metadata_limited') or state.get('limited') or state.get('ambiguous') or any(record['status'] == 'ambiguous' for record in row.get('metadata', {}).values()):
+                        status = 'partial'
+            yield update
+    finally:
+        try:
+            await finish_owned(iterator.aclose())
+        finally:
+            await finish_owned(crawl_jobs.call(job.finish, status))
+
+
+async def _ingest_site_impl(
+    library_id: str,
+    seed_url: str,
+    *,
+    max_pages: int | None = None,
+    checkpoint=None,
 ) -> AsyncIterator[ProgressUpdate]:
     """Ingest a whole doc tree, yielding progress as it goes.
 
@@ -1559,9 +1403,18 @@ async def ingest_site(
     Playwright full-DOM fallback for tabbed/JS pages.  Per-page dedup via
     content hash means a refresh only re-indexes changed pages.
     """
-    cap = _kb_max_pages()
-    page_cap = max(1, min(cap, int(max_pages or cap)))
-    delay_ms = _kb_delay_ms()
+    # Capture job policy without leaving ContextVars set while yielding progress.
+    try:
+        with crawl_policy(purpose="kb") as job_policy:
+            job_policy.enforce()
+    except AcquisitionError as exc:
+        yield ProgressUpdate(phase="error", message=f"crawl policy failed: {exc}")
+        return
+    from kazma_core.web_acquire.crawl_jobs import call
+
+    saved = await call(checkpoint.read)
+    page_cap = saved['policy']['max_pages']
+    delay_ms = saved['policy']['delay_ms']
     started = datetime.now(UTC).isoformat()
     result = IngestResult()
 
@@ -1573,20 +1426,32 @@ async def ingest_site(
     # sequence looks like a silent hang).  The callback pushes messages
     # into a queue; we drain it while awaiting the discovery result.
     import asyncio as _aio
-    progress_q: _aio.Queue[str] = _aio.Queue()
+    progress_q: _aio.Queue[str] = _aio.Queue(maxsize=64)
 
     async def _on_discovery_progress(msg: str) -> None:
-        await progress_q.put(msg)
+        if progress_q.full():
+            progress_q.get_nowait()
+        progress_q.put_nowait(msg[:2000])
 
     try:
         from kazma_core.security.ssrf import validate_url
 
-        await _aio.to_thread(validate_url, seed_url, block_unresolved=True)
+        from kazma_core.web_acquire.dns_worker import validate_public_url
+
+        await validate_public_url(seed_url, validator=validate_url)
     except Exception as exc:
         yield ProgressUpdate(phase="error", message=f"invalid seed: {exc}", started_at=started)
         return
 
-    disco_task = _aio.create_task(kb_discover_pages(seed_url, on_progress=_on_discovery_progress))
+    scope_mode = saved['policy']['scope']
+    checker = lambda target: _in_scope(seed_url, target, scope_mode)
+    async def discover_or_resume():
+        if saved['discovered']:
+            return [page['url'] for page in saved['pages']]
+        return await kb_discover_pages(seed_url, mode=scope_mode, on_progress=_on_discovery_progress)
+
+    with crawl_policy(job=job_policy):
+        disco_task = _aio.create_task(discover_or_resume())
     try:
         while not disco_task.done():
             # Drain any progress messages that arrived, with a short timeout
@@ -1609,8 +1474,16 @@ async def ingest_site(
         disco_task.cancel()
         yield ProgressUpdate(phase="error", message=f"discovery failed: {exc}", started_at=started)
         return
+    finally:
+        # Includes cancellation and async-generator close (BaseExceptions).
+        # Await ownership cleanup so a cancelled crawl cannot keep discovering.
+        if not disco_task.done():
+            disco_task.cancel()
+        await _aio.gather(disco_task, return_exceptions=True)
 
     pages = pages[:page_cap]
+    if not saved['discovered']:
+        await call(checkpoint.frontier, pages)
     result.pages_discovered = len(pages)
     yield ProgressUpdate(
         phase="discover", discovered=len(pages), started_at=started,
@@ -1618,16 +1491,18 @@ async def ingest_site(
     )
 
     # ── Fetch + ingest each page (shared Playwright for the job) ─────
-    index = await asyncio.to_thread(get_knowledge_index)
-    store = await asyncio.to_thread(get_knowledge_store)
-    fetched = 0
-    failed = 0
-    chunks_new = 0
-    chunks_skipped = 0
+    index = await call(get_knowledge_index)
+    store = await call(get_knowledge_store)
+    fetched = saved['fetched']
+    failed = saved['failed'] + sum(page['status'] == 'ambiguous' for page in saved['pages'])
+    chunks_new = saved['ingested']
+    chunks_skipped = saved['skipped']
 
-    pages_unchanged = 0
+    pages_unchanged = saved['pages_unchanged']
     async with _pw_browser_scope():
         for i, url in enumerate(pages):
+            if not await call(checkpoint.begin_page, url):
+                continue
             yield ProgressUpdate(
                 phase="fetch",
                 discovered=len(pages), fetched=fetched, ingested=chunks_new,
@@ -1637,7 +1512,8 @@ async def ingest_site(
                 started_at=started,
             )
             try:
-                text, status, reason = await _extract_page(url)
+                with crawl_policy(job=job_policy):
+                    text, status, reason = await _extract_page(url, scope_check=checker)
                 if text is None or status == "error":
                     failed += 1
                     result.failed_urls.append(url)
@@ -1648,6 +1524,7 @@ async def ingest_site(
                     else:
                         err_msg = f"{url}: fetch returned no content"
                         result.errors.append(err_msg)
+                    await call(checkpoint.end_page, url, error=reason or 'No readable content')
                     yield ProgressUpdate(
                         phase="fetch",
                         discovered=len(pages), fetched=fetched, ingested=chunks_new,
@@ -1658,7 +1535,7 @@ async def ingest_site(
                         started_at=started,
                     )
                     continue
-                new, skipped, n_chunks = await asyncio.to_thread(
+                new, skipped, n_chunks = await call(
                     _store_page, index, library_id, url, text
                 )
                 chunks_new += new
@@ -1671,18 +1548,22 @@ async def ingest_site(
                     pages_unchanged += 1
                 fetched += 1
                 result.pages_fetched += 1
+                await call(checkpoint.end_page, url, new=new, skipped=skipped,
+                    unchanged=bool(n_chunks and new == 0 and skipped >= n_chunks))
             except Exception as exc:
+                if isinstance(exc, AcquisitionError) and exc.code.value in ('storage_error', 'policy_error', 'resource_limit'):
+                    raise
                 failed += 1
                 result.failed_urls.append(url)
                 result.errors.append(f"{url}: {exc}")
                 logger.warning("[kb_ingest] page failed %s: %s", url, exc)
+                await call(checkpoint.end_page, url, error=str(exc))
 
             if delay_ms:
                 await asyncio.sleep(delay_ms / 1000.0)
 
-    # Prune URLs that were in-scope under this seed but disappeared from discovery
-    # (site shrink) — keeps orphan safety at the *site* level, not only page shrink.
-    pruned_urls = await asyncio.to_thread(
+    # Refresh counts; discovery absence never authorizes deletion of old pages.
+    pruned_urls = await call(
         _prune_gone_urls, index, store, library_id, seed_url, pages
     )
 
@@ -1690,7 +1571,7 @@ async def ingest_site(
     # message — that's what the user sees in the toast/progress panel, and
     # "0/1 pages, 0 chunks, 1 failed" without a reason is unactionable.
     done_msg = (
-        f"done: {fetched}/{len(pages)} pages, "
+        f"{'done' if fetched else 'failed'}: {fetched}/{len(pages)} pages, "
         f"{chunks_new} new chunks (+{chunks_skipped} deduped"
         + (f", {pages_unchanged} pages unchanged" if pages_unchanged else "")
         + (f", {pruned_urls} gone URLs pruned" if pruned_urls else "")
@@ -1703,12 +1584,13 @@ async def ingest_site(
         done_msg += f" — first failure: {first_reason}"
 
     yield ProgressUpdate(
-        phase="done",
+        phase="done" if fetched else "error",
         discovered=len(pages), fetched=fetched, ingested=chunks_new,
         skipped=chunks_skipped, failed=failed,
         pages_unchanged=pages_unchanged,
         pruned_urls=pruned_urls,
         message=done_msg,
+        errors=list(result.errors),
         started_at=started,
     )
 
@@ -1716,7 +1598,6 @@ async def ingest_site(
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 _TITLE_RE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
-
 
 def _derive_title(text: str, url: str) -> str:
     """Best-effort page title from the first H1, else the URL's last segment."""
