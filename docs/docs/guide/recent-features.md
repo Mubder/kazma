@@ -7,6 +7,32 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-10-10 through 2026-10-12 — local-first research with visible outcomes.**
+Page acquisition defaults to local HTTP/extraction and optional local Chromium.
+Hosted extractors and proxies require an explicit mode and provider allowlist;
+saved API keys alone do not enable them. Research, crawl and Knowledge jobs
+retain bounded durable journals, preserve uncertain effects and require explicit
+recovery after interruption. Automated crawls enforce robots checks by default
+and share origin limits and cooldowns.
+
+Completion now creates a persistent notification linking to the saved run and
+results. Partial, failed, cancelled and interrupted runs have distinct alerts;
+no observed progress produces a warning, and resumed progress clears it.
+**Settings → System → Web acquisition** controls monitoring and completion
+alerts, the no-progress threshold (default 180 seconds) and fresh low-credit
+threshold (default 100). Cached errors, usage, request reservations and balances
+are visible without provider calls. Unsupported balances and charges remain
+unknown; credit refresh is an explicit permitted action. External notification
+receipts distinguish platform acceptance from a requested or uncertain send.
+
+Local-only acquisition does not make AI planning or synthesis offline: those
+steps use the configured model. Strict Chromium isolation is qualified on Linux
+with the required host controls; Windows strict rendering refuses launch, and
+Windows compatibility endurance remains unqualified. Local HTTP remains
+available. See [Web research](web-research#progress-and-result-alerts),
+[Configuration](configuration#research-and-crawler-alerts) and
+[Known gaps](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md).
+
 **New in 2026-10-10 — final answers stay final across chat apps.** Telegram,
 Discord and Slack deliver the shared graph's answer without adding a greeting
 or sign-off afterward, and save the completed reply once. Native live checks
@@ -619,7 +645,7 @@ Industry-grade web scraping resilience and model output truncation recovery.
 | **Response Size Caps** | `read_url` streams body reads and enforces `KAZMA_FETCH_MAX_BYTES` (default 5 MB) to prevent memory exhaustion and gzip-bomb exploits. |
 | **Content-Type Gate** | Non-textual binary payloads (PDFs, images, archives) fail fast with actionable guidance instead of polluting the text extractor. |
 | **5xx Retry Loop** | HTTP scraper retry loop covers 500, 502, 503, and 504 status codes with backoff and jitter (3 attempts). |
-| **robots.txt policy** | Automated crawl/KB/research saves enforce bounded KazmaBot checks by default; failed checks refuse crawling and disallowed URLs report `blocked_robots`. Explicit opt-out is visible. See [web research](./web-research#robots-policy) for limits. |
+| **robots.txt policy** | Automated crawl/KB/research saves enforce bounded KazmaBot checks by default; failed checks refuse crawling and disallowed URLs report `robots_disallowed`. Explicit opt-out is visible. See [web research](./web-research#robots-policy) for limits. |
 | **Auto-Retry Truncation** | When LLM completion stops with `finish_reason='length'`, `llm_provider.chat` transparently retries ONCE with doubled `max_tokens` (capped at 4x configured / 32k) instead of returning broken tool JSON. |
 | **`file_append` Tool** | Built-in tool in `LocalToolRegistry` allowing agents to write large files in chunks (`file_write` to initialize, `file_append` for subsequent sections). |
 

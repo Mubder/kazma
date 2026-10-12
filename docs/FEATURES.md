@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-10**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -83,7 +83,11 @@ Every line below describes that setup.
 | Convert, split, merge and redact documents; generate reports as Word, PDF or HTML with correct Arabic typography | Shipped | `/documents` |
 | Deep web research with sources: search, read, crawl, summarize | Shipped | `/research` |
 | Web search through SearXNG (self-hosted metasearch, in the Docker setup) | Shipped | `tools/web_search.py` |
-| Reading hard pages with local Chromium; optional hosted Firecrawl/Jina recovery | Local-only default; hosted mode + allowlist + credentials required | `tools/read_url.py` |
+| Local HTTP extraction with optional local Chromium; hosted Firecrawl/Jina recovery requires explicit consent | Partial — local-only default; strict Chromium needs Linux network/cgroup controls; Windows strict rendering refuses launch and compatibility endurance is unqualified | [Web research](docs/guide/web-research.md) |
+| Durable research and crawl journals with explicit recovery after interruption | Shipped — finite job/history/report allowances; uncertain effects are not automatically replayed | [Web research](docs/guide/web-research.md) |
+| Persistent research/crawl completion alerts linking to saved results, with stall, recovery and distinct terminal-outcome warnings | Shipped — monitoring and completion alerts default on; external delivery requires configured ops routes | Settings → System → Web acquisition |
+| Saved acquisition errors, reported usage, request reservations and cached provider balances in Web, chat, CLI and TUI | Partial — unsupported balances and charges stay unknown; balance refresh is explicit and permitted by policy | [Web research](docs/guide/web-research.md) |
+| Automated crawl/KB/research robots checks and shared origin limits/cooldowns | Shipped — failed checks refuse crawling; explicit robots opt-out is visible | [Web research](docs/guide/web-research.md) |
 | Scraping through a rotating residential proxy | Opt-in — acquisition mode + proxy allowlist permission + Settings | Settings → System → Proxy |
 | Image generation (Pollinations with no key; DALL-E, Stability, Flux with keys) and image understanding | Shipped | `tools/image_gen.py` |
 

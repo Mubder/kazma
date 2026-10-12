@@ -11,6 +11,10 @@
   the correct saved run through soft navigation in English and Arabic.
 - Preserve local-only acquisition by default and make no monitoring provider
   probes. Research AI steps still use the configured model.
+- Update the operator guides, English/Arabic overview and public feature claims
+  for completion links, alert thresholds, explicit hosted-service permission,
+  durable recovery, credit evidence and platform/history limits. Correct older
+  guidance that treated robots checks as opt-in or API keys as remote consent.
 
 ## Web acquisition safety foundation (2026-10-10 through 2026-10-12)
 

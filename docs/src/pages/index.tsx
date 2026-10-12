@@ -43,6 +43,10 @@ function Features() {
       description: 'A supervisor watchdog tracks node heartbeats, detects stalls, and rolls back to a clean checkpoint with reflection injection. Model failover chains, a durable LLM call ledger, orphan-task recovery, and an HITL approval timeout keep long-horizon tasks running.'
     },
     {
+      title: 'Local-First Research',
+      description: 'Local HTTP extraction and optional local Chromium, with hosted services requiring explicit consent. Durable runs show saved results, usage and credit evidence, completion alerts and progress warnings. AI planning and writing use your configured model; browser isolation depends on the host.'
+    },
+    {
       title: 'Document Intelligence',
       description: 'A secure, durable document platform: streamed intake → content-addressed quarantine → policy sniff → isolated subprocess parse/OCR → durable jobs → optional Knowledge index, plus generate/convert/redact and ops (capacity, GC, audit, cert).'
     },
