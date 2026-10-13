@@ -511,17 +511,24 @@ When you **merge** two paths into one, add a test that would have failed under t
 | `read_url` recovery | knowledge_ingest, crawl, web_research |
 | Document durable path | Web API, tools, gateway `/documents`, TUI — all → `DocumentIngestionService` only |
 | Document parse execution | `DocumentService` (workers + chat transient attachments) — never import `documents.parsers` from gateway/UI |
-| Document jobs vs metadata | `jobs_pg` multi-replica; `repository_pg` optional; GC is backend-agnostic (`repository.gc_mark`) |
+| Document worker isolation | `process` profile: `sandbox.py` child; `container` profile: both worker call sites → `worker_container.run_container_worker` → `worker_broker.py`, the only holder of the Docker socket — no fallback between them |
+| Document jobs vs metadata | `jobs_pg` multi-replica; `repository_pg` when metadata is on Postgres (`auto` follows the jobs backend); intake admission lives with the jobs (`admission.py`); GC is backend-agnostic (`repository.gc_mark`) |
+| Document backup | `backup.py` (SQLite metadata + jobs) or `backup_pg.py` (Postgres) — chosen by where the installed service's stores are; the knowledge index is re-published at worker start (`reconcile_index`) |
 | Document danger-ish redaction | UI `kazmaConfirm` only; API/tools ACL still apply |
 
 ### Document Intelligence symptoms
 
 | Symptom | Related paths | Invariant |
 |---------|---------------|-----------|
-| Upload rejected 429/503/507 | `capacity.py`, Settings Documents | Truthful status + Retry-After |
+| Upload rejected 429/503/507/413 | `documents_api.py` (`precheck_upload` before the body), `capacity.py`, `admission.py`, Settings Documents | Truthful status; capacity refusals carry Retry-After |
+| Upload 409 `intake_in_progress` / `intake_taken_over` | `admission.py` reservations and lease | Same key still reserved; a lapsed lease was taken over and fenced — retry |
+| Readiness `document_intake_reservations_stranded` | `admission.py`, `ops/capacity` `admission.stranded` | A legacy or lapsed reservation no process can prove dead; never expires by age alone |
+| Readiness `document_worker_isolation_unavailable` / `document_worker_image_outdated` | `worker_container.isolation_report`, broker log | Broker not attested or unreachable; image built from other code — rebuild, restart the broker |
 | Job stuck | worker pool, leases, `recover_expired_leases` | Restart reclaim + heartbeat |
+| Job retried then dead-lettered (`malware_scanner_unavailable`, `storage_full`, `metadata_unavailable`, `worker_isolation_*`) | `errors.py`, `worker.py` `_classify_failure` | Outages retry within the finite budget; only content is rejected |
+| Job "not found" for a job that exists | `ingestion.job_status` actor check | An unreadable job reads exactly like an unknown one (no existence oracle) |
 | Cross-tenant access | repository ACL | Tenant + actor on every read |
-| Convert/redact unavailable | health renderers/mutators | 422/503, no silent fake success |
+| Convert/redact unavailable | `GET /api/documents/health` renderers/mutators (the worker image's report in the container profile) | 422/503, no silent fake success |
 | Multi-replica inconsistency | readiness metadata/jobs backends + shared blob volume | Check `ops/readiness` before scaling |
 | Parser import from gateway | architecture compliance tests | Forbidden modules list |
 

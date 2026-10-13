@@ -264,89 +264,47 @@ def _stream_contains(path: Path, markers: tuple[bytes, ...]) -> set[bytes]:
     return found
 
 
-def _pdf_action_is_dangerous(action: object) -> bool:
-    """True when a PDF action dictionary is JS/Launch-style (not plain GoTo)."""
-    if action is None:
-        return False
-    try:
-        obj = action.get_object() if hasattr(action, "get_object") else action
-        subtype = str(obj.get("/S", "") or "")
-    except Exception:
-        return False
-    return subtype in {"/JavaScript", "/JS", "/Launch", "/RichMedia", "/GoToE"}
-
-
-def _pdf_has_active_content_structural(path: Path) -> bool | None:
-    """Use pypdf structure when available. Returns None if pypdf is missing."""
+def _pdf_has_active_content_structural(path: Path) -> bool:
+    """Require a readable PDF structure before declaring it safe."""
     try:
         from pypdf import PdfReader
-    except ImportError:
-        return None
+    except ImportError as exc:
+        from .errors import DocumentUnavailableError
+
+        raise DocumentUnavailableError("PDF structural security inspection is unavailable") from exc
     try:
         reader = PdfReader(str(path), strict=False)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise DocumentFormatError("PDF structure could not be verified") from exc
     if getattr(reader, "is_encrypted", False):
-        # Encryption is handled separately via /Encrypt byte marker.
-        return False
+        raise DocumentEncryptedError("Encrypted PDFs are not supported")
+    from .pdf_policy import assert_pdf_safe
+
     try:
-        root = reader.trailer.get("/Root", {})
-        if hasattr(root, "get_object"):
-            root = root.get_object()
-    except Exception:
-        return False
-    try:
-        if _pdf_action_is_dangerous(root.get("/OpenAction")):
-            return True
-        if "/JavaScript" in root or "/Launch" in root:
-            return True
-        names = root.get("/Names")
-        if names is not None:
-            names = names.get_object() if hasattr(names, "get_object") else names
-            if any(key in names for key in ("/JavaScript", "/EmbeddedFiles")):
-                return True
-        for page in reader.pages:
-            if _pdf_action_is_dangerous(page.get("/AA")):
-                return True
-            for reference in page.get("/Annots", ()) or ():
-                try:
-                    annotation = reference.get_object()
-                except Exception:
-                    continue
-                if any(
-                    _pdf_action_is_dangerous(annotation.get(key))
-                    for key in ("/A", "/AA")
-                ) or "/JavaScript" in annotation:
-                    return True
-    except Exception:
-        # Parse failed mid-walk — can't judge structurally. Return None (not
-        # False) so the caller falls back to the conservative byte scan. A bare
-        # `return False` here previously declared such PDFs "clean" and skipped
-        # the byte-scan fallback entirely (audit finding).
-        return None
+        assert_pdf_safe(reader)
+    except DocumentSecurityError:
+        return True
     return False
 
 
 def _pdf_has_active_content(path: Path) -> bool:
     """Detect high-risk PDF active content with low false-positive rate.
 
-    Prefers a structural pypdf pass (catalog / names / annotations). Falls back
-    to a conservative byte scan that avoids short ``/JS`` matches inside
-    compressed streams (a common false positive on real-world PDFs).
+    Structural inspection is mandatory. Byte markers can classify a broken
+    file as hostile, but their absence can never authorize a malformed PDF.
     """
 
-    structural = _pdf_has_active_content_structural(path)
-    if structural is not None:
-        return structural
-
-    tail = b""
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(_ARCHIVE_CHUNK_BYTES), b""):
-            window = tail + chunk
-            if _PDF_ACTIVE_CONTENT_RE.search(window) or _PDF_JS_NAME_RE.search(window):
-                return True
-            tail = window[-64:]
-    return False
+    try:
+        return _pdf_has_active_content_structural(path)
+    except DocumentFormatError:
+        tail = b""
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(_ARCHIVE_CHUNK_BYTES), b""):
+                window = tail + chunk
+                if _PDF_ACTIVE_CONTENT_RE.search(window) or _PDF_JS_NAME_RE.search(window):
+                    return True
+                tail = window[-64:]
+        raise
 
 
 def sniff_document(path: Path, config: DocumentConfig) -> SniffResult:

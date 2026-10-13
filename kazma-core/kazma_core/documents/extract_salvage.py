@@ -2,8 +2,8 @@
 
 Two tiers, both governed by ConfigStore policy, the remote one audited.
 
-**Local (Docling)** runs in the parent process — the parser sandbox is scrubbed
-of API keys on purpose — and never leaves the machine. Governed by
+**Local (Docling)** runs inside the bounded parser child with a scrubbed
+environment. Governed by
 ``documents.security.local_salvage`` (default **on**).
 
 **Remote (LlamaParse / Reducto)** uploads the *original document bytes* to a
@@ -27,10 +27,13 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 from .config import DocumentConfig
+from .errors import DocumentPolicyError, DocumentSecurityError
 from .models import BlockType, DocumentIR
 from .parsers.common import IRBuilder, ParseContext
 from .quality import score_document_extraction
@@ -41,36 +44,42 @@ __all__ = [
     "SALVAGE_SCORE",
     "maybe_salvage_extract",
     "ir_from_markdown",
-    "set_salvage_audit_hook",
+    "salvage_audit_scope",
 ]
 
 SALVAGE_SCORE = 0.55
 
-# Called as ``hook(provider, path, byte_count)`` when remote egress happens.
-# The ingestion service installs the durable recorder; the default is a warning
-# log line, so even a bare DocumentService leaves a trace.
-AuditHook = Callable[[str, Path, int], None]
-_audit_hook: AuditHook | None = None
+# The durable operation supplies attribution. A missing recorder refuses egress.
+AuditHook = Callable[[str, Path, int, str], None]
+_audit_hook: ContextVar[AuditHook | None] = ContextVar("document_egress_audit", default=None)
 
 
-def set_salvage_audit_hook(hook: AuditHook | None) -> None:
-    """Install the durable audit recorder for remote-parse egress."""
-    global _audit_hook
-    _audit_hook = hook
+@contextmanager
+def salvage_audit_scope(hook: AuditHook):
+    """Bind the immutable operation's recorder; restore the prior scope."""
+    token = _audit_hook.set(hook)
+    try:
+        yield
+    finally:
+        _audit_hook.reset(token)
 
 
-def _record_egress(provider: str, path: Path, size: int) -> None:
+def _record_egress(provider: str, path: Path, size: int, phase: str = "attempt") -> None:
+    hook = _audit_hook.get()
+    if hook is None:
+        raise DocumentSecurityError(
+            "Remote parsing requires an authorized document audit scope",
+            code="remote_parse_audit_unavailable",
+        )
+    # Required audit persistence precedes upload. No unknown/system tenant
+    # fallback is allowed to conceal missing attribution.
+    hook(provider, path, size, phase)
     logger.warning(
-        "[extract] remote parse egress: provider=%s bytes=%d — document content "
-        "left this machine under documents.security.remote_parse",
+        "[extract] remote parse event: provider=%s bytes=%d phase=%s",
         provider,
         size,
+        phase,
     )
-    if _audit_hook is not None:
-        try:
-            _audit_hook(provider, path, size)
-        except Exception:  # pragma: no cover - auditing must never break a parse
-            logger.debug("[extract] salvage audit hook failed", exc_info=True)
 
 
 def _env_veto(name: str) -> bool:
@@ -84,8 +93,8 @@ def _resolve_config(config: DocumentConfig | None) -> DocumentConfig | None:
     try:
         from .config import get_document_config
 
-        return get_document_config()
-    except Exception:  # pragma: no cover - defensive
+        return get_document_config(required=True)
+    except DocumentPolicyError:
         logger.debug(
             "[extract] document config unavailable; salvage tiers stay disabled",
             exc_info=True,
@@ -106,6 +115,8 @@ def maybe_salvage_extract(
     document: DocumentIR,
     *,
     config: DocumentConfig | None = None,
+    allow_local: bool = True,
+    allow_remote: bool = True,
 ) -> DocumentIR:
     """If the native extract is weak, try local salvage then (if permitted) remote.
 
@@ -125,10 +136,10 @@ def maybe_salvage_extract(
         return document
 
     cfg = _resolve_config(config)
-    local_allowed = bool(
+    local_allowed = allow_local and bool(
         getattr(cfg, "security_local_salvage", False)
     ) and not _env_veto("KAZMA_DOCLING")
-    remote_allowed = bool(
+    remote_allowed = allow_remote and bool(
         getattr(cfg, "security_remote_parse", False)
     ) and not _env_veto("KAZMA_REMOTE_PARSE")
 
@@ -136,7 +147,7 @@ def maybe_salvage_extract(
     best_score = score
     if local_allowed:
         try:
-            salvaged = try_docling(path, document)
+            salvaged = try_docling(path, document, config=cfg)
         except Exception:
             logger.debug("[extract] Docling salvage failed", exc_info=True)
             salvaged = None
@@ -160,19 +171,21 @@ def maybe_salvage_extract(
     return best
 
 
-def _context_for(path: Path, document: DocumentIR) -> ParseContext:
+def _context_for(path: Path, document: DocumentIR, config: DocumentConfig | None = None) -> ParseContext:
     from .config import DocumentConfig as _Config
     from .config import get_document_config
 
     meta = dict(document.metadata or {})
-    try:
-        cfg = get_document_config()
-    except Exception:
-        cfg = _Config(storage_root=path.parent)
+    cfg = config
+    if cfg is None:
+        try:
+            cfg = get_document_config()
+        except Exception:
+            cfg = _Config(storage_root=path.parent)
     return ParseContext(
         config=cfg,
         source_sha256=str(meta.get("source_sha256") or ""),
-        mime_type=str(meta.get("mime_type") or "application/pdf"),
+        mime_type=str(meta.get("source_mime") or meta.get("mime_type") or "application/pdf"),
         extension=path.suffix.lower() or ".pdf",
         parser_id="salvage",
         parser_version="1",
@@ -185,33 +198,38 @@ def ir_from_markdown(
     markdown: str,
     *,
     extractor: str,
+    config: DocumentConfig | None = None,
 ) -> DocumentIR:
     """Map markdown (Docling / LlamaParse / Reducto) onto DocumentIR."""
-    builder = IRBuilder(path, _context_for(path, document))
+    builder = IRBuilder(path, _context_for(path, document, config))
     chunks = [p.strip() for p in (markdown or "").split("\n\n") if p.strip()]
     if not chunks:
         chunks = [(markdown or "").strip() or "(empty salvage)"]
     page_blocks: list[tuple[BlockType, str, dict[str, Any] | None]] = []
+    segment_metadata = {"kind": "segment", "physical_page_mapping": False}
+    builder.warnings.append("Salvage segments have no verified source-page mapping")
     for chunk in chunks:
-        page_blocks.append((BlockType.PARAGRAPH, chunk[:20_000], None))
+        page_blocks.append((BlockType.PARAGRAPH, chunk, {"physical_page_mapping": False}))
         if len(page_blocks) >= 40:
-            builder.add_page(page_blocks)
+            builder.add_page(page_blocks, metadata=segment_metadata)
             page_blocks = []
     if page_blocks:
-        builder.add_page(page_blocks)
+        builder.add_page(page_blocks, metadata=segment_metadata)
     ir = builder.build()
     meta = {
         **dict(document.metadata or {}),
         **dict(ir.metadata or {}),
         "extractor": extractor,
         "salvaged": True,
+        "page_semantics": "synthetic_segment",
+        "physical_page_mapping": False,
     }
     from dataclasses import replace
 
     return replace(ir, metadata=meta)
 
 
-def try_docling(path: Path, document: DocumentIR) -> DocumentIR | None:
+def try_docling(path: Path, document: DocumentIR, *, config: DocumentConfig | None = None) -> DocumentIR | None:
     try:
         from docling.document_converter import DocumentConverter
     except ImportError:
@@ -221,82 +239,138 @@ def try_docling(path: Path, document: DocumentIR) -> DocumentIR | None:
     md = result.document.export_to_markdown()
     if not (md or "").strip():
         return None
-    return ir_from_markdown(path, document, md, extractor="docling")
+    return ir_from_markdown(path, document, md, extractor="docling", config=config)
+
+
+#: Decoded bytes a remote parser may return; a larger answer is refused.
+_PROVIDER_RESPONSE_LIMIT = 32 * 1024 * 1024
 
 
 def try_remote_parse(path: Path, document: DocumentIR) -> DocumentIR | None:
-    """Upload the document to a third-party parser.
+    """Upload the document to a third-party parser, trying each configured provider.
 
     The caller MUST have checked ``documents.security.remote_parse`` first.
-    Egress is recorded *before* the bytes move, so an upload that then fails is
-    still on the record.
+    Before EACH provider the live policy is read again (a revocation stops
+    the next upload) and the attempt is durably audited before a byte moves;
+    the outcome is audited as ``success`` or ``failure``. A failed provider
+    no longer ends salvage: the next configured one is tried, under the same
+    rules (until 2026-10-13 a first failure re-raised and the fallback never
+    ran).
     """
     try:
         size = path.stat().st_size
     except OSError:
         size = 0
-    llama = os.environ.get("LLAMAPARSE_API_KEY", "").strip()
-    reducto = os.environ.get("REDUCTO_API_KEY", "").strip()
-    if llama:
-        _record_egress("llamaparse", path, size)
-        md = _llamaparse(path, llama)
+    for provider, key_name, parse in (
+        ("llamaparse", "LLAMAPARSE_API_KEY", _llamaparse),
+        ("reducto", "REDUCTO_API_KEY", _reducto),
+    ):
+        # This is a separate revocation check, immediately at each egress
+        # boundary. A job snapshot or API key cannot override live denial.
+        live = _resolve_config(None)
+        if not getattr(live, "security_remote_parse", False) or _env_veto("KAZMA_REMOTE_PARSE"):
+            return None
+        key = os.environ.get(key_name, "").strip()
+        if not key:
+            continue
+        _record_egress(provider, path, size)
+        try:
+            md = parse(path, key)
+        except Exception as exc:  # noqa: BLE001 - audited, then the next provider
+            _record_egress(provider, path, size, "failure")
+            logger.warning(
+                "[extract] remote parse provider=%s failed (%s); trying the next one",
+                provider,
+                type(exc).__name__,
+            )
+            continue
+        _record_egress(provider, path, size, "success")
         if md:
-            return ir_from_markdown(path, document, md, extractor="llamaparse")
-    if reducto:
-        _record_egress("reducto", path, size)
-        md = _reducto(path, reducto)
-        if md:
-            return ir_from_markdown(path, document, md, extractor="reducto")
+            return ir_from_markdown(path, document, md, extractor=provider)
     return None
 
 
-def _llamaparse(path: Path, api_key: str) -> str:
+def _provider_client(transport: Any = None) -> Any:
+    """The one HTTP client for remote parsers.
+
+    Never an ambient proxy: customer bytes go to the named provider only,
+    not through a proxy an environment variable happens to name (acquisition
+    clients follow the same rule). No redirects: an upload is never re-sent
+    to another host.
+    """
+
     import httpx
 
-    upload = "https://api.cloud.llamaindex.ai/api/parsing/upload"
-    with path.open("rb") as fh:
-        resp = httpx.post(
-            upload,
-            headers={"Authorization": f"Bearer {api_key}"},
+    return httpx.Client(
+        trust_env=False,
+        follow_redirects=False,
+        timeout=httpx.Timeout(120.0, connect=15.0),
+        transport=transport,  # tests only: an in-memory provider
+    )
+
+
+def _read_capped(response: Any) -> bytes:
+    """The decoded body, refusing past :data:`_PROVIDER_RESPONSE_LIMIT`."""
+
+    response.raise_for_status()
+    data = bytearray()
+    for chunk in response.iter_bytes():
+        data.extend(chunk)
+        if len(data) > _PROVIDER_RESPONSE_LIMIT:
+            raise DocumentSecurityError(
+                "The remote parser's answer exceeded its size limit",
+                code="remote_parse_response_limit",
+            )
+    return bytes(data)
+
+
+def _json_or_empty(payload: bytes) -> Any:
+    import json
+
+    return json.loads(payload.decode("utf-8")) if payload.strip() else {}
+
+
+def _llamaparse(path: Path, api_key: str) -> str:
+    headers = {"Authorization": f"Bearer {api_key}"}
+    with _provider_client() as client:
+        with path.open("rb") as fh, client.stream(
+            "POST",
+            "https://api.cloud.llamaindex.ai/api/parsing/upload",
+            headers=headers,
             files={"file": (path.name, fh, "application/pdf")},
-            timeout=120.0,
-        )
-    resp.raise_for_status()
-    data = resp.json() if resp.content else {}
-    job_id = str(data.get("id") or data.get("job_id") or "")
-    md = data.get("markdown") or data.get("text")
-    if isinstance(md, str) and md.strip():
-        return md
-    if not job_id:
+        ) as resp:
+            data = _json_or_empty(_read_capped(resp))
+        job_id = str(data.get("id") or data.get("job_id") or "") if isinstance(data, dict) else ""
+        md = data.get("markdown") or data.get("text") if isinstance(data, dict) else None
+        if isinstance(md, str) and md.strip():
+            return md
+        if not job_id:
+            return ""
+        with client.stream(
+            "GET",
+            f"https://api.cloud.llamaindex.ai/api/parsing/job/{job_id}/result/markdown",
+            headers=headers,
+        ) as result:
+            payload = _read_capped(result)
+            is_json = result.headers.get("content-type", "").startswith("application/json")
+    if is_json:
+        body = _json_or_empty(payload)
+        if isinstance(body, dict):
+            return str(body.get("markdown") or body.get("text") or "")
         return ""
-    result = httpx.get(
-        f"https://api.cloud.llamaindex.ai/api/parsing/job/{job_id}/result/markdown",
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=120.0,
-    )
-    result.raise_for_status()
-    body = (
-        result.json()
-        if result.headers.get("content-type", "").startswith("application/json")
-        else {}
-    )
-    if isinstance(body, dict):
-        return str(body.get("markdown") or body.get("text") or "")
-    return result.text
+    return payload.decode("utf-8", errors="replace")
 
 
 def _reducto(path: Path, api_key: str) -> str:
-    import httpx
-
-    with path.open("rb") as fh:
-        resp = httpx.post(
-            "https://platform.reducto.ai/parse",
-            headers={"Authorization": f"Bearer {api_key}"},
-            files={"document": (path.name, fh, "application/pdf")},
-            timeout=120.0,
-        )
-    resp.raise_for_status()
-    data = resp.json() if resp.content else {}
+    with _provider_client() as client, path.open("rb") as fh, client.stream(
+        "POST",
+        "https://platform.reducto.ai/parse",
+        headers={"Authorization": f"Bearer {api_key}"},
+        files={"document": (path.name, fh, "application/pdf")},
+    ) as resp:
+        data = _json_or_empty(_read_capped(resp))
+    if not isinstance(data, dict):
+        return ""
     if isinstance(data.get("text"), str):
         return data["text"]
     chunks = data.get("result") or data.get("chunks") or []

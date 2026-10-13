@@ -76,7 +76,10 @@ fails closed.
 
 The strict container profile requires Docker for `python_exec`, skips E2B,
 disables `shell_exec`, and forbids local fallback even when legacy environment
-flags allow it. Native file and Git tools retain their approval gates. Check
+flags allow it. It also refuses the local `process` profile for document
+parsing, OCR, conversion and PDF mutation (`worker_isolation_required`): set
+`KAZMA_DOCUMENT_WORKER_ISOLATION=container` with the document worker broker
+(see Document processing, "Isolated document workers"). Native file and Git tools retain their approval gates. Check
 the actual Docker daemon and run an approved disposable snippet before
 qualifying execution; daemon readiness alone does not verify the image or
 mount permissions. The strict profile makes `code_execution` a required
@@ -99,19 +102,22 @@ answer it generates.
 - [ ] HA compose / LB retains one active owner; Postgres and the complete state volume are backed up and restored together
 - [ ] Memory: tenant scoping is automatic with `KAZMA_PRODUCTION=1`; set `KAZMA_MEMORY_ENFORCE_TENANT=1` for a multi-tenant install that is not flagged production
 - [ ] Before `KAZMA_MEMORY_STATE_ROLE=primary`: `python scripts/reconcile_memory_mirror.py --dry-run` is clean (no dead-in-mirror rows)
-- [ ] Document catalog tables are on `KAZMA_PG_TABLES` when metadata backend is Postgres (H-13)
+- [ ] Document catalog, job and intake tables are on `KAZMA_PG_TABLES` when the document store is on Postgres (H-13)
 
 ## Document Intelligence (if enabled)
 
 - [ ] `documents.enabled` intentional (default compatibility: enabled, not default-authoritative)
 - [ ] Document metadata readiness verified with `GET /api/documents/ops/readiness`; Postgres metadata alone does not qualify concurrent active runtimes
+- [ ] Readiness `degraded_reasons` empty, or each one understood (`stranded_intake_reservations` is 0)
+- [ ] Execution profile chosen deliberately: the default `process` profile has **no filesystem or network isolation** (readiness `hostile_document_profile: unqualified`); for documents you do not trust, deploy the container broker ([Document processing → Isolated document workers](./document-processing#isolated-document-workers-container-profile)) and confirm `worker_isolation.ready` and `image_code_matches` are true
 - [ ] `documents.capacity.storage_free_floor_bytes` set conservatively (default 512 MiB)
-- [ ] Document backup path known (the 6-hourly native backup: `kazma-data/backups/document-store-*` or equivalent)
-- [ ] Migration plan includes `documents.db` + content tree ([Migration](./migration))
+- [ ] Document backup path known (the 6-hourly backup: `kazma-data/backups/document-store-*` on SQLite, `document-pg-*` on Postgres) and a restore drilled once; document metadata and jobs on the **same** backend (SQLite metadata beside Postgres jobs has no coordinated document backup)
+- [ ] Migration plan includes `documents.db` + content tree ([Migration](./migration)); a Postgres document store moves with `scripts/document_pg_backup.py`, not the bundle
 - [ ] Optional engines understood (fitz / WeasyPrint / LibreOffice may be CONDITIONAL)
-- [ ] PDF Arabic / electronic text: `pip install -e ".[document-platform]"` (PyMuPDF + pypdfium2); parser readiness should be **ready**, not text-only degraded
-- [ ] Scanned Arabic PDFs: system Tesseract + `ara` (and `eng`) traineddata on PATH
-- [ ] Malware: install ClamAV (`clamscan`/`clamdscan` on PATH); consider `documents.security.malware_scan=on` + fail-closed; check readiness `malware.available`
+- [ ] PDF Arabic / electronic text: `pip install -e ".[document-platform]"` (PyMuPDF + pypdfium2); parser readiness (`GET /api/documents/health`) should be **ready**, not text-only degraded
+- [ ] Scanned Arabic PDFs: system Tesseract + `ara` (and `eng`) traineddata on PATH; Arabic OCR is not qualified for release (Arabic-Indic digits are not read)
+- [ ] Malware: install ClamAV (`clamscan`/`clamdscan` on PATH) and check readiness `malware.available`. With `KAZMA_PRODUCTION=1` the scan is fail-closed by default: without a scanner every upload is refused
+- [ ] Remote parsing (`documents.security.remote_parse`) left off unless sending original documents to a third party is intended
 - [ ] Cert smoke: `python scripts/certify_documents.py` exits non-FAIL; record report if promoting canary
 
 Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document processing](./document-processing).

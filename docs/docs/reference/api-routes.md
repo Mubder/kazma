@@ -118,8 +118,19 @@ Page: `GET /memory` (HTML admin). Guide: [Memory & RAG](../guide/memory-and-rag)
 ## Documents / Document Intelligence
 
 Mounted from `documents_api.py` at `/api/documents/*`. Thin transport over the
-shared `DocumentIngestionService` (no parallel parser path). Tenant/actor come
-from request context — clients never supply trusted paths for remote intake.
+shared `DocumentIngestionService` (no parallel parser path). Tenant, actor and
+workspace come from the request, never from the body: the tenant from the
+tenant middleware, the actor from the signed-in principal's name (`operator`
+for the shared secret sent as a header, `local` for a request without a
+credential), the workspace from the active workspace row. Clients never supply trusted server paths.
+
+A document belongs to the actor that ingested it; every read, job read and
+action checks the document's ACL. A document or job the caller cannot read
+answers exactly like one that does not exist (404). On a single-operator
+install these routes, the chat commands and the agent's tools all act as the
+install's operator (`documents.principal`, since 2026-10-13), so each sees the
+documents the others ingested; with platform users (multi-user mode) these
+routes act as each user, and chat and the agent refuse.
 
 Guide: [Document Intelligence](../guide/document-intelligence) ·
 Ops: [Document processing](../ops/document-processing) ·
@@ -129,31 +140,64 @@ Security: [Document security](../security/document-security).
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/documents` | Session | Streamed upload intake (bounded; 413 on overflow) |
-| POST | `/api/documents/import` | Session | Workspace-safe local file intake |
-| POST | `/api/documents/generate` | Session | Generate + durably ingest (payload ≤ 1 MiB) |
-| GET | `/api/documents` | Session | List documents (tenant/actor scoped) |
-| GET | `/api/documents/health` | Session | Parser/OCR/renderer readiness + worker status |
-| POST | `/api/documents/merge` | Session | Merge several documents' PDFs by opaque IDs |
+| POST | `/api/documents` | Session | Streamed upload. Body: the file's bytes; filename in `X-Document-Filename` (URL-encoded) or `?filename=`; optional `X-Idempotency-Key` and `?force_ocr=1`. The declared size, writes switched on, the storage floor, the queue, the tenant's caps and its rate window are answered **before the body is read** (see the answers below; the tenant byte quota is checked while the file is stored); at most `documents.capacity.max_concurrent_uploads` (default 4) uploads are received at once per process (503 `uploads_busy`). The body is spooled under the storage root and cut off at `documents.intake.max_bytes` or at its declared length (413). |
+| POST | `/api/documents/import` | Session | Ingest a file of the active workspace: `{"path": …}` (relative to the workspace, or absolute inside it); 400 `path_outside_workspace` otherwise |
+| POST | `/api/documents/generate` | Session | Generate + durably ingest: `target_format`, `payload` (an object of at most 1 MiB serialized, 413 above; nesting deeper than 32 is a 400), optional `output_name`, `title` |
+| GET | `/api/documents` | Session | The documents the caller can read, each with its newest job's state |
+| GET | `/api/documents/health` | Session | Parser/OCR/renderer/PDF-mutator readiness + worker status (read-only diagnostic). With `KAZMA_DOCUMENT_WORKER_ISOLATION=container` the engines are those the worker image reports |
+| POST | `/api/documents/merge` | Session | Merge the PDFs of `document_ids` (at least two) into a new artifact |
 | GET | `/api/documents/{document_id}` | Session | Detail (versions + jobs + artifacts) |
 | GET | `/api/documents/{document_id}/versions` | Session | Version list |
-| GET | `/api/documents/{document_id}/content` | Session | Paged normalized/fenced content |
+| GET | `/api/documents/{document_id}/content` | Session | Normalized content, fenced as untrusted data: `?page=` or `?page_start=&page_end=`, `offset`, `max_chars` (default 20,000, at most 200,000), with a continuation. 409 `not_ready` before processing finishes |
 | GET | `/api/documents/{document_id}/artifacts` | Session | Derived artifacts for a document |
-| GET | `/api/documents/artifacts/{artifact_id}/download` | Session | Download artifact by opaque ID |
-| POST | `/api/documents/{document_id}/convert` | Session | Convert current version to target format |
+| GET | `/api/documents/artifacts/{artifact_id}/download` | Session | Download an artifact by opaque ID (404 when the caller cannot read it) |
+| POST | `/api/documents/{document_id}/convert` | Session | Convert the current version: `target_format`, optional `output_name` → a new artifact |
 | GET | `/api/documents/{document_id}/pdf-info` | Session | Structural PDF report |
-| POST | `/api/documents/{document_id}/split` | Session | Split page range from PDF version |
-| POST | `/api/documents/{document_id}/fill-form` | Session | Fill AcroForm fields |
-| POST | `/api/documents/{document_id}/redact` | Session | Physical redact terms → new artifact (no UI confirm on API) |
-| POST | `/api/documents/{document_id}/index` | Session | Publish current version to a Knowledge library |
-| POST | `/api/documents/{document_id}/unindex` | Session | Remove from a library |
-| POST | `/api/documents/search` | Session | Library search (fenced hits) |
-| GET | `/api/documents/jobs/{job_id}` | Session | Job status |
-| GET | `/api/documents/jobs/{job_id}/events` | Session | Append-only job event history |
-| POST | `/api/documents/jobs/{job_id}/cancel` | Session | Cooperative cancel |
-| POST | `/api/documents/jobs/{job_id}/retry` | Session | Re-enqueue dead-letter/rejected job |
-| POST | `/api/documents/{document_id}/delete` | Session | Tombstone / delete document |
+| POST | `/api/documents/{document_id}/split` | Session | Split a page range: `start_page`, `end_page`, optional `output_name` |
+| POST | `/api/documents/{document_id}/fill-form` | Session | Fill AcroForm fields: `fields` (object), optional `output_name` |
+| POST | `/api/documents/{document_id}/redact` | Session | Physically redact `terms` (list) → a new artifact; the original is unchanged. No confirmation dialog on the API (the page asks first) |
+| POST | `/api/documents/{document_id}/index` | Session | Publish the current version to the Knowledge library `library_id` |
+| POST | `/api/documents/{document_id}/unindex` | Session | Remove it from the library `library_id` |
+| POST | `/api/documents/search` | Session | Search a library: `library_id`, `query`, `top_k` (default 5, 1–50); hits come back inside an untrusted-data fence |
+| GET | `/api/documents/jobs/{job_id}` | Session | Job status. 404 `Job not found` for an unknown job and for one whose document the caller cannot read, identically |
+| GET | `/api/documents/jobs/{job_id}/events` | Session | Append-only job event history (the same 404 rule) |
+| POST | `/api/documents/jobs/{job_id}/cancel` | Session | Cooperative cancel (the same 404 rule; 409 for a job that can no longer be cancelled) |
+| POST | `/api/documents/jobs/{job_id}/retry` | Session | Re-run a `dead_letter` or `rejected` job as a fresh job (409 for any other state). Needs write permission on the document and passes the same admission as an upload (429/503/507) |
+| POST | `/api/documents/{document_id}/delete` | Session | Tombstone: the document leaves every Knowledge library first (a library it cannot leave stops the delete, 500 `document_unindex_failed`, so a retry can finish it), then its metadata is archived; garbage collection reclaims the bytes later. Optional body `{"reason": …}` |
 | DELETE | `/api/documents/{document_id}` | Session | The same tombstone as `POST …/delete` (one implementation); the reason goes in `?reason=` |
+
+**Answers shared by these routes.** The routes with a JSON body (import,
+generate, merge, convert, split, fill-form, redact, index, unindex, search, and
+the optional body of `POST /{id}/delete`) read at most 2 MiB: a declared length
+past it is refused before a byte is read and an undeclared one is cut off (413
+`request_too_large`); malformed JSON, a body that is not an object or nesting
+too deep is a 422 `invalid_json`. A live document policy that cannot be read or
+holds an invalid saved value refuses the call with 503 and `Retry-After: 30`
+(`document_policy_unavailable`). **One status per error code on every route**
+(`documents_api._STATUS_BY_CODE`, since 2026-10-13; the route helpers kept
+three tables that disagreed): a refusal the server's state causes is a 503 with
+`Retry-After: 30` wherever it happens -- durable writes switched off
+(`document_platform_disabled`: reads, PDF info and cancel keep working), a
+required malware scanner that cannot run (`malware_scanner_unavailable`,
+answered by the upload before its body is read), no permitted worker profile
+(`worker_isolation_*`). A code the table does not name keeps its route's
+default: 400 for intake and lifecycle, 422 for the action routes. Refusals of
+upload, import and retry carry a `code`; the 429, 503 and 507 ones also a
+`reason` and a `Retry-After` header:
+
+| Status | Code | When |
+|--------|------|------|
+| 413 | `intake_too_large`, `quota_exceeded` | Past `documents.intake.max_bytes` (declared or received), or past the tenant byte quota |
+| 507 | `storage_full` | Free space minus the incoming file would fall below `documents.capacity.storage_free_floor_bytes` |
+| 503 | `queue_full`, `capacity_unavailable`, `uploads_busy` | The durable queue is at `documents.capacity.max_queued_jobs`; a capacity measurement (storage, queue, tenant load, admission store) could not be made; too many uploads being received |
+| 429 | `tenant_queue_full`, `tenant_active_full`, `rate_limited` | The tenant's queued/active caps or its files/bytes-per-minute window |
+| 409 | `idempotency_conflict`, `intake_in_progress`, `intake_taken_over` | The key was used for another request or by another actor; the same key is still being received; the upload took so long its lease lapsed and another process rolled it back (nothing was saved: send it again) |
+
+When a secret is configured, upload, import, generate, merge, convert, split,
+fill-form, redact, index and search also count against the per-principal HTTP
+rate limit bucket `documents` (429 with `Retry-After`): 10 requests a minute,
+search allowed up to 30 in the same window; a saved
+`api.rate_limit.documents_per_minute` replaces both.
 
 ### Operations (`/api/documents/ops/*`)
 
@@ -161,13 +205,15 @@ Security: [Document security](../security/document-security).
 |--------|------|------|-------------|
 | GET | `/api/documents/ops/metrics` | Session | Content-free metrics snapshot |
 | GET | `/api/documents/ops/capacity` | Session | Backpressure snapshot + `degraded_reasons` |
-| GET | `/api/documents/ops/readiness` | Session | Multi-replica honesty (`jobs_multi_replica`, `metadata_multi_replica`; `degraded` only for a configured backend that fell back) |
+| GET | `/api/documents/ops/readiness` | Session | Read-only: storage backends and multi-replica honesty (`jobs_multi_replica`, `metadata_multi_replica`; a SQLite backend chosen on purpose is not degraded), `policy` (configured vs effective, `restart_required`), `malware`, `worker_isolation` (`hostile_document_profile`, `image_code_matches`), `stranded_intake_reservations`, `rollout`, `accepting_durable_writes`. `status` is `degraded` when a configured backend fell back or `degraded_reasons` names a problem (worker isolation unavailable, stranded intake reservations, an outdated worker image, malware scanning blocking intake), `disabled` while durable writes are off |
 | GET | `/api/documents/ops/retention` | Session | Live retention/GC policy view |
-| GET | `/api/documents/ops/audit` | Session | Keyset-paged operational audit (`?limit=&before_id=`) |
+| GET | `/api/documents/ops/audit` | Admin | Keyset-paged operational audit of the tenant (`?document_id=&event_type=&limit=&before_id=`). Admin-only: the trail names documents and actors the caller may not be able to read |
 | POST | `/api/documents/ops/maintenance/dry-run` | Admin | GC dry-run report |
-| POST | `/api/documents/ops/maintenance/run` | Admin | GC run after dry-run/confirm in UI |
+| POST | `/api/documents/ops/maintenance/run` | Admin | GC run (the page always dry-runs and confirms first; the route does not require it) |
 
-HTML page: `GET /documents` (session). TUI Documents tab uses the same coordinator.
+HTML page: `GET /documents` (session). The TUI Documents tab reads
+`GET /api/documents` and `GET /api/documents/{document_id}/content` from the
+running server.
 
 ## Email (`email_api.py`)
 

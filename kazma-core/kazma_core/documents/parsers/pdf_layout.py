@@ -202,11 +202,16 @@ def reading_order_text(
     }
 
 
-def extract_pymupdf_page_text(page: Any) -> tuple[str, dict[str, object]]:
+def extract_pymupdf_page_text(
+    page: Any, glyph_lines: Sequence[Sequence[Any]] | None = None
+) -> tuple[str, dict[str, object]]:
     """Best-effort text for one PyMuPDF page: layout when multi-column, else plain.
 
     Single-column keeps plain ``get_text("text")`` (better continuous Arabic).
     Multi-column uses dict geometry for left/right (or RTL) reading order.
+    ``glyph_lines`` (``pdf_rtl.page_glyph_lines``, given when the page holds
+    right-to-left script) re-reads every block in logical order: PyMuPDF's
+    own reversal turned numbers and ligatures around (2026-10-13, F09).
     """
 
     plain = (page.get_text("text") or "").strip()
@@ -214,6 +219,18 @@ def extract_pymupdf_page_text(page: Any) -> tuple[str, dict[str, object]]:
     try:
         data = page.get_text("dict") or {}
         blocks = blocks_from_pymupdf_dict(data)
+        if glyph_lines:
+            from .pdf_rtl import text_in_rect, text_margins
+
+            margins = text_margins(glyph_lines)
+            for block in blocks:
+                repaired = text_in_rect(
+                    glyph_lines, (block["x0"], block["y0"], block["x1"], block["y1"]), margins=margins
+                )
+                if repaired:
+                    block["text"] = repaired
+            plain = "\n".join(block["text"] for block in blocks).strip() or plain
+            meta["rtl_logical_order"] = "glyph_runs"
         width = float(getattr(getattr(page, "rect", None), "width", 0) or 0) or _page_width(
             data, blocks
         )

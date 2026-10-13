@@ -754,6 +754,8 @@ class PgvectorBackend:
         key = (self._dsn, self._table)
         if key in _PGVECTOR_TABLES_READY:
             return
+        from kazma_core.db.pg_schema import ensure_schema
+
         errors = _pg_driver_errors()
         cur = conn.cursor()
         try:
@@ -771,7 +773,7 @@ class PgvectorBackend:
                         "pgvector", self._dsn, "not_permitted", "CREATE EXTENSION was refused"
                     )
                     raise
-            cur.execute(
+            ensure_schema(cur, [
                 f"""
                 CREATE TABLE IF NOT EXISTS {self._table} (
                   id TEXT PRIMARY KEY,
@@ -781,16 +783,16 @@ class PgvectorBackend:
                   meta JSONB DEFAULT '{{}}'::jsonb
                 )
                 """
-            )
+            ])
             conn.commit()
             try:
-                cur.execute(
+                ensure_schema(cur, [
                     f"""
                     CREATE INDEX IF NOT EXISTS {self._table}_hnsw
                     ON {self._table}
                     USING hnsw (embedding vector_cosine_ops)
                     """
-                )
+                ])
                 conn.commit()
             except errors as exc:
                 conn.rollback()

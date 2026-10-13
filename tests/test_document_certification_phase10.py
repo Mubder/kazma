@@ -145,6 +145,30 @@ class TestCertificationRunner:
             assert "status" in check
             assert check["status"] in {"PASS", "CONDITIONAL", "NOT RUN", "FAIL"}
 
+    def test_certification_reports_the_profile_it_actually_ran(self, tmp_path, monkeypatch):
+        """2026-10-13 (F10): the report names the configured isolation profile
+        and backends, and its fidelity and backup checks are real runs -- a
+        process profile is never reported as confined."""
+        from kazma_core.documents.certification import run_document_certification
+
+        monkeypatch.delenv("KAZMA_DOCUMENT_WORKER_ISOLATION", raising=False)
+        report = run_document_certification(tmp_path / "cert-profile")
+        profile = report["execution_profile"]
+        assert profile["worker_isolation"] == "process"
+        assert profile["filesystem_network_confinement_qualified"] is False
+        assert profile["metadata_backend_configured"] in {"sqlite", "postgres"}
+        assert profile["jobs_backend_configured"] in {"sqlite", "postgres"}
+        checks = {check["name"]: check for check in report["checks"]}
+        assert checks["worker_isolation"]["status"] == "CONDITIONAL"
+        assert checks["backup_restore_sqlite"]["status"] == "PASS"
+        assert checks["backup_restore_sqlite"]["metrics"]["restored_state"] == "ready"
+        fidelity = checks["extraction_fidelity"]
+        assert fidelity["status"] in {"PASS", "CONDITIONAL"}
+        assert fidelity["metrics"]["cases"] >= 11
+        for still_open in ("multi_day_soak", "external_security_review"):
+            assert checks[still_open]["status"] == "NOT RUN"
+        assert report["overall_status"] != "PASS"
+
     def test_certification_includes_required_gates(self, tmp_path):
         from kazma_core.documents.certification import run_document_certification
 

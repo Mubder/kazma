@@ -1,0 +1,3 @@
+# The broker image needs exactly one file from the checkout.
+*
+!kazma-core/kazma_core/documents/worker_broker.py

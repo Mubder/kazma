@@ -163,3 +163,7 @@ pytest-of-*/
 # CI, never committed.
 test-artifacts/
 /.unsnooze
+
+# Deployment secrets (deploy/docker-compose.document-broker.yml reads
+# secrets/document_broker_token). Never committed, never in an image.
+/secrets/

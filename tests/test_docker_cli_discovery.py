@@ -228,6 +228,26 @@ def test_nothing_else_looks_docker_up_on_path_alone():
     )
 
 
+def test_the_document_broker_uses_the_one_lookup_without_importing_kazma(tmp_path, monkeypatch):
+    # The broker is standard-library only (its image is the one file): in a
+    # checkout it loads docker_cli.py by path; alone, it takes the CLI its
+    # image names in KAZMA_DOCKER_BIN, never PATH alone.
+    from kazma_core import docker_cli
+    from kazma_core.documents import worker_broker
+
+    cli = tmp_path / "docker.exe"
+    cli.write_text("", encoding="utf-8")
+    monkeypatch.setenv("KAZMA_DOCKER_BIN", str(cli))
+    assert worker_broker._find_docker_cli() == docker_cli.find_docker_cli() == str(cli)
+    alone = tmp_path / "opt" / "kazma-broker" / "worker_broker.py"
+    monkeypatch.setattr(worker_broker, "__file__", str(alone))
+    assert worker_broker._find_docker_cli() == str(cli)
+    monkeypatch.delenv("KAZMA_DOCKER_BIN")
+    assert worker_broker._find_docker_cli() is None
+    image = (REPO / "deploy" / "document-broker" / "Dockerfile").read_text(encoding="utf-8")
+    assert "ENV KAZMA_DOCKER_BIN=/usr/local/bin/docker" in image
+
+
 def test_the_docker_lookup_gate_sees_a_path_only_call():
     planted = {"x.py": textwrap.dedent('''
         import shutil

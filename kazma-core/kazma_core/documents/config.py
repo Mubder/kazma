@@ -6,7 +6,14 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
+
+from kazma_core.db.pg_helpers import store_errors
+
+from .errors import DocumentPolicyError
+
+if TYPE_CHECKING:
+    from kazma_core.config_store import SettingsSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +22,7 @@ __all__ = [
     "DocumentRollout",
     "get_document_config",
     "get_document_rollout",
+    "get_document_storage_root",
 ]
 
 _MIB = 1024 * 1024
@@ -32,8 +40,10 @@ class DocumentConfig:
     default_authoritative: bool = False
     intake_max_bytes: int = 50 * _MIB
     intake_max_files: int = 10
-    remote_fetch_max_redirects: int = 3
-    remote_fetch_timeout_seconds: int = 30
+    #: How long an intake may go without renewing its reservation before
+    #: another process may take it over (fenced: the stale owner can no
+    #: longer publish). The owner renews every quarter of it.
+    intake_lease_seconds: int = 300
     max_pages: int = 500
     max_sheets: int = 100
     max_slides: int = 500
@@ -57,9 +67,6 @@ class DocumentConfig:
     worker_retry_max_seconds: int = 300
     security_malware_scan: str = "auto"
     security_malware_fail_closed: bool = False
-    security_allow_encrypted_documents: bool = False
-    security_allow_external_render_resources: bool = False
-    security_fence_llm_content: bool = True
     # Third-party parse egress. When a native extract scores poorly the salvage
     # tier can send the ORIGINAL DOCUMENT BYTES to an external service. That is
     # off unless a deployment turns it on here — an API key sitting in the
@@ -76,9 +83,10 @@ class DocumentConfig:
     ocr_dpi: int = 200
     ocr_min_text_chars_per_page: int = 40
     ocr_min_confidence: float = 0.75
-    ocr_page_concurrency: int = 2
     ocr_subprocess_timeout_seconds: int = 60
     ocr_output_limit_bytes: int = 8 * _MIB
+    #: Read ruled tables on scanned pages cell by cell (``ocr/tables.py``).
+    ocr_tables: bool = True
     indexing_enabled: bool = True
     indexing_chunk_tokens: int = 800
     indexing_overlap_tokens: int = 120
@@ -86,10 +94,8 @@ class DocumentConfig:
     indexing_preserve_page_boundaries: bool = True
     retention_original_days: int = 30
     retention_artifact_days: int = 30
-    retention_failed_days: int = 7
     retention_audit_days: int = 365
     quota_tenant_bytes: int = 10 * _GIB
-    quota_tenant_daily_pages: int = 10_000
     # ── Phase 9: retention / garbage collection ─────────────────────────
     retention_rejected_days: int = 7
     retention_dead_letter_days: int = 14
@@ -107,6 +113,10 @@ class DocumentConfig:
     capacity_intake_rate_per_minute: int = 120
     capacity_intake_bytes_per_minute: int = 512 * _MIB
     capacity_storage_free_floor_bytes: int = 512 * _MIB
+    #: Web uploads being received at once by one process. Each is spooled to
+    #: disk (at most ``intake_max_bytes``) before intake, so this bounds the
+    #: spool: concurrent uploads x the intake limit.
+    capacity_max_concurrent_uploads: int = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,8 +254,17 @@ def _malware_mode(value: Any) -> str:
     return normalized
 
 
+@dataclass(frozen=True, slots=True)
+class _Settings:
+    snapshot: SettingsSnapshot
+    required: bool
+
+    def get(self, key: str) -> Any:
+        return self.snapshot.get(key)
+
+
 def _read(
-    store: Any,
+    store: _Settings,
     key: str,
     default: _T,
     coerce: Callable[[Any], _T],
@@ -264,6 +283,8 @@ def _read(
     try:
         return coerce(raw)
     except (TypeError, ValueError, OverflowError) as exc:
+        if getattr(store, "required", False):
+            raise DocumentPolicyError(f"Invalid document policy at {selected}; correct the saved setting") from exc
         logger.warning(
             "[documents.config] Invalid ConfigStore value for %s=%r; using %r: %s",
             selected,
@@ -296,36 +317,13 @@ def _normalize_rollout(
 
 
 def get_document_rollout() -> DocumentRollout:
-    """Re-read only the rollout flags from ConfigStore on every decision."""
-
-    defaults = DocumentRollout()
+    """Read live routing policy; unavailable or invalid settings refuse writes."""
     try:
-        from kazma_core.config_store import get_config_store
-
-        store = get_config_store()
-    except Exception as exc:
-        logger.warning(
-            "[documents.config] ConfigStore unavailable for rollout; "
-            "using compatibility defaults: %s",
-            exc,
-        )
-        return defaults
-    enabled = _read(store, "documents.enabled", defaults.enabled, _coerce_bool)
-    shadow = _read(
-        store,
-        "documents.shadow",
-        defaults.shadow,
-        _coerce_bool,
-        aliases=("documents.shadow_mode",),
-    )
-    authoritative = _read(
-        store,
-        "documents.default_authoritative",
-        defaults.default_authoritative,
-        _coerce_bool,
-        aliases=("documents.authoritative_by_default",),
-    )
-    return _normalize_rollout(enabled, shadow, authoritative)
+        config = get_document_config(required=True)
+    except DocumentPolicyError:
+        logger.warning("[documents.config] Live policy unavailable; refusing durable writes")
+        return DocumentRollout(enabled=False)
+    return DocumentRollout(config.enabled, config.shadow, config.default_authoritative)
 
 
 def _production() -> bool:
@@ -336,7 +334,22 @@ def _production() -> bool:
     )
 
 
-def get_document_config() -> DocumentConfig:
+def get_document_storage_root() -> Path:
+    """Use installed CAS for backup/migration; offline callers use saved policy.
+
+    A pending root change must never redirect backup away from the live store.
+    Do not lazily construct a coordinator from a diagnostic/backup read. Existing
+    storage can still be backed up while the settings database is unavailable.
+    """
+    from .ingestion import peek_ingestion_service
+
+    installed = peek_ingestion_service()
+    if installed is not None:
+        return Path(installed.storage.root)
+    return get_document_config(required=True).storage_root
+
+
+def get_document_config(*, required: bool = False) -> DocumentConfig:
     """Re-read the ConfigStore and return a validated immutable snapshot."""
     defaults = DocumentConfig(storage_root=_default_storage_root())
     if _production():
@@ -344,8 +357,10 @@ def get_document_config() -> DocumentConfig:
     try:
         from kazma_core.config_store import get_config_store
 
-        store = get_config_store()
-    except Exception as exc:
+        store = _Settings(get_config_store().snapshot("documents"), required)
+    except store_errors() as exc:
+        if required:
+            raise DocumentPolicyError("Document policy is unavailable; retry after settings recover") from exc
         logger.warning(
             "[documents.config] ConfigStore unavailable; using safe defaults: %s",
             exc,
@@ -382,24 +397,18 @@ def get_document_config() -> DocumentConfig:
                 _positive_int,
                 aliases=("documents.intake_max_bytes",),
             ),
+            intake_lease_seconds=_read(
+                store,
+                "documents.intake.lease_seconds",
+                defaults.intake_lease_seconds,
+                _positive_int,
+            ),
             intake_max_files=_read(
                 store,
                 "documents.intake.max_files",
                 defaults.intake_max_files,
                 _positive_int,
                 aliases=("documents.intake_max_files",),
-            ),
-            remote_fetch_max_redirects=_read(
-                store,
-                "documents.intake.remote_fetch_max_redirects",
-                defaults.remote_fetch_max_redirects,
-                _nonnegative_int,
-            ),
-            remote_fetch_timeout_seconds=_read(
-                store,
-                "documents.intake.remote_fetch_timeout_seconds",
-                defaults.remote_fetch_timeout_seconds,
-                _positive_int,
             ),
             max_pages=_read(store, "documents.limits.max_pages", defaults.max_pages, _positive_int),
             max_sheets=_read(
@@ -525,24 +534,6 @@ def get_document_config() -> DocumentConfig:
                 defaults.security_malware_fail_closed,
                 _coerce_bool,
             ),
-            security_allow_encrypted_documents=_read(
-                store,
-                "documents.security.allow_encrypted_documents",
-                defaults.security_allow_encrypted_documents,
-                _coerce_bool,
-            ),
-            security_allow_external_render_resources=_read(
-                store,
-                "documents.security.allow_external_render_resources",
-                defaults.security_allow_external_render_resources,
-                _coerce_bool,
-            ),
-            security_fence_llm_content=_read(
-                store,
-                "documents.security.fence_llm_content",
-                defaults.security_fence_llm_content,
-                _coerce_bool,
-            ),
             security_remote_parse=_read(
                 store,
                 "documents.security.remote_parse",
@@ -578,18 +569,13 @@ def get_document_config() -> DocumentConfig:
                 defaults.ocr_min_confidence,
                 _unit_float,
             ),
-            ocr_page_concurrency=_read(
-                store,
-                "documents.ocr.page_concurrency",
-                defaults.ocr_page_concurrency,
-                _positive_int,
-            ),
             ocr_subprocess_timeout_seconds=_read(
                 store,
                 "documents.ocr.subprocess_timeout_seconds",
                 defaults.ocr_subprocess_timeout_seconds,
                 _positive_int,
             ),
+            ocr_tables=_read(store, "documents.ocr.tables", defaults.ocr_tables, _coerce_bool),
             ocr_output_limit_bytes=_read(
                 store,
                 "documents.ocr.output_limit_bytes",
@@ -638,12 +624,6 @@ def get_document_config() -> DocumentConfig:
                 defaults.retention_artifact_days,
                 _nonnegative_int,
             ),
-            retention_failed_days=_read(
-                store,
-                "documents.retention.failed_days",
-                defaults.retention_failed_days,
-                _nonnegative_int,
-            ),
             retention_audit_days=_read(
                 store,
                 "documents.retention.audit_days",
@@ -654,12 +634,6 @@ def get_document_config() -> DocumentConfig:
                 store,
                 "documents.quotas.tenant_bytes",
                 defaults.quota_tenant_bytes,
-                _positive_int,
-            ),
-            quota_tenant_daily_pages=_read(
-                store,
-                "documents.quotas.tenant_daily_pages",
-                defaults.quota_tenant_daily_pages,
                 _positive_int,
             ),
             retention_rejected_days=_read(
@@ -752,8 +726,16 @@ def get_document_config() -> DocumentConfig:
                 defaults.capacity_storage_free_floor_bytes,
                 _nonnegative_int,
             ),
+            capacity_max_concurrent_uploads=_read(
+                store,
+                "documents.capacity.max_concurrent_uploads",
+                defaults.capacity_max_concurrent_uploads,
+                _positive_int,
+            ),
         )
         if config.indexing_overlap_tokens >= config.indexing_chunk_tokens:
+            if required:
+                raise DocumentPolicyError("Invalid document policy: indexing overlap must be smaller than chunk size")
             logger.warning(
                 "[documents.config] indexing overlap must be smaller than chunk size; "
                 "using default overlap %s",
@@ -775,7 +757,11 @@ def get_document_config() -> DocumentConfig:
             default_authoritative=rollout.default_authoritative,
         )
         return config
-    except Exception as exc:
+    except DocumentPolicyError:
+        raise
+    except store_errors() as exc:
+        if required:
+            raise DocumentPolicyError("Document policy is unavailable; retry after settings recover") from exc
         logger.warning(
             "[documents.config] Failed to read document settings; using safe defaults: %s",
             exc,

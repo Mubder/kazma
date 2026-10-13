@@ -131,7 +131,31 @@ closing a request in flight.
 
 ### 2.5 `.dockerignore`
 
-Excludes `archive/`, `__pycache__/`, `.venv/`, `.git/`, `tests/`, `kazma-data/`, `docs/`, `*.md`, `.env`, `*.db`, build caches — keeping the image lean and secrets out.
+Excludes `archive/`, `__pycache__/`, `.venv/`, `.git/`, `tests/`, `kazma-data/`, `docs/`, `*.md`, `.env`, `*.db`, build caches and `secrets/` (the document broker token, below) — keeping the image lean and secrets out.
+
+### 2.6 Isolated document workers (optional overlay)
+
+The image parses, OCRs, converts and edits documents in local child processes
+with resource limits but **no filesystem or network isolation**. For documents
+you do not trust, add the document worker broker: every such job then runs in
+a fresh container with no network and no mounts, started by a broker that is
+the only container holding the Docker socket.
+
+```bash
+docker build -f deploy/document-worker/Dockerfile -t kazma-document-worker:local .
+mkdir -p secrets
+python -c "import secrets; print(secrets.token_urlsafe(48))" > secrets/document_broker_token
+docker compose -f docker-compose.yml -f deploy/docker-compose.document-broker.yml up -d
+```
+
+The overlay (`deploy/docker-compose.document-broker.yml`) builds the broker
+from `deploy/document-broker/Dockerfile` and sets
+`KAZMA_DOCUMENT_WORKER_ISOLATION=container` on `kazma`. The broker refuses to
+serve until it has attested its container policy from inside the worker
+image; check `GET /api/documents/ops/readiness` → `worker_isolation.ready`.
+Rebuild the worker image and restart `document-broker` after every update.
+Checks, failure codes, sizing and qualification:
+[Document processing → Isolated document workers](../ops/document-processing#isolated-document-workers-container-profile).
 
 ---
 

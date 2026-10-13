@@ -34,12 +34,14 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .config import DocumentConfig, get_document_config
+from .policy import DocumentPolicy, policy_operation
 
 logger = logging.getLogger(__name__)
 
@@ -101,18 +103,20 @@ class DocumentGarbageCollector:
         storage: Any,
         audit: Any = None,
         config: DocumentConfig | None = None,
+        policy: DocumentPolicy | None = None,
     ) -> None:
         self._repo = repository
         self._storage = storage
         self._audit = audit
-        self._config = config
+        self._policy = policy or DocumentPolicy(config)
         self._root = Path(storage.root).resolve()
 
     # ── Public entry ─────────────────────────────────────────────────────
 
+    @policy_operation
     def collect(self, *, dry_run: bool = False) -> GcReport:
         """Run one bounded mark/sweep pass and return a truthful report."""
-        cfg = self._config or get_document_config()
+        cfg = self._policy.current
         now = datetime.now(UTC)
         report = GcReport(
             dry_run=dry_run,
@@ -146,6 +150,11 @@ class DocumentGarbageCollector:
                 report=report,
                 dry_run=dry_run,
             )
+
+        # Scratch a crash left behind: upload spools, staged copies, parser
+        # and operation run directories (2026-10-13, F08 -- none was swept).
+        if budget > 0:
+            budget = self._sweep_scratch(now=now, grace=grace, budget=budget, report=report, dry_run=dry_run)
 
         # Sweep manifests.
         if budget > 0:
@@ -296,6 +305,49 @@ class DocumentGarbageCollector:
 
     # ── Sweep helpers ────────────────────────────────────────────────────
 
+    #: Scratch areas under the storage root: (folder, entries are directories).
+    _SCRATCH = ((".upload-staging", False), (".stage", True), ("parser-runs", True), ("operation-runs", True))
+
+    def _sweep_scratch(
+        self, *, now: datetime, grace: timedelta, budget: int, report: GcReport, dry_run: bool
+    ) -> int:
+        cutoff = (now - grace).timestamp()
+        for folder, directories in self._SCRATCH:
+            base = self._root / folder
+            if not base.is_dir() or base.is_symlink():
+                continue
+            for entry in sorted(base.iterdir()):
+                if budget <= 0:
+                    report.budget_exhausted = True
+                    return budget
+                if entry.is_symlink():
+                    report.refused_symlinks += 1
+                    continue
+                try:
+                    newest = entry.stat().st_mtime
+                    if entry.is_dir():
+                        for child in entry.iterdir():
+                            newest = max(newest, child.lstat().st_mtime)
+                except OSError:
+                    continue
+                if newest >= cutoff or entry.is_dir() != directories:
+                    continue
+                if dry_run:
+                    report.deleted_staging += 1
+                    budget -= 1
+                    continue
+                try:
+                    if entry.is_dir():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                except OSError as exc:
+                    report.errors.append(f"scratch:{folder}:{type(exc).__name__}")
+                    continue
+                report.deleted_staging += 1
+                budget -= 1
+        return budget
+
     def _sweep_kind(
         self,
         kind: str,
@@ -360,8 +412,16 @@ class DocumentGarbageCollector:
                 budget -= 1
         return budget
 
+    def _pinned(self, rel: str) -> bool:
+        """A running backup's snapshot still needs this file (F06)."""
+        from .backup_pg import backup_pins
+
+        return rel in backup_pins(self._root)
+
     def _is_live_reference(self, *, kind: str, sha: str) -> bool:
         """Recheck authoritative references immediately before unlink."""
+        if self._pinned(f"{kind}/sha256/{sha[:2]}/{sha[2:4]}/{sha}"):
+            return True
         if hasattr(self._repo, "gc_is_live_reference"):
             return bool(self._repo.gc_is_live_reference(kind=kind, sha=sha))
 
@@ -448,6 +508,8 @@ class DocumentGarbageCollector:
                 except OSError:
                     continue
                 if mtime >= grace_cutoff:
+                    continue
+                if not dry_run and self._pinned(f"manifests/{doc_id}/{entry.name}"):
                     continue
                 if self._delete_file(path, report, dry_run):
                     report.deleted_manifests += 1

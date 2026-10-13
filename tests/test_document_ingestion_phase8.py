@@ -12,6 +12,7 @@ from kazma_core.documents.ingestion import (
     DocumentIngestionError,
     DocumentIngestionService,
 )
+from kazma_core.documents.jobs import JobNotFoundError
 from kazma_core.documents.knowledge import DocumentIndexResult
 from kazma_core.documents.models import DocumentJobState, DocumentResult
 from kazma_core.documents.repository import DocumentAccessError
@@ -73,7 +74,7 @@ async def test_ingest_process_read_index(tmp_path):
         assert docs[0]["state"] == "ready"
 
         events = await asyncio.to_thread(
-            svc.job_events, tenant_id="tenant-a", job_id=result.job_id
+            svc.job_events, tenant_id="tenant-a", job_id=result.job_id, actor_id="alice"
         )
         states = [e["to_state"] for e in events]
         for expected in ("quarantined", "validating", "parsing", "verifying", "ready"):
@@ -208,7 +209,7 @@ async def test_tenant_isolation_blocks_cross_access(tmp_path):
         )
         assert docs == []
         status = await asyncio.to_thread(
-            svc.job_status, tenant_id="tenant-b", job_id=result.job_id
+            svc.job_status, tenant_id="tenant-b", job_id=result.job_id, actor_id="mallory"
         )
         assert status is None
         with pytest.raises(DocumentIngestionError):
@@ -253,15 +254,24 @@ async def test_cancel_pending_job(tmp_path):
             workspace_id="ws-1",
             actor_id="alice",
         )
-        # ACL: a non-reader principal cannot cancel the owner's job.
-        with pytest.raises(DocumentAccessError):
+        # ACL: a non-reader principal cannot cancel the owner's job, and
+        # cannot tell it exists (the same answer as an unknown job).
+        with pytest.raises(JobNotFoundError):
             await asyncio.to_thread(
                 svc.cancel_job, tenant_id="tenant-a", job_id=result.job_id,
                 actor_id="bob",
             )
-        # Backward-compatible: no actor → no per-principal gate.
+        # 2026-10-13 (F05): no actor is no longer "no gate" -- it is refused.
+        with pytest.raises(TypeError):
+            await asyncio.to_thread(
+                svc.cancel_job, tenant_id="tenant-a", job_id=result.job_id
+            )
+        with pytest.raises(DocumentAccessError):
+            await asyncio.to_thread(
+                svc.cancel_job, tenant_id="tenant-a", job_id=result.job_id, actor_id=None
+            )
         cancelled = await asyncio.to_thread(
-            svc.cancel_job, tenant_id="tenant-a", job_id=result.job_id
+            svc.cancel_job, tenant_id="tenant-a", job_id=result.job_id, actor_id="alice"
         )
         assert cancelled["state"] == "cancelled"
     finally:

@@ -7,6 +7,25 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-10-13 — documents: refusal, recovery and measured limits.** PDFs
+with scripts, outside actions, attachments or links to files and network
+shares are refused on upload, on every edit and on every PDF Kazma renders,
+always inside the document worker. A Web upload is answered before its body is
+read when a limit would refuse it; an upload interrupted by a crash is rolled
+back, and one whose owner stops renewing its lease is taken over and fenced.
+Every job read checks access, and an outage (scanner, disk, database) is
+retried, never recorded as bad content. A Postgres document store is backed up
+with its files as one point in time and restored only into an empty database;
+searches are re-published at the next start. Arabic PDFs read numbers,
+ligatures and table cells in order, and ruled tables on scans are read cell by
+cell. An optional `container` worker profile runs each job in its own
+container with no network or mounts. Limits: the default `process` profile
+does not confine files or network and is not qualified for hostile documents;
+Arabic OCR is not qualified (Tesseract does not read Arabic-Indic digits); no
+48–72 hour soak and no independent review have been done. See
+[Document Intelligence](document-intelligence) and the
+[hardening tracker](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md).
+
 **New in 2026-10-10 through 2026-10-12 — local-first research with visible outcomes.**
 Page acquisition defaults to local HTTP/extraction and optional local Chromium.
 Hosted extractors and proxies require an explicit mode and provider allowlist;
@@ -252,7 +271,7 @@ resolution + git-write blast radius), transcript recall fallback
 | **Post-industry leftovers (2026-08-25)** | MCP resources/prompts (fenced; sampling HITL). CUA planner adapters on `computer_use`. LiveKit TTS published into the room. 429 backoff on Anthropic. Router word-boundaries + `models.defaults`. Eval tool-trace. Bright Data/Oxylabs stubs. | [GOAL](https://github.com/Mubder/kazma/blob/main/docs/plans/POST_INDUSTRY_NON_SAAS_GOAL.md); [MCP](./skills-mcp-and-tools#57-resources-prompts-sampling-roots) |
 | **LiveKit duplex (web) (2026-08-25)** | Live button: WebRTC AEC + barge-in (interrupt TTS). Brain is still LangGraph. Needs `LIVEKIT_URL` + API key/secret. Telegram stays voice notes. | [Voice](./voice-and-media); `KAZMA_VOICE_DUPLEX=0` |
 | **LiteLLM optional gateway (2026-08-25)** | `KAZMA_LITELLM_URL` (or `llm.gateway.url`) sends OpenAI-compatible calls through a LiteLLM proxy. Native Anthropic/Azure/Bedrock/Gemini stay direct. Locals stay direct. Not exclusive. | [FAQ](./faq#do-i-need-litellm); `KAZMA_LITELLM=0` |
-| **Computer use + leftover polish (2026-08-25)** | `computer_use` screenshot→action loop (HITL). Langfuse **auto-on** with keys. Hosted embed fleet (`KAZMA_EMBED_FLEET=1`). Docling/LlamaParse salvage for hard PDFs. Voice is **turn-based**, not Realtime. | [Tools](../reference/tools-catalog); `KAZMA_COMPUTER_USE=0`; [Voice](./voice-and-media) |
+| **Computer use + leftover polish (2026-08-25)** | `computer_use` screenshot→action loop (HITL). Langfuse **auto-on** with keys. Hosted embed fleet (`KAZMA_EMBED_FLEET=1`). Docling/LlamaParse salvage for hard PDFs (remote LlamaParse/Reducto upload only with `documents.security.remote_parse`, off by default). Voice is **turn-based**, not Realtime. | [Tools](../reference/tools-catalog); `KAZMA_COMPUTER_USE=0`; [Voice](./voice-and-media) |
 | **kazma ask + ACP (2026-08-25)** | `kazma ask "…"` runs the graph without the web server. Tokens stream; TTY HITL (`y/N`). `kazma acp` is ACP stdio with `session/update` + `session/request_permission`. `--yolo` is headless. | [Quickstart](./quickstart); `kazma ask --help` |
 | **IDE LSP backend (2026-08-25)** | `/api/ide/lsp` hover/complete/definition/diagnostics still exist. The Web editor is CodeMirror syntax-only; the industrial editor loop is `kazma acp`. | `/ide`; `KAZMA_IDE_LSP=0`; [IDE](../products/ide) |
 | **Plan mode (2026-08-25)** | `/plan on` inspects (write/exec blocked). `/plan go` or **Proceed** executes. HITL still on. | Plan pill; [Slash commands](../reference/slash-commands); `KAZMA_PLAN_MODE=0` |
@@ -297,7 +316,7 @@ detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:
 |------|----------------|--------|
 | **X Studio** | Compose / schedule / reschedule / thread / delete on X (official API) | `/x`; [X publisher](./x-publisher) |
 | Deep research | Multi-source pipeline, live sessions, routing, rubric | `/research`, chat, `/research deep` |
-| **Document Intelligence** | Secure ingest, OCR, index, generate/convert/redact, ops (capacity/GC/audit), cert | `/documents`, `/api/documents/*`, `/documents` slash, `document_*` tools, TUI Documents |
+| **Document Intelligence** | Quarantined ingest with a PDF active-content policy, OCR, index, generate/convert/redact, ops (capacity/GC/audit), cert; optional per-job container worker | `/documents`, `/api/documents/*`, `/documents` slash, `document_*` tools, TUI Documents |
 | Proxy Provider | Residential proxy for scrape/crawl/Playwright/SERP | Settings → System |
 | Knowledge Library | Smart re-index, gone-URL prune, hybrid inject; **document_index** bridge | `/knowledge`, Settings → Memory, Documents → Index |
 | Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand, Group/Ungroup, truncation honesty | `/memory` |
@@ -370,9 +389,12 @@ The August tranche — beyond the items in the table above:
 - **Primary `kazma update`** — a fail-closed operator upgrade path: preflight,
   named stash, hard reset to `origin/main`, extras-preserving reinstall, and
   postflight verification. [Kazma Update](../ops/kazma-update).
-- **Arabic PDF ingestion** — industry-grade extraction: PyMuPDF primary with a
+- **Arabic PDF ingestion** — PyMuPDF primary with a
   multi-engine bake-off (pypdfium2/pdfplumber/pypdf), layout-aware reading
-  order, fuzzy RTL round-trip verifier, and `ara+eng` OCR routing.
+  order, a fuzzy RTL round-trip check of generated PDFs, and `ara+eng` OCR
+  routing. Numbers,
+  ligatures and table cells in Arabic PDF lines were still reversed until the
+  2026-10-13 glyph re-read, and Arabic OCR remains unqualified.
   [Document Intelligence](./document-intelligence).
 - **Document rendering richness** — code/syntax highlighting (PDF+HTML), XLSX
   charts (multi-series + axis titles), approved-asset image embedding, and a
@@ -388,9 +410,13 @@ The August tranche — beyond the items in the table above:
 
 ### What it does
 
-End-to-end **secure document platform**: streamed intake → quarantine CAS →
+End-to-end **durable document platform**: streamed intake → quarantine CAS →
 policy sniff → isolated parse/OCR → durable jobs → optional Knowledge index,
-generate/convert/redact, ops (capacity, GC, audit, cert).
+generate/convert/redact, ops (capacity, GC, audit, cert). The default `process`
+worker bounds memory and CPU but does not confine files or network; the
+`container` profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container`) runs each
+job in its own container with no network and no mounts, through a document
+broker.
 
 ### How to run
 

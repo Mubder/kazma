@@ -29,6 +29,7 @@ from ..models import BlockType, DocumentIR
 from ..quality import score_document_extraction
 from .common import IRBuilder, ParseContext
 from .pdf_layout import extract_pymupdf_page_text
+from .pdf_rtl import has_rtl_glyphs, page_glyph_lines, text_in_rect
 
 __all__ = ["PdfParser"]
 
@@ -66,6 +67,32 @@ def _pdf_metadata(
         if value is not None:
             metadata[target] = str(value)[:4096]
     return metadata
+
+
+def _logical_table(table: Any, matrix: list, glyph_lines: list) -> list:
+    """Cells re-read in logical order; a right-to-left table's columns too.
+
+    PyMuPDF returned each Arabic cell character-reversed and the columns of
+    a right-to-left table left to right (2026-10-13, F09).
+    """
+    from kazma_core.documents.arabic import is_rtl_dominant
+
+    rows = []
+    for row_index, row in enumerate(getattr(table, "rows", None) or ()):
+        cells = []
+        for col_index, bbox in enumerate(getattr(row, "cells", None) or ()):
+            if bbox is None:
+                original = matrix[row_index][col_index] if row_index < len(matrix) and col_index < len(matrix[row_index]) else None
+                cells.append(original)
+            else:
+                cells.append(text_in_rect(glyph_lines, bbox, margins=(float(bbox[0]), float(bbox[2]))) or None)
+        rows.append(cells)
+    if not rows:
+        return matrix
+    sample = " ".join(str(cell) for row in rows for cell in row if cell)
+    if is_rtl_dominant(sample):
+        rows = [list(reversed(row)) for row in rows]
+    return rows
 
 
 def _table_rows_from_matrix(
@@ -195,7 +222,14 @@ class PdfParser:
                 page = document.load_page(page_index)
                 blocks: list[tuple[BlockType, str, dict[str, object] | None]] = []
 
-                text, layout_meta = extract_pymupdf_page_text(page)
+                try:
+                    glyph_lines = page_glyph_lines(page)
+                except (RuntimeError, ValueError, TypeError, KeyError):
+                    glyph_lines = []
+                    builder.warnings.append(f"Glyph order unavailable on PDF page {page_index + 1}")
+                if not has_rtl_glyphs(glyph_lines):
+                    glyph_lines = []
+                text, layout_meta = extract_pymupdf_page_text(page, glyph_lines or None)
                 if text:
                     blocks.append(
                         (
@@ -216,6 +250,8 @@ class PdfParser:
                             matrix = table.extract()
                         except Exception:
                             continue
+                        if glyph_lines:
+                            matrix = _logical_table(table, matrix, glyph_lines)
                         rows = _table_rows_from_matrix(
                             matrix,
                             max_rows=context.config.max_rows_per_sheet,

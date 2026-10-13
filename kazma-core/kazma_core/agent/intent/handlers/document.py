@@ -271,27 +271,23 @@ async def run_document(decision: TurnDecision, state: dict[str, Any], **ctx: Any
 
 
 def _read_pdf_raw(path: Path) -> str:
-    """Read PDF text — raw fitz, NO get_display (§13).
+    """Read a source PDF's text through the documents service.
 
-    The renderer (documents/rich_render.py) already handles Arabic shaping.
+    The PDF is the user's: it is parsed only in the bounded document worker,
+    under the active-content policy (and in a container in the container
+    profile). It used to be opened with fitz in this server process first,
+    which skipped both. The service handles Arabic shaping and reading order.
     """
     try:
-        import fitz
+        from kazma_core.documents.service import DocumentService
 
-        doc = fitz.open(str(path))
-        parts = [page.get_text() for page in doc]
-        doc.close()
-        return "\n\n".join(parts)
-    except Exception:
-        try:
-            from kazma_core.documents.service import DocumentService
-
-            result = DocumentService().read_transient_sync(
-                path, approved_path=path, max_chars=50000, fence=False
-            )
-            return result.as_tool_output()
-        except Exception:
-            return ""
+        result = DocumentService().read_transient_sync(
+            path, approved_path=path, max_chars=50000, fence=False
+        )
+        return result.as_tool_output()
+    except Exception as exc:  # noqa: BLE001 - a refused or failed read is "no text"
+        logger.info("[intent_document] source PDF could not be read: %s", type(exc).__name__)
+        return ""
 
 
 def _basic_structure(text: str) -> str:

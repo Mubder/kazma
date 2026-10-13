@@ -303,7 +303,7 @@ These need a dedicated drill, not this pack:
 
 - Multi-replica sticky sessions
 - OIDC login
-- Document Arabic/OCR visual
+- Document Arabic/OCR visual (extraction is measured separately by `python scripts/document_fidelity.py`, and backup/restore by the drills in [Document processing](./document-processing.md#backup))
 - Browser/Playwright computer-use
 - Swarm A→B→A handoff cycles
 - Time-travel `/replay` `/fork`

@@ -19,19 +19,29 @@ Surfaces the shared **Document Intelligence** platform (`DocumentIngestionServic
 via `/documents` (alias `/docs`) across Telegram, Discord, Slack, and other
 gateway chats. Reads use opaque IDs; no raw server paths from the user.
 
+Every chat acts as the install's operator (one operator per install), as the
+agent's document tools and the Web **Documents** page do: the commands list
+and read every document of the install, whichever surface ingested it (since
+2026-10-13). With platform users (multi-user mode) they refuse. An id another
+tenant holds answers exactly like an unknown one (`status` says "Not
+found"). None of the subcommands needs a gateway admin.
+
 | Subcommand | Usage | Description |
 |---|---|---|
-| *(help)* | `/documents` | Help + recent documents |
+| *(help)* | `/documents` | Help + up to 8 documents |
 | `list` | `/documents list` | List id, title, state |
-| `status` | `/documents status <id>` | Job/document durable state |
-| `read` | `/documents read <id>` | Paged fenced content when ready |
-| `convert` | `/documents convert <id> <format>` | Convert to pdf/html/docx/markdown |
-| `pdf-info` | `/documents pdf-info <id>` | Structural PDF report |
-| `redact` | `/documents redact <id> <term[,term…]>` | Physical redact → new artifact |
-| `search` | `/documents search <library> <query>` | Search an indexed library |
-| `health` | `/documents health` | Capability + worker readiness |
+| `status` | `/documents status <id>` | A job's state, stage and attempts; for a document id, its newest job |
+| `read` | `/documents read <id>` | The first 3,000 characters of a ready document, fenced as untrusted data (no paging from chat) |
+| `convert` | `/documents convert <id> <format>` | Convert to another format (e.g. pdf/html/docx/markdown) → a new artifact; the reply gives its id, format and size |
+| `pdf-info` | `/documents pdf-info <id>` | Page count and encryption of a PDF (alias `pdfinfo`) |
+| `redact` | `/documents redact <id> <term[,term…]>` | Physical redact → new artifact; the original is unchanged. No confirmation in chat |
+| `search` | `/documents search <library> <query>` | Top 5 hits from an indexed library, fenced |
+| `health` | `/documents health` | Worker running/stopped, parsers ready, OCR readiness |
 
-Alias: `/docs …` accepts the same subcommands.
+Alias: `/docs …` accepts the same subcommands. There is no upload subcommand:
+a file sent in a chat is read transiently, not stored in the platform, and a document these
+commands can see enters through the agent's `document_import`. With durable
+writes switched off, convert and redact answer that writes are disabled.
 
 Guide: [Document Intelligence](../guide/document-intelligence) ·
 API: [API routes — Documents](./api-routes.md#documents--document-intelligence).

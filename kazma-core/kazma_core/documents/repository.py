@@ -732,6 +732,79 @@ class DocumentRepository:
             raise RuntimeError("version insert succeeded but record was not found")
         return _version(row)
 
+    def discard_unpublished_intake(
+        self,
+        *,
+        tenant_id: str,
+        intake_token: str,
+        document_id: str,
+        version_id: str,
+        created_document: bool,
+    ) -> dict[str, bool]:
+        """Remove what one intake published before its job existed.
+
+        Only rows that intake created are touched: a version is removed only
+        when its metadata carries ``intake_token`` (a deduplicated version
+        another intake made is left alone), and the document only when this
+        intake created it, it carries the same token and no version remains.
+        The caller has proven no job exists for the intake. The document's
+        current version falls back to its newest remaining version.
+        """
+        tenant = _required(tenant_id, "tenant_id")
+        token = _required(intake_token, "intake_token")
+        removed = {"version": False, "document": False}
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                if version_id:
+                    row = self._conn.execute(
+                        "SELECT document_id, metadata_json FROM document_versions WHERE tenant_id = ? AND id = ?",
+                        (tenant, str(version_id)),
+                    ).fetchone()
+                    if row is not None and _decode_json(row["metadata_json"]).get("intake_token") == token:
+                        self._conn.execute(
+                            "DELETE FROM document_versions WHERE tenant_id = ? AND id = ?",
+                            (tenant, str(version_id)),
+                        )
+                        newest = self._conn.execute(
+                            """SELECT id FROM document_versions WHERE tenant_id = ? AND document_id = ?
+                            ORDER BY version_number DESC LIMIT 1""",
+                            (tenant, row["document_id"]),
+                        ).fetchone()
+                        self._conn.execute(
+                            "UPDATE documents SET current_version_id = ?, updated_at = ? WHERE tenant_id = ? AND id = ?",
+                            (newest["id"] if newest is not None else None, _now(), tenant, row["document_id"]),
+                        )
+                        removed["version"] = True
+                if created_document and document_id:
+                    doc = self._conn.execute(
+                        "SELECT metadata_json FROM documents WHERE tenant_id = ? AND id = ?",
+                        (tenant, str(document_id)),
+                    ).fetchone()
+                    remaining = self._conn.execute(
+                        "SELECT COUNT(*) AS n FROM document_versions WHERE tenant_id = ? AND document_id = ?",
+                        (tenant, str(document_id)),
+                    ).fetchone()
+                    if (
+                        doc is not None
+                        and _decode_json(doc["metadata_json"]).get("intake_token") == token
+                        and int(remaining["n"]) == 0
+                    ):
+                        self._conn.execute(
+                            "DELETE FROM document_acl WHERE tenant_id = ? AND document_id = ?",
+                            (tenant, str(document_id)),
+                        )
+                        self._conn.execute(
+                            "DELETE FROM documents WHERE tenant_id = ? AND id = ?",
+                            (tenant, str(document_id)),
+                        )
+                        removed["document"] = True
+                self._conn.execute("COMMIT")
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+        return removed
+
     def get_version(
         self,
         *,
@@ -921,6 +994,18 @@ class DocumentRepository:
                 params,
             )
         return cursor.rowcount
+
+    def active_index_entries(self) -> list[tuple[str, str, str, str]]:
+        """Every ``(tenant, library, document, version)`` this store records
+        as searchable: what the knowledge index must hold."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT DISTINCT tenant_id, library_id, document_id, version_id
+                   FROM document_chunks WHERE active = 1 AND index_status = 'indexed'
+                   ORDER BY tenant_id, library_id, document_id"""
+            ).fetchall()
+        return [(str(r["tenant_id"]), str(r["library_id"]), str(r["document_id"]), str(r["version_id"]))
+                for r in rows]
 
     def list_indexed_libraries(
         self, *, tenant_id: str, document_id: DocumentId

@@ -72,6 +72,9 @@ KAZMA_PG_TABLES: list[str] = [
     # Document job queue (auto-created by documents/jobs_pg.py)
     "document_jobs",
     "document_job_events",
+    # Durable intake ownership and admission budgets (documents/admission.py).
+    "document_intake_reservations",
+    "document_intake_mutex",
     # Document catalog / ACL (documents/repository_pg.py) — required when
     # KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto (audit H-13 / §21A).
     "documents",
@@ -83,6 +86,32 @@ KAZMA_PG_TABLES: list[str] = [
     "document_chunks",
     "document_audit_events",
 ]
+
+#: Functions the triggers on Kazma's tables call. ``pg_dump -t`` dumps a
+#: table's triggers but never the functions they call, so every restore
+#: creates these in the target first (``migration.pg_bridge.restore_database``)
+#: -- otherwise a restore into a fresh database (the weekly rehearsal, a drill,
+#: a new machine) cannot recreate the trigger. ``tests/test_document_audit_pg.py``
+#: holds every trigger function product code creates to this mapping.
+KAZMA_PG_FUNCTIONS: dict[str, str] = {
+    # documents/audit.py: audit rows are immutable, and deleted only by the
+    # retention prune, which sets kazma.document_audit_prune for its own
+    # transaction (the Postgres side of the SQLite triggers there).
+    "kazma_document_audit_guard": """
+CREATE OR REPLACE FUNCTION kazma_document_audit_guard() RETURNS trigger
+LANGUAGE plpgsql AS $guard$
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        RAISE EXCEPTION 'audit events are immutable';
+    END IF;
+    IF coalesce(current_setting('kazma.document_audit_prune', true), '') <> 'on' THEN
+        RAISE EXCEPTION 'audit events may only be pruned by retention';
+    END IF;
+    RETURN OLD;
+END
+$guard$
+""",
+}
 
 # How many raw .dump files stay on local disk. These are staging, not the
 # archive: restic snapshots each dump and keeps the real history under

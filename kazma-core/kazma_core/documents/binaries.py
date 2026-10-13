@@ -123,14 +123,60 @@ def run_soffice_cli(
     if not executable:
         raise FileNotFoundError("soffice not found")
     cmd = [executable, *args]
-    return subprocess.run(
+    # Not ``subprocess.run(timeout=)``: on a timeout it kills only the process
+    # it started and then waits WITHOUT a limit for the output pipes, which
+    # soffice.com's own child (soffice.bin) still holds. Under load an 8 s
+    # version probe hung its caller -- the certification run -- indefinitely
+    # (2026-10-13). The whole tree is killed, and the last wait is bounded.
+    process = subprocess.Popen(
         cmd,
-        capture_output=True,
-        check=False,
-        timeout=timeout,
-        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL,
+        text=True,
         cwd=str(cwd) if cwd is not None else None,
         env=env,
         creationflags=windows_no_window_flags(),
     )
+    finished = False
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        finished = True
+    except subprocess.TimeoutExpired:
+        _kill_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=_DRAIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = None, None  # a descendant still holds the pipes
+        raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr) from None
+    finally:
+        if not finished and process.poll() is None:
+            _kill_tree(process)  # interrupted: never leave the tree running
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
+
+#: How long the output pipes are drained after a timed-out tree is killed.
+_DRAIN_SECONDS = 5.0
+
+
+def _kill_tree(process: subprocess.Popen[str]) -> None:
+    """Kill a process and every descendant it started (best effort)."""
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+    if psutil is not None:
+        try:
+            children = psutil.Process(process.pid).children(recursive=True)
+        except psutil.Error:
+            logger.debug("[binaries] soffice process %s has no readable children", process.pid)
+            children = []
+        for child in children:
+            try:
+                child.kill()
+            except psutil.Error:
+                logger.debug("[binaries] could not kill soffice descendant %s", child.pid)
+    try:
+        process.kill()
+    except OSError:
+        logger.debug("[binaries] soffice process %s already ended", process.pid)

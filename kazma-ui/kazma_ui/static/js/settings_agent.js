@@ -466,6 +466,7 @@
                     intake_max_bytes: Number(this.documents.intake_max_bytes),
                     intake_max_files: Number(this.documents.intake_max_files),
                     ocr_enabled: !!this.documents.ocr_enabled,
+                    ocr_tables: !!this.documents.ocr_tables,
                     worker_timeout_seconds: Number(this.documents.worker_timeout_seconds),
                     worker_memory_mb: Number(this.documents.worker_memory_mb),
                     capacity_storage_free_floor_bytes: Number(this.documents.capacity_storage_free_floor_bytes),

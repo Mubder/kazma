@@ -150,6 +150,9 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("acquisition.artifacts_revision", RUNTIME, "artifact conditional-write revision"),
     KeyRule("acquisition.crawls", RUNTIME, "durable crawl effects and ownership; restoring a journal could repeat requests or indexing"),
     KeyRule("acquisition.crawls_revision", RUNTIME, "conditional-write revision for durable crawl effects"),
+    KeyRule("acquisition.monitor", RUNTIME, "research/crawl alerts already raised and whether each was "
+            "delivered; restoring an older ledger would raise them again"),
+    KeyRule("acquisition.monitor_revision", RUNTIME, "conditional-write revision for the alert ledger"),
     KeyRule("research.papers_index", RUNTIME, "papers research found"),
     KeyRule("memory.v2.last_reconsolidation", RUNTIME, "when reconsolidation last ran"),
     KeyRule("memory.v2.rehydrate", RUNTIME, "the recovery sweep's progress"),
@@ -175,6 +178,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     # ── Learned: restored only where the install has none ────────────────
     KeyRule("self_improvement.agent_evolution", LEARNED, "the Soul Kazma learned"),
     # ── Settings product code writes (named so the class gate sees them) ──
+    KeyRule("acquisition.monitor_settings", SETTING, "research/crawl alerts: on or off, the stall and "
+            "low-credit thresholds, completion notices"),
     KeyRule("agent.", SETTING, "how Kazma behaves: language, personality, commitment"),
     KeyRule("agent_skills.enabled.", SETTING, "Agent Skills switched on or off"),
     KeyRule("appearance.", SETTING, "the interface's look"),

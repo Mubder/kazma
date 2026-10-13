@@ -77,7 +77,7 @@ class DocumentChunk:
         )
         return (
             f"document:{self.document_id}@{self.version_id} "
-            f"page:{pages} blocks:{','.join(self.block_ids)}"
+            f"{self.metadata.get('location_kind', 'page')}:{pages} blocks:{','.join(self.block_ids)}"
         )
 
     def to_knowledge_dict(self, *, library_id: str, title: str = "") -> dict[str, Any]:
@@ -301,6 +301,13 @@ def _build_chunk(
         ),
         metadata={
             "schema_version": document.schema_version,
+            "location_kind": (
+                "segment" if document.metadata.get("salvaged")
+                else "section" if any((piece.page_metadata or {}).get("kind") == "logical_document" for piece in pieces)
+                else str((pieces[0].page_metadata or {}).get("kind", "page"))
+            ),
+            "physical_page_mapping": not document.metadata.get("salvaged", False)
+            and all((piece.page_metadata or {}).get("kind", "page") == "page" for piece in pieces),
             "has_code": any(piece.block.block_type is BlockType.CODE for piece in pieces),
             "block_types": list(
                 dict.fromkeys(piece.block.block_type.value for piece in pieces)

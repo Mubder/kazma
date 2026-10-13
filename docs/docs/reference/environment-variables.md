@@ -13,9 +13,9 @@ description: Master reference for Kazma environment variables (dev, single-opera
 | `KAZMA_LANGFUSE` | (unset) | `0` forces console tracing even when Langfuse keys exist |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | | With `logging.langfuse.enabled: auto`, both set → Langfuse backend |
 | `KAZMA_EMBED_FLEET` | (unset) | `1` + OpenAI/Voyage key → hosted embeddings (issue #78) |
-| `KAZMA_DOCLING` | `1` | `0` skips Docling salvage on weak PDF extracts |
-| `KAZMA_REMOTE_PARSE` | `0` (veto only) | **Off by default.** Remote PDF salvage (LlamaParse/Reducto) ships documents to a third party, so it is governed by `documents.security.remote_parse`, which defaults to `False`. This variable is a **veto, not a switch**: `0` force-disables salvage even where the policy allows it, and setting it to `1` does **not** enable salvage on its own. Having an API key configured is not consent — turn the policy on deliberately. |
-| `LLAMAPARSE_API_KEY` / `REDUCTO_API_KEY` | | Hard-PDF remote extract (parent process; not the parser sandbox) |
+| `KAZMA_DOCLING` | `1` | An additional **veto** on local Docling salvage of weak PDF extracts, which `documents.security.local_salvage` (default on) governs: `0`/`false`/`off`/`no` turns it off; no value of this variable turns it on. The salvage runs inside the bounded parser worker. |
+| `KAZMA_REMOTE_PARSE` | unset (no veto) | **Remote salvage is off by default.** Remote PDF salvage (LlamaParse/Reducto) ships the original document to a third party, so it is governed by `documents.security.remote_parse`, which defaults to `False`. This variable is a **veto, not a switch**: `0`/`false`/`off`/`no` disables salvage even where the policy allows it; unset or any other value leaves the policy alone and never enables salvage on its own. Policy and veto are read again before each provider. Having an API key configured is not consent — turn the policy on deliberately. |
+| `LLAMAPARSE_API_KEY` / `REDUCTO_API_KEY` | | Provider keys for remote salvage, used only while `documents.security.remote_parse` is on: tried in the order LlamaParse, Reducto (one without a key is skipped, a failed one falls through to the next), each attempt audited before the upload. Read by the Kazma process, never the parser worker; a chat attachment's transient read never uploads. |
 | `KAZMA_SILERO_VAD` | (unset) | `1` tries Silero VAD (falls back to energy) |
 | `KAZMA_LITELLM_URL` | (unset) | LiteLLM proxy for OpenAI-compatible providers only (e.g. `http://127.0.0.1:4000`) |
 | `KAZMA_LITELLM` | `1` | `0` disables the LiteLLM proxy even if a URL is set |
@@ -45,20 +45,36 @@ are **ConfigStore / `kazma.yaml` keys** (live-read), not a parallel env matrix.
 Primary keys are nested, for example:
 
 - `documents.enabled` / `documents.shadow` / `documents.default_authoritative`
-- `documents.intake.max_bytes`, `documents.limits.max_pages`
-- `documents.ocr.*`, `documents.workers.*`, `documents.capacity.*`
+- `documents.intake.max_bytes`, `documents.intake.lease_seconds`, `documents.limits.max_pages`
+- `documents.ocr.*` (including `documents.ocr.tables`, the cell-by-cell reading
+  of ruled tables on scanned pages), `documents.workers.*`, `documents.capacity.*`
 - `documents.retention.*`, `documents.gc.*`, `documents.security.*`
 
 See [Document Intelligence — live configuration](../guide/document-intelligence.md#live-configuration)
-and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
-`KAZMA_DOCUMENT_SOAK_ITERATIONS` (used by `scripts/certify_documents.py --soak`).
+and `kazma_core.documents.config.DocumentConfig`. The strict execution profile
+`security.execution.container_required` (a setting, not a variable) refuses the
+`process` worker profile below (`worker_isolation_required`). Optional cert
+soak size: `KAZMA_DOCUMENT_SOAK_ITERATIONS` (used by
+`scripts/certify_documents.py --soak`).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KAZMA_DOCUMENTS_JOBS_BACKEND` | auto | Force `sqlite` for job queue (else follow Postgres when configured) |
-| `KAZMA_DOCUMENTS_METADATA_BACKEND` | `auto` | `sqlite` / `postgres` / `auto` (auto follows jobs backend). Postgres metadata enables multi-replica CRUD; GC mark/sweep is backend-agnostic (`repository.gc_mark`) |
-| `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Soak iteration count for `certify_documents.py --soak` |
+| `KAZMA_DOCUMENTS_JOBS_BACKEND` | unset | `sqlite` (or `sqlite3`) forces the SQLite job queue; any other value follows the platform: Postgres when Kazma's database is Postgres. A Postgres pool that cannot be reached at start falls back to SQLite, and readiness reports it as degraded. |
+| `KAZMA_DOCUMENTS_METADATA_BACKEND` | unset (`auto`) | `sqlite` / `postgres` (also `postgresql`, `pg`) / `auto` (unset or `auto`: follow the jobs backend); any other value means SQLite. Postgres metadata enables multi-replica CRUD; GC mark/sweep is backend-agnostic (`repository.gc_mark`) |
+| `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Repetitions of the extended repeated-parse smoke of `certify_documents.py --soak`. It is not, and is not reported as, a multi-day soak. |
 | `KAZMA_DOCUMENT_FONT_DIR` | vendored `documents/assets/fonts/` | Font directory for generated PDF/DOCX/HTML. A path that is not a directory is ignored with a warning, and the vendored IBM Plex Sans Arabic is used. Fonts are still chosen by verified glyph coverage. |
+| `KAZMA_DOCUMENT_WORKER_ISOLATION` | `process` | Where the parser, mutation and renderer workers run. `process`: a local child process with time/output/resource limits and **no filesystem or network isolation** (readiness reports `hostile_document_profile: unqualified`); refused when `security.execution.container_required` is on. `container`: every run goes to the document worker broker, which runs it in a fresh attested container with no network and no mounts, and the engines Kazma reports are the ones the worker image reports; an unreachable, unattested or full broker refuses the run (`worker_isolation_unavailable`, retried; no fallback to `process`). Any other value refuses every run (`worker_isolation_invalid`). |
+| `KAZMA_DOCUMENT_BROKER_URL` | unset | The broker for `container` isolation: `unix:///path/to/broker.sock` or `tcp://host:port`. Without it `container` refuses every run. TCP belongs on a private network: the token is the only authentication. |
+| `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` | unset | File holding the shared broker token (at least 32 characters; the broker is started with the same file). Read per run, so a rotated token takes effect without a restart. |
+
+Test-only, opt-in qualification runs (each test skips without its variable;
+the [document processing](../ops/document-processing.md) page says how to run
+them): `KAZMA_TEST_DOCUMENT_WORKER_IMAGE` (a built worker image: the real-Docker
+container profile), `KAZMA_TEST_CONTAINER_LEASE_DRILL_IMAGE` (the cross-host
+intake lease drill), `KAZMA_TEST_RESTORE_DRILL_DOCUMENTS` with
+`KAZMA_TEST_RESTORE_DRILL_KIB` (default 64) and
+`KAZMA_TEST_RESTORE_DRILL_WRITERS` (default 1) (the Postgres restore drill at
+scale), `KAZMA_TEST_REAL_SCANS_MANIFEST` (real-scan measurements).
 
 ---
 
@@ -144,7 +160,7 @@ curl -s https://your.domain/api/auth/status
 | `KAZMA_DB_BACKEND` | auto | Optional | Force `postgres` / `sqlite`. |
 | `KAZMA_DB_CONTAINER` | `kazma-db` | Migration | Docker container name for `pg_dump` / `pg_restore` discovery during `kazma migrate`. See [Migration](../ops/migration). |
 | `KAZMA_DB_INTERNAL_PORT` | `5432` | Migration | Container-internal Postgres port when `pg_dump` / `pg_restore` run via `docker exec` (the host's forwarded port is unreachable from inside the container). |
-| `KAZMA_DOCKER_BIN` | unset | Optional | Absolute path of the `docker` CLI. Kazma looks for it here, then on `PATH`, then in Docker's standard install folders (e.g. `C:\Program Files\Docker\Docker\resources\bin`). Needed only when docker lives somewhere else: the Postgres dump (`pg_dump` via `docker exec`) and the `python_exec` Docker jail both use it. A Docker Desktop update that drops its folder from `PATH` no longer stops backups (2026-09-25). |
+| `KAZMA_DOCKER_BIN` | unset | Optional | Absolute path of the `docker` CLI. Kazma looks for it here, then on `PATH`, then in Docker's standard install folders (e.g. `C:\Program Files\Docker\Docker\resources\bin`). Needed only when docker lives somewhere else: the Postgres dump (`pg_dump` via `docker exec`), the `python_exec` Docker jail and the document worker broker (`documents/worker_broker.py`, which the broker image points at its CLI with this variable) all use it. A Docker Desktop update that drops its folder from `PATH` no longer stops backups (2026-09-25). |
 | `KAZMA_PG_POOL_RETRIES` | `5` | Optional | Connection-pool creation retry count. Handles transient failures (Windows Docker-bridge, container mid-startup). |
 | `KAZMA_PG_POOL_RETRY_DELAY` | `1.0` | Optional | Seconds between pool-creation retries. |
 | `KAZMA_PG_POOL_MIN` | `1` | Optional | Minimum connections in the psycopg pool. |

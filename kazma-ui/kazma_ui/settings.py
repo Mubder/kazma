@@ -1251,6 +1251,7 @@ class SettingsRouterBuilder:
                     "intake_max_bytes": cfg.intake_max_bytes,
                     "intake_max_files": cfg.intake_max_files,
                     "ocr_enabled": cfg.ocr_enabled,
+                    "ocr_tables": cfg.ocr_tables,
                     "worker_timeout_seconds": cfg.worker_timeout_seconds,
                     "worker_memory_mb": cfg.worker_memory_mb,
                     "capacity_storage_free_floor_bytes": cfg.capacity_storage_free_floor_bytes,
@@ -1274,6 +1275,7 @@ class SettingsRouterBuilder:
                 "intake_max_bytes": ("documents.intake.max_bytes", "documents"),
                 "intake_max_files": ("documents.intake.max_files", "documents"),
                 "ocr_enabled": ("documents.ocr.enabled", "documents"),
+                "ocr_tables": ("documents.ocr.tables", "documents"),
                 "worker_timeout_seconds": ("documents.workers.timeout_seconds", "documents"),
                 "worker_memory_mb": ("documents.workers.memory_mb", "documents"),
                 "capacity_storage_free_floor_bytes": (

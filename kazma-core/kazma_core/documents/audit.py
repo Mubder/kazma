@@ -14,7 +14,10 @@ Invariants (mirrors ``document_job_events`` immutability):
 * **Controlled pruning only.** A ``BEFORE DELETE`` trigger aborts casual
   deletes; the retention sweep flips a one-row control flag inside its own
   transaction to prune whole aged-out rows (log-rotation semantics). No
-  other path can delete audit rows.
+  other path can delete audit rows. On Postgres one row trigger does both
+  (``kazma_document_audit_guard``, declared in ``db/pg_backup.KAZMA_PG_FUNCTIONS``
+  so every restore recreates it), and the prune marks its own transaction
+  with ``SET LOCAL kazma.document_audit_prune``.
 * **Sanitized detail.** Only an allowlist of safe scalar keys is persisted
   in ``detail_json``; content, filenames, redaction terms, and secrets are
   never stored. Every value is coerced to a short scalar.
@@ -63,6 +66,7 @@ AUDIT_EVENT_TYPES = frozenset(
         "delete",
         "gc",
         "operator",
+        "egress",
     }
 )
 
@@ -99,6 +103,8 @@ _DETAIL_ALLOWLIST = frozenset(
         "engine",
         "count",
         "actor_role",
+        "provider",
+        "bytes",
     }
 )
 
@@ -179,6 +185,15 @@ class DocumentAuditEvent:
             "detail": self.detail,
             "created_at": self.created_at,
         }
+
+
+def _first(row: Any) -> Any:
+    """The first column of a row from either driver's row factory."""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return next(iter(row.values()))
+    return row[0]
 
 
 def _now() -> str:
@@ -275,6 +290,39 @@ class DocumentAuditStore:
                 self._conn.executescript(_SCHEMA)
         else:
             self._conn = None
+            self._ensure_pg_guard()
+
+    def _ensure_pg_guard(self) -> None:
+        """The Postgres side of the SQLite triggers: no update, and delete only
+        inside the retention prune. Created when missing, under the schema
+        lock, so a start never locks the audit table (``db/pg_schema.py``).
+
+        Until 2026-10-13 the Postgres audit had no guard at all, and the prune
+        below used the SQLite connection (``None`` here), so retention failed
+        every pass and the table grew without bound.
+        """
+        pool = getattr(self._repo, "_pool", None)
+        if pool is None:
+            return
+        from kazma_core.db.pg_backup import KAZMA_PG_FUNCTIONS
+        from kazma_core.db.pg_schema import ensure_schema
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                ensure_schema(cur, [])  # the shared schema lock
+                cur.execute("SELECT to_regprocedure('kazma_document_audit_guard()') IS NOT NULL AS present")
+                if not _first(cur.fetchone()):
+                    cur.execute(KAZMA_PG_FUNCTIONS["kazma_document_audit_guard"])
+                cur.execute(
+                    "SELECT 1 FROM pg_trigger WHERE tgname = 'document_audit_guard' "
+                    "AND tgrelid = to_regclass('document_audit_events')"
+                )
+                if cur.fetchone() is None:
+                    cur.execute(
+                        "CREATE TRIGGER document_audit_guard BEFORE UPDATE OR DELETE "
+                        "ON document_audit_events FOR EACH ROW EXECUTE FUNCTION kazma_document_audit_guard()"
+                    )
+            conn.commit()
 
     def record(
         self,
@@ -289,6 +337,7 @@ class DocumentAuditStore:
         version_id: Any = None,
         job_id: Any = None,
         detail: dict[str, Any] | None = None,
+        required: bool = False,
     ) -> None:
         """Append one immutable operational audit event.
 
@@ -325,6 +374,8 @@ class DocumentAuditStore:
             if self._pg:
                 pool = getattr(self._repo, "_pool", None)
                 if pool is None:
+                    if required:
+                        raise RuntimeError("Document audit backend is unavailable")
                     return
                 with pool.connection() as conn:
                     with conn.cursor() as cur:
@@ -352,6 +403,8 @@ class DocumentAuditStore:
                     args,
                 )
         except Exception:  # noqa: BLE001 - audit must never break operations
+            if required:
+                raise RuntimeError("Required document audit could not be persisted") from None
             logger.debug("[documents.audit] failed to record %s/%s", event_type, action, exc_info=True)
 
     def list_events(
@@ -480,6 +533,30 @@ class DocumentAuditStore:
         """
         limit = max(1, int(max_rows))
         deleted = 0
+        if self._pg:
+            pool = getattr(self._repo, "_pool", None)
+            if pool is None:
+                raise RuntimeError("Document audit backend is unavailable")
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    # The guard trigger lets a delete through only while this
+                    # transaction says it is the prune.
+                    cur.execute("SET LOCAL kazma.document_audit_prune = 'on'")
+                    cur.execute(
+                        """
+                        DELETE FROM document_audit_events
+                        WHERE id IN (
+                            SELECT id FROM document_audit_events
+                            WHERE created_at < %s::timestamptz
+                            ORDER BY id ASC
+                            LIMIT %s
+                        )
+                        """,
+                        (str(cutoff_iso), limit),
+                    )
+                    deleted = int(cur.rowcount)
+                conn.commit()
+            return deleted
         with self._lock:
             try:
                 self._conn.execute("BEGIN IMMEDIATE")

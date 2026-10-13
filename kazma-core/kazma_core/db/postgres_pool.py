@@ -231,6 +231,8 @@ def os_env(key: str, default: str) -> str:
 
 def _ensure_core_schema(pool: PostgresPool) -> None:
     """Idempotent schema for multi-replica shared tables."""
+    from kazma_core.db.pg_schema import ensure_schema, split_statements
+
     ddl = """
     CREATE TABLE IF NOT EXISTS kazma_settings (
         key TEXT PRIMARY KEY,
@@ -291,15 +293,16 @@ def _ensure_core_schema(pool: PostgresPool) -> None:
             # Boot schema locks must not turn a bounded connection retry
             # into an unlimited wait. Scoped to this transaction only.
             cur.execute("SET LOCAL statement_timeout = '5s'")
-            cur.execute(ddl)
-            # Idempotent column migrations for pre-existing databases
-            # (CREATE TABLE IF NOT EXISTS only helps fresh installs). IF NOT
-            # EXISTS makes a present column a no-op, so an error here is real
-            # -- and it aborts this transaction, the tables above included --
-            # so it goes to the caller's retry loop, never swallowed.
-            cur.execute(
-                "ALTER TABLE kazma_chat_sessions ADD COLUMN IF NOT EXISTS "
-                "pinned BOOLEAN DEFAULT FALSE"
-            )
+            # Column migrations for pre-existing databases (CREATE TABLE IF
+            # NOT EXISTS only helps fresh installs) are sent only when the
+            # column is missing (db.pg_schema: an ALTER takes an exclusive
+            # lock before it looks, and waited out every pg_dump). An error
+            # here is real -- it aborts this transaction, the tables above
+            # included -- so it goes to the caller's retry loop, never
+            # swallowed.
+            ensure_schema(cur, [
+                *split_statements(ddl),
+                "ALTER TABLE kazma_chat_sessions ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE",
+            ])
         conn.commit()
     logger.info("[PostgresPool] core schema ensured")

@@ -448,6 +448,7 @@ def _export_kb_settings(dest: Path) -> int:
     — restoring that would clobber the target's config/workspaces tables.
     """
     import sqlite3
+
     from kazma_core import paths as _paths
 
     try:
@@ -495,9 +496,30 @@ def _export_document_store(
     references already exists on disk (files precede rows), so the pair is
     consistent. The tree carries no embedded paths, so it needs no rewrite.
     """
-    from kazma_core.documents.config import get_document_config
+    from kazma_core.documents.backup import UNSUPPORTED_SHAPE, installed_document_backends
+    from kazma_core.documents.config import get_document_storage_root
 
-    root = Path(get_document_config().storage_root)
+    # Where the catalog is decides what travels (DOC-A7, 2026-10-13). The
+    # CLI has no running service, and the old check asked only the service:
+    # a Postgres store exported as its empty local documents.db, and the
+    # bundle carried none of its files.
+    metadata, jobs = installed_document_backends()
+    if metadata == "postgres" and jobs != "postgres":
+        raise RuntimeError(UNSUPPORTED_SHAPE)
+    root = Path(get_document_storage_root())
+    dsn = ""
+    if "postgres" in (metadata, jobs):
+        from kazma_core.db.backend import get_database_url
+
+        dsn = get_database_url() or ""
+        if not dsn:
+            raise RuntimeError(
+                "document_backup_backend_unsupported: the document store is on Postgres "
+                "but no database URL is set"
+            )
+    if metadata == "postgres":
+        _export_postgres_document_content(dsn, root, staging, manifest, _log)
+        return
     db_src = root / "documents.db"
     if not db_src.exists():
         _log("  (no documents.db — skipping document store)")
@@ -513,9 +535,19 @@ def _export_document_store(
     # 2) Copy referenced content + manifests verbatim (hashed by the manifest
     #    pass, so integrity is verified on import).
     try:
-        from kazma_core.documents.backup import _blob_rel_path, _read_references
+        from kazma_core.documents.backup import (
+            _blob_rel_path,
+            _read_references,
+            promoted_versions_from_postgres,
+        )
 
-        refs, versions = _read_references(db_dest if db_dest.exists() else db_src)
+        # A Postgres queue beside the SQLite catalog holds the promotions
+        # (read after the snapshot: a superset). The queue itself travels in
+        # data/postgres.dump.
+        promoted = promoted_versions_from_postgres(dsn) if jobs == "postgres" else None
+        refs, versions = _read_references(
+            db_dest if db_dest.exists() else db_src, promoted_versions=promoted
+        )
         blob_count = 0
         missing_blobs: list[str] = []
         for sha, kind in refs:
@@ -551,6 +583,44 @@ def _export_document_store(
     except Exception as exc:
         logger.warning("[migrate:export] document content copy failed: %s", exc)
         raise
+
+
+def _export_postgres_document_content(
+    dsn: str, root: Path, staging: Path, manifest: Manifest, _log: Callable[[str], None]
+) -> None:
+    """The content files a Postgres document catalog references.
+
+    The catalog itself is in ``data/postgres.dump``, taken BEFORE this step,
+    so the references read now are a superset of the dump's (blobs are
+    immutable and written before their rows). A referenced blob or required
+    manifest that is gone fails the export (verify then refuses the bundle).
+    """
+    import psycopg
+    from psycopg.rows import dict_row
+
+    from kazma_core.documents.backup_pg import _snapshot_references
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn, conn.cursor() as cur:
+        refs = _snapshot_references(cur)
+    dest_root = staging / "document-store"
+    copied = 0
+    missing: list[str] = []
+    for rel in sorted(refs["blobs"] | refs["manifests"]):
+        src = root / rel
+        if not src.is_file():
+            if rel in refs["blobs"] or rel in refs["required_manifests"]:
+                missing.append(rel)
+            continue
+        dst = dest_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied += 1
+    if missing:
+        raise RuntimeError(
+            "document store is incomplete; referenced file(s) are missing: " + ", ".join(missing[:3])
+        )
+    manifest.table_counts["_document_store"] = {"files": copied, "catalog": "postgres"}
+    _log(f"  document store: {copied} file(s); the catalog is in data/postgres.dump")
 
 
 def _dump_postgres_shared_state(

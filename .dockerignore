@@ -20,3 +20,6 @@ build/
 .pytest_cache/
 .mypy_cache/
 .poolside/
+
+# Deployment secrets: never copied into an image.
+secrets/

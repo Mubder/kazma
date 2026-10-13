@@ -15,6 +15,10 @@ tests/test_postgres_suite.py now refuses any test that reads the real `.env`.
 from __future__ import annotations
 
 import os
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from threading import Barrier
 
 import pytest
 
@@ -124,3 +128,58 @@ def test_storage_bytes_sql_on_postgres(pg_pool) -> None:
     # returns dict rows, not that the DB is empty.
     assert int(row["logical"]) >= 0
     assert int(row["physical"]) >= 0
+
+
+@pytest.mark.parametrize("limits, code", [
+    ({"capacity_max_queued_jobs": 1}, "queue_full"),
+    ({"capacity_max_tenant_queued_jobs": 1}, "tenant_queue_full"),
+    ({"capacity_max_tenant_active_jobs": 1}, "tenant_active_full"),
+    ({"capacity_intake_bytes_per_minute": 16}, "rate_limited"),
+    ({"capacity_intake_rate_per_minute": 1}, "rate_limited"),
+])
+def test_concurrent_postgres_intake_reservations(pg_pool, tmp_path, limits, code):
+    """Real independent pool connections, isolated from other test tenants."""
+    from kazma_core.documents.admission import IntakeAdmissionStore
+    from kazma_core.documents.capacity import CapacityError
+    from kazma_core.documents.config import DocumentConfig
+    from kazma_core.documents.jobs_pg import PostgresDocumentJobRepository
+    from kazma_core.documents.models import new_job_id
+
+    # The main Tests job does not install psycopg: skip there, run in the
+    # Postgres job (tests/test_postgres_suite.py keeps bare imports out).
+    sql = pytest.importorskip("psycopg").sql
+
+    schema = sql.Identifier("documents_admission_" + uuid.uuid4().hex)
+    with pg_pool.connection() as conn:
+        conn.execute(sql.SQL("CREATE SCHEMA {}").format(schema))
+        conn.commit()
+    class ScopedPool:
+        @contextmanager
+        def connection(self):
+            with pg_pool.connection() as conn:
+                conn.execute(sql.SQL("SET LOCAL search_path TO {}").format(schema))
+                yield conn
+    try:
+        repo = PostgresDocumentJobRepository(ScopedPool())
+        stores = [IntakeAdmissionStore(repo) for _ in range(2)]
+        barrier = Barrier(2)
+        config = DocumentConfig(storage_root=tmp_path, **limits)
+        def reserve(store):
+            barrier.wait(timeout=10)
+            try:
+                return store.reserve(tenant_id="t", request_key=str(new_job_id()),
+                    request_digest="digest", job_id=str(new_job_id()), byte_size=16,
+                    config=config)
+            except CapacityError as exc:
+                return exc.code
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(reserve, stores))
+        assert results.count(code) == 1
+        assert stores[0].snapshot(tenant_id="t") == {
+            "pending": 1, "reserved_bytes": 16, "window_files": 1, "window_bytes": 16,
+            "stranded": 0,
+        }
+    finally:
+        with pg_pool.connection() as conn:
+            conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(schema))
+            conn.commit()

@@ -287,9 +287,11 @@ class PostgresDocumentRepository:
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
+        from kazma_core.db.pg_schema import ensure_schema
+
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(_PG_SCHEMA)
+                ensure_schema(cur, _PG_SCHEMA)
             conn.commit()
 
     def close(self) -> None:
@@ -598,6 +600,7 @@ class PostgresDocumentRepository:
                     if existing is not None:
                         conn.commit()
                         return _version(existing)
+                    self._require_blob_quota(cur, tenant, blob_id)
                     cur.execute(
                         """
                         SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
@@ -645,6 +648,79 @@ class PostgresDocumentRepository:
                 conn.rollback()
                 raise
         return _version(row)
+
+    def discard_unpublished_intake(
+        self,
+        *,
+        tenant_id: str,
+        intake_token: str,
+        document_id: str,
+        version_id: str,
+        created_document: bool,
+    ) -> dict[str, bool]:
+        """Postgres twin of ``DocumentRepository.discard_unpublished_intake``."""
+        tenant = _required(tenant_id, "tenant_id")
+        token = _required(intake_token, "intake_token")
+        removed = {"version": False, "document": False}
+        with self._pool.connection() as conn:
+            try:
+                with conn.cursor() as cur:
+                    if version_id:
+                        cur.execute(
+                            "SELECT document_id, metadata_json FROM document_versions "
+                            "WHERE tenant_id = %s AND id = %s FOR UPDATE",
+                            (tenant, str(version_id)),
+                        )
+                        row = cur.fetchone()
+                        row = _as_dict(row) if row is not None else None
+                        if row is not None and _decode_json(row["metadata_json"]).get("intake_token") == token:
+                            cur.execute(
+                                "DELETE FROM document_versions WHERE tenant_id = %s AND id = %s",
+                                (tenant, str(version_id)),
+                            )
+                            cur.execute(
+                                """SELECT id FROM document_versions WHERE tenant_id = %s AND document_id = %s
+                                ORDER BY version_number DESC LIMIT 1""",
+                                (tenant, row["document_id"]),
+                            )
+                            newest = cur.fetchone()
+                            cur.execute(
+                                "UPDATE documents SET current_version_id = %s, updated_at = %s "
+                                "WHERE tenant_id = %s AND id = %s",
+                                (_as_dict(newest)["id"] if newest is not None else None, _now(), tenant,
+                                 row["document_id"]),
+                            )
+                            removed["version"] = True
+                    if created_document and document_id:
+                        cur.execute(
+                            "SELECT metadata_json FROM documents WHERE tenant_id = %s AND id = %s FOR UPDATE",
+                            (tenant, str(document_id)),
+                        )
+                        doc = cur.fetchone()
+                        cur.execute(
+                            "SELECT COUNT(*) AS n FROM document_versions WHERE tenant_id = %s AND document_id = %s",
+                            (tenant, str(document_id)),
+                        )
+                        remaining = int(_as_dict(cur.fetchone())["n"])
+                        if (
+                            doc is not None
+                            and _decode_json(_as_dict(doc)["metadata_json"]).get("intake_token") == token
+                            and remaining == 0
+                        ):
+                            cur.execute(
+                                "DELETE FROM document_acl WHERE tenant_id = %s AND document_id = %s",
+                                (tenant, str(document_id)),
+                            )
+                            cur.execute(
+                                "DELETE FROM documents WHERE tenant_id = %s AND id = %s",
+                                (tenant, str(document_id)),
+                            )
+                            removed["document"] = True
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+        return removed
 
     def get_version(
         self,
@@ -856,6 +932,21 @@ class PostgresDocumentRepository:
             conn.commit()
         return int(count or 0)
 
+    def active_index_entries(self) -> list[tuple[str, str, str, str]]:
+        """Every ``(tenant, library, document, version)`` this store records
+        as searchable: what the knowledge index must hold."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT DISTINCT tenant_id, library_id, document_id, version_id
+                       FROM document_chunks WHERE active = TRUE AND index_status = 'indexed'
+                       ORDER BY tenant_id, library_id, document_id"""
+                )
+                rows = [_as_dict(row) for row in cur.fetchall()]
+            conn.commit()
+        return [(str(r["tenant_id"]), str(r["library_id"]), str(r["document_id"]), str(r["version_id"]))
+                for r in rows]
+
     def list_indexed_libraries(
         self, *, tenant_id: str, document_id: DocumentId
     ) -> tuple[str, ...]:
@@ -924,6 +1015,7 @@ class PostgresDocumentRepository:
                     if existing is not None:
                         conn.commit()
                         return _artifact(existing)
+                    self._require_blob_quota(cur, tenant, blob_identifier)
                     cur.execute(
                         """
                         INSERT INTO document_artifacts
@@ -1077,6 +1169,64 @@ class PostgresDocumentRepository:
             reason=r["reason"],
             deleted_at=str(r["deleted_at"]),
         )
+
+    def _require_blob_quota(self, cur: Any, tenant: str, blob_id: BlobId) -> None:
+        """The SQLite repository's quota rule, inside the publishing transaction.
+
+        Postgres stored the tenant quota and never applied it (2026-10-13,
+        F08): a tenant could publish past its bytes on Postgres metadata. A
+        transaction-scoped advisory lock per tenant serializes the check with
+        the insert that follows, so two publishers cannot both pass it.
+        """
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"kazma-document-quota:{tenant}",),
+        )
+        cur.execute(
+            "SELECT sha256, storage_kind, byte_size FROM document_blobs WHERE tenant_id = %s AND id = %s",
+            (tenant, str(blob_id)),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("blob is unavailable in this tenant")
+        blob = _as_dict(row)
+        cur.execute(
+            """
+            SELECT 1 FROM document_blobs b
+            WHERE b.tenant_id = %s AND b.sha256 = %s AND b.storage_kind = %s
+              AND b.id IN (
+                SELECT source_blob_id FROM document_versions WHERE tenant_id = %s
+                UNION
+                SELECT blob_id FROM document_artifacts WHERE tenant_id = %s
+              )
+            LIMIT 1
+            """,
+            (tenant, blob["sha256"], blob["storage_kind"], tenant, tenant),
+        )
+        if cur.fetchone() is not None:
+            return  # the same bytes are already counted once
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(byte_size), 0) AS total
+            FROM (
+                SELECT b.sha256, b.storage_kind, MAX(b.byte_size) AS byte_size
+                FROM document_blobs b
+                JOIN (
+                    SELECT source_blob_id AS blob_id FROM document_versions WHERE tenant_id = %s
+                    UNION
+                    SELECT blob_id FROM document_artifacts WHERE tenant_id = %s
+                ) refs ON refs.blob_id = b.id
+                WHERE b.tenant_id = %s
+                GROUP BY b.sha256, b.storage_kind
+            ) t
+            """,
+            (tenant, tenant, tenant),
+        )
+        prospective = int(_as_dict(cur.fetchone()).get("total") or 0) + int(blob["byte_size"])
+        if prospective > self._tenant_quota_bytes:
+            raise ValueError(
+                f"tenant blob quota exceeded: {prospective} > {self._tenant_quota_bytes}"
+            )
 
     def tenant_referenced_blob_bytes(self, *, tenant_id: str) -> int:
         tenant = _required(tenant_id, "tenant_id")

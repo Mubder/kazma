@@ -147,6 +147,24 @@ def _binary_versions(names: tuple[str, ...]) -> tuple[dict[str, str | None], str
     return versions, None
 
 
+def _weasyprint_health() -> tuple[RendererReadiness, str | None]:
+    """Import exactly what the renderer worker uses.
+
+    An installed package is not a working renderer: WeasyPrint 70 removed
+    ``default_url_fetcher`` and the renderer failed every HTML->PDF job with
+    an ImportError while this plugin read "ready" (found 2026-10-13, first
+    run where WeasyPrint's native libraries were present). Importing also
+    loads Pango, so a host without it reads unavailable here, not at render.
+    """
+
+    try:
+        from weasyprint import HTML  # noqa: F401
+        from weasyprint.urls import FatalURLFetchingError, URLFetcher  # noqa: F401
+    except (ImportError, OSError) as exc:
+        return RendererReadiness.UNAVAILABLE, f"WeasyPrint cannot be used ({type(exc).__name__}: {exc})"[:300]
+    return RendererReadiness.READY, None
+
+
 def builtin_plugins() -> tuple[RendererPlugin, ...]:
     return (
         RendererPlugin(
@@ -195,6 +213,7 @@ def builtin_plugins() -> tuple[RendererPlugin, ...]:
             ("html", "markdown", "pdf"),
             ("unicode", "mixed-direction", "local-approved-assets", "no-network"),
             ("weasyprint",),
+            health_probe=_weasyprint_health,
         ),
         RendererPlugin(
             "libreoffice",
@@ -300,4 +319,10 @@ class RendererRegistry:
 
 
 def get_renderer_registry() -> RendererRegistry:
+    """Live renderer readiness; the worker image's in the container profile."""
+
+    from kazma_core.documents.worker_container import image_renderer_registry, uses_worker_image
+
+    if uses_worker_image():
+        return image_renderer_registry("renderers", builtin_plugins())
     return RendererRegistry()

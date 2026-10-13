@@ -200,8 +200,10 @@ class PostgresStateBackend:
     def _ensure(self, conn: Any) -> None:
         if self._ensured:
             return
+        from kazma_core.db.pg_schema import ensure_schema
+
         cur = conn.cursor()
-        cur.execute(
+        ensure_schema(cur, [
             """
             CREATE TABLE IF NOT EXISTS kazma_episodes (
               id TEXT PRIMARY KEY,
@@ -216,9 +218,7 @@ class PostgresStateBackend:
               created_at DOUBLE PRECISION,
               metadata_json TEXT
             )
-            """
-        )
-        cur.execute(
+            """,
             """
             CREATE TABLE IF NOT EXISTS kazma_beliefs (
               id TEXT PRIMARY KEY,
@@ -235,14 +235,10 @@ class PostgresStateBackend:
               invalidated_at DOUBLE PRECISION,
               metadata_json TEXT
             )
-            """
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_kazma_ep_tenant ON kazma_episodes(tenant_id)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_kazma_bel_tenant ON kazma_beliefs(tenant_id)"
-        )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_kazma_ep_tenant ON kazma_episodes(tenant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_kazma_bel_tenant ON kazma_beliefs(tenant_id)",
+        ])
         conn.commit()
         cur.close()
         self._ensured = True

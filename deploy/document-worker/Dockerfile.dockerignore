@@ -1,0 +1,10 @@
+# BuildKit reads this instead of the root .dockerignore when building with
+# -f deploy/document-worker/Dockerfile: the worker image needs exactly the
+# kazma_core source and its hash-locked requirements, nothing else from the
+# checkout (no data, worktrees, tests or other packages).
+*
+!kazma-core/kazma_core
+!deploy/document-worker/requirements.txt
+**/__pycache__
+**/*.pyc
+**/*.pyo

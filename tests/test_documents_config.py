@@ -16,10 +16,10 @@ def test_document_config_safe_defaults(tmp_path) -> None:
     assert config.intake_max_files == 10
     assert config.worker_lease_seconds > 0
     assert config.worker_max_retries >= 0
-    assert config.security_allow_encrypted_documents is False
+    assert config.security_remote_parse is False
     assert config.ocr_languages
     assert config.indexing_overlap_tokens < config.indexing_chunk_tokens
-    assert config.retention_failed_days >= 0
+    assert config.retention_rejected_days >= 0
     assert config.quota_tenant_bytes > config.intake_max_bytes
 
 

@@ -5,6 +5,7 @@ import json
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader, select_autoescape
@@ -20,7 +21,11 @@ def _html(lang, job, legacy):
     env = Environment(loader=ChoiceLoader([DictLoader({'base.html': base}),
         FileSystemLoader(str(ROOT / 'kazma-ui/kazma_ui/templates'))]), autoescape=select_autoescape())
     env.globals.update(t=lambda key: t(key, lang=lang), plural_forms=lambda key: plural_forms(key, lang=lang), js_version=lambda: 'fixture')
-    html = env.get_template('knowledge_base.html').render(lang=lang, direction='rtl' if lang == 'ar' else 'ltr')
+    # The app renders every page with its request (Starlette's TemplateResponse);
+    # the page reads a deep link's ?job= from it. A plain visit has none.
+    request = SimpleNamespace(query_params={})
+    html = env.get_template('knowledge_base.html').render(
+        lang=lang, direction='rtl' if lang == 'ar' else 'ltr', request=request)
     html = html.replace('<script src="/static/js/kb.js?v=fixture"></script>', '')
     catalog = {key: entry.get(lang) or entry['en'] for key, entry in TRANSLATIONS.items()}
     bootstrap = '''window.fixtureCalls=[];window.fixtureToasts=[];

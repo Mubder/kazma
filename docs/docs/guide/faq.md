@@ -87,7 +87,12 @@ Use **Document Intelligence** — not a one-off script path:
 3. Chat gateway: `/documents list|read|…` (alias `/docs`).
 
 Content is sniffed, parsed out-of-process, fenced for the LLM, and stored
-content-addressed. See [Document Intelligence](document-intelligence) and
+content-addressed. PDFs with scripts, outside actions, attachments or links to
+files and network shares are refused. The default worker is a child process
+with memory and CPU limits but no filesystem or network confinement; for
+documents you do not trust, run the `container` profile
+(`KAZMA_DOCUMENT_WORKER_ISOLATION=container`: one container per job, no
+network, no mounts). See [Document Intelligence](document-intelligence) and
 [Document security](../security/document-security).
 
 ### What’s the difference between `generate_pdf` and `document_import`?
@@ -110,13 +115,18 @@ default. Search with `document_search` or library tools. See
 
 Optional engines may be missing. Install `pip install -e ".[document-platform]"`
 and check `GET /api/documents/health` (renderers/mutators readiness). API returns
-truthful **422/503** when degraded.
+truthful **422/503** when degraded. In the `container` worker profile the
+engines are the worker image's, not the host's: the health check reports what
+the image has, a broker that is not ready answers the retryable
+`worker_isolation_unavailable`, and `GET /api/documents/ops/readiness` shows
+`document_worker_image_outdated` when the image was built from other document
+code than Kazma runs (rebuild it and restart the broker).
 
 ### How do I enable malware scanning?
 
 Kazma does not install ClamAV with pip. It runs `clamdscan` when that program is on `PATH`, and `clamscan` otherwise. Settings → Documents sets the mode (`auto`, `on`, or `off`) and the fail-closed switch. Readiness reports `malware.available`.
 
-With `KAZMA_PRODUCTION=1`, fail-closed is on. A missing scanner, a missing virus database, or a scanner error rejects the upload.
+With `KAZMA_PRODUCTION=1`, fail-closed is on. A missing scanner, a missing virus database, or a scanner error rejects the upload. A queued job is scanned again before it is parsed (today's policy, not the one at upload); when that scan cannot run, the job is held and retried, then dead-lettered — never marked as unsafe content.
 
 **Linux and Docker.** The image installs `clamav` and runs `freshclam`. On a host, install the distro ClamAV package and run `freshclam` once so `clamscan` has signatures.
 

@@ -140,7 +140,9 @@ def _unannounced_writers(source: str, classes: tuple[str, ...] = ("ConfigStore",
     protocol = next(
         n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "ConfigStoreProtocol"
     )
-    read_only = {"get", "get_category", "get_all", "export_yaml", "close", "add_change_listener"}
+    # ``snapshot`` (2026-10-13) reads a prefix in one statement: no cache fill,
+    # no lazy vault migration, nothing written.
+    read_only = {"get", "get_category", "get_all", "export_yaml", "close", "add_change_listener", "snapshot"}
     protocol_writers = {
         n.name for n in protocol.body if isinstance(n, ast.FunctionDef) and n.name not in read_only
     }

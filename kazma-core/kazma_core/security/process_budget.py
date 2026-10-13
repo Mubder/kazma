@@ -24,6 +24,20 @@ class OutputLimitExceeded(subprocess.SubprocessError):
     """A child exceeded the combined stdout/stderr budget."""
 
 
+def job_cpu_rate(cores: int, *, cpu_count: int | None = None) -> int:
+    """The Job Object ``CpuRate`` that holds a job to ``cores`` logical CPUs.
+
+    Windows reads ``CpuRate`` as cycles per 10,000 of the WHOLE machine (all
+    logical processors), not of one core: 10,000 is no cap at all. The
+    document sandbox once set ``100 * 100`` meaning "one core" and capped
+    nothing (DOC-A12, 2026-10-13). Every Job Object CPU cap is sized here.
+    """
+    if isinstance(cores, bool) or not isinstance(cores, int) or cores < 1:
+        raise ValueError("cores must be a positive integer")
+    total = cpu_count or os.cpu_count() or 1
+    return max(1, min(10_000, 10_000 * cores // total))
+
+
 def _windows_job(proc: subprocess.Popen, memory_bytes: int, cpu_rate: int | None = None):
     """Assign a suspended child before it can spawn, then resume it."""
     import ctypes

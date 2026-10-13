@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import replace
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Any
 
 from ..config import DocumentConfig
 from ..errors import (
@@ -109,6 +111,11 @@ def merge_page_content(
 def get_ocr_health(
     requested_languages: tuple[str, ...] = (),
 ) -> OcrHealth:
+    from ..worker_container import image_ocr_health, uses_worker_image
+
+    if uses_worker_image():
+        # OCR runs inside the worker image: its Tesseract and languages count.
+        return image_ocr_health(requested_languages)
     provider = TesseractProvider()
     capability = provider.probe(requested_languages)
     engine = OcrComponentHealth(
@@ -199,6 +206,50 @@ def _unavailable(
             "ocr": {"status": "unavailable", "reason": message},
         },
     )
+
+
+#: Cells read one at a time per page, and the time they may take: past
+#: either, the tables not yet read keep the page's own reading.
+_TABLE_MAX_CELLS = 600
+_TABLE_SECONDS = 120.0
+
+
+def _with_page_tables(
+    provider: Any,
+    image: Path,
+    result: Any,
+    config: DocumentConfig,
+    *,
+    language: str,
+    installed: tuple[str, ...],
+    work_dir: Path,
+) -> tuple[tuple[DocumentBlock, ...], str | None]:
+    """The page's OCR lines with its ruled tables read cell by cell."""
+    if not hasattr(provider, "recognize_region"):
+        return result.blocks, None
+    from .tables import read_tables, with_tables
+
+    try:
+        tables, note = read_tables(
+            image,
+            provider=provider,
+            language=language,
+            digits="eng" in installed,
+            dpi=config.ocr_dpi,
+            timeout_seconds=config.ocr_subprocess_timeout_seconds,
+            output_limit_bytes=config.ocr_output_limit_bytes,
+            work_dir=work_dir,
+            max_cells=_TABLE_MAX_CELLS,
+            deadline=time.monotonic() + _TABLE_SECONDS,
+        )
+    except (DocumentOcrError, DocumentOcrUnavailableError, DocumentLimitError, OSError) as exc:
+        # A cell that cannot be read costs the cell pass, never the page.
+        return result.blocks, f"table_read_failed: {type(exc).__name__}"
+    blocks = with_tables(
+        result.blocks, tables, page_number=result.page_number, language=result.language,
+        engine_version=result.engine_version, dpi=result.dpi,
+    )
+    return blocks, note
 
 
 def apply_ocr(
@@ -331,9 +382,17 @@ def apply_ocr(
                 output_limit_bytes=config.ocr_output_limit_bytes,
                 work_dir=work_dir,
             )
+            ocr_blocks, table_note = result.blocks, None
+            if config.ocr_tables:
+                ocr_blocks, table_note = _with_page_tables(
+                    provider, temporary_image, result, config,
+                    language=selected_language, installed=capability.languages, work_dir=work_dir,
+                )
+                if table_note:
+                    warnings.append(f"Tables on page {page.page_number} were not all read cell by cell ({table_note})")
             blocks = merge_page_content(
                 page,
-                result.blocks,
+                ocr_blocks,
                 quality=quality_by_page[page.page_number],
                 ocr_confidence=result.confidence,
             )

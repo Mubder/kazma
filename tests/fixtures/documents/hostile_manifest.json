@@ -259,13 +259,109 @@
       "stage": "sniff"
     },
     {
+      "byte_size": 532,
+      "category": "active-content",
+      "config_overrides": {},
+      "description": "An XFA form, whose XML packets can carry scripts, is rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "xfa-script.pdf",
+      "id": "pdf-xfa-script",
+      "sha256": "8c0747378166bf6c1abae6162fcf6bdac7e89c63d2c518d6994d84af2b052b90",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 416,
+      "category": "external-reference",
+      "config_overrides": {},
+      "description": "A remote GoTo to a network share (credential leak when opened) is rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "remote-goto.pdf",
+      "id": "pdf-remote-goto",
+      "sha256": "73b8e02cc5cf230da45f5e692fee26eddfa64aefa2bc51c7568563e856186362",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 490,
+      "category": "external-reference",
+      "config_overrides": {},
+      "description": "A link to a network share instead of a web address is rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "unc-link.pdf",
+      "id": "pdf-unc-link",
+      "sha256": "b352bb22263a8d3e858d7576408ad32885851a687d1df17ed0fa1dc2855e7d3d",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 424,
+      "category": "active-content",
+      "config_overrides": {},
+      "description": "A form that submits its data to a remote address on open is rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "submit-form.pdf",
+      "id": "pdf-submit-form",
+      "sha256": "131fab8476f52433f869cb41c05c7b493b1aaebd1b9dfe8c1d24337c4830ab33",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 602,
+      "category": "active-content",
+      "config_overrides": {},
+      "description": "An embedded file without the optional /Type marker is still rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "untyped-embedded-file.pdf",
+      "id": "pdf-untyped-embedded-file",
+      "sha256": "bcdd200042291fec1c579c3ac27a964ff5565d0eef48bf34b30eb7c9b8576300",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 406,
+      "category": "active-content",
+      "config_overrides": {},
+      "description": "A rendition (media playback) action is rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "rendition.pdf",
+      "id": "pdf-rendition",
+      "sha256": "f0186950e0ed595eeec9b9c227406121069d5093f6246e10b46909d8af8ad33a",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 566,
+      "category": "navigation-control",
+      "config_overrides": {},
+      "description": "In-document navigation and an https link stay usable (negative control).",
+      "disposition": "fenced",
+      "expected_codes": [],
+      "filename": "navigation-only.pdf",
+      "id": "pdf-navigation-only",
+      "sha256": "f5cccca1ce4cc24bbdcbcc8a417bb566996d88a8a79104d34334f9c881d172d1",
+      "stage": "parse"
+    },
+    {
       "byte_size": 41,
       "category": "parser-crash",
       "config_overrides": {},
       "description": "Certification suppresses the worker result to prove missing output fails closed.",
       "disposition": "reject",
       "expected_codes": [
-        "document_parser_failed"
+        "parser_result_missing"
       ],
       "filename": "parser-crash.txt",
       "id": "parser-crash",

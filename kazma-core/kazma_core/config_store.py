@@ -44,7 +44,7 @@ from kazma_core.security.url_credentials import (
     url_password_is_masked,
 )
 
-__all__ = ["CONFIG_STORE_MIGRATIONS", "ChangeListener", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
+__all__ = ["CONFIG_STORE_MIGRATIONS", "ChangeListener", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "SettingsSnapshot", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
 
 logger = logging.getLogger(__name__)
 
@@ -752,11 +752,51 @@ class ConfigRevisionConflict(ValueError):
     """A conditional settings batch no longer matches its reviewed revision."""
 
 
+class SettingsSnapshot:
+    """Detached settings view from one DB statement, with the usual precedence.
+
+    Values are copied on read. An exact stored key wins over its stored children;
+    a missing key uses merged children, then YAML. Parent objects are not an
+    alternate source of child overrides (the same rule as ConfigStore.get).
+    """
+
+    def __init__(self, prefix: str, values: dict[str, Any], yaml_data: dict[str, Any]) -> None:
+        if not prefix or prefix.endswith("."):
+            raise ValueError("A nonempty settings prefix is required")
+        self._prefix = prefix
+        self._values = copy.deepcopy(values)
+        self._yaml = copy.deepcopy(yaml_data)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key != self._prefix and not key.startswith(self._prefix + "."):
+            raise ValueError("Setting is outside this snapshot's prefix")
+        if key in self._values:
+            return copy.deepcopy(self._values[key])
+        merged: dict[str, Any] = {}
+        for child, value in sorted(self._values.items()):
+            if not child.startswith(key + "."):
+                continue
+            parts = child[len(key) + 1:].split(".")
+            target = merged
+            for part in parts[:-1]:
+                if not isinstance(target.get(part), dict):
+                    target[part] = {}
+                target = target[part]
+            target[parts[-1]] = copy.deepcopy(value)
+        if merged:
+            return merged
+        value: Any = self._yaml
+        for part in key.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        return copy.deepcopy(value) if value is not None else default
+
+
 class ConfigStoreProtocol(Protocol):
     """Protocol defining the ConfigStore interface for type safety."""
 
     def add_change_listener(self, listener: ChangeListener) -> Callable[[], None]: ...
     def get(self, key: str, default: Any = None) -> Any: ...
+    def snapshot(self, prefix: str) -> SettingsSnapshot: ...
     def set(self, key: str, value: Any) -> None: ...
     def set_if_absent(self, key: str, value: Any, ttl: float | None = None, category: str = "general") -> bool: ...
     def atomic_update(self, key: str, updater: Callable[[Any], Any], category: str = "general") -> Any: ...
@@ -793,6 +833,15 @@ class _InMemoryStore(_ChangeNotices):
             self._evict_expired()
             return self._data.get(key, default)
     
+    def snapshot(self, prefix: str) -> SettingsSnapshot:
+        with self._lock:
+            if self._read_only:
+                raise ConfigStoreUnavailableError()
+            self._evict_expired()
+            values = {key: value for key, value in self._data.items()
+                      if key == prefix or key.startswith(prefix + ".")}
+            return SettingsSnapshot(prefix, values, {})
+
     @_ONE_KEY
     def set(self, key: str, value: Any, category: str = "general") -> None:
         refuse_write("config", key)
@@ -1728,6 +1777,49 @@ class ConfigStore(_ChangeNotices):
     def _cache_put(self, key: str, value: Any) -> None:
         self._cache[key] = value
         self._cache_at[key] = time.monotonic()
+
+    def snapshot(self, prefix: str) -> SettingsSnapshot:
+        """Read a prefix in one statement, bypassing the per-key TTL cache.
+
+        This sees one committed batch even when another process writes settings.
+        Keep the native statement and decoding under the connection/close lock.
+        Vault pointers are resolved without lazy writes; no cache is populated.
+        Failure is explicit, including an unavailable configured Postgres pool.
+        """
+        if not prefix or prefix.endswith("."):
+            raise ValueError("A nonempty settings prefix is required")
+        below = prefix + "."
+        with self._lock:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise ConfigStoreUnavailableError()
+                rows = pool.execute(
+                    "SELECT key, value FROM kazma_settings WHERE key = %s OR substr(key, 1, %s) = %s ORDER BY key",
+                    (prefix, len(below), below),
+                )
+            else:
+                rows = self._get_conn().execute(
+                    "SELECT key, value FROM settings WHERE key = ? OR substr(key, 1, ?) = ? ORDER BY key",
+                    (prefix, len(below), below),
+                ).fetchall()
+            values = {}
+            for row in rows:
+                value = row["value"]
+                raw = json.loads(value) if isinstance(value, str) else value
+                values[row["key"]] = self._resolve_vault_value(row["key"], raw, migrate=False)
+            yaml_value: Any = self._load_yaml()
+            for part in prefix.split("."):
+                yaml_value = yaml_value.get(part, {}) if isinstance(yaml_value, dict) else {}
+            yaml_value = self._resolve_vault_value(prefix, yaml_value, migrate=False)
+            yaml_data: dict[str, Any] = {}
+            target = yaml_data
+            parts = prefix.split(".")
+            for part in parts[:-1]:
+                target[part] = {}
+                target = target[part]
+            target[parts[-1]] = yaml_value
+            return SettingsSnapshot(prefix, values, yaml_data)
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a setting. DB overrides YAML.

@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from kazma_core.db import pg_backup
 
 # Verified against a real Postgres; the CI Postgres job runs every test
@@ -106,6 +105,8 @@ def test_kazma_pg_tables_cover_all_shared_state() -> None:
         "kazma_web_sessions",
         "document_jobs",
         "document_job_events",
+        "document_intake_reservations",
+        "document_intake_mutex",
         "documents",
         "document_blobs",
         "document_versions",
@@ -121,13 +122,13 @@ def test_kazma_pg_tables_cover_all_shared_state() -> None:
 
 
 def test_kazma_pg_tables_covers_document_ddl() -> None:
-    """H-13: every CREATE TABLE in repository_pg / jobs_pg is backed up."""
+    """H-13: every document PG table, including intake ownership, is backed up."""
     import re
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1] / "kazma-core" / "kazma_core" / "documents"
     names: set[str] = set()
-    for fname in ("repository_pg.py", "jobs_pg.py"):
+    for fname in ("repository_pg.py", "jobs_pg.py", "admission.py"):
         src = (root / fname).read_text(encoding="utf-8")
         names.update(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", src))
     missing = names - set(pg_backup.KAZMA_PG_TABLES)

@@ -349,33 +349,58 @@ Two predefined pipelines (lists of stages, each with `worker`, `depends_on`, `sy
 
 Not every key is in the shipped `kazma.yaml` skeleton; the authoritative defaults
 live on `DocumentConfig` (`kazma_core/documents/config.py`) and are read **live**
-via `get_document_config()`. Configure with:
+via `get_document_config()`: each operation takes one snapshot of the
+`documents` settings and keeps it to the end. Configure with:
 
-- **Settings → Documents** (`/settings?tab=documents`)
-- `GET/PUT /api/settings/documents`
-- `PUT /api/settings/single` with a nested key
+- **Settings → Documents** (`/settings?tab=documents`): durable writes, shadow
+  and authoritative mode, intake size and file count, worker timeout and
+  memory, the storage free-space floor, malware scan mode and fail-closed,
+  OCR, reading ruled tables on scanned pages (`documents.ocr.tables`), GC and
+  indexing; it also shows whether a malware scanner was found
+- `GET/PUT /api/settings/documents` (those same fields)
+- `PUT /api/settings/single` with a nested key, for every other key
 - optional `kazma.yaml` seed under a `documents:` section
+
+A saved value that cannot be read as its type is not replaced by a default:
+document operations answer 503 `document_policy_unavailable` until it is
+corrected, and a settings store that cannot be read refuses document work
+too. Nothing checks the value when it is saved through these routes.
 
 | Key prefix | Purpose |
 |---|---|
 | `documents.enabled` / `shadow` / `default_authoritative` | Rollout mode (disabled / shadow / compatibility / authoritative) |
-| `documents.intake.*` | Max bytes/files, remote fetch limits |
+| `documents.storage_root` | Where documents, uploads in progress and worker scratch live (restart to change) |
+| `documents.intake.*` | Max bytes/files, remote fetch limits, `lease_seconds` (300: how long an upload may go without renewing its reservation before another process may take it over) |
 | `documents.limits.*` | Pages, cells, archive members, compression, pixels, … |
-| `documents.security.*` | Malware scan mode, fence, encrypted/external-resource policy |
-| `documents.ocr.*` | Enable, languages, DPI, confidence, concurrency |
-| `documents.workers.*` | Timeout, memory, concurrency, lease, retries |
+| `documents.security.*` | Malware scan mode (`auto`) and fail-closed (off, but on by default under `KAZMA_PRODUCTION=1`), fence, encrypted/external-resource policy, `remote_parse` (third-party salvage, default off), `local_salvage` (Docling inside the worker, default on) |
+| `documents.render.embed_html_fonts` | Inline the pinned font in HTML exports (default on) |
+| `documents.ocr.*` | Enable, languages, DPI, confidence, concurrency, timeouts, output limit; `tables` (default on): ruled tables on scanned pages are read cell by cell, at most 600 cells and 120 s a page; a table not read within those bounds keeps the page's own reading |
+| `documents.workers.*` | Timeout, memory, concurrency, lease, heartbeat, retries, result size |
 | `documents.indexing.*` | Chunk tokens, overlap, preserve tables/pages |
 | `documents.retention.*` / `documents.gc.*` | Retention windows + GC schedule / bounds |
-| `documents.capacity.*` | Queue caps, rate/byte windows, storage free floor |
+| `documents.capacity.*` | Queue caps, rate/byte windows, storage free floor, `max_concurrent_uploads` (4 uploads received at once per process) |
 | `documents.quotas.*` | Per-tenant byte / daily page quotas |
 
-**Env (backend selection only):**
+Seven keys are bound to stores and workers built at start and take effect after
+a restart: `documents.storage_root`, `documents.quotas.tenant_bytes`, and
+`concurrency`, `lease_seconds`, `heartbeat_seconds`, `retry_base_seconds` and
+`retry_max_seconds` under `documents.workers.`. Until then readiness reports
+`policy.restart_required` with the configured and effective values, and the
+Documents page says some saved settings need a restart.
+
+`security.execution.container_required` (the strict execution profile, not a
+`documents.*` key) also refuses the local `process` document worker profile.
+
+**Env (backend selection and worker isolation):**
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `KAZMA_DOCUMENTS_JOBS_BACKEND` | auto | `sqlite` forces SQLite job queue; else Postgres when platform uses PG |
-| `KAZMA_DOCUMENTS_METADATA_BACKEND` | `auto` | `sqlite` / `postgres` / `auto` (auto follows jobs) |
-| `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Cert soak iterations |
+| `KAZMA_DOCUMENTS_JOBS_BACKEND` | unset | `sqlite` forces SQLite job queue; else Postgres when platform uses PG |
+| `KAZMA_DOCUMENTS_METADATA_BACKEND` | unset (`auto`) | `sqlite` / `postgres` / `auto` (auto follows jobs) |
+| `KAZMA_DOCUMENT_WORKER_ISOLATION` | `process` | `process` (local child, no filesystem or network isolation) or `container` (the document worker broker); with `KAZMA_DOCUMENT_BROKER_URL` and `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` |
+| `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Repetitions of the certification script's extended parse smoke (`--soak`); not a multi-day soak |
+
+Every document variable: [Environment variables](../reference/environment-variables.md#document-intelligence).
 
 Full product guide: [Document Intelligence](document-intelligence). Ops:
 [Document processing](../ops/document-processing).

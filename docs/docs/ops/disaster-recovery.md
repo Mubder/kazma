@@ -25,8 +25,8 @@ description: Disaster Recovery — production ops
 | Swarm tasks | `kazma-data/swarm_tasks.db` | Medium–High |
 | Memory / vectors / graph | `kazma-data/vector_memory/`, `memory.db`, `vector.db`, `knowledge_graph.db` | Medium |
 | Cron jobs | `kazma-data/cron.db` | Medium |
-| Document Intelligence metadata | `{documents.storage_root}/documents.db` (or Postgres when metadata backend is PG) | High — library + jobs |
-| Document content-addressed blobs | `{documents.storage_root}/` (`quarantine`/`originals`/`artifacts` + manifests) | **Critical** — irrecoverable without backup |
+| Document Intelligence metadata | `{documents.storage_root}/documents.db` on SQLite (catalog, ACL, audit, and the jobs and intake reservations when they are on SQLite); Postgres tables when the install uses Postgres, unless `KAZMA_DOCUMENTS_METADATA_BACKEND=sqlite` | High — library + jobs |
+| Document content-addressed blobs | `{documents.storage_root}/` (`quarantine`/`originals`/`artifacts` + manifests) | **Critical** — irrecoverable without backup. The 6-hour document backup captures metadata and blobs as one point in time: `kazma-data/backups/document-store-*` when metadata and jobs are on SQLite (restore: copy into an empty storage root), `document-pg-*` when both are on Postgres (restore with `scripts/document_pg_backup.py`; after the shared Postgres dump, with `--replace-document-tables`). SQLite metadata beside Postgres jobs is snapshotted like a SQLite store, its job queue being in the shared Postgres dump; Postgres metadata beside SQLite jobs (a fallback) is refused by name. The next start re-publishes indexed documents to their knowledge libraries (see [Document processing](./document-processing.md#backup), which records the measured restore drills) |
 | Graph memory | Neo4j (`bolt://…`) — Docker volume, NOT in the data dir | Medium–High |
 | MCP + connector config | `kazma.yaml` at the install root, NOT in the data dir | **Critical** — a restore without it boots with no tools |
 | Opaque web sessions | ConfigStore / Postgres | Low (users re-login) |
@@ -235,7 +235,7 @@ that accompanies it.
 ### Step 2 — restore the files
 
 ```powershell
-python -m kazma_core.backup.restore --target D:resh-kazma
+python -m kazma_core.backup.restore --target D:\fresh-kazma
 ```
 
 Add `--generation <epoch>` to pick a specific point, or `--repo <path>` to
@@ -255,11 +255,10 @@ commands are printed at the end of step 2 with paths filled in.
 
 ```powershell
 # Postgres
-pg_restore --clean --if-exists -d "$env:KAZMA_DATABASE_URL" "D:resh-kazma\pg\…\pg_shared_….dump"
+pg_restore --clean --if-exists -d "$env:KAZMA_DATABASE_URL" "D:\fresh-kazma\pg\…\pg_shared_….dump"
 
 # Graph memory, into an EMPTY Neo4j (it refuses a populated one)
-python -c "from kazma_core.backup.neo4j_backup import restore_graph; print(restore_graph(r'D:resh-kazma
-eo4j_graph.jsonl'))"
+python -c "from kazma_core.backup.neo4j_backup import restore_graph; print(restore_graph(r'D:\fresh-kazma\neo4j_graph.jsonl'))"
 ```
 
 ### Step 4 — point Kazma at it and start
@@ -363,6 +362,17 @@ Use your platform standard:
 
 **Rule:** Never run multiple replicas against a shared SQLite file.
 
+A whole-database dump also holds the document tables, but not as of the moment
+the document content files were copied. Restore a Postgres document store from
+its coordinated backup (`scripts/document_pg_backup.py`, see
+[Document processing → Backup](./document-processing.md#backup)), in this
+order (drilled, `tests/test_document_pg_restore_order.py`): the whole-database
+dump first, then the coordinated backup with `--replace-document-tables`,
+which drops the dump's older document tables once the backup has verified and
+the storage root is found empty. Without the option the coordinated restore
+refuses the database; the other order lets the dump's `--clean` put older
+document rows back over the coordinated copy.
+
 Compose example: `docker-compose.postgres.yml`.
 
 ---
@@ -396,6 +406,7 @@ which is the half that rots unnoticed.
 - [ ] Restore once from the **offsite** repo, not just local (`--repo rclone:…`)
 - [ ] Load the Postgres dump into a throwaway database
 - [ ] Load the graph into an empty Neo4j and compare node/relationship counts
+- [ ] Restore the newest document backup into an empty storage root (and, on Postgres, after the whole-database dump: `scripts/document_pg_backup.py verify`, then `restore ... --replace-document-tables`), start against it and open a document
 - [ ] Confirm the vault unlocks and tools are listed (proves `.env` + `kazma.yaml`)
 - [ ] Time it (update the RTO note above)
 - [ ] Confirm the restic passphrase is still recoverable from OUTSIDE this machine

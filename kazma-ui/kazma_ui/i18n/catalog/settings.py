@@ -3165,6 +3165,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "التعرّف الضوئي مفعّل",
         "en": "OCR enabled",
     },
+    "settings.docs.ocr_tables": {
+        "ar": "قراءة جداول الصفحات الممسوحة خلية خلية",
+        "en": "Read tables on scanned pages cell by cell",
+    },
     "settings.docs.gc_enabled": {
         "ar": "تنظيف المساحة مفعّل",
         "en": "GC enabled",

@@ -1,0 +1,202 @@
+{
+  "corpus_version": "2026-10-13.3",
+  "measured_on": "2026-10-13, Windows 11, Python 3.12.9, PyMuPDF 1.28.2, python-bidi 0.6.10, LibreOffice 26.2.6.3 (Arabic PDF route), Tesseract 5.4.0 (ara, eng)",
+  "notes": {
+    "ar-ocr": "Below release: Tesseract 'ara' misreads the Arabic-Indic digits of this font, and its page layout analysis skips the second heading and the last paragraph (both are read when cropped). Segmentation modes 3/4/6/11/12, removing the coloured rules, grayscale and 2x upscaling were measured; none qualifies (best CER 0.2357). Arabic OCR is not qualified.",
+    "ar-ocr-table": "Below release: the table is found and read cell by cell (its labels come back), but Tesseract 'ara' cannot read the Arabic-Indic digits in its cells (the same limit as ar-ocr), and the page around it loses the same heading and paragraph.",
+    "en-ocr-degraded": "Below release: on the degraded scan Tesseract reads 3.75 as 3:75. Every word is right (CER/WER 0 count words, not the punctuation inside them), so numbers OCR'd from poor scans are not qualified."
+  },
+  "qualified": [
+    "ar-docx",
+    "ar-html",
+    "ar-pdf",
+    "ar-pdf-long",
+    "bilingual-docx",
+    "bilingual-html",
+    "bilingual-pdf",
+    "en-docx",
+    "en-docx-widetable",
+    "en-html",
+    "en-ocr",
+    "en-ocr-table",
+    "en-pdf",
+    "en-pdf-columns",
+    "en-pdf-long",
+    "en-pdf-widetable"
+  ],
+  "release_targets": {
+    "alignment": 1.0,
+    "cer": 0.02,
+    "number_recall": 1.0,
+    "order": 1.0,
+    "page_honesty": 1.0,
+    "segment_recall": 0.95,
+    "table_cell_recall": 1.0,
+    "token_recall": 0.99,
+    "wer": 0.05
+  },
+  "thresholds": {
+    "ar-docx": {
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "ar-html": {
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "ar-ocr": {
+      "cer": 0.2481,
+      "number_recall": 0.3133,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 0.2657,
+      "token_recall": 0.6379,
+      "wer": 0.3382
+    },
+    "ar-ocr-table": {
+      "cer": 0.3461,
+      "number_recall": 0.1229,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 0.2657,
+      "table_cell_recall": 0.5556,
+      "token_recall": 0.6379,
+      "wer": 0.454
+    },
+    "ar-pdf": {
+      "alignment": 1.0,
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "ar-pdf-long": {
+      "alignment": 1.0,
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "bilingual-docx": {
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "bilingual-html": {
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "bilingual-pdf": {
+      "alignment": 1.0,
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "en-docx": {
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "en-docx-widetable": {
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "en-html": {
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "en-ocr": {
+      "cer": 0.02,
+      "number_recall": 0.98,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 0.98,
+      "token_recall": 0.98,
+      "wer": 0.02
+    },
+    "en-ocr-degraded": {
+      "cer": 0.02,
+      "number_recall": 0.73,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 0.98,
+      "token_recall": 0.98,
+      "wer": 0.02
+    },
+    "en-ocr-table": {
+      "cer": 0.02,
+      "number_recall": 0.98,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 0.98,
+      "table_cell_recall": 1.0,
+      "token_recall": 0.98,
+      "wer": 0.02
+    },
+    "en-pdf": {
+      "alignment": 1.0,
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "en-pdf-columns": {
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "en-pdf-long": {
+      "alignment": 1.0,
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "token_recall": 1.0
+    },
+    "en-pdf-widetable": {
+      "alignment": 1.0,
+      "number_recall": 1.0,
+      "order": 1.0,
+      "page_honesty": 1.0,
+      "segment_recall": 1.0,
+      "table_cell_recall": 1.0,
+      "token_recall": 1.0
+    }
+  }
+}

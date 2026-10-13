@@ -143,20 +143,49 @@ def test_a_boot_schema_lock_fails_bounded_then_recovers(monkeypatch):
     reset_postgres_pool()
     monkeypatch.setattr(settings, "_config_store", None)
     monkeypatch.setenv("KAZMA_PG_POOL_RETRIES", "1")
-    with psycopg.connect(dsn) as blocker:
-        blocker.execute("LOCK TABLE kazma_chat_sessions IN ACCESS EXCLUSIVE MODE")
+    from kazma_core.db.pg_schema import SCHEMA_LOCK_KEY
+
+    # A boot on a current schema takes no table lock (db.pg_schema); what it
+    # still waits for is another process's schema setup -- held here forever.
+    with psycopg.connect(dsn, autocommit=True) as blocker:
+        blocker.execute("SELECT pg_advisory_lock(hashtextextended(%s, 0))", (SCHEMA_LOCK_KEY,))
         started = time.monotonic()
         with pytest.raises(ConfigStoreUnavailableError):
             settings.get_config_store()
         assert time.monotonic() - started < 20
         assert settings.peek_config_store() is None
-        blocker.rollback()
+        blocker.execute("SELECT pg_advisory_unlock(hashtextextended(%s, 0))", (SCHEMA_LOCK_KEY,))
     store = settings.get_config_store()
     store.set("test.boot_lock_recovery", "durable", category="test")
     try:
         assert store.get("test.boot_lock_recovery") == "durable"
     finally:
         store.delete("test.boot_lock_recovery")
+
+
+@pytest.mark.postgres
+def test_a_lock_on_a_core_table_no_longer_blocks_a_boot(monkeypatch):
+    # 2026-10-13: the boot sent ALTER TABLE kazma_chat_sessions ADD COLUMN IF
+    # NOT EXISTS, whose exclusive lock waited for any reader -- pg_dump's
+    # backup -- and failed the pool after its 5 s timeout. It is sent now only
+    # when the column is missing.
+    import time
+
+    import kazma_core.config_store as settings
+    from kazma_core.db.postgres_pool import get_postgres_pool, reset_postgres_pool
+
+    dsn = _dsn()
+    psycopg = pytest.importorskip("psycopg")
+    get_postgres_pool()
+    reset_postgres_pool()
+    monkeypatch.setattr(settings, "_config_store", None)
+    monkeypatch.setenv("KAZMA_PG_POOL_RETRIES", "1")
+    with psycopg.connect(dsn) as reader:
+        reader.execute("SELECT * FROM kazma_chat_sessions LIMIT 1")  # what pg_dump holds
+        started = time.monotonic()
+        assert settings.get_config_store() is not None
+        assert time.monotonic() - started < 5
+        reader.rollback()
 
 
 @pytest.mark.postgres

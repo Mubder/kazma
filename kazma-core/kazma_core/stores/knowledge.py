@@ -1146,6 +1146,22 @@ class KnowledgeStore:
             ).fetchall()
         return tuple(row["library_id"] for row in rows)
 
+    def document_index_entries(self) -> set[tuple[str, str, str, str]]:
+        """Every ``(tenant, library, document, version)`` a library holds
+        active chunks for: the knowledge side of the documents index
+        reconcile (``DocumentIngestionService.reconcile_index``)."""
+        with self._lock:
+            rows = self._get_conn().execute(
+                """SELECT DISTINCT l.tenant_id, c.library_id, c.document_id, c.version_id
+                   FROM knowledge_chunks c
+                   JOIN knowledge_libraries l ON l.id = c.library_id
+                   WHERE c.document_id IS NOT NULL AND c.active = 1 AND c.tombstoned = 0"""
+            ).fetchall()
+        return {
+            (str(r["tenant_id"]), str(r["library_id"]), str(r["document_id"]), str(r["version_id"] or ""))
+            for r in rows
+        }
+
     def existing_hashes(self, library_id: str) -> dict[str, str]:
         """Map ``content_hash -> chunk_id`` for all chunks in a library.
 

@@ -40,20 +40,27 @@ import hashlib
 import json
 import logging
 import shutil
-import sqlite3
 import tempfile
+import threading
+import time
 import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, Iterable
+from typing import Any, BinaryIO
 
+from kazma_core.db.pg_helpers import store_errors
+
+from . import telemetry
+from .admission import IntakeAdmissionStore, current_owner, lease_lapsed, owner_state
 from .audit import DocumentAuditStore
 from .capacity import CapacityError, DocumentCapacityGuard
-from .config import DocumentConfig, get_document_config, get_document_rollout
-from .errors import DocumentParseError
+from .config import DocumentConfig, get_document_rollout
+from .errors import DocumentParseError, infrastructure_errors, storage_full
 from .jobs import (
     DocumentJobRecord,
     DocumentJobRepository,
+    IntakeFencedError,
     InvalidJobTransitionError,
     JobNotFoundError,
 )
@@ -70,17 +77,19 @@ from .models import (
     JobId,
     VersionId,
     new_document_id,
+    new_version_id,
 )
+from .policy import DocumentPolicy, policy_operation
 from .repository import DocumentAccessError, DocumentRepository
 from .retention import DocumentGarbageCollector
 from .service import DocumentService
-from .sniff import sniff_document
-from . import telemetry
 from .storage import (
     BlobChecksumError,
+    BlobLengthError,
     BlobTooLargeError,
     ContentAddressedStorage,
     StorageQuotaExceeded,
+    bounded_stream_digest,
 )
 from .worker import (
     DocumentWorker,
@@ -90,6 +99,7 @@ from .worker import (
     StageResult,
     TransientDocumentError,
 )
+from .worker_container import isolation_report
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +109,7 @@ __all__ = [
     "IngestionResult",
     "create_default_ingestion_service",
     "get_ingestion_service",
+    "peek_ingestion_service",
     "set_ingestion_service",
 ]
 
@@ -156,94 +167,79 @@ class DocumentIngestionService:
         service: DocumentService | None = None,
         knowledge_adapter: DocumentKnowledgeAdapter | None = None,
     ) -> None:
-        self.config = config or get_document_config()
-        self.storage = storage or ContentAddressedStorage(self.config.storage_root)
+        self._policy = DocumentPolicy(config)
+        initial = self._policy.initial
+        self.storage = storage or ContentAddressedStorage(initial.storage_root)
         sqlite_meta = repository or DocumentRepository(
-            self.config.storage_root / "documents.db",
-            tenant_quota_bytes=self.config.quota_tenant_bytes,
+            initial.storage_root / "documents.db",
+            tenant_quota_bytes=initial.quota_tenant_bytes,
         )
         # Prefer Postgres multi-replica metadata when configured; fall back to SQLite.
         from .repository_pg import resolve_document_repository
 
         self.repository = resolve_document_repository(
             sqlite_meta,
-            tenant_quota_bytes=self.config.quota_tenant_bytes,
+            tenant_quota_bytes=initial.quota_tenant_bytes,
         )
         # Job queue needs a SQLite DocumentRepository only as a local fallback
         # when Postgres jobs are unavailable. If metadata is already SQLite,
         # share that connection; otherwise use a sidecar jobs-only DB.
         if getattr(self.repository, "backend_name", "sqlite") == "postgres":
             jobs_meta = DocumentRepository(
-                self.config.storage_root / "documents-jobs-fallback.db",
-                tenant_quota_bytes=self.config.quota_tenant_bytes,
+                initial.storage_root / "documents-jobs-fallback.db",
+                tenant_quota_bytes=initial.quota_tenant_bytes,
             )
         else:
             jobs_meta = self.repository
         sqlite_jobs = jobs or DocumentJobRepository(
             jobs_meta,
-            retry_base_seconds=float(self.config.worker_retry_base_seconds),
-            retry_max_seconds=float(self.config.worker_retry_max_seconds),
+            retry_base_seconds=float(initial.worker_retry_base_seconds),
+            retry_max_seconds=float(initial.worker_retry_max_seconds),
         )
         # Use the Postgres multi-replica job queue when configured; otherwise
         # (or if the pool is unavailable) stay on the single-node SQLite queue.
         self.jobs = resolve_job_repository(
             sqlite_jobs,
-            retry_base_seconds=float(self.config.worker_retry_base_seconds),
-            retry_max_seconds=float(self.config.worker_retry_max_seconds),
+            retry_base_seconds=float(initial.worker_retry_base_seconds),
+            retry_max_seconds=float(initial.worker_retry_max_seconds),
         )
         self.knowledge_adapter = knowledge_adapter
         self.service = service or DocumentService(
-            config=self.config,
+            policy=self._policy,
             knowledge_adapter=knowledge_adapter,
             storage=self.storage,
             repository=self.repository,
         )
         # Phase 9 operations: append-only audit, backpressure guard, GC.
         self.audit = DocumentAuditStore(self.repository)
+        self.admissions = IntakeAdmissionStore(self.jobs)
+        self.admissions.reconcile_published()
+        self._recover_stranded_intakes()
         self.capacity = DocumentCapacityGuard(
-            config=self.config,
+            config=initial,
+            policy=self._policy,
             jobs=self.jobs,
-            storage_root=self.config.storage_root,
+            storage_root=initial.storage_root,
+            admissions=self.admissions,
         )
         self.gc = DocumentGarbageCollector(
             repository=self.repository,
             storage=self.storage,
             audit=self.audit,
-            config=self.config,
+            config=initial,
+            policy=self._policy,
         )
         self._manager: DocumentWorkerManager | None = None
-        # Tenant of the stage currently executing, so out-of-band events
-        # raised deep inside a parse (salvage egress) can be attributed.
-        self._active_tenant: str | None = None
-        self._install_salvage_audit()
+        self._intake_sweeper: asyncio.Task[None] | None = None
+        self._index_reconcile: asyncio.Task[Any] | None = None
+        self._reconcile_stop = threading.Event()
+        #: Tenant -> when ``grant_operator_access`` last looked (monotonic).
+        self._operator_checked: dict[str, float] = {}
+        self._operator_lock = threading.Lock()
 
-    def _install_salvage_audit(self) -> None:
-        """Route third-party parse egress into the durable audit log.
-
-        The salvage tier can upload original document bytes to LlamaParse or
-        Reducto when ``documents.security.remote_parse`` is enabled. That is a
-        boundary crossing and every other boundary crossing in this subsystem
-        writes an audit row; this one used to write nothing at all.
-        """
-        from kazma_core.documents.extract_salvage import set_salvage_audit_hook
-
-        def _record(provider: str, path: Any, size: int) -> None:
-            try:
-                self.audit.record(
-                    tenant_id=self._active_tenant or "unknown",
-                    event_type="egress",
-                    action="remote_parse",
-                    outcome="success",
-                    actor_id="system",
-                    detail={"provider": provider, "bytes": int(size)},
-                )
-            except Exception:  # pragma: no cover - auditing must not break a parse
-                logger.warning(
-                    "[documents.ingestion] remote-parse egress audit failed "
-                    "(provider=%s)", provider, exc_info=True,
-                )
-
-        set_salvage_audit_hook(_record)
+    @property
+    def config(self) -> DocumentConfig:
+        return self._policy.current
 
     # ── Worker lifecycle ────────────────────────────────────────────────
 
@@ -251,6 +247,7 @@ class DocumentIngestionService:
     def worker_running(self) -> bool:
         return self._manager is not None and self._manager.worker.running
 
+    @policy_operation
     async def start_workers(self) -> None:
         """Start the bounded worker pool (idempotent)."""
         if self.worker_running:
@@ -270,14 +267,202 @@ class DocumentIngestionService:
             heartbeat_interval=float(self.config.worker_heartbeat_seconds),
         )
         self._manager = DocumentWorkerManager(worker)
-        await self._manager.start()
+        with self._policy.detached():
+            await self._manager.start()
+        from kazma_core.background import spawn_background
+
+        self._intake_sweeper = spawn_background(
+            self._sweep_stranded_intakes(), name="documents:stranded-intakes", never_completes=True
+        )
+        if self.knowledge_adapter is not None:
+            self._reconcile_stop.clear()
+            self._index_reconcile = spawn_background(
+                self._reconcile_index_once(), name="documents:index-reconcile"
+            )
         logger.info(
             "[documents.ingestion] worker pool started concurrency=%d",
             self.config.worker_concurrency,
         )
 
+    async def _sweep_stranded_intakes(self) -> None:
+        """Roll back dead owners' intakes while the service runs.
+
+        Start-up recovery alone left an intake killed in ANOTHER process (a
+        CLI import, a second worker) holding its capacity until this server
+        restarted; the soak harness found it (2026-10-13, Q01). Only owners
+        proven dead are touched, so a live intake -- here or elsewhere -- is
+        never raced.
+        """
+        while True:
+            await asyncio.sleep(_INTAKE_SWEEP_SECONDS)
+            try:
+                await asyncio.to_thread(self._recover_stranded_intakes)
+            except store_errors() as exc:
+                logger.warning("[documents.ingestion] stranded intake sweep failed (%s)", type(exc).__name__)
+
+    async def _reconcile_index_once(self) -> None:
+        """Bring the knowledge index back to what this store records, once
+        per start. A restore of the documents store alone (the Postgres
+        backup, ``backup_pg``) leaves the libraries without the chunks of
+        documents it records as indexed; this re-publishes them."""
+        try:
+            report = await asyncio.to_thread(self.reconcile_index, stop=self._reconcile_stop)
+        except store_errors() as exc:
+            logger.warning("[documents.ingestion] index reconcile failed (%s)", type(exc).__name__)
+            return
+        if report.get("reindexed") or report.get("failed") or report.get("library_missing"):
+            logger.log(
+                logging.WARNING if report.get("failed") else logging.INFO,
+                "[documents.ingestion] index reconcile: reindexed=%d failed=%d "
+                "library_missing=%d stale_version=%d unavailable=%d extra=%d orphaned=%d",
+                len(report["reindexed"]), len(report["failed"]), len(report["library_missing"]),
+                len(report["stale_version"]), len(report["unavailable"]),
+                len(report["extra"]), len(report["orphaned"]),
+            )
+
+    @policy_operation
+    def reconcile_index(
+        self,
+        *,
+        apply: bool = True,
+        prune: bool = False,
+        tenant_id: str | None = None,
+        stop: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        """Compare what this store records as searchable with what the
+        knowledge libraries hold, and repair the difference.
+
+        The documents store is the truth: ``document_chunks`` rows that are
+        active and indexed say a version must be searchable in a library.
+        A version the library does not hold is re-published from its own
+        manifest, as the document's owner, through the normal publication
+        path (``index_document_ir``). Each one is re-checked under the
+        document's publication lock first, so an unindex or a delete that
+        ran meanwhile is never undone. Nothing is invented: a library that
+        does not exist here is reported (``library_missing``), and so is a
+        version that is no longer the document's current one
+        (``stale_version``) or whose manifest is gone (``unavailable``).
+
+        The other direction is reported and removed only with ``prune``:
+        ``extra`` -- a live document the store records as not indexed in
+        that library -- and ``orphaned`` -- a document this store does not
+        have, or has deleted. Both stay searchable until then.
+
+        ``apply=False`` reports what would be done and changes nothing;
+        ``tenant_id`` limits both sides to one tenant.
+        """
+        adapter = self.knowledge_adapter
+        report: dict[str, Any] = {
+            "ok": adapter is not None, "applied": bool(apply), "checked": 0,
+            "reindexed": [], "needs_reindex": [], "failed": [], "library_missing": [],
+            "stale_version": [], "unavailable": [], "extra": [], "orphaned": [], "pruned": [],
+            "stopped": False,
+        }
+        if adapter is None:
+            report["reason"] = "knowledge_unavailable"
+            return report
+        wanted = self.repository.active_index_entries()
+        held = adapter.store.document_index_entries()
+        if tenant_id is not None:
+            only = _clean(tenant_id, "tenant_id")
+            wanted = [item for item in wanted if item[0] == only]
+            held = {item for item in held if item[0] == only}
+        report["checked"] = len(wanted)
+        wanted_places = {(tenant, library, document) for tenant, library, document, _v in wanted}
+
+        def entry(tenant: str, library: str, document: str, version: str) -> dict[str, str]:
+            return {"tenant_id": tenant, "library_id": library,
+                    "document_id": document, "version_id": version}
+
+        for tenant, library, document, version in wanted:
+            if (tenant, library, document, version) in held:
+                continue
+            if stop is not None and stop.is_set():
+                report["stopped"] = True
+                break
+            item = entry(tenant, library, document, version)
+            doc_id = DocumentId(document)
+            with adapter.publication_lock(tenant, doc_id):
+                still = self.repository.list_document_chunks(
+                    tenant_id=tenant, library_id=library, document_id=doc_id,
+                    version_id=VersionId(version),
+                )
+                if not still:
+                    continue  # unindexed or deleted while this ran
+                if adapter.store.get_library_for_tenant(library, tenant) is None:
+                    report["library_missing"].append(item)
+                    continue
+                record = self.repository.get_document(tenant_id=tenant, document_id=doc_id)
+                if record is None:
+                    report["unavailable"].append({**item, "reason": "document_missing"})
+                    continue
+                if str(record.current_version_id) != version:
+                    report["stale_version"].append(
+                        {**item, "current_version_id": str(record.current_version_id)}
+                    )
+                    continue
+                manifest = self.storage.read_manifest(
+                    document_id=record.id, version_id=record.current_version_id
+                )
+                if manifest is None or "ir" not in manifest:
+                    report["unavailable"].append({**item, "reason": "manifest_missing"})
+                    continue
+                report["needs_reindex"].append(item)
+                if not apply:
+                    continue
+                result = adapter.index_document_ir(
+                    DocumentIR.from_dict(manifest["ir"]),
+                    tenant_id=tenant, actor_id=record.owner_id, library_id=library,
+                )
+                if not result.ok:
+                    report["failed"].append({**item, "code": result.code})
+                    continue
+                report["reindexed"].append(item)
+                self.audit.record(
+                    tenant_id=tenant, event_type="index", action="reconcile",
+                    outcome="success", actor_id=record.owner_id, document_id=doc_id,
+                    version_id=record.current_version_id, detail={"library_id": library},
+                )
+
+        wanted_keys = set(wanted)
+        for tenant, library, document, version in sorted(held - wanted_keys):
+            if (tenant, library, document) in wanted_places:
+                continue  # an older version the re-publication above retires
+            item = entry(tenant, library, document, version)
+            try:
+                found: DocumentId | None = DocumentId(document)
+            except ValueError:
+                found = None
+            record = (
+                self.repository.get_document(tenant_id=tenant, document_id=found, include_deleted=True)
+                if found is not None else None
+            )
+            kind = "extra" if record is not None and record.deleted_at is None else "orphaned"
+            report[kind].append(item)
+            if not (prune and apply):
+                continue
+            with adapter.publication_lock(tenant, document):
+                if found is not None and library in self.repository.list_indexed_libraries(
+                    tenant_id=tenant, document_id=found
+                ):
+                    continue  # indexed meanwhile
+                adapter.index.unindex_document(
+                    tenant_id=tenant, library_id=library, document_id=document
+                )
+            report["pruned"].append(item)
+        return report
+
     async def stop_workers(self) -> None:
         """Stop the worker pool, awaiting in-flight stages (idempotent)."""
+        sweeper, self._intake_sweeper = self._intake_sweeper, None
+        if sweeper is not None:
+            sweeper.cancel()
+            await asyncio.gather(sweeper, return_exceptions=True)
+        reconcile, self._index_reconcile = self._index_reconcile, None
+        if reconcile is not None:
+            # The thread finishes the document it is on and stops.
+            self._reconcile_stop.set()
+            await asyncio.gather(reconcile, return_exceptions=True)
         manager = self._manager
         self._manager = None
         if manager is not None:
@@ -291,6 +476,7 @@ class DocumentIngestionService:
         except Exception:  # pragma: no cover - defensive
             logger.debug("[documents.ingestion] repository close failed", exc_info=True)
 
+    @policy_operation
     def recover_interrupted_intake(self) -> int:
         """Resume pre-worker intake states left behind by a hard process crash."""
 
@@ -310,7 +496,7 @@ class DocumentIngestionService:
                 tenant_id=current.tenant_id,
                 version_id=current.version_id,
             )
-            force_ocr = bool(version and version.metadata.get("force_ocr"))
+            force_ocr = current.force_ocr if current.request_digest else bool(version and version.metadata.get("force_ocr"))
             try:
                 result = self._advance_intake(
                     current,
@@ -331,6 +517,7 @@ class DocumentIngestionService:
 
     # ── Intake ──────────────────────────────────────────────────────────
 
+    @policy_operation
     def ingest_stream(
         self,
         source: BinaryIO | Iterable[bytes],
@@ -348,7 +535,7 @@ class DocumentIngestionService:
     ) -> IngestionResult:
         """Stream bytes into quarantine, register, and enqueue a durable job.
 
-        Raises :class:`~kazma_core.documents.capacity.CapacityError` (429/503/
+        Raises :class:`~kazma_core.documents.capacity.CapacityError` (409/429/503/
         507) if backpressure/rate/storage limits are exceeded, before any
         bytes are stored.
         """
@@ -357,27 +544,25 @@ class DocumentIngestionService:
         tenant = _clean(tenant_id, "tenant_id")
         workspace = _clean(workspace_id, "workspace_id")
         actor = _clean(actor_id, "actor_id")
+        if idempotency_key is not None and (
+            not isinstance(idempotency_key, str) or not idempotency_key.strip()
+            or len(idempotency_key) > 256
+        ):
+            raise DocumentIngestionError("invalid_request", "idempotency_key must contain 1 to 256 characters")
         safe_name = _safe_filename(filename)
         doc_title = (title or safe_name).strip() or safe_name
-
-        # Backpressure / rate / storage capacity gate (before streaming bytes).
-        try:
-            self.capacity.check_intake(
-                tenant_id=tenant, byte_size=int(content_length or 0)
-            )
-        except CapacityError as exc:
-            self.audit.record(
-                tenant_id=tenant,
-                event_type="intake",
-                action="refused",
-                outcome="denied",
-                actor_id=actor,
-                workspace_id=workspace,
-                detail={"reason": exc.reason, "http_status": exc.status, "code": exc.code},
-            )
-            telemetry.record_intake(accepted=False)
-            telemetry.record_intake_rejection(exc.reason)
-            raise
+        if content_length is not None and (
+            isinstance(content_length, bool) or not isinstance(content_length, int) or content_length < 0
+        ):
+            raise DocumentIngestionError("invalid_request", "content_length must be a non-negative integer")
+        if content_length is not None and content_length > self.config.intake_max_bytes:
+            raise DocumentIngestionError("intake_too_large", "Document exceeds the configured intake size limit")
+        attempts = max(1, int(max_attempts) if max_attempts else self.config.worker_max_retries)
+        request_digest = hashlib.sha256(json.dumps({
+            "actor_id": actor, "workspace_id": workspace, "filename": safe_name,
+            "title": doc_title, "document_id": str(DocumentId(document_id)) if document_id is not None else None,
+            "force_ocr": bool(force_ocr), "max_attempts": attempts,
+        }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
         # Deterministic ids on idempotent replay.
         det_doc = det_ver = det_job = None
@@ -385,9 +570,38 @@ class DocumentIngestionService:
             key = idempotency_key.strip()
             if not key:
                 raise DocumentIngestionError("invalid_request", "idempotency_key is empty")
-            det_job = JobId(uuid.uuid5(_INGEST_NS, f"{tenant}:{key}:job"))
-            existing = self.jobs.get(tenant_id=tenant, job_id=det_job)
+            det_job = JobId(_ingest_identifier(tenant, key, "job"))
+            # The stored tenant/key constraint is the lookup authority. Older
+            # jobs retain their IDs when the derivation changes.
+            existing = self.jobs.get_by_idempotency_key(tenant_id=tenant, idempotency_key=key)
             if existing is not None:
+                # Authorize before returning even an opaque id or state. A
+                # tenant-level key is not authority to inspect another actor:
+                # its holder gets the same conflict as a different request,
+                # never a sign of whose document the key named.
+                try:
+                    self._authorize_job_read(tenant, existing.document_id, actor)
+                except DocumentAccessError as exc:
+                    raise DocumentIngestionError(
+                        "idempotency_conflict", "Idempotency key belongs to another request"
+                    ) from exc
+                version = self.repository.get_version(
+                    tenant_id=tenant, version_id=existing.version_id, actor_id=actor
+                )
+                if version is None or existing.request_digest != request_digest:
+                    raise DocumentIngestionError(
+                        "idempotency_conflict", "Idempotency key belongs to another request"
+                    )
+                try:
+                    replay_sha, replay_size = bounded_stream_digest(source, max_bytes=self.config.intake_max_bytes)
+                except BlobTooLargeError as exc:
+                    raise DocumentIngestionError("intake_too_large", str(exc)) from exc
+                if replay_sha != version.source_sha256:
+                    raise DocumentIngestionError(
+                        "idempotency_conflict", "Idempotency key belongs to different content"
+                    )
+                if content_length is not None and replay_size != content_length:
+                    raise DocumentIngestionError("intake_length_mismatch", "Document length does not match the declared length")
                 return IngestionResult(
                     document_id=existing.document_id,
                     version_id=existing.version_id,
@@ -395,9 +609,104 @@ class DocumentIngestionService:
                     state=existing.state,
                     reused=True,
                 )
-            det_doc = DocumentId(uuid.uuid5(_INGEST_NS, f"{tenant}:{key}:doc"))
-            det_ver = VersionId(uuid.uuid5(_INGEST_NS, f"{tenant}:{key}:ver"))
+            det_doc = DocumentId(_ingest_identifier(tenant, key, "doc"))
+            det_ver = VersionId(_ingest_identifier(tenant, key, "ver"))
 
+        # Recheck write authority again at publication, including revocation.
+        if document_id is not None and not self.repository.has_access(
+            tenant_id=tenant, document_id=DocumentId(document_id), actor_id=actor, permission="write"
+        ):
+            raise DocumentIngestionError("document_access_denied", "Target document is unavailable")
+        det_job = det_job or JobId(uuid.uuid4())
+        key = idempotency_key.strip() if idempotency_key else f"intake:{det_job}"
+        try:
+            self.capacity.check_intake(tenant_id=tenant, byte_size=content_length or 0)
+            reservation = self.admissions.reserve(
+                tenant_id=tenant, request_key=key, request_digest=request_digest,
+                job_id=str(det_job), byte_size=content_length if content_length is not None else self.config.intake_max_bytes,
+                config=self.config,
+            )
+        except CapacityError as exc:
+            self.audit.record(
+                tenant_id=tenant, event_type="intake", action="refused", outcome="denied",
+                actor_id=actor, workspace_id=workspace,
+                detail={"reason": exc.reason, "http_status": exc.status, "code": exc.code},
+            )
+            telemetry.record_intake(accepted=False)
+            telemetry.record_intake_rejection(exc.reason)
+            raise
+        published = False
+        lease = _IntakeLease(self.admissions, reservation, float(self.config.intake_lease_seconds))
+        try:
+            result = self._ingest_reserved(
+                source, safe_name=safe_name, tenant=tenant, workspace=workspace, actor=actor,
+                doc_title=doc_title, document_id=document_id, det_doc=det_doc, det_ver=det_ver,
+                det_job=det_job, key=key, request_digest=request_digest, attempts=attempts,
+                force_ocr=force_ocr, content_length=content_length, reservation=reservation,
+                lease=lease,
+            )
+            published = True
+            return result
+        except IntakeFencedError as exc:
+            raise DocumentIngestionError(
+                "intake_taken_over",
+                "This upload took too long to finish and was cancelled; nothing was saved. Retry it.",
+            ) from exc
+        finally:
+            lease.stop()
+            if not published:
+                # All or nothing: undo what this intake published before it
+                # failed, so the reservation can close and a retry starts clean.
+                self._abandon_own_intake(reservation)
+            self.admissions.finish(reservation)
+
+    @policy_operation
+    def precheck_upload(
+        self, *, tenant_id: str, actor_id: str, workspace_id: str, byte_size: int | None,
+    ) -> None:
+        """Answer an upload BEFORE its body is received (2026-10-13, F08).
+
+        Every refusal ``ingest_stream`` would give for budget reasons --
+        writes disabled, too large, storage floor, queue, tenant caps, rate
+        window -- is given here, with nothing consumed. The body used to be
+        received in full (up to the intake limit) and spooled to the system
+        temp directory before any of these was asked. ``ingest_stream``
+        remains the authority and re-checks everything.
+        """
+        self._require_writes_enabled()
+        tenant = _clean(tenant_id, "tenant_id")
+        _clean(actor_id, "actor_id")
+        _clean(workspace_id, "workspace_id")
+        # A required scanner that cannot run refuses every upload; say so
+        # before the body (DOC-A9). Intake still scans and stays the authority.
+        from .malware import malware_blocks_intake
+
+        blocked = malware_blocks_intake(self.config)
+        if blocked:
+            raise DocumentIngestionError(
+                blocked, "Uploads are paused: a malware scan is required and no scanner can run",
+            )
+        if byte_size is not None and byte_size > self.config.intake_max_bytes:
+            raise DocumentIngestionError("intake_too_large", "Document exceeds the configured intake size limit")
+        expected = byte_size if byte_size is not None else self.config.intake_max_bytes
+        self.capacity.check_intake(tenant_id=tenant, byte_size=expected)
+        self.admissions.check(tenant_id=tenant, byte_size=expected, config=self.config)
+
+    def upload_spool_dir(self) -> Path:
+        """Where the Web route spools a body: under the storage root, so the
+        free-space floor measures it and garbage collection removes what a
+        crash left (it used to be the system temp directory)."""
+        path = self.config.storage_root / ".upload-staging"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _ingest_reserved(
+        self, source: BinaryIO | Iterable[bytes], *, safe_name: str, tenant: str,
+        workspace: str, actor: str, doc_title: str, document_id: DocumentId | str | None,
+        det_doc: DocumentId | None, det_ver: VersionId | None, det_job: JobId,
+        key: str, request_digest: str, attempts: int, force_ocr: bool,
+        content_length: int | None, reservation: str, lease: _IntakeLease | None = None,
+    ) -> IngestionResult:
         # 1) Stream to quarantine CAS (bounded + tenant-quota enforced).
         try:
             stored = self.storage.put_stream(
@@ -407,6 +716,7 @@ class DocumentIngestionService:
                 tenant_id=tenant,
                 repository=self.repository,
                 tenant_quota_bytes=self.config.quota_tenant_bytes,
+                expected_byte_size=content_length,
             )
         except BlobTooLargeError as exc:
             self._audit_intake_rejection(tenant, workspace, actor, "intake_too_large")
@@ -417,6 +727,9 @@ class DocumentIngestionService:
         except BlobChecksumError as exc:
             self._audit_intake_rejection(tenant, workspace, actor, "intake_corrupt")
             raise DocumentIngestionError("intake_corrupt", str(exc)) from exc
+        except BlobLengthError as exc:
+            self._audit_intake_rejection(tenant, workspace, actor, "intake_length_mismatch")
+            raise DocumentIngestionError("intake_length_mismatch", str(exc)) from exc
 
         # 1b) Optional malware scan on the quarantined bytes (ClamAV when present).
         try:
@@ -437,7 +750,21 @@ class DocumentIngestionService:
                 getattr(exc, "safe_message", str(exc)),
             ) from exc
 
-        # 2) Register blob + document + immutable version.
+        # 2) Register blob + document + immutable version. The ids are fixed
+        # and recorded first, and every row this intake creates is tagged
+        # with its reservation, so a rollback removes exactly those rows.
+        planned_doc = DocumentId(document_id) if document_id is not None else (det_doc or new_document_id())
+        planned_ver = det_ver or new_version_id()
+        if lease is not None:
+            lease.check()
+        self.admissions.mark_publishing(
+            reservation,
+            byte_size=stored.byte_size,
+            source_sha256=stored.sha256,
+            document_id=str(planned_doc),
+            version_id=str(planned_ver),
+            created_document=document_id is None,
+        )
         blob = self.repository.register_blob(
             tenant_id=tenant,
             sha256=stored.sha256,
@@ -454,12 +781,16 @@ class DocumentIngestionService:
                     "document_access_denied", "Target document is unavailable"
                 )
         else:
-            doc_id = det_doc or new_document_id()
+            doc_id = planned_doc
             self.repository.create_document(
                 tenant_id=tenant,
                 owner_id=actor,
                 title=doc_title,
-                metadata={"original_filename": safe_name, "workspace_id": workspace},
+                metadata={
+                    "original_filename": safe_name,
+                    "workspace_id": workspace,
+                    "intake_token": reservation,
+                },
                 document_id=doc_id,
             )
 
@@ -472,23 +803,28 @@ class DocumentIngestionService:
             source_sha256=stored.sha256,
             original_filename=safe_name,
             mime_type=mime,
-            metadata={"force_ocr": bool(force_ocr)},
-            version_id=det_ver,
+            metadata={
+                "force_ocr": bool(force_ocr),
+                "intake_policy_revision": self._policy.revision,
+                "intake_token": reservation,
+            },
+            version_id=planned_ver,
         )
 
-        # 3) Enqueue durable job.
-        attempts = int(max_attempts) if max_attempts else self.config.worker_max_retries
-        attempts = max(1, attempts)
+        # 3) Enqueue durable job: the publication, and the fence. It commits
+        # only while the reservation is still this process's (admission).
+        if lease is not None:
+            lease.check()
         job = self.jobs.enqueue(
             tenant_id=tenant,
             workspace_id=workspace,
             document_id=doc_id,
             version_id=version.id,
-            idempotency_key=idempotency_key.strip()
-            if idempotency_key
-            else f"ingest:{version.id}",
+            idempotency_key=key,
             max_attempts=attempts,
             job_id=det_job,
+            actor_id=actor, request_digest=request_digest, force_ocr=bool(force_ocr),
+            intake_fence=(reservation, current_owner()),
         )
 
         # 4) Synchronous quarantine + validation, then hand to the worker.
@@ -524,6 +860,123 @@ class DocumentIngestionService:
             reused=False,
         )
 
+    # ── unpublished intakes: own rollback and dead-owner recovery ──────────
+
+    def _rollback_intake(self, row: Mapping[str, Any]) -> bool:
+        """Undo one unpublished intake this process owns; True when released.
+
+        A job for it means publication completed: the ordinary close applies.
+        Otherwise the rows it created (tagged with its token) are removed and
+        the reservation is released; its quarantine bytes are left to GC.
+        """
+
+        token, tenant = str(row["token"]), str(row["tenant_id"])
+        if self.jobs.get(tenant_id=tenant, job_id=JobId(str(row["job_id"]))) is not None:
+            self.admissions.finish(token)
+            return True
+        if int(row.get("publishing") or 0):
+            self.repository.discard_unpublished_intake(
+                tenant_id=tenant,
+                intake_token=token,
+                document_id=str(row.get("document_id") or ""),
+                version_id=str(row.get("version_id") or ""),
+                created_document=bool(int(row.get("created_document") or 0)),
+            )
+        return self.admissions.release_owned(token)
+
+    def _discard_tagged(self, row: Mapping[str, Any]) -> bool:
+        """Remove the rows one intake tagged with its token, unless its job
+        exists (it published). Idempotent: only rows carrying the token."""
+        tenant = str(row["tenant_id"])
+        if self.jobs.get(tenant_id=tenant, job_id=JobId(str(row["job_id"]))) is not None:
+            return False
+        removed = self.repository.discard_unpublished_intake(
+            tenant_id=tenant,
+            intake_token=str(row["token"]),
+            document_id=str(row.get("document_id") or ""),
+            version_id=str(row.get("version_id") or ""),
+            created_document=bool(int(row.get("created_document") or 0)),
+        )
+        return any(removed.values())
+
+    def _abandon_own_intake(self, token: str) -> None:
+        """Best effort, never raising: the intake's own error is the answer."""
+
+        try:
+            row = self.admissions.get(token)
+            if row is None or not int(row.get("publishing") or 0):
+                return  # nothing published: ``finish`` closes it
+            if str(row.get("owner") or "") != current_owner():
+                # Taken over (fenced): remove what this process wrote under
+                # its token -- possibly after the new owner's rollback. The
+                # reservation is no longer ours to release.
+                self._discard_tagged(row)
+                return
+            if not int(row.get("active") or 0):
+                return
+            self._rollback_intake(row)
+        except store_errors() + (RuntimeError, ValueError, OSError) as exc:
+            logger.warning(
+                "[documents.ingestion] a failed intake could not be rolled back (%s); "
+                "its reservation stays held until this process restarts",
+                type(exc).__name__,
+            )
+
+    def _recover_stranded_intakes(self) -> int:
+        """Roll back intakes whose owner is provably dead or whose lease lapsed.
+
+        Runs when a service starts and every minute while it runs. A dead
+        owner (this host) cannot publish again. An owner that cannot be
+        proven dead (another host, an unreadable process) is taken over only
+        once its lease has lapsed, and is then fenced (``admission``). A
+        legacy row (no owner or no heartbeat) is never taken over: it stays
+        held and is reported (``capacity.admission.stranded``). Rows a fenced
+        owner wrote after its takeover are removed for a day after it.
+        """
+
+        try:
+            rows = self.admissions.unpublished()
+            now = self.admissions.now_epoch()
+        except store_errors() as exc:
+            logger.warning("[documents.ingestion] stranded intake scan failed (%s)", type(exc).__name__)
+            return 0
+        recovered = 0
+        for row in rows:
+            owner = str(row.get("owner") or "")
+            state = owner_state(owner)
+            if state == "dead":
+                expected_heartbeat = None
+            elif state != "self" and lease_lapsed(row, now):
+                expected_heartbeat = float(row["heartbeat_epoch"])
+            else:
+                continue
+            token = str(row["token"])
+            if not self.admissions.claim(
+                token, expected_owner=owner, expected_heartbeat=expected_heartbeat
+            ):
+                continue  # another recoverer took it, its lease was renewed, or it published
+            try:
+                if self._rollback_intake(row):
+                    recovered += 1
+            except store_errors() + (RuntimeError, ValueError, OSError) as exc:
+                logger.warning(
+                    "[documents.ingestion] stranded intake %s could not be rolled back (%s); "
+                    "a later start retries it",
+                    token, type(exc).__name__,
+                )
+        if recovered:
+            logger.info("[documents.ingestion] rolled back %d intake(s) left by a stopped process", recovered)
+        try:
+            for row in self.admissions.fenced_recent():
+                if self._discard_tagged(row):
+                    logger.info(
+                        "[documents.ingestion] removed rows a fenced intake wrote after its takeover (%s)",
+                        row["token"],
+                    )
+        except store_errors() + (RuntimeError, ValueError, OSError) as exc:
+            logger.warning("[documents.ingestion] fenced intake sweep failed (%s)", type(exc).__name__)
+        return recovered
+
     def _audit_intake_rejection(
         self, tenant: str, workspace: str, actor: str, reason: str
     ) -> None:
@@ -558,6 +1011,13 @@ class DocumentIngestionService:
         try:
             self._validate_and_promote(tenant=tenant, actor=actor, job=job)
         except DocumentParseError as exc:
+            if exc.retryable:
+                return self.jobs.record_failure(
+                    tenant_id=job.tenant_id, job_id=job.id,
+                    expected_state=job.state, expected_version=job.version,
+                    owner="intake", error_code=exc.code,
+                    error_message=exc.safe_message, transient=True,
+                )
             return self._transition(
                 job,
                 DocumentJobState.REJECTED,
@@ -565,9 +1025,11 @@ class DocumentIngestionService:
                 error_message=exc.safe_message,
                 event_type="rejected",
             )
-        except (OSError, sqlite3.Error) as exc:
+        except infrastructure_errors() as exc:
             # Transient infra fault (disk full while staging, OS error re-
-            # reading the quarantine blob, momentary DB error). The worker
+            # reading the quarantine blob, momentary DB error on SQLite OR
+            # Postgres -- a psycopg error used to reach the generic handler
+            # below and REJECT the document permanently). The worker
             # tier already routes TransientDocumentError to RETRY_WAIT; do the
             # same here instead of permanently REJECTing (terminal) — a flaky
             # disk shouldn't force the user to re-upload (audit finding).
@@ -586,7 +1048,7 @@ class DocumentIngestionService:
                 expected_state=job.state,
                 expected_version=job.version,
                 owner="intake",
-                error_code="validation_transient",
+                error_code="storage_full" if storage_full(exc) else "validation_transient",
                 error_message=(
                     f"Document validation hit a transient error ({type(exc).__name__})"
                 ),
@@ -624,11 +1086,16 @@ class DocumentIngestionService:
             kind="quarantine", sha256=version.source_sha256
         )
         if not quarantine_path.is_file():
-            raise DocumentParseError(
-                "Quarantined document bytes are missing", code="document_missing"
-            )
+            # A validated immutable source can have lost its redundant
+            # quarantine copy to GC (or restore). Revalidate the original
+            # against today's policy instead of making recovery depend on it.
+            quarantine_path = self.storage.blob_path(kind="originals", sha256=version.source_sha256)
+            if not quarantine_path.is_file():
+                raise DocumentParseError(
+                    "Document source bytes are missing", code="document_missing"
+                )
         with self._materialize(quarantine_path, version.original_filename) as staged:
-            sniffed = sniff_document(staged, self.config)
+            sniffed = self.service.inspect_path(staged)
             self.service.registry.resolve(
                 mime_type=sniffed.mime_type, extension=sniffed.extension
             )
@@ -645,6 +1112,7 @@ class DocumentIngestionService:
 
     def stage_handlers(self) -> dict[DocumentJobState, Any]:
         return {
+            DocumentJobState.VALIDATING: self._stage_validate,
             DocumentJobState.PARSING: self._stage_parse,
             DocumentJobState.OCR_RUNNING: self._stage_ocr,
             DocumentJobState.NORMALIZING: self._stage_normalize,
@@ -652,6 +1120,23 @@ class DocumentIngestionService:
             DocumentJobState.VERIFYING: self._stage_verify,
         }
 
+    @policy_operation
+    def _stage_validate(
+        self, job: DocumentJobRecord, context: StageContext
+    ) -> StageResult:
+        context.raise_if_cancelled()
+        self._validate_and_promote(tenant=job.tenant_id, actor=None, job=job)
+        version = self.repository.get_version(
+            tenant_id=job.tenant_id, version_id=job.version_id
+        )
+        target = (
+            DocumentJobState.OCR_REQUIRED
+            if (job.force_ocr if job.request_digest else bool(version and version.metadata.get("force_ocr")))
+            else DocumentJobState.READY_TO_PARSE
+        )
+        return StageResult(target, stage=target.value)
+
+    @policy_operation
     def _stage_parse(
         self, job: DocumentJobRecord, context: StageContext
     ) -> StageResult:
@@ -659,6 +1144,7 @@ class DocumentIngestionService:
         self._parse_to_manifest(job, force_ocr=False)
         return StageResult(DocumentJobState.NORMALIZING, stage="normalizing")
 
+    @policy_operation
     def _stage_ocr(self, job: DocumentJobRecord, context: StageContext) -> StageResult:
         context.raise_if_cancelled()
         self._parse_to_manifest(job, force_ocr=True)
@@ -707,11 +1193,34 @@ class DocumentIngestionService:
         return StageResult(DocumentJobState.READY, stage="ready")
 
     def _parse_to_manifest(self, job: DocumentJobRecord, *, force_ocr: bool) -> None:
-        self._active_tenant = job.tenant_id
-        try:
+        from .extract_salvage import salvage_audit_scope
+
+        record = self.repository.get_document(
+            tenant_id=job.tenant_id, document_id=job.document_id
+        )
+        if record is None:
+            raise PermanentDocumentError("document_missing", "Document is unavailable")
+        actor = job.actor_id
+
+        def audit_egress(provider: str, path: Path, size: int, phase: str) -> None:
+            if not isinstance(actor, str) or not actor.strip():
+                from .errors import DocumentSecurityError
+
+                raise DocumentSecurityError(
+                    "Remote parsing requires the original operation's actor",
+                    code="remote_parse_audit_unavailable",
+                )
+            self.audit.record(
+                tenant_id=job.tenant_id, actor_id=actor,
+                workspace_id=job.workspace_id, document_id=job.document_id,
+                version_id=job.version_id, job_id=job.id,
+                event_type="egress", action=f"remote_parse_{phase}",
+                outcome="failure" if phase == "failure" else "success",
+                detail={"provider": provider, "bytes": int(size)}, required=True,
+            )
+
+        with salvage_audit_scope(audit_egress):
             self._parse_to_manifest_impl(job, force_ocr=force_ocr)
-        finally:
-            self._active_tenant = None
 
     def _parse_to_manifest_impl(self, job: DocumentJobRecord, *, force_ocr: bool) -> None:
         version = self.repository.get_version(
@@ -728,12 +1237,19 @@ class DocumentIngestionService:
             raise TransientDocumentError(
                 "originals_missing", "Original document bytes are unavailable"
             )
-        force = force_ocr or bool(version.metadata.get("force_ocr"))
+        force = force_ocr or (job.force_ocr if job.request_digest else bool(version.metadata.get("force_ocr")))
+        if self.capacity.below_floor(extra_bytes=2 * int(getattr(version, "byte_size", 0) or 0)):
+            # Parsing stages a copy and writes a run directory and a manifest:
+            # held and retried, never started into a full disk (F08).
+            raise TransientDocumentError(
+                "storage_full", "Document storage is below its free-space floor"
+            )
+        # A queued job must obey today's malware policy, not intake's old one.
+        from .malware import scan_if_configured
+
+        scan_if_configured(originals_path, self.config)
         with self._materialize(originals_path, version.original_filename) as staged:
-            try:
-                parsed = self.service.parse_ingested_blob(staged, force_ocr=force)
-            except DocumentParseError as exc:
-                raise PermanentDocumentError(exc.code, exc.safe_message) from exc
+            parsed = self.service.parse_ingested_blob(staged, force_ocr=force)
         # Bind the parsed IR to the durable document/version identity.
         ir = DocumentIR(
             document_id=version.document_id,
@@ -747,6 +1263,7 @@ class DocumentIngestionService:
 
     # ── Content + inspection ────────────────────────────────────────────
 
+    @policy_operation
     def get_content(
         self,
         *,
@@ -816,6 +1333,49 @@ class DocumentIngestionService:
             "continuation": read.continuation,
         }
 
+    #: How often a tenant is looked over again for documents the operator
+    #: cannot open (a document ingested under an older name, or before a
+    #: switch from multi-user mode).
+    OPERATOR_GRANT_INTERVAL_SECONDS = 60.0
+
+    def grant_operator_access(self, *, tenant_id: str, force: bool = False) -> int:
+        """Give the install's operator an ``owner`` ACL row on every document.
+
+        Single-operator installs only (``documents.principal``; the caller
+        decides). Each grant is made by the document's own owner through the
+        normal ACL path and audited; ownership never changes, and leaving
+        single-operator mode is enough to stop using the grants. Returns how
+        many were added. Blocking.
+        """
+        from .principal import OPERATOR
+
+        tenant = _clean(tenant_id, "tenant_id")
+        now = time.monotonic()
+        with self._operator_lock:
+            last = self._operator_checked.get(tenant)
+            if not force and last is not None and now - last < self.OPERATOR_GRANT_INTERVAL_SECONDS:
+                return 0
+        granted = 0
+        for record in self.repository.list_documents(tenant_id=tenant):
+            if record.owner_id == OPERATOR or self.repository.has_access(
+                tenant_id=tenant, document_id=record.id, actor_id=OPERATOR, permission="owner"
+            ):
+                continue
+            self.repository.grant_access(
+                tenant_id=tenant, document_id=record.id, actor_id=record.owner_id,
+                principal_id=OPERATOR, permission="owner",
+            )
+            self.audit.record(
+                tenant_id=tenant, event_type="access", action="grant_operator",
+                outcome="success", actor_id=record.owner_id, document_id=record.id,
+            )
+            granted += 1
+        with self._operator_lock:
+            self._operator_checked[tenant] = now
+        if granted:
+            logger.info("[documents] gave the operator access to %d document(s) of tenant %s", granted, tenant)
+        return granted
+
     def list_documents(
         self, *, tenant_id: str, actor_id: str
     ) -> list[dict[str, Any]]:
@@ -828,7 +1388,7 @@ class DocumentIngestionService:
             ):
                 continue
             latest = self.jobs_for_document(
-                tenant_id=tenant, document_id=record.id
+                tenant_id=tenant, document_id=record.id, actor_id=SYSTEM_ACTOR
             )
             state = latest[0]["state"] if latest else None
             rows.append(
@@ -872,7 +1432,7 @@ class DocumentIngestionService:
                 tenant_id=tenant, document_id=doc_id, actor_id=actor
             )
         ]
-        jobs = self.jobs_for_document(tenant_id=tenant, document_id=doc_id)
+        jobs = self.jobs_for_document(tenant_id=tenant, document_id=doc_id, actor_id=SYSTEM_ACTOR)
         try:
             artifacts = self.list_document_artifacts(
                 tenant_id=tenant, actor_id=actor, document_id=doc_id
@@ -914,10 +1474,12 @@ class DocumentIngestionService:
             return None
 
     def jobs_for_document(
-        self, *, tenant_id: str, document_id: DocumentId | str
+        self, *, tenant_id: str, document_id: DocumentId | str,
+        actor_id: str | _SystemActor,
     ) -> list[dict[str, Any]]:
         tenant = _clean(tenant_id, "tenant_id")
         doc_id = DocumentId(document_id)
+        self._authorize_job_read(tenant, doc_id, actor_id)
         # Backend-agnostic: works whether the queue is SQLite or Postgres.
         job_ids = self.jobs.document_job_ids(tenant_id=tenant, document_id=doc_id)
         result: list[dict[str, Any]] = []
@@ -928,16 +1490,21 @@ class DocumentIngestionService:
         return result
 
     def job_status(
-        self, *, tenant_id: str, job_id: JobId | str
+        self, *, tenant_id: str, job_id: JobId | str,
+        actor_id: str | _SystemActor,
     ) -> dict[str, Any] | None:
-        tenant = _clean(tenant_id, "tenant_id")
-        job = self.jobs.get(tenant_id=tenant, job_id=JobId(job_id))
+        """The job, or None when it does not exist OR the actor cannot read
+        its document -- the two are indistinguishable to the caller."""
+        job = self._readable_job(tenant_id, job_id, actor_id)
         return self._job_dict(job) if job is not None else None
 
     def job_events(
-        self, *, tenant_id: str, job_id: JobId | str
+        self, *, tenant_id: str, job_id: JobId | str,
+        actor_id: str | _SystemActor,
     ) -> list[dict[str, Any]]:
         tenant = _clean(tenant_id, "tenant_id")
+        if self._readable_job(tenant, job_id, actor_id) is None:
+            raise JobNotFoundError("job is unavailable in this tenant")
         events = self.jobs.events(tenant_id=tenant, job_id=JobId(job_id))
         return [
             {
@@ -952,46 +1519,72 @@ class DocumentIngestionService:
             for e in events
         ]
 
-    def cancel_job(
-        self, *, tenant_id: str, job_id: JobId | str, actor_id: str | None = None
-    ) -> dict[str, Any]:
+    def _authorize_job_read(
+        self, tenant: str, document_id: DocumentId, actor_id: str | _SystemActor,
+        *, permission: str = "read",
+    ) -> None:
+        """Every transport passes its resolved actor; only ``SYSTEM_ACTOR``
+        (code that already authorized the read) skips the check. A missing
+        actor is refused -- it used to mean "no check" (2026-10-13, F05)."""
+        if actor_id is SYSTEM_ACTOR:
+            return
+        if not isinstance(actor_id, str) or not actor_id.strip():
+            raise DocumentAccessError("document access requires an actor")
+        if not self.repository.has_access(
+            tenant_id=tenant, document_id=document_id,
+            actor_id=_clean(actor_id, "actor_id"), permission=permission,
+        ):
+            raise DocumentAccessError("document is unavailable to this actor")
+
+    def _readable_job(
+        self, tenant_id: str, job_id: JobId | str, actor_id: str | _SystemActor,
+        *, permission: str = "read",
+    ) -> DocumentJobRecord | None:
         tenant = _clean(tenant_id, "tenant_id")
         job = self.jobs.get(tenant_id=tenant, job_id=JobId(job_id))
         if job is None:
+            return None
+        try:
+            self._authorize_job_read(tenant, job.document_id, actor_id, permission=permission)
+        except DocumentAccessError:
+            if actor_id is not SYSTEM_ACTOR and (not isinstance(actor_id, str) or not actor_id.strip()):
+                raise  # a caller bug, not an access answer
+            return None
+        return job
+
+    def cancel_job(
+        self, *, tenant_id: str, job_id: JobId | str, actor_id: str | _SystemActor
+    ) -> dict[str, Any]:
+        tenant = _clean(tenant_id, "tenant_id")
+        # The same per-principal read gate as get_content: cancelling is
+        # destructive control over another principal's ingestion. The actor
+        # is required -- the agent tool used to omit it and cancel any job in
+        # the tenant -- and an unreadable job is "not found".
+        job = self._readable_job(tenant, job_id, actor_id)
+        if job is None:
             raise JobNotFoundError("job is unavailable in this tenant")
-        if actor_id:
-            # Enforce the same per-principal read gate as get_content —
-            # cancelling is destructive control over another principal's
-            # ingestion, and reads already gate the same bytes. Previously the
-            # actor was only written to the audit row, so principal B could
-            # cancel principal A's job they can't even read (audit finding).
-            _actor = _clean(actor_id, "actor_id")
-            if not self.repository.has_access(
-                tenant_id=tenant,
-                document_id=job.document_id,
-                actor_id=_actor,
-                permission="read",
-            ):
-                raise DocumentAccessError("document is unavailable to this actor")
         job = self.jobs.request_cancel(tenant_id=tenant, job_id=job.id)
         self.audit.record(
             tenant_id=tenant,
             event_type="cancel",
             action="request_cancel",
             outcome="success",
-            actor_id=actor_id,
+            actor_id=actor_id if isinstance(actor_id, str) else None,
             document_id=job.document_id,
             job_id=job.id,
             detail={"state": job.state.value},
         )
         return self._job_dict(job)
 
+    @policy_operation
     def retry_job(
-        self, *, tenant_id: str, job_id: JobId | str, actor_id: str | None = None
+        self, *, tenant_id: str, job_id: JobId | str, actor_id: str | _SystemActor
     ) -> dict[str, Any]:
         """Re-enqueue a dead-lettered/rejected job as a fresh version job."""
         self._require_writes_enabled()
         tenant = _clean(tenant_id, "tenant_id")
+        if self._readable_job(tenant, job_id, actor_id) is None:
+            raise JobNotFoundError("job is unavailable in this tenant")
         job = self.jobs.get(tenant_id=tenant, job_id=JobId(job_id))
         if job is None:
             raise JobNotFoundError("job is unavailable in this tenant")
@@ -1005,35 +1598,36 @@ class DocumentIngestionService:
         if version is None:
             raise JobNotFoundError("document version is unavailable")
         owner_record = self.repository.get_document(
-            tenant_id=tenant, document_id=job.document_id, include_deleted=True
+            tenant_id=tenant, document_id=job.document_id
         )
-        # Enforce the read gate when a principal is provided AND the document
-        # is live: previously retry was actor-agnostic, so principal B could
-        # force re-processing of principal A's document (audit finding).
-        # Soft-deleted docs (tombstones) skip the check — has_access filters
-        # deleted_at IS NULL and would otherwise deny them — and fall through
-        # to the owner="system" legacy fallback below (same as hard-deleted).
-        if actor_id and owner_record is not None and not getattr(
-            owner_record, "deleted_at", None
-        ):
-            _actor = _clean(actor_id, "actor_id")
-            if not self.repository.has_access(
-                tenant_id=tenant,
-                document_id=job.document_id,
-                actor_id=_actor,
-                permission="read",
-            ):
-                raise DocumentAccessError("document is unavailable to this actor")
-        owner = owner_record.owner_id if owner_record is not None else "system"
-        fresh = self.jobs.enqueue(
-            tenant_id=tenant,
-            workspace_id=job.workspace_id,
-            document_id=job.document_id,
-            version_id=job.version_id,
-            idempotency_key=f"retry:{job.id}:{uuid.uuid4().hex}",
-            max_attempts=job.max_attempts,
+        if owner_record is None:
+            raise DocumentAccessError("document is unavailable to this actor")
+        self._authorize_job_read(tenant, job.document_id, actor_id, permission="write")
+        actor_text = actor_id if isinstance(actor_id, str) else ""
+        owner = owner_record.owner_id
+        force = job.force_ocr if job.request_digest else bool(version.metadata.get("force_ocr"))
+        identifier = JobId(uuid.uuid4())
+        key = f"retry:{job.id}:{identifier}"
+        digest = hashlib.sha256(json.dumps({
+            "retry_of": str(job.id), "actor_id": actor_text, "force_ocr": force,
+            "workspace_id": job.workspace_id, "source_sha256": version.source_sha256,
+            "max_attempts": job.max_attempts,
+        }, sort_keys=True).encode("utf-8")).hexdigest()
+        self.capacity.check_intake(tenant_id=tenant)
+        reservation = self.admissions.reserve(
+            tenant_id=tenant, request_key=key, request_digest=digest,
+            job_id=str(identifier), byte_size=0, config=self.config,
         )
-        force = bool(version.metadata.get("force_ocr"))
+        try:
+            fresh = self.jobs.enqueue(
+                tenant_id=tenant, workspace_id=job.workspace_id,
+                document_id=job.document_id, version_id=job.version_id,
+                idempotency_key=key, job_id=identifier, max_attempts=job.max_attempts,
+                actor_id=actor_text, request_digest=digest, force_ocr=force,
+                intake_fence=(reservation, current_owner()),
+            )
+        finally:
+            self.admissions.finish(reservation)
         fresh = self._advance_intake(
             fresh, tenant=tenant, actor=owner, force_ocr=force
         )
@@ -1051,6 +1645,7 @@ class DocumentIngestionService:
 
     # ── Knowledge integration (explicit index/search) ───────────────────
 
+    @policy_operation
     def index_document(
         self,
         *,
@@ -1187,6 +1782,7 @@ class DocumentIngestionService:
 
     # ── Document actions (convert / pdf / redact / generate) ─────────────
 
+    @policy_operation
     async def convert_document(
         self,
         *,
@@ -1233,6 +1829,7 @@ class DocumentIngestionService:
             detail={"target_format": fmt}, failure_metric="generation",
         )
 
+    @policy_operation
     async def pdf_info_document(
         self,
         *,
@@ -1260,6 +1857,7 @@ class DocumentIngestionService:
             )
         return self._report_payload(result)
 
+    @policy_operation
     async def pdf_split_document(
         self,
         *,
@@ -1307,6 +1905,7 @@ class DocumentIngestionService:
             detail={"page_start": start, "page_end": end}, failure_metric="generation",
         )
 
+    @policy_operation
     async def pdf_fill_form_document(
         self,
         *,
@@ -1347,6 +1946,7 @@ class DocumentIngestionService:
             detail={"field_count": len(clean_fields)}, failure_metric="generation",
         )
 
+    @policy_operation
     async def redact_document(
         self,
         *,
@@ -1391,6 +1991,7 @@ class DocumentIngestionService:
             detail={"term_count": len(clean_terms)}, failure_metric="redaction",
         )
 
+    @policy_operation
     async def merge_documents(
         self,
         *,
@@ -1454,6 +2055,7 @@ class DocumentIngestionService:
             detail={"count": len(doc_ids)}, failure_metric="generation",
         )
 
+    @policy_operation
     async def generate_document(
         self,
         *,
@@ -1645,8 +2247,10 @@ class DocumentIngestionService:
 
     # ── Health ──────────────────────────────────────────────────────────
 
+    @policy_operation
     def health(self) -> dict[str, Any]:
         data = self.service.health()
+        data["policy"] = self._policy.status()
         data["rollout"] = get_document_rollout().to_dict()
         data["worker"] = {
             "running": self.worker_running,
@@ -1657,6 +2261,7 @@ class DocumentIngestionService:
 
     # ── Phase 9 operations (capacity / metrics / audit / GC / readiness) ──
 
+    @policy_operation
     def capacity_snapshot(self, *, tenant_id: str | None = None) -> dict[str, Any]:
         """Return the live capacity/backpressure snapshot and refresh gauges."""
         snap = self.capacity.snapshot(tenant_id=tenant_id)
@@ -1682,6 +2287,7 @@ class DocumentIngestionService:
             logger.debug("[documents.ingestion] queue gauge refresh failed", exc_info=True)
         return snap
 
+    @policy_operation
     def metrics_snapshot(self, *, tenant_id: str | None = None) -> dict[str, Any]:
         """Refresh queue/storage gauges and return a document metrics view.
 
@@ -1727,6 +2333,7 @@ class DocumentIngestionService:
             before_id=before_id,
         )
 
+    @policy_operation
     def run_maintenance(
         self, *, dry_run: bool = False, actor_id: str | None = None
     ) -> dict[str, Any]:
@@ -1753,11 +2360,13 @@ class DocumentIngestionService:
         )
         return data
 
+    @policy_operation
     def readiness(self) -> dict[str, Any]:
         """Report multi-replica readiness of document storage (truthful)."""
         data = document_storage_readiness(
             jobs_repo=self.jobs, metadata_repo=self.repository
         )
+        data["policy"] = self._policy.status()
         try:
             from .malware import probe_malware_scanner
 
@@ -1768,6 +2377,32 @@ class DocumentIngestionService:
             }
         except Exception:  # noqa: BLE001
             data["malware"] = {"available": False, "mode": self.config.security_malware_scan}
+        # Hostile-document execution profile: ``process`` is reported as
+        # having no filesystem/network isolation; ``container`` is ready only
+        # while the broker's attested policy holds.
+        isolation = isolation_report()
+        data["worker_isolation"] = isolation
+        problems = []
+        if not isolation.get("ready"):
+            problems.append("document_worker_isolation_unavailable")
+        try:
+            stranded = int(self.admissions.snapshot().get("stranded", 0))
+        except store_errors():
+            stranded = 0  # the admission store's own outage is reported elsewhere
+        data["stranded_intake_reservations"] = stranded
+        if stranded:
+            # Held by an owner no process can prove dead (another host, a
+            # legacy row): capacity only the operator can free.
+            problems.append("document_intake_reservations_stranded")
+        if isolation.get("image_code_matches") is False:
+            # The worker image runs other document code than this Kazma.
+            problems.append("document_worker_image_outdated")
+        if problems:
+            reasons = list(data.get("degraded_reasons") or [])
+            reasons += [reason for reason in problems if reason not in reasons]
+            data["degraded_reasons"] = reasons
+            if data.get("status") in {"ok", "ready"}:
+                data["status"] = "degraded"
         rollout = get_document_rollout()
         data["rollout"] = rollout.to_dict()
         data["accepting_durable_writes"] = rollout.enabled
@@ -1783,7 +2418,7 @@ class DocumentIngestionService:
             if blocked not in reasons:
                 reasons.append(blocked)
             data["degraded_reasons"] = reasons
-            if data.get("status") == "ok":
+            if data.get("status") in {"ok", "ready"}:
                 data["status"] = "degraded"
         if not rollout.enabled:
             data["underlying_status"] = data["status"]
@@ -2124,7 +2759,7 @@ class DocumentIngestionService:
         path = self.storage.blob_path(kind="quarantine", sha256=stored.sha256)
         try:
             with self._materialize(path, filename) as staged:
-                return sniff_document(staged, self.config).mime_type
+                return self.service.inspect_path(staged).mime_type
         except DocumentParseError:
             # Defer the real rejection to the VALIDATING stage; store a
             # generic type so the immutable version can still be created.
@@ -2133,9 +2768,11 @@ class DocumentIngestionService:
     class _Materialized:
         __slots__ = ("_dir", "path")
 
-        def __init__(self, blob_path: Path, filename: str) -> None:
+        def __init__(self, blob_path: Path, filename: str, scratch: Path | None = None) -> None:
             suffix = Path(filename).suffix or ""
-            self._dir = Path(tempfile.mkdtemp(prefix="doc-stage-"))
+            if scratch is not None:
+                scratch.mkdir(parents=True, exist_ok=True)
+            self._dir = Path(tempfile.mkdtemp(prefix="doc-stage-", dir=scratch))
             self.path = self._dir / f"source{suffix}"
             shutil.copyfile(blob_path, self.path)
 
@@ -2146,10 +2783,13 @@ class DocumentIngestionService:
             shutil.rmtree(self._dir, ignore_errors=True)
 
     def _materialize(self, blob_path: Path, filename: str) -> "DocumentIngestionService._Materialized":
-        return self._Materialized(blob_path, filename)
+        # Under the storage root: measured by the free-space floor and swept
+        # by garbage collection if a crash leaves it behind.
+        return self._Materialized(blob_path, filename, self.config.storage_root / ".stage")
 
     def _write_manifest(self, job: DocumentJobRecord, ir: DocumentIR) -> None:
         payload = {
+            "policy_revision": self._policy.revision,
             "ir": ir.to_dict(),
             "ir_sha256": hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest(),
         }
@@ -2213,8 +2853,8 @@ def create_default_ingestion_service(
     (index/search operations then report the adapter is missing).
     """
 
-    cfg = config or get_document_config()
-    service = DocumentIngestionService(config=cfg)
+    service = DocumentIngestionService(config=config)
+    cfg = service._policy.initial
     try:
         from kazma_core.stores.knowledge import get_knowledge_store
         from kazma_core.stores.knowledge_index import KnowledgeIndex
@@ -2225,6 +2865,7 @@ def create_default_ingestion_service(
             knowledge_store=store,
             knowledge_index=KnowledgeIndex(store=store),
             config=cfg,
+            policy=service._policy,
         )
         service.knowledge_adapter = adapter
         service.service.knowledge_adapter = adapter
@@ -2246,6 +2887,11 @@ def set_ingestion_service(service: DocumentIngestionService | None) -> None:
     _singleton = service
 
 
+def peek_ingestion_service() -> DocumentIngestionService | None:
+    """Return the installed coordinator without creating stores or workers."""
+    return _singleton
+
+
 def get_ingestion_service() -> DocumentIngestionService:
     """Return the shared coordinator, lazily creating one if unset.
 
@@ -2260,10 +2906,73 @@ def get_ingestion_service() -> DocumentIngestionService:
     return _singleton
 
 
+class _IntakeLease:
+    """Renews one intake's reservation while it runs (``admission``).
+
+    A daemon thread renews every quarter of the lease. When a renewal finds
+    the reservation no longer this process's, the intake has been taken over:
+    ``check`` raises before the next write and the job's own fence refuses
+    publication whatever this thread saw. A renewal that fails on a store
+    error is retried at the next tick; a lease that lapses because the store
+    stayed unreachable ends in the same fence.
+    """
+
+    def __init__(self, admissions: IntakeAdmissionStore, token: str, lease_seconds: float) -> None:
+        self._admissions = admissions
+        self._token = token
+        self._interval = max(0.5, lease_seconds / 4.0)
+        self._stop = threading.Event()
+        self.fenced = False
+        self._thread = threading.Thread(target=self._run, name="documents-intake-lease", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                if not self._admissions.heartbeat(self._token):
+                    self.fenced = True
+                    return
+            except store_errors() as exc:
+                logger.debug("[documents.ingestion] intake lease renewal failed (%s)", type(exc).__name__)
+
+    def check(self) -> None:
+        if self.fenced:
+            raise IntakeFencedError("the intake's reservation was taken over")
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=10.0)
+
+
+def _ingest_identifier(tenant: str, key: str, kind: str) -> uuid.UUID:
+    # Delimiter joins alias ("a", "b:c") and ("a:b", "c") across tenants.
+    return uuid.uuid5(_INGEST_NS, json.dumps([tenant, key, kind], separators=(",", ":")))
+
+
 def _clean(value: str, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise DocumentIngestionError("invalid_request", f"{name} is required")
     return value.strip()
+
+
+#: How often a running service looks for intakes whose owner died.
+_INTAKE_SWEEP_SECONDS = 60.0
+
+
+class _SystemActor:
+    """The service itself (listing it already authorized, recovery, tests).
+
+    Not a string, so no request, header or chat message can produce it.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "SYSTEM_ACTOR"
+
+
+#: Pass as ``actor_id`` only from code that has authorized the read itself.
+SYSTEM_ACTOR = _SystemActor()
 
 
 def _safe_filename(filename: str) -> str:

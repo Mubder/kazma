@@ -1358,8 +1358,17 @@ async def _try_documents_command(
         )
         return True
 
+    # Chat acts as the install's operator, like the Web page and the agent
+    # (DOC-A3, ``documents.principal``); with platform users it refuses (D1).
+    from kazma_core.documents.principal import MULTI_USER_REFUSAL, operator_for
+
+    actor = await asyncio.to_thread(operator_for, svc, tenant)
+    if actor is None:
+        await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {MULTI_USER_REFUSAL}")
+        return True
+
     if sub in ("", "help"):
-        docs = svc.list_documents(tenant_id=tenant, actor_id="agent")
+        docs = svc.list_documents(tenant_id=tenant, actor_id=actor)
         lines = [
             "📄 **Kazma Documents**",
             "",
@@ -1384,7 +1393,7 @@ async def _try_documents_command(
         return True
 
     if sub == "list":
-        docs = svc.list_documents(tenant_id=tenant, actor_id="agent")
+        docs = svc.list_documents(tenant_id=tenant, actor_id=actor)
         if not docs:
             await _send_model_reply(msg, store, manager, thread_id, "No documents yet.")
             return True
@@ -1400,9 +1409,14 @@ async def _try_documents_command(
             await _send_model_reply(msg, store, manager, thread_id, "Usage: `/documents status <id>`")
             return True
         try:
-            status = svc.job_status(tenant_id=tenant, job_id=ident)
+            status = svc.job_status(tenant_id=tenant, job_id=ident, actor_id=actor)
             if status is None:
-                jobs = svc.jobs_for_document(tenant_id=tenant, document_id=ident)
+                from kazma_core.documents.repository import DocumentAccessError
+
+                try:
+                    jobs = svc.jobs_for_document(tenant_id=tenant, document_id=ident, actor_id=actor)
+                except DocumentAccessError:
+                    jobs = []  # unreadable reads like unknown: no existence hint
                 status = jobs[0] if jobs else None
             if status is None:
                 await _send_model_reply(msg, store, manager, thread_id, "⚠️ Not found.")
@@ -1426,7 +1440,7 @@ async def _try_documents_command(
             return True
         try:
             data = svc.get_content(
-                tenant_id=tenant, actor_id="agent", document_id=ident, max_chars=3000
+                tenant_id=tenant, actor_id=actor, document_id=ident, max_chars=3000
             )
             await _send_model_reply(msg, store, manager, thread_id, data["text"] or "(empty)")
         except Exception as exc:  # noqa: BLE001
@@ -1459,7 +1473,7 @@ async def _try_documents_command(
                     )
                     return True
                 data = await svc.convert_document(
-                    tenant_id=tenant, actor_id="agent", workspace_id=workspace,
+                    tenant_id=tenant, actor_id=actor, workspace_id=workspace,
                     document_id=ident, target_format=fmt,
                 )
                 out = data.get("manifest", {}).get("output", {})
@@ -1478,7 +1492,7 @@ async def _try_documents_command(
                     )
                     return True
                 data = await svc.pdf_info_document(
-                    tenant_id=tenant, actor_id="agent", workspace_id=workspace,
+                    tenant_id=tenant, actor_id=actor, workspace_id=workspace,
                     document_id=ident,
                 )
                 report = data.get("report", {})
@@ -1497,7 +1511,7 @@ async def _try_documents_command(
                 raw_terms = body.split(None, 2)[2]
                 terms = [t.strip() for t in raw_terms.split(",") if t.strip()]
                 data = await svc.redact_document(
-                    tenant_id=tenant, actor_id="agent", workspace_id=workspace,
+                    tenant_id=tenant, actor_id=actor, workspace_id=workspace,
                     document_id=ident, terms=terms,
                 )
                 await _send_model_reply(
@@ -1523,7 +1537,7 @@ async def _try_documents_command(
         try:
             data = await svc.search_library(
                 tenant_id=tenant, library_id=library, query=query, top_k=5,
-                actor_id="agent",
+                actor_id=actor,
             )
             context = data.get("prompt_context") or ""
             await _send_model_reply(

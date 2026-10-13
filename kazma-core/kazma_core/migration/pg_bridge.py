@@ -152,6 +152,7 @@ def dump_database(
     *,
     progress=None,
     tables: Sequence[str] | None = None,
+    snapshot: str | None = None,
 ) -> Path:
     """Dump the database at ``dsn`` to ``out_path`` in custom format (-Fc).
 
@@ -163,6 +164,10 @@ def dump_database(
             None (default) dumps the whole database. The nightly PG backup
             passes its SoT list so a shared DB never leaks a foreign app's
             tables into Kazma's backups.
+        snapshot: an id from ``pg_export_snapshot()`` in a transaction that
+            stays open until the dump has started: the dump then shows the
+            database exactly as that transaction saw it (the coordinated
+            document backup reads its file references in the same snapshot).
 
     Returns:
         The Path to the written dump.
@@ -191,6 +196,8 @@ def dump_database(
     ]
     for table in tables or ():
         cmd += ["-t", table]
+    if snapshot:
+        cmd += [f"--snapshot={snapshot}"]
     cmd += [
         "-U", conn_parts.user,
         "-h", conn_parts.host,
@@ -217,13 +224,41 @@ def dump_database(
     return out_path
 
 
+def _create_kazma_functions(dsn: str) -> None:
+    """Create the functions Kazma's table triggers call, in the target.
+
+    ``pg_dump -t`` carries a table's triggers but not the functions they call
+    (``db/pg_backup.KAZMA_PG_FUNCTIONS``), so a restore into a fresh database
+    could not recreate the trigger. ``CREATE OR REPLACE`` makes this a no-op on
+    a database that has them.
+    """
+    from kazma_core.db.pg_backup import KAZMA_PG_FUNCTIONS
+
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise PgBridgeError("psycopg is required to restore Kazma's trigger functions") from exc
+    try:
+        with psycopg.connect(dsn, autocommit=True, connect_timeout=10) as conn:
+            for ddl in KAZMA_PG_FUNCTIONS.values():
+                conn.execute(ddl)
+    except psycopg.Error as exc:
+        raise PgBridgeError(f"could not create Kazma's trigger functions in the target ({type(exc).__name__})") from exc
+
+
 def restore_database(
     dump_path: str | Path,
     dsn: str,
     *,
     progress=None,
+    strict: bool = False,
 ) -> int:
     """Restore a custom-format dump into the database at ``dsn``.
+
+    ``strict`` (a restore drill into an empty database): one transaction,
+    stop at the first error, and ANY non-zero exit is a failure -- the
+    default counts exit 1 (warnings) as success, which can hide a partial
+    restore.
 
     Uses ``--clean --if-exists`` so the restore is idempotent (safe to
     re-run). ``pg_restore`` recreates the schema itself, so the target DB
@@ -247,6 +282,7 @@ def restore_database(
     if not dump_path.exists():
         raise PgBridgeError(f"dump file not found: {dump_path}")
     parts = _parse_dsn(dsn)
+    _create_kazma_functions(dsn)
     restore_cmd = resolve_pg_restore()
     conn_parts = _docker_adjusted_parts(restore_cmd, parts)
     cmd = list(restore_cmd) + [
@@ -254,6 +290,7 @@ def restore_database(
         "--no-privileges",
         "--clean",
         "--if-exists",
+        *(["--single-transaction", "--exit-on-error"] if strict else []),
         "-U", conn_parts.user,
         "-h", conn_parts.host,
         "-p", conn_parts.port,
@@ -273,7 +310,7 @@ def restore_database(
     # pg_restore returns 0 (clean), 1 (non-fatal warnings, e.g. "relation
     # does not exist" during --clean), or 2+ (fatal). Treat 0 and 1 as
     # success; only 2+ is a real failure.
-    if proc.returncode >= 2:
+    if proc.returncode >= 2 or (strict and proc.returncode != 0):
         raise PgBridgeError(
             f"pg_restore failed (exit {proc.returncode}): {stderr.strip()[:500]}"
         )

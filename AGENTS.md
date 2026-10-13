@@ -1565,12 +1565,24 @@ refuses the bundle.
 - `kazma-cli/kazma_cli/migrate.py` — CLI dispatch (`kazma migrate export|verify|import`)
 - `memory/backup.py:backup_one()` — the WAL-safe SQLite copier reused by the
   importer's pre-swap safety backup (promoted from `_backup_one`).
-- Document store export/import is also wired (`documents.db` + content-addressed
-  tree under the document-store root) — see §19 and `migration/exporter.py`.
+- Document store export/import is also wired — see §19 F3 and
+  `migration/exporter.py`. What travels follows where the document CATALOG is
+  (`documents.backup.installed_document_backends`: the running service, else
+  the configured backends, so the CLI sees a Postgres store too): a SQLite
+  catalog as `documents.db` + the content it references; a Postgres catalog as
+  `data/postgres.dump` + every content file it references (copied after the
+  dump: a superset); a Postgres catalog beside a SQLite queue is refused by
+  name. The export records a refusal or a missing referenced file under
+  `_document_store`, and `verify` refuses the bundle. A document restore that
+  fails on import fails the import (2026-10-13, DOC-A7/A8).
 
 ### 19. Document Intelligence (`kazma-core/kazma_core/documents/`)
 
-Secure durable document platform (phases 0–10). Docs SoT:
+Durable document platform (phases 0–10), hardened 2026-10-13 against the
+Documents audit (tracker `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md`,
+F01–F10 / Q01–Q05; an independent review and the 48–72 h soak are still
+open, and the default `process` worker profile is not qualified for hostile
+documents, E). Docs SoT:
 `docs/docs/guide/document-intelligence.md`, phases
 `docs/docs/guide/document-phases.md`, security
 `docs/docs/security/document-security.md`, ops
@@ -1579,10 +1591,11 @@ Secure durable document platform (phases 0–10). Docs SoT:
 **A. Two boundaries — do not invent a third path.**
 - **Durable public boundary:** `DocumentIngestionService` — Web
   `/api/documents/*` (`documents_api.py`), native `document-platform` tools,
-  gateway `/documents`/`/docs`, TUI `DocumentsPanel`. Tenant/actor ACL, capacity,
-  audit, jobs, index.
+  gateway `/documents`/`/docs`, TUI `DocumentsPanel` (through the Web API).
+  Tenant/actor ACL, capacity, audit, jobs, index.
 - **Execution boundary:** `DocumentService` — sniff/parse/OCR/render inside
-  isolated subprocesses. Durable workers call it; chat
+  an isolated worker (a bounded subprocess, or a per-job container: E).
+  Durable workers call it; chat
   `agent_handler/attachments.py` may call it for **transient** fenced excerpts
   only (not a second durable store).
 - Gateway/UI **must not** import `documents.parsers`, `documents.ocr`,
@@ -1594,20 +1607,166 @@ parsing|ocr_running → normalizing → indexing → verifying → ready`
 (+ `retry_wait`, `rejected`, `cancelled`, `dead_letter`). Do not reintroduce
 generic PENDING/ACCEPTED/PROCESSING labels in product code or docs.
 
+**B2. Intake admission is durable; a partial publication is undone only by
+its owner or after its owner is PROVEN dead.**
+`documents/admission.py` reserves pending queue and tenant rate/byte budgets in
+the job backend before durable ingestion reads bytes. SQLite uses a short
+`BEGIN IMMEDIATE`; Postgres locks the one `document_intake_mutex` row
+(`SELECT ... FOR UPDATE`). No DB lock is held
+during streaming. Declared lengths are enforced before CAS publication; unknown
+lengths reserve the intake maximum and reconcile actual bytes. Replay is checked
+before fresh admission. Retries reserve a slot and require write ACL on a live
+document. A published job closes its reservation. Since 2026-10-13 every
+reservation records its OWNER (install, host, pid, process start time) and,
+before any metadata write, the ids it publishes under; the rows it creates
+carry its `intake_token`. A failed intake rolls its own rows back
+(`_abandon_own_intake`). At start and every minute while the workers run
+(`_sweep_stranded_intakes`), `_recover_stranded_intakes` claims (CAS) and
+rolls back intakes whose owner is provably dead (same install and host, pid
+gone or reused) or restored from a backup. An owner that cannot be proven dead
+(another host, an unreadable process) holds a LEASE: it renews
+`heartbeat_epoch` every quarter of its own `lease_seconds`
+(`documents.intake.lease_seconds`, default 300, stored on the row) while the
+intake runs, and is taken over only once that has lapsed. The takeover FENCES
+it: `jobs.enqueue(intake_fence=)` creates the publishing job only in a
+transaction that finds the reservation still active and still the caller's,
+under the admission mutex the claim also takes, and a claim refuses a
+reservation whose job exists. A fenced owner removes the rows tagged with its
+token (`_discard_tagged`) and answers `intake_taken_over` (409); the sweep
+removes what a fenced owner wrote and left, for a day after the takeover
+(`fenced_epoch`). A legacy row (no owner or no heartbeat: a build without the
+fence) is never taken over and is reported (`stranded`, readiness
+`document_intake_reservations_stranded`; a remote intake renewing its lease is
+not stranded). Never add age-only expiry without the fence. The Web route
+answers every budget BEFORE reading the body (`precheck_upload`; F08 below).
+Gates: `tests/test_document_admission_hardening.py`,
+`tests/test_document_crash_recovery.py` (a real child killed after each of 7
+intake stages and inside 4 job stages, SQLite and real Postgres),
+`tests/test_document_intake_lease.py` (a real child on "another host",
+paused, taken over and resumed; without the fence it publishes over the
+takeover, without the sweep its rows stay), the real-Postgres races in
+`tests/test_document_jobs_pg_idempotency.py`, and the opt-in
+`tests/test_document_intake_lease_containers.py`
+(`KAZMA_TEST_CONTAINER_LEASE_DRILL_IMAGE`): the stale owner in a real other
+container -- frozen with `docker pause`, or cut off the network -- is taken
+over on the database's clock and fenced when it returns; with its renewals
+blind the fence alone refuses it; blind and unfenced it publishes (control).
+
+**B3. Admission, scratch and claims are bounded and fair** (2026-10-13, F08).
+The Web upload refuses a declared length past the limit, a disabled platform,
+a disk whose free space minus the incoming file is below the floor, a full
+queue, a tenant cap or a spent rate window before reading a byte, and holds
+one of `documents.capacity.max_concurrent_uploads` spool slots (per process)
+while receiving. Spools, staged copies and parser/operation run directories
+live under the storage root: the floor measures them and GC sweeps what a
+crash left (`retention._sweep_scratch`). A worker stage below the floor is
+retried (`storage_full`), never started. Postgres metadata enforces the tenant
+blob quota (an advisory lock per tenant serializes check and insert). Claims
+are fair across tenants (`jobs.fair_claim_order`: fewest running first, then
+by when the job became ready, so a retry does not jump the queue), on both
+backends. The ten JSON routes (`/import`, `/generate`, `/merge`, `/convert`,
+`/split`, `/fill-form`, `/redact`, `/index`, `/unindex`, `/search`) read their
+body through `documents_api._json_body`: a declared length past 2 MiB is
+refused unread, an undeclared one is cut off at the cap, malformed or
+too-deep JSON is a 422. FastAPI's `Body(...)` parsed any size into memory
+before a route could look at it; never take a document route's body that way.
+Gates: `tests/test_document_upload_admission.py` (body-read counter,
+the old route as its control), `tests/test_document_claim_fairness.py`,
+`tests/test_document_quota_both_backends.py`,
+`tests/test_document_json_body_cap.py` (`Body(...)` as its control).
+
+**B4. Every job read names its caller** (2026-10-13, F05). `job_status`,
+`job_events`, `jobs_for_document`, `cancel_job` and `retry_job` take a required
+`actor_id`; `ingestion.SYSTEM_ACTOR` (not a string) is for code that already
+authorized the read. A missing actor is refused -- it used to mean "no check".
+An unreadable job reads exactly like an unknown one on the Web routes, the
+agent's tools and the gateway (no existence oracle; a replay by another actor
+is `idempotency_conflict`). `/api/documents/ops/audit` is admin-only. Gate:
+`tests/test_document_job_read_matrix.py` (signature gate with its control).
+
+**B4b. One operator, one principal** (2026-10-13, DOC-A3). The Web page acted
+as the signed-in name and chat `/documents` and the agent's tools as `agent`:
+a page upload was invisible to chat and the agent, and theirs to the page. On
+a single-operator install every surface acts as `documents.principal.OPERATOR`;
+`DocumentIngestionService.grant_operator_access` gives it an `owner` ACL row
+on documents ingested under another name (granted by their owner, audited,
+ownership unchanged, re-checked at most once a minute per tenant). With
+platform users (`multi_user_enabled`) the page acts as each user and chat and
+the agent refuse (`MULTI_USER_REFUSAL`, D1); a failed mode check refuses.
+`operator_for` (the one helper the three surfaces call) and
+`grant_operator_access` are loop-stall helpers. No
+surface passes a literal actor. Gate: `tests/test_document_operator_principal.py`
+(page->chat->agent and back on a real service; the old `agent` principal and
+a literal actor as controls).
+
+**B6. One status per error code** (2026-10-13, DOC-A4/A9).
+`documents_api._STATUS_BY_CODE` answers every route: writes off, an unavailable
+required scanner and `worker_isolation_*` are 503 with `Retry-After`
+everywhere (writes-off was 422 on the action routes; the scanner 400). The
+upload precheck asks `malware_blocks_intake` before reading the body. Every
+body goes through the 2 MiB reader (`_json_body`, `_optional_json_body` for
+delete); no route calls `request.json()`/`body()`/`form()`. Gates:
+`tests/test_document_api_statuses.py`, `tests/test_document_json_body_cap.py`.
+
+**B5. Outages are retried; only content is rejected** (2026-10-13, F07). A
+required malware scanner that is unavailable, a full disk (`storage_full`), a
+locked or unreachable metadata store (`metadata_unavailable`, SQLite or
+Postgres: `errors.infrastructure_errors`) go to the queue's finite retry
+budget, then dead-letter -- never REJECTED. (At upload, a required scanner
+that cannot run refuses the upload with `malware_scanner_unavailable`; nothing
+is published.) A store error while recording a
+stage's outcome leaves the job leased for lease recovery and never ends the
+worker loop. Gate: `tests/test_document_fault_transitions.py` (old handling as
+the negative-control witness).
+
 **C. Config is ConfigStore-nested.** Primary keys are
 `documents.intake.*`, `documents.limits.*`, `documents.ocr.*`,
 `documents.workers.*`, `documents.capacity.*`, `documents.retention.*`,
-`documents.gc.*`, `documents.security.*`, plus rollout
-`documents.enabled` / `shadow` / `default_authoritative`. Prefer
-`get_document_config()` live reads. Flat aliases exist only for a few intake
-keys — do not invent `documents.max_pages` style flat keys without wiring
-aliases.
+`documents.gc.*`, `documents.security.*`, `documents.indexing.*`,
+`documents.quotas.*`, `documents.render.*` and `documents.storage_root`, plus
+rollout `documents.enabled` / `shadow` / `default_authoritative`. Prefer
+`get_document_config()` live reads. Legacy aliases exist for a few keys only
+(`documents.intake_max_bytes` / `intake_max_files`, `documents.worker.*`,
+`documents.shadow_mode`, `documents.authoritative_by_default`,
+`documents.limits.max_uncompressed_bytes`) — do not invent
+`documents.max_pages` style flat keys without wiring aliases. A default
+coordinator captures one strict immutable policy per operation
+from `ConfigStore.snapshot("documents")` (one SELECT, no per-key TTL). Share its
+`DocumentPolicy` with execution, render, capacity, knowledge and GC layers; never
+refresh a shared mutable config during an operation. Explicit configs stay fixed.
+Worker tasks must detach startup's ContextVar and capture again per stage.
+Unavailable/invalid live policy refuses execution; rollout never enables writes
+on a settings outage. Remote parsing still checks live denial before each upload.
+Storage root, committed-reference quota, worker concurrency/lease/heartbeat and
+queue retry timing are constructed-resource settings: pin them until coordinator
+reconstruction and report configured/effective differences in readiness `policy`.
+Intake version metadata and parsed manifests record the effective policy hash.
+Backup/migration resolve the installed CAS root (`get_document_storage_root`),
+never a pending proposed root, and offline resolution does not create a service.
+Backup and migration take their path from where the catalog is
+(`backup.installed_document_backends`, F3); a fallback SQLite database never
+stands in for a Postgres catalog.
+A new document Postgres table goes in `db.pg_backup.KAZMA_PG_TABLES` (gate:
+`tests/test_pg_backup.py::test_kazma_pg_tables_covers_document_ddl`, which reads
+the DDL) AND in `backup_pg.DOCUMENT_PG_TABLES` (gate since 2026-10-13, DOC-A13:
+`tests/test_document_pg_tables.py`, the DDL and a started store on real
+Postgres, both directions). The Postgres store's backup and restore are F2;
+RPO/RTO on deployment hardware and store sizes remain open.
+Every `DocumentConfig` field has a reader outside `config.py` (DOC-A2: eight
+settings were read, validated and acted on by nothing -- `fence_llm_content`,
+`allow_encrypted_documents`, `allow_external_render_resources` among them --
+and were removed; none was shipped in kazma.yaml, so no stored default to
+retire). Gate: `tests/test_document_config_fields_read.py`.
+Gates: `tests/test_document_live_policy.py`, `tests/test_config_store_snapshot.py`.
 
 **D. Multi-replica honesty.**
 `jobs_pg.py` can claim jobs with `SELECT … FOR UPDATE SKIP LOCKED` when
-Postgres is configured. Document **metadata** (documents/versions/blobs)
-defaults to SQLite and moves to `repository_pg.py` when
-`KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and the pool is up. Readiness
+Postgres is configured. The job queue is on Postgres whenever Kazma's backend
+is (`KAZMA_DOCUMENTS_JOBS_BACKEND=sqlite` keeps it local). Document
+**metadata** (documents/versions/blobs) follows the job backend when
+`KAZMA_DOCUMENTS_METADATA_BACKEND` is unset or `auto` -- so it is on Postgres
+by default on a Postgres install -- `postgres` forces `repository_pg.py` and
+`sqlite` keeps SQLite; either Postgres store needs the pool up. Readiness
 must report single-replica for metadata **whenever the SQLite backend is
 active** — never claim multi-replica HA from the availability of the Postgres
 path alone, only from the backend actually in use. Single-replica is a
@@ -1625,7 +1784,56 @@ default. Redaction UI confirm is Web-only; API/tools can redact under ACL.
 **Malware:** `documents/malware.py` runs on quarantine via
 `scan_if_configured` (`auto`/`on`/`off` + fail-closed). Uses system
 `clamscan`/`clamdscan` only — no third-party upload of document bytes.
-Sandbox: scrubbed env + resource limits; not a full network namespace.
+Sandbox, `KAZMA_DOCUMENT_WORKER_ISOLATION=process` (default): scrubbed env;
+Windows Job Object memory/CPU-rate/process limits with fail-closed parser
+start -- the worker starts SUSPENDED and is resumed only once the job holds it
+(DOC-A12, 2026-10-13: a venv's `python.exe` is a launcher, and a job assigned
+a moment late held only the launcher, so the first run of every process ran
+uncapped while reporting "enforced"); the CPU cap is `cpu_cores=1`, sized by
+`security.process_budget.job_cpu_rate` (CpuRate is a share of the WHOLE
+machine: the old 100*100 was no cap). Every Job Object assignment in product
+code holds a suspended child (gate `tests/test_job_objects_hold_suspended_children.py`,
+`code_exec` too; busy-worker and memory-hog measurements with the old launch
+as controls in `tests/test_document_sandbox.py`); Unix memory/CPU-time
+`setrlimit` (no process-count limit). It confines
+no filesystem/network access; readiness says `hostile_document_profile:
+unqualified`. `container` (2026-10-13): both worker call sites (service
+parser, operations mutation/renderer) branch to
+`worker_container.run_container_worker` -> the broker
+(`documents/worker_broker.py`, stdlib-only), the ONLY holder of the Docker
+socket -- never mount it into Kazma. One container per job under one fixed
+policy (no network/mounts, read-only root, tmpfs, cgroup limits, caps
+dropped, uid 10001); the broker attests it from inside the image before
+serving. Inputs/outputs are digest-checked bundles (`worker_bundle.py`); the
+output is untrusted. No fallback to `process`; an invalid mode refuses every
+run; a crash with no stream is `parser_result_missing`, as locally. Never
+block the output pump on a kill: an attached container whose stdout backs up
+cannot be killed (Docker 29). In container mode the four readiness factories
+(`get_parser_registry`, `get_renderer_registry`, `get_mutation_registry`,
+`get_ocr_health`) answer from the image's own capability report, as live
+views, never from host packages; the broker refuses to serve without it. A
+broker that is not ready answers the retryable `worker_isolation_unavailable`
+(a full one `worker_isolation_busy`), never a permanent engine error. The
+image reports a fingerprint of its document code: readiness says
+`image_code_matches: false` and `document_worker_image_outdated` when the
+image was built from other code than Kazma runs (rebuild it and restart the
+broker). The image carries no Docling and no httpx: local salvage is not part
+of the container profile, and remote parsing stays in the Kazma process (K).
+`security.execution.container_required` refuses the `process` profile
+(`worker_isolation_required`; unreadable policy refuses too) -- checked where
+Kazma starts a worker, never inside one. Gates:
+`tests/test_document_worker_container.py`; real Docker
+(`KAZMA_TEST_DOCUMENT_WORKER_IMAGE`, CI job `Document worker container
+profile`): `tests/test_document_worker_container_docker.py`.
+Rendering engines: a readiness probe imports exactly what its render path
+uses -- WeasyPrint 70 (the locked floor) removed `default_url_fetcher`, and
+every HTML->PDF job failed while the engine read "ready". The renderer's
+fetcher (a `URLFetcher` subclass) allows only `data:` and files inside the
+approved asset folder (`tests/test_weasyprint_renderer.py`). A LibreOffice call
+made through `binaries.run_soffice_cli` kills the whole process tree on
+timeout and bounds the last wait: `subprocess.run(timeout=)` waited without a
+limit for the pipes soffice.bin still held and hung the certification
+(`tests/test_soffice_call_bounded.py`, the old call as its control).
 
 **E2. A deleted document is never still searchable** (2026-09-28).
 `DocumentService.delete_document` takes the document out of every library
@@ -1635,20 +1843,165 @@ leave stops the delete (`document_unindex_failed`, naming the library) so a
 retry can finish it. It used to swallow the failure and archive a document
 chat could still quote. `tests/test_document_library_membership.py`.
 
+**E3. One PDF active-content policy, applied only inside the worker**
+(2026-10-13, F01). `documents/pdf_policy.assert_pdf_safe` walks the object
+graph (not page streams or extracted text), bounded at 100,000 objects and
+depth 128, and refuses script (JavaScript, XFA), actions that run, open,
+submit or fetch outside the document (Launch, remote GoTo, SubmitForm,
+ImportData, renditions, rich media, sound, movie), embedded files (a bare
+`/EF` without `/Type` too) and links that are not absolute http, https or
+mailto (`file:`, UNC and relative targets leak credentials when opened).
+Navigation inside the document and web links stay. A graph it cannot read, or
+one past its budget, is refused, never passed. It runs on intake (`sniff`), on
+every mutation input and output (redaction opened its source before the
+policy until 2026-10-13) and on every PDF Kazma renders (LibreOffice,
+WeasyPrint, ReportLab), always in the worker. No PDF library opens a PDF in
+the server process: the document intent handler and the document pipeline
+read through `DocumentService` (the pipeline used to fall back to fitz
+exactly when the worker had refused a file), and structural preflight and
+local salvage run in the worker too. Gates:
+`tests/test_pdf_openers_stay_in_workers.py` (any PDF-library opener outside
+the worker-side modules fails, except declared checks of a PDF Kazma itself
+just generated; the old reader as its control), `tests/test_document_pdf_policy.py`
+(real inert PDFs: each denial, navigation and web links kept, shared indirect
+`/URI`, the call-site matrix through the real worker),
+`tests/test_document_worker_preflight.py`.
+
 **F. Multi-replica backends.**
-Jobs: `jobs_pg.py` when Postgres. Metadata: `repository_pg.py` when
-`KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and pool is up. GC is
+Jobs: `jobs_pg.py` when Postgres. Metadata: `repository_pg.py` when the
+metadata backend resolves to Postgres (D) and the pool is up. GC is
 backend-agnostic: `retention._mark` dispatches to `repository.gc_mark`, which
 both backends implement, so mark/sweep runs on Postgres metadata. The old
 `gc_postgres_metadata_sql_port_pending` skip is gone and
 `tests/test_leftovers_except_g.py` asserts it stays gone. Audit works on both
 backends.
 
+**F2. A Postgres store is backed up as ONE point in time** (2026-10-13, F06).
+`documents/backup_pg.py`: a REPEATABLE READ transaction exports its snapshot,
+reads the blob/manifest references inside it, PINS them (`.backup-pins`; GC
+re-reads pins before each delete), and `pg_dump --snapshot` dumps the document
+tables while that transaction stays open; the files are copied with
+checksums. The scheduled document backup takes this path whenever the
+installed store is on Postgres. A restore goes only into an EMPTY database and
+storage root, re-checks every table's row count against the snapshot, expires
+the dead source's leases and marks its unfinished intakes `restored` (rolled
+back at start). The knowledge index is a separate store (library chunks in
+the settings store, vectors in Chroma): restore reports `reindex_required`,
+and every worker start runs `DocumentIngestionService.reconcile_index` once,
+which re-publishes each version the store records as indexed but no library
+holds, from its own manifest, as the owner, through `index_document_ir`. Each
+is re-checked under the document's publication lock
+(`DocumentKnowledgeAdapter.publication_lock`, striped per tenant and
+document; index and unindex hold it), so an unindex is never undone. A
+missing library, a superseded version or a missing manifest is reported,
+never invented; chunks the store does not record are reported and removed
+only with `index --apply --prune`. Operator: `scripts/document_pg_backup.py`
+(`backup`, `verify`, `restore`, `index`). Gates:
+`tests/test_document_pg_backup_restore.py` (real Postgres, private databases;
+a dump outside the snapshot is caught by the row-count check),
+`tests/test_document_backup_pins.py`, `tests/test_document_reindex_after_restore.py`
+(both backends; without the re-check an unindex is undone), and the opt-in
+`tests/test_document_pg_restore_drill_scale.py` (`KAZMA_TEST_RESTORE_DRILL_DOCUMENTS`).
+
+**F3. Backup, export and import follow the CATALOG** (2026-10-13, DOC-A6/A7/A8).
+`backup.installed_document_backends()` is the one answer: the running
+service's repositories, else the configured backends (a CLI has no service;
+asking only the service exported a Postgres store as its empty local
+`documents.db`). Postgres catalog -> coordinated backup (F2); its files travel
+in a migration bundle, the catalog in `data/postgres.dump`. SQLite catalog
+beside a Postgres queue -> the SQLite snapshot, with quarantine->originals
+promotions read from the queue after the snapshot and kept in the manifest
+(`promoted_versions`, read again by `verify_document_backup`); the jobs
+backend alone used to pick the coordinated backup, which read a catalog that
+was not there. Postgres catalog beside a SQLite queue (a fallback) ->
+`UNSUPPORTED_SHAPE`, by name. Backups are written under a `.…partial` name
+and renamed when complete. A failed document restore fails `kazma migrate
+import`. Restoring BOTH Postgres backups into one database: the whole-database
+dump first, then `restore --replace-document-tables` (drops the dump's older
+document tables only after the backup verifies and the storage root is empty).
+Gates: `tests/test_document_backup_shapes.py`,
+`tests/test_document_pg_restore_order.py` (both wrong orders as controls),
+`tests/test_document_backup_restore_hardening.py`.
+
+**F4. The Postgres audit is append-only too** (2026-10-13, DOC-A1). Trigger
+`document_audit_guard` (function `kazma_document_audit_guard`) refuses every
+UPDATE and every DELETE outside a transaction the retention prune marks
+(`SET LOCAL kazma.document_audit_prune`); the prune runs in bounded batches on
+Postgres (it called the SQLite connection, `None` there, and the table grew
+forever). `pg_dump -t` carries a trigger but not its function: every restore
+creates `db/pg_backup.KAZMA_PG_FUNCTIONS` first, and any trigger function in
+product code must be declared there. Gate: `tests/test_document_audit_pg.py`
+(old prune, no trigger and no function step as controls).
+
 **G. Certification.**
-`scripts/certify_documents.py` + `tests/test_document_certification_phase10.py`
-+ `hostile_corpus.py` / committed `tests/fixtures/documents/hostile_manifest.json`.
-Keep CLI gates and pytest groups honest (architecture/a11y/crash matrix are
-pytest; CLI has NOT RUN placeholders for soak/Postgres/external review).
+`scripts/certify_documents.py` (`documents/certification.py`) +
+`tests/test_document_certification_phase10.py` + `hostile_corpus.py` /
+committed `tests/fixtures/documents/hostile_manifest.json`. Keep CLI gates and
+pytest groups honest (architecture/a11y/crash matrix are pytest). The report
+runs what it names: the hostile corpus, a bounded performance smoke, engine
+readiness, rollout, the isolation profile configured NOW (`process` is
+CONDITIONAL and never reported as confined; `container` passes only attested
+and with a current image), the fidelity corpus (G2) and a real SQLite backup,
+verify and restore. Postgres multi-replica, metadata multi-replica, a 48-72 h
+soak and an external security review are NOT RUN, `default_ready` stays
+false, and `--soak` is an extended smoke, never a soak
+(`tests/test_document_certification_honesty.py`). The soak harness is
+`scripts/document_soak.py` (Q03: private SQLite stores unless `--use-env`,
+restarts and killed intakes, fails on a job left unfinished, a reservation
+left pending or scratch left behind); a two-minute pilot is not the soak.
+
+**G2. Fidelity is measured on a versioned corpus** (2026-10-13, F09/Q02).
+`documents/fidelity.py` builds EN/AR/bilingual cases with Kazma's own engines
+(DOCX, PDF, HTML, OCR from a rasterized page) from a ground-truth spec and
+measures the real parser: word recall, segment recall, order, exact numbers,
+table cells, page honesty, alignment, CER/WER. Floors and release targets are
+declared per corpus version in `tests/fixtures/documents/fidelity_thresholds.json`;
+the `qualified` list must match the measurement. Change the corpus = bump
+`CORPUS_VERSION` and re-lock (`scripts/document_fidelity.py --lock`, which
+never lowers a floor within a version). Version 2 adds long documents (EN/AR,
+many pages), two columns from another producer (MuPDF Story), wide wrapping
+tables and a degraded scan. A segment counts as recovered only when its
+words come back together (`_SPAN_SLACK`): words in order but interleaved with
+another column are not. Alignment judges every line that shows its side
+against its segment's direction by `arabic.direction_of`, the engines' own
+per-block rule. Version 3 adds `*-ocr-table`, an OCR page with its ruled
+table; the OCR reference text is the whole page, table included. Not
+qualified, each with its reason in the thresholds file: `ar-ocr` and
+`ar-ocr-table` (Tesseract does not read Arabic-Indic digits, and its layout
+analysis drops lines of the Arabic page) and `en-ocr-degraded` (3.75 read as
+3:75). A re-lock keeps the file's `notes` and `measured_on`. Certification
+runs the corpus and reports the actual isolation profile and backends (F10).
+Gate: `tests/test_document_fidelity.py`.
+
+**G3. Scanned pages: tables cell by cell; real scans measured opt-in**
+(2026-10-13, from a real 300 dpi copier scan of an Arabic booklet).
+`ocr/tesseract._parse_tsv` reads Tesseract's TSV with `quoting=QUOTE_NONE`: a
+word OCR reads as starting with `"` opened a CSV quoted field that swallowed
+every later row, so a page's "text" held other rows' coordinates (one line of
+14,386 characters) and lost words. `ocr/tables.py` (Pillow only) finds ruled
+grids and reads each cell (`TesseractProvider.recognize_region`, psm 6/7); when
+`eng` is installed, a cell with no letters, or one read below 0.5 confidence,
+is read again as digits only (`eng`), and that reading wins only at
+confidence >= 0.75. The page's lines inside a table become one `TABLE` block (`extractor: ocr-grid`, cells right to left
+for an RTL table). Rules the scan taught, each gated with the old rule as its
+control: a ruling line is ONE continuous stroke (a joined Arabic baseline is
+as dark as a rule on average, and cut text lines in half); a cell is >= 3 %
+of the page wide (the strips of a page border made every boxed section a
+"table"); the line cut follows the page's paper (pale tinted grids). At most
+600 cells and 120 s a page: past either, the tables already read are kept and
+the rest keep the page's own reading; a cell that fails to read drops the
+table pass for that page (`documents.ocr.tables`, default on, Settings →
+Documents). Measured on the scan: a contents table's numbers 22 % -> 91 %,
+its rows kept together 3 % -> 56 % complete, 6 of 6 searches on the right
+page. Tesseract did not read Arabic-Indic digits in any font measured (fast or
+best `ara` model, any segmentation mode); a different engine is the owner's
+decision. Gates: `tests/test_document_ocr_tables.py`,
+`tests/test_document_ocr_phase5.py` (the quote with the old quoting as
+control), `test_ocr_without_the_table_pass_fails_the_floor`, and the opt-in
+`tests/test_document_real_scans.py` (`KAZMA_TEST_REAL_SCANS_MANIFEST`: a
+manifest outside the repository names each scan by path and SHA-256, the
+pages, the numbers, symbols and single terms each holds -- never page text --
+the searches and the floors; without it the test skips).
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
 `documents/arabic.py` is the ONLY home for Arabic text policy. Do not
@@ -1675,6 +2028,29 @@ call-site-local normalization.
   search time (`knowledge.py:fts_search`). A fold on one side only is worse
   than none. SQLite's `unicode61` treats harakat (`Mn`) as separators, so
   vocalized Arabic indexes as single letters without this.
+- **PDF lines with right-to-left script are re-read glyph by glyph**
+  (`parsers/pdf_rtl.py`, 2026-10-13). PyMuPDF reverses such a line
+  character by character, which turned numbers drawn left to right around
+  ("١٢٣٤٥٦٧" -> "٧٦٥٤٣٢١") and swapped the letters of ligature glyphs ("في" ->
+  "يف"); Arabic table cells came out fully reversed. Glyphs come from
+  `page.get_texttrace` (a ligature's extra characters carry glyph -1, in
+  logical order); only right-to-left runs are reversed, as whole glyphs. A
+  block's base direction comes from its layout when a line shows it (Kazma
+  sets RTL paragraphs against the right margin), else `is_rtl_dominant`. An
+  RTL table's columns are read right to left. Digits after Arabic letters are
+  ARABIC numbers to the bidi algorithm (W2): "-" does not join them (W4) and
+  a space between two of them is right-to-left (N1), so "في 2026-09-30" is
+  drawn "30-09-2026 يف" and a table row's numbers right to left. Each number
+  cluster's reading is the one `arabic.visual_order` (python-bidi) draws as
+  the page shows; with none, the left-to-right reading stands. A gap wider
+  than half a font size is a word break; a zero-advance glyph that is not a
+  mark is a misread mark (LibreOffice maps a tanween to "/") and is dropped.
+  OCR words get the same rule: `arabic.number_in_logical_order` puts a
+  separated number read off an Arabic line back in logical order (the TSV
+  parser applies it with the paragraph text before the word). Gates:
+  `tests/test_document_pdf_rtl.py` (round trips laid out by python-bidi
+  itself; without the check the date reads back reversed),
+  `tests/test_document_number_order.py`.
 - **`to_logical()` runs in `parsers/common.IRBuilder.add_page`**, before limits,
   quality assessment and chunking. It NFKC-folds Arabic presentation forms back
   to base letters so a legacy visual-dump PDF is recovered without OCR. Pages
@@ -1701,10 +2077,16 @@ call-site-local normalization.
   never affected. DOCX names `THEME["font_latin"]` / `THEME["font_arabic"]`
   (both IBM Plex Sans Arabic); LibreOffice needs the family, or the PDF
   route copies the TTFs into the soffice user profile.
-- **The image and CI carry the system deps.** `fonts-noto-naskh-arabic`,
-  `libreoffice-writer`, `tesseract-ocr(-ara)`. Removing them from either does
-  not fail a test — it silently returns the platform to blank Arabic PDFs, and
-  makes `tests/test_docx_rtl_visual.py` skip instead of run.
+- **The images and CI carry the system deps.** `fonts-noto-core` (the Naskh
+  faces ship inside it; `fonts-noto-naskh-arabic` is not a Debian/Ubuntu
+  package, and naming it failed the image build and CI's Tests job),
+  `libreoffice-writer` (`-nogui` in the worker image), `tesseract-ocr` with
+  `-ara` and `-eng` -- in the
+  application image (`Dockerfile`), the document worker image
+  (`deploy/document-worker/Dockerfile`) and CI, which checks `fc-list` for
+  Naskh. Removing them does not fail a test — it silently returns the platform
+  to blank Arabic PDFs, and makes `tests/test_docx_rtl_visual.py` skip instead
+  of run.
 
 **I. Direction is per BLOCK, not per document.**
 `DocProfile.direction` is the *document* base direction — margins, section,
@@ -1752,11 +2134,25 @@ assertions.
 `extract_salvage.try_remote_parse` uploads the ORIGINAL document bytes to
 LlamaParse/Reducto. It requires `documents.security.remote_parse` (default
 **off**); an API key in the environment is not consent. Local Docling salvage
-is `documents.security.local_salvage` (default on). Every remote call records
-an `egress`/`remote_parse` audit row with provider and byte count via the hook
-`DocumentIngestionService._install_salvage_audit` installs. The legacy
+is `documents.security.local_salvage` (default on), inside the bounded parser
+worker, along with structural preflight. Every remote attempt requires a
+durable `egress` audit row carrying immutable job identity before upload,
+with separate success/failure events; a context-scoped recorder prevents
+cross-tenant attribution. Actor, request digest and OCR intent belong to the
+job, not a deduplicated version. Consent is rechecked at each provider attempt.
+A failed provider is audited (`failure`) and the next configured one is tried,
+after the live policy is read again (until 2026-10-13 the first failure
+re-raised and the fallback never ran). Both providers use one client
+(`_provider_client`): no ambient proxy environment, no redirects (an upload is
+never re-sent elsewhere), decoded answers capped at 32 MiB
+(`remote_parse_response_limit`). Remote parsing runs in the Kazma process
+(`DocumentService`), never in the worker; local salvage runs only in the
+worker. Transient excerpts lack durable egress scope and cannot upload remotely. The legacy
 `KAZMA_REMOTE_PARSE=0` / `KAZMA_DOCLING=0` env switches remain as an additional
-veto only — they can turn a tier off, never on.
+veto only — they can turn a tier off, never on. Gates:
+`tests/test_document_egress_hardening.py`, `tests/test_document_egress_pg.py`
+(the same rules on real Postgres metadata, jobs, audit and settings),
+`tests/test_extract_salvage.py`.
 
 ### 20. Commitment Layer (`kazma-core/kazma_core/safety/commitment/`)
 
@@ -1884,11 +2280,17 @@ The list lives in `kazma_core/db/pg_backup.py` (not here — this file will
 drift). It includes LangGraph `checkpoints*`, shared-state
 (`kazma_settings`, `kazma_chat_sessions`, `kazma_swarm_tasks`,
 `kazma_swarm_worker_metrics`, `kazma_platform_users`, `kazma_web_sessions`),
-document jobs (`document_jobs`, `document_job_events`), **and** the document
-catalog from H-13 (`documents`, `document_blobs`, `document_versions`,
-`document_artifacts`, `document_acl`, `document_tombstones`,
-`document_chunks`, `document_audit_events`). A new shared-state PG table
-MUST be added to that Python list or it silently stops being backed up.
+document jobs (`document_jobs`, `document_job_events`), document intake
+ownership and admission (`document_intake_reservations`,
+`document_intake_mutex`, §19 B2), **and** the document catalog from H-13
+(`documents`, `document_blobs`, `document_versions`, `document_artifacts`,
+`document_acl`, `document_tombstones`, `document_chunks`,
+`document_audit_events`). A new shared-state PG table MUST be added to that
+Python list or it silently stops being backed up
+(`tests/test_pg_backup.py::test_kazma_pg_tables_covers_document_ddl` reads the
+document stores' DDL). This dump does not carry the document store's content
+files; a document store on Postgres is backed up as one point in time with its
+files by `documents/backup_pg.py` (§19 F2).
 The dump is deliberately table-filtered — never a whole-DB dump — so a
 shared database neither leaks foreign-app data into Kazma's backups nor
 restores over another app's tables. `hitl_gates.db` is SQLite (single-process
@@ -1937,6 +2339,25 @@ Docker's install folders), never `shutil.which("docker")` alone
 alert carries its reason (`last_pg_backup_failure`), redacted. Putting the
 folder back on PATH then needs only `kazma_guard.py --reload`: the server
 adopts PATH entries the OS settings gained since the guard started (§38).
+
+**E3. Schema setup takes no table lock it does not need**
+(`kazma_core/db/pg_schema.py`, 2026-10-13). Postgres takes `ALTER TABLE ...
+ADD COLUMN IF NOT EXISTS`'s ACCESS EXCLUSIVE lock -- and `CREATE INDEX IF NOT
+EXISTS`'s SHARE lock -- BEFORE it looks for the column or index (measured: the
+ALTER waits behind `pg_dump`'s read locks, both wait behind any open writer).
+Every store sent them at every start, so starts deadlocked each other (a
+4-writer restore drill, in the intake store's constructor), and a start during
+a dump waited for the whole dump with every query on the table queued behind
+it -- the core schema's 5 s timeout then failed the pool. `ensure_schema`
+takes one transaction-scoped advisory lock every Kazma schema setup shares,
+and sends a `CREATE TABLE`, `CREATE INDEX` or `ADD COLUMN` only when the
+catalog says it is missing; any other `ALTER TABLE` is refused. Every
+Postgres DDL site uses it: the core schema, the swarm task store, the memory
+mirror and pgvector table, and the document jobs, catalog and intake stores.
+Gate: `tests/test_pg_schema_setup.py` (no `ADD COLUMN IF NOT EXISTS` sent
+outside it, the old shapes as control; on real Postgres each store's setup
+completes under a held dump lock and an open writer, and fresh starts at the
+same moment both succeed -- the direct statements wait and collide).
 
 **F. Universal backup — "never left anything behind"**
 (`kazma_core/backup/universal.py`). One unified backup that backs up
@@ -5401,6 +5822,8 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
 - `docs/docs/guide/document-phases.md` — Document phases 0–10 map
 - `docs/docs/security/document-security.md` — Document threat model
 - `docs/docs/ops/document-processing.md` — Document ops (metrics/GC/capacity)
+- `docs/docs/guide/document-rendering.md` — Unified document rendering (one `DocProfile` for every output format)
+- `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md` — Documents hardening tracker (F01–F10, Q01–Q05): what is implemented, with evidence, and what stays open (independent review, the 48–72 h soak, Arabic OCR); handoff `docs/plans/DOCUMENTS_INDUSTRIAL_HANDOFF_2026-10-13.md`
 - `docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md` — Document docs remediation goal
 - `docs/plans/MEMORY_REMAINING.md` — Memory done vs later backlog
 - `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
@@ -5410,7 +5833,8 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
 - `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` — Binding industrial audit (waves 0–8 shipped). Do **not** follow dump `AUDIT_DEEP_2026-09-01.md` Part 6 order.
 - `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` — Deep-structure audit (22 findings, change-impact map, CI recovery, Telegram desync §20)
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Historical production audit (2026-07-21)
-- `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report
+- `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report (historical, 2026-08-11; not a current qualification — the current state is the hardening tracker above)
+- `docs/audits/AUDIT_{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_2026-10-13.md` and their trackers `docs/plans/{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_INDUSTRIAL_HARDENING_GOAL.md` — the 2026-10-13 audits of those areas (findings, AGENTS.md claims the code does not match, staged path) and the open remediation, one tracker per area, modelled on Documents
 - `docs/plans/HITL_GATE_REGISTRY_PLAN.md` — Gate registry (P6)
 - `docs/plans/TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md` — Turn Delivery V2
 - `docs/plans/CONTEXT_INTEGRITY_HARDENING_PLAN.md` — Context integrity

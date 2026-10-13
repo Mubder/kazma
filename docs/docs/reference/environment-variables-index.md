@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**273** variables are read by the product code; **273** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**276** variables are read by the product code; **276** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -71,11 +71,14 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DISCLOSURE_KEY` | `""` | `kazma_core.config_store` | yes |
 | `KAZMA_DIVISION` | (none) | `kazma_core.division_runtime` | yes |
 | `KAZMA_DIVISION_USER` | (none) | `kazma_core.division_runtime` | yes |
-| `KAZMA_DOCKER_BIN` | (none) | `kazma_core.docker_cli` | yes |
-| `KAZMA_DOCLING` | (none) | `kazma_core.documents.extract_salvage` | yes |
+| `KAZMA_DOCKER_BIN` | `""` | `kazma_core.docker_cli`, `kazma_core.documents.worker_broker` | yes |
+| `KAZMA_DOCLING` | `"1"` | `kazma_core.documents.extract_salvage`, `kazma_core.documents.service` | yes |
 | `KAZMA_DOCUMENTS_JOBS_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
 | `KAZMA_DOCUMENTS_METADATA_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
+| `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` | (none) | `kazma_core.documents.worker_container` | yes |
+| `KAZMA_DOCUMENT_BROKER_URL` | (none) | `kazma_core.documents.worker_container` | yes |
 | `KAZMA_DOCUMENT_FONT_DIR` | `""` | `kazma_core.documents.fonts` | yes |
+| `KAZMA_DOCUMENT_WORKER_ISOLATION` | (none) | `kazma_core.documents.worker_container` | yes |
 | `KAZMA_E2B` | (none) | `kazma_core.sandbox.e2b` | yes |
 | `KAZMA_E2B_API_KEY` | (none) | `kazma_core.sandbox.e2b` | yes |
 | `KAZMA_EMBED_ALLOW_DOWNLOAD` | `""` | `kazma_core.memory.embedder` | yes |

@@ -40,7 +40,14 @@ into a Knowledge library after it reaches `ready`:
 
 Auto-index after parse is **off by default** (explicit index only). Crawl-based
 KB ingestion (this page) and document-platform indexing share library ids but
-are different intake pipelines. See [Document Intelligence](./document-intelligence.md).
+are different intake pipelines. Deleting a document takes it out of every
+library that holds it first; a library it cannot leave stops the delete, so a
+retry can finish it. The document store records what it indexed where: after a
+restore of the store, each worker start re-publishes every version the store
+records as indexed but its library no longer holds, and reports a missing
+library or manifest instead of inventing one
+(`scripts/document_pg_backup.py index` runs the same check by hand). See
+[Document Intelligence](./document-intelligence.md).
 
 ## How ingestion works
 

@@ -97,6 +97,24 @@ Put your install's own extras in the brackets: the ones `kazma update` prints un
 Or: `python -m kazma_cli update --reinstall -y` once the CLI is importable enough to run, or
 after fixing the venv with `uv pip install` as above.
 
+## Documents after an update
+
+The document tables are brought up to date when the server next starts, on
+SQLite and on Postgres. On Postgres the setup takes one advisory lock shared by
+every Kazma schema setup and sends a statement only for a table, index or
+column the catalog says is missing (`kazma_core/db/pg_schema.py`), so a start
+does not wait behind a running backup's dump or deadlock with another start.
+
+The update does **not** rebuild the document worker image. With the container
+profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container`), rebuild the image from
+`deploy/document-worker/Dockerfile` and restart `document-broker` after every
+update: the broker pins the image it started with. Until then readiness
+reports `worker_isolation.image_code_matches: false` and
+`document_worker_image_outdated` when the document code changed (the check
+covers `kazma_core/documents` only, while the image holds all of
+`kazma_core`). See
+[Document processing → Isolated document workers](./document-processing#isolated-document-workers-container-profile).
+
 ## Developer clones
 
 Use normal git on feature branches. Do not rely on hard-reset update while

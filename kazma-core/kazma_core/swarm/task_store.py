@@ -173,9 +173,11 @@ class TaskStore:
             );
             """
             try:
+                from kazma_core.db.pg_schema import ensure_schema
+
                 with pool.connection() as conn:
                     with conn.cursor() as cur:
-                        cur.execute(ddl_extra)
+                        ensure_schema(cur, ddl_extra)
                     conn.commit()
             except Exception:
                 # A column missing here fails every task write that names it.

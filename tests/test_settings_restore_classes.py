@@ -47,11 +47,14 @@ _SKIP_FILES = frozenset({
 #: ``path::function`` of a write whose key the scan cannot read -> the key
 #: patterns it writes (each must be named by a rule), or why there are none.
 DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
+    # ``mutate(name, ...)`` writes acquisition.<name> and its revision; the
+    # names are read from its callers by test_every_durable_state_name_is_declared.
     "kazma-core/kazma_core/web_acquire/durable_state.py::mutate": (
         "acquisition.origins", "acquisition.origins_revision",
         "acquisition.robots", "acquisition.robots_revision",
         "acquisition.artifacts", "acquisition.artifacts_revision",
-        "acquisition.outputs", "acquisition.outputs_revision"),
+        "acquisition.outputs", "acquisition.outputs_revision",
+        "acquisition.monitor", "acquisition.monitor_revision"),
     "kazma-core/kazma_core/web_acquire/accounting.py::_mutate": ("acquisition.allowances", "acquisition.allowances_revision"),
     "kazma-core/kazma_core/web_acquire/crawl_jobs.py::_mutate": ("acquisition.crawls", "acquisition.crawls_revision"),
     "kazma-core/kazma_core/x_api/ai_budget.py::reserve_daily": ("connectors.x.ai_usage", "connectors.x.read_usage"),
@@ -374,6 +377,65 @@ def test_every_key_the_code_writes_is_named_by_a_rule() -> None:
         "Settings writes whose key the scan cannot read; add each to DYNAMIC_WRITES "
         "with the keys it writes (or why it needs none):\n  " + "\n  ".join(undeclared)
     )
+
+
+_DURABLE_STATE = "kazma_core.web_acquire.durable_state"
+_DURABLE_STATE_SITE = "kazma-core/kazma_core/web_acquire/durable_state.py::mutate"
+
+
+def _durable_state_names(sources: dict[str, str]) -> tuple[set[str], list[str]]:
+    """The names each module passes to ``durable_state.mutate`` -- called
+    directly, ``mutate('monitor', ...)``, or handed to a runner,
+    ``call(mutate, 'artifacts', ...)`` -- and the calls whose name is not a
+    literal."""
+    names: set[str] = set()
+    unread: list[str] = []
+    for path, text in sources.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        local = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == _DURABLE_STATE
+            for alias in node.names if alias.name == "mutate"
+        }
+        if not local:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id in local:
+                name = node.args[0] if node.args else None
+            else:
+                at = next((i for i, a in enumerate(node.args)
+                           if isinstance(a, ast.Name) and a.id in local), None)
+                if at is None:
+                    continue
+                name = node.args[at + 1] if len(node.args) > at + 1 else None
+            if isinstance(name, ast.Constant) and isinstance(name.value, str):
+                names.add(name.value)
+            else:
+                unread.append(f"{path}:{node.lineno}")
+    return names, unread
+
+
+def test_every_durable_state_name_is_declared() -> None:
+    # The declaration above is kept by hand, and it missed the alert ledger:
+    # acquisition.monitor rode in every backup, unclassified (2026-10-13).
+    names, unread = _durable_state_names(_product_sources())
+    assert {"origins", "robots", "artifacts", "outputs", "monitor"} <= names  # the scan is not blind
+    assert not unread, f"durable_state.mutate calls whose name is not a literal: {unread}"
+    declared = set(DYNAMIC_WRITES[_DURABLE_STATE_SITE])
+    missing = sorted(
+        key for name in names for key in (f"acquisition.{name}", f"acquisition.{name}_revision")
+        if key not in declared
+    )
+    assert not missing, f"declare these under {_DURABLE_STATE_SITE} and give each a KEY_RULES entry: {missing}"
+    # Negative control: a planted caller with a new name is found.
+    planted = {"x.py": "from kazma_core.web_acquire.durable_state import mutate\nmutate('ghost', f)\n"}
+    assert _durable_state_names(planted) == ({"ghost"}, [])
 
 
 def test_every_declared_dynamic_write_is_real_and_named() -> None:

@@ -91,9 +91,11 @@ eval, and docs presence. **Live network / LLM rows below still need a human.**
 | D5 | Gateway: `/documents list` (or `/docs list`) | Opaque ids + titles | ☐ |
 | D6 | Agent tool `document_import` on workspace file | Returns document_id; not a path escape | ☐ |
 | D7 | `python scripts/certify_documents.py` | `overall_status` not `FAIL`; canary_ready when core parsers ready | ☐ |
-| D8 | Settings → Documents → change a limit → save → re-read | Live ConfigStore update without restart | ☐ |
+| D8 | Settings → Documents → change a limit → save → re-read | Live ConfigStore update without restart (worker concurrency, leases, retry timing, storage root and the tenant quota wait for a restart: readiness `policy.pending_restart`) | ☐ |
 | D9 | (Optional) ClamAV installed → malware_scan `on` → upload clean file | Accept; readiness `malware.available` true | ☐ |
-| D10 | (Optional) PG + `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres` | `ops/readiness` `metadata_multi_replica` true when pool up | ☐ |
+| D10 | (Optional) PG + `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres` (or `auto`/unset on a Postgres install) | `ops/readiness` `metadata_multi_replica` true when pool up | ☐ |
+| D11 | (Optional, container profile) `ops/readiness` → `worker_isolation`, then upload a PDF | `ready` and `image_code_matches` true; the broker log shows the job with `cleanup=verified` | ☐ |
+| D12 | (Optional) Verify the newest document backup (`scripts/document_pg_backup.py verify <dir>` on Postgres; `document-store-*` `manifest.json` `verification.ok` on SQLite) | Verified; no required object missing | ☐ |
 
 Guide: [Document Intelligence](../guide/document-intelligence) · [Phase map](../guide/document-phases) · [Ops](./document-processing).
 

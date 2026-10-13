@@ -87,6 +87,7 @@
             intake_max_bytes: 52428800,
             intake_max_files: 10,
             ocr_enabled: true,
+            ocr_tables: true,
             worker_timeout_seconds: 300,
             worker_memory_mb: 1024,
             capacity_storage_free_floor_bytes: 536870912,

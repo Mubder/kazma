@@ -26,10 +26,17 @@ def test_resolve_prefers_available_docx_pdf_engine() -> None:
 
 
 def test_pdf_sniff_allows_openaction_goto(tmp_path: Path) -> None:
+    from pypdf import PdfWriter
+    from pypdf.generic import ArrayObject, DictionaryObject, NameObject, NumberObject
+
     path = tmp_path / "goto.pdf"
-    path.write_bytes(
-        b"%PDF-1.7\n1 0 obj << /OpenAction << /S /GoTo /D [0 /Fit] >> >>\nendobj\n%%EOF\n"
-    )
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer._root_object[NameObject('/OpenAction')] = DictionaryObject({
+        NameObject('/S'): NameObject('/GoTo'),
+        NameObject('/D'): ArrayObject([NumberObject(0), NameObject('/Fit')]),
+    })
+    writer.write(path)
     assert _pdf_has_active_content(path) is False
     result = sniff_document(path, DocumentConfig(storage_root=tmp_path / "store"))
     assert result.mime_type == "application/pdf"

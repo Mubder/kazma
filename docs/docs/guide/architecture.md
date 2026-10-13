@@ -351,19 +351,39 @@ PRAGMA synchronous=NORMAL;     -- WAL-safe, faster than FULL
 | Hub registry | `~/.kazma/hub/registry.db` | Installed skills |
 | Vector / KB | `kazma-data/vector_memory`, `kazma_kb_*` | Isolated from chat memory |
 | Session store (gateway) | configurable | Platform ID ↔ thread_id mapping (TTL 300s — not for reminders) |
-| Document store | `{documents.storage_root}/documents.db` + CAS tree | Metadata + blobs; metadata may be Postgres when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres\|auto` |
+| Document store | `{documents.storage_root}/documents.db` + CAS tree (default root `kazma-data/document-store/`) | Catalog, jobs, intake reservations and audit + blobs and manifests. On a Postgres install the jobs and (by default, `KAZMA_DOCUMENTS_METADATA_BACKEND` unset or `auto`) the catalog are Postgres tables; the files stay on disk |
 
 ### Document Intelligence (subsystem)
 
 Durable document ingest/parse/OCR/index/generate lives under
 `kazma_core/documents/`. **Public durable boundary:** `DocumentIngestionService`
-(Web `/api/documents/*`, tools, gateway `/documents`, TUI). **Execution boundary:**
-`DocumentService` (isolated subprocess parsers). Job claiming can use Postgres
-(`jobs_pg.py`). Document **metadata** defaults to SQLite and moves to
-`repository_pg.py` when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and
-the pool is up. Readiness must report single-replica whenever the **active**
-metadata backend is SQLite — never claim HA from a path that is not in use.
-Those catalog tables are on `KAZMA_PG_TABLES` (H-13). Full guide: [Document Intelligence](./document-intelligence.md) ·
+(Web `/api/documents/*`, tools, gateway `/documents` (alias `/docs`), TUI
+through the Web API). **Execution boundary:** `DocumentService`, which parses,
+OCRs, mutates and renders in an isolated worker. Two worker profiles
+(`KAZMA_DOCUMENT_WORKER_ISOLATION`): `process` (default) is a child process
+with a scrubbed environment and memory/CPU limits, but no filesystem or
+network confinement, so readiness reports it as unqualified for hostile
+documents; `container` sends every run to a document broker that runs it in a
+fresh attested container with no network and no mounts, with no fallback to
+`process`. One PDF active-content policy refuses scripts, outside actions,
+attachments and non-web links on intake, on every edit and on every rendered
+PDF, inside the worker. Remote parsing (LlamaParse/Reducto) is off unless
+`documents.security.remote_parse` is set, and runs in the Kazma process with an
+audit row before each upload.
+
+Uploads are admitted before their body is read: a durable reservation per
+upload holds queue, tenant and rate budgets. An upload interrupted by a crash
+is rolled back; one whose owner stops renewing its lease (another host, a
+paused process) is taken over and fenced, so the owner cannot publish it
+later. Job claiming can use
+Postgres (`jobs_pg.py`). Document **metadata** follows the job backend unless
+`KAZMA_DOCUMENTS_METADATA_BACKEND` says otherwise, and moves to
+`repository_pg.py` when that is Postgres and the pool is up. Readiness must
+report single-replica whenever the **active** metadata backend is SQLite —
+never claim HA from a path that is not in use. Those tables, the intake
+reservations included, are on `KAZMA_PG_TABLES` (H-13); a Postgres document
+store is backed up with its files as one point in time (`backup_pg.py`).
+Full guide: [Document Intelligence](./document-intelligence.md) ·
 [Phase map](./document-phases.md) · [Security](../security/document-security.md).
 
 ---

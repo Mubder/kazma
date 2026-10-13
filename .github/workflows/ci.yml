@@ -171,6 +171,50 @@ jobs:
         # website gets a fresh copy daily from sync-metrics.yml.
         run: python scripts/generate_metrics.py --check-readme
 
+  document-worker-container:
+    name: Document worker container profile (real Docker)
+    runs-on: ubuntu-latest
+    # KAZMA_DOCUMENT_WORKER_ISOLATION=container: untrusted documents run in
+    # broker-owned, attested containers (no network, no mounts). Its
+    # qualification needs a real Docker engine and the real worker image,
+    # so it skips everywhere else; here a skip fails the job, because a
+    # skipped qualification proves nothing. First qualified 2026-10-13 on
+    # Docker Desktop; this job is the Linux Docker Engine run.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install deps
+        run: pip install -e ".[test]"
+      - name: Build the worker and broker images
+        run: |
+          docker version --format 'engine {{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'
+          docker build -f deploy/document-worker/Dockerfile -t kazma-document-worker:ci .
+          docker build -f deploy/document-broker/Dockerfile -t kazma-document-broker:ci .
+      - name: Attest the container policy from inside the image
+        run: |
+          python -c "import secrets; print(secrets.token_urlsafe(48))" > "$RUNNER_TEMP/broker-token"
+          python -I kazma-core/kazma_core/documents/worker_broker.py --image kazma-document-worker:ci \
+            --token-file "$RUNNER_TEMP/broker-token" --name ciattest --attest-only > "$RUNNER_TEMP/attest.json"
+          python -c "import json,sys; r=json.load(open(sys.argv[1])); print(r['verified'], r['problems'], r['image_id'])" "$RUNNER_TEMP/attest.json"
+      - name: Qualification suite (GATE, no skips)
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_document_worker_container_docker.py tests/test_document_worker_container.py \
+            tests/test_weasyprint_renderer.py -v -rs --timeout=300 -p no:cacheprovider | tee "$RUNNER_TEMP/qualification.log"
+          if grep -Eq "[0-9]+ skipped" "$RUNNER_TEMP/qualification.log"; then
+            echo "::error::a container-profile qualification test was skipped"; exit 1
+          fi
+        env:
+          KAZMA_TEST_DOCUMENT_WORKER_IMAGE: kazma-document-worker:ci
+      - name: Compose-shaped topology (broker container + socket-less client)
+        run: python scripts/document_broker_topology.py kazma-document-worker:ci kazma-document-broker:ci
+      - name: No job container is left behind
+        if: always()
+        run: test -z "$(docker ps -aq --filter label=io.kazma.document-worker)"
+
   postgres:
     name: Tests (Postgres backend)
     runs-on: ubuntu-latest
@@ -508,6 +552,14 @@ jobs:
         # same. The Arabic UI right-aligned English replies and tool output,
         # and a mostly English reply ran its Arabic paragraphs left to right.
         run: python -m pytest tests/e2e/test_text_follows_its_language.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Research completion reaches the bell and its saved result (2026-10-12)
+        # A finished research session becomes a durable bell alert in both
+        # UIs; its link opens the SAVED result (still there after a reload,
+        # not a toast), and Settings reads the monitor's settings. It ran in
+        # no job from the day it was written (found 2026-10-13).
+        run: python -m pytest tests/e2e/test_acquisition_alerts.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites

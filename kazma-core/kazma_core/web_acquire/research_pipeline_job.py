@@ -235,9 +235,12 @@ class _PipelineJob:
             raise
         except Exception as exc:
             # No arbitrary exception text (provider/file errors can hold secrets).
+            # The closure takes the name, not ``exc`` (unbound after the block).
+            error_name = type(exc).__name__
+
             def failed(row):
                 if row['effects'][key]['status'] == 'running':
-                    row['effects'][key].update(status='failed', error=type(exc).__name__)
+                    row['effects'][key].update(status='failed', error=error_name)
             await crawl_jobs.call(self.job.update, failed)
             if isinstance(exc, (AcquisitionError, TimeoutError)):
                 raise

@@ -887,6 +887,17 @@ _LOOP_STALL_HELPERS = frozenset({
     # Waits up to 45 s for a test alert's delivery ON the loop: called on the
     # loop it would wait for itself (it refuses, but no async code may try).
     "send_test_alert",
+    # Who a document surface acts as (DOC-A3): a settings read, and the
+    # operator's ACL grants (a catalog walk and writes).
+    "grant_operator_access", "operator_for",
+    # The document worker broker exchange waits for a whole container job
+    # (the worker deadline plus start and removal); the readiness report
+    # reads the broker's status over a socket.
+    "run_container_worker", "isolation_report",
+    # Document engine readiness: local binary probes (subprocess), or the
+    # broker's capability report over a socket in the container profile.
+    "get_parser_registry", "get_renderer_registry", "get_mutation_registry",
+    "get_ocr_health",
     # Two git probes of up to 4 s each plus a workspace-store read; the IDE's
     # swarm dispatch ran it on the loop until 2026-10-02.
     "_build_env_context_sync",
@@ -1123,6 +1134,15 @@ def test_loop_stall_gate_catches_the_watchdog_shape():
         "    return v2_recall(query)\n"
     )
     assert _loop_stall_helper_calls(ast.parse(aliased)) == [(3, "recall")]
+    # file_read asked the document parser registry on the loop until
+    # 2026-10-13 (local binary probes; a broker socket in the container
+    # profile); it now asks from a thread.
+    reads_a_registry = (
+        "async def file_read(path):\n"
+        "    from kazma_core.documents.registry import get_parser_registry\n"
+        "    capability = get_parser_registry().capability_for_extension(path)\n"
+    )
+    assert _loop_stall_helper_calls(ast.parse(reads_a_registry)) == [(3, "get_parser_registry")]
 
 
 def test_loop_stall_gate_follows_a_private_wrapper():

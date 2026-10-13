@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from kazma_core.documents.ingestion import SYSTEM_ACTOR
+
 #: Long enough for a parse on a loaded machine; a hung job still fails.
 PARSE_DEADLINE_S = 120.0
 
@@ -34,7 +36,9 @@ async def wait_for_job(
     deadline = loop.time() + timeout
     last = None
     while loop.time() < deadline:
-        status = await asyncio.to_thread(svc.job_status, tenant_id=tenant, job_id=job_id)
+        status = await asyncio.to_thread(
+            svc.job_status, tenant_id=tenant, job_id=job_id, actor_id=SYSTEM_ACTOR
+        )
         last = status
         if status is not None and status["state"] == expected:
             return status

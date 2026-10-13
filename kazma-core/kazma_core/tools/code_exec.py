@@ -446,6 +446,38 @@ def _assign_to_job_object(proc: Any) -> Any:
         return None
 
 
+#: The snippet starts suspended on Windows and runs once its Job Object holds
+#: it. ``sys.executable`` is the venv's launcher, which starts the real
+#: interpreter at once: a job assigned a moment late holds only the launcher
+#: (found in the document sandbox, DOC-A12, 2026-10-13).
+_CREATE_SUSPENDED = 0x4
+
+
+def _resume_process(proc: Any) -> bool:
+    """Resume a snippet started suspended; False when it could not be."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+        ntdll.NtResumeProcess.restype = wintypes.LONG
+        handle = kernel32.OpenProcess(0x0800, False, int(proc.pid))  # PROCESS_SUSPEND_RESUME
+        if not handle:
+            return False
+        try:
+            return ntdll.NtResumeProcess(handle) >= 0
+        finally:
+            kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.warning("[code_exec] could not resume the snippet: %s", exc)
+        return False
+
+
 def _format_output(exit_code: int, stdout: bytes, stderr: bytes) -> str:
     out = stdout.decode(errors="replace")
     err = stderr.decode(errors="replace")
@@ -509,13 +541,24 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
         "cwd": exec_cwd,
         "env": child_env,
     }
+    if sys.platform == "win32":
+        subprocess_kwargs["creationflags"] = _CREATE_SUSPENDED
     argv = _sandbox_argv(code_file)
+    not_started = "[Exit code: 125 — the snippet could not be started]"
     try:
         proc = await asyncio.create_subprocess_exec(*argv, **subprocess_kwargs)
 
         job_handle = None
         if sys.platform == "win32":
             job_handle = _assign_to_job_object(proc)
+            if not _resume_process(proc):
+                proc.kill()
+                await proc.wait()
+                if job_handle:
+                    import ctypes
+
+                    ctypes.windll.kernel32.CloseHandle(job_handle)
+                return not_started
 
         try:
             try:
@@ -545,6 +588,14 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
             job = None
             if sys.platform == "win32":
                 job = _assign_to_job_object(p)
+                if not _resume_process(p):
+                    p.kill()
+                    p.wait()
+                    if job:
+                        import ctypes
+
+                        ctypes.windll.kernel32.CloseHandle(job)
+                    return not_started
 
             try:
                 out, err = p.communicate(timeout=timeout)

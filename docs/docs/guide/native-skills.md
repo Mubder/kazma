@@ -91,30 +91,40 @@ See [Document Intelligence](./document-intelligence.md).
 
 | Tool | Purpose |
 |---|---|
-| `document_import` | Workspace-safe file → durable ingest + parse |
-| `document_status` | Job / document state; no ids → tenant platform overview |
-| `document_read` | Paged fenced content by opaque id |
+| `document_import` | Workspace-safe file → durable ingest + parse; waits up to 30 s for a final state and reports the state it reached |
+| `document_status` | A `job_id`'s state, or a `document_id`'s newest job; no ids → tenant platform overview |
+| `document_read` | Paged fenced content by opaque id (`page`, `offset`, `max_chars`, default 20,000) |
 | `document_index` | Publish into a Knowledge library (`library_id`) |
-| `document_search` | Search library (fenced hits) |
-| `document_cancel` | Cancel job by id |
+| `document_search` | Search library (`library_id`, `query`, `top_k`; fenced hits) |
+| `document_cancel` | Cancel job by id (**danger**: asks for approval) |
 | `document_convert` | Convert format → artifact id |
-| `document_redact` | Physical PDF redaction → new artifact |
+| `document_redact` | Physical PDF redaction → new artifact (**danger**: asks for approval) |
 
-No special `[document]` extra is required for the coordinator itself; optional
-render/redaction engines (pymupdf, WeasyPrint, LibreOffice) affect conversion
-and some PDF mutations only.
+The tools act as the install's operator, like the `/documents` chat command
+and the Web **Documents** page, so they read what was uploaded there and the
+page lists what they import (since 2026-10-13). With platform users
+(multi-user mode) they refuse. A job or document they cannot read answers
+like an unknown one.
+
+The coordinator runs on the base install (pypdf, pdfplumber, python-docx,
+openpyxl and python-pptx are base dependencies). The `[document-platform]`
+extra adds PyMuPDF (the first PDF parser, and redaction), pypdfium2, OCR
+(pytesseract, pdf2image, Pillow) and WeasyPrint (HTML/Markdown → PDF);
+Tesseract, LibreOffice and ClamAV are system packages. What is ready is live:
+`/documents health` or `GET /api/documents/health` (in the container worker
+profile, the worker image's own report).
 
 ## Document generation (`document_generator`) — simple / legacy path
 
 Create **simple** documents from structured content **without** the durable
 platform. Files land under `kazma-data/documents/`. Prefer `document_platform`
-when you need opaque IDs, ACL, jobs, or re-ingest.
+when you need opaque IDs, ACL, jobs, or re-ingest. Generation still runs in the
+isolated renderer worker (`DocumentService.generate`), and a generated PDF
+passes the same active-content check as an uploaded one before it leaves the
+worker.
 
-Requires the `[document]` extra for PDF/DOCX/XLSX:
-
-```bash
-pip install -e ".[document]"   # reportlab, python-docx, openpyxl
-```
+reportlab, python-docx and openpyxl are base dependencies, so PDF/DOCX/XLSX
+need no extra; `[document]` remains only as a compatibility alias.
 
 | Tool | Output | Library |
 |---|---|---|
@@ -130,8 +140,11 @@ pair as the web UI and the Docusaurus docs (vendored under
 `kazma_core/documents/assets/fonts/`). Coverage is verified against Arabic
 presentation forms before the face is accepted; Amiri remains a naskh
 fallback if Plex is absent. Override the directory with
-`KAZMA_DOCUMENT_FONT_DIR`. When an Arabic font is active, all styles
-(title, headings, body) use it with `TA_RIGHT` alignment.
+`KAZMA_DOCUMENT_FONT_DIR`. Direction is per paragraph, not per document: an
+Arabic paragraph is right-aligned and an English one left-aligned in the same
+file. A PDF that holds Arabic is rendered through the DOCX engine and
+LibreOffice (`soffice`) when it is installed, for real shaping and bidi;
+without LibreOffice it falls back to ReportLab and says so in a warning.
 
 ---
 

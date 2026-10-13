@@ -534,10 +534,7 @@ def import_bundle(
     # tree — into the target's document-store root (resolved AFTER config
     # import so a custom storage_root is honored). documents.db carries no
     # embedded paths, so it needs no rewrite.
-    try:
-        _restore_document_store(staging, staged_data, report, _log)
-    except Exception as exc:  # noqa: BLE001 - document restore is optional
-        report.warn(f"document store restore failed: {exc}")
+    file_failures += _restore_documents_reported(staging, staged_data, report, _log)
 
     # 9. Notify workspace root change so MCP rebinds (AGENTS.md §10A).
     if report.target_workspace_root:
@@ -759,6 +756,25 @@ def _find_env_file(data_dir: Path) -> Path | None:
     return None
 
 
+def _restore_documents_reported(
+    staging: Path, staged_data: Path, report: Any, _log: Any
+) -> list[str]:
+    """Restore the document store; what could not be restored (or ``[]``).
+
+    A document store the bundle carries and the import could not put back is
+    a failed import (DOC-A8, 2026-10-13): it was a warning, the import said
+    ok, and the target ran with its documents' files missing.
+    """
+    try:
+        _restore_document_store(staging, staged_data, report, _log)
+    except Exception as exc:  # noqa: BLE001 - reported as the import's failure
+        failure = f"document store restore failed: {exc}"
+        report.error(failure)
+        _log(f"  ✗ {failure}")
+        return ["document store"]
+    return []
+
+
 def _restore_document_store(
     staging: Path, staged_data: Path, report: Any, _log: Any
 ) -> None:
@@ -773,13 +789,21 @@ def _restore_document_store(
     staged_tree = staging / "document-store"
     if not staged_db.exists() and not staged_tree.exists():
         return
-    from kazma_core.documents.config import get_document_config
+    from kazma_core.documents.backup import UNSUPPORTED_SHAPE, installed_document_backends
+    from kazma_core.documents.config import get_document_storage_root
     from kazma_core.memory.backup import _backup_one
 
-    target_root = Path(get_document_config().storage_root)
+    # The target's catalog decides what goes where (DOC-A7): on Postgres it
+    # came with data/postgres.dump and only the content files are put back.
+    metadata, jobs = installed_document_backends()
+    if metadata == "postgres" and jobs != "postgres":
+        raise RuntimeError(UNSUPPORTED_SHAPE)
+    target_root = Path(get_document_storage_root())
     target_root.mkdir(parents=True, exist_ok=True)
 
-    if staged_db.exists():
+    if staged_db.exists() and metadata == "postgres":
+        _log("  documents.db not installed: the target's document catalog is on Postgres")
+    elif staged_db.exists():
         # Back up any existing live documents.db before overwriting.
         live_db = target_root / "documents.db"
         if live_db.exists():

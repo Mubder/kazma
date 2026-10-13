@@ -15,7 +15,9 @@ tools:
     description: >
       Ingest a workspace-safe local file into the durable document platform
       (quarantine, validate, parse out-of-process) and return its opaque
-      document_id/job_id and final state. Only files inside the active
+      document_id/job_id. Waits up to 30 seconds: the state is final if
+      processing finished by then, otherwise the reply says it is still
+      processing (follow it with document_status). Only files inside the active
       workspace are accepted; arbitrary server paths are refused.
     category: document
     prompt_chain:

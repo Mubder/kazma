@@ -253,7 +253,12 @@ def get_parser_registry() -> ParserRegistry:
     """Return a fresh live readiness snapshot.
 
     Dependency installation and system-binary changes therefore take effect
-    without restarting Kazma.
+    without restarting Kazma. In the container profile the snapshot is the
+    worker image's own report, read per lookup (``worker_container``).
     """
 
+    from .worker_container import image_parser_registry, uses_worker_image
+
+    if uses_worker_image():
+        return image_parser_registry()
     return ParserRegistry()

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import zlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +15,7 @@ from kazma_core.stores.knowledge_index import KnowledgeHit, KnowledgeIndex
 from .config import DocumentConfig
 from .indexer import chunk_document_ir
 from .models import DocumentIR, DocumentResult
+from .policy import DocumentPolicy, policy_operation
 from .repository import DocumentAccessError, DocumentRepository
 
 __all__ = [
@@ -23,6 +26,12 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: A document's publications (index, unindex, the restore reconcile) run one
+#: at a time per process, by a lock striped on (tenant, document): the
+#: reconcile re-publishes what the documents store records as searchable, and
+#: must never land between an unindex's two writes and undo it.
+_PUBLICATION_LOCKS = tuple(threading.RLock() for _ in range(64))
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,11 +95,16 @@ class DocumentKnowledgeAdapter:
         knowledge_store: KnowledgeStore,
         knowledge_index: KnowledgeIndex | None = None,
         config: DocumentConfig,
+        policy: DocumentPolicy | None = None,
     ) -> None:
         self.repository = repository
         self.store = knowledge_store
         self.index = knowledge_index or KnowledgeIndex(store=knowledge_store)
-        self.config = config
+        self._policy = policy or DocumentPolicy(config)
+
+    @property
+    def config(self) -> DocumentConfig:
+        return self._policy.current
 
     def libraries_holding(self, *, tenant_id: str, document_id: Any) -> list[str]:
         """The tenant's libraries a document is searchable in: the document
@@ -110,7 +124,27 @@ class DocumentKnowledgeAdapter:
             )
         )
 
+    @staticmethod
+    def publication_lock(tenant_id: str, document_id: Any) -> threading.RLock:
+        """The lock every publication of this document holds."""
+        key = f"{tenant_id}\x1f{document_id}".encode()
+        return _PUBLICATION_LOCKS[zlib.crc32(key) % len(_PUBLICATION_LOCKS)]
+
+    @policy_operation
     def index_document_ir(
+        self,
+        document: DocumentIR,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        library_id: str,
+    ) -> DocumentResult[DocumentIndexResult]:
+        with self.publication_lock(tenant_id, document.document_id):
+            return self._index_document_ir(
+                document, tenant_id=tenant_id, actor_id=actor_id, library_id=library_id
+            )
+
+    def _index_document_ir(
         self,
         document: DocumentIR,
         *,
@@ -236,6 +270,20 @@ class DocumentKnowledgeAdapter:
             )
 
     def unindex_document(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        library_id: str,
+        document_id: Any,
+    ) -> DocumentResult[dict[str, Any]]:
+        with self.publication_lock(tenant_id, document_id):
+            return self._unindex_document(
+                tenant_id=tenant_id, actor_id=actor_id, library_id=library_id,
+                document_id=document_id,
+            )
+
+    def _unindex_document(
         self,
         *,
         tenant_id: str,

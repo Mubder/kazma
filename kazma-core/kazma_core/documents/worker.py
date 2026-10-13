@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from . import telemetry
+from kazma_core.db.pg_helpers import store_errors
+
+from .errors import DocumentParseError, infrastructure_errors, storage_full
 from .jobs import (
     DocumentJobRecord,
     DocumentJobRepository,
@@ -271,7 +274,22 @@ class DocumentWorker:
             if job is None:
                 await self._wait_for_poll()
                 continue
-            await self._process_claimed(job, owner)
+            try:
+                await self._process_claimed(job, owner)
+            except store_errors() as exc:
+                # A store error while recording the outcome (the transition,
+                # the failure, the refresh) used to end this loop for good: a
+                # database blip silently removed a worker until restart. The
+                # job keeps its lease, which expires and is recovered exactly
+                # once; this loop carries on with other work.
+                logger.error(
+                    "Document job outcome could not be recorded worker=%s job=%s "
+                    "error_type=%s; the job resumes when its lease expires",
+                    owner,
+                    job.id,
+                    type(exc).__name__,
+                )
+                await self._wait_for_poll()
 
     async def _wait_for_poll(self) -> None:
         try:
@@ -482,8 +500,18 @@ class DocumentWorker:
 def _classify_failure(failure: Exception) -> tuple[str, str, bool]:
     if isinstance(failure, DocumentProcessingError):
         return failure.code, failure.safe_message, failure.transient
+    if isinstance(failure, DocumentParseError):
+        return failure.code, failure.safe_message, failure.retryable
     if isinstance(failure, (TimeoutError, subprocess.TimeoutExpired)):
         return "parser_timeout", "Document parser exceeded its time limit", True
+    if storage_full(failure):
+        return "storage_full", "Document storage is full", True
+    if isinstance(failure, infrastructure_errors()) and not isinstance(failure, OSError):
+        return (
+            "metadata_unavailable",
+            f"Document metadata store was unavailable ({type(failure).__name__})",
+            True,
+        )
     return (
         "worker_crash",
         f"Document stage failed unexpectedly ({type(failure).__name__})",

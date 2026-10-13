@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Documents: the documentation review's code fixes (2026-10-13)
+
+- The document worker on Windows now starts suspended and runs only once its
+  Job Object holds it. A venv's `python.exe` is a launcher, and a job assigned
+  a moment late held only the launcher: on the first run of every process the
+  parser ran with no memory, CPU or process limit while the result said the
+  limits were enforced (measured: 3.93-3.99 cores used under a one-core cap;
+  1.03-1.30 after). The CPU cap is now sized from the processor count (the old
+  value capped nothing). `python_exec`'s host mode launches the same way, and
+  a gate holds every Job Object assignment to it.
+- The Web Documents page, chat `/documents` and the agent's document tools act
+  as one principal, the install's operator, on a single-operator install: a
+  document uploaded on the page is read in chat and by the agent, and the
+  reverse. Older documents get an audited `owner` grant; ownership never
+  changes. With platform users chat and the agent refuse.
+- Every document route answers an error code with one status: writes off, a
+  required malware scanner that cannot run and no permitted worker profile are
+  503 with Retry-After everywhere (the scanner refusal now comes before the
+  upload is read). The delete route reads its body through the 2 MiB reader.
+- On Postgres the document audit is append-only (a trigger) and the retention
+  prune works there; every restore recreates the trigger's function first.
+- Backups, `kazma migrate` and restores follow where the document catalog is.
+  A SQLite catalog beside a Postgres queue is backed up (it was sent to a
+  backup that read a catalog that was not there); a Postgres catalog's files
+  now travel in a migration bundle; a failed document restore fails the
+  import; backups are renamed into place only when complete. Restoring both
+  Postgres backups into one database has a drilled order
+  (`restore --replace-document-tables`).
+- Eight document settings that nothing acted on were removed, and a gate
+  requires every remaining one to have a reader. `document_import` says when a
+  job is still processing after its 30-second wait. The coordinated backup's
+  table list is checked against the tables the store creates.
+
 ## Persistent research and crawler alerts (2026-10-12)
 
 - Add local, durable completion/result, partial/failure/interruption, stalled
