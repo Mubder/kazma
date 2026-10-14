@@ -44,6 +44,13 @@ What it runs:
   cancelled, nothing is drained, and a fire dies mid-turn or a send dies
   mid-send. One downtime is longer than the catch-up window
   (``--gap-minutes``), so jobs due in it are missed.
+* **Kills around an alert** (``--alert-kills-per-day``), alternating: Kazma
+  dies right after a change that queued an alert committed (a failed
+  fire's finish, a message ended undeliverable), before the alert is
+  raised; or right after an alert was raised, before its row is marked
+  sent. The first must still give exactly one alert; the second gives one
+  more, and the ledger records it (``alert_redelivered``) so the check can
+  tell that duplicate from any other.
 * **A dead poll loop**, once.
 
 How it checks. Ground truth comes from the harness, not the scheduler: it
@@ -56,7 +63,8 @@ platform took:
   - delivered;
   - missed, with exactly one notice;
   - failed, undeliverable or delivery-unknown, with its reason on the job
-    and exactly one alert;
+    and exactly one alert -- or two, when the ledger recorded a kill
+    between raising that alert and marking it sent;
   - or cancelled by the harness.
   Nothing is delivered twice, nothing is silently absent, and nothing fires
   at a time it was not due.
@@ -146,6 +154,8 @@ _PROGRESS_WALL_S = 60.0
 
 #: The delivery the next send serves: set when the outbox hands one out.
 _CLAIMED: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("soak_claimed", default=None)
+#: The alerts a store call queued in its transaction, while it runs.
+_QUEUED: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar("soak_queued", default=None)
 
 
 def _draw(seed: int, *parts: object) -> float:
@@ -330,15 +340,57 @@ class _Graph:
 
 
 def _observed_store_class() -> type:
-    """The real store, plus one observer: which delivery a send serves."""
+    """The real store, plus observers: which delivery a send serves, and the
+    two points where the harness kills Kazma around an alert -- after a
+    change that queued one committed, and after one was raised, before its
+    mark."""
     from kazma_core.cron.store import SQLiteCronStore
 
     class ObservedStore(SQLiteCronStore):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.soak: Soak | None = None
+            #: alert row id -> the job and key it names, as the drain read them.
+            self.alert_rows: dict[int, dict[str, str]] = {}
+
         async def claim_delivery(self, **kwargs: Any) -> dict[str, Any] | None:
             row = await super().claim_delivery(**kwargs)
             if row is not None:
                 _CLAIMED.set({k: row[k] for k in ("id", "job_id", "fire_key", "purpose", "due_at", "attempts")})
             return row
+
+        async def _enqueue_alert(self, db: Any, **kwargs: Any) -> None:
+            queued = _QUEUED.get()
+            if queued is not None:
+                queued.append({"job": kwargs.get("job_id"), "key": kwargs.get("ops_key")})
+            await super()._enqueue_alert(db, **kwargs)
+
+        async def finish_fire(self, job_id: str, **kwargs: Any) -> Any:
+            return await self._committed(super().finish_fire(job_id, **kwargs), "finish_fire")
+
+        async def finish_delivery(self, delivery_id: int, **kwargs: Any) -> Any:
+            return await self._committed(super().finish_delivery(delivery_id, **kwargs), "finish_delivery")
+
+        async def _committed(self, call: Any, where: str) -> Any:
+            token = _QUEUED.set([])
+            try:
+                result = await call
+                queued = _QUEUED.get() or []
+            finally:
+                _QUEUED.reset(token)
+            if queued and self.soak is not None:
+                await self.soak._after_alert_commit(where, queued)
+            return result
+
+        async def pending_alerts(self, **kwargs: Any) -> list[dict[str, Any]]:
+            rows = await super().pending_alerts(**kwargs)
+            self.alert_rows.update({int(r["id"]): {"job": str(r["job_id"]), "key": str(r["ops_key"])} for r in rows})
+            return rows
+
+        async def mark_alert_sent(self, alert_id: int, **kwargs: Any) -> bool:
+            if self.soak is not None:
+                await self.soak._before_alert_mark(int(alert_id), self.alert_rows.get(int(alert_id)))
+            return await super().mark_alert_sent(alert_id, **kwargs)
 
     return ObservedStore
 
@@ -411,6 +463,17 @@ class Soak:
         self.arm_turn_until: float | None = None
         self.arm_send_until: float | None = None
         self.arm_downtime = 60
+        #: A kill around an alert, armed by the plan: ``commit`` (after a
+        #: change that queued an alert committed) or ``mark`` (after an alert
+        #: was raised, before its mark). ``hung_alert`` once Kazma hangs there.
+        self.arm_alert: dict[str, Any] | None = None
+        self.hung_alert: dict[str, Any] | None = None
+        #: No kill around an alert while the harness itself starts or stops Kazma.
+        self.no_alert_kill = True
+        self.alert_kills: list[dict[str, Any]] = []
+        #: Alerts raised and not marked when Kazma was killed: each is raised
+        #: once more after the restart, the one duplicate the check allows.
+        self.alert_redelivered: list[dict[str, Any]] = []
         self.outage = 0
         self.last_event_id = 0
         self.last_claim: dict[str, float] = {}
@@ -528,6 +591,30 @@ class Soak:
             self._violate(f"delivery {did} of {claim['job_id']} reached the platform {info['accepted']} times")
         return f"sent:{target_id}"
 
+    async def _after_alert_commit(self, where: str, queued: list[dict[str, Any]]) -> None:
+        """Kazma dies after a change that queued an alert committed, before
+        the alert is raised: the restart must raise it, once."""
+        arm = self.arm_alert
+        if arm is None or arm["mode"] != "commit" or self.no_alert_kill:
+            return
+        self.arm_alert, self.hung_alert = None, arm
+        self.injected["alert_kill_after_commit"] += 1
+        self.alert_kills.append({"mode": "commit", "where": where, "alerts": queued, "at": _iso(self.clock.now())})
+        await self.clock.sleep(math.inf)  # Kazma dies here: the harness kills it at the next settle
+
+    async def _before_alert_mark(self, alert_id: int, row: dict[str, str] | None) -> None:
+        """Kazma dies after an alert was raised, before its row is marked
+        sent: the restart raises it again, and the ledger says so."""
+        arm = self.arm_alert
+        if arm is None or arm["mode"] != "mark" or self.no_alert_kill or row is None:
+            return
+        self.arm_alert, self.hung_alert = None, arm
+        self.injected["alert_kill_before_mark"] += 1
+        rec = {"row": alert_id, "job": row["job"], "key": row["key"], "at": _iso(self.clock.now())}
+        self.alert_redelivered.append(rec)
+        self.alert_kills.append({"mode": "mark", **rec})
+        await self.clock.sleep(math.inf)  # Kazma dies here: the harness kills it at the next settle
+
     def _delivery(self, did: int, **fields: Any) -> dict[str, Any]:
         info = self.deliveries.setdefault(did, {"state": "pending", "accepted": 0, "attempts": 0})
         for k, v in fields.items():
@@ -540,11 +627,14 @@ class Soak:
     async def _open(self) -> None:
         from kazma_core.cron.scheduler import CronScheduler
 
+        self.no_alert_kill = True  # the start's own drain is never where Kazma dies
         self.store = _observed_store_class()(db_path=str(self.db_path), clock=self.clock)
+        self.store.soak = self
         await self.store.init()
         self.sched = CronScheduler(store=self.store, graph_builder=self._build_graph, poll_interval=self.poll,
                                    max_concurrent=int(self.args.max_concurrent), drain_seconds=30.0)
         await self.sched.start()
+        self.no_alert_kill = False
         self.up.append([self.clock.time(), None])
         if self.observer is None:
             self.observer = sqlite3.connect(str(self.db_path), timeout=30, isolation_level=None,
@@ -562,6 +652,7 @@ class Soak:
 
     async def _stop_graceful(self) -> None:
         """``stop()``: the fires in flight finish (their turns take fake time)."""
+        self.no_alert_kill = True
         stop = asyncio.create_task(self.sched.stop())
         while not stop.done():
             await self._settle()
@@ -982,6 +1073,7 @@ class Soak:
         sched = self.sched
         previous = get_cron_scheduler()
         set_cron_scheduler(sched)
+        self.no_alert_kill = True  # the restart after it is graceful: nothing may hang
         try:
             before = check_cron()
             sched._task.cancel()
@@ -1053,6 +1145,12 @@ class Soak:
             add(self.t0 + rng.uniform(0.02, 0.95) * span, "edit", {"n": n})
         for n in range(round(a.jobs * a.cancel_share)):
             add(self.t0 + rng.uniform(0.02, 0.95) * span, "cancel", {"n": n})
+        # Kills around an alert draw from their own stream, so the plan above
+        # is the same with or without them.
+        alert_rng = random.Random(f"{self.seed}:alert-kills")
+        for n in range(round(a.days * a.alert_kills_per_day)):
+            add(self.t0 + alert_rng.uniform(0.05, 0.95) * span, "alert_kill",
+                {"mode": "commit" if n % 2 == 0 else "mark", "downtime": alert_rng.randint(30, 180)})
         heapq.heapify(events)
         return events
 
@@ -1077,17 +1175,30 @@ class Soak:
         elif kind == "outage":
             self.outage += 1 if data["on"] else -1
             self.injected["outage_windows"] += int(bool(data["on"]))
+        elif kind == "alert_kill":
+            if self.arm_alert is not None:
+                self.injected[f"alert_kill_{self.arm_alert['mode']}_not_reached"] += 1
+            self.arm_alert = {"mode": data["mode"], "until": now + 12 * 3600, "downtime": data["downtime"]}
         elif kind == "book":
             await self._book(int(data["i"]), mid_run=True)
         elif kind in ("edit", "cancel"):
             await self._edit(int(data["n"]), cancel=kind == "cancel")
 
     async def _maybe_kill(self) -> bool:
-        """An armed abrupt restart: mid-send, mid-turn, or plain when none came."""
+        """An armed abrupt restart: mid-send, around an alert, mid-turn, or
+        plain when none came."""
         now = self.clock.time()
         kind = None
+        downtime = self.arm_downtime
+        if self.arm_alert is not None and now >= self.arm_alert["until"]:
+            self.injected[f"alert_kill_{self.arm_alert['mode']}_not_reached"] += 1
+            self.arm_alert = None
         if self.hung_sends:
             kind = "abrupt_mid_send"
+        elif self.hung_alert is not None:
+            kind = ("abrupt_after_alert_commit" if self.hung_alert["mode"] == "commit"
+                    else "abrupt_before_alert_mark")
+            downtime = int(self.hung_alert["downtime"])
         elif self.arm_turn_until is not None and self.turns_in_flight:
             kind = "abrupt_mid_turn"
         elif (self.arm_turn_until is not None and now >= self.arm_turn_until) or (
@@ -1095,9 +1206,11 @@ class Soak:
             kind = "abrupt"
         if kind is None:
             return False
-        self.arm_turn_until = self.arm_send_until = None
-        self.hung_sends = 0
-        await self._restart(kind, self.arm_downtime)
+        if self.hung_alert is None:
+            self.arm_turn_until = self.arm_send_until = None
+        # One kill ends every hang: Kazma is gone whatever it was waiting on.
+        self.hung_sends, self.hung_alert = 0, None
+        await self._restart(kind, downtime)
         return True
 
     async def run(self) -> None:
@@ -1194,6 +1307,7 @@ class Soak:
             "budget": self.budget, "operator_zone": OPERATOR_ZONE, "change_at": self.change_at,
             "up": [list(u) for u in self.up], "jobs": self.jobs, "fires": self.fires, "missed": self.missed,
             "deliveries": {str(k): v for k, v in self.deliveries.items()}, "alerts": list(self.alerts),
+            "alert_redelivered": list(self.alert_redelivered),
             "visibility": self.visibility, "dead_loop": self.dead_loop,
             "dead_loop_planned": True,
         }
@@ -1236,7 +1350,8 @@ class Soak:
                 "send_attempts": self.counts["send_attempts"],
                 "accepted": sum(int(d.get("accepted") or 0) for d in self.deliveries.values()),
             },
-            "alerts": {"total": len(self.alerts), "by_key": dict(Counter(a["key"] for a in self.alerts))},
+            "alerts": {"total": len(self.alerts), "by_key": dict(Counter(a["key"] for a in self.alerts)),
+                       "kills_around_an_alert": self.alert_kills[:20]},
             "restarts": {"total": sum(self.restarts.values()), "by_kind": dict(self.restarts),
                          "gap_minutes": getattr(self, "gap_minutes", None),
                          "downtime_s_total": round(self.downtime_s, 1)},
@@ -1414,9 +1529,16 @@ def analyse(ledger: dict[str, Any], *, horizon: float | None = None) -> tuple[li
         elif state == "unknown":
             expected_alerts[(str(d.get("job")), "cron.delivery_unknown")] += 1
     observed = Counter((a["job"], a["key"]) for a in ledger["alerts"] if str(a["key"]).startswith("cron."))
-    for pair in sorted(set(expected_alerts) | set(observed)):
-        if expected_alerts[pair] != observed[pair]:
-            v.append(f"{pair[0]}: {observed[pair]} {pair[1]} alert(s), {expected_alerts[pair]} expected")
+    # The alert outbox's one duplicate: an alert raised and not marked sent
+    # when Kazma was killed is raised again after the restart. The harness
+    # records each such kill; any other extra alert, or a recorded one that
+    # was not raised again, is a violation.
+    redelivered = Counter((str(r["job"]), str(r["key"])) for r in ledger.get("alert_redelivered") or [])
+    for pair in sorted(set(expected_alerts) | set(observed) | set(redelivered)):
+        if observed[pair] != expected_alerts[pair] + redelivered[pair]:
+            again = (f" (+{redelivered[pair]} raised again after a kill between raising it and marking it sent)"
+                     if redelivered[pair] else "")
+            v.append(f"{pair[0]}: {observed[pair]} {pair[1]} alert(s), {expected_alerts[pair]} expected{again}")
     for e in ledger["visibility"]:
         if not e["ok"]:
             v.append(f"{e['job']} {e['what']}: the reason is not on the job ({e['detail']})")
@@ -1447,6 +1569,7 @@ def analyse(ledger: dict[str, Any], *, horizon: float | None = None) -> tuple[li
                        "bound_s": bound, "p95_within_bound": p95 is not None and p95 <= bound},
         "clock_change": {"zone": zone_name, "at": change, "series_across_change": crossed},
         "alerts_expected": sum(expected_alerts.values()),
+        "alerts_redelivered_after_kill": sum(redelivered.values()),
         "deliveries_in_flight_at_end": in_flight,
     })
     return v, summary
@@ -1568,6 +1691,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db-locks-per-day", type=float, default=1.0, help="cron.db write-lock holds per day")
     parser.add_argument("--db-lock-max-seconds", type=float, default=30.0,
                         help="a hold lasts until a write failed on it (the busy timeout is 5 s), at most this")
+    parser.add_argument("--alert-kills-per-day", type=float, default=1.0,
+                        help="kills right after a change that queued an alert, or between raising one and its mark")
     parser.add_argument("--settle-timeout", type=float, default=120.0, help="wall seconds a step may take")
     parser.add_argument("--seed", type=int, default=20261015)
     parser.add_argument("--data-dir", default=None, help="default: a private temporary directory")

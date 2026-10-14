@@ -16,7 +16,7 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 
 | Item | Source | What closes it | State |
 |---|---|---|---|
-| Two cron alert-loss windows | Scheduled soak | An alert outbox in the state change's own transaction, drained after commit; real-process kill regressions | In progress |
+| Two cron alert-loss windows | Scheduled soak | An alert outbox in the state change's own transaction, drained after commit; real-process kill regressions | Done: `tests/test_cron_alert_outbox.py` (real-process kills in both windows, the old order as control), AGENTS §16 E2 |
 | One snapshot step over its cap after a crash | TT-G3 soak | Insert and eviction in one transaction; the soak's allowance removed | Done: `tests/test_time_travel_capture_atomic.py` (real-process kill matrix, the old two transactions as control) |
 | AGENTS §18 B migration note | TT-09 | §18 B matches `path_rewrite` / `importer` | Done: `test_agents_18b_names_what_the_import_rewrites` |
 | Semantic routing | SW-E10, D8 | One embedding space, explicit vectors, off the loop, keyword fallback said | In progress |

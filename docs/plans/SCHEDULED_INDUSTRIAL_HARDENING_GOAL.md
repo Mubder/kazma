@@ -149,6 +149,10 @@ when its gate passes on current evidence.
      it.
    - A restart every `--restart-hours` (3): graceful, or abrupt mid-turn or
      mid-send.
+   - Kills around an alert (`--alert-kills-per-day`, 1), alternating: right
+     after a change that queued an alert committed, before the alert; or
+     right after an alert was raised, before its row was marked sent (the
+     ledger records it: `alert_redelivered`).
    - One downtime longer than the catch-up window.
    - A dead poll loop.
 
@@ -157,7 +161,8 @@ when its gate passes on current evidence.
    definition, with `timing.py` as a second opinion at booking. It checks:
    - every due occurrence ends exactly once: delivered; missed with one
      notice; failed, undeliverable or delivery-unknown, with its reason on
-     the job and exactly one alert; or cancelled;
+     the job and exactly one alert (two only where the ledger recorded a
+     kill between raising that alert and marking it sent); or cancelled;
    - nothing is delivered twice, and nothing fires at a time it was not
      due;
    - a missed occurrence was really due while the scheduler was down;
@@ -171,23 +176,56 @@ when its gate passes on current evidence.
    and a ledger is kept so `analyse` can re-check the run.
 
    *Its test:* `tests/test_scheduled_soak_harness.py`. A three-day run
-   with 240 jobs ends healthy, having done each kind of work. The report
-   is on disk while the run goes. The check reports each planted
-   violation: a message delivered twice, an occurrence that never fired,
-   and a failure with no alert.
+   with 240 jobs ends healthy, having done each kind of work, both kills
+   around an alert included. The report is on disk while the run goes. The
+   check reports each planted violation: a message delivered twice, an
+   occurrence that never fired, a failure with no alert, and an alert
+   raised twice with no kill recorded (or a recorded kill whose alert was
+   not raised again).
 
    **Still open:** the 7-day qualification run itself (D3: a separate
    machine or an agreed overnight slot).
 
-   **Found while building it, and out of the soak's reach** (two narrow
-   windows in which an alert can be lost, for the owner to decide; a crash
-   inside either loses the one alert, never the job's visible state):
-   - `_alert_failed_deliveries` marks a delivery alerted before it raises
-     the alert (at most once: a crash between the two drops it);
-   - a failed fire's alert is raised after `finish_fire` commits.
-   Closing them means an alert outbox recorded in the same transaction and
-   drained after it (at least once, so a crash can repeat an alert); the
-   soak's in-process kills land at quiet points and cannot reach either.
+   **Found while building it -- fixed 2026-10-15** (two narrow windows in
+   which a crash lost an alert, never the job's visible state):
+   - `_alert_failed_deliveries` marked a delivery alerted before it raised
+     the alert: a crash between the two dropped it;
+   - a failed fire's alert was raised after `finish_fire` committed: a crash
+     between the two dropped it.
+
+   *The fix: an alert outbox* (`cron_alerts` in cron.db, AGENTS §16 E2).
+   Each change that needs an alert writes its row in its own transaction
+   (`SQLiteCronStore._enqueue_alert` inside `finish_fire`,
+   `finish_delivery`, `recover_deliveries`; a cron.db an older build left
+   gets its unalerted failures queued when the store opens). The scheduler
+   drains it after the commit, at each poll and at start
+   (`CronScheduler._drain_alerts`, into `ops_alerts.alert`), and marks a
+   row sent only once `alert` returned. That is at least once: the only
+   duplicate is a crash between the alert and its mark. Within a process a
+   row is raised once (one pass at a time; a failed mark is retried without
+   raising again; `stop()` waits for a pass in progress). A row that cannot
+   be raised stays queued with a WARNING and a backoff;
+   `kazma_cron_alerts_pending` on /metrics, `alerts_pending` in readiness.
+   Raised rows follow the job retention.
+
+   *Evidence:* `tests/test_cron_alert_outbox.py` -- a real child process
+   killed (`os._exit`) in each window: right after the change committed
+   (a failed fire, a message ended undeliverable, a send recovered
+   unknown at boot) the alert is raised once after the restart; killed
+   after the alert and before its mark it is raised once more, then never
+   again. Negative control: the old order (alert after the fire's commit,
+   a delivery marked before its alert) in the same harness loses it. Also
+   in process: a row `ops_alerts` cannot raise stays queued with a WARNING
+   and is raised after its backoff; a refused mark is made later and never
+   raised twice (control: without that memory it is raised twice);
+   concurrent passes raise each row once (control: no pass lock); `stop()`
+   lets a pass in progress mark what it raised (control: the old stop
+   leaves it unmarked); an older build's unalerted failures are queued
+   once; retention. Class gates, each with its negative control: the cron
+   engine names `ops_alerts.alert` only in `CronScheduler._raise_alert`;
+   no `cron_alerts` row is written outside its change's transaction. The
+   soak now kills in both windows (`--alert-kills-per-day`), and its check
+   allows a second alert only where the ledger recorded the kill.
 
 ## Execution rules
 
@@ -245,6 +283,26 @@ when its gate passes on current evidence.
     time and memory.
   - **This is not the qualification run.** It shows that the harness
     works. The qualification run stays open (D3, owner).
+- 2026-10-15: The two alert-loss windows the harness found are closed by an
+  alert outbox (Stage 5, "Found while building it": AGENTS §16 E2; evidence
+  under the harness above). The soak now also kills in both windows.
+  - **A development run** of the defaults with the outbox (7 simulated
+    days, 2,000 jobs, seed 20261015) passed in 160 s of wall time:
+    - the same 5,228 due occurrences, each ended exactly once (4,932
+      delivered, 24 missed with one notice each, 188 failed, 65
+      undeliverable, 13 delivery unknown, 6 not due after their budget);
+    - 64 restarts: 28 graceful, 14 killed mid-turn, 13 killed mid-send, 4
+      killed right after a change that queued an alert committed (three
+      failed fires, one undeliverable message), 3 killed after an alert
+      was raised and before its mark, one 105-minute gap, one after the
+      dead loop;
+    - 260 alerts: the 257 the rules expect, plus exactly one more for each
+      of the 3 recorded kills between raising an alert and marking it;
+      none lost in the 4 kills after a commit;
+    - 7 lock holds (8 writes failed, 4 of them a fire's own finish); p95
+      lateness 26 s while up (bound 50 s); readiness degraded at once on
+      the dead loop; 176 series across the New York fall-back.
+  - Still not the qualification run (D3, owner).
 
 ## Start here
 

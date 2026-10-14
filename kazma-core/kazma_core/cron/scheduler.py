@@ -13,9 +13,12 @@ the scheduler stores it in cron.db and fires it at its time:
 Every fire is a leased record and ends in one transaction; every message goes
 through the delivery outbox and is retried until the platform takes it or it
 is recorded ``undeliverable`` with one alert (:mod:`kazma_core.cron.store`).
-A fire interrupted by a restart runs again within the job's catch-up window;
-one due longer ago than that is ``missed``, and its chat gets one notice
-(SCH-E04, E02, E06). Timing has one model: :mod:`kazma_core.cron.timing`.
+Every alert goes through an outbox as well: written in the transaction of the
+change that needs it, raised after the commit (:meth:`CronScheduler._drain_alerts`),
+so no crash loses one. A fire interrupted by a restart runs again within the
+job's catch-up window; one due longer ago than that is ``missed``, and its
+chat gets one notice (SCH-E04, E02, E06). Timing has one model:
+:mod:`kazma_core.cron.timing`.
 
 Usage:
     store = SQLiteCronStore()
@@ -27,12 +30,14 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import os
 import re
+import sqlite3
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar as _ContextVar
 from datetime import UTC, datetime, tzinfo
 from typing import Any
@@ -385,6 +390,14 @@ class CronScheduler:
         #: The poll loop's heartbeat (SCH-E11): wall time of the last pass.
         self.last_poll_at: float | None = None
         self.started_at: float | None = None
+        #: One alert-outbox pass at a time; stop() takes it before cancelling,
+        #: so a cancel never lands between raising an alert and marking it.
+        self._alert_lock = asyncio.Lock()
+        #: Rows raised in this process whose mark failed (a store error): the
+        #: next pass marks them and never raises them again.
+        self._alerts_raised: set[int] = set()
+        #: Alerts queued and not yet raised, as the last pass left them (readiness).
+        self.alerts_pending: int | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────
 
@@ -417,10 +430,15 @@ class CronScheduler:
         not end in time is cancelled and left ``running``, and the next start
         fires it again within its catch-up window (SCH-E04: stop() used to
         leave fires running under an agent that was then closed).
+
+        Every cancel waits for an alert-outbox pass in progress to finish: a
+        cancel between raising an alert and marking it sent would raise it
+        again at the next start.
         """
         self._running = False
         if self._task:
-            self._task.cancel()
+            async with self._no_alert_pass():
+                self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
@@ -432,10 +450,29 @@ class CronScheduler:
                 logger.warning(
                     "[CronScheduler] %d fire(s) still running after %.0fs; stopping them -- "
                     "each runs again at the next start", len(still), self._drain_seconds)
-                for t in still:
-                    t.cancel()
+                async with self._no_alert_pass():
+                    for t in still:
+                        t.cancel()
                 await asyncio.wait(still, timeout=5.0)
         logger.info("[CronScheduler] Stopped")
+
+    @contextlib.asynccontextmanager
+    async def _no_alert_pass(self, timeout: float = 10.0) -> AsyncIterator[None]:
+        """Hold the alert outbox while tasks are cancelled (a pass in progress
+        finishes first). Bounded: a pass that does not finish in *timeout* is
+        cancelled anyway, and what it raised but did not mark is raised again
+        at the next start."""
+        held = False
+        try:
+            await asyncio.wait_for(self._alert_lock.acquire(), timeout)
+            held = True
+        except TimeoutError:
+            logger.warning("[CronScheduler] an alert pass did not finish within %.0fs; stopping it anyway", timeout)
+        try:
+            yield
+        finally:
+            if held:
+                self._alert_lock.release()
 
     def active_fire_count(self) -> int:
         """Fires in flight now (``/health/activity`` and ``--when-idle``)."""
@@ -466,6 +503,9 @@ class CronScheduler:
         out += ["# HELP kazma_cron_outbox_pending Scheduled messages waiting to be sent",
                 "# TYPE kazma_cron_outbox_pending gauge",
                 f"kazma_cron_outbox_pending {await self._store.pending_delivery_count()}"]
+        out += ["# HELP kazma_cron_alerts_pending Scheduled-job alerts recorded and not yet raised",
+                "# TYPE kazma_cron_alerts_pending gauge",
+                f"kazma_cron_alerts_pending {await self._store.pending_alert_count()}"]
         age = self.liveness().get("last_poll_age_s")
         out += ["# HELP kazma_cron_poll_age_seconds Seconds since the scheduler's last poll",
                 "# TYPE kazma_cron_poll_age_seconds gauge", f"kazma_cron_poll_age_seconds {age if age is not None else -1}"]
@@ -490,7 +530,8 @@ class CronScheduler:
         else:
             state = "ok"
         return {"state": state, "last_poll_age_s": age, "stale_after_s": stale_after,
-                "fires_in_flight": self.active_fire_count(), "poll_interval_s": self._poll_interval}
+                "fires_in_flight": self.active_fire_count(), "poll_interval_s": self._poll_interval,
+                "alerts_pending": self.alerts_pending}
 
     # ── booking and the operator's actions ───────────────────────────────
 
@@ -757,7 +798,7 @@ class CronScheduler:
             self._exec_tasks.add(exec_task)
             exec_task.add_done_callback(self._exec_done(job.job_id))
         await self._drain_deliveries()
-        await self._alert_failed_deliveries()
+        await self._drain_alerts()
 
     def _exec_done(self, job_id: str) -> Callable[[asyncio.Task], None]:
         def done(t: asyncio.Task) -> None:
@@ -809,7 +850,8 @@ class CronScheduler:
         at the same occurrence and fires again -- or is recorded missed by the
         catch-up rule if that took too long. It used to be marked FAILED,
         delivered or not. A send whose sender died ends ``unknown`` with an
-        alert: it may have arrived, and it is never sent twice.
+        alert: it may have arrived, and it is never sent twice. At a start,
+        the alerts a dead process committed and never raised are raised here.
         """
         now_ts = self._clock.time()
         for job in await self._store.list_running():
@@ -831,8 +873,8 @@ class CronScheduler:
         for row in recovered:
             logger.warning("[CronScheduler] delivery %s of %s was interrupted mid-send; outcome unknown",
                            row["id"], row["job_id"])
-        if recovered:
-            await self._alert_failed_deliveries()
+        if boot or recovered:
+            await self._drain_alerts()
 
     # ── the fire ─────────────────────────────────────────────────────────
 
@@ -891,9 +933,12 @@ class CronScheduler:
                                job.job_id)
                 return
             logger.info("[cron] outcome job=%s outcome=%s status=%s", job.job_id, result.outcome, done["status"])
-            await self._alert_on_failure(current, result, done)
+            if done.get("budget_exhausted"):
+                logger.error("[CronScheduler] Recurring job %s exceeded failure budget → marked FAILED", job.job_id)
             if done.get("delivery_id"):
                 await self._drain_deliveries(only_id=done["delivery_id"])
+            # A failed fire's alert committed with its outcome; raise it now.
+            await self._drain_alerts()
         finally:
             reset_current_tenant_id(tenant_token)
             _cron_parent_ctx.reset(parent_token)
@@ -1019,23 +1064,6 @@ class CronScheduler:
             logger.debug("[CronScheduler] session lookup failed for %s", job.job_id, exc_info=True)
         return ""
 
-    async def _alert_on_failure(self, job: ScheduledJob, result: FireResult, done: dict[str, Any]) -> None:
-        if result.success:
-            return
-        from kazma_core.observability.ops_alerts import alert
-
-        # alert() reads its routing settings: off the loop (SCH-E10).
-        if done.get("budget_exhausted"):
-            await asyncio.to_thread(
-                alert, "cron.job_failed",
-                f"Scheduled job {job.job_id} failed {done.get('failures')} times in a row and stopped",
-                detail=f"{result.outcome}: {result.result_text[:200]} | Timing: {job.timing}", severity="error")
-            logger.error("[CronScheduler] Recurring job %s exceeded failure budget → marked FAILED", job.job_id)
-        elif done.get("failures") == 1 or done.get("status") == "failed":
-            await asyncio.to_thread(
-                alert, "cron.job_failure", f"Scheduled job {job.job_id} failed ({result.outcome})",
-                detail=f"{result.result_text[:200]} | Timing: {job.timing}", severity="warn")
-
     async def _record_missed(self, job: ScheduledJob, now: datetime) -> None:
         zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
         due = _parse_dt(job.next_run)
@@ -1052,12 +1080,17 @@ class CronScheduler:
             return
         logger.warning("[cron] outcome job=%s outcome=missed status=%s (due %s)", job.job_id, res["status"], when)
         if res.get("delivery_id"):
+            # A notice that cannot be delivered queues its own alert.
             await self._drain_deliveries(only_id=res["delivery_id"])
+            await self._drain_alerts()
 
     # ── the delivery outbox ──────────────────────────────────────────────
 
     async def _drain_deliveries(self, *, only_id: int | None = None, limit: int = 20) -> int:
-        """Send due deliveries; acknowledge only what a platform took."""
+        """Send due deliveries; acknowledge only what a platform took.
+
+        A message that ends undeliverable queues its alert in the same
+        transaction; the caller drains the alert outbox after this."""
         delivered = 0
         for _ in range(1 if only_id is not None else limit):
             row = await self._store.claim_delivery(owner=self._owner, delivery_id=only_id)
@@ -1074,8 +1107,6 @@ class CronScheduler:
                     "job's delivery target or re-create it from a live conversation.",
                     row["job_id"], row["body"], error or "no valid delivery target")
             logger.info("[cron] outcome job=%s outcome=delivery_%s status=-", row["job_id"], res["state"])
-        if only_id is not None:
-            await self._alert_failed_deliveries()
         return delivered
 
     async def _send(self, row: dict[str, Any]) -> tuple[bool, str]:
@@ -1100,23 +1131,76 @@ class CronScheduler:
         logger.info("[CronScheduler] delivered %s -> %s", job_id, target)
         return True, ""
 
-    async def _alert_failed_deliveries(self) -> None:
-        """One alert per delivery that ended undeliverable or unknown."""
+    # ── the alert outbox ─────────────────────────────────────────────────
+
+    async def _drain_alerts(self, *, limit: int = 50) -> int:
+        """Raise the alerts the outbox holds; mark each sent once raised.
+
+        An alert's row commits with the change that needs it (a failed fire,
+        a budget run out, a message undeliverable or unknown), so a crash
+        before this runs loses nothing: the next pass, or the next start,
+        raises it. A row is marked sent only after ``ops_alerts.alert``
+        returned: a crash between the two raises it once more at the next
+        start -- the only duplicate. Within a process a row is raised once:
+        one pass at a time (a call while a pass runs returns at once; that
+        pass, or the next poll, raises what was queued), and a row whose mark
+        failed is marked by the next pass, never raised again.
+
+        Never raises for the store: a pass the database refuses (a held
+        lock) is a WARNING, and its alerts wait for the next pass.
+        """
+        if self._alert_lock.locked():
+            return 0
+        raised = 0
+        async with self._alert_lock:
+            try:
+                for alert_id in sorted(self._alerts_raised):
+                    await self._store.mark_alert_sent(alert_id)
+                    self._alerts_raised.discard(alert_id)
+                while raised < limit:
+                    rows = [r for r in await self._store.pending_alerts(limit=limit - raised)
+                            if int(r["id"]) not in self._alerts_raised]
+                    if not rows:
+                        break
+                    progress = 0
+                    for row in rows:
+                        progress += int(await self._raise_alert(row))
+                    raised += progress
+                    if not progress:
+                        break  # every row failed: each waits out its backoff
+                self.alerts_pending = await self._store.pending_alert_count()
+            except sqlite3.Error as exc:
+                logger.warning("[CronScheduler] the alert outbox could not be read or marked (%s); its alerts "
+                               "are raised at the next pass", exc)
+        return raised
+
+    async def _raise_alert(self, row: dict[str, Any]) -> bool:
+        """Raise one queued alert, then mark it sent. False when it could not
+        be raised: it stays queued, with a WARNING, tried again after a backoff.
+
+        The one place the cron engine calls ``ops_alerts.alert`` (gate:
+        ``tests/test_cron_alert_outbox.py``).
+        """
         from kazma_core.observability.ops_alerts import alert
 
-        for row in await self._store.unalerted_failures():
-            if not await self._store.mark_alerted(int(row["id"])):
-                continue
-            if row["state"] == "unknown":
-                await asyncio.to_thread(
-                    alert, "cron.delivery_unknown",
-                    f"A scheduled message for job {row['job_id']} may not have arrived",
-                    detail="Kazma stopped while sending it; check the chat. It is not resent.", severity="warn")
-            else:
-                await asyncio.to_thread(
-                    alert, "cron.delivery_failed", f"A scheduled message for job {row['job_id']} was not delivered",
-                    detail=f"{row['purpose']}: {str(row['last_error'] or 'no delivery target')[:200]}",
-                    severity="error")
+        alert_id = int(row["id"])
+        try:
+            # alert() reads its routing settings: off the loop (SCH-E10).
+            await asyncio.to_thread(alert, str(row["ops_key"]), str(row["title"]), detail=str(row["detail"]),
+                                    severity=str(row["severity"]))
+        except (RuntimeError, OSError) as exc:
+            # ops_alerts.alert never raises (it catches everything itself);
+            # what reaches here is the hand-off to the thread (an executor
+            # shutting down). One alert that cannot be raised must not hold
+            # up the rest: it stays queued.
+            logger.warning("[CronScheduler] alert %d (%s, job %s) could not be raised; it stays queued and is "
+                           "tried again: %s", alert_id, row["ops_key"], row["job_id"], exc)
+            await self._store.alert_failed(alert_id, error=f"{type(exc).__name__}: {str(exc)[:300]}")
+            return False
+        self._alerts_raised.add(alert_id)
+        await self._store.mark_alert_sent(alert_id)
+        self._alerts_raised.discard(alert_id)
+        return True
 
 
 def _parse_dt(value: Any) -> datetime | None:

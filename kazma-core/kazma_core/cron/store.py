@@ -21,6 +21,16 @@ recorded as done. Now:
 * **Every mutation names its actor and source** (``created_by``,
   ``updated_by``, ``source``, and a ``cron_events`` row), carries a version,
   and is legal only in the states that allow it.
+* **Alerts go through an outbox too** (``cron_alerts``, 2026-10-15). A state
+  change that needs an ops alert -- a failed fire, a failure budget run out,
+  a message ended ``undeliverable`` or ``unknown`` -- writes the alert's row
+  in its own transaction (:meth:`SQLiteCronStore._enqueue_alert`); the
+  scheduler raises it after the commit and marks it sent only once
+  ``ops_alerts.alert`` returned. A crash between the commit and the alert
+  loses nothing (the next pass, or the next start, raises it); a crash
+  between the alert and its mark raises it once more. The alert used to be
+  raised after the commit, and a delivery's was marked before it was raised:
+  a crash in either window lost it (the Scheduled soak found both).
 
 The connection is autocommit (AGENTS §16C); a group of writes is one
 ``BEGIN IMMEDIATE`` through :func:`kazma_core.db.sqlite_session.write_transaction`,
@@ -262,6 +272,25 @@ _EXTRA_SCHEMA = (
         detail TEXT NOT NULL DEFAULT '{}'
     )""",
     "CREATE INDEX IF NOT EXISTS idx_cron_events_job ON cron_events(job_id, id)",
+    # The alert outbox. ``dedupe`` names the state change the row belongs to
+    # (``fire:<event id>``, ``delivery:<id>``), so a change can never queue
+    # its alert twice; ``sent_at`` stays NULL until ops_alerts.alert returned.
+    """CREATE TABLE IF NOT EXISTS cron_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dedupe TEXT NOT NULL UNIQUE,
+        job_id TEXT NOT NULL,
+        ops_key TEXT NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        severity TEXT NOT NULL DEFAULT 'warn',
+        created_at REAL NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt REAL NOT NULL DEFAULT 0,
+        last_error TEXT NOT NULL DEFAULT '',
+        sent_at REAL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_cron_alerts_pending ON cron_alerts(sent_at, next_attempt)",
+    "CREATE INDEX IF NOT EXISTS idx_cron_alerts_job ON cron_alerts(job_id)",
 )
 
 _JOB_COLUMNS = (
@@ -293,6 +322,45 @@ class FireResult:
     failure_budget: int = 3
     #: How late the fire started after its due time (metrics: p50/p95).
     lateness_s: float = 0.0
+
+
+#: Alerts handed out per drain pass, at most.
+ALERT_PASS_LIMIT = 50
+
+
+def _fire_alert(job_id: str, result: FireResult, *, timing: str, failures: int, status: str,
+                budget_exhausted: bool) -> dict[str, str] | None:
+    """The ops alert a fire's end needs, or None.
+
+    One when a run of failures starts (or a one-off fails), and one when a
+    recurring job's failure budget runs out; a success needs none. Decided
+    inside :meth:`SQLiteCronStore.finish_fire`, so the alert commits with
+    the outcome that needs it.
+    """
+    if result.success:
+        return None
+    text = (result.result_text or "")[:200]
+    if budget_exhausted:
+        return {"ops_key": "cron.job_failed",
+                "title": f"Scheduled job {job_id} failed {failures} times in a row and stopped",
+                "detail": f"{result.outcome}: {text} | Timing: {timing}", "severity": "error"}
+    if failures == 1 or status == "failed":
+        return {"ops_key": "cron.job_failure", "title": f"Scheduled job {job_id} failed ({result.outcome})",
+                "detail": f"{text} | Timing: {timing}", "severity": "warn"}
+    return None
+
+
+def _delivery_alert(delivery_id: int, job_id: str, *, state: str, purpose: str, error: str) -> dict[str, Any]:
+    """The ops alert of a message that ended ``undeliverable`` or ``unknown``."""
+    if state == "unknown":
+        alert = {"ops_key": "cron.delivery_unknown",
+                 "title": f"A scheduled message for job {job_id} may not have arrived",
+                 "detail": "Kazma stopped while sending it; check the chat. It is not resent.", "severity": "warn"}
+    else:
+        alert = {"ops_key": "cron.delivery_failed",
+                 "title": f"A scheduled message for job {job_id} was not delivered",
+                 "detail": f"{purpose}: {str(error or 'no delivery target')[:200]}", "severity": "error"}
+    return {**alert, "dedupe": f"delivery:{delivery_id}", "job_id": job_id, "delivery_id": delivery_id}
 
 
 class SQLiteCronStore:
@@ -358,7 +426,24 @@ class SQLiteCronStore:
         for statement in _EXTRA_SCHEMA:
             await self._db.execute(statement)
         await self._normalize_next_runs()
+        await self._queue_unalerted_deliveries()
         logger.info("[CronStore] Initialized at %s", self._db_path)
+
+    async def _queue_unalerted_deliveries(self) -> None:
+        """A cron.db an older build left: a message that ended undeliverable or
+        unknown and whose alert was never raised gets it queued now (that
+        build's drain raised it at its next pass; this one drains the outbox)."""
+        rows = await self._conn().execute_fetchall(
+            "SELECT id, job_id, state, purpose, last_error FROM cron_deliveries "
+            "WHERE state IN ('undeliverable', 'unknown') AND alerted = 0 ORDER BY id")
+        if not rows:
+            return
+        async with self._tx() as db:
+            for row in rows:
+                await self._enqueue_alert(db, **_delivery_alert(
+                    int(row["id"]), str(row["job_id"]), state=str(row["state"]), purpose=str(row["purpose"]),
+                    error=str(row["last_error"] or "")))
+        logger.info("[CronStore] queued the alerts of %d earlier undelivered message(s)", len(rows))
 
     async def _normalize_next_runs(self) -> None:
         """Rewrite every stored ``next_run`` in the one sortable UTC form, and
@@ -757,10 +842,16 @@ class SQLiteCronStore:
                  (result.result_text or "")[:5000], result.outcome, now_iso, failures, finished,
                  "pending" if delivery_id is not None else ("" if result.success else row["delivery_state"]),
                  job_id))
-            await self._event(db, job_id, "fire_finished", source="scheduler", detail={
+            event_id = await self._event(db, job_id, "fire_finished", source="scheduler", detail={
                 "outcome": result.outcome, "status": status, "due": due,
                 "delivery_id": delivery_id, "failures": failures,
                 "lateness_s": round(max(0.0, float(result.lateness_s or 0.0)), 1)})
+            # The failure's alert commits with the failure (it was raised
+            # after this commit, and a crash in between lost it).
+            alert = _fire_alert(job_id, result, timing=str(row["timing"]), failures=failures, status=status,
+                                budget_exhausted=budget_exhausted)
+            if alert is not None:
+                await self._enqueue_alert(db, dedupe=f"fire:{event_id}", job_id=job_id, **alert)
             return {"status": status, "delivery_id": delivery_id, "failures": failures,
                     "budget_exhausted": budget_exhausted, "next_run": norm_iso(nxt) if nxt else "",
                     "due": due, "cancelled": cancel}
@@ -876,6 +967,8 @@ class SQLiteCronStore:
                         "ELSE status END, finished_at = CASE WHEN status = 'delivering' THEN ? ELSE finished_at END, "
                         "delivery_state = 'undeliverable', delivery_error = ?, last_outcome = 'undeliverable' "
                         "WHERE job_id = ?", (self._now_iso(), error[:500], job_id))
+                    await self._enqueue_alert(db, **_delivery_alert(
+                        delivery_id, str(job_id), state="undeliverable", purpose=str(purpose), error=error[:500]))
                 else:
                     await db.execute(
                         "UPDATE cron_jobs SET delivery_state = 'retrying', delivery_error = ? WHERE job_id = ?",
@@ -907,19 +1000,62 @@ class SQLiteCronStore:
                     (self._now_iso(), row["job_id"]))
                 await self._event(db, row["job_id"], "delivery_unknown", source="scheduler",
                                   detail={"delivery_id": row["id"]})
+                await self._enqueue_alert(db, **_delivery_alert(
+                    int(row["id"]), str(row["job_id"]), state="unknown", purpose=str(row["purpose"]), error=""))
             return rows
 
-    async def unalerted_failures(self) -> list[dict[str, Any]]:
-        """Undeliverable or unknown deliveries nobody was told about yet."""
+    # ── the alert outbox ─────────────────────────────────────────────────
+
+    async def _enqueue_alert(self, db: Any, *, dedupe: str, job_id: str, ops_key: str, title: str,
+                             detail: str = "", severity: str = "warn", delivery_id: int | None = None) -> None:
+        """Queue one ops alert INSIDE the transaction of the change that needs it.
+
+        Called only within ``async with self._tx()``: the row commits with the
+        change or not at all (gate: ``tests/test_cron_alert_outbox.py``). A
+        change queues its alert once (``dedupe``). A delivery's ``alerted``
+        flag means its alert is queued.
+        """
+        await db.execute(
+            "INSERT OR IGNORE INTO cron_alerts (dedupe, job_id, ops_key, title, detail, severity, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (dedupe, job_id, ops_key, title[:500], detail[:1000], severity, self.clock.time()))
+        if delivery_id is not None:
+            await db.execute("UPDATE cron_deliveries SET alerted = 1 WHERE id = ?", (delivery_id,))
+
+    async def pending_alerts(self, *, limit: int = ALERT_PASS_LIMIT, now: float | None = None) -> list[dict[str, Any]]:
+        """Alerts queued and not yet raised, oldest first (one that failed waits out its backoff)."""
+        ts = self.clock.time() if now is None else now
         rows = await self._conn().execute_fetchall(
-            "SELECT * FROM cron_deliveries WHERE state IN ('undeliverable', 'unknown') AND alerted = 0 ORDER BY id")
+            "SELECT * FROM cron_alerts WHERE sent_at IS NULL AND next_attempt <= ? ORDER BY id LIMIT ?",
+            (ts, int(limit)))
         return [dict(r) for r in rows]
 
-    async def mark_alerted(self, delivery_id: int) -> bool:
-        """Mark one failed delivery as alerted; False if someone already did."""
+    async def mark_alert_sent(self, alert_id: int, *, now: float | None = None) -> bool:
+        """Record that ``ops_alerts.alert`` returned for this row; False if it was already."""
+        ts = self.clock.time() if now is None else now
         async with self._tx() as db:
-            cur = await db.execute("UPDATE cron_deliveries SET alerted = 1 WHERE id = ? AND alerted = 0", (delivery_id,))
+            cur = await db.execute("UPDATE cron_alerts SET sent_at = ? WHERE id = ? AND sent_at IS NULL",
+                                   (ts, int(alert_id)))
             return bool(cur.rowcount)
+
+    async def alert_failed(self, alert_id: int, *, error: str, now: float | None = None) -> None:
+        """An alert that could not be raised stays queued, tried again after a backoff."""
+        ts = self.clock.time() if now is None else now
+        async with self._tx() as db:
+            cur = await db.execute("SELECT attempts FROM cron_alerts WHERE id = ? AND sent_at IS NULL",
+                                   (int(alert_id),))
+            row = await cur.fetchone()
+            if row is None:
+                return
+            attempts = int(row["attempts"]) + 1
+            await db.execute(
+                "UPDATE cron_alerts SET attempts = ?, last_error = ?, next_attempt = ? WHERE id = ?",
+                (attempts, error[:500], ts + _delivery_backoff(attempts), int(alert_id)))
+
+    async def pending_alert_count(self) -> int:
+        """Alerts queued and not yet raised (/metrics, readiness)."""
+        rows = await self._conn().execute_fetchall("SELECT COUNT(*) AS n FROM cron_alerts WHERE sent_at IS NULL")
+        return int(rows[0]["n"]) if rows else 0
 
     async def deliveries_for(self, job_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
         """A job's deliveries, newest first (the retry history)."""
@@ -960,11 +1096,14 @@ class SQLiteCronStore:
     # ── events and retention ─────────────────────────────────────────────
 
     async def _event(self, db: Any, job_id: str, event: str, *, actor: str = "", source: str = "",
-                     detail: dict[str, Any] | None = None) -> None:
-        await db.execute(
+                     detail: dict[str, Any] | None = None) -> int:
+        """Append one history row inside the caller's transaction; its id
+        (never reused: AUTOINCREMENT) names the change, e.g. for its alert."""
+        cur = await db.execute(
             "INSERT INTO cron_events (job_id, at, event, actor, source, detail) VALUES (?, ?, ?, ?, ?, ?)",
             (job_id, self.clock.time(), event, actor or "", source or "",
              json.dumps(detail or {}, ensure_ascii=False, default=str)))
+        return int(cur.lastrowid or 0)
 
     async def record_event(self, job_id: str, event: str, *, actor: str = "", source: str = "",
                            detail: dict[str, Any] | None = None) -> None:
@@ -985,7 +1124,9 @@ class SQLiteCronStore:
         that failed today was erased at the next purge, with its failure. A
         recurring job is a finished job only once it ended; its last outcome
         stays on its row. Delivered outbox rows and events go with their job,
-        and delivered rows of live jobs past the window go too. Returns the
+        and delivered rows of live jobs past the window go too. Alerts follow
+        the same window once raised; one not yet raised is kept whatever its
+        age (it is the record that someone still has to be told). Returns the
         number of jobs deleted.
         """
         if self._db is None:
@@ -1004,10 +1145,13 @@ class SQLiteCronStore:
             for job_id in doomed:
                 await db.execute("DELETE FROM cron_deliveries WHERE job_id = ?", (job_id,))
                 await db.execute("DELETE FROM cron_events WHERE job_id = ?", (job_id,))
+                await db.execute("DELETE FROM cron_alerts WHERE job_id = ? AND sent_at IS NOT NULL", (job_id,))
                 await db.execute("DELETE FROM cron_jobs WHERE job_id = ?", (job_id,))
             await db.execute(
                 "DELETE FROM cron_deliveries WHERE state IN ('delivered', 'cancelled') AND finished_at < ?",
                 (cutoff_dt.timestamp(),))
+            await db.execute("DELETE FROM cron_alerts WHERE sent_at IS NOT NULL AND sent_at < ?",
+                             (cutoff_dt.timestamp(),))
         if doomed:
             logger.info("[CronStore] Purged %d old finished job row(s)", len(doomed))
         return len(doomed)

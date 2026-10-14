@@ -2050,6 +2050,31 @@ sender died mid-send ends `unknown` (`delivery_unknown` on the job, alert
 daily digest show the outcome. Gate: `tests/test_cron_delivery_outbox.py`
 (the old deliver-then-finalize order is the negative control).
 
+**E2. Alerts go through an outbox too** (2026-10-15, found by the Stage 5
+soak). A change that needs an ops alert writes its `cron_alerts` row in its
+OWN transaction (`SQLiteCronStore._enqueue_alert`, called only inside
+`self._tx()`): a failed fire or a budget run out in `finish_fire`
+(`cron.job_failure` / `cron.job_failed`), a message ended undeliverable in
+`finish_delivery` (`cron.delivery_failed`), a send recovered `unknown` in
+`recover_deliveries` (`cron.delivery_unknown`). The scheduler drains it after
+the commit -- after a fire, after a delivery pass, at each poll and at start
+(`CronScheduler._drain_alerts`) -- into `ops_alerts.alert` (§33: no fourth
+notifier), and marks a row sent only after `alert` returned. A crash after the
+commit loses nothing; a crash between the alert and its mark raises it once
+more, the only duplicate. One pass at a time, a row whose mark failed is
+marked next pass without being raised again, and `stop()` waits for a pass in
+progress before it cancels. A row `ops_alerts` cannot raise stays queued with
+a WARNING and a backoff (`kazma_cron_alerts_pending` on /metrics,
+`alerts_pending` in readiness). Raised rows follow the job retention; one not
+yet raised is kept. A missed occurrence alerts only through its notice's
+delivery. Until then a delivery's alert was marked before it was raised and a
+fire's was raised after its commit: a crash in either window lost it. Gate:
+`tests/test_cron_alert_outbox.py` (a real child killed in each window of each
+gap, the old order as the negative control; the cron engine names
+`ops_alerts.alert` only in `CronScheduler._raise_alert`; no alert row outside
+its change's transaction). The soak kills in both windows and counts the
+recorded duplicates (`scripts/scheduled_soak.py`, `alert_redelivered`).
+
 **F. Missed is missed** (SCH-E06). A job due longer ago than its catch-up
 window does not run. The window is `cron.catchup_minutes` (default 60), or
 `KAZMA_CRON_STALE_HOURS` when that is unset; a window given at booking wins

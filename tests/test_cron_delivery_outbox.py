@@ -64,7 +64,7 @@ async def _setup(tmp_path, *, kind="task", target="telegram:42"):
 async def _drain(sched, n=10):
     for _ in range(n):
         await sched._drain_deliveries()
-        await sched._alert_failed_deliveries()
+        await sched._drain_alerts()
 
 
 async def test_a_refused_delivery_is_retried_then_undeliverable_with_one_alert(tmp_path, capture):

@@ -11,8 +11,10 @@ in three ways.
   York clock change crossed, and a dead loop seen by readiness.
 * The report is on disk, whole, while the run goes.
 * The run's own check reports a planted violation: a message delivered
-  twice, an occurrence that never fired and was not recorded missed, and a
-  non-delivered job nobody was told about. These are the negative controls.
+  twice, an occurrence that never fired and was not recorded missed, a
+  non-delivered job nobody was told about, and an alert raised twice with no
+  kill recorded between raising it and marking it sent (or a recorded one
+  that was not raised again). These are the negative controls.
 """
 
 from __future__ import annotations
@@ -99,12 +101,18 @@ def test_the_run_did_the_work_it_reports(run):
     alerts = report["alerts"]["by_key"]
     for key in ("cron.job_failure", "cron.job_failed", "cron.delivery_failed", "cron.delivery_unknown"):
         assert alerts.get(key), (key, alerts)
-    assert report["alerts"]["total"] == report["alerts_expected"]
+    # Killed around an alert both ways: after the change that queued it
+    # committed (still exactly one), and after it was raised, before its mark
+    # (raised once more, recorded): the only duplicates, and each was raised.
+    assert injected.get("alert_kill_after_commit") and injected.get("alert_kill_before_mark"), injected
+    assert report["alerts_redelivered_after_kill"] == len(ledger["alert_redelivered"]) >= 1
+    assert report["alerts"]["total"] == report["alerts_expected"] + report["alerts_redelivered_after_kill"]
     # A broken series ran out of its failure budget and stopped, with its alert.
     assert any(f["status"] == "failed" and f["failures"] >= ledger["budget"] for f in ledger["fires"])
     # Restarts of every kind, and the long downtime missed jobs with one notice each.
     restarts = report["restarts"]["by_kind"]
-    for kind in ("graceful", "abrupt_mid_turn", "abrupt_mid_send", "gap", "after_dead_loop"):
+    for kind in ("graceful", "abrupt_mid_turn", "abrupt_mid_send", "abrupt_after_alert_commit",
+                 "abrupt_before_alert_mark", "gap", "after_dead_loop"):
         assert restarts.get(kind), (kind, restarts)
     assert report["fires"]["run_again_after_interruption"] >= 1
     assert ledger["missed"]
@@ -167,3 +175,22 @@ def test_the_check_sees_a_failure_nobody_was_told_about(run):
         planted["alerts"].remove(alert)
         problems, _ = scheduled_soak.analyse(planted)
         assert any(alert["job"] in p and key in p and "expected" in p for p in problems), (key, problems)
+
+
+def test_the_check_tells_a_recorded_redelivery_from_any_other_duplicate(run):
+    """Negative controls: an alert raised twice with no kill recorded is a
+    violation; so is a recorded kill whose alert was not raised again."""
+    _, _, ledger = run
+    planted = copy.deepcopy(ledger)
+    alert = next(a for a in planted["alerts"] if a["key"] == "cron.delivery_failed"
+                 and not any(r["job"] == a["job"] for r in planted["alert_redelivered"]))
+    planted["alerts"].append(dict(alert))
+    problems, _ = scheduled_soak.analyse(planted)
+    assert any(alert["job"] in p and "cron.delivery_failed alert(s)" in p and "expected" in p
+               and "raised again" not in p for p in problems), problems
+    # Recorded, so allowed -- but only when the second alert was raised.
+    planted["alert_redelivered"].append({"row": 0, "job": alert["job"], "key": alert["key"], "at": ""})
+    assert scheduled_soak.analyse(planted)[0] == []
+    planted["alerts"].remove(alert)
+    problems, _ = scheduled_soak.analyse(planted)
+    assert any(alert["job"] in p and "raised again after a kill" in p for p in problems), problems

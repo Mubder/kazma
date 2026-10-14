@@ -47,6 +47,12 @@
 - A Time Travel step and the eviction that keeps its chat within budget are
   written in one transaction: a crash between the two used to leave a turn
   one step over its cap until it was captured again.
+- No scheduler alert is lost to a crash. A failed task, an undeliverable
+  message or a send of unknown outcome now queues its alert in the same
+  database step that records the failure, and the scheduler raises it after
+  that step (and at every start); a crash right after the step used to lose
+  it. A crash between raising and recording can repeat one alert, never
+  lose it.
 - Knowledge Library scale and soak harness (`scripts/knowledge_soak.py`,
   tracker row KB-Q01): `scale` measures ingest, keyword, meaning and hybrid
   search, the repair sweep, library delete and the re-embed time after a
