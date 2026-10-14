@@ -41,10 +41,13 @@ A cycle (the child):
   while (``locked``), every statement failing (``io_error``), the file not a
   database (``unreadable``), a restore while a turn runs
   (``restore_running``), a restore of a cut step (``restore_cut``), a restore
-  while an approval waits (``restore_pending``), and a kill mid-capture: the
-  process exits right after a step's insert (``after_insert``), inside the
-  eviction transaction (``mid_evict``), or the parent kills it at a seeded
-  moment of the mission (``hard``; the moment lands where it lands);
+  while an approval waits (``restore_pending``), and a kill mid-capture. A
+  capture writes its step and its eviction in one transaction
+  (``enforce_bounds(insert=True)``); the process exits inside it, right after
+  the step's INSERT (``after_insert``) or inside the eviction
+  (``mid_evict``), having recorded the step in flight, or the parent kills it
+  at a seeded moment of the mission (``hard``; the moment lands where it
+  lands);
 * runs maintenance on its cadence (``maintain_snapshots``: the prune, and
   VACUUM only past its threshold) every ``--maintain-every`` cycles (the
   product's cadence is daily).
@@ -56,9 +59,12 @@ plan of every cycle is a function of ``--seed``.
 Checked after every cycle, from the stores: ``PRAGMA integrity_check``; every
 step's bytes as recorded and within the per-step ceiling, cut steps marked and
 only cut steps; rows within every cap (per turn, per chat, install total) and
-bytes within every budget (per chat, total) -- after a kill, the one step in
-flight may stand over until the next cycle continues its turn (the insert and
-the eviction are two transactions); the database file within its bound (the
+bytes within every budget (per chat, total), right after a kill too (a kill
+stores a step with its eviction or not at all: one step over a cap is a
+violation); after an ``after_insert`` or ``mid_evict`` kill, the kill inside
+the step's transaction and the step in flight not in the store (the two
+transactions this replaced left it there, one over its turn's cap); the
+database file within its bound (the
 budgets plus page overhead: SQLite reuses freed pages, so the file grows only
 to the peak live size) and the WAL within its own (VACUUM writes the whole
 database through it); after maintenance, no step older than the retention,
@@ -84,8 +90,9 @@ declared budgets beside the observed peaks (rows, bytes, file and WAL size,
 RSS), captures by result, operations by kind with their outcomes and latency
 summaries, each fault kind with how each one ended, maintenance runs and
 VACUUMs (each one's file and WAL sizes before and after, the recorder's
-connection still open as on a server, and what it reported reclaimed), kills,
-cycles and wall time, and the
+connection still open as on a server, and what it reported reclaimed), kills
+and the kills inside a step's transaction checked to have stored nothing of
+it (``kill_checks``), cycles and wall time, and the
 peak size of the run's other stores (checkpoints, transcripts, memory: the
 harness's footprint, not a Time Travel budget). The parent's own record of the run
 (chats cleared, steps deleted, the checkpoint digests to check next) is
@@ -790,7 +797,8 @@ class _Cycle:
 
     async def resume(self) -> None:
         """Continue the mission turn a kill cut short: the same turn, from
-        the step after the last one stored (its eviction runs again)."""
+        the step after the last one stored (a step the kill caught inside its
+        transaction was not stored, so it is captured again)."""
         r = self.plan.get("resume")
         if not r:
             return
@@ -1281,7 +1289,7 @@ class _Cycle:
                                "kill": kill.get("mode")}
         self.save()
         if kill.get("mode") in ("after_insert", "mid_evict"):
-            self._die_at(kill["mode"], int(kill["at_capture"]))
+            self._die_at(kill["mode"], int(kill["at_capture"]), Path(kill["record_file"]))
         marker = Path(m["marker"])
         marker.write_text("started", encoding="utf-8")
         t0 = time.perf_counter()
@@ -1290,33 +1298,40 @@ class _Cycle:
         marker.unlink(missing_ok=True)
         self.out["mission"]["seconds"] = round(time.perf_counter() - t0, 2)
 
-    def _die_at(self, mode: str, at: int) -> None:
-        """Exit the process at the *at*-th capture of the mission: right after
-        its insert committed (``after_insert``), or inside its eviction
-        transaction, before the commit (``mid_evict``)."""
+    def _die_at(self, mode: str, at: int, record_file: Path) -> None:
+        """Exit the process at the *at*-th capture of the mission, inside the
+        one write transaction that stores the step and its eviction: right
+        after the step's INSERT (``after_insert``), or inside its eviction
+        (``mid_evict``), before the COMMIT either way. It first writes to
+        *record_file* the step in flight and whether a transaction was open,
+        for the parent to check that nothing of the step was stored."""
         from kazma_core import time_travel
 
         cls = time_travel.SnapshotStore
-        real_save, real_trim = cls.save, cls._trim_bytes
-        saves = [0]
+        real_insert, real_trim = cls._insert, cls._trim_bytes
+        inserts = [0]
+        flight: dict[str, Any] = {"mode": mode}
 
-        def die() -> None:
+        def die(store: Any) -> None:
+            flight["in_transaction"] = bool(store._conn.in_transaction)
+            record_file.write_text(json.dumps(flight), encoding="utf-8")
             sys.stdout.flush()
             os._exit(_KILLED)
 
-        def save(store: Any, record: Any) -> None:
-            real_save(store, record)
-            saves[0] += 1
-            if mode == "after_insert" and saves[0] >= at:
-                die()
+        def insert(store: Any, record: Any) -> None:
+            real_insert(store, record)
+            inserts[0] += 1
+            flight.update(id=record.id, iteration=record.iteration, capture=inserts[0])
+            if mode == "after_insert" and inserts[0] >= at:
+                die(store)
 
         def trim(store: Any, *a: Any, **k: Any) -> int:
             n = real_trim(store, *a, **k)
-            if saves[0] >= at:
-                die()
+            if inserts[0] >= at:
+                die(store)
             return n
 
-        cls.save = save  # type: ignore[method-assign]
+        cls._insert = insert  # type: ignore[method-assign]
         if mode == "mid_evict":
             cls._trim_bytes = trim  # type: ignore[method-assign]
 
@@ -1388,8 +1403,8 @@ class _Latency:
 def _file_bounds(limits: dict[str, int], page_size: int = 4096) -> dict[str, int]:
     """The database and WAL file bounds the budgets imply.
 
-    Stored bytes are at most the install budget plus the one step written
-    before its eviction runs. SQLite allocates from its free pages before it
+    Stored bytes are at most the install budget plus the one step a capture
+    inserts before its eviction, in the same transaction, frees pages. SQLite allocates from its free pages before it
     grows the file, so the file is never larger than the most pages ever live:
     the stored bytes on overflow pages (4 bytes of each page are its link),
     plus for each row at most three more pages (its cell and the partial last
@@ -1435,10 +1450,11 @@ def _store_facts(data_dir: Path) -> dict[str, Any]:
 
 
 def _judge(facts: dict[str, Any], state: dict[str, Any], cutoff: str | None = None) -> list[str]:
-    """The invariants, from the store's facts and the parent's record."""
+    """The invariants, from the store's facts and the parent's record. Every
+    cap holds right after a kill too: a step and its eviction are one
+    transaction (an ``allow`` an older run's record carries is ignored)."""
     limits = state["limits"]
     bounds = state["bounds"]
-    allow = state.get("allow") or {}
     problems: list[str] = []
     if facts["integrity"] != "ok":
         problems.append(f"integrity: {facts['integrity']}")
@@ -1458,22 +1474,18 @@ def _judge(facts: dict[str, Any], state: dict[str, Any], cutoff: str | None = No
         per_turn[(r["thread"], r["turn_key"])] += 1
         rows_of[r["thread"]] += 1
         bytes_of[r["thread"]] += r["length"]
-    over_turn = 1 if allow else 0
     for (thread, turn_key), n in per_turn.items():
-        cap = limits["max_per_turn"] + (over_turn if (thread, turn_key) == (allow.get("thread"), allow.get("turn_key"))
-                                        else 0)
-        if n > cap:
+        if n > limits["max_per_turn"]:
             problems.append(f"cap: turn {turn_key} of {thread} holds {n} steps (max {limits['max_per_turn']})")
     for thread, n in rows_of.items():
-        mine = thread == allow.get("thread")
-        if n > limits["max_snapshots"] + (1 if mine else 0):
+        if n > limits["max_snapshots"]:
             problems.append(f"cap: chat {thread} holds {n} steps (max {limits['max_snapshots']})")
-        if bytes_of[thread] > limits["max_thread_bytes"] + (limits["max_snapshot_bytes"] if mine else 0):
+        if bytes_of[thread] > limits["max_thread_bytes"]:
             problems.append(f"cap: chat {thread} holds {bytes_of[thread]} bytes (max {limits['max_thread_bytes']})")
     total_rows, total_bytes = len(facts["rows"]), sum(bytes_of.values())
-    if total_rows > limits["max_global_snapshots"] + over_turn:
+    if total_rows > limits["max_global_snapshots"]:
         problems.append(f"cap: the install holds {total_rows} steps (max {limits['max_global_snapshots']})")
-    if total_bytes > limits["max_total_bytes"] + (limits["max_snapshot_bytes"] if allow else 0):
+    if total_bytes > limits["max_total_bytes"]:
         problems.append(f"cap: the install holds {total_bytes} bytes (max {limits['max_total_bytes']})")
     retired = set(state["retired"])
     for thread in sorted(set(rows_of) & retired):
@@ -1500,6 +1512,23 @@ def _judge(facts: dict[str, Any], state: dict[str, Any], cutoff: str | None = No
 def _check(data_dir: Path, state: dict[str, Any], cutoff: str | None = None) -> list[str]:
     """The invariants, read from the store (the parent runs this after every cycle)."""
     return _judge(_store_facts(data_dir), state, cutoff)
+
+
+def _kill_problems(facts: dict[str, Any], flight: dict[str, Any] | None, mode: str) -> list[str]:
+    """After an ``after_insert`` or ``mid_evict`` kill: the child's record of
+    the step in flight (``_Cycle._die_at``) says the kill landed inside the
+    step's write transaction, and the store does not hold the step. With the
+    insert committed on its own (before TT-G3's fix) the step stood in the
+    store, one over its turn's cap."""
+    if not flight or not flight.get("id"):
+        return [f"kill: the {mode} kill left no record of the step in flight"]
+    problems = []
+    if flight.get("in_transaction") is not True:
+        problems.append(f"kill: the {mode} kill of step {flight['id']} landed outside its write transaction")
+    if any(r["id"] == flight["id"] for r in facts["rows"]):
+        problems.append(f"kill: step {flight['id']} (iteration {flight.get('iteration')}) was in flight at the "
+                        f"{mode} kill and is in the store")
+    return problems
 
 
 def _mission_progress(data_dir: Path, thread: str, turn_key: str) -> int:
@@ -1564,7 +1593,8 @@ def _plan(cycle: int, rng: random.Random, args: argparse.Namespace, state: dict[
         }
         if kill:
             plan["kill"] = {"mode": kill, "at_capture": rng.randint(1, max(1, _captures_of(iterations))),
-                            "delay": round(rng.uniform(0.05, 0.6), 3)}
+                            "delay": round(rng.uniform(0.05, 0.6), 3),
+                            "record_file": str(soak_dir / f"kill-{cycle}.json")}
     return plan
 
 
@@ -1631,7 +1661,7 @@ class _Run:
         self.env = _env(data_dir)
         self.started = time.monotonic()
         self.state: dict[str, Any] = {"pool": [], "transients": [], "retired": [], "gone": [], "present": [],
-                                      "digests": {}, "resume": None, "allow": None, "limits": None, "bounds": None}
+                                      "digests": {}, "resume": None, "limits": None, "bounds": None}
         self.gone: OrderedDict[str, None] = OrderedDict()
         self.ops: dict[str, _Latency] = {}
         self.outcomes: dict[str, Counter[str]] = {}
@@ -1639,12 +1669,13 @@ class _Run:
         self.capture = _Latency(args.seed ^ 0xC0)
         self.capture_results: Counter[str] = Counter()
         self.kills: Counter[str] = Counter()
+        #: Kills inside a step's transaction checked to have stored nothing of it.
+        self.kill_checks: Counter[str] = Counter()
         self.chats: Counter[str] = Counter()
         self.maintenance: dict[str, Any] = {"runs": 0, "vacuums": 0, "pruned_rows": 0, "last": None,
                                             "wal_after_vacuum_bytes": 0}
         self.missions: Counter[str] = Counter()
         self.peaks: dict[str, Any] = {}
-        self.kill_peaks: dict[str, Any] = {}
         self.other_stores: dict[str, Any] = {}
         self.violations: list[str] = []
         self.cycles = 0
@@ -1695,20 +1726,29 @@ class _Run:
             self.state["digests"] = {}
         mission = plan.get("mission")
         if killed and mission:
-            self.state["allow"] = {"thread": mission["thread"], "turn_key": mission["turn_key"]}
             done = _mission_progress(self.data_dir, mission["thread"], mission["turn_key"])
             self.state["resume"] = {**{k: mission[k] for k in ("thread", "turn_key", "question", "iterations",
                                                                 "chunk")},
                                     "start": min(done + 1, mission["iterations"]) if done else 1}
         else:
-            self.state["allow"] = None
             self.state["resume"] = None
+        kill = plan.get("kill") or {}
+        record_file = Path(kill["record_file"]) if kill.get("record_file") else None
+        flight = None
+        if record_file is not None and record_file.exists():
+            flight = json.loads(record_file.read_text(encoding="utf-8"))
+            record_file.unlink(missing_ok=True)
         if self.state["limits"] is None:
             problems.append(f"cycle {c}: the child reported no budgets")
             return problems
         maint = res.get("maintenance") or {}
         facts = _store_facts(self.data_dir)
         problems += [f"cycle {c}: {p}" for p in _judge(facts, self.state, maint.get("cutoff"))]
+        if kill.get("mode") in ("after_insert", "mid_evict") and run["rc"] == _KILLED:
+            found = _kill_problems(facts, flight, kill["mode"])
+            problems += [f"cycle {c}: {p}" for p in found]
+            if not found:
+                self.kill_checks["in_flight_not_stored"] += 1
         # The WAL right after maintenance: the child closes its connections
         # before this check, and the last one to close deletes the WAL, so a
         # VACUUM's WAL is only seen there.
@@ -1787,14 +1827,13 @@ class _Run:
         for r in rows:
             per_thread_b[r["thread"]] += r["length"]
         stored = sum(per_thread_b.values())
-        # Right after a kill the step in flight may stand over a cap until
-        # its turn continues: those counts are kept apart from the peaks.
-        into = self.kill_peaks if self.state.get("allow") else None
-        self._peak("rows_total", len(rows), into)
-        self._peak("rows_per_chat", max(per_thread_n.values(), default=0), into)
-        self._peak("rows_per_turn", max(per_turn.values(), default=0), into)
-        self._peak("stored_bytes_total", stored, into)
-        self._peak("stored_bytes_per_chat", max(per_thread_b.values(), default=0), into)
+        # Right after a kill too: a step is stored with its eviction or not
+        # at all, so these peaks are the run's whole.
+        self._peak("rows_total", len(rows))
+        self._peak("rows_per_chat", max(per_thread_n.values(), default=0))
+        self._peak("rows_per_turn", max(per_turn.values(), default=0))
+        self._peak("stored_bytes_total", stored)
+        self._peak("stored_bytes_per_chat", max(per_thread_b.values(), default=0))
         self._peak("step_bytes", max((r["length"] for r in rows), default=0))
         self._peak("db_file_bytes", facts["db_bytes"])
         self._peak("wal_file_bytes", facts["wal_bytes"])
@@ -1835,13 +1874,14 @@ class _Run:
             "updated_at": utc_stamp(), "seconds": round(time.monotonic() - self.started, 1), "cycles": self.cycles,
             "seed": self.args.seed, "data_dir": str(self.data_dir),
             "options": {k: v for k, v in vars(self.args).items() if k not in ("child", "report")},
-            "budgets": budgets, "peaks": dict(self.peaks), "peaks_right_after_a_kill": dict(self.kill_peaks),
+            "budgets": budgets, "peaks": dict(self.peaks),
             # The run's other stores (checkpoints, transcripts, memory, audit):
             # what the harness leaves on disk, not a Time Travel budget.
             "other_stores_peak_bytes": dict(sorted(self.other_stores.items())),
             "end": dict(self.end),
             "captures": {**dict(self.capture_results), "latency_ms": self.capture.summary()},
-            "missions": dict(self.missions), "kills": dict(self.kills), "chats": dict(self.chats),
+            "missions": dict(self.missions), "kills": dict(self.kills), "kill_checks": dict(self.kill_checks),
+            "chats": dict(self.chats),
             "operations": {k: {"n": self.ops[k].n, "outcomes": dict(self.outcomes.get(k) or {}),
                                "latency_ms": self.ops[k].summary()} for k in sorted(self.ops)},
             "faults": {k: {"injected": v["injected"], "endings": dict(v["endings"])}

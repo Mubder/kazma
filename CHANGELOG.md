@@ -44,6 +44,9 @@
   the size of the rewritten file, so the disk use rose while the clean-up
   reported space reclaimed. It now truncates that log after the VACUUM, and
   reports the sizes of the file and its log together.
+- A Time Travel step and the eviction that keeps its chat within budget are
+  written in one transaction: a crash between the two used to leave a turn
+  one step over its cap until it was captured again.
 - Knowledge Library scale and soak harness (`scripts/knowledge_soak.py`,
   tracker row KB-Q01): `scale` measures ingest, keyword, meaning and hybrid
   search, the repair sweep, library delete and the re-embed time after a

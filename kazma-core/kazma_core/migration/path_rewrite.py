@@ -2,9 +2,10 @@
 
 On export, Kazma captures the source machine's workspace root and data dir
 into ``pathmap.json``. On import, this module rewrites every embedded
-absolute path (in ``workspaces.root_path``, ``chat_sessions.messages``,
-memory episodes, cron prompts, config) to the
-target machine's equivalent — across OS path-separator conventions
+absolute path in the columns the importer names
+(``importer._PATH_REWRITE_TARGETS``: ``workspaces.root_path``, chat
+history, memory, cron prompts, artifacts, task ledgers) to the target
+machine's equivalent — across OS path-separator conventions
 (``/home/user/kazma`` ↔ ``C:\\Users\\user\\kazma``).
 
 This is the single place path-translation logic lives. Three design points:
@@ -232,7 +233,7 @@ def rewrite_paths_in_sqlite(
             value differs.
         path_map: the substitution map.
         progress: optional callback ``(done, total)`` for the slow tables
-            (snapshots.db can be 304 MB / thousands of rows).
+            (chat history and memory can hold thousands of large rows).
         progress_every: invoke the progress callback every N rows.
 
     Returns:

@@ -8,8 +8,10 @@ Entry point: :func:`import_bundle`. Orchestrates:
   3. **stage** everything to ``kazma-data/.migrate-staging-<ts>/`` (never
      touch live DBs mid-import).
   4. **path translation** (invariant B) — rewrite embedded source paths to
-     the target root across workspaces.root_path, chat_sessions.messages,
-     memory episodes, cron prompts, config.yaml.
+     the target root in the staged databases' columns named by
+     ``_PATH_REWRITE_TARGETS`` (workspaces.root_path, chat history, memory,
+     cron prompts, artifacts, task ledgers). config.yaml is imported as
+     exported.
   5. **backup** the existing live DBs to ``.migrate-backup-<ts>/`` (WAL-safe).
   6. **preflight** Postgres-bundle vs SQLite-target (abort before live writes).
      Then **pg_restore** (if dump present), then **swap** SQLite atomically.

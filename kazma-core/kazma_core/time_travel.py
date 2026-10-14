@@ -20,8 +20,9 @@ inside a turn, never an address. Restore, fork, detail and compare take a
 snapshot id on every surface.
 
 Bounds (TT-06). A snapshot is the whole state, so the stored bytes grew with
-the square of a turn's length. Declared budgets, enforced in SQLite on every
-capture, oldest first by capture order:
+the square of a turn's length. Declared budgets, enforced in SQLite in the
+same write transaction that inserts each captured step (a crash leaves the
+step stored with its eviction, or not at all), oldest first by capture order:
 
 - ``max_snapshot_bytes`` -- one snapshot; a larger state is stored with its
   long texts cut, marked ``_time_travel_truncated``, and cannot be restored
@@ -475,19 +476,30 @@ class SnapshotStore:
             self._last_seq = max(time.time_ns(), self._last_seq + 1)
             return self._last_seq
 
-    def save(self, record: SnapshotRecord) -> None:
-        """Insert a snapshot record (raises on failure)."""
+    def _insert(self, record: SnapshotRecord) -> None:
+        """Write *record*'s row. The caller holds the lock; from
+        :meth:`enforce_bounds` it also holds the write transaction."""
         if not record.seq:
             record.seq = self._next_seq()
+        self._conn.execute(
+            f"INSERT OR REPLACE INTO snapshots ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                record.id, record.thread_id, record.iteration, record.state_json,
+                record.timestamp, record.model_used, record.turn_key, record.turn_index,
+                record.message_count, record.nbytes, int(record.truncated), record.seq,
+            ),
+        )
+
+    def save(self, record: SnapshotRecord) -> None:
+        """Insert a snapshot record on its own (raises on failure).
+
+        Not the capture path: a row saved here is held to no budget until
+        the next capture of its chat. A capture writes its step and its
+        eviction in one transaction (:meth:`enforce_bounds` with
+        ``insert=True``). Kept for tests and tools that seed a store.
+        """
         with self._conn_lock:
-            self._conn.execute(
-                f"INSERT OR REPLACE INTO snapshots ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    record.id, record.thread_id, record.iteration, record.state_json,
-                    record.timestamp, record.model_used, record.turn_key, record.turn_index,
-                    record.message_count, record.nbytes, int(record.truncated), record.seq,
-                ),
-            )
+            self._insert(record)
 
     def get_by_id(self, snapshot_id: str) -> SnapshotRecord | None:
         """One snapshot, with its state."""
@@ -589,6 +601,7 @@ class SnapshotStore:
         self,
         record: SnapshotRecord,
         *,
+        insert: bool = False,
         max_per_turn: int,
         max_snapshots: int,
         max_thread_bytes: int,
@@ -598,13 +611,21 @@ class SnapshotStore:
         """Evict, oldest first by capture order, until every budget holds.
 
         Never deletes *record* itself (the step just written). One write
-        transaction, so a reader never sees a half-evicted thread.
+        transaction, so a reader never sees a half-evicted thread. With
+        ``insert=True`` the record's row is written first, inside that same
+        transaction: a crash, or an error anywhere in it, leaves the step
+        stored with its eviction or not at all. As two transactions (the
+        insert committed alone, then the eviction) a kill between them left
+        the turn one step over its cap (found by the TT-G3 soak), and a
+        failed eviction left a step stored that the capture said was not.
         """
         out = {"per_turn": 0, "thread_count": 0, "thread_bytes": 0, "total_count": 0, "total_bytes": 0}
         thread = record.thread_id
         with self._conn_lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                if insert:
+                    self._insert(record)
                 if record.turn_key and max_per_turn > 0:
                     # The turn's first step stays (where it started), and its newest.
                     rows = self._conn.execute(
@@ -772,7 +793,10 @@ class SnapshotRecorder:
         Returns the stored record; None when time travel is off or the durable
         write failed. A failed write used to return the record anyway, so the
         turn stamped its id and the stream announced a step that was never
-        stored (TT-11).
+        stored (TT-11). The step's insert and its eviction are one write
+        transaction (:meth:`SnapshotStore.enforce_bounds`, ``insert=True``):
+        None means nothing was stored, and a crash leaves the store as it was
+        or holding the step with every budget kept.
         """
         if not self._enabled:
             return None
@@ -795,9 +819,9 @@ class SnapshotRecorder:
         )
         try:
             store = self._get_store(db_path)
-            store.save(record)
             evicted = store.enforce_bounds(
                 record,
+                insert=True,
                 max_per_turn=self._max_per_turn,
                 max_snapshots=self._max_snapshots,
                 max_thread_bytes=self._max_thread_bytes,

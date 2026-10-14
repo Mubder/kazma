@@ -735,8 +735,18 @@ its first 8+ characters, `resolve_ref`); listings group turns then steps
 same path): off the loop, never failing the turn, thinned in a long turn
 (`_capture_due`: every step to 20, every 10th after, always the last), and
 stamping `snapshot_id` only when the durable write succeeded (`capture`
-returns None on failure; `kazma_time_travel_capture_total{result}`). Budgets
-are enforced in SQLite on every save, oldest first: per step
+returns None on failure; `kazma_time_travel_capture_total{result}`). The
+step's insert and its eviction are ONE write transaction
+(`SnapshotStore.enforce_bounds(record, insert=True)`, the only call
+`capture` makes): a crash or an error leaves the step stored with its
+eviction, or not at all, and None means nothing was stored. As two
+transactions (`save`, then `enforce_bounds`) a kill between them left the
+turn one step over its cap until its next capture (31 of 30, found by the
+TT-G3 soak, 2026-10-15); `save` alone is for seeding a store in tests.
+Gate: `tests/test_time_travel_capture_atomic.py` (a real child killed inside
+and after the transaction; the two transactions as the negative control; no
+product code writes a step any other way). Budgets
+are enforced in SQLite on every capture, oldest first: per step
 (`max_snapshot_bytes`, 2 MB: a larger state is stored cut with
 `_time_travel_truncated` and can be read, never restored or forked), per turn
 (`max_per_turn`, first and newest), per chat (`max_snapshots`,
@@ -2244,22 +2254,44 @@ first, then overwrites the key). This is the #1 silent-breakage mode of a
 copy-paste migration.
 
 **B. Embedded absolute paths are rewritten to the target root.** A Linux
-source (`/home/user/kazma`) has its workspace root baked into
-`workspaces.root_path`, `chat_sessions.messages`, memory entities/episodes,
-cron prompts. The importer rewrites them all to the target path across OS
-separator conventions (`migration/path_rewrite.py`). Time-travel snapshots
-(`snapshots.db`) are no longer carried at all (2026-10-14, Time Travel audit
-TT-05: a copy elsewhere would bring back chats the owner deleted or forgot;
-§12, `store_registry`: `machine`). Three correctness properties: (1)
-`PathMap` is ordered **longest-source-first** so `/home/u/kazma` doesn't
-partially rewrite `/home/u/kazma-repos/ShipX`; (2) substitution is
-byte-level substring on the column text (NOT a JSON parse -- paths appear
-anywhere), with forward-slash, backslash AND the JSON-escaped Windows form
-(`C:\\Users\\...`, every backslash doubled inside a JSON column; TT-09: a
-Windows-source migration left those paths on the old machine) handled. No
-false positives (e.g. `barcode` ≠ `code`); (3) a JSON column whose rewritten
-text would no longer parse keeps its original text (`_parses`). Workspace
-root rewrite also fires `notify_root_changed()` so MCP rebinds.
+source (`/home/user/kazma`) has its workspace root and data dir baked into
+stored text. Before the swap the importer rewrites them, in the staged
+copies, to the target's (`build_path_map`: the source workspace root and the
+source data dir, each to the target's; `migration/path_rewrite.py`), in
+exactly these columns (`importer._PATH_REWRITE_TARGETS`):
+`workspaces.root_path` (exported as `workspaces.db`, merged into
+`settings.db` after the swap); `sessions.messages` (`chat_sessions.db`) and
+`spool.payload` (`chat_sessions_spool.db`); in `memory_state.db`
+`entities.metadata_json`, `episodes.user_text`, `episodes.assistant_text`,
+`episodes.summary_text`, `episodes.metadata_json`, `beliefs.object`,
+`beliefs.metadata_json`, `procedural_dags.preconditions_json`,
+`procedural_dags.dag_steps_json`, `procedural_dags.postconditions_json`; in
+`memory_ops.db` `memory_audit_log.reason`,
+`memory_audit_log.state_before_json`, `memory_audit_log.state_after_json`;
+`cron_jobs.prompt` (`cron.db`); `agent_artifacts.value`
+(`agent_artifacts.db`); `task_ledgers.goal`, `task_ledgers.next_action`,
+`task_ledgers.steps`, `task_ledgers.findings` (`task_ledgers.db`). The
+import report counts the rows changed per database (`rows_rewritten`).
+Nothing else is rewritten: `config.yaml` is imported as exported, the
+document store holds no paths, and time-travel snapshots (`snapshots.db`)
+are not carried at all, so none of their columns is rewritten (2026-10-14,
+Time Travel audit TT-05: a copy elsewhere would bring back chats the owner
+deleted or forgot; §12, `store_registry`: `machine`). Three correctness
+properties: (1) `PathMap` is ordered **longest-source-first** so
+`/home/u/kazma` doesn't partially rewrite `/home/u/kazma-repos/ShipX`; (2)
+substitution is byte-level substring on the column text (NOT a JSON parse --
+paths appear anywhere), of the forward-slash form, the backslash form AND
+the JSON-escaped Windows form (`C:\\Users\\...`, every backslash doubled
+inside a JSON column; TT-09: a Windows-source migration left those paths on
+the old machine), whose rest is written in the target's separators (`/` for
+a POSIX target, still escaped for a Windows one); a match is anchored at
+path boundaries, so no false positives (`/home/u/kazma-backup` is not
+`/home/u/kazma`, `barcode` ≠ `code`); (3) a row that parsed as JSON and
+whose rewritten text would not keeps its original text and is counted in a
+WARNING (`_parses`). Gates: `tests/test_path_rewrite.py`,
+`tests/test_time_travel_bounds.py` (both directions with the old rewrite as
+the control; this list against the importer's). Workspace root rewrite also
+fires `notify_root_changed()` so MCP rebinds.
 
 **C. Import is atomic — never corrupt the target mid-flight.** The importer
 (`migration/importer.py:import_bundle`) stages to `kazma-data/.migrate-staging-<ts>/`,
@@ -2270,8 +2302,8 @@ staging dir is preserved on failure. `verify` runs as a dry-run inside every
 import and is available standalone.
 
 **Scope — SQLite + Postgres (v2).** The bundle always carries the SQLite
-files (vault, memory, snapshots, cron — these are SQLite even under a
-Postgres backend). When the source is Postgres, it ALSO carries a
+files (vault, memory, cron and the other stores `store_registry` carries —
+these are SQLite even under a Postgres backend). When the source is Postgres, it ALSO carries a
 ``data/postgres.dump`` produced by ``pg_dump -Fc`` containing the
 shared-state tables (settings, chat sessions, checkpoints, swarm tasks).
 The exporter reads via the backend-agnostic data-access layer for the
@@ -2288,7 +2320,7 @@ clear install hint. Override the container name with ``KAZMA_DB_CONTAINER``.
 backend: if Postgres, it ``pg_restore`` the dump (``--clean --if-exists``
 idempotent; schema self-recreates, target DB can be empty) into
 ``KAZMA_DATABASE_URL``, then proceeds with the SQLite-file restore +
-path-rewrite for vault/memory/snapshots. If the target is SQLite but the
+path-rewrite of the staged SQLite stores (B). If the target is SQLite but the
 bundle has a Postgres dump, it **aborts with a clear error** rather than
 silently importing partial data (the SQLite files alone lack chat history,
 settings, checkpoints that live in Postgres). No SQLite↔Postgres content
@@ -2298,7 +2330,9 @@ translation is attempted — the bundle is source-backend-shaped.
 vault-key fingerprint, table counts, source workspace root), `meta.env`
 (vault key + public url), `config.yaml` (ConfigStore.export_yaml — secrets
 are `vault://` refs, not plaintext), `vault.db` (encrypted, under `data/`),
-the 13 data SQLite files under `data/`, `data/postgres.dump` (only when the
+every other SQLite store `store_registry` says a bundle carries, under
+`data/` (`bundle_store_names`, plus the `checkpoints_<tenant>.db` family
+members present), `data/postgres.dump` (only when the
 source was Postgres — custom format, restored via pg_restore), `pathmap.json`,
 and verbatim `assets/`: every other entry of the data dir that
 `store_registry.carried_in_bundle` says travels (2026-10-01) -- the swarm's
