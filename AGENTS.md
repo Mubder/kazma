@@ -3060,6 +3060,18 @@ restore command (`python scripts/pg_backup.py restore --latest`); the
 server still boots (SQLite-side features work) but chat/settings/document
 history is broken until restored. A pool failure returns None = "unknown",
 not "all present".
+**Dropped, or added by this build?** (2026-10-14.) The check runs before
+the stores start, on purpose (a store recreates a dropped table empty and
+would hide the drop), so a table a newer build adds is missing too until its
+store creates it: the first boot of the Documents hardening told the owner to
+restore a backup over two tables that had never existed. Every check records
+the Kazma tables it finds in `<data dir>/pg_tables_seen.json` (beside the
+install, so a lost Postgres cannot lose the record; `machine`).
+`report_missing_tables` calls a missing table on the record dropped
+(CRITICAL, restore command) and one never seen new (INFO; WARNING with no
+record yet), and `recheck_new_tables` looks for those again a minute after
+start (still missing: WARNING). Gate: `tests/test_pg_tables_seen.py` (the
+live boot as the witness, the old rule as the negative control).
 
 **D. Operator CLI (`scripts/pg_backup.py`).**
 `backup` (one-shot dump now), `restore --latest|--file <name> [--dry-run]`
@@ -5344,9 +5356,14 @@ Read the named test before changing the code it guards.
   it (`probe_vector_backend`). Auto-selected pgvector on a server without the
   extension is the expected fallback (INFO, "full (local)"); a chosen one is a
   WARNING. The table is sized by the embedder (`get_embedding_dim`, the
-  sqlite-vec source), and each DDL statement commits alone. Gate:
+  sqlite-vec source), and each DDL statement commits alone. A delete where no
+  vector table can exist (`missing`, `installable`, `not_permitted`) is done,
+  with no statement sent; `unreachable` is retried by the forget journal; a
+  table of another size has the row deleted (2026-10-14: the live install,
+  with no pgvector, queued a remote retry for every forget that no pass could
+  finish, a WARNING each 15 minutes). Gate:
   `tests/test_vector_store_probe.py` (fakes for every state; a real Postgres
-  with and without pgvector).
+  with and without pgvector; the old delete as the negative control).
 
 ### 39. The guard carries out reloads, keeps a heartbeat, never dies silently (`scripts/service/kazma_guard.py`)
 

@@ -38,6 +38,11 @@ _REMOTE_VECTOR_STATE: dict[tuple[str, str], tuple[float, str]] = {}
 #: ``dimension_mismatch`` (the table holds another vector size),
 #: ``unauthorized`` (Qdrant refused the key), ``unreachable``.
 _USABLE_REMOTE_STATES = frozenset({"installed", "installable", "reachable"})
+#: Probe states in which a Postgres holds no vector table at all: no
+#: extension (``missing``), the extension not created yet (``installable``:
+#: a vector column cannot outlive its extension), or no table and a role that
+#: may not make one (``not_permitted``). A delete there has nothing to remove.
+_NO_VECTOR_TABLE_STATES = frozenset({"missing", "installable", "not_permitted"})
 #: Probes run on worker threads; one transition, one log line.
 _REMOTE_VECTOR_LOCK = threading.Lock()
 
@@ -965,15 +970,25 @@ class PgvectorBackend:
 
     def delete(self, item_id: str, *, tenant_id: str = "default") -> bool:
         del tenant_id
-        # No extension, no table: the DELETE could only fail (63 a week live).
-        if not item_id or not self._dsn or not self.available:
+        if not item_id or not self._dsn:
             return False
+        state = self.probe()
+        if state in _NO_VECTOR_TABLE_STATES:
+            # No table can hold the vector, so it is gone: no statement is sent
+            # (the DELETE could only fail, 63 a week live). This answered "not
+            # deleted", and every forget queued a remote retry no pass could
+            # finish, a WARNING each 15 minutes (live 2026-10-14).
+            return True
+        if state not in _USABLE_REMOTE_STATES and state != "dimension_mismatch":
+            return False  # unreachable: the forget journal retries it
         try:
             conn = self._connect()
             try:
-                # Like search/upsert: the table may not exist yet on a server
-                # where pgvector is installable but nothing has written.
-                self._ensure_table(conn)
+                if state != "dimension_mismatch":
+                    # The table may not exist yet on a server where the
+                    # extension is installed but nothing has written. A table
+                    # of another size exists: the row is deleted from it as is.
+                    self._ensure_table(conn)
                 cur = conn.cursor()
                 cur.execute(f"DELETE FROM {self._table} WHERE id = %s", (item_id,))
                 conn.commit()

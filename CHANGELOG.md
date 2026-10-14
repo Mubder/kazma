@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Deploy follow-ups (2026-10-14)
+
+- A forget no longer waits forever on a remote vector index that cannot hold
+  vectors. With pgvector configured on a Postgres that has no pgvector
+  extension (the live install), the delete answered "not deleted", so every
+  forget queued a retry that no pass could finish, with a WARNING every 15
+  minutes. Such a delete is now done, with no statement sent; an unreachable
+  store is still retried, and a table of another vector size has the row
+  deleted. Retries already queued clear on the next pass.
+- The boot check no longer asks for a restore over tables a new build adds.
+  It runs before the stores start (a store would recreate a dropped table
+  empty), so the first boot of the Documents hardening logged a CRITICAL
+  "restore the latest backup" over two intake tables that had never existed.
+  The install now records the Kazma tables it has found in its Postgres
+  (`<data dir>/pg_tables_seen.json`): a recorded table that is gone is a drop
+  (CRITICAL, as before); one never seen is new, and is looked for again a
+  minute after start.
+
 ## Knowledge Library: the industrial audit (2026-10-14)
 
 - The Knowledge Library has its own database, `knowledge.db`, with a 1 GiB

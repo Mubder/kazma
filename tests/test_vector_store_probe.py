@@ -251,15 +251,104 @@ def test_a_healthy_store_logs_nothing(monkeypatch, caplog):
 
 
 def test_no_statement_reaches_a_server_without_pgvector(monkeypatch):
-    """Search, upsert and delete stop at the probe: one catalog query, nothing else."""
+    """Search, upsert and delete stop at the probe: one catalog query, nothing else.
+    The delete answers "gone": no table can hold the vector (2026-10-14)."""
     server = _Server()
     be = _backend(monkeypatch, server)
     assert be.search([0.1, 0.2, 0.3], tier=None) == []
     assert be.upsert("ep-1", [0.1, 0.2, 0.3], meta={"tier": "episodic"}) is False
-    assert be.delete("ep-1") is False
+    assert be.delete("ep-1") is True
     assert server.connects == 1
     assert len(server.statements) == 1
     assert not any(s.startswith(("CREATE", "INSERT", "DELETE", "SELECT id")) for s in server.statements)
+
+
+# ── a delete where no vector table can exist (live 2026-10-14) ────────
+#
+# The live Postgres has no pgvector. Every forget asked the remote index to
+# delete the memory's vector, got "not deleted" (the store is unavailable),
+# queued a retry and logged a WARNING -- and the retry, each 15 minutes, got
+# the same answer forever. With no extension there is no table and no vector.
+
+
+def _old_delete(self, item_id, *, tenant_id="default"):
+    """The delete before the fix: unavailable meant "not deleted"."""
+    if not item_id or not self._dsn or not self.available:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        _Server(),  # missing
+        _Server(installable=True),  # the extension is not created yet
+        _Server(installed=True, may_create=False),  # no table, may not make one
+    ],
+    ids=["missing", "installable", "not_permitted"],
+)
+def test_a_delete_where_no_vector_table_can_exist_is_done(monkeypatch, server):
+    be = _backend(monkeypatch, server)
+    assert be.delete("ep-1") is True
+    assert not any(s.startswith(("CREATE", "DELETE")) for s in server.statements)
+
+
+def test_a_delete_to_an_unreachable_store_is_retried(monkeypatch):
+    be = PgvectorBackend(dsn=_DSN, collection="kazma_memory", dimension=3)
+
+    def _down():
+        raise _PgError("connection refused")
+
+    monkeypatch.setattr(be, "_connect", _down)
+    assert be.probe() == "unreachable"
+    assert be.delete("ep-1") is False
+
+
+def test_a_delete_reaches_a_table_of_another_size(monkeypatch):
+    """The table exists: the row is deleted from it, nothing is created."""
+    server = _Server(installed=True, table_dim=1024)
+    be = _backend(monkeypatch, server)  # dimension=3
+    assert be.delete("ep-1") is True
+    assert any(s.startswith("DELETE FROM kazma_memory") for s in server.statements)
+    assert not any(s.startswith("CREATE") for s in server.statements)
+
+
+def _forget_one(monkeypatch, be):
+    from kazma_core.memory import forget, forget_journal
+
+    queued: list[str] = []
+    monkeypatch.setattr(backends, "get_remote_vector_backend", lambda: be)
+    monkeypatch.setattr(forget_journal, "queue_remote_delete", lambda eid, tenant: queued.append(eid))
+    done = forget._delete_remote_vector(None, "e_1", "default")
+    return done, queued
+
+
+def test_a_forget_on_a_postgres_without_pgvector_queues_nothing(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="kazma_core.memory.forget")
+    done, queued = _forget_one(monkeypatch, _backend(monkeypatch, _Server()))
+    assert done is True and queued == []
+    assert not [r for r in caplog.records if r.name == "kazma_core.memory.forget"]
+
+
+def test_the_old_delete_queued_a_retry_that_could_never_finish(monkeypatch, caplog):
+    """Negative control: the delete before the fix queues and warns."""
+    caplog.set_level(logging.WARNING, logger="kazma_core.memory.forget")
+    monkeypatch.setattr(PgvectorBackend, "delete", _old_delete)
+    done, queued = _forget_one(monkeypatch, _backend(monkeypatch, _Server()))
+    assert done is False and queued == ["e_1"]
+    assert [r for r in caplog.records if "not deleted yet" in r.getMessage()]
+
+
+def test_retries_left_from_before_the_fix_are_cleared(monkeypatch):
+    """The four retries the live install queued are finished by the next pass."""
+    from kazma_core.memory import forget_journal
+
+    forget_journal.queue_remote_delete("e_left_1", "default")
+    forget_journal.queue_remote_delete("e_left_2", "default")
+    monkeypatch.setattr(backends, "get_remote_vector_backend", lambda: _backend(monkeypatch, _Server()))
+    out = forget_journal.retry_remote_deletes(None)
+    assert out == {"deleted": 2, "pending": 0}
+    assert forget_journal.state()["remote_deletes_waiting"] == 0
 
 
 def test_a_usable_store_is_written_searched_and_deleted(monkeypatch):
@@ -707,7 +796,8 @@ def test_a_real_postgres_is_used_only_if_it_can_hold_vectors(monkeypatch):
         if state == "missing":
             assert be.upsert("ep-1", [0.1, 0.2, 0.3], meta={"tier": "episodic"}) is False
             assert be.search([0.1, 0.2, 0.3], tier=None) == []
-            assert be.delete("ep-1") is False
+            # Nothing can hold the vector: gone, with no statement sent.
+            assert be.delete("ep-1") is True
         else:
             item = f"ep-{uuid.uuid4().hex[:8]}"
             assert be.upsert(item, [0.1, 0.2, 0.3], meta={"tier": "episodic", "kind": "episode"}) is True

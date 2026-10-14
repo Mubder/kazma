@@ -325,6 +325,10 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
         "this install's identity", "machine",
         reason="two installs must never share one: shared-store peers and the "
                "memory mirror tell installs apart by it"),
+    "pg_tables_seen.json": DataDirEntry(
+        "Kazma's tables this install has found in its Postgres", "machine",
+        reason="it describes this install's own Postgres: the boot check tells a "
+               "dropped table from one a newer build adds by it"),
     "kazma.log": DataDirEntry(
         "a log file", "machine", reason="logs stay with the machine that wrote them"),
     "restart.log": DataDirEntry(

@@ -1770,9 +1770,10 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.db.pg_backup import (
                     KAZMA_PG_TABLES,
-                    latest_pg_backup,
                     pg_backup_enabled,
                     pg_dump_tool_problem,
+                    recheck_new_tables,
+                    report_missing_tables,
                     verify_required_pg_tables,
                 )
 
@@ -1796,20 +1797,15 @@ class KazmaAppBuilder:
                                 "could not confirm the required Postgres tables"
                             )
                         elif _missing:
-                            _backup = latest_pg_backup()
-                            _hint = (
-                                "Restore the latest backup with: "
-                                "python scripts/pg_backup.py restore --latest"
-                                if _backup
-                                else "No pg_backup dump exists yet — restore from your "
-                                "migration bundle, then run: python scripts/pg_backup.py backup"
-                            )
-                            logger.critical(
-                                "[PG-BACKUP] REQUIRED POSTGRES TABLES MISSING: %s. "
-                                "Chat history / settings / document jobs are broken until restored. %s",
-                                ", ".join(_missing),
-                                _hint,
-                            )
+                            # Dropped (CRITICAL, restore) or added by this build
+                            # (its store creates it at start: looked for again).
+                            _later = await _aio.to_thread(report_missing_tables, _missing)
+                            if _later:
+                                from kazma_core.background import spawn_background
+
+                                spawn_background(
+                                    recheck_new_tables(_pool, _later), name="pg-tables-recheck"
+                                )
                         else:
                             logger.info(
                                 "[PG-BACKUP] schema verification OK (all %d tables present)",
