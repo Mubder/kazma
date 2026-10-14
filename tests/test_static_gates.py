@@ -1205,6 +1205,11 @@ _CROSS_MODULE_AREAS: dict[str, tuple[str, ...]] = {
     "memory": _MEMORY_PATH,
     "swarm": ("kazma-core/kazma_core/swarm/", "kazma-ui/kazma_ui/swarm_panel/",
               "kazma-ui/kazma_ui/swarm_sse.py"),
+    # Scheduled audit SCH-E10 / S11: the zone, the tenant rule, the delivery
+    # address and the graph build were read on the loop through wrappers.
+    "scheduled": ("kazma-core/kazma_core/cron/", "kazma-ui/kazma_ui/scheduled_api.py",
+                  "kazma-skills/kazma_skills/native/task_scheduler_cron/",
+                  "kazma-skills/kazma_skills/native/x_publisher/tools.py"),
 }
 
 

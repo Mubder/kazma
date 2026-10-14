@@ -85,6 +85,22 @@ _TURN_MARKER = "[turn] Turn finished:"
 # M35): one line each, with the route and the status. The forgets are counted.
 _MEMORY_ACTION = "[memory] operator action="
 _TURN_LINE = re.compile(r"\[turn\] Turn finished: platform=(\S+) key=(\S+) failed=(\S+)")
+# One line per scheduled fire and per delivery outcome (kazma_core.cron.scheduler,
+# Scheduled audit SCH-E02/E11): a reminder not delivered, missed or failed was a
+# CRITICAL log line and nothing else.
+_CRON_MARKER = "[cron] outcome job="
+_CRON_LINE = re.compile(r"\[cron\] outcome job=(\S+) outcome=(\S+)")
+#: Outcome -> (label, needs attention?).
+_CRON_OUTCOMES = {
+    "delivery_delivered": ("scheduled messages delivered", False),
+    "delivery_undeliverable": ("scheduled messages not delivered", True),
+    "delivery_unknown": ("scheduled messages that may not have arrived", True),
+    "missed": ("scheduled jobs missed while Kazma was down", True),
+    "turn_failed": ("scheduled tasks that failed", True),
+    "timed_out": ("scheduled tasks that failed", True),
+    "error": ("scheduled tasks that failed", True),
+    "hitl_off": ("scheduled tasks not run (approvals off)", True),
+}
 
 # Every ops alert leaves this line, sent or held back by its cooldown
 # (ops_alerts.alert): "[ops_alert] <key> | <title>[ (throttled)]". The digest
@@ -234,12 +250,18 @@ def _scan_app_log(
     counts: Counter = Counter()
     turns: dict[str, tuple[str, bool]] = {}
     alerts: dict[str, list[int]] = {}
-    needles = (*_APP_MARKERS, _TURN_MARKER, _ALERT_MARKER, _MEMORY_ACTION)
+    needles = (*_APP_MARKERS, _TURN_MARKER, _ALERT_MARKER, _MEMORY_ACTION, _CRON_MARKER)
     for _ts, rec in _records(_app_log_path, since, "timestamp", needles):
         msg = str(rec.get("message", ""))
         turn = _TURN_LINE.search(msg)
         if turn:
             turns[turn.group(2)] = (turn.group(1), turn.group(3) == "yes")
+            continue
+        cron = _CRON_LINE.search(msg)
+        if cron:
+            label = _CRON_OUTCOMES.get(cron.group(2), (None, False))[0]
+            if label:
+                counts[label] += 1
             continue
         if msg.startswith(_MEMORY_ACTION):
             if "/forget " in msg and " status=200" in msg:
@@ -310,6 +332,9 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
         lines.append(f"  approvals asked: {asked} ({_split(outcomes)})")
     elif approvals_note:
         lines.append(f"  {approvals_note}")
+    delivered = app.get("scheduled messages delivered", 0)
+    if delivered:
+        lines.append(f"Scheduled messages delivered: {delivered}")
 
     # Planned work: what the operator did on purpose. Context, never a fault.
     forgets = app.get("memory forgets", 0)
@@ -353,6 +378,9 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     }
     problems["turns that ended in an error"] = failed_turns
     problems["approvals that could not resume"] = approvals.get("error", 0)
+    for label, attention in sorted({v for v in _CRON_OUTCOMES.values()}):
+        if attention:
+            problems[label] = app.get(label, 0)
     problems = {k: v for k, v in problems.items() if v}
     if problems:
         lines.append("")

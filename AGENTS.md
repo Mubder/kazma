@@ -1814,31 +1814,55 @@ drawing, the rest by extraction.
   no work-item, isolated or empty entity; each rule with the old behaviour
   as its negative control).
 
-### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
+### 16. Scheduled reminders and tasks (`kazma-core/kazma_core/cron/`)
 
-The user-facing reminder cron (`schedule_task` native skill → `CronScheduler`
-→ `kazma-data/cron.db`). Two invariants must hold:
+The agent's `schedule_task` / `list_scheduled` / `edit_scheduled` /
+`cancel_scheduled` (native `task_scheduler_cron`) and the Scheduled page
+(`/scheduled`, `kazma_ui/scheduled_api.py`) → `CronScheduler`
+(`cron/scheduler.py`) → `SQLiteCronStore` (`cron/store.py`,
+`kazma-data/cron.db`). X posts on the same page are the X publication
+store's operations (§29C). Hardened 2026-10-14 against the Scheduled audit
+(`docs/audits/AUDIT_SCHEDULED_2026-10-13.md`, tracker
+`docs/plans/SCHEDULED_INDUSTRIAL_HARDENING_GOAL.md`; the 7-day fake-clock
+soak is still open). Every rule below must hold:
 
 **A. The scheduler MUST be constructed with a `graph_builder=`.**
 `app.py` builds `CronScheduler(store=…, graph_builder=_cron_graph_builder,
-poll_interval=…)`. Without `graph_builder=`, a job fires and `_execute()`
-raises `RuntimeError("No graph builder configured")` — every reminder
-silently crashes on fire. The closure returns the agent's one-shot
-`build_child_graph()` (checkpointer=None), mirroring the sub-agent
-graph-builder closure defined just above it.
+poll_interval=…)`. The closure returns `cron_fire_graph(agent,
+capabilities=…)` (`cron/capabilities.py`): the agent's one-shot
+`build_child_graph(declared_tools=…)` (checkpointer=None). Without it a
+task's fire fails -- counted and alerted, never delivered. A reminder needs
+no graph.
+
+**A2. A fired job does only what it declared** (decision D12, SCH-S05).
+`kind="reminder"` (the tool's default) delivers its stored text with NO
+model call. `kind="task"` runs an agent turn offered exactly its declared
+tools: `read` (read-tier tools, the default) or `read_write` (the write
+tier too); MCP and `ALWAYS_HITL` tools never. `DeclaredToolExecutor`
+refuses a call to anything else, and the job's one delivery is the
+scheduler's, not a tool. The prompt reaches the model labelled as a stored
+instruction. The booking's approval card says what the job will do, and an
+edit's card shows the prompt now and after (`cron/card.py`). A task does
+not fire while HITL is off unless the operator set
+`safety.cron_fire_without_hitl` (the agent cannot: `safety.` is protected,
+§45). Gate: `tests/test_cron_capabilities.py` (the old builder's whole
+registry as the negative control).
 
 **B. `delivery_target` is captured at schedule time, not resolved at fire time.**
 `schedule_task` reads `get_current_delivery_target()` (the
 `_current_delivery_target` ContextVar, bound at the gateway handler entry
 AND re-set in the tool-worker node from the `_gateway` routing block —
 same two-layer pattern as `_current_thread_id`) and stores it on the job.
-At fire time `_deliver()` uses `job.delivery_target` as the `target_id`.
-The fire-time SessionStore lookup is NOT a viable fallback — sessions
-TTL-evict after 5 min (`_session_ttl_seconds=300`), so any reminder >5 min
-out would miss. Legacy rows with empty `delivery_target` fall back to
-`thread_id`, then `"{platform}:unknown"`. The platform-isolation invariant
-(§2) is preserved — `chat_id` never enters graph state; `delivery_target`
-joins `thread_id`/`platform` in the internal `_gateway` routing sub-dict.
+At fire time the job's own target is used. A job whose target is empty or
+malformed adopts a sibling job's target on the same thread (and keeps it),
+then tries the thread's session -- best effort only: sessions TTL-evict
+after 5 min, so no reminder may rely on it. With none, the delivery is
+`undeliverable` at once, with an alert naming the job; nothing goes to a
+guessed address (the old `"{platform}:unknown"` fallback is gone). No tool
+result or page answer carries the address: `ScheduledJob.to_dict()` gives
+`destination`, a label (SCH-S10). The platform-isolation invariant (§2) is
+preserved — `chat_id` never enters graph state; `delivery_target` joins
+`thread_id`/`platform` in the internal `_gateway` routing sub-dict.
 
 **B2. A web turn's delivery target is for reminders, not for answers.**
 `web_gateway_block` stamps the operator's Telegram as a web turn's
@@ -1859,11 +1883,119 @@ transaction. In Python's default mode a DELETE opens a transaction even when
 it matches nothing, and the purge (at start and hourly) committed only when
 it had deleted something: from each boot until the next reminder fired the
 server held cron.db's write lock, and the live-data cleanup stopped half way
-with "database is locked". Every store method is one write statement; one
-that needs two writes together takes an explicit `BEGIN IMMEDIATE ... COMMIT`.
-Gates: `tests/test_cron_store_write_lock.py` (every public method, then
-another connection must take the write lock at once) and §35's kept-connection
-gate.
+with "database is locked". A group of writes (a claim, a fire's finish, a
+delivery's outcome) is one `BEGIN IMMEDIATE` through
+`db.sqlite_session.write_transaction`. Gates:
+`tests/test_cron_store_write_lock.py` (every public method, then another
+connection must take the write lock at once) and §35's kept-connection gate.
+
+**D. A fire is a durable, leased record, and ends once** (SCH-E04, E01,
+E07). A fire claims its job by compare-and-swap (`claim_job`: pending →
+running, with `fire_owner`, `lease_until`, `fire_due`, `fire_attempt` and
+the version it read). Its result, a recurring job's next occurrence, the
+job's status and the delivery row then commit in ONE transaction
+(`finish_fire`). A crash anywhere leaves either nothing (the fire runs
+again) or a finished fire whose delivery the outbox owns. Recovery decides
+per phase. At boot every running row belongs to a dead runtime and goes
+back to pending at the same occurrence; it used to be marked FAILED,
+delivered or not. While running, a row past its lease, or ours with no
+task, goes back the same way. A failed agent turn (an exception, `error`,
+`turn_failed`) is a failed fire: counted and alerted (`cron.job_failure`;
+`cron.job_failed` when its budget of 3 runs out), never delivered as the
+reminder. Shutdown stops cron first and drains fires within a bound;
+`/health/activity` counts them (`active_fires`), and
+`kazma_guard.py --reload --when-idle` waits for them. Retention purges by
+`finished_at`, and recovery reads every running row. Gates:
+`tests/test_cron_fire_record.py`, `tests/test_cron_crash_matrix.py` (a real
+child killed at each phase, one-off and daily: exactly one delivery, or one
+honest state with an alert; the old RUNNING→FAILED recovery is the negative
+control).
+
+**E. Delivery goes through a leased outbox, acknowledged only on `sent:`**
+(SCH-E02, §51). `cron_deliveries` holds a row per message. It is claimed
+with a lease, retried with backoff (30 s doubling to 15 min, at most 6
+attempts within 2 hours), and acknowledged only when `send_message`
+answers `sent:`. A refused delivery ends `undeliverable` -- the job too,
+never DONE -- with exactly one alert (`cron.delivery_failed`). A row whose
+sender died mid-send ends `unknown` (`delivery_unknown` on the job, alert
+`cron.delivery_unknown`) and is never sent twice. The job, the page and the
+daily digest show the outcome. Gate: `tests/test_cron_delivery_outbox.py`
+(the old deliver-then-finalize order is the negative control).
+
+**F. Missed is missed** (SCH-E06). A job due longer ago than its catch-up
+window does not run. The window is `cron.catchup_minutes` (default 60), or
+`KAZMA_CRON_STALE_HOURS` when that is unset; a window given at booking wins
+over both. The job is `missed` (a recurring job moves on to its next
+occurrence), and its chat gets ONE notice through the outbox. A late fire
+inside the window says how late ("(due 09:00 Asia/Kuwait, 12 min late)").
+X posts keep their own 5-minute hold (§29C). Gate:
+`tests/test_cron_fire_record.py::test_each_lateness_band`.
+
+**G. One timing model, in the operator's zone** (SCH-E03, E05, E09;
+`cron/timing.py`). A naive time means `cron.timezone` (else `KAZMA_TZ`,
+else UTC) on every path: chat, the Web form, `edit_scheduled` and X
+booking resolve one string to one instant. It accepts `5m`/`2h`/`3d`,
+RFC 3339 (`Z` and offsets honoured), and a typed recurrence: daily,
+weekdays or weekly at a clock time, or an RRULE subset (FREQ daily/weekly,
+BYDAY, BYHOUR/BYMINUTE, UNTIL/COUNT, TZID). It refuses, naming the zone:
+the past; more than two years ahead (`MAX_HORIZON`); more than 100
+characters; and a one-off inside a clock change's gap or fold. A recurring
+job takes the earlier time of a fold and shifts across a gap. X booking
+takes one-offs only. The commitment gate (§20) never rewrites a recurrence,
+and rewrites a one-off only to an aware instant in that zone; a recurring
+request booked as a one-off is refused. Gate:
+`tests/test_cron_timing_model.py`. It runs one fixture in UTC, Asia/Kuwait,
+America/New_York and Europe/London, a daily series across two clock
+changes, and checks that every docstring, manifest and hint example is
+accepted by its validator.
+
+**H. Only legal actions, and the stored truth** (SCH-E12, S02, S07, S04).
+The statuses are pending, running, delivering, done, failed, cancelled,
+undeliverable, missed and delivery_unknown.
+- Edit and cancel carry the version the form read; a stale one is 409
+  `conflict`. During a fire they are recorded and applied when it ends
+  (202 `edit_pending` / `cancel_pending`).
+- A finished job comes back only through Restore
+  (`POST /api/scheduled/cron/{id}/restore`).
+- The page offers only what the server lists in a job's `actions`. Its
+  dialog fetches the full prompt and sends only the changed fields, so a
+  timing edit never touches the prompt.
+- The page's X rows are the publication store's operations, changed through
+  `/api/x/queue/{op}/reschedule|cancel`. The page's own X PUT/DELETE routes
+  are gone.
+- Every change records its actor and source (`cron_events`).
+- The API and the page share one status-class map
+  (`tests/test_scheduled_presentation.py`).
+
+Gates: `tests/test_scheduled_api.py` (real scheduler and store),
+`tests/test_cron_fire_record.py::test_state_by_action_matrix`,
+`tests/js/test_scheduled_page.js`.
+
+**I. One operator, bounded, off the loop** (SCH-S03, E14, E10, E11, S12).
+- **Single operator:** on an install with platform users every Scheduled
+  surface refuses (decision D1, `cron/single_operator.py`). The routes answer
+  409 `scheduled_single_operator`, the page shows a banner, the tools give the
+  reason. In production mode reads and changes keep to the caller's tenant;
+  another tenant's id reads as unknown.
+- **Bounds:** 500 jobs a tenant and 50 a thread (Settings keys
+  `cron.max_jobs_per_*`); a prompt of 8,000 characters and a timing of 100; a
+  `scheduled` rate bucket (30 a minute); a task turn's budget
+  (`cron.task_budget_seconds`).
+- **Throughput:** a pass starts every due job, and the semaphore holds all but
+  `max_concurrent`. 50 jobs due among 1,000 fire in one pass
+  (`tests/test_cron_load.py`; the old four-a-pass rule is the negative
+  control).
+- **Off the loop:** the zone, the tenant rule, the address and the graph build
+  are resolved in a thread (static gate area `scheduled`,
+  `tests/test_scheduled_off_loop.py`).
+- **Readiness and metrics:** readiness reads the poll heartbeat
+  (`CronScheduler.liveness()`), degraded within two intervals of a dead or
+  stuck loop. /metrics carries fires, missed jobs, lateness p50/p95, the
+  outbox and the heartbeat. The digest counts outcomes from the
+  `[cron] outcome` line (`tests/test_cron_liveness.py`).
+- **Dates and origin:** dates on the page and in X Studio go through
+  `KazmaFormat`. `kazma_ui/same_origin.verify_same_origin` is the one
+  same-origin check for the Scheduled, X and email routes.
 
 **Multi-tenant memory:** tenants are enforced with
 `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with
@@ -2679,7 +2811,12 @@ import-unavailable degradation stay fail-open (treated as layer-off).
 **B. The decision mapping (§3.4). `authorize_effect` returns one of:**
 - `allow` (+ optional `rewritten_args`): for the remind act, the gate anchors
   the relative phrase to a memory event and **rewrites the tool args to the
-  memory-correct fire_at**. For exec, the denylist blocks catastrophes before
+  memory-correct fire_at**: an aware ISO instant computed in the operator's
+  zone (`cron.timezone`, §16G), never a naive time read as UTC. A recurring
+  timing is never rewritten, and a recurring request ("every day at 9")
+  booked as a one-off is denied (Scheduled audit SCH-E03, E05, 2026-10-14).
+  `edit_scheduled` is its own act (`edit_job`): the caller's own jobs only,
+  and the new timing through the same resolver. For exec, the denylist blocks catastrophes before
   the HITL card. For config, protected keys are denied. For outbound, the
   target allowlist is checked.
 - `clarify` / `confirm`: a real interrupt card fires on the unified HITL bus
@@ -2715,6 +2852,9 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   writing `user_explicit` declared as a user channel).
 - **Rewrite-on-allow**: the gate's fire_at wins over the model's args — do not
   let the original (possibly wrong) `timing` reach the scheduler for remind.
+  The fire_at is one instant in the operator's zone, and a recurrence is kept
+  as the user asked, never turned into one fire
+  (`tests/test_cron_timing_model.py`).
 - **Exec denylist**: catastrophic commands (`rm -rf /`, fork bombs, `curl|sh`,
   `dd of=/dev/`, `mkfs`, shutdown, `chmod 777 /`) are denied BEFORE the HITL
   card. Safe commands pass through (HITL still applies).
@@ -2743,9 +2883,12 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   (`mcp__*`) route through `classify_mcp_tool_effect`.
 - `authorize.py` — `authorize_effect` (the policy gate) + `EffectDecision` +
   the act resolvers: `_resolve_remind_act`, `_resolve_cancel_job_act`,
-  `_resolve_exec_act` (denylist+cwd), `_resolve_send_outbound_act` (allowlist),
-  `_resolve_config_change_act` (protected keys).
-- `relative_time.py` — `resolve_remind` (EN+AR). G2-measured (0 false-allow).
+  `_resolve_edit_job_act`, `_resolve_exec_act` (denylist+cwd),
+  `_resolve_send_outbound_act` (allowlist), `_resolve_config_change_act`
+  (protected keys).
+- `relative_time.py` — `resolve_remind` (EN+AR). G2-measured (0 false-allow)
+  on one-off requests; recurring requests (EN+AR) are measured by the
+  Scheduled corpus in `tests/test_cron_timing_model.py`, not by G2.
 - `store.py` — `Commitment` + ops-SQLite tables + TTL/GC + tiered retention +
   `list_pending_soul()` (the confirm queue).
 - `constraints.py` — `is_commitment_enabled` + `load_constraint_beliefs` +
@@ -3849,7 +3992,12 @@ every one, no chat post went out, and an eval test had locked that in as a
 "property". `tests/test_x_post_proposal_gate.py` +
 `test_a_verified_publish_stops_at_the_approval_card` pin both halves. The HITL card (Web `renderHitlCard`
 + gateway `_build_approval_prompt`) renders the stored proposal text, so
-what the user approves is what publishes.
+what the user approves is what publishes. That covers the time too
+(Scheduled audit SCH-E08, 2026-10-14): a rebook of a cancelled, failed or
+expired booking is a new key revision at the new time, a booking still live
+at another time answers `booking_conflict`, and every booking reply gives
+the stored time and state, `ok` only when the state is `scheduled`
+(`tests/test_x_rebook_and_fire_cycle.py`).
 
 **D. The summary net fires on EVERY trim that drops turns.** Never gate
 `inject_summary_of_dropped` on a percentage-of-window again — trim fires at
@@ -5874,8 +6022,10 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
 - **The answer is `sent:<target>` or `Error: ...`**: the backend returns the
   error when the platform did not take the message (no adapter, a refusal, a
   timeout). `send_failed(result)` is the one reader. A caller either returns
-  the answer (a tool) or reads it with `send_failed`: the cron delivery logs
-  `delivery FAILED` (CRITICAL) or `delivered`, the scheduled-post notice falls
+  the answer (a tool) or reads it with `send_failed`: the cron outbox
+  acknowledges a message only on `sent:` and otherwise retries it, then ends
+  it `undeliverable` with an alert (§16E; the job was finalized DONE whatever
+  the answer until 2026-10-14), the scheduled-post notice falls
   through to the fan-out and says when no chat app took it, the cron denial
   notice warns, `send_file` and the dispatcher tools return the `Error:` (a
   failed tool call, §37).

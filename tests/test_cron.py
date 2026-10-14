@@ -220,15 +220,17 @@ class TestSQLiteCronStore:
 
     @pytest.mark.asyncio
     async def test_update_status(self) -> None:
+        # The free-form status setter is gone (Scheduled audit SCH-E04: a
+        # fire's status moves only inside its one transaction); a finished
+        # job is inserted finished here to check the same two reads.
         store = SQLiteCronStore(":memory:")
         await store.init()
 
         job = ScheduledJob(
             job_id="test-2", timing="5m", prompt="task",
-            platform="telegram", thread_id="t",
+            platform="telegram", thread_id="t", status=JobStatus.DONE,
         )
         await store.insert(job)
-        await store.update_status("test-2", JobStatus.DONE)
 
         active = await store.list_active()
         assert len(active) == 0  # DONE is not active
@@ -250,8 +252,10 @@ class TestSQLiteCronStore:
         )
         await store.insert(job)
 
+        # cancel() names its outcome (cancelled / cancel_pending / not_found /
+        # conflict / not_cancellable) since SCH-E12; it returned a bool.
         cancelled = await store.cancel("test-3")
-        assert cancelled is True
+        assert cancelled == "cancelled"
 
         active = await store.list_active()
         assert len(active) == 0

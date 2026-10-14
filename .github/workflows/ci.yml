@@ -570,6 +570,13 @@ jobs:
         run: python -m pytest tests/e2e/test_swarm_through_a_cutting_proxy.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Scheduled page reads every status in Arabic (2026-10-14)
+        # Scheduled audit SCH-S04/SCH-S08: every cron and X status the page
+        # projects, a booked and a held X post, and the clarify card of a
+        # real paused cancel turn, rendered in Arabic.
+        run: python -m pytest tests/e2e/test_scheduled_reads_in_arabic.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,

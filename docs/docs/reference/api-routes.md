@@ -275,13 +275,15 @@ Chat tweets still go through `x_post` (always HITL + `proposal_id`). Guide: [X p
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/scheduled` | Session | Mixed clock page (cron jobs **and** X posts). |
-| GET | `/api/scheduled/tasks` | Session | Combined upcoming list. |
-| POST | `/api/scheduled/cron` | Session + CSRF | Create a cron job. |
-| PUT | `/api/scheduled/cron/{job_id}` | Session + CSRF | Reschedule a cron job. |
-| DELETE | `/api/scheduled/cron/{job_id}` | Session + CSRF | Cancel a cron job. |
-| POST | `/api/scheduled/x` | Session + CSRF | Book an X post (`book_x_post`). Optional `reply_to_id`, `proposal_id`. |
-| PUT | `/api/scheduled/x/{post_id}` | Session + CSRF | Reschedule a pending X post. |
-| DELETE | `/api/scheduled/x/{post_id}` | Session + CSRF | Cancel a pending X post (releases reserved quota). |
+| GET | `/api/scheduled/tasks` | Session | Every cron job (upcoming and finished, each with its status class and the `actions` the server allows) and the X publication store's operations. Prompts are display summaries; the address is a `destination` label. |
+| GET | `/api/scheduled/cron/{job_id}` | Session | One job with its full prompt and `version`, for the edit dialog. |
+| POST | `/api/scheduled/cron` | Session + CSRF | Book a job: `timing`, `prompt`, optional `kind` (`reminder`/`task`) and `capabilities` (`read`/`read_write`). Caps, length limits and the `scheduled` rate bucket apply. |
+| PUT | `/api/scheduled/cron/{job_id}` | Session + CSRF | Edit `timing` and/or `prompt` with the `expected_version` the form read: 200 `rescheduled`, 202 `edit_pending` (during a fire), 409 `conflict` / `not_editable`. |
+| DELETE | `/api/scheduled/cron/{job_id}` | Session + CSRF | Cancel: 200 `cancelled`, 202 `cancel_pending` (during a fire), 409 for a finished job. |
+| POST | `/api/scheduled/cron/{job_id}/restore` | Session + CSRF | **Run again**: book a finished job anew at `timing`. |
+| POST | `/api/scheduled/x` | Session + CSRF | Book an X post (`book_x_post`). Optional `reply_to_id`, `proposal_id`. Answers the stored time and state. |
+
+X posts on this page are rescheduled and cancelled through `POST /api/x/queue/{operation_id}/reschedule` and `.../cancel` (with the revision the page read), the routes X Studio uses. Every mutating route checks the same origin (`kazma_ui/same_origin.py`). On an install with platform users every route answers **409** `scheduled_single_operator`. Behaviour: [Scheduled reminders and tasks](../guide/native-skills#scheduled-reminders-and-tasks).
 
 X Studio's **All clocks** link is this page. The Studio planner itself is X-only.
 

@@ -409,9 +409,16 @@ class TestRecurringTimingsAreRefused:
         assert "recurring task" in msg, "tell the operator what to do instead"
         assert "identical tweets" in msg, "and why repeating a post cannot work"
 
-    @pytest.mark.parametrize("when", ["2h", "45m", "2099-01-01T09:00:00"])
+    # A date within the booking horizon: since the one time model (Scheduled
+    # audit SCH-E09) a time is future AND finite -- at most two years ahead;
+    # "2099-01-01T09:00:00" is now refused with that reason.
+    @pytest.mark.parametrize("when", ["2h", "45m", f"{__import__('datetime').date.today().year + 1}-01-01T09:00:00"])
     def test_one_shot_times_still_work(self, when):
         assert self._parse()(when) > 0
+
+    def test_a_time_past_the_horizon_is_refused(self):
+        with pytest.raises(ValueError, match="at most 730 days"):
+            self._parse()("2099-01-01T09:00:00")
 
     def test_past_times_are_still_rejected_separately(self):
         with pytest.raises(ValueError) as exc:

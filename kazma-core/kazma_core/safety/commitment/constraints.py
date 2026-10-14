@@ -58,23 +58,30 @@ def load_constraint_beliefs(tenant_id: str = "default", *, limit: int = 50) -> l
         return []
 
 
+#: The jobs a cancel or an edit may still act on: pending, firing now (the
+#: change is recorded and applied when the fire ends), or a one-off whose
+#: message is waiting in the outbox (cancel only). Scheduled audit SCH-E12.
+LIVE_JOB_STATUSES = ("pending", "running", "delivering")
+
+
 def cron_pending_jobs(
     thread_id: str | None = None, tenant_id: str = "default",
+    statuses: tuple[str, ...] = LIVE_JOB_STATUSES,
 ) -> list[dict[str, str]] | None:
-    """Sync read of PENDING cron jobs for the cancel_job resolver (plan §3.5).
+    """Sync read of the live cron jobs for the cancel_job / edit_job resolvers (plan §3.5).
 
     The cron store API is async-only and the resolver runs in the sync
     ``authorize_effect``; this mirrors ``load_constraint_beliefs``' direct-sqlite
-    pattern. Only ``status='pending'`` jobs are cancellable
-    (``SQLiteCronStore.cancel`` updates ``WHERE status='pending'``), so that's
-    what we return — counting ``running`` would false-match jobs that can't be
-    cancelled.
+    pattern. A job is cancellable or editable while it still holds work
+    (:data:`LIVE_JOB_STATUSES`); a finished one is not (the store refuses it).
 
-    Returns ``[{"job_id": ..., "prompt": ...}, ...]`` for pending jobs on the
-    given thread; **``[]`` means "checked, none"; ``None`` means "couldn't
-    check"** (no scheduler / DB error) so the resolver can degrade to audit-only
-    rather than over-blocking every cancel when verification is unavailable.
+    Returns ``[{"job_id": ..., "prompt": ..., "status": ..., "next_run": ...}, ...]`` for the
+    tenant's live jobs (on the given thread when one is named); **``[]`` means
+    "checked, none"; ``None`` means "couldn't check"** (no scheduler / DB
+    error) so the resolver can degrade rather than over-block when
+    verification is unavailable.
     """
+    marks = ", ".join("?" for _ in statuses) or "''"
     try:
         from kazma_core.cron.scheduler import get_cron_scheduler
         from kazma_core.paths import data_dir
@@ -99,19 +106,20 @@ def cron_pending_jobs(
                 try:
                     if thread_id:
                         rows = conn.execute(
-                            "SELECT job_id, prompt FROM cron_jobs "
-                            "WHERE status='pending' AND thread_id=? AND tenant_id=?",
-                            (thread_id, tenant_id),
+                            "SELECT job_id, prompt, status, next_run FROM cron_jobs "
+                            f"WHERE status IN ({marks}) AND thread_id=? AND tenant_id=?",
+                            (*statuses, thread_id, tenant_id),
                         ).fetchall()
                     else:
                         rows = conn.execute(
-                            "SELECT job_id, prompt FROM cron_jobs "
-                            "WHERE status='pending' AND tenant_id=?",
-                            (tenant_id,),
+                            "SELECT job_id, prompt, status, next_run FROM cron_jobs "
+                            f"WHERE status IN ({marks}) AND tenant_id=?",
+                            (*statuses, tenant_id),
                         ).fetchall()
                 finally:
                     conn.close()
-                return [{"job_id": r[0], "prompt": r[1] or ""} for r in rows]
+                return [{"job_id": r[0], "prompt": r[1] or "", "status": r[2], "next_run": r[3] or ""}
+                        for r in rows]
             except sqlite3.OperationalError as _op_exc:
                 last_exc = _op_exc
                 if _attempt == 0:

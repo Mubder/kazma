@@ -259,7 +259,7 @@ refused. Install the `[database]` extra for SQLGlot and the remote drivers.
 | `secret_vault` | vault_store/retrieve/list/delete | AES-256-GCM encrypted |
 | `advanced_web_crawler` | web_search_duckduckgo, crawl_page, parse_document | CSV/JSON/XLS/PDF parsing |
 | `system_health_monitor` | get_system_stats, list_active_processes, read_system_logs | |
-| `task_scheduler_cron` | schedule_task, list_scheduled, cancel_scheduled | HITL-gated |
+| `task_scheduler_cron` | schedule_task, list_scheduled, edit_scheduled, cancel_scheduled | Booking, editing and cancelling are HITL-gated. See [Scheduled reminders and tasks](#scheduled-reminders-and-tasks) |
 | `x_publisher` | x_status, x_post, x_delete_post, x_schedule_post, x_list_scheduled, x_cancel_scheduled_post | Official X API v2. Chat writes **always HITL**. Web compose/plan is [X Studio](x-publisher) (`/x`) |
 | `environment_bootstrapper` | install_python_packages, install_npm_packages, check_environment | HITL-gated |
 | `visual_interpreter_generator` | analyze_local_image, generate_ui_mockup | |
@@ -267,6 +267,82 @@ refused. Install the `[database]` extra for SQLGlot and the remote drivers.
 | `chat_platform_dispatcher` | dispatch_notification, send_approval_request, send_message | cross-platform notify |
 | `code_analyzer_linter` | lint_code, format_code, run_unit_tests | ruff + pytest |
 | `code-review`, `fix-lint`, `refactor-file`, `write-tests` | *(manifest-only, no tools)* | prompt/workflow skills |
+
+---
+
+## Scheduled reminders and tasks {#scheduled-reminders-and-tasks}
+
+`schedule_task` books a job; `list_scheduled`, `edit_scheduled` and
+`cancel_scheduled` read and change the jobs of the conversation's install. The
+Scheduled page (`/scheduled`) shows the same jobs, with the X posts booked in
+[X Studio](x-publisher). Booking, editing and cancelling each ask for approval.
+
+### What a scheduled job can do when it fires
+
+A job is one of two kinds, chosen when it is booked:
+
+| Kind | When it fires | Tools |
+|---|---|---|
+| `reminder` (the default) | Sends its stored text, as written, to the chat it was booked from. No model call. | None |
+| `task` | Runs one agent turn on its stored instruction, then sends the answer to that chat. | Only the set declared at booking: `read` (read-only tools, the default) or `read_write` (write tools too). Never MCP tools, and never the tools that always need approval. |
+
+- The approval card of the booking says which kind it is and which tools the
+  task will have. A call to any other tool is refused when the job fires.
+- The instruction reaches the model labelled as an instruction stored
+  earlier, not as something the user just said.
+- A task does not fire while approvals (HITL) are switched off, unless the
+  operator turned on `safety.cron_fire_without_hitl`. The agent cannot turn
+  it on itself. A reminder still fires: it runs no model.
+- A task's turn has a time budget (`cron.task_budget_seconds`, default 300).
+  A turn that fails -- the model provider is down, the turn errors or runs
+  out of time -- is a failed fire: it is counted on the job and raises an
+  alert. The error text is never sent as if it were the reminder. After 3
+  failures in a row a recurring job stops, with an alert.
+
+### Delivery, late and missed jobs
+
+- A message counts as sent only when the chat app accepted it. A refused
+  message is tried again with a growing wait, for up to two hours. Then the
+  job ends **undeliverable**, with one alert. If Kazma stopped in the middle
+  of sending, the job ends **delivery unknown**, with one alert, and the
+  message is not sent a second time.
+- A job that fell due while Kazma was down still fires if it is at most
+  `cron.catchup_minutes` late (default 60), and says how late it is. A job
+  later than that is **missed**: it does not run, and its chat gets one
+  notice. A recurring job then moves on to its next time. A window given
+  when the job is booked wins over the setting.
+- An interrupted fire runs again after a restart. A reload with
+  `--when-idle` waits for a fire that is running.
+
+### Times
+
+Times are read in the cron time zone (Settings, `cron.timezone`; else
+`KAZMA_TZ`; else UTC). Kazma accepts these forms:
+
+- a delay: `30m`, `2h`, `3d`;
+- an ISO time: `2026-12-01T09:00`, read in that zone; `Z` and offsets are
+  honoured;
+- a recurrence: `daily at 9am`, `weekdays at 08:00`, `every mon,wed at 21:00`,
+  or an RRULE such as `FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=0;COUNT=10`.
+
+Kazma refuses a time in the past or more than two years ahead. It also
+refuses a one-off time that does not exist on a clock-change day, or that
+occurs twice; give an offset instead. A recurring job uses the earlier of
+two repeated times, and moves a time that does not exist forward by the
+change. X posts take one-off times only.
+
+### Changing a job
+
+- An edit or a cancel names the version of the job it read. A job that
+  changed meanwhile answers with a conflict; refresh and try again.
+- A job running right now takes an edit or a cancel when the run ends.
+- A finished job comes back only through **Run again**.
+- A timing-only edit never changes the stored prompt.
+- Every change records who made it and from where.
+
+On an install with platform users (multi-user mode), scheduling is off: the
+page shows why, and the tools and routes refuse. Scheduled jobs are not
+separated per user yet.
 
 ---
 

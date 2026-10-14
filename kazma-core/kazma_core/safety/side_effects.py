@@ -85,8 +85,10 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "cancel_scheduled": (EffectKind.SCHEDULE, SemanticTier.HIGH, "cancel_job",
                          ("job_id",)),
     # Editing a scheduled job mutates what runs autonomously; HITL gates it.
-    # act=None → audit-only in the commitment gate (no remind/cancel resolver).
-    "edit_scheduled": (EffectKind.SCHEDULE, SemanticTier.HIGH, None,
+    # act=edit_job: the resolver checks the id is a live job of the caller's
+    # tenant and runs the memory guard on a new absolute time (Scheduled
+    # audit SCH-S03/E03; it was audit-only, act=None).
+    "edit_scheduled": (EffectKind.SCHEDULE, SemanticTier.HIGH, "edit_job",
                        ("job_id",)),
     # memory (graph cleanup + store — omitting these fail-closes merge/delete)
     "memory_store": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,

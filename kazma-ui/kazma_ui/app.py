@@ -1225,16 +1225,19 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.cron.scheduler import CronScheduler, SQLiteCronStore, set_cron_scheduler
 
-                # Graph builder for scheduled-job execution. Uses the agent's
+                # Graph builder for a fired agent task. Uses the agent's
                 # one-shot child graph (checkpointer=None) — correct for a
-                # fire-and-deliver cron job. Mirrors the _sub_graph_builder
-                # closure above. Without this, _execute() raises
-                # "No graph builder configured" the moment a job fires.
-                def _cron_graph_builder(**_kwargs: Any) -> Any:
+                # fire-and-deliver cron job — offered exactly the tools the
+                # job declared at booking (Scheduled audit SCH-S05: it got the
+                # whole agent). Without this, a task fire fails with
+                # "No graph builder configured". Called in a thread.
+                def _cron_graph_builder(**kwargs: Any) -> Any:
+                    from kazma_core.cron.capabilities import cron_fire_graph
+
                     agent = self.agent
-                    if agent is not None and hasattr(agent, "build_child_graph"):
-                        return agent.build_child_graph()
-                    return agent.get_streaming_graph()
+                    if agent is None or not hasattr(agent, "build_child_graph"):
+                        raise RuntimeError("No agent to run a scheduled task")
+                    return cron_fire_graph(agent, capabilities=str(kwargs.get("capabilities") or "read"))
 
                 self.cron_store = SQLiteCronStore()
                 self.cron_scheduler = CronScheduler(
@@ -2258,6 +2261,25 @@ class KazmaAppBuilder:
         except Exception as e:  # noqa: BLE001 — teardown must not fail here
             logger.debug("[app] background loop stop failed: %s", e)
 
+        # 1) Stop cron FIRST, while the agent, the chat apps and the stores it
+        # delivers through are all still up: no new fire starts, and a fire in
+        # flight finishes within its bound (CronScheduler.stop drains with
+        # asyncio.wait; one that does not end in time runs again at the next
+        # start). It ran after the document and memory drains (up to 75 s),
+        # and left fires running under an agent that was then closed
+        # (Scheduled audit SCH-E04).
+        try:
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            cron_sched = get_cron_scheduler()
+            if cron_sched is not None and hasattr(cron_sched, "stop"):
+                maybe = cron_sched.stop()
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+                logger.info("[app] Cron scheduler stopped")
+        except Exception as e:  # noqa: BLE001 — teardown must not fail here
+            logger.warning("[app] cron stop failed: %s", e)
+
         # Join the watchdog's local statements before any stores close.
         from kazma_core.web_acquire.monitor import stop as stop_acquisition_monitor
 
@@ -2354,20 +2376,8 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Documents] ingestion coordinator stop failed: %s", e)
 
-        # 1) Stop cron first so no new jobs fire (audit C3)
-        try:
-            from kazma_core.cron.scheduler import get_cron_scheduler
-
-            cron_sched = get_cron_scheduler()
-            if cron_sched is not None and hasattr(cron_sched, "stop"):
-                maybe = cron_sched.stop()
-                if asyncio.iscoroutine(maybe):
-                    await maybe
-                logger.info("[app] Cron scheduler stopped")
-        except Exception as e:
-            logger.warning("[app] cron stop failed: %s", e)
-
-        # Stop the scheduled-X fire loop so no scheduled post fires mid-shutdown.
+        # (Cron was stopped first, above.) Stop the scheduled-X fire loop so no
+        # scheduled post fires mid-shutdown.
         try:
             from kazma_core.x_api.scheduled_fire import stop_scheduled_x_loop
 

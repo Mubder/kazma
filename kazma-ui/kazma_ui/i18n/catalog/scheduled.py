@@ -185,12 +185,252 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "When",
     },
     "scheduled.timing_hint": {
-        "ar": "نسبي (5m، 1h) أو متكرر (daily at 9am) أو طابع زمني ISO.",
-        "en": "Relative (5m, 1h), recurring (daily at 9am), or an ISO timestamp.",
+        "ar": "نسبي (5m، 1h)، أو متكرر (daily at 9am، weekdays at 08:30، every mon,wed at 21:00، مع until 2026-12-31 أو count 5 اختياريًا)، أو تاريخ ووقت.",
+        "en": "Relative (5m, 1h), recurring (daily at 9am, weekdays at 08:30, every mon,wed at 21:00, optionally with until 2026-12-31 or count 5), or a date and time.",
     },
     "scheduled.timing_ph": {
         "ar": "مثال: 5m أو 1h أو daily at 9am أو 2026-12-01T09:00",
         "en": "e.g. 5m, 1h, daily at 9am, or 2026-12-01T09:00",
+    },
+    "scheduled.x_timing_hint": {
+        "ar": "وقت واحد: نسبي (2h) أو تاريخ ووقت. منشورات إكس لا تتكرر.",
+        "en": "One time: relative (2h) or a date and time. X posts do not repeat.",
+    },
+    "scheduled.x_timing_ph": {
+        "ar": "مثال: 2h أو 2026-12-01T09:00",
+        "en": "e.g. 2h or 2026-12-01T09:00",
+    },
+    "scheduled.zone_hint": {
+        "ar": "الأوقات بلا فرق توقيت تُقرأ بالمنطقة الزمنية: {zone}.",
+        "en": "Times without an offset are read in {zone}.",
+    },
+    "scheduled.single_operator": {
+        "ar": "المهام المجدولة تعمل في تثبيت بمشغل واحد. في هذا التثبيت مستخدمون للمنصة، والمهام المجدولة لم تُفصل لكل مستخدم بعد، لذا الجدولة متوقفة هنا.",
+        "en": "Scheduled tasks work on a single-operator install. This install has platform users, and scheduled tasks are not separated per user yet, so scheduling is off here.",
+    },
+    "scheduled.stat_attention": {
+        "ar": "تحتاج انتباهك",
+        "en": "Needs attention",
+    },
+    "scheduled.st_attention": {
+        "ar": "تحتاج انتباهك",
+        "en": "Needs attention",
+    },
+    "scheduled.st_delivering": {
+        "ar": "قيد الإرسال",
+        "en": "Sending",
+    },
+    "scheduled.st_undeliverable": {
+        "ar": "لم تُسلَّم",
+        "en": "Not delivered",
+    },
+    "scheduled.st_delivery_unknown": {
+        "ar": "الإرسال غير مؤكد",
+        "en": "Delivery unknown",
+    },
+    "scheduled.st_missed": {
+        "ar": "فاتت",
+        "en": "Missed",
+    },
+    "scheduled.st_scheduled": {
+        "ar": "مجدول",
+        "en": "Scheduled",
+    },
+    "scheduled.st_deferred": {
+        "ar": "مؤجل",
+        "en": "Deferred",
+    },
+    "scheduled.st_sending": {
+        "ar": "جارٍ النشر",
+        "en": "Publishing",
+    },
+    "scheduled.st_awaiting_approval": {
+        "ar": "موقوف للمراجعة",
+        "en": "Held for review",
+    },
+    "scheduled.st_outcome_unknown": {
+        "ar": "النتيجة غير معروفة",
+        "en": "Outcome unknown",
+    },
+    "scheduled.st_published": {
+        "ar": "نُشر",
+        "en": "Published",
+    },
+    "scheduled.st_failed_permanent": {
+        "ar": "فشل",
+        "en": "Failed",
+    },
+    "scheduled.st_expired": {
+        "ar": "انتهت صلاحيته",
+        "en": "Expired",
+    },
+    "scheduled.kind_reminder": {
+        "ar": "تذكير",
+        "en": "Reminder",
+    },
+    "scheduled.kind_label": {
+        "ar": "ماذا يحدث في الموعد",
+        "en": "What happens at that time",
+    },
+    "scheduled.kind_opt_reminder": {
+        "ar": "تذكير: يُرسل هذا النص كما هو",
+        "en": "Reminder: sends this text as written",
+    },
+    "scheduled.kind_opt_task": {
+        "ar": "مهمة للوكيل: ينفّذها كاظمه ويرسل الجواب",
+        "en": "Agent task: Kazma runs it and sends the answer",
+    },
+    "scheduled.tools_label": {
+        "ar": "الأدوات المسموحة",
+        "en": "Tools it may use",
+    },
+    "scheduled.tools_read": {
+        "ar": "أدوات القراءة فقط",
+        "en": "Read-only tools",
+    },
+    "scheduled.tools_read_write": {
+        "ar": "أدوات القراءة والكتابة",
+        "en": "Read and write tools",
+    },
+    "scheduled.tools_hint": {
+        "ar": "لا أحد يراقب عند التشغيل: الأدوات التي تحتاج موافقة لا تُتاح أبدًا.",
+        "en": "Nobody is watching when it runs: tools that need an approval are never offered.",
+    },
+    "scheduled.repeats": {
+        "ar": "يتكرر",
+        "en": "Repeats",
+    },
+    "scheduled.destination": {
+        "ar": "يُرسل إلى",
+        "en": "Sends to",
+    },
+    "scheduled.failures": {
+        "ar": "إخفاقات متتالية",
+        "en": "Failures in a row",
+    },
+    "scheduled.last_delivery": {
+        "ar": "آخر إرسال",
+        "en": "Last delivery",
+    },
+    "scheduled.delivery_pending": {
+        "ar": "قيد الإرسال",
+        "en": "sending",
+    },
+    "scheduled.delivery_retrying": {
+        "ar": "يُعاد المحاولة",
+        "en": "retrying",
+    },
+    "scheduled.delivery_delivered": {
+        "ar": "سُلّم",
+        "en": "delivered",
+    },
+    "scheduled.delivery_undeliverable": {
+        "ar": "لم يُسلَّم",
+        "en": "not delivered",
+    },
+    "scheduled.delivery_unknown": {
+        "ar": "غير معروف",
+        "en": "unknown",
+    },
+    "scheduled.delivery_cancelled": {
+        "ar": "أُلغي",
+        "en": "cancelled",
+    },
+    "scheduled.edit_pending": {
+        "ar": "المهمة تعمل الآن؛ يُطبَّق التعديل عند انتهاء هذا التشغيل.",
+        "en": "The task is running now; the change applies when this run ends.",
+    },
+    "scheduled.cancel_pending": {
+        "ar": "المهمة تعمل الآن؛ تُلغى عند انتهاء هذا التشغيل.",
+        "en": "The task is running now; it is cancelled when this run ends.",
+    },
+    "scheduled.restore": {
+        "ar": "شغّل مرة أخرى",
+        "en": "Run again",
+    },
+    "scheduled.restore_when": {
+        "ar": "متى يعمل مرة أخرى؟",
+        "en": "When should it run again?",
+    },
+    "scheduled.restored": {
+        "ar": "جُدولت المهمة مرة أخرى.",
+        "en": "Scheduled again.",
+    },
+    "scheduled.err_conflict": {
+        "ar": "تغيّرت المهمة منذ فتحتها. حدّث الصفحة وراجعها مرة أخرى.",
+        "en": "The task changed since you opened it. Refresh and review it again.",
+    },
+    "scheduled.err_not_editable": {
+        "ar": "انتهت المهمة. استخدم «شغّل مرة أخرى» لجدولتها من جديد.",
+        "en": "The task has finished. Use Run again to schedule it again.",
+    },
+    "scheduled.err_not_cancellable": {
+        "ar": "انتهت المهمة بالفعل.",
+        "en": "The task has already finished.",
+    },
+    "scheduled.err_not_found": {
+        "ar": "لا توجد مهمة مجدولة بهذا المعرّف.",
+        "en": "No such scheduled task.",
+    },
+    "scheduled.err_not_finished": {
+        "ar": "ما زالت المهمة قيد العمل؛ عدّلها بدلًا من ذلك.",
+        "en": "The task still has work to do; edit it instead.",
+    },
+    "scheduled.err_scheduled_single_operator": {
+        "ar": "الجدولة متوقفة في تثبيت فيه مستخدمون للمنصة.",
+        "en": "Scheduling is off on an install with platform users.",
+    },
+    "scheduled.err_tenant_job_limit": {
+        "ar": "وصلت المهام المجدولة إلى حدها. ألغِ بعضها أو ارفع الحد في الإعدادات.",
+        "en": "The scheduled jobs reached their limit. Cancel some, or raise the limit in Settings.",
+    },
+    "scheduled.err_thread_job_limit": {
+        "ar": "وصلت مهام هذه المحادثة المجدولة إلى حدها.",
+        "en": "This conversation's scheduled jobs reached their limit.",
+    },
+    "scheduled.err_prompt_too_long": {
+        "ar": "نص المهمة أطول من 8000 حرف.",
+        "en": "The task prompt is longer than 8000 characters.",
+    },
+    "scheduled.err_no_delivery_address": {
+        "ar": "لا يوجد عنوان للإرسال. اضبط محادثة تيليجرام في الإعدادات.",
+        "en": "No delivery address. Set a Telegram chat in Settings.",
+    },
+    "scheduled.clarify_remind_when": {
+        "ar": "متى تريد التذكير؟ في الذاكرة موعد قريب، فاختر الوقت المقصود.",
+        "en": "When should the reminder go off? Memory holds a date nearby, so pick the time you mean.",
+    },
+    "scheduled.clarify_cancel_which": {
+        "ar": "أي مهمة مجدولة تريد إلغاءها؟",
+        "en": "Which scheduled task should be cancelled?",
+    },
+    "scheduled.clarify_opt_memory_anchor": {
+        "ar": "ذكّرني في {when} (من الموعد المحفوظ)",
+        "en": "Remind me at {when} (from the date in memory)",
+    },
+    "scheduled.clarify_opt_from_now": {
+        "ar": "ذكّرني في {when} (محسوبًا من الآن)",
+        "en": "Remind me at {when} (counted from now)",
+    },
+    "scheduled.clarify_opt_cancel": {
+        "ar": "لا تجدوله",
+        "en": "Don't schedule it",
+    },
+    "scheduled.clarify_opt_cancel_job": {
+        "ar": "ألغِ {job}: {what}",
+        "en": "Cancel {job}: {what}",
+    },
+    "scheduled.clarify_opt_cancel_job_at": {
+        "ar": "ألغِ {job} (موعده التالي {when}): {what}",
+        "en": "Cancel {job} (next {when}): {what}",
+    },
+    "scheduled.clarify_opt_keep": {
+        "ar": "لا تلغِ شيئًا",
+        "en": "Don't cancel anything",
+    },
+    "scheduled.err_unchanged": {
+        "ar": "لم يتغير شيء.",
+        "en": "Nothing changed.",
     },
     "scheduled.timing_required": {
         "ar": "الوقت مطلوب.",

@@ -549,7 +549,7 @@ whole.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `KAZMA_TZ` | `UTC` | Time zone for cron schedules when `cron.timezone` (Settings) is empty. |
-| `KAZMA_CRON_STALE_HOURS` | `24` | A one-off job that fell due while Kazma was down still runs if it is at most this many hours late (at least 1); an older one is skipped. |
+| `KAZMA_CRON_STALE_HOURS` | the setting (60 minutes) | The catch-up window in hours, used only when `cron.catchup_minutes` (Settings) is not set: a reminder or task that fell due while Kazma was down still fires if it is at most this late, and says how late. Past it the job is *missed*: it does not run, and one notice says so (since 2026-10-14; before, a job up to 24 hours late ran as if on time and an older one was skipped without a word). A window given when the job is booked wins over both. |
 
 ---
 

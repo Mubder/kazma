@@ -182,8 +182,10 @@ COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         "x",
-        "X Studio: drafts, accounts and scheduled posts (/x help)",
-        "استوديو X: المسودات والحسابات والمنشورات المجدولة",
+        # In a chat app /x is the auto-reply loop; scheduled posts are booked
+        # with the x_schedule_post tool or in X Studio (Scheduled audit SCH-S09).
+        "X auto-reply: drafts, approvals and summons; X Studio on the web (/x help)",
+        "الرد التلقائي في X: المسودات والموافقات والاستدعاءات؛ استوديو X على الويب",
         web=True,
         page="/x",
         arguments="",

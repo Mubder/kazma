@@ -54,7 +54,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CRAWL_MAX_DEPTH` | `5` | `kazma_core.tools.web_research` | yes |
 | `KAZMA_CRAWL_MAX_PAGES` | `50` | `kazma_core.tools.web_research` | yes |
 | `KAZMA_CRAWL_RESPECT_ROBOTS` | `"1"` | `kazma_core.web_acquire.research_pipeline_job`, `kazma_core.web_acquire.robots` | yes |
-| `KAZMA_CRON_STALE_HOURS` | (none) | `kazma_core.cron.scheduler` | yes |
+| `KAZMA_CRON_STALE_HOURS` | `""` | `kazma_core.cron.settings` | yes |
 | `KAZMA_CUA_PLANNER` | `"1"` | `kazma_core.tools.computer_use_planners` | yes |
 | `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DATABASE_URL` | (none) | `kazma_core.db.backend`, `kazma_core.memory.backends` | yes |

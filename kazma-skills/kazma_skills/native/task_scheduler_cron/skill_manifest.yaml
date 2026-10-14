@@ -7,7 +7,7 @@ license: MIT
 tools:
   schedule_task:
     arabic_name: "جدولة مهمة"
-    description: "Schedule a task to run autonomously at a future time. Timing: '5m', '1h', 'daily at 9am'."
+    description: "Schedule a reminder (kind 'reminder': sends the text as written, no model) or an agent task (kind 'task': runs with read-only tools unless tools='read_write') at a future time. Timing: '30m', '2h', a date and time in the operator's zone, or a recurrence ('daily at 9am', 'weekdays at 08:30', 'every mon,wed at 21:00')."
     category: "automation"
     prompt_chain:
       - "قم بجدولة مهمة للتشغيل الذاتي في المستقبل"
@@ -25,7 +25,7 @@ tools:
       - "قم بإلغاء المهمة المجدولة المحددة بالمعرف"
   edit_scheduled:
     arabic_name: "تعديل مهمة مجدولة"
-    description: "Edit an existing scheduled task's timing and/or prompt. Provide the job ID plus at least one of timing ('5m', '1h', 'daily at 9am') or a new prompt."
+    description: "Edit a scheduled job's timing and/or prompt (a job running now takes the change when the run ends; a finished job is not reopened by an edit: book it again). Provide the job ID plus at least one of timing ('30m', '2h', 'daily at 9am') or a new prompt."
     category: "automation"
     prompt_chain:
       - "عدّل وقت أو نص المهمة المجدولة"

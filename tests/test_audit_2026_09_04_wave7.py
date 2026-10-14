@@ -134,7 +134,9 @@ class TestWave7CronPurgeAndReliability:
         )
         await store.insert(job_active)
 
-        # 2 old terminal jobs (>20 days old)
+        # 2 old terminal jobs (>20 days old). Retention counts from when a job
+        # FINISHED since 2026-10-14 (Scheduled audit SCH-E07: a job booked long
+        # ago that finished today is kept), so these finished 20 days ago too.
         old_time = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat()
         job_old_done = ScheduledJob(
             job_id="job-old-done",
@@ -144,6 +146,7 @@ class TestWave7CronPurgeAndReliability:
             thread_id="t1",
             status=JobStatus.DONE,
             created_at=old_time,
+            finished_at=old_time,
         )
         await store.insert(job_old_done)
 
@@ -155,6 +158,7 @@ class TestWave7CronPurgeAndReliability:
             thread_id="t1",
             status=JobStatus.FAILED,
             created_at=old_time,
+            finished_at=old_time,
         )
         await store.insert(job_old_failed)
 

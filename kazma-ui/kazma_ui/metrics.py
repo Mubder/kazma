@@ -184,6 +184,16 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
                 label = action.replace("\\", "\\\\").replace('"', '\\"')
                 lines.append(f'kazma_memory_operator_actions_total{{action="{label}"}} {count}')
 
+        # ── Scheduled reminders and tasks (Scheduled audit SCH-E11) ──────
+        try:
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            sched = get_cron_scheduler()
+            if sched is not None and hasattr(sched, "metrics"):
+                lines.extend(await sched.metrics())
+        except Exception as exc:  # noqa: BLE001 — a metric must not break the page
+            logger.debug("Failed to append cron metrics: %s", exc)
+
         # ── In-process prometheus_client registry (kazma-core Counters) ──
         # Exposes counters that aren't DB-derivable — notably
         # kazma_commitment_terminal_total (PR3 loop-prevention signal) and the

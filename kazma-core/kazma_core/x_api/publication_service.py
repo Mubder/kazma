@@ -22,6 +22,33 @@ from kazma_core.x_api.publication_store import (
 
 logger = logging.getLogger(__name__)
 
+#: A scheduled post that provably never left (connect refused or timed out)
+#: is tried again after this long, up to this many attempts in all.
+_NOT_SENT_RETRY_S = 60.0
+_NOT_SENT_ATTEMPTS = 3
+
+#: Finished, unpublished operations, delivered notices and done projections
+#: older than this are pruned, at most once an hour (SCH-E13).
+_RETENTION_DAYS = 90
+_last_retention = 0.0
+
+
+def _retain() -> dict[str, int]:
+    """Retention for the publication store; blocking, at most hourly."""
+    global _last_retention
+    now = time.time()
+    if now - _last_retention < 3600:
+        return {}
+    _last_retention = now
+    try:
+        pruned = get_publication_store().prune_terminal(older_than_days=_RETENTION_DAYS, now=now)
+    except Exception:  # noqa: BLE001 — retention never stops the fire cycle
+        logger.warning("[x-publication] retention failed", exc_info=True)
+        return {}
+    if any(pruned.values()):
+        logger.info("[x-publication] pruned %s", pruned)
+    return pruned
+
 
 def operation_inventory(*, limit: int = 50, state: str = "", query: str = "", cursor: str = "") -> dict[str, Any]:
     """Read-only diagnostic contract; do not expose lease tokens or credential digests."""
@@ -357,6 +384,12 @@ async def _dispatch_operation(ident: str, *, cfg: XConfig | None = None) -> tupl
         from kazma_core.x_api.scheduled_fire import _parse_retry_wait
 
         defer = time.time() + _parse_retry_wait(exc) if exc.status == 429 and row["origin"] == "schedule" and claimed["attempts"] < 8 else None
+        if (defer is None and exc.outcome == "not_sent" and row["origin"] == "schedule"
+                and claimed["attempts"] < _NOT_SENT_ATTEMPTS):
+            # Provably unsent (the connection never opened): try again in a
+            # minute, a bounded number of times, inside the missed-fire window.
+            # It became failed_permanent at once (Scheduled audit SCH-E13).
+            defer = time.time() + _NOT_SENT_RETRY_S
         await asyncio.to_thread(store.fail, ident, owner=owner, outcome=exc.outcome, reason=str(exc), defer_until=defer)
         await asyncio.to_thread(_project_pending)
         return _result(await asyncio.to_thread(store.get, ident, tenant_id=tenant))
@@ -418,10 +451,29 @@ async def delete(*, tweet_id: str, idempotency_key: str = "") -> tuple[bool, dic
     return await _dispatch_operation(row["id"], cfg=cfg)
 
 
+#: A booking key whose operation ended this way may be booked again, under a
+#: new key revision (``<key>:r<n>``): a draft cancelled or refused can be
+#: scheduled anew. A published one cannot (the duplicate rule holds it too).
+_REBOOKABLE_STATES = frozenset({"cancelled", "failed_permanent", "expired"})
+_LIVE_SCHEDULE_STATES = frozenset({"scheduled", "deferred", "awaiting_approval"})
+
+
 def schedule(*, text: str, fire_at: float, reply_to_id: str = "", idempotency_key: str = "",
              metadata: dict[str, Any] | None = None) -> tuple[bool, dict[str, Any]]:
+    """Book a scheduled post. ``(ok, payload)``; ``ok`` only when it is scheduled.
+
+    The payload always reports the STORED booking -- its time and state. A
+    booking key is "proposal:<id>" from chat and the page, so booking the same
+    draft again replayed the first operation whatever had become of it, and
+    answered ``scheduled: True`` with the newly requested time over a
+    cancelled row that would never fire (Scheduled audit SCH-E08). Now a key
+    whose booking ended (:data:`_REBOOKABLE_STATES`) books a new revision; one
+    still booked at another time is a conflict naming that time; one already
+    published is a conflict.
+    """
     from datetime import datetime
 
+    from kazma_core.cron.scheduler import resolve_cron_zone
     from kazma_core.x_api.policy import evaluate_post
     from kazma_core.x_api.schedule import get_x_scheduled_store
 
@@ -436,18 +488,51 @@ def schedule(*, text: str, fire_at: float, reply_to_id: str = "", idempotency_ke
         return False, {"error": decision.reason}
     if not cfg.account_id:
         return False, {"error": "Verify the connected account with Test in Settings → X before scheduling. Existing work remains held."}
+    zone, zone_name = resolve_cron_zone()
+
+    def _when(epoch: float) -> str:
+        # The operator's zone, named in ``tz`` -- the server's own local zone
+        # was used here (SCH-E13).
+        return datetime.fromtimestamp(float(epoch), tz=zone).isoformat(timespec="seconds")
+
+    base_key = idempotency_key or uuid.uuid4().hex
+    key = base_key
+    row: dict[str, Any] = {}
     try:
-        row = _reserve(cfg, text=body, reply_to_id=reply_to_id, due_at=fire_at,
-                       idempotency_key=idempotency_key or uuid.uuid4().hex, origin="schedule", metadata=metadata)
+        for revision in range(2, 12):
+            row = _reserve(cfg, text=body, reply_to_id=reply_to_id, due_at=fire_at,
+                           idempotency_key=key, origin="schedule", metadata=metadata)
+            if not row.get("_replayed"):
+                break
+            if row["state"] in _REBOOKABLE_STATES:
+                key = f"{base_key}:r{revision}"
+                continue
+            if row["state"] in _LIVE_SCHEDULE_STATES and abs(float(row["due_at"]) - fire_at) <= 1.0:
+                break  # the same booking asked again: report it
+            return False, {
+                "code": "booking_conflict",
+                "error": (f"This draft is already booked ({row['state']}) for {_when(row['due_at'])} {zone_name}. "
+                          "Reschedule or cancel that booking in X Studio instead of booking it again."
+                          if row["state"] in _LIVE_SCHEDULE_STATES else
+                          f"This draft's booking is {row['state']}; it cannot be booked again."),
+                "operation_id": row["id"], "state": row["state"], "fire_at": _when(row["due_at"]),
+                "tz": zone_name,
+            }
+        else:
+            return False, {"code": "booking_conflict", "error": "This draft was booked too many times."}
     except (PublicationPolicyError, PublicationConflictError) as exc:
         return False, {"error": ("An identical tweet is already scheduled or held. " if "Duplicate" in str(exc) else "") + str(exc)}
     repair = _project_pending()
     legacy = get_x_scheduled_store().by_operation(row["id"], tenant_id=x_tenant_id())
-    return True, {"scheduled": True, "id": legacy.id if legacy else None, "operation_id": row["id"],
-                  "version": row["version"], "state": row["state"], "text": body,
-                  "fire_at": datetime.fromtimestamp(fire_at).astimezone().isoformat(timespec="seconds"),
-                  "tz": (metadata or {}).get("tz", ""), "reply_to_id": reply_to_id,
-                  "repair_needed": bool(repair["failed"])}
+    scheduled = row["state"] == "scheduled"
+    payload = {"scheduled": scheduled, "id": legacy.id if legacy else None, "operation_id": row["id"],
+               "version": row["version"], "state": row["state"], "text": body,
+               "fire_at": _when(row["due_at"]), "tz": zone_name, "reply_to_id": reply_to_id,
+               "repair_needed": bool(repair["failed"])}
+    if not scheduled:
+        payload["code"] = "booking_held"
+        payload["error"] = f"The booking is {row['state']}: {row.get('reason') or 'review it in X Studio'}."
+    return scheduled, payload
 
 
 def cancel_schedule(post_id: int) -> bool:
@@ -464,25 +549,6 @@ def cancel_schedule(post_id: int) -> bool:
     store = get_publication_store()
     row = store.get(post.operation_id, tenant_id=tenant)
     if row is None or not store.cancel(row["id"], tenant_id=tenant, expected_version=row["version"]):
-        return False
-    _project_pending()
-    return True
-
-
-def reschedule_legacy(post_id: int, *, fire_at: float) -> bool:
-    from kazma_core.x_api.schedule import get_x_scheduled_store
-
-    tenant = x_tenant_id()
-    legacy = get_x_scheduled_store()
-    post = legacy.get(post_id, tenant_id=tenant)
-    if post is None:
-        return False
-    if not post.operation_id:
-        return legacy.set_fire_time(post_id, fire_at, tenant_id=tenant)
-    store, cfg = get_publication_store(), _config()
-    row = store.get(post.operation_id, tenant_id=tenant)
-    if row is None or not store.reschedule(row["id"], tenant_id=tenant, expected_version=row["version"],
-                                          due_at=fire_at, max_day=cfg.max_posts_per_day, max_month=cfg.max_posts_per_month):
         return False
     _project_pending()
     return True
@@ -526,5 +592,20 @@ async def fire_due_operations() -> None:
     due = await asyncio.to_thread(store.due)
     for row in due:
         with tenant_scope(row["tenant_id"]):
-            await _dispatch_operation(row["id"])
+            try:
+                await _dispatch_operation(row["id"])
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — one bad row must not stop the rows after it
+                # It aborted the whole cycle, so every later due post waited for
+                # the next one -- or missed its window (Scheduled audit SCH-E13).
+                # Hold it with a notice; a claimed one is recovered as unknown.
+                logger.exception("[x-publication] dispatch of %s failed; holding it for review", row["id"])
+                try:
+                    await asyncio.to_thread(store.hold, row["id"], tenant_id=row["tenant_id"],
+                                            reason="Kazma hit an error preparing this post; review it in X Studio.")
+                    await asyncio.to_thread(_project_pending)
+                except Exception:  # noqa: BLE001
+                    logger.warning("[x-publication] could not hold %s", row["id"], exc_info=True)
     await drain_notifications()
+    await asyncio.to_thread(_retain)

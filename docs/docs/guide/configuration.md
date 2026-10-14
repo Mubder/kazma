@@ -268,7 +268,7 @@ safety:
     auto_deny_on_timeout: true
 ```
 
-> The **swarm bus** uses a separate, broader list (`_EXTENDED_DANGER` adds `python_exec`, `code_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `run_tests`). The **MCP** path classifies dynamically by name pattern. See [Security & Safety → danger-tool lists](security-and-safety#danger-tool-lists-three-of-them).
+> The **swarm bus** uses `_EXTENDED_DANGER`, a copy of the canonical list (`CANONICAL_DANGER_TOOLS`) with the same contents, not a broader one. The canonical list is always added to the list above (unless `KAZMA_HITL_CANONICAL_FLOOR=0`), so this file cannot narrow it. The **MCP** path classifies dynamically by name pattern. See [Security & Safety → danger-tool lists](security-and-safety#danger-tool-lists-three-of-them).
 
 ### `notifications.lifecycle`
 
@@ -337,6 +337,23 @@ Notifications route through the SwarmMessageBus (no parallel path). Set `connect
 | `swarm.orchestrator.profile` | string | `default` | Orchestrator profile id. |
 | `swarm.workers` | list | `[]` | Populated at runtime via Web UI / `POST /api/swarm/workers`. |
 | `swarm.output_target` | obj | none | `\{bot_token, chat_id, platform, enabled\}` — when set, the token must match the active Telegram bot token. |
+
+### `cron.*` — scheduled reminders and tasks (ConfigStore)
+
+Read live by the scheduler; a value out of range is refused when it is saved
+(`PUT /api/settings/single`). The time zone has its own control (Settings,
+`cron.timezone`); these keys have none on a page yet.
+
+| Key | Type | Default (range) | Description |
+|---|---|---|---|
+| `cron.timezone` | string | empty (`KAZMA_TZ`, else UTC) | The zone a naive time and a clock time ("daily at 9am") are read in. |
+| `cron.catchup_minutes` | int | `60` (1–10080) | How late a job may still fire after Kazma was down. A later one is *missed*, with one notice. `KAZMA_CRON_STALE_HOURS` is used when this is unset. |
+| `cron.task_budget_seconds` | int | `300` (30–3600) | How long a fired agent task's turn may run. |
+| `cron.max_jobs_per_tenant` | int | `500` (1–10000) | Jobs still holding work per tenant; a booking past it is refused. |
+| `cron.max_jobs_per_thread` | int | `50` (1–1000) | The same, per conversation. |
+| `safety.cron_fire_without_hitl` | bool | `false` | Fire agent tasks while approvals (HITL) are off. Off: tasks do not fire then (reminders still do). Under `safety.`, so the agent cannot set it. |
+
+What a fired job may do: [Scheduled reminders and tasks](native-skills#scheduled-reminders-and-tasks).
 
 ### `pipelines`
 

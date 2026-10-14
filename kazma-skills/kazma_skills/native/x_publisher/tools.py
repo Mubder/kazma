@@ -161,17 +161,23 @@ async def x_schedule_post(
 
     Args:
         text: The exact tweet text to publish.
-        when: When to post: '5m', '1h', 'daily at 9am', or an ISO timestamp.
+        when: When to post, once: '30m', '2h', or a date and time
+            ('2026-12-01T09:00' is read in the operator's time zone; an offset
+            or 'Z' is honored). An X post does not repeat: a recurring time is
+            refused (book a recurring task instead).
         reply_to_id: Optional tweet id to reply to (thread).
         proposal_id: The saved proposal item id (from save_proposal).
 
     Returns:
-        JSON with the scheduled post id, text and fire time.
+        JSON with the scheduled post id, text and the STORED fire time and
+        state. ``ok`` is false unless the booking is scheduled; rebooking a
+        draft already booked at another time is a conflict.
     """
     try:
         from kazma_core.x_api.booking import book_x_post
 
-        tenant_id, thread_id, delivery_target = _booking_identity()
+        # The tenant rule can read settings: off the loop (SCH-S11).
+        tenant_id, thread_id, delivery_target = await asyncio.to_thread(_booking_identity)
         ok, payload = await asyncio.to_thread(book_x_post, text=text, when=when,
             reply_to_id=reply_to_id or "", tenant_id=tenant_id, thread_id=thread_id,
             delivery_target=delivery_target, idempotency_key="proposal:" + proposal_id if proposal_id else "",
@@ -184,7 +190,10 @@ async def x_schedule_post(
                 "while the server runs."
             )
         else:
-            payload = {"ok": False, "scheduled": False, "error": payload.get("error", "")}
+            # What the booking is now (its stored time and state), never the
+            # requested time over a cancelled row (SCH-E08).
+            payload = {"ok": False, "scheduled": False, **{k: payload[k] for k in (
+                "error", "code", "operation_id", "state", "fire_at", "tz") if k in payload}}
         return _json(payload)
     except Exception as exc:
         logger.exception("x_schedule_post failed")
@@ -198,19 +207,24 @@ async def x_list_scheduled() -> str:
         JSON with the scheduled posts and their status.
     """
     try:
-        tenant_id, _, _ = _booking_identity()
+        tenant_id, _, _ = await asyncio.to_thread(_booking_identity)
         store = await asyncio.to_thread(get_x_scheduled_store)
         posts = await asyncio.to_thread(store.list_all, tenant_id=tenant_id, limit=100)
         from datetime import datetime
 
+        from kazma_core.cron.scheduler import resolve_cron_zone
+
+        # Times in the operator's zone, named -- the server's own local zone
+        # was used here while ``tz`` named the cron zone (SCH-E13).
+        zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
         out = []
         for p in posts:
             out.append({
                 "id": p.id,
                 "text": p.text,
                 "status": p.status,
-                "fire_at": datetime.fromtimestamp(p.fire_at).astimezone().isoformat(timespec="seconds"),
-                "tz": p.tz,
+                "fire_at": datetime.fromtimestamp(p.fire_at, tz=zone).isoformat(timespec="seconds"),
+                "tz": zone_name,
                 "reply_to_id": p.reply_to_id,
                 "tweet_id": p.tweet_id,
                 "error": p.error,
@@ -239,14 +253,15 @@ async def x_cancel_scheduled_post(post_id: int) -> str:
     except (TypeError, ValueError):
         return _json({"ok": False, "cancelled": False, "error": "post_id must be a number."})
     try:
-        store = get_x_scheduled_store()
-        tenant_id, _, _ = _booking_identity()
+        # The stores are SQLite: off the loop, the error path too (SCH-S11).
+        store = await asyncio.to_thread(get_x_scheduled_store)
+        tenant_id, _, _ = await asyncio.to_thread(_booking_identity)
         from kazma_core.x_api.publication_service import cancel_schedule
 
         cancelled = await asyncio.to_thread(cancel_schedule, pid)
         if cancelled:
             return _json({"ok": True, "cancelled": True, "id": pid})
-        existing = store.get(pid, tenant_id=tenant_id)
+        existing = await asyncio.to_thread(store.get, pid, tenant_id=tenant_id)
         if existing is None:
             return _json({"ok": False, "cancelled": False, "error": f"No scheduled post with id {pid}."})
         return _json({

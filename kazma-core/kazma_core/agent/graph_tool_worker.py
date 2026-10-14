@@ -193,6 +193,11 @@ def _commitment_resolve_gate(
                             constraints=_beliefs,
                             tenant_id=_tenant,
                             enforce_unknown=_enforce_unknown,
+                            # The thread: the cancel_job and edit_job resolvers
+                            # run only with it, and nothing passed it, so both
+                            # were audit-only on this path (Scheduled audit
+                            # SCH-S03).
+                            thread_id=str(state.get("thread_id") or "") or None,
                         )
                     except Exception as _exc:
                         # Fail-closed per tool (deep-audit 2026-08-19, finding #9)
@@ -349,6 +354,8 @@ def _commitment_resolve_gate(
                 "tool": _tc["name"],
                 "commitment_id": _dec.commitment_id,
                 "question": _dec.clarify_question or _dec.reason or "needs clarification",
+                # The question for the person, worded by the page (SCH-S08).
+                "question_kind": getattr(_dec, "question_kind", "") or "",
                 "options": list(_dec.options) if _dec.options else [],
             } for _tc, _dec in semantic_hold]
             _sem_kind = ("semantic_confirm" if all(d.decision == "confirm" for _, d in semantic_hold)
@@ -1276,6 +1283,12 @@ async def tool_worker_node(
                         _notes.append(_note)
                 except Exception:  # noqa: BLE001 — a disclosure must not break the card
                     pass
+
+                # A scheduling call: what the job does when it fires, and the
+                # prompt an edit replaces (Scheduled audit SCH-S05, S03).
+                from kazma_core.cron.card import scheduling_card_notes
+
+                _notes += await scheduling_card_notes(danger_tools)
 
                 _jail = "\n".join(_notes)
             except Exception:

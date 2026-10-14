@@ -30,7 +30,8 @@ from kazma_core.mcp.manager import UnifiedToolExecutor
 from kazma_core.state import AgentState
 from kazma_core.tracing import KazmaTracer
 
-__all__ = ["AgentConfig", "CHECKPOINT_DB", "CONFIG_FILE", "KazmaAgent", "MAX_ITERATIONS", "load_config", "main", "run_agent"]
+__all__ = ["AgentConfig", "CHECKPOINT_DB", "CONFIG_FILE", "DeclaredToolExecutor", "KazmaAgent", "MAX_ITERATIONS",
+           "load_config", "main", "run_agent"]
 
 # NOTE: kazma_core.agent.graph_builder / .state are imported lazily inside
 # run()/_ensure_graph() to avoid a circular import — the kazma_core.agent
@@ -154,6 +155,34 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
         system_prompt=_system_prompt,
         raw=raw,
     )
+
+
+class DeclaredToolExecutor:
+    """A tool executor that runs only a declared set of tools.
+
+    A graph's tool definitions are what the model is OFFERED; the executor is
+    what runs. A fired scheduled task is offered its declared tools
+    (Scheduled audit SCH-S05), and a model that names another tool anyway is
+    refused here rather than run by the full registry underneath.
+    """
+
+    def __init__(self, inner: Any, *, allowed: list[str] | tuple[str, ...] | frozenset[str]) -> None:
+        self._inner = inner
+        self.allowed = frozenset(str(n) for n in allowed)
+
+    async def execute(self, name: str, arguments: dict[str, Any] | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if name not in self.allowed:
+            return {
+                "is_error": True,
+                "content": (
+                    f"{name} is not available to this scheduled task. It may use only the "
+                    "tools it was booked with; answer with what those can find."
+                ),
+            }
+        return await self._inner.execute(name, arguments, *args, **kwargs)
+
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(self._inner, attr)
 
 
 # ---------------------------------------------------------------------------
@@ -938,6 +967,7 @@ class KazmaAgent:
         tools: list[str] | None = None,
         hitl_config: dict[str, Any] | None = None,
         checkpointer: Any | None = None,
+        declared_tools: list[str] | None = None,
     ) -> Any:
         """Build a one-shot supervisor graph for sub-agents (audit M19).
 
@@ -945,6 +975,10 @@ class KazmaAgent:
 
         Args:
             tools: Optional tool-name allowlist filter.
+            declared_tools: An ENFORCED tool set (a fired scheduled task,
+                Scheduled audit SCH-S05): the graph is offered exactly these
+                tools, an empty list meaning none, and its executor refuses
+                any other name the model produces.
             hitl_config: Optional HITL config; defaults to the live
                 ``get_hitl_config()``.
             checkpointer: Optional checkpointer. Child graphs default to
@@ -959,14 +993,18 @@ class KazmaAgent:
         from kazma_core.safety.hitl import get_hitl_config
 
         tool_defs = list(self.tools.get_tool_definitions())
-        if tools:
-            allow = {str(t).lower() for t in tools}
+        executor: Any = self.tools
+        allowlist = declared_tools if declared_tools is not None else tools
+        if allowlist or declared_tools is not None:
+            allow = {str(t).lower() for t in allowlist or ()}
             tool_defs = [
                 d for d in tool_defs
                 if str(d.get("function", d).get("name", d.get("name", ""))).lower()
                 in allow
                 or str(d.get("name", "")).lower() in allow
             ]
+        if declared_tools is not None:
+            executor = DeclaredToolExecutor(self.tools, allowed=declared_tools)
 
         hitl = hitl_config if hitl_config is not None else get_hitl_config(self.config.raw)
         if isinstance(hitl, dict) and not hitl.get("enabled", True):
@@ -983,7 +1021,7 @@ class KazmaAgent:
             llm=self.llm,
             system_prompt=self.system_prompt,
             tool_definitions=tool_defs,
-            tool_executor=self.tools,
+            tool_executor=executor,
             cost_breaker=self.cost_breaker,
             authority=self.authority,
             tracer=self.tracer,

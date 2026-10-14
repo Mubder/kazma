@@ -165,10 +165,14 @@ def check_mcp() -> dict[str, Any]:
 
 
 def check_cron() -> dict[str, Any]:
-    """Is the scheduler actually running, and how many jobs does it hold?
+    """Is the scheduler's poll loop alive, by its heartbeat?
 
     A stopped scheduler is indistinguishable from "no jobs due" without
-    this: scheduled work simply never fires and nothing says so.
+    this: scheduled work simply never fires and nothing says so. It read the
+    ``_running`` flag, which stays True after the poll task dies, so a dead
+    loop read "ok" (Scheduled audit SCH-E11). Now the poll task must be alive
+    and its last pass no older than two intervals (plus a margin):
+    ``degraded`` otherwise, naming why.
     """
     try:
         from kazma_core.cron.scheduler import get_cron_scheduler
@@ -176,12 +180,15 @@ def check_cron() -> dict[str, Any]:
         sched = get_cron_scheduler()
         if sched is None:
             return {"status": "not_initialized", "component": "cron"}
-        running = bool(getattr(sched, "_running", False))
-        return {
-            "status": "ok" if running else "stopped",
-            "component": "cron",
-            "running": running,
-        }
+        live = sched.liveness() if hasattr(sched, "liveness") else {
+            "state": "ok" if getattr(sched, "_running", False) else "stopped"}
+        state = live.get("state")
+        status = {"ok": "ok", "starting": "ok", "stopped": "stopped"}.get(str(state), "degraded")
+        out = {"status": status, "component": "cron", "running": state in ("ok", "starting"), **live}
+        if status == "degraded":
+            out["error"] = ("the poll loop is not running" if state == "dead"
+                            else "the poll loop has not run within two intervals")
+        return out
     except Exception as e:
         logger.error("Cron health check failed: %s", e)
         return {"status": "failed", "component": "cron", "error": "check failed"}
@@ -197,24 +204,23 @@ def check_schedulers() -> dict[str, Any]:
     this, and "scheduled work silently stopped" is the failure mode that
     started this project.
 
-    Overdue counts are reported but do NOT mark the check degraded: both
-    schedulers fire overdue work on their next poll by design, so a non-zero
-    count during a sweep is normal rather than a fault.
+    Lateness is not a fault here: cron fires a job that is late by less than
+    its catch-up window (a reload, a slow poll) and records one later than
+    that as missed, with a notice to its chat; the X loop holds a post more
+    than five minutes late for review, never catching it up (Scheduled audit
+    SCH-E06). A dead or stale cron poll loop is a fault (SCH-E11).
     """
     out: dict[str, Any] = {"status": "ok", "component": "schedulers"}
     problems: list[str] = []
 
     try:
-        from kazma_core.cron.scheduler import get_cron_scheduler
-
-        sched = get_cron_scheduler()
-        if sched is None:
-            out["cron"] = "not_initialized"
-        else:
-            running = bool(getattr(sched, "_running", False))
-            out["cron"] = "running" if running else "stopped"
-            if not running:
-                problems.append("cron scheduler stopped")
+        cron = check_cron()
+        out["cron"] = {"ok": "running", "stopped": "stopped",
+                       "not_initialized": "not_initialized"}.get(cron["status"], cron.get("state", "error"))
+        if cron["status"] == "stopped":
+            problems.append("cron scheduler stopped")
+        elif cron["status"] not in ("ok", "not_initialized"):
+            problems.append("cron " + str(cron.get("error") or "check failed"))
     except Exception:
         out["cron"] = "error"
         problems.append("cron check failed")
@@ -373,6 +379,16 @@ async def activity(request: Request):
         from kazma_ui.active_turns import running_turn_count
 
         running = running_turn_count()
+        # A scheduled fire in flight is work a reload would interrupt too
+        # (Scheduled audit SCH-E04): --when-idle waits for it.
+        fires = 0
+        try:
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            sched = get_cron_scheduler()
+            fires = int(sched.active_fire_count()) if sched is not None and hasattr(sched, "active_fire_count") else 0
+        except (ImportError, AttributeError, TypeError, ValueError):
+            logger.debug("[health] cron fires unreadable", exc_info=True)
         pending: int | None
         try:
             from kazma_core.safety.hitl_gates import pending_gates_async
@@ -381,7 +397,8 @@ async def activity(request: Request):
         except (ImportError, OSError, RuntimeError, sqlite3.Error):
             logger.debug("[health] pending approvals unreadable", exc_info=True)
             pending = None
-        return {"active_turns": running, "pending_approvals": pending, "idle": running == 0}
+        return {"active_turns": running, "active_fires": fires, "pending_approvals": pending,
+                "idle": running == 0 and fires == 0}
 
 
 # Every /health route runs inside read_only_diagnostic: a probe that writes

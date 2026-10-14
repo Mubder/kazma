@@ -153,36 +153,14 @@ def _request_base(request: Request) -> str:
     return f"http://{host}:{port}"
 
 
-async def _verify_same_origin(request: Request) -> None:
-    """CSRF guard for mutating email POST endpoints (audit H4).
-
-    Two layers, both required:
-    1. A custom ``X-Requested-With`` header that the browser cannot be
-       tricked into sending cross-site without a CORS preflight (and the
-       Kazma app never grants such preflight). The frontend sets this header
-       explicitly via ``KazmaAPI.fetch``. This is the primary defense.
-    2. When the request carries an ``Origin`` (or ``Referer``), it must target
-       the same host the browser is on. This is defense-in-depth; the custom
-       header already blocks cross-site forgery. We compare against the
-       request's actual host (not the operator ``KAZMA_PUBLIC_URL``) so LAN /
-       loopback / proxied access isn't falsely rejected.
-    """
-    xrw = request.headers.get("x-requested-with", "").lower()
-    if xrw != "xmlhttprequest":
-        raise HTTPException(status_code=403, detail="missing custom request header")
-    origin = request.headers.get("origin") or request.headers.get("referer") or ""
-    if origin:
-        # Compare only the host:port, tolerating scheme differences (http/https
-        # behind a TLS-terminating proxy). Extract the netloc from the Origin.
-        own_host = request.headers.get("host") or ""
-        try:
-            from urllib.parse import urlparse
-
-            origin_host = urlparse(origin).netloc
-        except Exception:
-            origin_host = ""
-        if own_host and origin_host and origin_host != own_host:
-            raise HTTPException(status_code=403, detail="cross-origin request denied")
+# CSRF guard for mutating email POST endpoints (audit H4): a custom
+# ``X-Requested-With`` header the browser cannot send cross-site without a
+# preflight, and, when the browser names an Origin or Referer, this site's own
+# origin or one the operator declared. One rule for the Scheduled, X and email
+# routers (kazma_ui.same_origin, Scheduled audit SCH-S12): this copy compared
+# the Origin with the Host header only and refused a declared public origin
+# behind a proxy that rewrites Host.
+from kazma_ui.same_origin import verify_same_origin as _verify_same_origin  # noqa: E402
 
 
 # ── Status (open) ──────────────────────────────────────────────────────

@@ -2623,7 +2623,10 @@ def _wait_until_idle(health_url: str, max_wait_s: float, log: GuardLog, *,
                   f"{action} without waiting.")
             log("warn", f"{event}.idle_unknown")
             return True
-        running = int(act.get("active_turns") or 0)
+        # A scheduled reminder or task firing counts as a running turn: a
+        # reload would interrupt it too (Scheduled audit SCH-E04). An older
+        # server reports no active_fires (0).
+        running = int(act.get("active_turns") or 0) + int(act.get("active_fires") or 0)
         if running == 0:
             quiet += 1
             if quiet >= 2:

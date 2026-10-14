@@ -54,11 +54,15 @@ def test_values_a_setting_cannot_hold(key, value) -> None:
 
 def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     from kazma_core.checkpoint_retention import RETENTION_KEY
+    from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
-    assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY, TENANT_MODE_KEY}
+    # The scheduler's bounded settings joined 2026-10-14 (Scheduled audit
+    # SCH-E06/E14/S05), named by the module that reads them.
+    assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY, TENANT_MODE_KEY,
+                             *SETTING_BOUNDS, FIRE_WITHOUT_HITL_KEY}
 
 
 # ── the TUI's client: an answered refusal is not "no server" ───────────────

@@ -70,7 +70,15 @@ class EffectDecision:
     # Phase 3: when decision is clarify/confirm, the options shown on the
     # unified HITL card. Each option carries a slots_patch applied on resume
     # (plan §4.3). An empty list → free-text clarify (no discrete choices).
+    # Each option is structured (``kind``, an ISO instant ``at`` and its
+    # ``zone``, a ``job_id``) so a page words it in its own language with
+    # the date AND time; ``label`` is the English for chat apps
+    # (Scheduled audit SCH-S08).
     options: list[dict[str, Any]] = field(default_factory=list)
+    # The question for the PERSON, as a catalog key a page words in its
+    # language ("remind_when", "cancel_which"); ``clarify_question`` stays the
+    # model's diagnostic.
+    question_kind: str = ""
 
 
 def _nearest_belief_hint(timing: str, memory_beliefs: list[dict[str, Any]]) -> str:
@@ -257,6 +265,17 @@ def authorize_effect(
             source=ctx.get("source", "unknown"),
         )
 
+    # Scheduled audit SCH-S03/E03: an edit names a live job of the caller's
+    # tenant, and a new absolute time passes the same memory guard a booking
+    # does. (It was audit-only: any id, any time.)
+    if profile.act == "edit_job" and thread_id:
+        return _resolve_edit_job_act(
+            profile, tool_name, args or {}, audit=audit,
+            thread_id=thread_id, tenant_id=tenant_id, cfg=cfg,
+            memory_beliefs=memory_beliefs, user_text=user_text, request_at=request_at,
+            source=ctx.get("source", "unknown"),
+        )
+
     # Phase 4 expand: exec / send_outbound / config_change semantic resolvers.
     # These add a denylist/allowlist/protected-key check BEFORE the security HITL
     # card (the gate runs first, then the HITL split). mutate_fs (containment in
@@ -321,26 +340,42 @@ def _effective_mode(cfg: dict[str, Any] | None, thread_id: str | None) -> str:
     return mode
 
 
-def _build_remind_clarify_options(res) -> list[dict[str, Any]]:
+def _build_remind_clarify_options(res, *, zone=None, zone_name: str = "") -> list[dict[str, Any]]:
     """Build the discrete options for a remind clarify card (plan §4.3).
 
     Each option carries a ``slots_patch`` (a partial args dict) the tool_worker
-    applies on resume. For remind the slot is ``timing`` (ISO fire_at). The
-    resolver computed both candidate fire_ats; the card offers both + cancel.
+    applies on resume. For remind the slot is ``timing`` -- an ISO instant in
+    the operator's zone (SCH-E03). The resolver computed both candidate
+    fire_ats; the card offers both + cancel.
+
+    Each option names its instant in full (date, time and zone): two
+    candidates on the same day read identically when the label showed only
+    the date (SCH-S08). ``kind``/``at``/``zone`` let a page word it in its own
+    language; ``label`` is the English for chat apps.
     """
+    from datetime import UTC
+
+    zone = zone or UTC
+    zone_name = zone_name or "UTC"
+
+    def _when(dt: datetime) -> str:
+        return dt.astimezone(zone).strftime("%Y-%m-%d %H:%M") + f" {zone_name}"
+
     opts: list[dict[str, Any]] = []
     fa = getattr(res, "option_fire_ats", {}) or {}
     ma = fa.get("memory_anchor")
     fn = fa.get("from_now")
     if ma is not None:
-        opts.append({"id": "memory_anchor",
-                     "label": f"Use the memory-anchored date ({ma.date()})",
-                     "slots_patch": {"timing": ma.isoformat()}})
+        opts.append({"id": "memory_anchor", "kind": "remind_at", "anchor": "memory",
+                     "at": ma.astimezone(UTC).isoformat(), "zone": zone_name,
+                     "label": f"Remind me at {_when(ma)} (from the date in memory)",
+                     "slots_patch": {"timing": ma.astimezone(zone).isoformat()}})
     if fn is not None:
-        opts.append({"id": "from_now",
-                     "label": f"Use the from-now date ({fn.date()})",
-                     "slots_patch": {"timing": fn.isoformat()}})
-    opts.append({"id": "cancel", "label": "Cancel", "slots_patch": None})
+        opts.append({"id": "from_now", "kind": "remind_at", "anchor": "now",
+                     "at": fn.astimezone(UTC).isoformat(), "zone": zone_name,
+                     "label": f"Remind me at {_when(fn)} (counted from now)",
+                     "slots_patch": {"timing": fn.astimezone(zone).isoformat()}})
+    opts.append({"id": "cancel", "kind": "cancel", "label": "Don't schedule it", "slots_patch": None})
     return opts
 
 
@@ -371,7 +406,7 @@ def _resolve_remind_act(
       * balanced    — resolve_remind's decision stands (default).
     """
     # Lazy imports (store → paths; relative_time is standalone).
-    from .relative_time import compact_relative_delta, parse_absolute_timing
+    from .relative_time import compact_relative_delta, is_recurring_request, parse_absolute_timing
     from .relative_time import resolve_remind as _resolve
     from .relative_time import validate_timing_against_memory
     from .store import Commitment, create_commitment
@@ -384,6 +419,68 @@ def _resolve_remind_act(
         logger.info("[commitment] yolo mode — semantic bypass for %s source=%s",
                     tool_name, source)
         return EffectDecision("allow", "yolo mode (semantic bypassed)", profile, audit)
+
+    # The operator's zone (Scheduled audit SCH-E03): a time without an offset
+    # is read there, as the scheduler reads it, and a rewrite names its
+    # offset. The gate read such a time as UTC and rewrote the booking to that
+    # instant, so "09:00" from chat fired at 12:00 in Asia/Kuwait.
+    zone = _operator_zone()
+    zone_name = _zone_name(zone)
+
+    def _zoned(dt: datetime) -> str:
+        return dt.astimezone(zone).isoformat()
+
+    # ── Recurrence (Scheduled audit SCH-E05) ──────────────────────────
+    # A recurring timing is checked and KEPT: its first occurrence passes the
+    # memory guard like any time, and the gate never turns it into one fire.
+    # It used to be denied ("pass Nm/Nh or ISO") or rewritten to one fire at
+    # request_at + 1 day, the recurrence and the clock time both dropped.
+    _timing_arg = str((args or {}).get("timing") or "").strip()
+    from kazma_core.cron.timing import TimingError, next_occurrence, parse_recurrence
+
+    try:
+        _rec = parse_recurrence(_timing_arg) if _timing_arg else None
+    except TimingError as _exc:
+        return EffectDecision(decision="deny", reason=f"timing {_timing_arg!r}: {_exc}", profile=profile, audit=audit)
+    if _rec is not None:
+        _first = next_occurrence(_rec, zone=zone, after=request_at)
+        if _first is None:
+            return EffectDecision(decision="deny", reason=f"timing {_timing_arg!r} has no occurrence after now.",
+                                  profile=profile, audit=audit)
+        _cons, _ = validate_timing_against_memory(
+            _first.isoformat(), memory_beliefs or [], user_text=user_text, request_at=request_at, zone=zone)
+        if _cons == "conflict":
+            return EffectDecision(
+                decision="deny",
+                reason=(f"the first occurrence of {_timing_arg!r} ({_zoned(_first)}) conflicts with memory: "
+                        f"it is not within 2 days of any stored date{_nearest_belief_hint(_first.isoformat(), memory_beliefs or [])}. "
+                        "Correct the stored belief first, or confirm with the user."),
+                profile=profile, audit=audit)
+        req_ts = request_at.timestamp() if hasattr(request_at, "timestamp") else time.time()
+        _c = Commitment(
+            thread_id=thread_id or "", turn_id=turn_id, act="remind", tool_name=tool_name,
+            goal_text=(user_text or "")[:200], args_digest=_args_digest(args), request_at=req_ts,
+            tenant_id=tenant_id, slots={"fire_at": _first.isoformat(), "anchor": "recurrence",
+                                        "recurrence": _rec.describe()},
+            conflicts=[], confidence=1.0,
+        )
+        _c.status = "ready"
+        _c.policy_decision = "allow"
+        _cid = create_commitment(_c, cfg=cfg)
+        logger.info("[commitment] allow (recurring, kept) %s timing=%r first=%s cid=%s source=%s",
+                    tool_name, _timing_arg, _first.isoformat(), _cid, source)
+        return EffectDecision(decision="allow", reason=f"recurring timing kept: {_rec.describe()}",
+                              profile=profile, audit=audit, commitment_id=_cid, rewritten_args=None)
+    if is_recurring_request(user_text):
+        # The person asked for something that repeats and the call books one
+        # fire: say so, never book a one-off in its place.
+        return EffectDecision(
+            decision="deny",
+            reason=("the user asked for something that repeats, but schedule_task.timing is a single "
+                    f"time ({_timing_arg or 'none'}). Pass a recurrence as timing: 'daily at 9am', "
+                    "'weekdays at 08:30' or 'every mon,wed at 21:00' (optionally 'until YYYY-MM-DD' or "
+                    "'count N'); it fires at that time in the operator's zone."),
+            profile=profile, audit=audit)
 
     # ── PR4 (Class C): structured args first ──────────────────────────
     # If the model already put an ABSOLUTE ISO time in args.timing, validate it
@@ -409,7 +506,7 @@ def _resolve_remind_act(
     if _timing_arg and mode != "strict":
         _delta = compact_relative_delta(_timing_arg)
         if _delta is None:
-            _abs_from_now = parse_absolute_timing(_timing_arg)
+            _abs_from_now = parse_absolute_timing(_timing_arg, zone=zone)
             # HITL-resume leftover: our previous compact rewrite used
             # request_at+delta (preserves microseconds). Clock-aligned
             # invented dates (…T09:00:00) stay on the CoPilot path.
@@ -432,7 +529,7 @@ def _resolve_remind_act(
             _rel_consistency, _ = validate_timing_against_memory(
                 _timing_arg, memory_beliefs or [],
                 user_text=user_text, request_at=request_at,
-                require_subject_match=True,
+                require_subject_match=True, zone=zone,
             )
             if _rel_consistency == "conflict":
                 logger.info(
@@ -476,9 +573,9 @@ def _resolve_remind_act(
     if _timing_arg and mode != "strict":
         _consistency, _matched = validate_timing_against_memory(
             _timing_arg, memory_beliefs,
-            user_text=user_text, request_at=request_at,
+            user_text=user_text, request_at=request_at, zone=zone,
         )
-        _abs_dt = parse_absolute_timing(_timing_arg)  # non-None when not_absolute is False
+        _abs_dt = parse_absolute_timing(_timing_arg, zone=zone)  # non-None when not_absolute is False
         # "user_asserted" joins the allow set: the operator named this moment
         # themselves this turn, so the model did not invent it. Without it the
         # guard blocks the one thing it should never block -- a correction to
@@ -486,8 +583,10 @@ def _resolve_remind_act(
         if _abs_dt and _consistency in ("consistent", "no_memory", "user_asserted"):
             _anchor = ("absolute" if _consistency in ("no_memory", "user_asserted")
                        else str(_matched.get("predicate") or "absolute") if _matched else "absolute")
+            # The same instant, with its offset named in the operator's zone:
+            # the scheduler reads it exactly (rewrite-on-allow never re-zones).
             _rewritten = dict(args)
-            _rewritten["timing"] = _abs_dt.isoformat()
+            _rewritten["timing"] = _zoned(_abs_dt)
             req_ts = request_at.timestamp() if hasattr(request_at, "timestamp") else time.time()
             _c = Commitment(
                 thread_id=thread_id or "", turn_id=turn_id, act="remind",
@@ -515,14 +614,14 @@ def _resolve_remind_act(
     # strict widens the relevance window (more clarifies); others use default.
     window = timedelta(days=30) if mode == "strict" else None
     res = _resolve(user_text, request_at=request_at, memory_beliefs=memory_beliefs,
-                   relevance_window=window)
+                   relevance_window=window, zone=zone)
 
     # Chat text often has no time words on agent-initiated retries (the time
     # lives in args.timing) — fall back to resolving the timing arg itself
     # before reporting "no time expression found" (incident 2026-08-16).
     if res.decision == "clarify" and _timing_arg:
         _res_t = _resolve(_timing_arg, request_at=request_at,
-                          memory_beliefs=memory_beliefs, relevance_window=window)
+                          memory_beliefs=memory_beliefs, relevance_window=window, zone=zone)
         _adopt = False
         if _res_t.decision == "allow" and _res_t.fire_at is not None:
             _has_abs = any(e.kind == "absolute" for e in _res_t.time_expressions)
@@ -530,7 +629,7 @@ def _resolve_remind_act(
                 # Unvalidated absolute timing (PR4 judged conflict, or strict
                 # mode skipped PR4) — validate against memory before allowing;
                 # this is the CoPilot overwrite guard.
-                _cons_t, _ = validate_timing_against_memory(_timing_arg, memory_beliefs)
+                _cons_t, _ = validate_timing_against_memory(_timing_arg, memory_beliefs, zone=zone)
                 _adopt = _cons_t in ("consistent", "no_memory")
             else:
                 _adopt = True
@@ -567,7 +666,7 @@ def _resolve_remind_act(
         # for the CoPilot schedule path. Whatever the model put in `timing`,
         # the anchored, memory-checked ISO date wins.
         rewritten = dict(args)
-        rewritten["timing"] = res.fire_at.isoformat()
+        rewritten["timing"] = _zoned(res.fire_at)
         commitment.status = "ready"
         commitment.policy_decision = "allow"
         cid = create_commitment(commitment, cfg=cfg)
@@ -581,7 +680,7 @@ def _resolve_remind_act(
         )
 
     if res.decision == "clarify":
-        opts = _build_remind_clarify_options(res)
+        opts = _build_remind_clarify_options(res, zone=zone, zone_name=zone_name)
         actionable = [
             o for o in opts
             if o.get("id") != "cancel" and o.get("slots_patch")
@@ -616,7 +715,8 @@ def _resolve_remind_act(
             else:
                 _reason = (
                     (res.reason or "no time expression found — ask when to fire")
-                    + " Pass schedule_task.timing as Nm/Nh (e.g. 247m) or ISO."
+                    + " Pass schedule_task.timing as Nm/Nh (e.g. 247m), a date and time, "
+                    "or, for something that repeats, a recurrence ('daily at 9am')."
                 )
             return EffectDecision(
                 decision="deny", reason=_reason,
@@ -632,7 +732,7 @@ def _resolve_remind_act(
         return EffectDecision(
             decision="clarify", reason=res.reason, profile=profile, audit=audit,
             commitment_id=cid, clarify_question=res.reason,
-            options=opts,
+            options=opts, question_kind="remind_when",
         )
 
     # deny (rare for remind — e.g. unsatisfiable)
@@ -745,18 +845,118 @@ def _resolve_cancel_job_act(
     q = (f"job_id {job_id!r} is not a pending job. "
          f"Current pending jobs: {listing}. Provide the correct job_id.")
     options: list[dict[str, Any]] = []
+    # Each job names its next time in the operator's zone: two jobs with the
+    # same text read identically without it (Scheduled audit SCH-S08).
+    zone = _operator_zone()
+    zone_name = _zone_name(zone)
     for j in (listing_src or [])[:5]:
+        at, when = _job_time(j.get("next_run"), zone, zone_name)
         options.append({
             "id": f"job_{j['job_id']}",
-            "label": f"Cancel {j['job_id']} — {(j['prompt'] or '')[:40]}",
+            "kind": "cancel_job", "job_id": j["job_id"], "summary": (j["prompt"] or "")[:40],
+            "at": at, "zone": zone_name,
+            "label": f"Cancel {j['job_id']}" + (f" (next {when})" if when else "")
+                     + f" — {(j['prompt'] or '')[:40]}",
             "slots_patch": {"job_id": j["job_id"]},
         })
-    options.append({"id": "cancel", "label": "Don't cancel anything", "slots_patch": None})
+    options.append({"id": "cancel", "kind": "keep", "label": "Don't cancel anything", "slots_patch": None})
     logger.info("[commitment] clarify cancel_job %s cid=%s — not pending/matched", job_id, cid)
     return EffectDecision(
         decision="clarify", reason=q, profile=profile, audit=audit,
-        commitment_id=cid, clarify_question=q, options=options,
+        commitment_id=cid, clarify_question=q, options=options, question_kind="cancel_which",
     )
+
+
+def _resolve_edit_job_act(
+    profile: ToolEffectProfile,
+    tool_name: str,
+    args: dict[str, Any],
+    *,
+    audit: dict[str, Any],
+    thread_id: str | None,
+    tenant_id: str,
+    cfg: dict[str, Any] | None,
+    memory_beliefs: list[dict[str, Any]] | None,
+    user_text: str | None,
+    request_at: datetime | None,
+    source: str,
+) -> EffectDecision:
+    """Resolve an edit_scheduled call (Scheduled audit SCH-S03, E03).
+
+    The job must be a live job of the caller's tenant: an edit took any id,
+    so a job id learned from a log could rewrite another tenant's prompt. A
+    new absolute time passes the same memory guard a booking does (an edit
+    skipped it). The approval card shows the prompt the edit replaces
+    (:mod:`kazma_core.cron.card`).
+    """
+    from .constraints import cron_pending_jobs
+
+    mode = _effective_mode(cfg, thread_id)
+    if mode == "yolo":
+        return EffectDecision("allow", "yolo mode (semantic bypassed)", profile, audit)
+    job_id = str((args or {}).get("job_id") or "")
+    live = cron_pending_jobs(thread_id=None, tenant_id=tenant_id)
+    if live is None:
+        return EffectDecision(
+            "deny", "edit_job: cannot verify the scheduled jobs right now (scheduler unavailable); "
+            "try again shortly.", profile, audit)
+    if not job_id or not any(j["job_id"] == job_id for j in live):
+        listing = "; ".join(f"{j['job_id']} ({(j['prompt'] or '')[:40]})" for j in live[:5]) or "(none)"
+        return EffectDecision(
+            "deny", f"edit_job: {job_id!r} is not a live scheduled job of this install. "
+            f"Live jobs: {listing}. A finished job is booked again with schedule_task.",
+            profile, audit)
+    timing = str((args or {}).get("timing") or "").strip()
+    if timing and memory_beliefs:
+        from .relative_time import parse_absolute_timing, validate_timing_against_memory
+
+        zone = _operator_zone()
+        if parse_absolute_timing(timing, zone=zone) is not None:
+            consistency, _ = validate_timing_against_memory(
+                timing, memory_beliefs, user_text=user_text, request_at=request_at, zone=zone)
+            if consistency == "conflict":
+                return EffectDecision(
+                    "deny", f"edit_job: timing {timing!r} conflicts with memory: it is not within 2 days "
+                    f"of any stored date{_nearest_belief_hint(timing, memory_beliefs)}. Correct the stored "
+                    "belief first, or confirm with the user that the new date supersedes it.",
+                    profile, audit)
+    logger.info("[commitment] allow edit_job %s source=%s", job_id, source)
+    return EffectDecision("allow", f"edit_job: {job_id} is a live job of this install", profile, audit)
+
+
+def _operator_zone():
+    """The operator's zone for a naive time (the scheduler's own rule).
+
+    A settings read; the gate already reads the commitment config the same
+    way. A failure reads UTC, as the scheduler does.
+    """
+    try:
+        from kazma_core.cron.scheduler import get_cron_timezone
+
+        return get_cron_timezone()
+    except Exception:  # noqa: BLE001
+        from datetime import UTC
+
+        return UTC
+
+
+def _zone_name(zone: Any) -> str:
+    key = getattr(zone, "key", None)
+    return str(key) if key else "UTC"
+
+
+def _job_time(next_run: Any, zone: Any, zone_name: str) -> tuple[str, str]:
+    """A stored ``next_run`` as ``(UTC ISO, "YYYY-MM-DD HH:MM <zone>")``; empty
+    strings when the job has none or it does not parse."""
+    from datetime import UTC
+
+    try:
+        dt = datetime.fromisoformat(str(next_run or ""))
+    except ValueError:
+        return "", ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat(), dt.astimezone(zone).strftime("%Y-%m-%d %H:%M") + f" {zone_name}"
 
 
 # ── Phase 4 expand: exec / send_outbound / config_change resolvers ─────────

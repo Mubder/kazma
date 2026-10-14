@@ -37,8 +37,22 @@ class _StubGraph:
         return {"messages": msgs}
 
 
+async def _make_due(store: SQLiteCronStore, job_id: str) -> None:
+    """Move a booked job's time to now.
+
+    These tests booked with "0m" ("due immediately"); a booking must be in
+    the future since the one time model (Scheduled audit SCH-E09), so the
+    job is booked a minute out and then made due.
+    """
+    from datetime import UTC, datetime
+
+    await store._db.execute(  # noqa: SLF001 — the test's clock, not a product path
+        "UPDATE cron_jobs SET next_run = ? WHERE job_id = ?",
+        (datetime.now(UTC).replace(microsecond=0).isoformat(), job_id))
+
+
 class TestCronFires:
-    async def test_due_job_executes_and_completes(self, tmp_path) -> None:
+    async def test_due_job_executes_and_completes(self, tmp_path, monkeypatch) -> None:
         store = SQLiteCronStore(db_path=str(tmp_path / "cron.db"))
         await store.init()
 
@@ -48,15 +62,27 @@ class TestCronFires:
             fired.set()
             return _StubGraph()
 
+        # A fire is DONE once its answer was DELIVERED (Scheduled audit
+        # SCH-E02: a refused delivery used to be DONE too), so this job has an
+        # address and a backend that takes the message.
+        import kazma_core.tools.send_message  # noqa: F401
+        import sys
+
+        async def taken(target_id, text, *, backend="telegram"):
+            return f"sent:{target_id}"
+
+        monkeypatch.setattr(sys.modules["kazma_core.tools.send_message"], "send_message", taken)
+
         scheduler = CronScheduler(
             store=store,
             graph_builder=graph_builder,
             poll_interval=0.05,  # fast poll so the test is quick
         )
 
-        # "0m" => due immediately.
-        info = await scheduler.schedule(timing="0m", prompt="compute the answer", platform="telegram")
+        info = await scheduler.schedule(timing="1m", prompt="compute the answer", platform="telegram",
+                                        delivery_target="telegram:42")
         job_id = info["job_id"]
+        await _make_due(store, job_id)
 
         await scheduler.start()
         try:
@@ -81,8 +107,9 @@ class TestCronFires:
         store = SQLiteCronStore(db_path=str(tmp_path / "cron2.db"))
         await store.init()
         scheduler = CronScheduler(store=store, graph_builder=None, poll_interval=0.05)
-        info = await scheduler.schedule(timing="0m", prompt="x")
+        info = await scheduler.schedule(timing="1m", prompt="x")
         job_id = info["job_id"]
+        await _make_due(store, job_id)
         await scheduler.start()
         try:
             for _ in range(100):
@@ -145,13 +172,17 @@ class TestCronDeliveryTarget:
         )
 
         info = await scheduler.schedule(
-            timing="0m",
+            timing="1m",
             prompt="ping",
             platform="telegram",
             delivery_target="telegram:12345",
         )
         job_id = info["job_id"]
-        assert info["delivery_target"] == "telegram:12345"
+        await _make_due(store, job_id)
+        # The booking result names the platform, never the chat address
+        # (Scheduled audit SCH-S10: it reached the model through the tool).
+        assert info["destination"] == "telegram"
+        assert "12345" not in str(info)
 
         # delivery_target persisted on the job row.
         jobs = {j.job_id: j for j in await store.list_all()}
@@ -211,17 +242,19 @@ class TestCronDeliveryTarget:
         )
         # No delivery_target → legacy behavior.
         info = await scheduler.schedule(
-            timing="0m", prompt="ping", platform="telegram", thread_id="gw-telegram-1",
+            timing="1m", prompt="ping", platform="telegram", thread_id="gw-telegram-1",
         )
         job_id = info["job_id"]
+        await _make_due(store, job_id)
 
         await scheduler.start()
         try:
             # Nothing should ever be delivered here, so this waits for the job
-            # to finish rather than for a delivery that must not arrive.
+            # to finish rather than for a delivery that must not arrive. It
+            # ends UNDELIVERABLE, never DONE (Scheduled audit SCH-E02).
             for _ in range(60):
                 jobs = [j for j in await store.list_all() if j.job_id == job_id]
-                if jobs and str(getattr(jobs[0], "status", "")).upper().endswith("DONE"):
+                if jobs and str(getattr(jobs[0], "status", "")).upper().endswith("UNDELIVERABLE"):
                     break
                 if delivered:
                     break

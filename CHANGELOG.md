@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Scheduled: the industrial audit (2026-10-14)
+
+- A scheduled job says what it may do, and does only that. A reminder
+  delivers its stored message with no model and no tool; a task declares
+  `read` (the default) or `read_write` tools at booking, the approval card
+  shows it, and the fire's executor refuses any other tool. Fired tasks do not
+  run while approvals are switched off unless `safety.cron_fire_without_hitl`
+  is set. Jobs booked before this change are read-only tasks: book again with
+  `read_write` one that needs to write.
+- Nothing is lost across a restart: each fire is a leased record, recovery
+  decides per phase, and shutdown waits for fires; a reload with `--when-idle`
+  waits for them too. Deliveries go through a leased outbox and count only
+  when the platform took them; a refused one ends `undeliverable` with one
+  alert, never "done". A failed turn is a failed fire.
+- A job late by more than its catch-up window (60 minutes by default; it was
+  24 hours) is `missed`, with one notice, instead of running late.
+- One time model for every path (chat, the Web page, `edit_scheduled`, X):
+  a time with no zone means the operator's zone; English and Arabic
+  recurring requests stay recurring; one validator for cron and X across
+  clock changes.
+- The Scheduled page shows each job's state, recurrence, failures and last
+  delivery, and X posts' real state, in English and Arabic; an edit of the
+  timing never rewrites the prompt; edit and cancel are versioned.
+- Bounds, a rate bucket, a liveness heartbeat, metrics and a digest line. On
+  an install with platform users the Scheduled surfaces refuse (decision D1).
+- Open: the 7-day soak (owner, D3) and an independent review. Tracker:
+  `docs/plans/SCHEDULED_INDUSTRIAL_HARDENING_GOAL.md`.
+
 ## Swarm: the industrial audit, Stages 1-5 (2026-10-14)
 
 - Swarm approvals are a real boundary. The approval a chat turn gave covers
