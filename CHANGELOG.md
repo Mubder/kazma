@@ -17,6 +17,10 @@
   (`<data dir>/pg_tables_seen.json`): a recorded table that is gone is a drop
   (CRITICAL, as before); one never seen is new, and is looked for again a
   minute after start.
+- A weekly summary rebuilt after a forget names only the turns it was written
+  from. The forgotten turn stayed in its source list, so the forget check
+  found an active summary of a forgotten turn and sent it back for another
+  rebuild (and another model call) at every check.
 
 ## Knowledge Library: the industrial audit (2026-10-14)
 

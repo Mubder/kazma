@@ -652,8 +652,19 @@ def _store(
                 "WHERE id = ? AND status = 'rebuild'",
                 (*fields, summary_id),
             )
-            # Forgotten, retired or written meanwhile: nothing changed.
-            return summary_id if cur.rowcount == 1 else None
+            if cur.rowcount != 1:
+                return None  # forgotten, retired or written meanwhile: nothing changed
+            # The summary now stands for these turns only. The forgotten
+            # turn's source row stayed, so the ledger check (forget.
+            # enforce_ledger) found an ACTIVE summary of a forgotten turn after
+            # every rebuild and sent it back: a model call each time (live
+            # 2026-10-14).
+            conn.execute(
+                f"DELETE FROM memory_summary_sources WHERE summary_id = ? "
+                f"AND episode_id NOT IN ({','.join('?' for _ in ids)})",
+                (summary_id, *ids),
+            )
+            return summary_id
         if live != set(ids):
             left = [t for t in turns if t.id in live]
             if len(left) >= min_turns:

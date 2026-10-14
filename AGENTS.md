@@ -1630,10 +1630,13 @@ queued by the maintenance sweep with at most two weeks in flight.
   left, if still a topic, wait as `rebuild`) -- and a summary written again
   must still be `rebuild` (a forgotten one stays a tombstone). Until then a
   forget during the weekly run landed in an ACTIVE summary, and a rebuild
-  overwrote a summary the user had just forgotten. Gate:
+  overwrote a summary the user had just forgotten. A rebuild's store also
+  cuts the summary's sources to the turns it was written from (2026-10-14:
+  the forgotten turn's source row stayed, and `forget.enforce_ledger` sent
+  the rebuilt summary back at every check, a model call each time). Gate:
   `tests/test_memory_summary_store_cas.py` (both witnesses inverted; every
   statement that sets a summary active names the status it replaces; the
-  old store as negative control).
+  old store as negative control; the stale source row as the rebuild's).
 - **Local only:** summaries live in the local memory database, like the
   graph, and are not mirrored to the Postgres state backend; they are
   rebuilt from turns. The Memory page's "Weekly summaries" panel lists and
