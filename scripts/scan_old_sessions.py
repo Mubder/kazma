@@ -288,8 +288,17 @@ async def scan_session(
 
     total_beliefs = 0
     pending_turns: list[tuple[int, str, str]] = []
+    from kazma_core.memory.forget import chat_keys, refuses_write
+
+    keys = chat_keys(session["session_id"])
 
     for turn_idx, (user_text, assistant_text) in enumerate(pairs, start=1):
+        # A turn the user forgot, or a chat they keep out of memory, gives no
+        # facts -- the snapshots and transcripts still hold the words (Memory
+        # audit M08; Time Travel TT-05).
+        if refuses_write(primary_conn, tenant_id=tenant_id, session_id=session["session_id"],
+                         turn_number=turn_idx, user_text=user_text, keys=keys):
+            continue
         # Skip already-scanned turns that actually produced beliefs (idempotency)
         existing = primary_conn.execute(
             "SELECT COUNT(*) FROM beliefs WHERE source_session=? AND source_turn=? AND extraction_method='retroactive_scan'",

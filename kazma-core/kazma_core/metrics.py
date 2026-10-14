@@ -16,6 +16,7 @@ __all__ = [
     "record_long_task",
     "record_memory_op",
     "record_swarm_dispatch",
+    "record_swarm_failure",
     "record_swarm_handoff",
     "record_delivery_event",
     "record_delivery_replay",
@@ -134,6 +135,15 @@ if _PROMETHEUS_AVAILABLE:
         "LLM call latency distribution",
     )
 
+    # Swarm bookkeeping that failed and lost evidence or a decision (Swarm
+    # audit SW-E14): the RUNNING row, a task write, a gate row, a final card,
+    # a maintenance sweep. Each is a WARNING too; the counter is the trend.
+    SWARM_FAILURES_TOTAL = Counter(
+        "kazma_swarm_failures_total",
+        "Swarm bookkeeping failures (evidence or a decision not recorded)",
+        ["site"],
+    )
+
     # HITL Gate Registry (safety/hitl_gates.py — one gate, one row, one truth).
     # transitions counts every state change per mechanism; parity_mismatch is
     # THE dual-write health signal (registry answer ≠ legacy answer on a
@@ -188,6 +198,7 @@ else:
     LLM_TOKENS_TOTAL = None
     SWARM_DISPATCHES_TOTAL = None
     SWARM_HANDOFFS_TOTAL = None
+    SWARM_FAILURES_TOTAL = None
     MEMORY_OPERATIONS_TOTAL = None
     LONG_TASK_EVENTS_TOTAL = None
     COMMITMENT_TERMINAL_TOTAL = None
@@ -244,6 +255,14 @@ def record_swarm_dispatch(pattern: str, status: str) -> None:
     if not _PROMETHEUS_AVAILABLE:
         return
     SWARM_DISPATCHES_TOTAL.labels(pattern=pattern, status=status).inc()
+
+
+def record_swarm_failure(site: str) -> None:
+    """Count one swarm bookkeeping failure at *site* (logged as a WARNING by
+    the caller). No-op without prometheus-client."""
+    if not _PROMETHEUS_AVAILABLE or SWARM_FAILURES_TOTAL is None:
+        return
+    SWARM_FAILURES_TOTAL.labels(site=(site or "unknown")[:48]).inc()
 
 
 def record_swarm_handoff() -> None:

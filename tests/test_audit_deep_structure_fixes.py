@@ -49,15 +49,16 @@ async def test_broadcast_cancel_finalizes_as_cancelled(empty_config):
     outer.cancel()
     release.set()
 
-    try:
-        result = await outer
-    except asyncio.CancelledError:
-        pytest.fail("BROADCAST cancellation leaked out of dispatch() unfinalized")
-        return
+    # The caller's cancellation is raised to the caller -- after the
+    # broadcast was stopped and finalized (Swarm audit SW-E02/SW-E04: it used
+    # to be swallowed as a "Cancelled by user" result). The incident this
+    # locks is the leak: a cancelled broadcast left RUNNING in _active_tasks.
+    with pytest.raises(asyncio.CancelledError):
+        await outer
 
-    assert result.status == "cancelled"
     assert task.id not in engine._active_tasks
     assert task.status == TaskStatus.CANCELLED
+    assert task.result is not None and task.result.status == "cancelled"
 
 
 # ── Fix #5a: reap skips paused checkpoints with a configured timeout ────
@@ -90,15 +91,19 @@ def test_reap_skips_paused_checkpoint_with_timeout(empty_config):
 
 
 def test_reap_still_sweeps_paused_checkpoint_without_timeout(empty_config):
-    """No checkpoint_timeout configured → the watchdog stays the safety net."""
+    """A paused pipeline waits on a human: its lifetime is its checkpoint
+    timeout, or none -- one rule before and after a restart (Swarm audit
+    SW-E05). The watchdog used to reap one without a checkpoint timeout while
+    the same task restored after a restart was never reaped; Cancel or Reject
+    ends it."""
     engine = SwarmEngine(empty_config)
     task = _stale_paused_task(checkpoint_timeout=None)
     engine._active_tasks[task.id] = task
 
     reaped = engine.reap_stale_tasks()
 
-    assert reaped == 1
-    assert task.id not in engine._active_tasks
+    assert reaped == 0
+    assert task.id in engine._active_tasks and task.status == TaskStatus.PAUSED
 
 
 # ── Fix #5b: reject does not double-persist a terminal record ───────────

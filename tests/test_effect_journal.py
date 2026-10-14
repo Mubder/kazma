@@ -125,7 +125,7 @@ async def test_dispatch_exception_keeps_unknown_effect_held():
 @pytest.mark.asyncio
 async def test_real_registry_does_not_retry_mutator_or_hide_its_failure(monkeypatch):
     from kazma_core import retry
-    from kazma_core.agent.tool_registry import LocalToolRegistry, _graph_hitl_gate_ctx
+    from kazma_core.agent.tool_registry import CallAuthority, LocalToolRegistry, _graph_hitl_gate_ctx
 
     monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
     monkeypatch.setattr(retry, "load_retry_config", lambda: {
@@ -139,7 +139,8 @@ async def test_real_registry_does_not_retry_mutator_or_hide_its_failure(monkeypa
         calls.append("sent")
         raise TimeoutError("lost acknowledgement after sending")
 
-    token = _graph_hitl_gate_ctx.set(True)
+    # The graph's authority for this one call (SW-S01: per call, not per step).
+    token = _graph_hitl_gate_ctx.set(CallAuthority("fixture_write"))
     call = {"id": "write-1", "name": "fixture_write", "arguments": {}}
     try:
         with pytest.raises(EffectUncertain, match="effects are unknown"):
@@ -153,7 +154,7 @@ async def test_real_registry_does_not_retry_mutator_or_hide_its_failure(monkeypa
 
 @pytest.mark.asyncio
 async def test_real_registry_pre_invocation_argument_error_can_be_corrected(monkeypatch):
-    from kazma_core.agent.tool_registry import LocalToolRegistry, _graph_hitl_gate_ctx
+    from kazma_core.agent.tool_registry import LocalToolRegistry, _graph_hitl_gate_ctx, call_authority
 
     monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
     registry = LocalToolRegistry(include_builtins=False)
@@ -164,24 +165,23 @@ async def test_real_registry_pre_invocation_argument_error_can_be_corrected(monk
         calls.append(value)
         return "written"
 
-    token = _graph_hitl_gate_ctx.set(True)
-    try:
+    # One graph authority per call (SW-S01), as the tool worker binds them.
+    with call_authority(_graph_hitl_gate_ctx, "fixture_write"):
         call = {"id": "write-1", "name": "fixture_write", "arguments": {}}
         result = await execute_effect(registry, _state(), call, {})
         assert result["is_error"] and not result.get("effect_uncertain")
         assert calls == []
+    with call_authority(_graph_hitl_gate_ctx, "fixture_write"):
         call = {"id": "write-2", "name": "fixture_write", "arguments": {"value": "one"}}
         result = await execute_effect(registry, _state(), call, call["arguments"])
         assert not result["is_error"]
-    finally:
-        _graph_hitl_gate_ctx.reset(token)
     assert calls == ["one"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("leaf", ["write_file", "read_file"])
 async def test_unified_mcp_failure_holds_mutators_but_reads_remain_correctable(monkeypatch, leaf):
-    from kazma_core.agent.tool_registry import _hitl_approved_ctx
+    from kazma_core.agent.tool_registry import CallAuthority, _hitl_approved_ctx
     from kazma_core.mcp import manager as mcp_module
 
     monkeypatch.setattr(mcp_module, "set_active_mcp_manager", lambda manager: None)
@@ -192,7 +192,7 @@ async def test_unified_mcp_failure_holds_mutators_but_reads_remain_correctable(m
     manager.execute_mcp_tool = AsyncMock(return_value={"content": "server failed", "is_error": True})
     executor = mcp_module.UnifiedToolExecutor(mcp=manager, rbac=Mock())
     call = {"id": "mcp-1", "name": f"mcp__fixture__{leaf}", "arguments": {}}
-    token = _hitl_approved_ctx.set(True)
+    token = _hitl_approved_ctx.set(CallAuthority(call["name"]))  # this call, approved
     try:
         if leaf == "write_file":
             with pytest.raises(EffectUncertain, match="effects are unknown"):

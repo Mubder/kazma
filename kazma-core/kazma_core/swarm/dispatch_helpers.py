@@ -89,7 +89,12 @@ def build_handoff_context(
         sections.append(f"Original context:\n{original_ctx_text}")
     sections.append(f"Original prompt:\n{original_prompt}")
     if intermediate_results:
-        sections.append(f"Intermediate results:\n{intermediate_results}")
+        # The handing-off worker's text: data for the target, never its
+        # instructions (Swarm audit SW-S10).
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        sections.append("Intermediate results:\n"
+                        + fence_untrusted(str(intermediate_results), source="swarm_handoff"))
 
     context_text = "\n\n".join(sections)
 
@@ -173,3 +178,25 @@ def resolve_max_concurrent(task: SwarmTask, config_default: int = 5) -> int:
     except (TypeError, ValueError):
         return configured_default
     return max(1, resolved)
+
+
+def step_timeout_result(task: Any, worker_name: str, effects: Any, *, label: str = "Worker") -> Any:
+    """A pattern step that ran out of time. Safe to retry only when it had
+    invoked no tool that changes things (Swarm audit SW-E04: it was always
+    labelled safe, so a write that ran before the deadline could be repeated).
+    *effects* is the step's ``DispatchEffects``."""
+    from kazma_core.swarm.task import WorkerResult
+
+    error = f"{label} '{worker_name}' timed out after {task.timeout:g}s."
+    if effects.invoked:
+        error += (f" It had run tools that change things ({', '.join(effects.tools)}): "
+                  "not retried; inspect their effects.")
+    return WorkerResult(
+        worker=worker_name,
+        task_id=task.id,
+        status="timeout",
+        output="",
+        error=error,
+        retry_safe=not effects.invoked,
+    )
+

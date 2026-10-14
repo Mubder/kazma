@@ -4,14 +4,13 @@ Delivers structured Swarm Report cards and interactive HITL approval
 requests to a Discord channel.  Uses Discord components v2 buttons so
 operators can approve/reject directly.
 
-Mirrors ``telegram_bus.py``: an in-process ``asyncio.Event`` per pending
-approval, resolved by ``handle_callback`` when the Discord adapter
-delivers an interaction (button press).
+An approval's outcome lives in ``kazma_core.swarm.shared_approvals``: one
+row per request, decided once, whichever platform's button is pressed
+first; ``handle_callback`` decides it and every card shows the outcome.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -25,9 +24,37 @@ from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
+
+def _card_body(text: str) -> str:
+    """An approval card without its "APPROVAL REQUIRED" header and its
+    "times out" line: what a decided card keeps under its outcome."""
+    return text.split(chr(10), 1)[-1].rsplit(chr(10), 1)[0]
+
 __all__ = [
     "DiscordBusAdapter",
 ]
+
+
+def _mention_safe(payload: dict[str, Any]) -> dict[str, Any]:
+    """*payload* with every text it shows de-pinged and no mention parsed."""
+    from kazma_gateway.adapters.discord_send import sanitize_outbound
+
+    def walk(value: Any, key: str = "") -> Any:
+        if isinstance(value, str):
+            return sanitize_outbound(value) if key in _SHOWN_TEXT else value
+        if isinstance(value, dict):
+            return {k: walk(v, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v, key) for v in value]
+        return value
+
+    safe = walk(payload)
+    safe["allowed_mentions"] = {"parse": []}
+    return safe
+
+
+#: The payload fields Discord shows as message text (content, embeds, fields).
+_SHOWN_TEXT = frozenset({"content", "title", "description", "name", "value", "text", "label"})
 
 _APPROVAL_TIMEOUT = 60.0  # seconds
 _DISCORD_API = "https://discord.com/api/v10"
@@ -43,15 +70,13 @@ class DiscordBusAdapter(BusAdapter):
     Features:
         - SwarmReport cards with code-block output
         - Components v2 buttons for HITL approval
-        - Callback routing to resolve ``asyncio.Event``
+        - Callback routing to decide the shared approval
     """
 
     def __init__(self, bot_token: str, channel_id: str) -> None:
         self._bot_token = bot_token
         self._channel_id = channel_id
-        self._pending_approvals: dict[str, asyncio.Event] = {}
-        self._pending_results: dict[str, bool] = {}
-        self._pending_msg_ids: dict[str, str] = {}
+        self._pending_approvals: set[str] = set()
         self._http: Any = None  # lazy httpx client
 
     @property
@@ -74,7 +99,13 @@ class DiscordBusAdapter(BusAdapter):
         return self._http
 
     async def _post_message(self, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """POST a message to the target channel. Returns parsed JSON or None."""
+        """POST a message to the target channel. Returns parsed JSON or None.
+
+        Every post and edit of this sender goes through here or
+        :meth:`_patch_message`, which neutralize mentions the way the chat
+        adapter does (Swarm audit SW-S13: a worker's "@everyone" pinged the
+        channel)."""
+        payload = _mention_safe(payload)
         try:
             http = await self._ensure_http()
             resp = await http.post(f"/channels/{self._channel_id}/messages", json=payload)
@@ -86,16 +117,24 @@ class DiscordBusAdapter(BusAdapter):
             logger.warning("[DiscordBus] sendMessage failed: %s", exc)
             return None
 
-    async def _patch_message(self, message_id: str, payload: dict[str, Any]) -> None:
-        """Edit an existing message (e.g. to show APPROVED/REJECTED)."""
+    async def _patch_message(self, message_id: str, payload: dict[str, Any]) -> bool:
+        """Edit an existing message (e.g. to show APPROVED/REJECTED). Whether
+        Discord took the edit: a card left showing its buttons is a WARNING
+        (SW-S15)."""
+        payload = _mention_safe(payload)
         try:
             http = await self._ensure_http()
-            await http.patch(
+            resp = await http.patch(
                 f"/channels/{self._channel_id}/messages/{message_id}",
                 json=payload,
             )
+            if resp.status_code >= 400:
+                logger.warning("[DiscordBus] editMessage %d: %s", resp.status_code, resp.text[:200])
+                return False
+            return True
         except Exception as exc:
-            logger.debug("[DiscordBus] editMessage failed: %s", exc)
+            logger.warning("[DiscordBus] editMessage failed: %s", exc)
+            return False
 
     # ── BusAdapter interface ────────────────────────────────────────
 
@@ -179,22 +218,22 @@ class DiscordBusAdapter(BusAdapter):
     async def request_approval(
         self, approval: ApprovalRequest, timeout: float | None = None
     ) -> bool:
-        if timeout is None:
-            timeout = _APPROVAL_TIMEOUT
         """Post an approval card with buttons and await the response.
 
         Buttons carry ``custom_id`` = ``swarm_approve_{task_id}`` /
         ``swarm_reject_{task_id}``.  The Discord adapter's interaction
         handler calls ``handle_callback`` to resolve the event.
         """
+        if timeout is None:
+            timeout = _APPROVAL_TIMEOUT
         text = (
             "⚠️ **APPROVAL REQUIRED**\n"
             f"**Worker:** {approval.worker_name}\n"
             f"**Task:** {approval.task_description[:300]}\n"
         )
         if approval.proposed_output:
-            text += f"```\n{approval.proposed_output[:500]}\n```\n"
-        text += f"\n_(auto-reject in {int(timeout)}s)_"
+            text += f"```\n{approval.proposed_output}\n```\n"
+        text += f"\n_(times out in {int(timeout)}s; the tool does not run unless approved)_"
 
         # Discord components v2: a row with two buttons.
         components = [
@@ -219,80 +258,41 @@ class DiscordBusAdapter(BusAdapter):
 
         result = await self._post_message({"content": text[:2000], "components": components})
         msg_id = str(result.get("id", "")) if result else ""
+        if not msg_id:
+            logger.warning("[DiscordBus] Failed to deliver approval prompt for task %s", approval.task_id)
+            return False
 
+        # The request's one outcome, whatever platform decides it (SW-S04,
+        # SW-S05): shared_approvals waits, and this card shows the outcome.
         from kazma_core.swarm import shared_approvals
 
-        shared_approvals.create_pending(
-            approval.task_id,
-            meta={"platform": "discord", "worker": approval.worker_name},
-        )
-        event = asyncio.Event()
-        self._pending_approvals[approval.task_id] = event
-        if msg_id:
-            self._pending_msg_ids[approval.task_id] = msg_id
-        approved: bool = False
+        self._pending_approvals.add(approval.task_id)
+
+        async def _edit(row: dict) -> None:
+            await self._patch_message(msg_id, {
+                "content": f"**{shared_approvals.outcome_text(row)}**\n{_card_body(text)}"[:2000],
+                "components": []})
+
         try:
-            shared_task = asyncio.create_task(
-                shared_approvals.wait_for_resolution(approval.task_id, timeout=timeout)
-            )
-            local_task = asyncio.create_task(
-                asyncio.wait_for(event.wait(), timeout=timeout)
-            )
-            done, pending = await asyncio.wait(
-                [shared_task, local_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for t in pending:
-                t.cancel()
-
-            if approval.task_id in self._pending_results:
-                approved = self._pending_results[approval.task_id]
-            elif shared_task in done and not shared_task.cancelled():
-                approved = shared_task.result()
-            else:
-                approved = self._pending_results.get(approval.task_id, False)
-        except (TimeoutError, asyncio.TimeoutError):
-            logger.warning("[DiscordBus] Approval timed out for task %s", approval.task_id)
-            approved = self._pending_results.get(approval.task_id, False)
+            return await shared_approvals.await_card(approval.task_id, _edit)
         finally:
-            self._pending_approvals.pop(approval.task_id, None)
-            self._pending_results.pop(approval.task_id, None)
-            self._pending_msg_ids.pop(approval.task_id, None)
-
-        # Edit the original message to show result (remove buttons).
-        if msg_id:
-            status = "✅ **APPROVED**" if approved else "❌ **REJECTED**"
-            await self._patch_message(msg_id, {"content": status, "components": []})
-
-        return approved
+            self._pending_approvals.discard(approval.task_id)
 
     # ── Callback resolution ─────────────────────────────────────────
 
-    def approve(self, task_id: str) -> None:
-        """Signal approval for a pending task (local + durable)."""
-        if task_id in self._pending_approvals:
-            self._pending_results[task_id] = True
-            self._pending_approvals[task_id].set()
-        try:
-            from kazma_core.swarm.shared_approvals import resolve
+    def approve(self, task_id: str, *, actor: str = "") -> None:
+        """A human's Approve: decides the request if it is still pending."""
+        from kazma_core.swarm.shared_approvals import resolve_from_callback
 
-            resolve(task_id, True)
-        except Exception:
-            pass
+        resolve_from_callback(task_id, True, actor=actor, platform="discord")
 
-    def reject(self, task_id: str) -> None:
-        """Signal rejection for a pending task (local + durable)."""
-        if task_id in self._pending_approvals:
-            self._pending_results[task_id] = False
-            self._pending_approvals[task_id].set()
-        try:
-            from kazma_core.swarm.shared_approvals import resolve
+    def reject(self, task_id: str, *, actor: str = "") -> None:
+        """A human's Deny: decides the request if it is still pending (final)."""
+        from kazma_core.swarm.shared_approvals import resolve_from_callback
 
-            resolve(task_id, False)
-        except Exception:
-            pass
+        resolve_from_callback(task_id, False, actor=actor, platform="discord")
 
-    def handle_callback(self, custom_id: str) -> str | None:
+    def handle_callback(self, custom_id: str, *, actor: str = "") -> str | None:
         """Parse a Discord component custom_id and resolve the approval.
 
         Returns the task_id if handled, None otherwise.
@@ -301,15 +301,9 @@ class DiscordBusAdapter(BusAdapter):
 
             bus_adapter.handle_callback(interaction["data"]["custom_id"])
         """
-        if custom_id.startswith("swarm_approve_"):
-            task_id = custom_id[len("swarm_approve_"):]
-            self.approve(task_id)
-            return task_id
-        if custom_id.startswith("swarm_reject_"):
-            task_id = custom_id[len("swarm_reject_"):]
-            self.reject(task_id)
-            return task_id
-        return None
+        from kazma_core.swarm.shared_approvals import decide_from_button
+
+        return decide_from_button(custom_id, actor=actor, platform="discord")
 
     @property
     def pending_count(self) -> int:

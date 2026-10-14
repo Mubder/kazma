@@ -342,7 +342,10 @@ def test_chat_apps_turn_a_chats_memory_off_and_on(mem):
     _chat(mem)
     _live_turn()
     ctx = {"thread_id": "th1", "memory_tenant": "default", "memory_count": 1}
-    off = resolve_slash_command("/memory off", context=ctx)
+    # It asks first (Memory audit M36); nothing changes until confirmed.
+    ask = resolve_slash_command("/memory off", context=ctx)
+    assert "/memory off confirm" in ask and forget.chat_remembered("s1", tenant_id="default")
+    off = resolve_slash_command("/memory off confirm", context=ctx)
     assert "won't remember" in off and "Forgot 1 memory" in off
     assert not forget.chat_remembered("s1", tenant_id="default")
     assert _live_turn(turn=2, question=COLOUR_Q, answer="Teal.") is None
@@ -367,7 +370,7 @@ def test_forget_past_forgets_what_the_chat_left(mem):
 
 #: (file, innermost function) -> why a forgotten memory cannot come back through it.
 EPISODE_INSERTS = {
-    ("kazma-core/kazma_core/memory/dual_write.py", "mirror_episode"):
+    ("kazma-core/kazma_core/memory/dual_write.py", "write_episode"):
         "the one writer: asks the ledger before it writes anything",
     ("kazma-core/kazma_core/memory/swarm_bridge.py", "_insert_episode"):
         "asks the ledger first; its embedding update skips a tombstone",
@@ -384,7 +387,7 @@ EPISODE_INSERTS = {
 #: The writers of live memory: each asks the ledger.
 _LEDGER_CHECKS = {"refuses_write", "_forgotten"}
 _LIVE_WRITERS = {
-    ("kazma-core/kazma_core/memory/dual_write.py", "mirror_episode"),
+    ("kazma-core/kazma_core/memory/dual_write.py", "write_episode"),
     ("kazma-core/kazma_core/memory/swarm_bridge.py", "_insert_episode"),
     ("kazma-core/kazma_core/memory/legacy_tables.py", "restore_legacy_episode_archive"),
 }

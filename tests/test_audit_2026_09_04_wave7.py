@@ -213,6 +213,14 @@ class TestWave7CronPurgeAndReliability:
 
     @pytest.mark.asyncio
     async def test_l11_shared_approvals_reject_vote_cas(self, tmp_path: Path) -> None:
+        """L11 (concurrent decisions must not lose an update): with the
+        decision a compare-and-set on the row since the Swarm audit's stage 1,
+        concurrent clicks decide it exactly once -- the first wins, the rest
+        change nothing -- on a real ConfigStore. (The reject VOTE count this
+        test held is gone: an explicit Deny is final, owner decision D7.)"""
+        import threading
+        import time as _time
+
         from kazma_core.config_store import ConfigStore
         from kazma_core.swarm import shared_approvals
 
@@ -220,25 +228,27 @@ class TestWave7CronPurgeAndReliability:
         cs = ConfigStore(db_path=str(db_file))
 
         with patch("kazma_core.config_store.get_config_store", return_value=cs):
-            shared_approvals.create_pending("task-concurrent-reject", expected_voters=3)
+            shared_approvals.open_request(
+                "task-concurrent-reject", tool="git_push", args="{}", deadline=_time.time() + 60)
+            won: list[bool] = []
+            barrier = threading.Barrier(6)
 
-            # Two concurrent reject votes
-            shared_approvals.resolve("task-concurrent-reject", False)
-            shared_approvals.resolve("task-concurrent-reject", False)
+            def click(i: int) -> None:
+                barrier.wait()
+                won.append(shared_approvals.resolve(
+                    "task-concurrent-reject", i % 2 == 0, actor=f"telegram:{i}"))
 
-            # Check durable payload: reject_votes must be 2, status must still be pending
-            key = shared_approvals._key("task-concurrent-reject")
-            payload = cs.get(key)
-            assert payload is not None
-            assert payload["reject_votes"] == 2
-            assert payload["status"] == "pending"
+            threads = [threading.Thread(target=click, args=(i,)) for i in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
-            # Third reject vote reaches expected_voters=3 -> resolves to False
-            shared_approvals.resolve("task-concurrent-reject", False)
-            payload3 = cs.get(key)
-            assert payload3["reject_votes"] == 3
-            assert payload3["status"] == "resolved"
-            assert payload3["result"] is False
+            assert won.count(True) == 1, won
+            payload = cs.get(shared_approvals._key("task-concurrent-reject"))
+            assert payload["status"] in ("approved", "denied")
+            winner = int(payload["actor"].split(":")[1])
+            assert payload["status"] == ("approved" if winner % 2 == 0 else "denied")
 
         cs.close()
 

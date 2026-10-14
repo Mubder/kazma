@@ -34,11 +34,30 @@ async def _json_object(request: Request) -> dict[str, Any]:
     all leave the route on its defaults. A dropped connection is not one of
     them and propagates.
     """
-    try:
-        body = await request.json()
-    except ValueError:
-        return {}
-    return body if isinstance(body, dict) else {}
+    from kazma_ui.memory_api import _INVALID_JSON, _read_json  # bounded (Memory audit M36)
+
+    body = await _read_json(request)
+    return body if body is not _INVALID_JSON and isinstance(body, dict) else {}
+
+
+def _every_word_match(query: str) -> str:
+    """An FTS5 expression asking for EVERY content word of *query* (each in
+    any of its search forms, prefix-matched); empty when it has none.
+
+    The memories panel's search finds a memory to read or forget. Recall's
+    expression ORs the words, which suits ranking; listed newest first, "my
+    locker code" returned every memory saying "code" before the one asked for.
+    """
+    from kazma_core.memory.query_terms import search_terms
+
+    groups = []
+    for piece in query.split()[:12]:
+        forms = [w.replace('"', "") for w in search_terms(piece)]
+        forms = [f'"{w}"*' for w in forms if w]
+        if forms:
+            groups.append("(" + " OR ".join(forms) + ")")
+    return " AND ".join(groups)
+
 
 __all__ = ["register_memory_routes"]
 
@@ -84,13 +103,17 @@ def register_memory_routes(self: Any) -> None:
         """
         if not (q or "").strip():
             return {"results": [], "query": ""}
+        from kazma_core.diagnostic_scope import read_only_diagnostic
         from kazma_core.memory.recall import search
 
-        hits = search(
-            q.strip(),
-            limit=max(1, min(int(limit), 50)),
-            tenant_id=_mem_tid(),
-        )
+        # The operator looking is not a recall: no access bump (Memory audit
+        # M34 -- this GET wrote access counts, and kept what it showed "in use").
+        with read_only_diagnostic("/api/memory/graph/search"):
+            hits = search(
+                q.strip(),
+                limit=max(1, min(int(limit), 50)),
+                tenant_id=_mem_tid(),
+            )
         return {
             "query": q.strip(),
             "results": [
@@ -418,6 +441,7 @@ def register_memory_routes(self: Any) -> None:
                 "ok": True,
                 "query": query,
                 "empty": result.empty,
+                "degraded": result.degraded,
                 "hints": hints,
                 "beliefs": [
                     {
@@ -827,7 +851,7 @@ def register_memory_routes(self: Any) -> None:
             cur = conn.execute(
                 """
                 UPDATE memory_task_queue
-                SET status='pending', attempts=0, error_log=NULL, updated_at=?
+                SET status='pending', attempts=0, error_log=NULL, updated_at=?, next_attempt_at=NULL
                 WHERE id=? AND status IN ('failed', 'pending')
                 """,
                 (now, task_id),
@@ -868,8 +892,13 @@ def register_memory_routes(self: Any) -> None:
             if conn is not None:
                 conn.close()
     @self.app.get("/api/memory/v2/episodes")
-    def _memory_v2_episodes(limit: int = 40, tier: str = "", offset: int = 0):
-        """Recent episodes for Dashboard overlay (id, tier, preview text)."""
+    def _memory_v2_episodes(limit: int = 40, tier: str = "", offset: int = 0, q: str = ""):
+        """Episodes for the Memory page and the Dashboard overlay (id, tier,
+        preview text), newest first, a page at a time (``total`` counts every
+        match). *q* searches their words (the episodes full-text index): the
+        panel reached only the newest 30, so an older memory could not be
+        forgotten from the page (Memory audit M23).
+        """
 
 
         conn = None
@@ -887,6 +916,12 @@ def register_memory_routes(self: Any) -> None:
 
                 where += f" AND tier IN ({','.join('?' for _ in RECALLABLE_TIERS)})"
                 params.extend(RECALLABLE_TIERS)
+            if (q or "").strip():
+                match_q = _every_word_match(q.strip()[:500])
+                if not match_q:
+                    return {"ok": True, "episodes": [], "total": 0, "offset": 0, "limit": limit, "q": q}
+                where += " AND rowid IN (SELECT rowid FROM episodes_fts WHERE episodes_fts MATCH ?)"
+                params.append(match_q)
             total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
             lim = max(1, min(int(limit or 40), 100))
             off = max(0, int(offset or 0))
@@ -1070,12 +1105,25 @@ def register_memory_routes(self: Any) -> None:
                 conn.close()
     @self.app.get("/api/memory/v2/graph/export")
     def _memory_v2_graph_export(format: str = "json", limit: int = 500):
-        """Export belief graph as JSON or GraphML for download."""
-        import xml.sax.saxutils as xu
+        """Export belief graph as JSON or GraphML for download.
+
+        Built with ElementTree (Memory audit M33: ``saxutils.escape`` left a
+        ``"`` in an attribute, so any fact holding a quote made the GraphML
+        unreadable), and both formats say when the graph was cut at *limit*
+        (``truncated``, the ``X-Kazma-Truncated`` header) -- they cut it
+        silently.
+        """
+        import re as _re
+        import xml.etree.ElementTree as ET
 
         from fastapi.responses import Response
 
+        def _xml(value: object) -> str:
+            # Characters XML 1.0 cannot hold at all are dropped.
+            return _re.sub("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]", "", str(value or ""))
+
         fmt = (format or "json").strip().lower()
+        cap = max(10, min(limit, 2000))
         conn = None
         try:
             conn = open_memory_db()
@@ -1092,9 +1140,11 @@ def register_memory_routes(self: Any) -> None:
                 ORDER BY structural_importance DESC, confidence DESC
                 LIMIT ?
                 """,
-                (*tparams, max(10, min(limit, 2000))),
+                (*tparams, cap + 1),
             ).fetchall()
             conn.close()
+            truncated = len(rows) > cap
+            rows = rows[:cap]
             nodes: dict[str, dict] = {}
             links = []
             for r in rows:
@@ -1110,38 +1160,37 @@ def register_memory_routes(self: Any) -> None:
                         "id": r["id"],
                     }
                 )
+            headers = {"X-Kazma-Truncated": "true" if truncated else "false"}
             if fmt == "graphml":
-                parts = [
-                    '<?xml version="1.0" encoding="UTF-8"?>',
-                    '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
-                    '<key id="label" for="node" attr.name="label" attr.type="string"/>',
-                    '<key id="predicate" for="edge" attr.name="predicate" attr.type="string"/>',
-                    '<graph id="G" edgedefault="directed">',
-                ]
+                root = ET.Element("graphml", xmlns="http://graphml.graphdrawing.org/xmlns")
+                ET.SubElement(root, "key", {"id": "label", "for": "node", "attr.name": "label",
+                                            "attr.type": "string"})
+                ET.SubElement(root, "key", {"id": "predicate", "for": "edge", "attr.name": "predicate",
+                                            "attr.type": "string"})
+                ET.SubElement(root, "key", {"id": "truncated", "for": "graph", "attr.name": "truncated",
+                                            "attr.type": "boolean"})
+                graph = ET.SubElement(root, "graph", id="G", edgedefault="directed")
+                ET.SubElement(graph, "data", key="truncated").text = "true" if truncated else "false"
                 for n in nodes.values():
-                    parts.append(
-                        f'<node id="{xu.escape(n["id"])}">'
-                        f'<data key="label">{xu.escape(n["label"])}</data></node>'
-                    )
+                    node = ET.SubElement(graph, "node", id=_xml(n["id"]))
+                    ET.SubElement(node, "data", key="label").text = _xml(n["label"])
                 for i, e in enumerate(links):
-                    parts.append(
-                        f'<edge id="e{i}" source="{xu.escape(e["source"])}" '
-                        f'target="{xu.escape(e["target"])}">'
-                        f'<data key="predicate">{xu.escape(str(e["predicate"]))}</data></edge>'
-                    )
-                parts.append("</graph></graphml>")
-                body = "\n".join(parts)
+                    edge = ET.SubElement(graph, "edge", id=f"e{i}", source=_xml(e["source"]),
+                                         target=_xml(e["target"]))
+                    ET.SubElement(edge, "data", key="predicate").text = _xml(e["predicate"])
+                body = '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
                 return Response(
                     content=body,
                     media_type="application/graphml+xml",
                     headers={
-                        "Content-Disposition": 'attachment; filename="kazma_belief_graph.graphml"'
+                        "Content-Disposition": 'attachment; filename="kazma_belief_graph.graphml"',
+                        **headers,
                     },
                 )
             import json as _json
 
             payload = _json.dumps(
-                {"nodes": list(nodes.values()), "links": links},
+                {"nodes": list(nodes.values()), "links": links, "truncated": truncated, "limit": cap},
                 ensure_ascii=False,
                 indent=2,
             )
@@ -1149,7 +1198,8 @@ def register_memory_routes(self: Any) -> None:
                 content=payload,
                 media_type="application/json",
                 headers={
-                    "Content-Disposition": 'attachment; filename="kazma_belief_graph.json"'
+                    "Content-Disposition": 'attachment; filename="kazma_belief_graph.json"',
+                    **headers,
                 },
             )
         except Exception as exc:
@@ -1340,7 +1390,8 @@ def register_memory_routes(self: Any) -> None:
                 if hub_name and hub_name != "You" and (
                     not hub_row or is_self_label(hub_row_name) or hub_row_name.lower() == "user"
                 ):
-                    ensure_user_hub(conn, hub_name)
+                    # Only the caller's own hub (Memory audit M21).
+                    ensure_user_hub(conn, hub_name, tenant_id=_gtid)
                     conn.commit()
                     self_ids = collect_self_entity_ids(conn)
                     hub_name = resolve_hub_display_name(conn)

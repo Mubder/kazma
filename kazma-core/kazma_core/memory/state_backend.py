@@ -119,7 +119,7 @@ class _NullStateBackend:
     def belief_digest(self) -> dict[str, tuple[bool, str]]:
         return {}
 
-    def row_regions(self, table: str) -> dict[str, str]:
+    def row_regions(self, table: str, ids: list[str] | None = None) -> dict[str, str]:
         return {}
 
     def search_episodes(
@@ -158,8 +158,21 @@ class PostgresStateBackend:
         self._ready: bool | None = None
         self._ready_at: float = 0.0
         self._ensured = False
+        self._pool: Any = None
+        self._pool_lock = threading.Lock()
+        self._closed = False
 
     def _connect(self) -> Any:
+        """A connection for one operation; its ``close()`` gives it back.
+
+        Borrowed from this backend's pool (Memory audit M31: every mirrored
+        row, digest and probe opened a Postgres connection of its own --
+        thousands a pass at scale). Without psycopg's pool package, a new
+        connection, as before.
+        """
+        pool = self._get_pool()
+        if pool is not None:
+            return _PooledConnection(pool, pool.getconn(timeout=self._timeout))
         try:
             import psycopg
 
@@ -168,6 +181,40 @@ class PostgresStateBackend:
             import psycopg2
 
             return psycopg2.connect(self._dsn, connect_timeout=int(self._timeout))
+
+    def _get_pool(self) -> Any:
+        if self._pool is not None or self._closed or not self._dsn:
+            return self._pool
+        try:
+            import psycopg  # noqa: F401 - the pool needs psycopg 3
+            from psycopg_pool import ConnectionPool
+        except ImportError:
+            return None
+        from kazma_core.db.postgres_pool import pool_connection_kwargs
+
+        with self._pool_lock:
+            if self._pool is None and not self._closed:
+                self._pool = ConnectionPool(
+                    conninfo=self._dsn,
+                    min_size=1,
+                    max_size=4,
+                    timeout=self._timeout,
+                    kwargs=pool_connection_kwargs(self._dsn, autocommit=False),
+                    # A connection the server closed is replaced at checkout
+                    # (AGENTS.md section 44).
+                    check=ConnectionPool.check_connection,
+                    name="kazma-memory-mirror",
+                    open=True,
+                )
+        return self._pool
+
+    def close(self) -> None:
+        """Close the pool (a backend dropped from the cache, or shutdown)."""
+        with self._pool_lock:
+            self._closed = True
+            pool, self._pool = self._pool, None
+        if pool is not None:
+            pool.close()
 
     @property
     def available(self) -> bool:
@@ -268,52 +315,55 @@ class PostgresStateBackend:
         return ok
 
     def mirror_episode(self, row: dict[str, Any]) -> bool:
-        if not self._dsn or not row.get("id"):
-            return False
+        return bool(row.get("id")) and self.mirror_episode_rows([row]) == [str(row["id"])]
+
+    def mirror_episode_rows(self, rows: list[dict[str, Any]]) -> list[str]:
+        """Upsert *rows* on one connection, in one transaction (Memory audit
+        M31: a sweep that moved 16,000 memories pushed them one connection
+        and two round trips each -- five minutes at 10x the live size).
+        Returns the ids written; a row another region owns (under
+        ``origin_wins`` / ``fail_closed``) is left out. Never raises: a
+        failure writes nothing and returns ``[]``."""
+        rows = [r for r in rows if r.get("id")]
+        if not self._dsn or not rows:
+            return []
         try:
             conn = self._connect()
             try:
                 self._ensure(conn)
-                if not self._may_write(conn, "kazma_episodes", str(row.get("id"))):
-                    return False
+                allowed = self._writable(conn, "kazma_episodes", [str(r["id"]) for r in rows])
+                rows = [r for r in rows if str(r["id"]) in allowed]
+                if not rows:
+                    return []
                 cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO kazma_episodes (
-                      id, tenant_id, session_id, turn_number, user_text,
-                      assistant_text, summary_text, tier, structural_importance,
-                      created_at, metadata_json
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT (id) DO UPDATE SET
-                      user_text = EXCLUDED.user_text,
-                      assistant_text = EXCLUDED.assistant_text,
-                      summary_text = EXCLUDED.summary_text,
-                      tier = EXCLUDED.tier,
-                      structural_importance = EXCLUDED.structural_importance,
-                      metadata_json = EXCLUDED.metadata_json
-                    """,
-                    (
-                        row.get("id"),
-                        row.get("tenant_id") or "default",
-                        row.get("session_id"),
-                        int(row.get("turn_number") or 0),
-                        _pg_text(row.get("user_text")),
-                        _pg_text(row.get("assistant_text")),
-                        _pg_text(row.get("summary_text")),
-                        row.get("tier") or "episodic",
-                        int(row.get("structural_importance") or 1),
-                        float(row.get("created_at") or time.time()),
-                        _stamp_region_meta(row),
-                    ),
-                )
+                cur.executemany(_EPISODE_UPSERT, [_episode_params(r) for r in rows])
                 conn.commit()
                 cur.close()
-                return True
+                return [str(r["id"]) for r in rows]
             finally:
                 conn.close()
         except Exception:
             logger.debug("[state_backend] postgres episode mirror failed", exc_info=True)
-            return False
+            return []
+
+    def _writable(self, conn: Any, table: str, ids: list[str]) -> set[str]:
+        """Which of *ids* this region may write (:func:`should_apply_remote_write`
+        on each existing row's metadata), read in one query."""
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SELECT id, metadata_json FROM {table} WHERE id = ANY(%s)", (list(ids),))
+            existing = {str(r[0]): _parse_meta(r[1]) for r in cur.fetchall()}
+        finally:
+            cur.close()
+        region, policy = state_region(), state_conflict_policy()
+        out = set()
+        for rid in ids:
+            meta = existing.get(rid)
+            if meta is None or should_apply_remote_write(meta, region=region, policy=policy)[0]:
+                out.add(rid)
+            else:
+                logger.debug("[state_backend] skip %s %s: another region's row", table, rid)
+        return out
 
     def mirror_belief(self, row: dict[str, Any]) -> bool:
         if not self._dsn or not row.get("id"):
@@ -446,23 +496,45 @@ class PostgresStateBackend:
             ).items()
         }
 
-    def row_regions(self, table: str) -> dict[str, str]:
+    def present_ids(self, table: str, ids: list[str]) -> set[str]:
+        """Which of *ids* the mirror's *table* holds (primary-key reads).
+        :func:`sync_state_mirror` asks it for the newest rows it already
+        pushed: none there means the mirror went back (a restore of the
+        shared database). Raises like :meth:`episode_digest`."""
+        if table not in ("kazma_episodes", "kazma_beliefs") or not self._dsn or not ids:
+            return set()
+        conn = self._connect()
+        try:
+            self._ensure(conn)
+            cur = conn.cursor()
+            cur.execute(f"SELECT id FROM {table} WHERE id = ANY(%s)", (list(ids),))
+            out = {str(r[0]) for r in cur.fetchall()}
+            cur.close()
+            return out
+        finally:
+            conn.close()
+
+    def row_regions(self, table: str, ids: list[str] | None = None) -> dict[str, str]:
         """id -> the region that wrote it, for every row of *table* whose
         metadata names one (:func:`sync_state_mirror` under ``origin_wins`` /
-        ``fail_closed``). Read with a pattern, not a JSON cast: one row of
-        malformed metadata would fail the whole query. Raises like
-        :meth:`episode_digest`."""
+        ``fail_closed``), or only the rows *ids* names (the outbox drain).
+        Read with a pattern, not a JSON cast: one row of malformed metadata
+        would fail the whole query. Raises like :meth:`episode_digest`."""
         if table not in ("kazma_episodes", "kazma_beliefs") or not self._dsn:
             return {}
         conn = self._connect()
         try:
             self._ensure(conn)
             cur = conn.cursor()
-            cur.execute(
+            sql = (
                 "SELECT id, substring(metadata_json from "
                 "'\"region\"[[:space:]]*:[[:space:]]*\"([^\"]*)\"') "
                 f"FROM {table} WHERE metadata_json LIKE '%\"region\"%'"
             )
+            if ids is None:
+                cur.execute(sql)
+            else:
+                cur.execute(sql + " AND id = ANY(%s)", (list(ids),))
             out = {str(r[0]): str(r[1]) for r in cur.fetchall() if r[1]}
             cur.close()
             return out
@@ -497,18 +569,31 @@ class PostgresStateBackend:
                         for _ in terms
                     ]
                 )
-                params: list[Any] = [tenant_id]
+                from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
+                text = ("(LOWER(COALESCE(user_text,'')) || ' ' || LOWER(COALESCE(assistant_text,'')) "
+                        "|| ' ' || LOWER(COALESCE(summary_text,'')))")
+                # How many of the question's words a row holds: the candidates
+                # are the rows that hold the most, not the newest that hold one
+                # (Memory audit M06 -- an older memory only its words would
+                # find fell out of the slice once newer rows shared a word).
+                score = " + ".join(f"(CASE WHEN {text} LIKE %s THEN 1 ELSE 0 END)" for _ in terms)
+                tiers = ",".join("%s" for _ in RECALLABLE_TIERS)
+                params: list[Any] = [f"%{t}%" for t in terms]
+                params.append(tenant_id)
+                params.extend(RECALLABLE_TIERS)
                 for t in terms:
                     pat = f"%{t}%"
                     params.extend([pat, pat, pat])
                 params.append(max(1, min(int(limit), 50)) * 5)
                 cur.execute(
                     f"""
-                    SELECT id, session_id, user_text, assistant_text, summary_text,
-                           tier, structural_importance, created_at, metadata_json
+                    SELECT id, session_id, turn_number, user_text, assistant_text, summary_text,
+                           tier, structural_importance, created_at, metadata_json,
+                           ({score}) AS words_held
                     FROM kazma_episodes
-                    WHERE tenant_id = %s AND ({clauses})
-                    ORDER BY created_at DESC
+                    WHERE tenant_id = %s AND tier IN ({tiers}) AND ({clauses})
+                    ORDER BY words_held DESC, created_at DESC
                     LIMIT %s
                     """,
                     params,
@@ -552,7 +637,11 @@ class PostgresStateBackend:
                         for _ in terms
                     ]
                 )
-                params: list[Any] = [tenant_id]
+                text = ("(LOWER(COALESCE(subject,'')) || ' ' || LOWER(COALESCE(predicate,'')) "
+                        "|| ' ' || LOWER(COALESCE(object,'')))")
+                score = " + ".join(f"(CASE WHEN {text} LIKE %s THEN 1 ELSE 0 END)" for _ in terms)
+                params: list[Any] = [f"%{t}%" for t in terms]
+                params.append(tenant_id)
                 for t in terms:
                     pat = f"%{t}%"
                     params.extend([pat, pat, pat])
@@ -561,12 +650,13 @@ class PostgresStateBackend:
                     f"""
                     SELECT id, subject, predicate, object, predicate_type,
                            confidence, structural_importance, source_trust_weight,
-                           valid_from, metadata_json
+                           valid_from, metadata_json,
+                           ({score}) AS words_held
                     FROM kazma_beliefs
                     WHERE tenant_id = %s
                       AND valid_until IS NULL AND invalidated_at IS NULL
                       AND ({clauses})
-                    ORDER BY (structural_importance * confidence) DESC NULLS LAST
+                    ORDER BY words_held DESC, (structural_importance * confidence) DESC NULLS LAST
                     LIMIT %s
                     """,
                     params,
@@ -599,15 +689,18 @@ class PostgresStateBackend:
             try:
                 self._ensure(conn)
                 cur = conn.cursor()
+                from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
                 placeholders = ",".join(["%s"] * len(wanted))
+                tiers = ",".join("%s" for _ in RECALLABLE_TIERS)
                 cur.execute(
                     f"""
-                    SELECT id, session_id, user_text, assistant_text, summary_text,
+                    SELECT id, session_id, turn_number, user_text, assistant_text, summary_text,
                            tier, structural_importance, created_at
                     FROM kazma_episodes
-                    WHERE tenant_id = %s AND id IN ({placeholders})
+                    WHERE tenant_id = %s AND id IN ({placeholders}) AND tier IN ({tiers})
                     """,
-                    [tenant_id, *wanted],
+                    [tenant_id, *wanted, *RECALLABLE_TIERS],
                 )
                 cols = [d[0] for d in cur.description]
                 rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -673,6 +766,70 @@ class PostgresStateBackend:
             return 0
 
 
+class _PooledConnection:
+    """A pooled connection whose ``close()`` returns it to the pool, with any
+    open transaction rolled back first (a digest's SELECT leaves one open,
+    and the pool warns about every connection handed back inside one)."""
+
+    def __init__(self, pool: Any, conn: Any) -> None:
+        self._pool = pool
+        self._conn = conn
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+    def close(self) -> None:
+        conn, self._conn = self._conn, None
+        if conn is None:
+            return
+        import psycopg
+
+        try:
+            if not conn.closed and conn.info.transaction_status != _idle_status():
+                conn.rollback()
+        except psycopg.Error:  # a broken connection is discarded by putconn
+            logger.debug("[state_backend] rollback before returning a connection failed", exc_info=True)
+        self._pool.putconn(conn)
+
+
+def _idle_status() -> Any:
+    from psycopg.pq import TransactionStatus
+
+    return TransactionStatus.IDLE
+
+
+_EPISODE_UPSERT = """
+    INSERT INTO kazma_episodes (
+      id, tenant_id, session_id, turn_number, user_text,
+      assistant_text, summary_text, tier, structural_importance,
+      created_at, metadata_json
+    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    ON CONFLICT (id) DO UPDATE SET
+      user_text = EXCLUDED.user_text,
+      assistant_text = EXCLUDED.assistant_text,
+      summary_text = EXCLUDED.summary_text,
+      tier = EXCLUDED.tier,
+      structural_importance = EXCLUDED.structural_importance,
+      metadata_json = EXCLUDED.metadata_json
+"""
+
+
+def _episode_params(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        row.get("id"),
+        row.get("tenant_id") or "default",
+        row.get("session_id"),
+        int(row.get("turn_number") or 0),
+        _pg_text(row.get("user_text")),
+        _pg_text(row.get("assistant_text")),
+        _pg_text(row.get("summary_text")),
+        row.get("tier") or "episodic",
+        int(row.get("structural_importance") or 1),
+        float(row.get("created_at") or time.time()),
+        _stamp_region_meta(row),
+    )
+
+
 def _cfg() -> dict[str, Any]:
     try:
         from kazma_core.memory.backends import get_backends_cfg
@@ -691,6 +848,14 @@ def state_role(cfg: dict[str, Any] | None = None) -> str:
 
 def is_state_primary(cfg: dict[str, Any] | None = None) -> bool:
     return state_role(cfg) == "primary"
+
+
+def mirrors_to_postgres(cfg: dict[str, Any] | None = None) -> bool:
+    """Memory's state backend is configured as Postgres (whether or not it is
+    reachable right now). Never raises."""
+    st = (cfg or _cfg()).get("state") or {}
+    return str(st.get("provider") or "").lower() in ("postgres", "postgresql", "pg") and bool(
+        str(st.get("url") or "").strip())
 
 
 def state_region(cfg: dict[str, Any] | None = None) -> str:
@@ -879,8 +1044,14 @@ def get_state_backend() -> Any:
         be = PostgresStateBackend(url, timeout_s=timeout_ms / 1000.0)
         if be.available:
             with _state_backend_lock:
+                # A changed setting replaces the backend: the old one's pool
+                # is closed, not left reconnecting for the life of the process.
+                stale = [_state_backend_cache.pop(k) for k in list(_state_backend_cache) if k != key]
                 _state_backend_cache[key] = be
+            for old in stale:
+                getattr(old, "close", lambda: None)()
             return be
+        be.close()
         logger.info("[state_backend] postgres unavailable — null sink")
     return _NullStateBackend()
 
@@ -916,11 +1087,17 @@ _EPISODE_MIRROR_COLUMNS = (
 )
 
 
+def episode_mirror_row(conn: Any, episode_id: str) -> dict[str, Any] | None:
+    """An episode as the mirror holds it, read from *conn* now (None when the
+    row does not exist). Writers push this, never their own arguments."""
+    return _row_dict(conn, f"SELECT {_EPISODE_MIRROR_COLUMNS} FROM episodes WHERE id = ?", episode_id)
+
+
 def remirror_episode_by_id(conn: Any, episode_id: str) -> bool:
     """Push an episode's CURRENT local row to the mirror (a tier move, restored
     text). A row that no longer exists is left alone. Never raises."""
     try:
-        row = _row_dict(conn, f"SELECT {_EPISODE_MIRROR_COLUMNS} FROM episodes WHERE id = ?", episode_id)
+        row = episode_mirror_row(conn, episode_id)
     except sqlite3.Error:
         logger.debug("[state_backend] remirror failed for %s", episode_id, exc_info=True)
         return False
@@ -956,19 +1133,88 @@ def remirror_belief_by_id(conn: Any, belief_id: str) -> bool:
         return False
 
 
+#: Episodes pushed per batch (one SELECT here, one transaction there).
+_PUSH_BATCH = 500
+
+
 def remirror_episodes(conn: Any, episode_ids: Iterable[str]) -> int:
     """Push these episodes' current local rows to the mirror after a change
-    (a tier move, restored text). No-op without a mirror. Returns how many
-    reached it; a miss is caught by :func:`sync_state_mirror`."""
+    (a tier move, restored text), in batches. No-op without a mirror. Returns
+    how many reached it; a miss stays in the outbox for the next sync pass
+    (and the full comparison)."""
     ids = list(dict.fromkeys(str(i) for i in episode_ids if i))
-    if not ids or isinstance(get_state_backend(), _NullStateBackend):
+    backend = get_state_backend()
+    if not ids or isinstance(backend, _NullStateBackend):
         return 0
-    return sum(1 for eid in ids if remirror_episode_by_id(conn, eid))
+    return len(_push_episodes(conn, backend, ids))
+
+
+def _push_episodes(conn: Any, backend: Any, ids: list[str]) -> list[str]:
+    """Push the current local rows of *ids* (a row no longer here is skipped)
+    and take them off the outbox. Returns the ids the mirror took."""
+    batch_push = getattr(backend, "mirror_episode_rows", None)
+    written: list[str] = []
+    for start in range(0, len(ids), _PUSH_BATCH):
+        chunk = ids[start:start + _PUSH_BATCH]
+        upto = _outbox_head(conn)
+        try:
+            rows = _episode_rows(conn, chunk)
+        except sqlite3.Error:
+            logger.debug("[state_backend] remirror read failed", exc_info=True)
+            continue
+        if batch_push is not None:
+            done = batch_push(rows)
+        else:  # a backend without batches (a stand-in): one row at a time
+            done = [str(r["id"]) for r in rows if backend.mirror_episode(r)]
+        written.extend(done)
+        _dequeue(conn, "episode", done, upto)
+    return written
+
+
+def _episode_rows(conn: Any, ids: list[str]) -> list[dict[str, Any]]:
+    cur = conn.execute(
+        f"SELECT {_EPISODE_MIRROR_COLUMNS} FROM episodes WHERE id IN ({','.join('?' for _ in ids)})", ids)
+    names = [d[0] for d in cur.description]
+    return [dict(zip(names, tuple(r))) for r in cur.fetchall()]
+
+
+def _outbox_head(conn: Any) -> int | None:
+    """The outbox's newest entry now (changes queued later stay queued)."""
+    try:
+        row = conn.execute("SELECT MAX(seq) FROM memory_mirror_outbox").fetchone()
+    except sqlite3.OperationalError:  # a database older than the outbox
+        return None
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def _dequeue(conn: Any, kind: str, ids: list[str], upto: int | None) -> None:
+    """Take *ids* off the outbox, entries up to *upto* only -- a change queued
+    after the row was read is still to push. Left alone inside a caller's own
+    transaction (the next pass pushes the row once more, which is harmless)."""
+    if not ids or upto is None or getattr(conn, "in_transaction", True):
+        return
+    try:
+        for start in range(0, len(ids), _PUSH_BATCH):
+            chunk = ids[start:start + _PUSH_BATCH]
+            conn.execute(
+                f"DELETE FROM memory_mirror_outbox WHERE kind = ? AND seq <= ? "
+                f"AND row_id IN ({','.join('?' for _ in chunk)})", [kind, upto, *chunk])
+        conn.commit()
+    except sqlite3.Error:
+        logger.debug("[state_backend] outbox dequeue failed (the next pass pushes again)", exc_info=True)
 
 
 #: At most this many rows pushed per sync pass (each is one Postgres write).
-_SYNC_LIMIT = 500
+#: Rows a pass pushes at most. 500 when every push was a connection of its
+#: own; batched and pooled (M31) a pass pushes 5,000 in seconds, and a
+#: restore of the shared database can take thousands from the mirror at once.
+_SYNC_LIMIT = 5000
 _last_sync: dict[str, Any] = {}
+#: When the mirror was last compared row by row (``observability.cadence``).
+_FULL_VERIFY_KEY = "memory.v2.mirror_full_verify"
+#: A queued row whose push failed this many times leaves the outbox; the next
+#: full comparison finds it (and reports a region conflict, if that is why).
+_OUTBOX_MAX_ATTEMPTS = 5
 
 
 def _episode_digest(tier: Any, user: Any, assistant: Any, summary: Any) -> tuple[str, str]:
@@ -979,7 +1225,253 @@ def _episode_digest(tier: Any, user: Any, assistant: Any, summary: Any) -> tuple
     return str(tier or "episodic"), hashlib.md5(texts.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
-def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> dict[str, Any]:
+def _verify_interval_s() -> float:
+    try:
+        from kazma_core.memory.config import read_memory_cfg
+
+        hours = float(((read_memory_cfg() or {}).get("v2") or {}).get("mirror_verify_hours", 24))
+    except (TypeError, ValueError):
+        hours = 24.0
+    return min(168.0, max(1.0, hours)) * 3600.0
+
+
+def _full_verify_due(now: float) -> bool:
+    from kazma_core.observability.cadence import last_run
+
+    last = last_run(_FULL_VERIFY_KEY)
+    return last is None or now - last >= _verify_interval_s()
+
+
+#: When a pass last compared in full because the mirror had gone back; at
+#: most once an hour, so a row another region keeps out of the mirror (one of
+#: the newest, by chance) cannot make every pass a full comparison.
+_forced_full_at: dict[str, float] = {}
+_FORCED_FULL_MIN_S = 3600.0
+_PROBE_ROWS = 3
+
+
+def _mirror_went_back(conn: sqlite3.Connection, backend: Any, now: float) -> bool:
+    """Whether the mirror lost rows it had been sent: one of the newest local
+    rows already pushed (none waiting in the outbox) is not there.
+
+    A restore of the shared database (``pg_restore`` of an older dump, the
+    disaster-recovery runbook's step) does that. Each pass pushes only what
+    changed (the outbox, M31) and those rows had not, so until the daily
+    full comparison recall on the Postgres-primary path missed every memory
+    written after the dump (the restore drill, 2026-10-14). Rows are inserted
+    in rowid order, so the newest are what an older dump lacks. A row another
+    region keeps out of the mirror looks the same: the hourly limit bounds
+    what such a row costs.
+    """
+    present = getattr(backend, "present_ids", None)
+    if present is None or now - _forced_full_at.get("at", 0.0) < _FORCED_FULL_MIN_S:
+        return False
+    for kind, local, table in (("episode", "episodes", "kazma_episodes"), ("belief", "beliefs", "kazma_beliefs")):
+        try:
+            ids = [str(r[0]) for r in conn.execute(
+                f"SELECT id FROM {local} WHERE id NOT IN "
+                "(SELECT row_id FROM memory_mirror_outbox WHERE kind = ?) ORDER BY rowid DESC LIMIT ?",
+                (kind, _PROBE_ROWS),
+            )]
+        except sqlite3.OperationalError:  # a database older than the outbox
+            return False
+        if ids and len(present(table, ids)) < len(ids):
+            _forced_full_at["at"] = now
+            logger.warning(
+                "[memory] mirror sync: the Postgres mirror lacks the newest %ss it was sent "
+                "(a restore of the shared database?); comparing in full now", kind)
+            return True
+    return False
+
+
+#: What a full comparison found; an incremental pass reports them as they stood.
+_FINDINGS_KEY = "memory.v2.mirror_verify_result"
+_FINDING_FIELDS = ("episodes_behind", "beliefs_behind", "mirror_only_episodes", "mirror_only_beliefs",
+                   "kept_by_origin", "region_conflicts", "verified_at")
+
+
+def _keep_findings(stats: dict[str, Any]) -> None:
+    from kazma_core.config_store import get_config_store
+    from kazma_core.db.pg_helpers import store_errors
+
+    try:
+        get_config_store().set(_FINDINGS_KEY, {k: stats[k] for k in _FINDING_FIELDS if k in stats},
+                               category="memory")
+    except store_errors():  # health shows them again after the next full comparison
+        logger.warning("[memory] mirror sync: could not keep the comparison's findings", exc_info=True)
+
+
+def _findings() -> dict[str, Any]:
+    prior = last_mirror_sync()
+    if "verified_at" in prior:
+        return {k: prior[k] for k in _FINDING_FIELDS if k in prior}
+    from kazma_core.config_store import get_config_store
+    from kazma_core.db.pg_helpers import store_errors
+
+    try:
+        kept = get_config_store().get(_FINDINGS_KEY)
+    except store_errors():
+        logger.debug("[memory] mirror sync: kept findings unreadable", exc_info=True)
+        return {}
+    return {k: kept[k] for k in _FINDING_FIELDS if isinstance(kept, dict) and k in kept}
+
+
+def _clear_outbox(conn: sqlite3.Connection) -> None:
+    try:
+        conn.execute("DELETE FROM memory_mirror_outbox")
+        conn.commit()
+    except sqlite3.OperationalError:  # a database older than the outbox
+        logger.debug("[memory] mirror sync: no outbox to clear", exc_info=True)
+
+
+def _outbox_depth(conn: sqlite3.Connection) -> int:
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM memory_mirror_outbox").fetchone()[0])
+    except sqlite3.OperationalError:  # a database older than the outbox
+        return 0
+
+
+def _owners(backend: Any, table: str, ids: list[str]) -> dict[str, str]:
+    try:
+        return backend.row_regions(table, ids)
+    except TypeError:  # a backend that reads every row's region only
+        wanted = set(ids)
+        return {k: v for k, v in backend.row_regions(table).items() if k in wanted}
+
+
+def _drain_outbox(conn: sqlite3.Connection, budget: int, backend: Any = None) -> dict[str, Any]:
+    """Push the rows the outbox names, oldest change first, at most *budget*.
+
+    A row is pushed as it is NOW (one push however often it changed); its
+    outbox entries are removed once the push succeeds. A failed push stays
+    queued with an attempt counted, and leaves after
+    :data:`_OUTBOX_MAX_ATTEMPTS` -- a region conflict refuses for good, and
+    the full comparison counts and reports those.
+    """
+    out: dict[str, Any] = {"episodes": 0, "beliefs": 0, "failed": 0, "dropped": 0, "conflicts": []}
+    try:
+        rows = conn.execute(
+            "SELECT seq, kind, row_id FROM memory_mirror_outbox ORDER BY seq LIMIT ?", (max(1, budget) * 8,)
+        ).fetchall()
+    except sqlite3.OperationalError:  # a database older than the outbox: the full comparison covers it
+        logger.debug("[memory] mirror sync: no outbox", exc_info=True)
+        return out
+    latest: dict[tuple[str, str], int] = {}
+    for seq, kind, row_id in rows:
+        latest[(kind, row_id)] = seq
+    picked = sorted(latest.items(), key=lambda kv: kv[1])[: max(0, budget)]
+    # Under origin_wins / fail_closed a row another region wrote is not this
+    # install's to overwrite (as in the full comparison): counted, dequeued.
+    policy, here = state_conflict_policy(), state_region()
+    owners: dict[str, dict[str, str]] = {}
+    if backend is not None and policy != "last_write_wins":
+        for kind, table in (("episode", "kazma_episodes"), ("belief", "kazma_beliefs")):
+            ids = [rid for (k, rid), _seq in picked if k == kind]
+            if ids:
+                owners[kind] = _owners(backend, table, ids)
+    pushable: list[tuple[tuple[str, str], int]] = []
+    for (kind, row_id), seq in picked:
+        owner = owners.get(kind, {}).get(row_id)
+        if owner and not should_apply_remote_write({"region": owner}, region=here, policy=policy)[0]:
+            out["conflicts"].append(row_id)
+            conn.execute("DELETE FROM memory_mirror_outbox WHERE kind = ? AND row_id = ? AND seq <= ?",
+                         (kind, row_id, seq))
+            conn.commit()
+            continue
+        pushable.append(((kind, row_id), seq))
+    episode_ids = [rid for (kind, rid), _seq in pushable if kind == "episode"]
+    here_ids = {str(r[0]) for start in range(0, len(episode_ids), _PUSH_BATCH)
+                for r in conn.execute(
+                    f"SELECT id FROM episodes WHERE id IN ({','.join('?' * len(episode_ids[start:start + _PUSH_BATCH]))})",
+                    episode_ids[start:start + _PUSH_BATCH])}
+    pushed_eps = set(_push_episodes(conn, backend, [e for e in episode_ids if e in here_ids])) if backend else set()
+    for (kind, row_id), seq in pushable:
+        if kind == "episode":
+            # Deleted here: the mirror keeps its copy, as before.
+            ok = row_id not in here_ids or row_id in pushed_eps
+        else:
+            ok = remirror_belief_by_id(conn, row_id)
+        if ok:
+            if kind == "belief" or row_id in pushed_eps:  # a row deleted here is dequeued, not pushed
+                out["episodes" if kind == "episode" else "beliefs"] += 1
+            conn.execute("DELETE FROM memory_mirror_outbox WHERE kind = ? AND row_id = ? AND seq <= ?",
+                         (kind, row_id, seq))
+        else:
+            out["failed"] += 1
+            conn.execute("UPDATE memory_mirror_outbox SET attempts = attempts + 1 "
+                         "WHERE kind = ? AND row_id = ? AND seq <= ?", (kind, row_id, seq))
+        conn.commit()
+    gone = conn.execute("DELETE FROM memory_mirror_outbox WHERE attempts >= ?", (_OUTBOX_MAX_ATTEMPTS,))
+    out["dropped"] = gone.rowcount or 0
+    conn.commit()
+    return out
+
+
+def sync_state_mirror(
+    conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT, full: bool | None = None,
+) -> dict[str, Any]:
+    """Keep the Postgres mirror equal to the local store: each pass pushes the
+    rows the change outbox names; a full comparison runs when
+    ``memory.v2.mirror_verify_hours`` have passed since the last one (or
+    *full*). Without a configured mirror the outbox is emptied (nothing will
+    read it). Memory audit M31: every pass used to read every local text and
+    every mirror digest.
+    """
+    backend = get_state_backend()
+    if isinstance(backend, _NullStateBackend) and not mirrors_to_postgres():
+        _clear_outbox(conn)
+        return {"skipped": "no mirror"}
+    if isinstance(backend, _NullStateBackend) or not getattr(backend, "available", False):
+        # Configured but down: the outbox keeps every change for the next pass.
+        return {"skipped": "mirror unavailable", "outbox": _outbox_depth(conn)}
+    now = time.time()
+    if full if full is not None else (_full_verify_due(now) or _mirror_went_back(conn, backend, now)):
+        drained = _drain_outbox(conn, limit, backend)
+        stats = _compare_in_full(conn, backend, limit=max(0, limit - drained["episodes"] - drained["beliefs"]))
+        stats["episodes_pushed"] += drained["episodes"]
+        stats["beliefs_pushed"] += drained["beliefs"]
+        stats["failed"] += drained["failed"]
+        stats["mode"] = "full"
+        _keep_findings(stats)
+        # Caught up, or nothing more it can push: the next comparison in a
+        # day. Still pushing with more behind (a restore took thousands of
+        # rows): the next pass compares in full again, not a day later.
+        catching_up = (stats["episodes_pushed"] or stats["beliefs_pushed"]) and (
+            stats["episodes_behind"] or stats["beliefs_behind"])
+        stats["catching_up"] = bool(catching_up)
+        if not catching_up:
+            from kazma_core.observability.cadence import stamp_run
+
+            stamp_run(_FULL_VERIFY_KEY, now)
+    else:
+        drained = _drain_outbox(conn, limit, backend)
+        stats = {
+            "episodes_pushed": drained["episodes"],
+            "beliefs_pushed": drained["beliefs"],
+            "failed": drained["failed"],
+            "mode": "incremental",
+            "at": now,
+        }
+        # The last full comparison's findings stand until the next (kept in
+        # the settings store, so a restart does not lose them).
+        stats.update(_findings())
+    stats["outbox"] = _outbox_depth(conn)
+    stats["outbox_dropped"] = drained["dropped"]
+    if stats["mode"] == "incremental" and drained["conflicts"]:
+        stats["outbox_conflicts"] = len(drained["conflicts"])
+        if state_conflict_policy() == "fail_closed":
+            _report_region_conflicts(drained["conflicts"], state_region())
+    _last_sync.clear()
+    _last_sync.update(stats)
+    if stats["mode"] == "incremental" and (drained["episodes"] or drained["beliefs"]):
+        logger.debug("[memory] mirror sync: pushed %d changed memories and %d changed facts",
+                     drained["episodes"], drained["beliefs"])
+    if drained["failed"]:
+        logger.warning("[memory] mirror sync: %d pushes failed; the next pass retries them", drained["failed"])
+    return stats
+
+
+def _compare_in_full(conn: sqlite3.Connection, backend: Any, *, limit: int) -> dict[str, Any]:
     """Anti-entropy for the Postgres mirror: every local memory reaches it as
     it is now.
 
@@ -994,15 +1486,13 @@ def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> 
     install may have written it, and recall's top-up already leaves this
     install's own out (:func:`written_elsewhere`).
 
-    Skipped without a mirror and when Postgres is the primary store. Raises
+    Runs when Postgres is the primary store too (Memory audit M06): recall
+    reads it there, and a tombstone a blip kept from it was never repaired.
+    It pushes this install's local rows; a row only the mirror holds (another
+    replica's) is counted and left alone, never pulled. Skipped without a
+    mirror. Raises
     when the mirror cannot be read (the maintenance runner logs it).
     """
-    backend = get_state_backend()
-    if isinstance(backend, _NullStateBackend) or not getattr(backend, "available", False):
-        return {"skipped": "no mirror"}
-    if is_state_primary():
-        return {"skipped": "postgres is the primary store"}
-
     # Under origin_wins / fail_closed a row another region wrote is not this
     # install's to overwrite: it is counted, never pushed -- and never spent
     # from the push budget, or 500 of them would stop every other push.
@@ -1049,12 +1539,12 @@ def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> 
                 behind_bel.append((float(ingested or 0), bid))
 
     budget = max(0, int(limit))
-    pushed_ep = failed = pushed_bel = 0
-    for _, eid in sorted(behind_ep, reverse=True)[:budget]:
-        if remirror_episode_by_id(conn, eid):
-            pushed_ep += 1
-        else:
-            failed += 1
+    pushed_bel = 0
+    # In batches, as the outbox drain pushes (one region read, one
+    # transaction per 500): row by row a restore's thousands took minutes.
+    ep_ids = [eid for _, eid in sorted(behind_ep, reverse=True)[:budget]]
+    pushed_ep = len(_push_episodes(conn, backend, ep_ids)) if ep_ids else 0
+    failed = len(ep_ids) - pushed_ep
     for _, bid in sorted(behind_bel, reverse=True)[: max(0, budget - pushed_ep - failed)]:
         if remirror_belief_by_id(conn, bid):
             pushed_bel += 1
@@ -1070,13 +1560,12 @@ def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> 
         "mirror_only_episodes": len(set(remote_ep) - set(local_ep)),
         "mirror_only_beliefs": len(set(remote_bel) - local_bel),
         "at": time.time(),
+        "verified_at": time.time(),
     }
     if policy == "origin_wins":
         stats["kept_by_origin"] = len(conflicts)
     elif policy == "fail_closed":
         stats["region_conflicts"] = len(conflicts)
-    _last_sync.clear()
-    _last_sync.update(stats)
     if policy == "fail_closed" and conflicts:
         _report_region_conflicts(conflicts, here)
     if pushed_ep or pushed_bel:

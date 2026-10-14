@@ -128,13 +128,30 @@ class TestHostileCorpusDeterminism:
 # Group 2: Certification runner
 # ---------------------------------------------------------------------------
 
+#: One certification run serves the tests that read its report: each run is
+#: the whole certification (hostile corpus, fidelity corpus, a real backup and
+#: restore), about 90 s on a quiet machine. Three separate runs took 267 s, and
+#: under a full parallel suite each one passed pytest's 120 s per-test limit.
+_CERTIFICATION: dict[str, dict] = {}
+
+
+def _certification_report(tmp_path_factory) -> dict:
+    if "report" not in _CERTIFICATION:
+        from kazma_core.documents.certification import run_document_certification
+
+        with pytest.MonkeyPatch.context() as mp:
+            # The configured profile is the default process profile.
+            mp.delenv("KAZMA_DOCUMENT_WORKER_ISOLATION", raising=False)
+            _CERTIFICATION["report"] = run_document_certification(tmp_path_factory.mktemp("cert") / "cert-work")
+    return _CERTIFICATION["report"]
+
+
 class TestCertificationRunner:
     """The certification CLI and runner return correct overall status, gates, and JSON."""
 
-    def test_certification_json_is_valid(self, tmp_path):
-        from kazma_core.documents.certification import run_document_certification
-
-        report = run_document_certification(tmp_path / "cert-work")
+    @pytest.mark.timeout(600)  # the first reader pays for the shared run
+    def test_certification_json_is_valid(self, tmp_path_factory):
+        report = _certification_report(tmp_path_factory)
         assert isinstance(report, dict)
         assert report["schema_version"] == 1
         assert report["overall_status"] in {"PASS", "CONDITIONAL", "FAIL"}
@@ -145,14 +162,12 @@ class TestCertificationRunner:
             assert "status" in check
             assert check["status"] in {"PASS", "CONDITIONAL", "NOT RUN", "FAIL"}
 
-    def test_certification_reports_the_profile_it_actually_ran(self, tmp_path, monkeypatch):
+    @pytest.mark.timeout(600)
+    def test_certification_reports_the_profile_it_actually_ran(self, tmp_path_factory):
         """2026-10-13 (F10): the report names the configured isolation profile
         and backends, and its fidelity and backup checks are real runs -- a
         process profile is never reported as confined."""
-        from kazma_core.documents.certification import run_document_certification
-
-        monkeypatch.delenv("KAZMA_DOCUMENT_WORKER_ISOLATION", raising=False)
-        report = run_document_certification(tmp_path / "cert-profile")
+        report = _certification_report(tmp_path_factory)
         profile = report["execution_profile"]
         assert profile["worker_isolation"] == "process"
         assert profile["filesystem_network_confinement_qualified"] is False
@@ -169,10 +184,9 @@ class TestCertificationRunner:
             assert checks[still_open]["status"] == "NOT RUN"
         assert report["overall_status"] != "PASS"
 
-    def test_certification_includes_required_gates(self, tmp_path):
-        from kazma_core.documents.certification import run_document_certification
-
-        report = run_document_certification(tmp_path / "cert-work-2")
+    @pytest.mark.timeout(600)
+    def test_certification_includes_required_gates(self, tmp_path_factory):
+        report = _certification_report(tmp_path_factory)
         names = {check["name"] for check in report["checks"]}
         required = {
             "hostile_corpus",

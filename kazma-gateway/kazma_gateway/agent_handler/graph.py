@@ -1351,12 +1351,18 @@ def create_graph_handler(
                     _msgs = list(
                         (_snap.values if _snap and _snap.values else {}).get("messages") or []
                     )
+                    _before = list(_msgs)
                     _msgs.append({"role": "system", "content": abort_marker()})
                     await graph.aupdate_state(config, {
                         "messages": _msgs,
                         "task_status": "abandoned",
                         "auto_continue": False,
                     })
+                    # A turn aborted before its answer leaves memory too (M09).
+                    from kazma_core.memory.forget import rewind_memory
+
+                    await rewind_memory(thread_id, _before, _msgs, tenant_id=str(
+                        (_snap.values if _snap and _snap.values else {}).get("tenant_id") or "default"))
                 try:
                     from kazma_ui.hitl_gate_bridge import abort_thread_hitl
 
@@ -2125,38 +2131,26 @@ def create_graph_handler(
             messages = list(snap.values.get("messages") or [])
             if not messages:
                 return "↩️ No messages in conversation."
+            before = list(messages)
+            # The last answer, and its turn's tool calls and results.
+            from kazma_core.agent.rewind import drop_last_answer
 
-            # Drop trailing assistant message; also drop tool results that
-            # immediately precede it (same turn) so the graph is consistent.
-            removed = False
-            i = len(messages) - 1
-            while i >= 0:
-                role = messages[i].get("role") if isinstance(messages[i], dict) else None
-                if role == "assistant":
-                    messages.pop(i)
-                    removed = True
-                    # strip tool messages belonging to this turn (before assistant)
-                    j = i - 1
-                    while j >= 0:
-                        r = messages[j].get("role") if isinstance(messages[j], dict) else None
-                        if r == "tool":
-                            messages.pop(j)
-                            j -= 1
-                            continue
-                        # also drop the assistant tool_calls message that
-                        # triggered tools (role=assistant with tool_calls)
-                        if r == "assistant" and messages[j].get("tool_calls"):
-                            messages.pop(j)
-                        break
-                    break
-                i -= 1
-
-            if not removed:
+            dropped = drop_last_answer(messages)
+            if dropped is None:
                 return "↩️ No assistant response to undo."
+            messages = dropped
 
             await graph.aupdate_state(config, {"messages": messages})
             logger.info("[agent-handler] /undo thread=%s msgs_left=%d", thread_id, len(messages))
-            return "✅ Removed last assistant response. You can continue the conversation."
+            # The undone answer leaves memory too (Memory audit M09).
+            from kazma_core.memory.forget import rewind_memory
+
+            await rewind_memory(thread_id, before, messages,
+                                tenant_id=str(snap.values.get("tenant_id") or "default"))
+            return (
+                "✅ Removed last assistant response, and what Kazma remembered from it. "
+                "You can continue the conversation."
+            )
         except Exception as exc:
             logger.warning("[agent-handler] /undo failed: %s", exc, exc_info=True)
             return f"⚠️ Could not undo: {exc}"
@@ -2196,28 +2190,27 @@ def create_graph_handler(
             if not messages:
                 return corrected_text, "✏️ No messages in conversation."
 
-            for i in range(len(messages) - 1, -1, -1):
-                msg_i = messages[i]
-                if isinstance(msg_i, dict) and msg_i.get("role") == "assistant":
-                    # Keep tool_calls-only intermediate assistants out of "last reply"
-                    if msg_i.get("tool_calls") and not (msg_i.get("content") or "").strip():
-                        continue
-                    messages[i] = {**msg_i, "role": "assistant", "content": corrected_text}
-                    # Drop tool_calls if we are replacing with plain text
-                    messages[i].pop("tool_calls", None)
-                    await graph.aupdate_state(config, {"messages": messages})
-                    logger.info(
-                        "[agent-handler] /edit thread=%s len=%d",
-                        thread_id, len(corrected_text),
-                    )
-                    return (
-                        corrected_text,
-                        "✅ Replaced last response. You can continue the conversation.",
-                    )
+            from kazma_core.agent.rewind import replace_last_answer
 
-            messages.append({"role": "assistant", "content": corrected_text})
+            before = list(messages)
+            messages, edited = replace_last_answer(messages, corrected_text)
             await graph.aupdate_state(config, {"messages": messages})
-            return corrected_text, "✅ Added corrected text as new message."
+            if edited is None:
+                return corrected_text, "✅ Added corrected text as new message."
+            # The replaced answer leaves memory: its turn is forgotten, never
+            # kept beside the correction (Memory audit M09).
+            from kazma_core.memory.consolidator import user_turn_index
+            from kazma_core.memory.forget import rewind_memory
+
+            await rewind_memory(thread_id, before, messages,
+                                tenant_id=str(snap.values.get("tenant_id") or "default"),
+                                from_turn=max(1, user_turn_index(messages[: edited + 1])))
+            logger.info("[agent-handler] /edit thread=%s len=%d", thread_id, len(corrected_text))
+            return (
+                corrected_text,
+                "✅ Replaced last response, and forgot what Kazma remembered from the old one. "
+                "You can continue the conversation.",
+            )
         except Exception as exc:
             logger.warning("[agent-handler] /edit failed: %s", exc, exc_info=True)
             return corrected_text, f"⚠️ Could not edit: {exc}"

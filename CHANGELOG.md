@@ -1,5 +1,57 @@
 # CHANGELOG
 
+## Swarm: the industrial audit, Stages 1-5 (2026-10-14)
+
+- Swarm approvals are a real boundary. The approval a chat turn gave covers
+  that one tool call: work it starts (a swarm task from `dispatch_swarm`, a
+  background task) asks the bus again; a swarm worker's `file_write` or
+  `send_message` used to run with no card anywhere. Each bus request has a
+  fresh id (never one taken from the tool's arguments), a card showing every
+  argument, and one decision shared by every platform: the first human
+  Approve or Deny decides, every card shows it, and a timeout or cancel is its
+  own outcome, never a deny. The gate record names the person who pressed.
+- The engine owns every task's run: cancel and timeouts stop the work before
+  the ending is recorded, a task id runs once, a finished task stays finished,
+  and an interrupted run records which tools that change things had already
+  run. A resumed pipeline skips the steps it already finished; retrying a task
+  whose effects are unknown asks first.
+- The Swarm page reads every answer, approves in the background (202) and
+  follows progress on a resumable stream (event ids, heartbeat, caps), in
+  English and Arabic. Inputs are bounded; a full swarm answers 429.
+- One role table for `/api/swarm/*`: reading for signed-in users, everything
+  else for the admin. On an install with platform users the swarm refuses,
+  with the reason, until per-user swarm work is built. Sending a result to
+  another chat from `/swarm` is admin-only.
+- A worker's text reaches every model as fenced data. Circuit breakers ignore
+  outcomes from an older generation; a pool worker with a dispatch in flight
+  is never reaped. Discord and Slack swarm posts cannot ping the channel.
+- Lost swarm bookkeeping is a WARNING and counts
+  `kazma_swarm_failures_total{site}`; a refusal is counted once; worker
+  metrics follow the task retention. Postgres task rows take a NUL safely, and
+  the SQLite task store survives a power cut.
+- The separate swarm notifier (`SWARM_BOT_TOKEN`) is removed: swarm results go
+  to the swarm output target. A set `SWARM_BOT_TOKEN` is a startup warning.
+- Open (owner decisions): handoff as a feature or extension point (D6),
+  semantic routing and the pipeline Refiner (D8), the Temporal test server
+  (D9), the soak (D3). Tracker: `docs/plans/SWARM_INDUSTRIAL_HARDENING_GOAL.md`.
+
+## Memory: the industrial audit (2026-10-13 to 2026-10-14)
+
+- Forget reaches every copy (a fact's vector and history, archives, the audit
+  log, queued payloads, the search index) and converges: a forget cut short is
+  finished, and a restored older backup forgets again. Memory written from
+  Knowledge Library text is retired; library text is injected, never stored.
+- Entity ids keep their script (Arabic, Persian, CJK), the user's own facts
+  outrank what the model inferred, and the memory tools screen and fence what
+  they store and show.
+- The queue backs off failed work and keeps dead letters until the operator
+  retries or clears them; recall has a deadline and says when it is
+  incomplete; no slow call runs under a memory write lock; the Postgres mirror
+  is pushed by change and fully compared once a day.
+- Every memory and weekly summary can be found and forgotten from the Memory
+  page; every operator change leaves a trail and a real status. Tracker:
+  `docs/plans/MEMORY_INDUSTRIAL_HARDENING_GOAL.md`.
+
 ## Documents: the documentation review's code fixes (2026-10-13)
 
 - The document worker on Windows now starts suspended and runs only once its

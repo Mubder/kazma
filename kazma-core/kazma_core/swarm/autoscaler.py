@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 import os
 import threading
 import time
@@ -38,6 +39,9 @@ from kazma_core.swarm.task import WorkerCapabilities
 __all__ = ["AutoScaler", "WorkerTemplate"]
 
 logger = logging.getLogger(__name__)
+
+#: This boot's tag in pool instance names (unique per boot, SW-E12).
+_BOOT_TAG = uuid.uuid4().hex[:4]
 
 # Default templates file lives alongside kazma.yaml (project root or CWD).
 # Resolved to an absolute path at import time — mirrors WorkerRegistry — so
@@ -358,7 +362,9 @@ class AutoScaler:
         # Generate unique name
         count = self._counter.get(template.name, 0) + 1
         self._counter[template.name] = count
-        instance_name = f"{template.name}-pool-{count}"
+        # Unique per boot (SW-E12): an instance's shared breaker keys must
+        # not be inherited by the next boot's instance of the same number.
+        instance_name = f"{template.name}-pool-{_BOOT_TAG}-{count}"
 
         config = WorkerConfig(
             name=instance_name,
@@ -418,7 +424,7 @@ class AutoScaler:
                     worker = getter(name) if callable(getter) else None
                 except Exception:
                     worker = None
-                if worker is not None and getattr(worker, "busy", False):
+                if worker is not None and (getattr(worker, "in_flight", 0) > 0 or getattr(worker, "busy", False)):
                     logger.debug("[AutoScaler] skip reap of busy worker %s", name)
                     continue
                 to_reap.append(name)
@@ -431,11 +437,25 @@ class AutoScaler:
         return len(to_reap)
 
     def _reap_instance(self, name: str) -> None:
-        """Remove a single spawned worker instance."""
+        """Remove a single spawned worker instance, and its shared breaker
+        keys (SW-E11: a transient worker's keys never expired)."""
         try:
             self._engine.remove_worker(name)
         except Exception as exc:
-            logger.debug("Failed to remove worker %s: %s", name, exc)
+            logger.warning("Failed to remove worker %s: %s", name, exc)
+        from kazma_core.swarm.reliability import CircuitBreaker
+
+        try:
+            import asyncio as _asyncio
+
+            _asyncio.get_running_loop()
+        except RuntimeError:
+            CircuitBreaker.forget_shared(name)
+        else:
+            from kazma_core.background import spawn_background
+
+            spawn_background(_asyncio.to_thread(CircuitBreaker.forget_shared, name),
+                             name=f"swarm-forget-breaker:{name}")
         with self._lock:
             self._instances.pop(name, None)
         logger.debug("[AutoScaler] Reaped idle worker: %s", name)

@@ -150,6 +150,18 @@ class VectorEngine:
             "beliefs", ["tenant_id = ?", BELIEF_ACTIVE_SQL], [tenant_id], query_vec, limit
         )
 
+    def nearest_entities(
+        self,
+        query_vec: list[float] | None,
+        *,
+        tenant_id: str = "default",
+        limit: int = 1,
+    ) -> list[tuple[str, float]]:
+        """The tenant's entities whose stored name vector is nearest:
+        ``(id, similarity)``. An entity without a comparable vector is left
+        out until vector repair stores one (Memory audit M18)."""
+        return self._exact("entities", ["tenant_id = ?"], [tenant_id], query_vec, limit)
+
     def similarities(
         self,
         query_vec: list[float] | None,

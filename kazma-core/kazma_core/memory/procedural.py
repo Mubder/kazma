@@ -22,12 +22,49 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "strip_argument_values",
     "laplace_confidence",
     "record_procedural_outcome",
     "should_quarantine",
     "match_procedural_dags",
     "format_procedural_hints",
 ]
+
+
+def strip_argument_values(conn: sqlite3.Connection) -> int:
+    """Rewrite steps recorded with argument VALUES to argument names.
+
+    Until 2026-10-13 a new procedure's first step kept the tool call's whole
+    arguments -- text the user or the model typed -- which nothing read back
+    and Forget could not reach (Memory audit M01). Runs at schema setup; a
+    store with nothing left to rewrite costs one indexed-free scan of a small
+    table (one row per tool and argument shape). Returns the rows rewritten.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT id, dag_steps_json FROM procedural_dags WHERE instr(dag_steps_json, '\"args\":') > 0"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return 0
+    n = 0
+    for row in rows:
+        try:
+            steps = json.loads(row[1] or "[]")
+        except (TypeError, ValueError):
+            steps = []
+        clean = []
+        for step in steps if isinstance(steps, list) else []:
+            if isinstance(step, dict) and "args" in step:
+                args = step["args"]
+                step = {k: v for k, v in step.items() if k != "args"}
+                step["args_keys"] = sorted(args.keys()) if isinstance(args, dict) else []
+            clean.append(step)
+        conn.execute(
+            "UPDATE procedural_dags SET dag_steps_json = ? WHERE id = ?",
+            (json.dumps(clean, ensure_ascii=False), row[0]),
+        )
+        n += 1
+    return n
 
 
 def laplace_confidence(successes: int, trials: int) -> float:

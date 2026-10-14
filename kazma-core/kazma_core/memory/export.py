@@ -8,152 +8,150 @@ directly.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["export_nightly_snapshots"]
 
+#: Rows read at a time: every table is written whole, never a newest slice
+#: (Memory audit M30 -- the audit log stopped at its newest 20,000 rows).
+_PAGE = 2000
 
-def _dump_rows_jsonl(path: Path, rows) -> None:
+
+class _ExportResult(dict):
+    """The files written (``{piece: Path}``), plus what failed (``failed``)
+    and how many rows each piece holds (``counts``). A failed piece is a
+    failed export: the handler returns False and the queue retries it
+    (Memory audit M20 -- failures were logged at DEBUG and counted done)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed: list[str] = []
+        self.counts: dict[str, int] = {}
+
+
+def _portable(row: Any) -> dict[str, Any]:
+    """A row as JSON can hold it: no vector (``embedding``: a rebuilt index,
+    not data), and no other bytes as a Python literal (Memory audit M30:
+    ``default=str`` wrote ``b'...'``)."""
+    out: dict[str, Any] = {}
+    for key in row.keys():
+        if key == "embedding":
+            continue
+        value = row[key]
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            value = {"base64": base64.b64encode(bytes(value)).decode("ascii")}
+        out[key] = value
+    return out
+
+
+def _dump_query_jsonl(path: Path, conn: sqlite3.Connection, sql: str, params: tuple[Any, ...]) -> int:
+    """Every row of *sql*, a page at a time; returns how many."""
+    n = 0
     with open(path, "w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(dict(r), ensure_ascii=False, default=str) + "\n")
+        cur = conn.execute(sql, params)
+        while True:
+            rows = cur.fetchmany(_PAGE)
+            if not rows:
+                break
+            for r in rows:
+                f.write(json.dumps(_portable(r), ensure_ascii=False, default=str) + "\n")
+                n += 1
+    return n
 
 
-def _atomic_write(path: Path, writer) -> None:
+def _atomic_write(path: Path, writer) -> Any:
     """Write via tmp + rename so a crash never leaves a truncated "latest"
     snapshot (audit L-15) — every other backup path in the repo already
     does tmp+rename; this was the odd one out."""
     import os
 
     tmp = path.with_name(path.name + ".tmp")
-    writer(tmp)
+    out = writer(tmp)
     os.replace(tmp, path)
+    return out
 
 
-def export_nightly_snapshots(*, tenant_id: str = "default") -> dict[str, Path]:
-    """Export active beliefs (JSON-L) + entity graph (GraphML).
+def _name(table: str, tenant_id: str, ext: str = "jsonl") -> str:
+    # The "default" tenant keeps the legacy name (existing tooling reads it).
+    return f"kazma_{table}_latest.{ext}" if tenant_id == "default" else f"kazma_{table}_{tenant_id}.{ext}"
 
-    Returns ``{"jsonl": Path, "graphml": Path}``. Best-effort: missing
-    pieces are skipped (no exception) so a partial export still lands.
+
+def export_nightly_snapshots(*, tenant_id: str = "default") -> _ExportResult:
+    """Export the tenant's memory as portable text: current facts, memories,
+    archived facts and merge ledgers (JSON-L), the entity graph (GraphML),
+    and the audit trail (JSON-L), each whole. Native ``.db`` backups remain
+    the restore source; this is a snapshot a person or another tool can read.
+
+    Returns an :class:`_ExportResult`; a piece that failed is named in
+    ``failed`` (a partial export still lands what it could).
     """
-    from kazma_core.paths import exports_dir, primary_memory_db
+    from kazma_core.paths import exports_dir, memory_ops_db, primary_memory_db
 
     out_dir = exports_dir()
-    result: dict[str, Path] = {}
+    result = _ExportResult()
+
+    def piece(key: str, path: Path, conn: sqlite3.Connection, sql: str) -> None:
+        try:
+            result.counts[key] = _atomic_write(path, lambda p: _dump_query_jsonl(p, conn, sql, (tenant_id,)))
+            result[key] = path
+        except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+            result.failed.append(key)
+            logger.warning("[export] %s of %s failed: %s", key, tenant_id, exc)
 
     try:
         conn = sqlite3.connect(primary_memory_db())
         conn.row_factory = sqlite3.Row
         try:
-            # ── JSON-L dump of active beliefs ──
-            beliefs = conn.execute(
-                """SELECT * FROM beliefs
-                   WHERE tenant_id=? AND valid_until IS NULL AND invalidated_at IS NULL""",
-                (tenant_id,),
-            ).fetchall()
-            # Include tenant_id in the filename so per-tenant exports don't
-            # overwrite each other (the "default" tenant keeps the legacy
-            # name for backward compat with existing tooling).
-            jsonl_name = "kazma_beliefs_latest.jsonl" if tenant_id == "default" else f"kazma_beliefs_{tenant_id}.jsonl"
-            jsonl_path = out_dir / jsonl_name
-            _atomic_write(jsonl_path, lambda p: _dump_rows_jsonl(p, beliefs))
-            result["jsonl"] = jsonl_path
-
-            # M-16: episodes / archive / merge ledger (native .db backups
-            # still SoT; these dumps make a portable text snapshot).
-            extra_tables = (
-                ("episodes", "episodes", "SELECT * FROM episodes WHERE tenant_id=?"),
-                (
-                    "beliefs_archive",
-                    "beliefs_archive",
-                    "SELECT * FROM beliefs_archive WHERE tenant_id=?",
-                ),
-                (
-                    "entity_merges",
-                    "entity_merges",
-                    "SELECT * FROM entity_merges WHERE tenant_id=?",
-                ),
-                (
-                    "entity_merges_archive",
-                    "entity_merges_archive",
-                    "SELECT * FROM entity_merges_archive WHERE tenant_id=?",
-                ),
-            )
-            for key, table, sql in extra_tables:
-                try:
-                    rows = conn.execute(sql, (tenant_id,)).fetchall()
-                except Exception:
-                    logger.debug("[export] %s dump skipped", table, exc_info=True)
-                    continue
-                fname = (
-                    f"kazma_{table}_latest.jsonl"
-                    if tenant_id == "default"
-                    else f"kazma_{table}_{tenant_id}.jsonl"
-                )
-                path = out_dir / fname
-                try:
-                    _atomic_write(path, lambda p: _dump_rows_jsonl(p, rows))
-                    result[key] = path
-                except Exception:
-                    logger.debug("[export] %s write skipped", table, exc_info=True)
-
+            piece("jsonl", out_dir / _name("beliefs", tenant_id), conn,
+                  "SELECT * FROM beliefs WHERE tenant_id=? AND valid_until IS NULL AND invalidated_at IS NULL")
+            # M-16: episodes / archive / merge ledger.
+            for table in ("episodes", "beliefs_archive", "entity_merges", "entity_merges_archive"):
+                piece(table, out_dir / _name(table, tenant_id), conn, f"SELECT * FROM {table} WHERE tenant_id=?")
             # ── GraphML dump of entity graph ──
             try:
                 import networkx as nx
 
                 g = nx.DiGraph()
-                entities = conn.execute(
-                    "SELECT id, name, type FROM entities WHERE tenant_id=?", (tenant_id,)
-                ).fetchall()
-                for e in entities:
+                for e in conn.execute("SELECT id, name, type FROM entities WHERE tenant_id=?", (tenant_id,)):
                     g.add_node(e["id"], label=e["name"], type=e["type"])
-                edges = conn.execute(
-                    """SELECT subject, object, predicate FROM beliefs
-                       WHERE tenant_id=? AND valid_until IS NULL""",
+                for edge in conn.execute(
+                    "SELECT subject, object, predicate FROM beliefs WHERE tenant_id=? AND valid_until IS NULL",
                     (tenant_id,),
-                ).fetchall()
-                for edge in edges:
+                ):
                     g.add_edge(edge["subject"], edge["object"], predicate=edge["predicate"])
-                graphml_name = "kazma_graph_latest.graphml" if tenant_id == "default" else f"kazma_graph_{tenant_id}.graphml"
-                graphml_path = out_dir / graphml_name
+                graphml_path = out_dir / _name("graph", tenant_id, "graphml")
                 _atomic_write(graphml_path, lambda p: nx.write_graphml(g, p))
                 result["graphml"] = graphml_path
-            except Exception:
-                logger.debug("[export] GraphML step skipped", exc_info=True)
+                result.counts["graphml"] = g.number_of_nodes()
+            except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+                result.failed.append("graphml")
+                logger.warning("[export] GraphML of %s failed: %s", tenant_id, exc)
         finally:
             conn.close()
-    except Exception:
-        logger.debug("[export] nightly snapshot failed", exc_info=True)
+    except sqlite3.Error as exc:
+        result.failed.append("memory database")
+        logger.warning("[export] the memory database of %s could not be read: %s", tenant_id, exc)
 
-    # Ops-db audit trail (queue is operational noise — skip it).
+    # Ops-db audit trail, whole (queue is operational noise — skip it).
     try:
         from kazma_core.memory.schema_v2 import ensure_ops_schema
-        from kazma_core.paths import memory_ops_db
 
         ops = sqlite3.connect(memory_ops_db())
         ops.row_factory = sqlite3.Row
         try:
             ensure_ops_schema(ops)
-            audits = ops.execute(
-                "SELECT * FROM memory_audit_log WHERE tenant_id=? "
-                "ORDER BY timestamp DESC LIMIT 20000",
-                (tenant_id,),
-            ).fetchall()
-            audit_name = (
-                "kazma_audit_latest.jsonl"
-                if tenant_id == "default"
-                else f"kazma_audit_{tenant_id}.jsonl"
-            )
-            audit_path = out_dir / audit_name
-            _atomic_write(audit_path, lambda p: _dump_rows_jsonl(p, audits))
-            result["audit"] = audit_path
+            piece("audit", out_dir / _name("audit", tenant_id), ops,
+                  "SELECT * FROM memory_audit_log WHERE tenant_id=? ORDER BY timestamp DESC")
         finally:
             ops.close()
-    except Exception:
-        logger.debug("[export] ops audit dump skipped", exc_info=True)
+    except sqlite3.Error as exc:
+        result.failed.append("audit")
+        logger.warning("[export] the audit trail of %s could not be read: %s", tenant_id, exc)
     return result

@@ -782,9 +782,12 @@ def register_system_routes(self: Any) -> None:
         """V2 restore — file-swap memory_state.db from a chosen backup.
 
         Body: ``{"backup_name": "memory_state_<ts>.db"}``. Quiesces the V2
-        worker first (best-effort), then overwrites the live primary DB with
-        the backup copy via sqlite3.restore(). Bi-temporal ops DB is NOT
-        restored (it is rebuildable from the primary). Returns the new counts.
+        worker first (best-effort), then ``memory.backup.restore_memory_backup``:
+        the backup over the live primary DB in one step, the forgets made
+        since applied again and the turns since rebuilt from the chat store,
+        at once (they waited for the next 15-minute pass). Bi-temporal ops
+        DB is NOT restored (it is rebuildable from the primary). Returns the
+        new counts.
         """
         backup_name = str(req.get("backup_name", "")).strip()
         if not backup_name:
@@ -821,18 +824,9 @@ def register_system_routes(self: Any) -> None:
             except Exception:
                 pass
             dest = Path(primary_memory_db())
-            # Online restore: open the live DB and restore from the backup file.
-            conn = sqlite3.connect(str(dest))
-            try:
-                # closing(): a bare ``with sqlite3.connect()`` never closes,
-                # and the backup file then stays locked on Windows.
-                from contextlib import closing
+            from kazma_core.memory.backup import restore_memory_backup
 
-                with closing(sqlite3.connect(str(src))) as bkp:
-                    bkp.backup(conn, pages=100, sleep=0.01)
-                conn.commit()
-            finally:
-                conn.close()
+            caught_up = restore_memory_backup(src)
             # Count active beliefs in the restored DB for confirmation.
             conn = sqlite3.connect(str(dest))
             conn.row_factory = sqlite3.Row
@@ -844,6 +838,7 @@ def register_system_routes(self: Any) -> None:
                 "status": "success",
                 "restored_from": backup_name,
                 "active_beliefs": active,
+                **caught_up,
             }
         except Exception as e:
             from fastapi import HTTPException

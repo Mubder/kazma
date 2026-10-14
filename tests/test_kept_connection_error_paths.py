@@ -65,9 +65,9 @@ def test_the_memory_writer_releases_the_lock_when_a_write_fails(tmp_path, monkey
     monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(tmp_path / "memory_ops.db"))
     mirror = dual_write.DualWriteMirror()
     try:
-        assert mirror.mirror_belief("user", "likes", "tea")  # the writer works
-        _fail_inserts(tmp_path / "memory_state.db", "beliefs")
-        assert mirror.mirror_belief("user", "likes", "coffee") is None  # the write failed
+        assert mirror.write_episode(session_id="s", turn_number=1, user_text="tea please")[0] == "written"
+        _fail_inserts(tmp_path / "memory_state.db", "episodes")
+        assert mirror.write_episode(session_id="s", turn_number=2, user_text="coffee please")[0] == "failed"
         assert not mirror._primary.in_transaction  # noqa: SLF001
         assert _write_lock_free(tmp_path / "memory_state.db")
     finally:

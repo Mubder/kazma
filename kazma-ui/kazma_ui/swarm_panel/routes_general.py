@@ -65,6 +65,8 @@ def register_general_routes(
                         "has_swarm_core": svc.has_swarm_core(),
                         "config": None,
                         "active_page": "swarm",
+                        # SW-S16 / D1: set by RoleCheckedRoute on a multi-user install.
+                        "single_operator_refusal": bool(getattr(request.state, "swarm_refusal", None)),
                     },
                 ),
             )

@@ -109,15 +109,19 @@ async def test_division_blocks_denied_mcp(monkeypatch, tmp_path):
     assert "division" in err.lower()
 
 
-def test_unified_index_roundtrip(tmp_path, monkeypatch):
-    from kazma_core.memory import unified_index as ui
+def test_the_unified_index_is_retired(tmp_path):
+    # Memory audit M01 (2026-10-13): ``unified_items`` copied every fact and
+    # Knowledge chunk with no delete path, and federated search served it. An
+    # install that still has the table loses it at the next ops-schema check.
+    import sqlite3
 
-    monkeypatch.setattr(
-        "kazma_core.paths.memory_ops_db", lambda: str(tmp_path / "ops.db")
-    )
-    ui.upsert_unified(item_id="b1", kind="belief", text="user lives_in Kuwait", tenant_id="t")
-    ui.upsert_unified(item_id="kb:1", kind="kb", text="Kuwait office handbook", tenant_id="t")
-    hits = ui.search_unified("Kuwait", tenant_id="t", limit=10)
-    kinds = {h["kind"] for h in hits}
-    assert "belief" in kinds
-    assert "kb" in kinds
+    from kazma_core.memory.schema_v2 import ensure_ops_schema
+
+    conn = sqlite3.connect(tmp_path / "ops.db")
+    conn.execute("CREATE TABLE unified_items (id TEXT PRIMARY KEY, kind TEXT, tenant_id TEXT, "
+                 "text TEXT, updated_at REAL)")
+    conn.execute("INSERT INTO unified_items VALUES ('b1', 'belief', 't', 'user lives_in Kuwait', 0)")
+    conn.commit()
+    ensure_ops_schema(conn)
+    assert conn.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'unified_items'").fetchone() is None

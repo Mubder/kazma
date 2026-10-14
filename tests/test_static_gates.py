@@ -953,7 +953,18 @@ _LOOP_STALL_HELPERS = frozenset({
     # routes did too.
     "recall", "federated_search", "build_v2_health", "build_memory_health",
     "search_transcripts", "promote_working_memory", "run_golden_eval",
+    # The memory restore: a file copy, the forget journal and turn reconcile.
+    "restore_memory_backup",
     "count_current_facts", "backfill_vectors",
+    # Writing a memory: a chat-store id read, an insert, embeddings, the
+    # remote vector index, the Postgres mirror. The supervisor promoted
+    # Knowledge Library hits through it inline, on the loop (Memory audit
+    # M04); the promotion is gone, and so are the copies it left.
+    "mirror_episode", "retire_knowledge_promotions",
+    # The forget journal's work: SQLite on both files, the remote index and
+    # the mirror (Memory audits M08-M10). Rewinds call it through
+    # forget.rewind_memory, which threads it.
+    "_forget_rewound_turns", "converge", "apply_pending", "enforce_ledger",
     # Deleting a Knowledge Library: every chunk and FTS row, then the Chroma
     # collection (which may start the client). /kb delete ran it on the loop.
     "delete_library",
@@ -1064,7 +1075,7 @@ def _module_stall_wrappers(tree: ast.AST, aliases: dict[str, str]) -> set[str]:
     return stalls
 
 
-def _loop_stall_helper_calls(tree: ast.AST) -> list[tuple[int, str]]:
+def _loop_stall_helper_calls(tree: ast.AST, extra: frozenset[str] = frozenset()) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     # `from ... import recall as v2_recall` calls the helper by another name:
     # the memory_search tool ran recall on the loop that way until 2026-09-27,
@@ -1076,7 +1087,7 @@ def _loop_stall_helper_calls(tree: ast.AST) -> list[tuple[int, str]]:
         for a in node.names
         if a.asname and a.name in _LOOP_STALL_HELPERS
     }
-    helpers = _LOOP_STALL_HELPERS | _module_stall_wrappers(tree, aliases)
+    helpers = _LOOP_STALL_HELPERS | _module_stall_wrappers(tree, aliases) | extra
 
     def visit(node: ast.AST, in_async: bool) -> None:
         for child in ast.iter_child_nodes(node):
@@ -1109,6 +1120,122 @@ def test_loop_stall_helpers_are_not_called_on_the_loop():
         "health probe wait on it.\nFix: `await asyncio.to_thread(helper, ...)`.\n  "
         + "\n  ".join(offenders)
     )
+
+
+#: The memory path (Memory audit M34): its async code must not reach a listed
+#: helper through ANOTHER module's function either. Undo resolved its tenant
+#: on the loop: ``_consume_undo`` -> ``_memory_tenant_id`` ->
+#: ``tenant_isolation.multi_user_or_production`` -> ``multi_user_enabled``
+#: (a settings read) -- three hops, two modules, invisible to the in-module
+#: inference. Scoped to the memory path: product-wide it names ~130 sites
+#: in other areas, each its own change.
+_MEMORY_PATH = ("kazma-ui/kazma_ui/memory_api.py", "kazma-ui/kazma_ui/routes_direct/memory.py",
+                "kazma-core/kazma_core/agent/tool_builtins/memory.py", "kazma-core/kazma_core/memory/")
+
+
+def _module_of(path: Path) -> str:
+    parts = _rel(path).split("/")
+    if parts[0].startswith("kazma-"):
+        parts = parts[1:]
+    mod = ".".join(parts)[:-3]
+    return mod[: -len(".__init__")] if mod.endswith(".__init__") else mod
+
+
+def _kazma_imports(tree: ast.AST) -> dict[str, str]:
+    """Local name -> ``module:function`` for every ``from kazma_x... import``."""
+    return {
+        a.asname or a.name: f"{node.module}:{a.name}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("kazma_")
+        for a in node.names
+    }
+
+
+def _qualified_stall_helpers(trees: dict[str, ast.AST]) -> set[str]:
+    """Every ``module:function`` (public or private) that reaches a listed
+    helper, following calls into other Kazma modules by their import, to a
+    fixed point. A call is resolved through its module's own binding, never by
+    a bare name, so another module's function of the same name is not taken."""
+    graph: dict[str, set[str]] = {}
+    for mod, tree in trees.items():
+        imports = _kazma_imports(tree)
+        local = {n.name for n in getattr(tree, "body", []) if isinstance(n, ast.FunctionDef)}
+        for fn in getattr(tree, "body", []):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            callees: set[str] = set()
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    name = node.func.id
+                    if name in _LOOP_STALL_HELPERS:
+                        callees.add("<helper>")
+                    elif name in local:
+                        callees.add(f"{mod}:{name}")
+                    elif name in imports:
+                        callees.add(imports[name])
+            graph[f"{mod}:{fn.name}"] = callees
+    stalls = {q for q, callees in graph.items() if "<helper>" in callees}
+    changed = True
+    while changed:
+        changed = False
+        for q, callees in graph.items():
+            if q not in stalls and callees & stalls:
+                stalls.add(q)
+                changed = True
+    return stalls
+
+
+def _bound_stall_names(mod: str, tree: ast.AST, stalls: set[str]) -> frozenset[str]:
+    """Names in *mod* that call a qualified stall helper: its own functions and
+    the ones it imports."""
+    imports = _kazma_imports(tree)
+    local = {n.name for n in getattr(tree, "body", []) if isinstance(n, ast.FunctionDef)}
+    names = {n for n in local if f"{mod}:{n}" in stalls}
+    names |= {n for n, q in imports.items() if q in stalls}
+    return frozenset(names)
+
+
+def test_the_memory_path_reaches_no_helper_through_another_module():
+    trees: dict[str, ast.AST] = {}
+    paths: dict[str, Path] = {}
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        trees[_module_of(path)] = tree
+        paths[_module_of(path)] = path
+    stalls = _qualified_stall_helpers(trees)
+    offenders: list[str] = []
+    for mod, tree in trees.items():
+        rel = _rel(paths[mod])
+        if not any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in _MEMORY_PATH):
+            continue
+        extra = _bound_stall_names(mod, tree, stalls)
+        offenders += [f"{rel}:{line} {name}()" for line, name in _loop_stall_helper_calls(tree, extra)]
+    assert not offenders, (
+        "Async memory code reaches a loop-stall helper through another module's function.\n"
+        "Fix: `await asyncio.to_thread(...)`.\n  " + "\n  ".join(offenders))
+
+
+def test_the_cross_module_inference_follows_the_undo_chain():
+    """Negative control: undo's shape -- two modules, three hops."""
+    trees = {
+        "kazma_x.tenancy": ast.parse(
+            "def multi_user_or_production():\n    return multi_user_enabled()\n"),
+        "kazma_x.api": ast.parse(
+            "from kazma_x.tenancy import multi_user_or_production\n"
+            "def _tenant():\n    return 'a' if multi_user_or_production() else 'b'\n"
+            "def _consume(token):\n    return _tenant()\n"
+            "async def undo(token):\n    return _consume(token)\n"
+            "async def undo_fixed(token):\n    return await asyncio.to_thread(_consume, token)\n"),
+    }
+    stalls = _qualified_stall_helpers(trees)
+    assert {"kazma_x.tenancy:multi_user_or_production", "kazma_x.api:_tenant", "kazma_x.api:_consume"} <= stalls
+    extra = _bound_stall_names("kazma_x.api", trees["kazma_x.api"], stalls)
+    assert _loop_stall_helper_calls(trees["kazma_x.api"], extra) == [(7, "_consume")]
+    # Without following the import, the in-module inference sees nothing.
+    assert _loop_stall_helper_calls(trees["kazma_x.api"]) == []
 
 
 def test_loop_stall_gate_catches_the_watchdog_shape():
@@ -1812,6 +1939,26 @@ def test_no_unfenced_web_tool_output(rel):
 #: module → {function: must_fence}. False means "this function returns only
 #: our own text" and needs a reason in the comment beside it.
 FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
+    # Swarm audit SW-S10 (2026-10-14): a swarm worker's text is what it read
+    # and wrote -- web pages, files, other tools -- and reached the chat model
+    # raw through check_swarm_task.
+    "kazma-core/kazma_core/agent/tool_builtins/system.py": {
+        "check_swarm_task": True,
+        # The server's own tool names.
+        "mcp_test_server": True,
+        "current_datetime": False,
+        # Kazma's own message: the task id and where to look.
+        "dispatch_swarm": False,
+        # Output of a command or snippet run on this machine, not remote text.
+        "shell_exec": False,
+        "python_exec": False,
+        # The sub-agent's answer: its own tool reads are fenced where read.
+        "spawn_agent": False,
+        "spawn_agents": False,
+        "repository_metrics": False,
+        "context_info": False,
+        "computer_use": False,
+    },
     "kazma-core/kazma_core/mcp/spec_tools.py": {
         # Body already fenced in AsyncMCPManager.read_resource (fence_resource).
         "mcp_read_resource": False,
@@ -1878,6 +2025,32 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
         "email_categorize": False,
         "email_analyze": False,
     },
+    # Crawled documentation read back to the model (Knowledge KB-S01, fixed
+    # with Memory M11). The rest return the operator's names and our receipts.
+    "kazma-core/kazma_core/agent/tool_builtins/knowledge.py": {
+        "knowledge_search": True,
+        "knowledge_list_libraries": False,
+        "knowledge_create_library": False,
+        "knowledge_ingest_url": False,
+        "knowledge_ingest_site": False,
+    },
+    # Memory read back to the model: what turns, pages and tools once wrote
+    # (Memory audit M11 -- memory_search returned it raw). The tools are
+    # registered inside register_memory_tools.
+    "kazma-core/kazma_core/agent/tool_builtins/memory.py": {
+        "memory_search": True,
+        "memory_list_beliefs": True,
+        "memory_list_entities": True,
+        # Its list actions return the same lists as the two tools above.
+        "memory_admin": True,
+        # Our own receipts: ids, counts, status.
+        "memory_merge_entities": False,
+        "memory_link_entities": False,
+        "memory_invalidate": False,
+        "memory_delete_entity": False,
+        "memory_purge_empty_entities": False,
+        "memory_store": False,
+    },
 }
 
 
@@ -1903,9 +2076,16 @@ def test_untrusted_readers_fence_per_function(rel):
     tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
     expected = FENCED_TOOL_FUNCTIONS[rel]
 
+    # Tools registered inside a module-level ``register_*`` function count
+    # too (the memory tools are; a gate reading only the module's top level
+    # saw none of them).
+    nodes = list(tree.body)
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.name.startswith("register_"):
+            nodes.extend(n.body)
     public_async = {
         n.name: n
-        for n in tree.body
+        for n in nodes
         if isinstance(n, ast.AsyncFunctionDef) and not n.name.startswith("_")
     }
 
@@ -2343,7 +2523,6 @@ SLEEP_THEN_ASSERT_DEBT: dict[str, int] = {
     "tests/test_loop_stall_watchdog.py": 2,
     "tests/test_procedural_recorder_worker.py": 1,
     "tests/test_swarm_engine_core.py": 1,
-    "tests/test_swarm_notify.py": 1,
     "tests/test_swarm_reliability.py": 3,
     "tests/test_swarm_timeout_validation_concurrency.py": 2,
     "tests/test_typing_keepalive.py": 2,

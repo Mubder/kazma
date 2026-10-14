@@ -133,7 +133,25 @@ class MetricsCollector:
             snapshot.total_tokens += tokens
             snapshot.total_cost += cost
 
-        # Flush to TaskStore if available.
+        # Flush to TaskStore if available -- off the event loop (SW-E07):
+        # the counters are SQL increments, so their order does not matter.
+        if self._task_store is not None:
+            import asyncio
+
+            def _flush() -> None:
+                self._flush_metric(worker, success, duration, tokens, cost, metric_date)
+
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                _flush()
+                return
+            from kazma_core.background import spawn_background
+
+            spawn_background(asyncio.to_thread(_flush), name=f"swarm-metric:{worker}")
+
+    def _flush_metric(self, worker: str, success: bool, duration: float, tokens: int, cost: float,
+                      metric_date: str) -> None:
         if self._task_store is not None:
             try:
                 self._task_store.record_worker_metric(

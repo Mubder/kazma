@@ -5,7 +5,6 @@ from __future__ import annotations
 from kazma_core.memory.federated_search import (
     format_kb_hits_for_prompt,
     format_source_footer,
-    promote_kb_hits_to_episodes,
 )
 
 
@@ -33,29 +32,12 @@ def test_format_kb_empty():
     assert format_kb_hits_for_prompt([{"store": "memory"}]) == ""
 
 
-def test_promote_kb_hits(monkeypatch, tmp_path):
-    written = []
+def test_kb_hits_are_never_promoted_into_memory():
+    """Memory audit M04: the promotion copied library text into chat memory as
+    the user's words; it is gone (tests/test_memory_kb_never_in_memory.py)."""
+    from kazma_core.memory import federated_search
 
-    def _mirror(**kwargs):
-        written.append(kwargs)
-        return "ep-kb-1"
-
-    monkeypatch.setattr(
-        "kazma_core.memory.dual_write.mirror_episode",
-        _mirror,
-    )
-    hits = [
-        {
-            "store": "knowledge",
-            "content": "x" * 50 + " documentation about webhooks",
-            "provenance": {"document_title": "Webhooks", "source_url": "https://x"},
-        }
-    ]
-    n = promote_kb_hits_to_episodes(hits, session_id="s1", tenant_id="default")
-    assert n == 1
-    assert written
-    assert written[0]["source"] == "knowledge_library_promote"
-    assert "Webhooks" in written[0]["user_text"]
+    assert not hasattr(federated_search, "promote_kb_hits_to_episodes")
 
 
 def test_neo4j_capability_primary_wording():

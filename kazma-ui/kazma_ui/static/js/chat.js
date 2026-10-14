@@ -7057,15 +7057,20 @@
     });
     if (!choice || !choice.ok) return;
     try {
+      var nothingHeld = false;
       if (choice.checked) {
         var forgot = await window.kazmaSave(
           '/api/memory/v2/chats/' + encodeURIComponent(sessionId) + '/memory',
           { method: 'PUT', body: { remember: false, forget_past: true } });
         if (!forgot || !forgot.ok) throw new Error((forgot && forgot.error) || ti('forget_failed', 'Forget failed'));
+        // Nothing found is not "forgotten" (Memory audit M07).
+        var f = (forgot && forgot.forgot) || {};
+        nothingHeld = !(f.forgotten || f.facts_forgotten);
       }
       await window.kazmaSave('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
-      KS.toast(choice.checked ? ti('delete_chat_forgot', 'Chat deleted, and what Kazma learned from it forgotten')
-                              : ti('delete_chat_done', 'Chat deleted'), 'success', 2500);
+      KS.toast(!choice.checked ? ti('delete_chat_done', 'Chat deleted')
+               : nothingHeld ? ti('delete_chat_nothing_held', 'Chat deleted. Kazma held no memories of it.')
+               : ti('delete_chat_forgot', 'Chat deleted, and what Kazma learned from it forgotten'), 'success', 2500);
       loadSessions();
       if (sessionId === chatSessionId) newSession();
     } catch (e) {

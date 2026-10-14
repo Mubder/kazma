@@ -102,7 +102,9 @@ class SwarmManager:
         Returns:
             List of result dicts, one per worker.
         """
-        result = await self.engine.broadcast(
+        # Through dispatch(): a broadcast is admitted, recorded and finalized
+        # like any task (Swarm audit SW-E06).
+        result = await self.engine.dispatch(
             SwarmTask(
                 prompt=task,
                 context=context,

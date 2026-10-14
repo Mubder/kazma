@@ -369,6 +369,12 @@ class SwarmTask(_JsonSerializable):
     # that repo rather than the process-wide active one. None = use the
     # global active workspace (backward compatible). See workspace_scope.py.
     workspace_id: str | None = None
+    # Which run owns the task now (Swarm audit SW-E03): every admission to
+    # RUNNING -- a dispatch, a resume -- takes the next generation, and the
+    # store refuses a write from an older one. ``run_id`` names the process
+    # and run that holds it.
+    generation: int = 0
+    run_id: str = ""
 
     def __post_init__(self) -> None:
         self.type = _coerce_enum(TaskType, self.type)
@@ -409,6 +415,8 @@ class SwarmTask(_JsonSerializable):
             cost_estimate=float(data.get("cost_estimate", 0.0)),
             metadata=dict(data.get("metadata", {})),
             workspace_id=data.get("workspace_id"),
+            generation=int(data.get("generation", 0) or 0),
+            run_id=str(data.get("run_id", "") or ""),
         )
 
     @classmethod

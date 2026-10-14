@@ -1207,6 +1207,23 @@ def probe_vector_backend() -> str | None:
     return remote.probe(force=True)
 
 
+def get_remote_vector_backend() -> Any | None:
+    """The remote vector index writes and deletes go to (``hybrid``/``remote``
+    mode, or a pgvector/qdrant provider), up or not -- a delete to a down index
+    is queued, not skipped; None when vectors are local only.
+
+    Never opens the local store: a memory's local vector is the writer's own
+    guarded write (``memory/vector_write.py``, Memory audit M15), and
+    ``LocalSqliteVectorBackend.upsert`` committed the caller's transaction.
+    """
+    cfg = get_backends_cfg()
+    provider = str((cfg.get("vector") or {}).get("provider") or "sqlite_vec").lower()
+    mode = str(cfg.get("mode") or "local").lower()
+    if mode not in ("hybrid", "remote") and provider not in _REMOTE_VECTOR:
+        return None
+    return _build_remote_backend(cfg)
+
+
 def get_vector_backend(conn: Any | None = None) -> Any:
     """Return the active VectorBackend (live ConfigStore read).
 

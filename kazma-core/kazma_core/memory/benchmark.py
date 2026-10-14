@@ -25,6 +25,13 @@ noise, arabic, fact, overview, abstain):
 
 It never touches live memory: its own temp database, its own tenant id, and
 ``recall(local_only=True)`` so no state mirror or remote index is consulted.
+
+Held out (dataset v5, Memory audit M24): ``heldout`` questions are scored the
+same way and reported apart (``report["heldout"]``); recall's thresholds were
+never swept on them. The extraction benchmark
+(:func:`run_extraction_benchmark`) scores what the heuristic pass -- and,
+from recorded replies, the model's deep pass -- keeps from single turns in
+English, Arabic and mixed.
 """
 
 from __future__ import annotations
@@ -40,14 +47,19 @@ from typing import Any
 
 __all__ = [
     "DATASET_PATH",
+    "EXTRACTION_PATH",
     "RecordingEmbedder",
     "ReplayEmbedder",
+    "extraction_scores",
     "gated_scores",
     "load_dataset",
+    "record_llm_extraction",
     "run_benchmark",
+    "run_extraction_benchmark",
 ]
 
 DATASET_PATH = Path(__file__).with_name("benchmark_data") / "dataset.json"
+EXTRACTION_PATH = Path(__file__).with_name("benchmark_data") / "extraction.json"
 BENCH_TENANT = "bench"
 #: A fixed clock, so every run seeds the same created_at values.
 BASE_TIME = 1780000000.0
@@ -243,12 +255,16 @@ def gated_scores(report: dict[str, Any]) -> dict[str, float]:
     precision and order. Latency is not gated: it is the machine's, not the
     code's.
     """
-    out = {f"overall.{k}": float(v) for k, v in report["overall"].items()
-           if k in ("hit_rate", "mrr", "precision")}
-    for cat, row in report["categories"].items():
-        for k in ("hit_rate", "mrr", "precision", "order"):
-            if k in row:
-                out[f"{cat}.{k}"] = float(row[k])
+    out: dict[str, float] = {}
+    for prefix, part in (("", report), ("heldout.", report.get("heldout"))):
+        if not part:
+            continue
+        out.update({f"{prefix}overall.{k}": float(v) for k, v in part["overall"].items()
+                    if k in ("hit_rate", "mrr", "precision")})
+        for cat, row in part["categories"].items():
+            for k in ("hit_rate", "mrr", "precision", "order"):
+                if k in row:
+                    out[f"{prefix}{cat}.{k}"] = float(row[k])
     return dict(sorted(out.items()))
 
 
@@ -271,20 +287,29 @@ def run_benchmark(
         ensure_primary_schema(conn)
         refs = _seed(conn, data)
         covers = _covers(data, refs)
-        results, latencies = [], []
-        for q in data["questions"]:
-            started = time.perf_counter()
-            res = recall(q["text"], conn=conn, tenant_id=BENCH_TENANT, limit=limit,
-                         local_only=True)
-            latencies.append(time.perf_counter() - started)
-            # Facts, history, then weekly summaries: the order format_recall_block shows.
-            injected = (
-                [h.id for h in res.beliefs[:limit]] + [h.id for h in res.episodes[:limit]]
-                + [h.id for h in res.summaries]
-            )
-            results.append(_score(q, refs, injected, covers))
+        def ask(questions: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[float]]:
+            results, latencies = [], []
+            for q in questions:
+                started = time.perf_counter()
+                res = recall(q["text"], conn=conn, tenant_id=BENCH_TENANT, limit=limit,
+                             local_only=True)
+                latencies.append(time.perf_counter() - started)
+                # Facts, history, then weekly summaries: the order format_recall_block shows.
+                injected = (
+                    [h.id for h in res.beliefs[:limit]] + [h.id for h in res.episodes[:limit]]
+                    + [h.id for h in res.summaries]
+                )
+                results.append(_score(q, refs, injected, covers))
+            return results, latencies
+
+        results, latencies = ask(data["questions"])
         report = _summarise(results, latencies)
         report["memories"] = len(refs)
+        if data.get("heldout"):
+            held, held_latencies = ask(data["heldout"])
+            report["heldout"] = _summarise(held, held_latencies)
+            if keep_results:
+                report["heldout"]["results"] = held
         if keep_results:
             report["results"] = results
         return report
@@ -364,3 +389,164 @@ class ReplayEmbedder:
                 "run: python scripts/memory_bench.py vectors"
             )
         return (self._vecs[i].astype("float32") * self._scale[i]).tolist()
+
+
+# ── Extraction (Memory audit M24) ──────────────────────────────────────────
+#
+# What the two extraction passes keep from one chat turn, scored against the
+# facts a reader would keep (``benchmark_data/extraction.json``, built by
+# ``scripts/memory_bench.py build``). A gold fact lists the acceptable
+# (subject, predicate names, value); a turn with no gold fact should give
+# nothing. Matching: subject by its slug, predicate by
+# ``predicates._predicate_key`` (the same-words rule), value folded
+# (``documents.arabic.fold_for_search``, digits included) and contained
+# either way. The model's pass replays recorded replies
+# (``tests/fixtures/memory_bench/extraction_llm.json``, recorded with
+# ``scripts/memory_bench.py extraction --record`` on the configured model):
+# without them it is reported as not recorded, never guessed.
+
+
+def _slug(text: str) -> str:
+    return "_".join(str(text or "").strip().lower().replace("-", " ").split())
+
+
+def _folded(text: str) -> str:
+    from kazma_core.documents.arabic import fold_for_search
+
+    return " ".join(fold_for_search(str(text or "")).lower().split())
+
+
+def _fact_matches(alternatives: list[dict[str, Any]], got: dict[str, Any]) -> bool:
+    from kazma_core.memory.predicates import _predicate_key
+
+    subject, predicate, value = _slug(got.get("subject")), got.get("predicate") or "", _folded(got.get("object"))
+    if not value:
+        return False
+    for alt in alternatives:
+        if _slug(alt["subject"]) != subject:
+            continue
+        if _predicate_key(predicate) not in {_predicate_key(p) for p in alt["predicates"]}:
+            continue
+        gold = _folded(alt["object"])
+        if gold and (gold in value or value in gold):
+            return True
+    return False
+
+
+def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    by_lang: dict[str, dict[str, int]] = {}
+    for turn in turns:
+        row = by_lang.setdefault(turn["lang"], {"turns": 0, "gold": 0, "found": 0, "kept": 0, "right": 0,
+                                                "quiet_turns": 0, "quiet_kept_nothing": 0})
+        got = extracted.get(turn["id"], [])
+        row["turns"] += 1
+        row["gold"] += len(turn["facts"])
+        row["kept"] += len(got)
+        row["found"] += sum(1 for alts in turn["facts"] if any(_fact_matches(alts, g) for g in got))
+        row["right"] += sum(1 for g in got if any(_fact_matches(alts, g) for alts in turn["facts"]))
+        if not turn["facts"]:
+            row["quiet_turns"] += 1
+            row["quiet_kept_nothing"] += int(not got)
+    out = {}
+    for lang, row in sorted(by_lang.items()):
+        out[lang] = {
+            **row,
+            "recall": round(row["found"] / row["gold"], 4) if row["gold"] else 0.0,
+            "precision": round(row["right"] / row["kept"], 4) if row["kept"] else 1.0,
+            "quiet": round(row["quiet_kept_nothing"] / row["quiet_turns"], 4) if row["quiet_turns"] else 1.0,
+        }
+    return out
+
+
+def _llm_blob(user_text: str) -> str:
+    """The user message ``belief_extractor._llm_extract`` sends for a turn
+    with no vocabulary (the benchmark asks with none)."""
+    return f"User: {user_text[:1500]}\nAssistant: "
+
+
+class _ReplayClient:
+    """Answers the extraction prompt from recorded replies; a prompt nobody
+    recorded is an error (the dataset changed: record again)."""
+
+    def __init__(self, replies: dict[str, str]) -> None:
+        self._replies = replies
+
+    async def chat(self, messages: list[dict[str, Any]], **_kw: Any) -> str:
+        key = _text_key(messages[-1]["content"])
+        if key not in self._replies:
+            raise KeyError("no recorded reply for this turn: python scripts/memory_bench.py extraction --record")
+        return self._replies[key]
+
+
+def run_extraction_benchmark(
+    dataset: dict[str, Any] | None = None, *, llm_replies: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Score the heuristic pass, and the model's pass when *llm_replies* (the
+    recorded file) is given."""
+    import asyncio
+    from unittest import mock
+
+    from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief, extract_beliefs_heuristic
+
+    data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
+    turns = data["turns"]
+    report: dict[str, Any] = {
+        "version": data["version"],
+        "heuristic": _score_extraction(turns, {t["id"]: extract_beliefs_heuristic(t["user"]) for t in turns}),
+    }
+    if not llm_replies:
+        report["llm"] = {"recorded": False}
+        return report
+    registry = type("_Registry", (), {"get_client": lambda self: _ReplayClient(llm_replies["replies"])})()
+
+    missing = [t["id"] for t in turns if _text_key(_llm_blob(t["user"])) not in llm_replies["replies"]]
+    if missing:
+        # Checked here: the extractor reads any failed call as "the model is
+        # down", which would score a stale recording as an outage.
+        raise KeyError(f"no recorded reply for {missing}: python scripts/memory_bench.py extraction --record")
+
+    async def ask_all() -> dict[str, list[dict[str, Any]]]:
+        got = {}
+        for t in turns:
+            beliefs, _down = await _llm_extract(t["user"], "")
+            got[t["id"]] = [b for b in (_sanitize_belief(x) for x in beliefs or []) if b]
+        return got
+
+    with mock.patch("kazma_core.model_registry.get_model_registry", lambda: registry):
+        extracted = asyncio.run(ask_all())
+    report["llm"] = {"recorded": True, "model": llm_replies.get("model"), **_score_extraction(turns, extracted)}
+    return report
+
+
+def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
+    """The extraction scores the ratchet holds: per pass and language,
+    recall, precision and quiet (turns with nothing to keep that kept
+    nothing)."""
+    out = {}
+    for pass_name in ("heuristic", "llm"):
+        part = report.get(pass_name) or {}
+        for lang, row in part.items():
+            if isinstance(row, dict):
+                for k in ("recall", "precision", "quiet"):
+                    out[f"{pass_name}.{lang}.{k}"] = float(row[k])
+    return dict(sorted(out.items()))
+
+
+async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Ask the configured model the extraction prompt for every turn and
+    return its raw replies (``scripts/memory_bench.py extraction --record``;
+    costs one call a turn)."""
+    from kazma_core.model_registry import get_model_registry
+
+    data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
+    registry = get_model_registry()
+    client = registry.get_client()
+    replies: dict[str, str] = {}
+    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM
+
+    for t in data["turns"]:
+        blob = _llm_blob(t["user"])
+        raw = await client.chat([{"role": "system", "content": _EXTRACT_SYSTEM}, {"role": "user", "content": blob}])
+        replies[_text_key(blob)] = raw.content if hasattr(raw, "content") else str(raw or "")
+    model = getattr(client, "model", None) or getattr(registry, "active_model", None) or "unknown"
+    return {"model": str(model), "extraction_version": data["version"], "replies": replies}

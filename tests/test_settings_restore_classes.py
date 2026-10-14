@@ -76,6 +76,7 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     "kazma-core/kazma_core/security/web_sessions.py::purge_expired_sessions": ("web_session.",),
     "kazma-core/kazma_core/swarm/reliability.py::_release_probe_lease": ("swarm.breaker.",),
     "kazma-core/kazma_core/swarm/reliability.py::_try_acquire_probe_lease": ("swarm.breaker.",),
+    "kazma-core/kazma_core/swarm/reliability.py::forget_shared": ("swarm.breaker.",),
     "kazma-core/kazma_core/system/installer.py::_record_status": ("system.",),
     "kazma-tui/kazma_tui/settings_panel.py::_persist_setting": (
         "the TUI's Settings panel saves the settings it shows, through the server's "

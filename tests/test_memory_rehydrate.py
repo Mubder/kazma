@@ -319,44 +319,6 @@ def test_the_note_scan_resumes_where_it_stopped(monkeypatch):
     assert cands["e1"] == {rehydrate._Candidate(user="note in t-b", source="checkpoint_note")}
 
 
-def test_a_knowledge_excerpt_is_restored_from_the_library(mem, monkeypatch):
-    import kazma_core.stores.knowledge as knowledge
-    from kazma_core.memory import dual_write
-    from kazma_core.memory.federated_search import promote_kb_hits_to_episodes
-
-    store = knowledge.KnowledgeStore(db_path=str(mem.dir / "kb.db"))
-    monkeypatch.setattr(knowledge, "_knowledge_store", store)
-    monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
-    monkeypatch.setattr("kazma_core.memory.embedder.encode_text_to_blob", lambda text: None)
-    content = "Webhooks retry for 7 days with exponential backoff. " * 40
-    store.create_library("wa-docs", "WhatsApp docs")
-    store.upsert_chunk({"library_id": "wa-docs", "source_url": "https://example.test/webhooks",
-                        "document_title": "Webhooks", "chunk_index": 0,
-                        "content_hash": "h1", "content": content})
-    dual_write._reset_mirror()
-    try:
-        assert promote_kb_hits_to_episodes(
-            [{"store": "knowledge", "content": content,
-              "provenance": {"document_title": "Webhooks"}}],
-            session_id="kb-session",
-        ) == 1
-    finally:
-        dual_write._reset_mirror()
-        store.close()
-    eid = mem.db.execute("SELECT id FROM episodes").fetchone()[0]
-    original = _row(mem.db, eid)["user_text"]
-    _erase(mem.db, eid)
-
-    store = knowledge.KnowledgeStore(db_path=str(mem.dir / "kb.db"))
-    monkeypatch.setattr(knowledge, "_knowledge_store", store)
-    try:
-        rehydrate._rehydrate_erased(mem.db)
-    finally:
-        store.close()
-    assert _row(mem.db, eid)["user_text"] == original
-    assert _meta(_row(mem.db, eid))["rehydrated"]["sources"] == ["knowledge_library"]
-
-
 # ── Verdicts ──────────────────────────────────────────────────────────────
 
 

@@ -161,10 +161,11 @@ def test_the_check_is_scheduled_nightly():
     from kazma_core.memory import worker_bootstrap
 
     src = inspect.getsource(worker_bootstrap)
-    # Audit F-06 offloaded the enqueue into a worker thread, so the call is
-    # wrapped: asyncio.to_thread(enqueue_task, "connector_health", {}). The
-    # scheduling is what matters here, not which thread performs it.
-    assert 'to_thread(enqueue_task, "connector_health", {})' in src
+    # Audit F-06 offloaded the enqueue into a worker thread, and Memory
+    # audit M20 made it say when the queue refuses it (_enqueue_checked):
+    # asyncio.to_thread(_enqueue_checked, "connector_health", {}). The scheduling
+    # is what matters here, not which thread performs it.
+    assert 'to_thread(_enqueue_checked, "connector_health", {})' in src
     assert 'register_handler("connector_health"' in src
     handler = inspect.getsource(worker_bootstrap._handle_connector_health)
     assert "check_connectors" in handler

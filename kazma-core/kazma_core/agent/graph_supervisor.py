@@ -330,10 +330,10 @@ async def supervisor_node(
     # the turn.
     import sqlite3
 
-    from kazma_core.memory.profile import about_block, get_about
+    from kazma_core.memory.profile import about_block, about_for_turn
 
     try:
-        _about = await asyncio.to_thread(get_about, str(state.get("tenant_id") or "default"))
+        _about = await asyncio.to_thread(about_for_turn, str(state.get("tenant_id") or "default"))
     except sqlite3.Error:
         logger.warning("[Supervisor] About me unreadable; this call goes without it", exc_info=True)
         _about = {"about": ""}
@@ -342,11 +342,12 @@ async def supervisor_node(
     # ── LLM call ──────────────────────────────────────────────────
     # Extract the latest user message (used by both the model router and
     # per-turn memory retrieval below).
-    last_user_content = ""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            last_user_content = str(m.get("content", ""))
-            break
+    # The text parts only: ``str(content)`` of a photo turn is the Python
+    # repr of the parts, base64 and all -- recall embedded 200,000 characters
+    # and built a 6,000-term keyword query (Memory audit M17).
+    from kazma_core.agent.turn_input import extract_latest_user_text
+
+    last_user_content = extract_latest_user_text(messages, image_marker=False)
 
     # Same-session short continuations ("Proceed", "try now") must inherit
     # the prior task — expand recall query + pin a continuity system note.
@@ -1077,7 +1078,9 @@ async def supervisor_node(
                             "[Supervisor] transcript fallback failed", exc_info=True
                         )
                 # Merge Knowledge Library into chat path (labeled, fenced).
-                # Product merge: inject KB next to memory; optional promote to episodes.
+                # Injected next to memory, never written into it: the old
+                # "promote to episodes" stored crawled text in the chat's
+                # memory as the user's words, on this loop (Memory audit M04).
                 _kb_hits_for_explain: list[dict[str, Any]] = []
                 try:
                     from kazma_core.memory.config import read_memory_cfg
@@ -1088,7 +1091,6 @@ async def supervisor_node(
                         from kazma_core.memory.federated_search import (
                             federated_search,
                             format_kb_hits_for_prompt,
-                            promote_kb_hits_to_episodes,
                         )
 
                         # Industry path: hybrid RRF over inject-scoped libs first
@@ -1134,19 +1136,6 @@ async def supervisor_node(
                                 },
                             )
                             logger.info("[Supervisor] Knowledge Library merged into chat inject")
-                            if _v2m.get("promote_kb_to_episodes", True):
-                                try:
-                                    promote_kb_hits_to_episodes(
-                                        _kb_hits_for_explain,
-                                        session_id=str(state.get("thread_id") or "kb"),
-                                        tenant_id=state.get("tenant_id", "default"),
-                                        max_promote=2,
-                                    )
-                                except Exception:
-                                    logger.debug(
-                                        "[Supervisor] kb promote skipped",
-                                        exc_info=True,
-                                    )
                 except Exception:
                     logger.debug(
                         "[Supervisor] knowledge merge inject skipped", exc_info=True

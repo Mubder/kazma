@@ -165,7 +165,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_MCP_TOOLS` | (none) | `kazma_core.mcp.server` | yes |
 | `KAZMA_MCP_TRUSTED_IN_PROD` | (none) | `kazma_core.mcp.manager` | yes |
 | `KAZMA_MEMORY_CONFLICT_POLICY` | (none) | `kazma_core.memory.backends` | yes |
-| `KAZMA_MEMORY_ENFORCE_TENANT` | `""` | `kazma_ui.memory_api` | yes |
+| `KAZMA_MEMORY_ENFORCE_TENANT` | `""` | `kazma_core.memory.config` | yes |
 | `KAZMA_MEMORY_OPS_DB` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_MEMORY_STATE_DB` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_MEMORY_STATE_REGION` | (none) | `kazma_core.memory.backends` | yes |

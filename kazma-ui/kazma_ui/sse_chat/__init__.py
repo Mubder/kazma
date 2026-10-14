@@ -2244,13 +2244,19 @@ def create_sse_chat_router(
         }
         try:
             snap = await graph_inst.aget_state(config)
-            msgs = list((snap.values if snap and snap.values else {}).get("messages") or [])
+            values = (snap.values if snap and snap.values else {})
+            msgs = list(values.get("messages") or [])
+            before = list(msgs)
             msgs.append({"role": "system", "content": abort_marker()})
             await graph_inst.aupdate_state(config, {
                 "messages": msgs,
                 "task_status": "abandoned",
                 "auto_continue": False,
             })
+            # A turn aborted before its answer leaves memory too (M09).
+            from kazma_core.memory.forget import rewind_memory
+
+            await rewind_memory(thread_id, before, msgs, tenant_id=str(values.get("tenant_id") or "default"))
             try:
                 from kazma_ui.hitl_gate_bridge import abort_thread_hitl
 

@@ -29,10 +29,13 @@ with source channels: fts5 / dense / ppr / session_boost / belief_match.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import logging
 import sqlite3
 import threading
+import time
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterable
@@ -79,6 +82,9 @@ class RecallResult:
     episodes: list[RecallHit]
     #: Weekly topic summaries about the question, best first (plan C2b).
     summaries: list[RecallHit] = field(default_factory=list)
+    #: Why this recall is incomplete (meaning search unavailable), or None.
+    #: "Degraded" is not "empty": nothing found is not nothing remembered.
+    degraded: str | None = None
 
     @property
     def empty(self) -> bool:
@@ -88,7 +94,101 @@ class RecallResult:
 # ── Public entry point ────────────────────────────────────────────────────
 
 
+#: One recall's question vectors (a failure included) and its deadline:
+#: each text is embedded at most once per recall (Memory audit M16 -- a failed
+#: embedding was tried again by every channel, up to four times).
+_QUERY_MEMO: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "kazma_recall_query_memo", default=None)
+#: How long a recall waits for the question's embedding (``memory.v2.
+#: recall_deadline_s``). Past it, recall answers from keywords and says so.
+_DEFAULT_DEADLINE_S = 5.0
+#: Embeddings a recall may have in flight at once: one that hangs past its
+#: deadline keeps its slot until it returns, so a hung embedder cannot pile up
+#: threads; with none free, recall goes on with keywords at once.
+_EMBED_SLOTS = threading.BoundedSemaphore(2)
+
+
+def _embed_within(embedder: Any, text: str, timeout: float) -> Any:
+    """``embedder.encode(text)`` in a daemon thread, waited on for *timeout*
+    seconds; raises TimeoutError past it (the call finishes on its own)."""
+    if timeout <= 0 or not _EMBED_SLOTS.acquire(blocking=False):
+        raise TimeoutError
+    box: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            box["vec"] = embedder.encode(text)
+        except Exception as exc:  # noqa: BLE001 - handed to the caller below
+            box["error"] = exc
+        finally:
+            _EMBED_SLOTS.release()
+
+    worker = threading.Thread(target=run, name="kazma-recall-embed", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise TimeoutError
+    if "error" in box:
+        raise box["error"]
+    return box.get("vec")
+
+
+#: The most of a question recall reads, and the most of its words it searches
+#: for (Memory audits M17, M25): a 2,000-term keyword query cost 668 ms a
+#: search, and the graph walk's seeding grew with words times names.
+_QUESTION_MAX_CHARS = 2000
+_QUESTION_MAX_TERMS = 32
+
+
+def _bounded_question(query: str) -> str:
+    """*query* within ``_QUESTION_MAX_CHARS``: its start and its end, where a
+    long paste's own question usually is."""
+    q = query or ""
+    if len(q) <= _QUESTION_MAX_CHARS:
+        return q
+    head = _QUESTION_MAX_CHARS // 4
+    return q[:head] + " " + q[-(_QUESTION_MAX_CHARS - head):]
+
+
+def _recall_deadline_s() -> float:
+    try:
+        from kazma_core.memory.config import read_memory_cfg
+
+        value = float(((read_memory_cfg() or {}).get("v2") or {}).get("recall_deadline_s", _DEFAULT_DEADLINE_S))
+    except (TypeError, ValueError):
+        value = _DEFAULT_DEADLINE_S
+    return min(60.0, max(0.5, value))
+
+
 def recall(
+    query: str,
+    *,
+    conn: sqlite3.Connection | None = None,
+    vector_engine: Any | None = None,
+    tenant_id: str = "default",
+    limit: int = 5,
+    session_id: str | None = None,
+    explain: bool | None = None,
+    local_only: bool = False,
+) -> RecallResult:
+    """Unified V2 recall (:func:`_recall`) under a deadline for the question's
+    embedding, which is attempted once. A result that lacks meaning search
+    says so in ``degraded``."""
+    query = _bounded_question(query)
+    memo: dict[str, Any] = {"vectors": {}, "deadline": time.monotonic() + _recall_deadline_s(),
+                            "degraded": None}
+    token = _QUERY_MEMO.set(memo)
+    try:
+        result = _recall(query, conn=conn, vector_engine=vector_engine, tenant_id=tenant_id, limit=limit,
+                         session_id=session_id, explain=explain, local_only=local_only)
+    finally:
+        _QUERY_MEMO.reset(token)
+    if memo["degraded"] and result.degraded is None:
+        result.degraded = memo["degraded"]
+    return result
+
+
+def _recall(
     query: str,
     *,
     conn: sqlite3.Connection | None = None,
@@ -394,6 +494,43 @@ def _state_episode_texts(row: dict[str, Any]) -> tuple[str, str]:
     return match_text(*sides), display_text(*sides)
 
 
+def _locally_forgotten(rows: dict[str, dict[str, Any]], *, tenant_id: str) -> set[str]:
+    """Ids among the shared store's *rows* this install forgot: its own copy
+    is a tombstone, or the forget ledger refuses the row's turn (Memory audit
+    M06). The local database is the truth for what the user took back."""
+    if not rows:
+        return set()
+    from kazma_core.memory.forget import FORGOTTEN_TIER, forgotten_turns, question_sha
+
+    from kazma_core.paths import primary_memory_db
+
+    gone: set[str] = set()
+    conn = None
+    try:
+        conn = _connect_existing(primary_memory_db())
+        if conn is None:
+            return gone
+        ids = list(rows)
+        marks = ",".join("?" for _ in ids)
+        gone |= {str(r[0]) for r in conn.execute(
+            f"SELECT id FROM episodes WHERE id IN ({marks}) AND tier = ?", (*ids, FORGOTTEN_TIER))}
+        for eid, row in rows.items():
+            session = str(row.get("session_id") or "")
+            if not session or eid in gone:
+                continue
+            _whole, turns = forgotten_turns(conn, tenant_id=tenant_id, keys=[session])
+            turn = int(row.get("turn_number") or 0)
+            if (turn, question_sha(row.get("user_text"))) in turns:
+                gone.add(eid)
+    except sqlite3.Error:
+        logger.warning("[recall] could not check the shared store's memories against this install's forgets",
+                       exc_info=True)
+    finally:
+        if conn is not None:
+            conn.close()
+    return gone
+
+
 def _pg_primary_episodes(
     query: str,
     *,
@@ -436,6 +573,13 @@ def _pg_primary_episodes(
         for row in fetch(need, tenant_id=tenant_id) or []:
             if row.get("id"):
                 rows[str(row["id"])] = row
+    # What this install forgot stays forgotten, whatever the shared store
+    # still holds (a tombstone a blip kept from it, another replica's copy).
+    gone = _locally_forgotten(rows, tenant_id=tenant_id)
+    for eid in gone:
+        rows.pop(eid, None)
+        sims.pop(eid, None)
+    dense_pairs = [(eid, sim) for eid, sim in dense_pairs if str(eid) not in gone]
     lookup = getattr(backend, "similarities", None)
     unscored = [eid for eid in rows if eid not in sims]
     if unscored and qvec and callable(lookup):
@@ -582,7 +726,16 @@ _QUERY_VECTORS_LOCK = threading.Lock()
 
 
 def _encode_query(query: str) -> list[float] | None:
-    """The question's meaning vector, encoded once however many searches use it."""
+    """The question's meaning vector, encoded once however many searches use it.
+
+    Inside a recall (``_QUERY_MEMO``) a text is embedded at most once, a
+    failure included, and no longer than the recall's deadline: past it the
+    embedding is abandoned (the call finishes in its pool thread) and recall
+    goes on with keywords, marked degraded."""
+    memo = _QUERY_MEMO.get()
+    if memo is not None and query in memo["vectors"]:
+        cached = memo["vectors"][query]
+        return list(cached) if cached else None
     try:
         from kazma_core.memory.embedder import get_embedder
 
@@ -595,8 +748,22 @@ def _encode_query(query: str) -> list[float] | None:
             if entry is not None and entry[0]() is embedder:
                 _QUERY_VECTORS.move_to_end(key)
                 return list(entry[1])
-        qvec = embedder.encode(query)
+        if memo is None:
+            qvec = embedder.encode(query)
+        else:
+            remaining = memo["deadline"] - time.monotonic()
+            try:
+                qvec = _embed_within(embedder, query, remaining)
+            except TimeoutError:
+                memo["vectors"][query] = None
+                memo["degraded"] = "the embedder did not answer within the recall deadline"
+                logger.warning("[recall] the question's embedding missed the %.1f s deadline: keyword search only",
+                               _recall_deadline_s())
+                return None
         if not qvec:
+            if memo is not None:
+                memo["vectors"][query] = None
+                memo["degraded"] = "meaning search is unavailable (the embedder failed)"
             return None
         vec = [float(x) for x in qvec]
         try:
@@ -608,8 +775,14 @@ def _encode_query(query: str) -> list[float] | None:
             _QUERY_VECTORS.move_to_end(key)
             while len(_QUERY_VECTORS) > _QUERY_VECTORS_MAX:
                 _QUERY_VECTORS.popitem(last=False)
+        if memo is not None:
+            memo["vectors"][query] = vec
         return list(vec)
     except Exception:
+        logger.debug("[recall] question embedding failed", exc_info=True)
+        if memo is not None:
+            memo["vectors"][query] = None
+            memo["degraded"] = "meaning search is unavailable (the embedder failed)"
         return None
 
 
@@ -1476,7 +1649,8 @@ def _fts_match_query(query: str) -> str:
     """
     from kazma_core.memory.query_terms import search_terms
 
-    words = [w.replace('"', "") for w in search_terms(query)]
+    # Each content word gives at most two forms (as written, folded).
+    words = [w.replace('"', "") for w in search_terms(query)][: 2 * _QUESTION_MAX_TERMS]
     return " OR ".join(f'"{w}"*' for w in words if w)
 
 
@@ -1811,7 +1985,9 @@ def _belief_graph_ppr(
         "".join(c for c in t if c.isalnum())
         for t in q_low.replace("-", " ").split()
     ]
-    tokens = [t for t in tokens if len(t) >= 3]
+    # Each word once, at most _QUESTION_MAX_TERMS of them: seeding is words
+    # times names (Memory audit M25).
+    tokens = list(dict.fromkeys(t for t in tokens if len(t) >= 3))[:_QUESTION_MAX_TERMS]
     for t in tokens:
         if t in node_set:
             seeds.append(t)
@@ -1968,43 +2144,75 @@ def _bump_access(
     if writes_suppressed():
         logger.debug("[recall] access bump skipped inside %s", active_diagnostic())
         return
-    try:
-        from kazma_core.memory.config import read_memory_cfg
+    from kazma_core.memory.config import read_memory_cfg  # its readers swallow their own failures
 
-        v2 = (read_memory_cfg() or {}).get("v2") or {}
-        if v2.get("access_bump_enabled", True) is False:
-            return
-    except Exception:
-        pass
-    now = __import__("time").time()
+    if ((read_memory_cfg() or {}).get("v2") or {}).get("access_bump_enabled", True) is False:
+        return
+    now = time.time()
+    with _pending_lock:
+        for table, hits in (("beliefs", beliefs), ("episodes", episodes)):
+            for h in hits:
+                if h.id:
+                    count, _last = _pending_bumps.get((table, h.id), (0, now))
+                    _pending_bumps[(table, h.id)] = (count + 1, now)
+        while len(_pending_bumps) > _PENDING_BUMPS_MAX:
+            _pending_bumps.pop(next(iter(_pending_bumps)))
+    flush_access_bumps(conn, busy_ms=_BUMP_BUSY_MS)
+
+
+#: Access bumps not written yet (the database was busy): (table, id) ->
+#: (count, last access). The next recall, or the next macro_sleep, writes them.
+_pending_bumps: dict[tuple[str, str], tuple[int, float]] = {}
+_pending_lock = threading.Lock()
+_PENDING_BUMPS_MAX = 20_000
+#: How long a turn's recall waits for the write lock to count its hits. It
+#: waited the full busy timeout (5 s, measured 5.54 s) and then dropped them
+#: (Memory audit M14).
+_BUMP_BUSY_MS = 50
+
+
+def flush_access_bumps(conn: sqlite3.Connection, *, busy_ms: int | None = None) -> int:
+    """Write the pending access bumps on *conn*; returns the rows written.
+
+    With *busy_ms* the write waits at most that long for the lock; a busy
+    database keeps the bumps pending (never dropped). Commits only a
+    transaction it began.
+    """
+    with _pending_lock:
+        batch = dict(_pending_bumps)
+        _pending_bumps.clear()
+    if not batch:
+        return 0
+    old_timeout = None
+    began = not conn.in_transaction
     try:
-        for h in beliefs:
-            if not h.id:
-                continue
-            conn.execute(
-                """UPDATE beliefs
-                   SET access_count = COALESCE(access_count, 0) + 1,
-                       last_accessed = ?
-                   WHERE id = ?""",
-                (now, h.id),
-            )
-        for h in episodes:
-            if not h.id:
-                continue
-            conn.execute(
-                """UPDATE episodes
-                   SET access_count = COALESCE(access_count, 0) + 1,
-                       last_accessed = ?
-                   WHERE id = ?""",
-                (now, h.id),
-            )
-        conn.commit()
-    except Exception:
-        logger.debug("[recall] access bump failed", exc_info=True)
-        try:
+        if busy_ms is not None:
+            old_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            conn.execute(f"PRAGMA busy_timeout = {int(busy_ms)}")
+        for table in ("beliefs", "episodes"):
+            rows = [(n, last, rid) for (t, rid), (n, last) in batch.items() if t == table]
+            if rows:
+                conn.executemany(
+                    f"UPDATE {table} SET access_count = COALESCE(access_count, 0) + ?, "
+                    "last_accessed = MAX(COALESCE(last_accessed, 0), ?) WHERE id = ?",
+                    rows,
+                )
+        if began and conn.in_transaction:
+            conn.commit()
+        return len(batch)
+    except sqlite3.OperationalError:
+        if began and conn.in_transaction:
             conn.rollback()
-        except Exception:
-            pass
+        with _pending_lock:
+            for key, (n, last) in batch.items():
+                count, newest = _pending_bumps.get(key, (0, last))
+                _pending_bumps[key] = (count + n, max(newest, last))
+        logger.debug("[recall] database busy: %d access bumps kept for the next write", len(batch))
+        return 0
+    finally:
+        if old_timeout is not None:
+            with contextlib.suppress(sqlite3.Error):
+                conn.execute(f"PRAGMA busy_timeout = {int(old_timeout)}")
 
 
 def _apply_session_bias(

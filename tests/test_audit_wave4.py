@@ -42,8 +42,9 @@ def test_narrowed_require_approval_for_cannot_ungate_danger(monkeypatch):
     assert safety.check_sync("shell_exec") is False
     assert safety.is_danger_tool("file_read") is False
     assert safety.check_sync("file_read") is True
-    # MCP-style names without a tier stay classification-false unless forced.
-    assert safety.is_danger_tool("write_file") is False
+    # A name without a tier is gated, as the graph gates it (Swarm audit
+    # SW-S11, hitl.approval_floor); it used to pass the bus unasked.
+    assert safety.is_danger_tool("write_file") is True
 
 
 @pytest.mark.asyncio

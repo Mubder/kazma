@@ -1,317 +1,390 @@
-"""Shared HITL approval wait state for multi-replica deployments.
+"""The decision of one swarm-bus approval request, shared by every platform.
 
-In-process ``asyncio.Event`` maps break when the replica that posted the
-approval card is not the replica that receives the button callback.
-This module dual-writes pending approvals to ConfigStore (SQLite or
-Postgres via ConfigStore backend) so any replica can:
+``SafetyMiddleware.check`` -- the owner of a request -- opens a row for it
+under a freshly minted id (:func:`open_request`), the platform adapters post
+their cards and wait on that row (:func:`_wait_outcome`), a platform callback
+decides it (:func:`resolve`), and the owner reads the outcome and closes the
+row (:func:`close`). The row lives in the settings store, so a callback
+arriving at another replica decides it too; local events wake same-process
+waiters at once.
 
-* ``create_pending`` when posting an approval card
-* ``resolve`` when a platform callback arrives
-* ``wait`` by polling until resolved or timeout
+Swarm audit 2026-10-13, Stage 1 (each with its regression in
+``tests/test_swarm_bus_approvals.py``):
 
-Local Events are still used for low-latency same-process resolution.
+* **SW-S02** -- the id used to come from the tool's own arguments
+  (``arguments.get("task_id")``), a settled "yes" was never reset or deleted,
+  and ``resolve`` of an id nobody posted created a resolved row: one click
+  approved every later request carrying that id, another tool's included,
+  after a restart too. Now an id is opened once (a second open fails), bound
+  to the tool and an arguments hash, decided once by compare-and-set,
+  deleted when its owner has read it, and ``resolve`` changes only a pending
+  row it finds.
+* **SW-S04** -- each adapter had its own timer, a timeout left the card live,
+  and a timeout counted as a "reject". Now the row's deadline is the one
+  deadline: the first waiter past it settles ``timeout``, a cancelled waiter
+  settles ``cancelled``, and both are outcomes of their own, never a deny.
+* **SW-S05** -- with several platforms, the card where a human pressed Reject
+  said REJECTED while another platform's Approve ran the tool. Every
+  platform's card now waits on this one row, so each shows the one final
+  outcome; an explicit human Deny is final (owner decision D7), like an
+  Approve.
+* **SW-S12** -- the durable reads and writes run off the event loop.
 
-H-12 (swarm bus only — this is NOT web ``claim_gate``):
-Fan-out across Telegram/Discord/Slack used to settle on the first
-*boolean*, so a Discord timeout mapped to False denied a later Telegram
-Approve. Tri-state: ``True`` settles immediately; ``False`` is a reject
-vote and only settles denied when votes >= ``expected_voters`` or the
-overall deadline passes. A later True never loses to an earlier False.
-Web ``claim_gate`` stays first-claim 200 / second 409.
+``hitl_gates.db`` keeps the record of the decision and who made it: the
+owner claims and settles the gate row from this outcome. This row is only
+the wait state, and is gone once read.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import threading
 import time
 from typing import Any
 
 __all__ = [
-    "create_pending",
-    "get_result",
+    "OUTCOMES",
+    "args_hash",
+    "await_card",
+    "close",
+    "decide_from_button",
+    "get",
+    "open_request",
+    "outcome_text",
+    "purge_stale",
     "resolve",
-    "wait_for_resolution",
+    "resolve_from_callback",
+    "settle",
 ]
 
 logger = logging.getLogger(__name__)
 
 _KEY_PREFIX = "swarm.approval."
-_local_events: dict[str, asyncio.Event] = {}
-_local_results: dict[str, bool] = {}
+#: Every final state of a request. ``pending`` is the only other one.
+OUTCOMES = ("approved", "denied", "timeout", "cancelled")
+#: The outcomes no human chose: the deadline passed, or the request ended.
+_ENDINGS = tuple(o for o in OUTCOMES if o not in ("approved", "denied"))
+#: How often a waiter re-reads the durable row (another replica's callback);
+#: a callback in this process wakes it at once.
+_POLL_S = 1.0
+
+#: Same-process waiters: one event per request, on the loop that waits.
+_waiters: dict[str, tuple[asyncio.Event, asyncio.AbstractEventLoop]] = {}
 _lock = threading.RLock()
 
 
-def _key(task_id: str) -> str:
-    return f"{_KEY_PREFIX}{task_id}"
+def _key(approval_id: str) -> str:
+    return f"{_KEY_PREFIX}{approval_id}"
 
 
-def _schedule_eviction(task_id: str, *, delay: float = 60.0) -> None:
-    """Remove the in-process entries for *task_id* after *delay*.
-
-    By then any waiter has woken (``wait_for_resolution``'s timeout is ≤60s)
-    and read its result; the durable ConfigStore row remains the
-    cross-replica source of truth. Bounds the module-level dicts, which
-    previously grew for the whole process lifetime (audit finding).
-    """
-    def _evict() -> None:
-        with _lock:
-            _local_events.pop(task_id, None)
-            _local_results.pop(task_id, None)
-    try:
-        loop = asyncio.get_running_loop()
-        loop.call_later(delay, _evict)
-    except RuntimeError:
-        _evict()  # no running loop (sync context) — evict eagerly
+def args_hash(tool: str, args: str | None) -> str:
+    """What a decision is bound to besides its id: the tool and its arguments."""
+    return hashlib.sha256(f"{tool}\0{args or ''}".encode()).hexdigest()[:32]
 
 
-def _load_payload(task_id: str) -> dict[str, Any]:
-    try:
-        from kazma_core.config_store import get_config_store
+def _store():
+    from kazma_core.config_store import get_config_store
 
-        raw = get_config_store().get(_key(task_id))
-        if isinstance(raw, dict):
-            return dict(raw)
-    except Exception as exc:
-        logger.debug("[shared_approvals] load durable failed: %s", exc)
-    return {}
+    return get_config_store()
 
 
-def _save_payload(task_id: str, payload: dict[str, Any]) -> None:
-    try:
-        from kazma_core.config_store import get_config_store
-
-        get_config_store().set(_key(task_id), payload, category="swarm")
-    except Exception as exc:
-        logger.debug("[shared_approvals] save durable failed: %s", exc)
-
-
-def _is_resolved_true(payload: dict[str, Any]) -> bool:
-    return payload.get("status") == "resolved" and bool(payload.get("result"))
+def get(approval_id: str) -> dict[str, Any] | None:
+    """The request's row, or None (never opened, or closed)."""
+    if not approval_id:
+        return None
+    raw = _store().get(_key(approval_id))
+    return dict(raw) if isinstance(raw, dict) else None
 
 
-def _is_resolved(payload: dict[str, Any]) -> bool:
-    return payload.get("status") == "resolved" and payload.get("result") is not None
+def _transition(approval_id: str, mutate) -> tuple[dict[str, Any] | None, bool]:
+    """Compare-and-set on the row: *mutate* returns the new row, or None to
+    leave it. Returns (row as it is now, whether this call changed it). A
+    row that is not there is left alone: an id nobody opened, or a closed
+    one, is never decided."""
+    if get(approval_id) is None:
+        return None, False
+    changed = [False]
+
+    def _apply(prev: Any) -> Any:
+        if not isinstance(prev, dict):
+            # Closed between the read above and this write: the store writes
+            # what this returns, so leave a dated tombstone purge_stale takes.
+            return {"status": "closed", "opened_at": 0}
+        new = mutate(dict(prev))
+        if new is None:
+            return prev
+        changed[0] = True
+        return new
+
+    from kazma_core.config_store import ConfigStore
+
+    store = _store()
+    with _lock:
+        if isinstance(store, ConfigStore) or hasattr(store, "atomic_update"):
+            row = store.atomic_update(_key(approval_id), _apply, category="swarm")
+        else:  # a store without CAS (a test double): one process only
+            row = _apply(store.get(_key(approval_id)))
+            if changed[0]:
+                store.set(_key(approval_id), row, category="swarm")
+    return (dict(row) if isinstance(row, dict) else None), changed[0]
 
 
-def _should_settle_reject(payload: dict[str, Any], reject_votes: int) -> bool:
-    expected = max(1, int(payload.get("expected_voters") or 1))
-    if reject_votes >= expected:
-        return True
-    deadline = payload.get("deadline_at")
-    if deadline is not None:
-        try:
-            if time.time() >= float(deadline):
-                return True
-        except (TypeError, ValueError):
-            pass
-    return False
-
-
-def _wake(task_id: str) -> None:
-    ev = _local_events.get(task_id)
-    if ev is not None:
-        ev.set()
-
-
-def create_pending(
-    task_id: str,
+def open_request(
+    approval_id: str,
     *,
-    meta: dict[str, Any] | None = None,
-    expected_voters: int = 1,
-    deadline: float | None = None,
-) -> None:
-    """Register a pending approval (local event + durable row).
+    tool: str,
+    args: str | None,
+    deadline: float,
+    platforms: int = 1,
+) -> dict[str, Any]:
+    """Open the row for a new request. An id is opened once: a row already
+    there (a reused id) raises, so no request ever inherits a decision."""
+    if not approval_id:
+        raise ValueError("an approval request needs an id")
+    row = {
+        "status": "pending",
+        "tool": tool,
+        "args_hash": args_hash(tool, args),
+        "opened_at": time.time(),
+        "deadline_at": float(deadline),
+        "platforms": max(1, int(platforms or 1)),
+    }
+    created = [False]
 
-    Idempotent while pending: later calls raise ``expected_voters`` to the
-    max seen (FanOut stamps N, then each adapter stamps 1) and keep
-    reject votes. A settled True is never reset. This is the swarm-bus
-    shared wait — not web ``claim_gate``.
-    """
-    if not task_id:
-        return
-    expected = max(1, int(expected_voters or 1))
+    def _create(prev: Any) -> Any:
+        if prev is not None:
+            return prev
+        created[0] = True
+        return row
+
+    store = _store()
     with _lock:
-        if _local_results.get(task_id) is True:
-            return
-        if task_id not in _local_events:
-            _local_events[task_id] = asyncio.Event()
-
-        prev = _load_payload(task_id)
-        if _is_resolved_true(prev):
-            _local_results[task_id] = True
-            _wake(task_id)
-            return
-
-        if prev.get("status") == "pending":
-            expected = max(expected, int(prev.get("expected_voters") or 1))
-            reject_votes = int(prev.get("reject_votes") or 0)
-            created_at = prev.get("created_at") or time.time()
-            prev_deadline = prev.get("deadline_at")
-            if deadline is None:
-                deadline = prev_deadline
-            elif prev_deadline is not None:
-                try:
-                    deadline = min(float(deadline), float(prev_deadline))
-                except (TypeError, ValueError):
-                    deadline = prev_deadline
-        else:
-            # Fresh pending (or reuse after a settled False).
-            reject_votes = 0
-            created_at = time.time()
-            _local_results.pop(task_id, None)
-            ev = _local_events.get(task_id)
-            if ev is not None:
-                ev.clear()
-
-        payload: dict[str, Any] = {
-            "status": "pending",
-            "created_at": created_at,
-            "result": None,
-            "expected_voters": expected,
-            "reject_votes": reject_votes,
-            **(prev if prev.get("status") == "pending" else {}),
-            **(meta or {}),
-        }
-        payload["status"] = "pending"
-        payload["result"] = None
-        payload["expected_voters"] = expected
-        payload["reject_votes"] = reject_votes
-        payload["created_at"] = created_at
-        if deadline is not None:
-            payload["deadline_at"] = float(deadline)
-        _save_payload(task_id, payload)
+        if hasattr(store, "atomic_update"):
+            store.atomic_update(_key(approval_id), _create, category="swarm")
+        elif store.get(_key(approval_id)) is None:
+            created[0] = True
+            store.set(_key(approval_id), row, category="swarm")
+        if not created[0]:
+            raise ValueError(f"approval id {approval_id!r} is already in use")
+    return row
 
 
-def resolve(task_id: str, approved: bool) -> None:
-    """Resolve an approval from any replica/platform callback.
-
-    True settles immediately and is sticky. False is a reject vote and
-    only settles denied when every expected voter has rejected or the
-    overall deadline has passed. Does not clobber an existing True.
-    """
-    if not task_id:
-        return
-    should_evict = False
-    with _lock:
-        if _local_results.get(task_id) is True:
-            return
-
-        def _mutate(prev: Any) -> dict[str, Any]:
-            cur = dict(prev) if isinstance(prev, dict) else {}
-            if _is_resolved_true(cur):
-                return cur
-            if cur.get("status") == "resolved" and cur.get("result") is False:
-                return cur
-
-            expected = max(1, int(cur.get("expected_voters") or 1))
-            reject_votes = int(cur.get("reject_votes") or 0)
-            payload = dict(cur)
-            payload.setdefault("created_at", time.time())
-            payload["expected_voters"] = expected
-
-            if approved:
-                payload.update(
-                    {
-                        "status": "resolved",
-                        "result": True,
-                        "resolved_at": time.time(),
-                        "reject_votes": reject_votes,
-                    }
-                )
-            else:
-                reject_votes += 1
-                payload["reject_votes"] = reject_votes
-                if _should_settle_reject(payload, reject_votes):
-                    payload.update(
-                        {
-                            "status": "resolved",
-                            "result": False,
-                            "resolved_at": time.time(),
-                        }
-                    )
-                else:
-                    payload["status"] = "pending"
-                    payload["result"] = None
-            return payload
-
-        try:
-            from kazma_core.config_store import ConfigStore, get_config_store
-
-            cs = get_config_store()
-            if isinstance(cs, ConfigStore):
-                payload = cs.atomic_update(_key(task_id), _mutate, category="swarm")
-            else:
-                prev = _load_payload(task_id)
-                payload = _mutate(prev)
-                _save_payload(task_id, payload)
-        except Exception as exc:
-            logger.debug("[shared_approvals] atomic_update failed, falling back to local: %s", exc)
-            prev = _load_payload(task_id)
-            payload = _mutate(prev)
-            _save_payload(task_id, payload)
-
-        if _is_resolved_true(payload):
-            _local_results[task_id] = True
-            _wake(task_id)
-            should_evict = True
-        elif payload.get("status") == "resolved" and payload.get("result") is False:
-            _local_results[task_id] = False
-            _wake(task_id)
-            should_evict = True
-
-    if should_evict:
-        _schedule_eviction(task_id)
-
-
-def get_result(task_id: str) -> bool | None:
-    """Return True/False if resolved, else None."""
-    if task_id in _local_results:
-        return _local_results[task_id]
-    raw = _load_payload(task_id)
-    if _is_resolved(raw):
-        return bool(raw.get("result"))
-    return None
-
-
-async def wait_for_resolution(task_id: str, timeout: float = 60.0) -> bool:
-    """Wait until resolved. Returns approved bool (False on timeout).
-
-    A timeout is a reject *vote* (H-12). With ``expected_voters > 1`` it
-    does not globally deny until every voter has rejected or the stamped
-    deadline passes, so a later Approve on another platform can still win.
-    """
-    if not task_id:
+def resolve(approval_id: str, approved: bool, *, actor: str = "", platform: str = "") -> bool:
+    """A human's decision from a platform callback. Decides a PENDING row
+    only, once: an id nobody opened, a closed one or a decided one is left
+    as it is (False). True when this call decided it."""
+    if not approval_id:
         return False
 
-    existing = get_result(task_id)
-    if existing is not None:
-        return existing
+    def _decide(row: dict[str, Any]) -> dict[str, Any] | None:
+        if row.get("status") != "pending":
+            return None
+        row.update(status="approved" if approved else "denied", actor=str(actor or ""),
+                   platform=str(platform or ""), decided_at=time.time())
+        return row
 
-    create_pending(task_id)  # ensure local event exists; merge, do not reset
-    ev = _local_events[task_id]
-    deadline = time.monotonic() + max(0.5, float(timeout))
-    poll = 0.15
+    _row, changed = _transition(approval_id, _decide)
+    if changed:
+        _wake(approval_id)
+    return changed
 
-    while time.monotonic() < deadline:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
+
+def settle(approval_id: str, outcome: str) -> bool:
+    """End a pending request without a decision: ``timeout`` or ``cancelled``."""
+    if outcome not in _ENDINGS:
+        raise ValueError(f"not an ending: {outcome!r}")
+
+    def _end(row: dict[str, Any]) -> dict[str, Any] | None:
+        if row.get("status") != "pending":
+            return None
+        row.update(status=outcome, decided_at=time.time())
+        return row
+
+    _row, changed = _transition(approval_id, _end)
+    if changed:
+        _wake(approval_id)
+    return changed
+
+
+def _wake(approval_id: str) -> None:
+    """Wake this process's waiters, from any thread."""
+    with _lock:
+        waiter = _waiters.get(approval_id)
+    if waiter is None:
+        return
+    ev, loop = waiter
+    if loop.is_closed():
+        return
+    try:
+        if asyncio.get_running_loop() is loop:
+            ev.set()
+            return
+    except RuntimeError:
+        pass
+    loop.call_soon_threadsafe(ev.set)
+
+
+async def _wait_outcome(approval_id: str) -> dict[str, Any]:
+    """Wait until the request leaves ``pending``; returns its row.
+
+    The deadline is the row's own (the owner set it at open): the first
+    waiter past it settles ``timeout``. Cancelled while waiting, the request
+    is settled ``cancelled`` before the cancellation goes on. Every durable
+    read and write runs off the event loop."""
+    loop = asyncio.get_running_loop()
+    with _lock:
+        waiter = _waiters.get(approval_id)
+        if waiter is None or waiter[1] is not loop:
+            waiter = (asyncio.Event(), loop)
+            _waiters[approval_id] = waiter
+    ev = waiter[0]
+    try:
+        while True:
+            row = await asyncio.to_thread(get, approval_id)
+            if row is None or row.get("status") == "closed":  # closed by its owner
+                return {"status": "cancelled"}
+            if row.get("status") != "pending":
+                return row
+            remaining = float(row.get("deadline_at") or 0) - time.time()
+            if remaining <= 0:
+                await asyncio.to_thread(settle, approval_id, "timeout")
+                continue
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=min(_POLL_S, remaining))
+            except TimeoutError:
+                pass
+    except asyncio.CancelledError:
+        await asyncio.shield(asyncio.to_thread(settle, approval_id, "cancelled"))
+        raise
+
+
+def close(approval_id: str) -> None:
+    """Delete the row: its owner has read the outcome. A later callback for
+    this id finds nothing and changes nothing."""
+    with _lock:
+        _waiters.pop(approval_id, None)
+    try:
+        _store().delete(_key(approval_id))
+    except Exception:  # a store without delete (a test double), or a failure
+        logger.warning("[shared_approvals] could not delete approval %s", approval_id, exc_info=True)
+
+
+def purge_stale(older_than_s: float = 86400.0, *, now: float | None = None) -> int:
+    """Delete the rows whose owner never closed them (a crash mid-request).
+    The maintenance cadence runs it; a row that old has no waiter."""
+    store = _store()
+    cutoff = (now if now is not None else time.time()) - older_than_s
+    try:
+        rows = store.get(_KEY_PREFIX.rstrip(".")) or {}
+    except Exception:
+        logger.warning("[shared_approvals] could not list approval rows", exc_info=True)
+        return 0
+    removed = 0
+    if not isinstance(rows, dict):
+        return 0
+    for approval_id, row in rows.items():
+        if isinstance(row, dict) and float(row.get("opened_at") or 0) < cutoff:
+            close(str(approval_id))
+            removed += 1
+    return removed
+
+
+# ── For the platform adapters: one card, one outcome ───────────────────────
+
+_CARD_EDIT_TIMEOUT_S = 10.0
+
+
+def outcome_text(row: dict[str, Any]) -> str:
+    """The final line a card shows, the same on every platform (SW-S05)."""
+    status = row.get("status")
+    by = row.get("actor") or ""
+    on = row.get("platform") or ""
+    who = (f" by {by}" if by else "") + (f" on {on}" if on else "")
+    if status == "approved":
+        return f"✅ APPROVED{who}"
+    if status == "denied":
+        return f"❌ DENIED{who}: the tool did not run"
+    if status == "timeout":
+        return "⏱️ TIMED OUT: nobody answered, the tool did not run"
+    return "⛔ CANCELLED: the request ended before an answer, the tool did not run"
+
+
+async def await_card(approval_id: str, edit) -> bool:
+    """Wait for the request's outcome and show it on this platform's card.
+
+    *edit* is ``async (row) -> None`` and replaces the card's buttons with
+    :func:`outcome_text`. Cancelled while waiting, the card is edited to
+    "cancelled" (bounded, shielded) before the cancellation goes on: a card
+    left with live buttons invited a click that could decide nothing.
+    Returns True only for ``approved``."""
+    try:
+        row = await _wait_outcome(approval_id)
+    except asyncio.CancelledError:
         try:
-            await asyncio.wait_for(ev.wait(), timeout=min(poll, remaining))
-            result = get_result(task_id)
-            if result is not None:
-                return result
-        except TimeoutError:
-            pass
+            await asyncio.shield(asyncio.wait_for(edit({"status": "cancelled"}), _CARD_EDIT_TIMEOUT_S))
+        except (asyncio.CancelledError, Exception):  # the card stays as it is; the row is settled
+            logger.warning("[shared_approvals] could not mark the card of %s cancelled", approval_id)
+        raise
+    try:
+        await asyncio.wait_for(edit(row), _CARD_EDIT_TIMEOUT_S)
+    except Exception:
+        logger.warning("[shared_approvals] could not show the outcome on the card of %s", approval_id,
+                       exc_info=True)
+    return row.get("status") == "approved"
 
-        result = get_result(task_id)
-        if result is not None:
-            return result
 
-    logger.warning("[shared_approvals] timeout task_id=%s", task_id)
-    if get_result(task_id) is None:
-        resolve(task_id, False)
-    settled = get_result(task_id)
-    return bool(settled) if settled is not None else False
+def resolve_from_callback(approval_id: str, approved: bool, *, actor: str = "", platform: str = "") -> None:
+    """A platform button: decide the request, off the event loop when one
+    runs here (the decision is a settings-store write, SW-S12)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        _resolve_reported(approval_id, approved, actor=actor, platform=platform)
+        return
+    from kazma_core.background import spawn_background
+
+    spawn_background(
+        asyncio.to_thread(_resolve_reported, approval_id, approved, actor=actor, platform=platform),
+        name=f"swarm-approval:{approval_id}",
+    )
+
+
+def _resolve_reported(approval_id: str, approved: bool, *, actor: str, platform: str) -> bool:
+    """:func:`resolve`, saying when the decision could not be recorded (Swarm
+    audit SW-S15: the adapters swallowed it -- the human pressed a button, the
+    request stayed pending and timed out, and nothing said why)."""
+    try:
+        return resolve(approval_id, approved, actor=actor, platform=platform)
+    except Exception:
+        logger.warning(
+            "[SwarmApproval] %s's %s on request %s (%s) could not be recorded; the "
+            "request stays pending until it times out",
+            actor or "someone", "Approve" if approved else "Deny", approval_id,
+            platform or "?", exc_info=True,
+        )
+        from kazma_core.metrics import record_swarm_failure
+
+        record_swarm_failure("approval_resolve")
+        return False
+
+
+#: A swarm card's button data: the decision and the request's id.
+_BUTTON_PREFIXES = (("swarm_approve_", True), ("swarm_reject_", False))
+
+
+def decide_from_button(data: str, *, actor: str = "", platform: str = "") -> str | None:
+    """A swarm card's button press on any platform: decide the request its
+    data names (``swarm_approve_<id>`` / ``swarm_reject_<id>``) and return
+    the id, or None when *data* is not a swarm button. The row is shared, so
+    no adapter instance is needed: a sender rebuilt since the card was posted
+    (a saved setting, AGENTS §48) does not lose the click. An id nobody is
+    waiting on changes nothing (:func:`resolve`)."""
+    for prefix, approved in _BUTTON_PREFIXES:
+        if data.startswith(prefix):
+            approval_id = data[len(prefix):]
+            if approval_id:
+                resolve_from_callback(approval_id, approved, actor=actor, platform=platform)
+                return approval_id
+    return None

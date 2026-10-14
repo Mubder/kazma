@@ -569,12 +569,24 @@ def test_approve_endpoint_resumes_pipeline():
     assert payload["result_status"] == "paused"
     task_id = payload["task_id"]
 
-    # Approve via API
-    approve_response = client.post(f"/api/swarm/tasks/{task_id}/approve")
-    assert approve_response.status_code == 200
-    approve_payload = approve_response.json()
-    assert approve_payload["status"] == "success"
-    assert len(approve_payload["worker_results"]) == 3
+    # Approve via API: answered at once (202), the pipeline resumes in the
+    # background (Swarm audit SW-S08); the client keeps its loop open.
+    with client:
+        approve_response = client.post(f"/api/swarm/tasks/{task_id}/approve")
+        assert approve_response.status_code == 202
+        approve_payload = approve_response.json()
+        assert approve_payload["status"] == "ok" and approve_payload["task_status"] == "running"
+        import time
+
+        deadline = time.monotonic() + 10
+        done = None
+        while time.monotonic() < deadline:
+            done = engine.get_task(task_id)
+            if done is not None and done.result is not None and done.result.status == "success":
+                break
+            time.sleep(0.05)
+    assert done is not None and done.result.status == "success"
+    assert len(done.result.worker_results) == 3
     assert call_log == ["alpha", "beta", "gamma"]
 
 
@@ -615,7 +627,7 @@ def test_reject_endpoint_aborts_pipeline():
     reject_response = client.post(f"/api/swarm/tasks/{task_id}/reject")
     assert reject_response.status_code == 200
     reject_payload = reject_response.json()
-    assert reject_payload["status"] == "failed"
+    assert reject_payload["status"] == "ok" and reject_payload["task_status"] == "failed"
     assert len(reject_payload["worker_results"]) == 1
 
 

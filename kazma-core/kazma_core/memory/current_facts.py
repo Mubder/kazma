@@ -92,8 +92,13 @@ def normalize_service_slug(name: str) -> str:
     key2 = re.sub(r"\s+", " ", key2)
     if key2 in _SERVICE_ALIASES:
         return _SERVICE_ALIASES[key2]
-    slug = re.sub(r"[^a-z0-9]+", "_", key2).strip("_")
-    return slug[:40]
+    if not key2.strip():
+        return ""
+    # The one id rule (entity_resolution.slug, Memory audit M02): a service
+    # named in Arabic or Chinese kept no letter under ``a-z0-9`` and was lost.
+    from kazma_core.memory.entity_resolution import slug
+
+    return slug(key2)[:40].strip("_")
 
 
 def is_functional_current_predicate(predicate: str) -> bool:

@@ -39,7 +39,7 @@ def test_saved_text_comes_back_trimmed():
 def test_too_long_is_refused_not_cut():
     profile.set_about("default", ABOUT)
     out = profile.set_about("default", "x" * (profile.ABOUT_MAX_CHARS + 1))
-    assert out["ok"] is False and str(profile.ABOUT_MAX_CHARS) in out["error"]
+    assert out["ok"] is False and out["code"] == "about_too_long" and out["max"] == profile.ABOUT_MAX_CHARS
     assert profile.get_about("default")["about"] == ABOUT  # the saved text stands
 
 

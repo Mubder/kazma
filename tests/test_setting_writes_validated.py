@@ -45,6 +45,7 @@ def test_values_a_setting_can_hold(key, value, expect) -> None:
     ("checkpoints.retention_days", "forever"),
     ("notifications.lifecycle.events", ["started", "a_message_kazma_never_sends"]),
     ("notifications.lifecycle.events", 7),
+    ("memory.tenant_mode", "per_galaxy"),
 ])
 def test_values_a_setting_cannot_hold(key, value) -> None:
     with pytest.raises(SettingRejected):
@@ -54,9 +55,10 @@ def test_values_a_setting_cannot_hold(key, value) -> None:
 def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.lifecycle_notifier import EVENTS_KEY
+    from kazma_core.memory.config import TENANT_MODE_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
-    assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY}
+    assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY, TENANT_MODE_KEY}
 
 
 # ── the TUI's client: an answered refusal is not "no server" ───────────────

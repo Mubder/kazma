@@ -27,10 +27,20 @@ whatever the turn's own time.
 A turn is already in memory when an episode of the same conversation has the
 same question -- counted, so a question asked twice needs two -- or when an
 erased row's stub starts with it (``rehydrate`` owns those).
+
+The cursors live in the memory database (``memory_reconcile_state``,
+2026-10-14), beside what they describe. In the settings store, a memory
+database restored from a backup met a cursor that had already passed the
+chats changed since the backup: their newer turns were never memories again
+(the restore drill, ``tests/test_memory_restore_drill.py``). A restored copy
+now carries the cursor of its own moment. A database without the row (an
+older build's, or an older backup) reads every chat once: a turn already in
+memory is skipped, so the rescan only adds what is missing.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -43,9 +53,10 @@ from kazma_core.memory.chat_history import STORE_ERRORS
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["STATE_KEY", "run_turn_reconcile_pass"]
+__all__ = ["STATE_KEY", "read_state", "run_turn_reconcile_pass"]
 
-#: ConfigStore key: the cursor ``(updated_at, session_id)`` and the last report.
+#: ConfigStore key: the last pass's report (memory health shows it). The
+#: cursors are in the memory database (:func:`read_state`).
 STATE_KEY = "memory.v2.turn_reconcile"
 
 #: A turn younger than this belongs to the live pipeline (close_turn hands it
@@ -194,20 +205,41 @@ def _reconcile(
     return report
 
 
+#: Passes a turn's fact extraction may fail before it is set aside (Memory
+#: audit M27): one turn that always failed kept the cursor before it, and no
+#: later reconciled turn ever had its facts extracted.
+_FACT_ATTEMPTS = 3
+
+
+def _set_aside(conn: sqlite3.Connection, episode_id: str, error: str) -> None:
+    """Mark the episode's facts as failed (``metadata.facts_failed``): the
+    memory stays recallable; only its facts are not extracted."""
+    conn.execute(
+        "UPDATE episodes SET metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.facts_failed', ?) "
+        "WHERE id = ?", (error[:300], episode_id))
+    conn.commit()
+
+
 def _extract_facts(
-    conn: sqlite3.Connection, after_rowid: int, deadline: float
+    conn: sqlite3.Connection, after_rowid: int, deadline: float,
+    attempts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Facts for the episodes this pass wrote, oldest write first.
 
     Same two passes as a live turn (``consolidator._run_turn_memory``), at
-    the turn's own time. A failing turn raises: the cursor stays before it
-    and the next pass tries again -- an outage is never a verdict.
+    the turn's own time. A turn whose extraction fails keeps the cursor before
+    it and the next pass tries again; after ``_FACT_ATTEMPTS`` passes it is set
+    aside (``metadata.facts_failed``, a WARNING naming it) and the cursor moves
+    on. *attempts* (episode id -> failed passes) carries over between passes in
+    the reconcile state. A locked database is an outage, never a verdict: it
+    raises to the maintenance runner and counts nothing.
     """
     from kazma_core.memory.consolidator import _v2_extract_sync
     from kazma_core.memory.task_queue import enqueue_task
 
+    attempts = dict(attempts or {})
     report: dict[str, Any] = {"facts_turns": 0, "deep_queued": 0, "facts_after": after_rowid,
-                              "facts_done": False}
+                              "facts_done": False, "fact_attempts": attempts, "facts_set_aside": 0}
     rows = conn.execute(
         """SELECT rowid, id, session_id, turn_number, user_text, assistant_text, tenant_id,
                   created_at
@@ -222,7 +254,26 @@ def _extract_facts(
         messages = [{"role": "user", "content": user or ""}]
         if answer:
             messages.append({"role": "assistant", "content": answer})
-        _v2_extract_sync(messages, session_id=session, turn=turn, tenant_id=tenant, now=at)
+        try:
+            _v2_extract_sync(messages, session_id=session, turn=turn, tenant_id=tenant, now=at)
+        except sqlite3.OperationalError:
+            raise  # locked or busy: an outage, counted by the runner (Memory audit M20)
+        except (sqlite3.Error, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
+            failed = attempts.get(str(episode_id), 0) + 1
+            error = f"{type(exc).__name__}: {exc}"
+            if failed < _FACT_ATTEMPTS:
+                attempts[str(episode_id)] = failed
+                logger.info("[memory] facts of reconciled turn %s failed (pass %d of %d): %s",
+                            episode_id, failed, _FACT_ATTEMPTS, error)
+                return report  # the cursor stays before it
+            attempts.pop(str(episode_id), None)
+            _set_aside(conn, str(episode_id), error)
+            logger.warning("[memory] facts of reconciled turn %s set aside after %d failed passes: %s",
+                           episode_id, failed, error)
+            report["facts_set_aside"] += 1
+            report["facts_after"] = rowid
+            continue
+        attempts.pop(str(episode_id), None)
         if enqueue_task("micro_consolidation", {"episode_id": episode_id}):
             report["deep_queued"] += 1
         report["facts_turns"] += 1
@@ -231,38 +282,119 @@ def _extract_facts(
     return report
 
 
-def run_turn_reconcile_pass(*, time_budget_s: float = 60.0) -> dict[str, Any]:
-    """One reconcile pass (15-minute cadence); the cursor and report are kept
-    under :data:`STATE_KEY`. Returns the report (``{}`` without a database)."""
-    from kazma_core.config_store import apply_sqlite_pragmas, get_config_store
+def _open_primary() -> sqlite3.Connection | None:
+    from kazma_core.config_store import apply_sqlite_pragmas
     from kazma_core.paths import primary_memory_db
 
     db = primary_memory_db()
     if not db or not os.path.isfile(db):
+        return None
+    from kazma_core.memory.schema_v2 import RECONCILE_STATE_DDL
+
+    conn = sqlite3.connect(db, timeout=15)
+    apply_sqlite_pragmas(conn, busy_timeout=15000)
+    conn.executescript(RECONCILE_STATE_DDL)  # a database an older build left
+    return conn
+
+
+def read_state(conn: sqlite3.Connection | None) -> dict[str, Any]:
+    """The cursors this memory database was reconciled up to: ``after``
+    (``(updated_at, session_id)`` of the chat store), ``facts_after`` (an
+    episode rowid) and ``fact_attempts``. Without a row -- an older build's
+    database, or one restored from an older backup -- every chat is read
+    again (``after`` empty), and the facts cursor goes on from where the
+    settings store had it (where it lived until 2026-10-14), never past this
+    database's newest episode: a restored copy's rebuilt turns come after
+    it. With no cursor anywhere, from the start (a fact written twice adds
+    nothing)."""
+    own = conn is None
+    conn = conn or _open_primary()
+    if conn is None:
+        return {"after": ["", ""], "facts_after": 0, "fact_attempts": {}}
+    try:
+        row = conn.execute("SELECT state_json FROM memory_reconcile_state WHERE id = 1").fetchone()
+        if row is not None:
+            state = json.loads(row[0] or "{}")
+            if isinstance(state, dict):
+                return {"after": list(state.get("after") or ["", ""]),
+                        "facts_after": int(state.get("facts_after") or 0),
+                        "fact_attempts": dict(state.get("fact_attempts") or {})}
+        newest = int(conn.execute("SELECT COALESCE(MAX(rowid), 0) FROM episodes").fetchone()[0])
+        legacy = _legacy_facts_after()
+        return {"after": ["", ""], "facts_after": min(legacy, newest) if legacy is not None else 0,
+                "fact_attempts": {}}
+    finally:
+        if own:
+            conn.close()
+
+
+def _legacy_facts_after() -> int | None:
+    """The facts cursor an older build kept in the settings store, if any."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.db.pg_helpers import store_errors
+
+    try:
+        state = get_config_store().get(STATE_KEY)
+    except store_errors():
+        return None
+    if isinstance(state, dict) and state.get("facts_after") is not None:
+        try:
+            return int(state["facts_after"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _write_state(conn: sqlite3.Connection | None, state: dict[str, Any]) -> None:
+    """Record the cursors in this memory database (one row)."""
+    own = conn is None
+    conn = conn or _open_primary()
+    if conn is None:
+        return
+    try:
+        value = json.dumps({"after": list(state.get("after") or ["", ""]),
+                            "facts_after": int(state.get("facts_after") or 0),
+                            "fact_attempts": dict(state.get("fact_attempts") or {})})
+        with conn:
+            conn.execute(
+                "INSERT INTO memory_reconcile_state (id, state_json, updated_at) VALUES (1, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at",
+                (value, time.time()),
+            )
+    finally:
+        if own:
+            conn.close()
+
+
+def run_turn_reconcile_pass(*, time_budget_s: float = 60.0) -> dict[str, Any]:
+    """One reconcile pass (15-minute cadence). The cursors are kept in the
+    memory database (:func:`read_state`); the report under :data:`STATE_KEY`.
+    Returns the report (``{}`` without a database)."""
+    from kazma_core.config_store import get_config_store
+
+    conn = _open_primary()
+    if conn is None:
         return {}
-    store = get_config_store()
-    state = store.get(STATE_KEY)
-    state = state if isinstance(state, dict) else {}
-    after = tuple(state.get("after") or ("", ""))
-    facts_after = int(state.get("facts_after") or 0)
     started = time.monotonic()
     deadline = started + max(0.0, float(time_budget_s))
-    conn = sqlite3.connect(db, timeout=15)
     try:
-        apply_sqlite_pragmas(conn, busy_timeout=15000)
+        state = read_state(conn)
+        after = tuple(state["after"])
+        facts_after = state["facts_after"]
+        fact_attempts = state["fact_attempts"]
         report = _reconcile(conn, after, deadline, time.time())
-        report.update(_extract_facts(conn, facts_after, deadline))
+        report.update(_extract_facts(conn, facts_after, deadline, fact_attempts))
+        if (list(after) != report["after"] or report["facts_after"] != facts_after
+                or report["fact_attempts"] != fact_attempts):
+            _write_state(conn, report)
     except STORE_ERRORS:
         logger.warning("[memory] conversation history unreadable; turn reconcile waits", exc_info=True)
         return {"error": "chat store unreadable"}
     finally:
         conn.close()
     report["duration_s"] = round(time.monotonic() - started, 3)
-    if (report["turns_written"] or list(after) != report["after"]
-            or report["facts_after"] != facts_after):
-        store.set(STATE_KEY, {"after": report["after"], "facts_after": report["facts_after"],
-                              "last": {**report, "at": time.time()}},
-                  category="memory")
+    if report["turns_written"] or report["facts_turns"] or report["facts_set_aside"]:
+        get_config_store().set(STATE_KEY, {"last": {**report, "at": time.time()}}, category="memory")
     if report["turns_written"]:
         logger.info(
             "[memory] %d conversation turns from %d sessions added to memory from the chat "

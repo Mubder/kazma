@@ -69,10 +69,17 @@ def conn(tmp_path):
     db.close()
 
 
+def _outbox_rows(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM memory_mirror_outbox").fetchone()[0]
+
+
 def _rows_written(conn: sqlite3.Connection, sql: str) -> int:
-    before = conn.total_changes
+    """Rows the statement wrote, the mirror outbox's entry aside: a tier or
+    validity change is one the Postgres mirror must hear about (Memory audit
+    M31), and that queue is not the full-text index this file measures."""
+    before, queued = conn.total_changes, _outbox_rows(conn)
     conn.execute(sql)
-    return conn.total_changes - before
+    return conn.total_changes - before - (_outbox_rows(conn) - queued)
 
 
 def _integrity(conn: sqlite3.Connection) -> None:

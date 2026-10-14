@@ -9,8 +9,56 @@ from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "memory.archive_dead": {
-        "ar": "أرشفة المعتقدات الملغاة",
-        "en": "Archive invalidated beliefs",
+        "ar": "أرشفة الحقائق المنتهية (الملغاة أو المستبدلة، حتى 2000 في كل تشغيل)",
+        "en": "Archive ended facts (invalidated or superseded, up to 2000 a run)",
+    },
+    "memory.err.not_found": {
+        "ar": "غير موجود: ربما تغيّر أو حُذف في الأثناء",
+        "en": "Not found: it may have been changed or removed meanwhile",
+    },
+    "memory.err.protected": {
+        "ar": "هذا الكيان محمي",
+        "en": "This entity is protected",
+    },
+    "memory.page.hygiene_partial": {
+        "ar": "فشلت بعض إجراءات التنظيف",
+        "en": "Some hygiene actions failed",
+    },
+    "memory.page.hygiene_more_left": {
+        "ar": "اكتمل التنظيف، وبقيت حقائق منتهية للتشغيل التالي",
+        "en": "Hygiene complete; more ended facts are left for the next run",
+    },
+    "memory.console.forgotten_remote_pending": {
+        "ar": "نُسيت. تُزال النسخة الموجودة في فهرس المتجهات البعيد في جولة الصيانة التالية.",
+        "en": "Forgotten. The copy in the remote vector index is removed at the next maintenance pass.",
+    },
+    "memory.mc.search_memories": {
+        "ar": "ابحث في الذكريات بكلماتها",
+        "en": "Search memories by their words",
+    },
+    "memory.mc.newer": {
+        "ar": "الأحدث",
+        "en": "Newer",
+    },
+    "memory.mc.older": {
+        "ar": "الأقدم",
+        "en": "Older",
+    },
+    "memory.console.page_range": {
+        "ar": "{from}–{to} من {total}",
+        "en": "{from}–{to} of {total}",
+    },
+    "memory.console.no_memory_matches": {
+        "ar": "لا توجد ذكرى تحمل هذه الكلمات.",
+        "en": "No memory holds these words.",
+    },
+    "memory.console.hit_summary": {
+        "ar": "ملخص أسبوعي",
+        "en": "WEEKLY SUMMARY",
+    },
+    "memory.console.probe_degraded": {
+        "ar": "البحث بالمعنى غير متاح: مطابقات الكلمات فقط.",
+        "en": "Meaning search was unavailable: keyword matches only.",
     },
     "memory.confirm_delete": {
         "ar": "حذف هذا الكيان؟",
@@ -421,8 +469,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Memories of conversations",
     },
     "memory.mc.download_everything_kazma_remembers_as": {
-        "ar": "نزّل كل ما يتذكره Kazma بصيغة JSON",
-        "en": "Download everything Kazma remembers, as JSON",
+        "ar": "نزّل ما يتذكره Kazma بصيغة JSON، والملف يذكر ما لا يتضمنه",
+        "en": "Download what Kazma remembers, as JSON; the file names anything it leaves out",
     },
     "memory.mc.weekly_summaries": {
         "ar": "الملخصات الأسبوعية",
@@ -877,12 +925,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "post-turn: –",
     },
     "memory.console.post_turn_ok": {
-        "ar": "ناجحة: {ok} · فاشلة م/س/ط: {m}/{e}/{q}",
-        "en": "ok: {ok} · fail m/e/q: {m}/{e}/{q}",
+        "ar": "ناجحة: {ok} · فاشلة م/س/ع/ط: {m}/{e}/{d}/{q}",
+        "en": "ok: {ok} · fail m/e/d/q: {m}/{e}/{d}/{q}",
     },
     "memory.console.post_turn_ok_title": {
-        "ar": "خطوات ما بعد الدور الفاشلة: م = الكتابة إلى المرآة، س = استخراج الحقائق، ط = الطابور",
-        "en": "Failed post-turn steps: m = mirror write, e = fact extraction, q = queue",
+        "ar": "خطوات ما بعد الدور الفاشلة: م = الكتابة إلى المرآة، س = استخراج الحقائق، "
+              "ع = استخراج النموذج العميق (يُعاد لاحقًا)، ط = الطابور",
+        "en": "Failed post-turn steps: m = memory write, e = fact extraction, "
+              "d = the model's deep pass (retried later), q = queue",
     },
     "memory.console.last_error": {
         "ar": "آخر خطأ: {error}",
@@ -1174,8 +1224,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Clear failed tasks?",
     },
     "memory.console.clear_failed_message": {
-        "ar": "حذف صفوف المهام المتوقفة نهائيًا من الطابور.",
-        "en": "Permanently delete dead-letter queue rows.",
+        "ar": "حذف صفوف المهام المتوقفة نهائيًا من الطابور. تبقى المهمة الفاشلة هنا حتى تعيد "
+              "محاولتها أو تمسحها: لم تعد تُحذف بعد أسبوع.",
+        "en": "Permanently delete dead-letter queue rows. A failed task stays here until you retry "
+              "or clear it: it is no longer deleted after a week.",
     },
     "memory.console.clear_failed_native": {
         "ar": "مسح كل المهام الفاشلة في الطابور؟",
@@ -1342,8 +1394,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Forget this memory?",
     },
     "memory.console.forget_memory_message": {
-        "ar": "يتوقف Kazma عن تذكّر هذا الجزء من المحادثة والحقائق التي تعلّمها منه. تبقى المحادثة نفسها كما هي.",
-        "en": "Kazma stops remembering this part of the conversation and the facts it learned from it. The chat itself stays as it is.",
+        "ar": "يتوقف Kazma عن تذكّر هذا الجزء من المحادثة والحقائق التي تعلّمها منه، أينما حُفظت نسخة منها. تبقى المحادثة نفسها كما هي. النسخ الاحتياطية التي سبقت هذا تحتفظ به حتى تُستبدل (حتى سنة للنسخ الخارجية).",
+        "en": "Kazma stops remembering this part of the conversation and the facts it learned from it, wherever a copy was kept. The chat itself stays as it is. Backups made before now keep it until they are replaced (up to a year for offsite backups).",
     },
     "memory.console.forgotten": {
         "ar": "نُسيت",

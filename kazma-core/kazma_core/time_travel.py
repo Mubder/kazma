@@ -850,7 +850,16 @@ async def apply_snapshot_to_thread(
     """
     payload = checkpoint_payload_from_snapshot(state, thread_id)
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+    # The state being replaced: its later turns leave memory.
+    before = await graph.aget_state(config)
+    old_messages = list(((before.values if before is not None else None) or {}).get("messages") or [])
     await graph.aupdate_state(config, payload)
+    # A rewind takes the turns after the restored point back from memory too
+    # (Memory audit M09); a fork's new thread holds none.
+    from kazma_core.memory.forget import rewind_memory
+
+    await rewind_memory(thread_id, old_messages, list(payload.get("messages") or []),
+                        tenant_id=str(payload.get("tenant_id") or state.get("tenant_id") or "default"))
     return payload
 
 

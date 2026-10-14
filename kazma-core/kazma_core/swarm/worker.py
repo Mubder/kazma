@@ -65,6 +65,10 @@ class SwarmWorker(ABC):
     capabilities: WorkerCapabilities = field(default_factory=WorkerCapabilities)
     added_at: str = field(default_factory=_utc_now_iso, init=False)
     busy: bool = field(default=False, init=False)
+    # Dispatches running now (Swarm audit SW-E12: busy was a bool, so a
+    # short dispatch's end cleared it under a long one and the autoscaler
+    # reaped the worker mid-dispatch). ``busy`` is ``in_flight > 0``.
+    in_flight: int = field(default=0, init=False)
     last_task: str | None = field(default=None, init=False)
     last_heartbeat: str | None = field(default=None, init=False)
     logs: list[str] = field(default_factory=list, init=False)
@@ -117,6 +121,7 @@ class SwarmWorker(ABC):
 
     def mark_dispatched(self, task: str) -> None:
         """Record dispatch metadata for status and logs."""
+        self.in_flight += 1
         self.busy = True
         self.last_task = task
         self.last_heartbeat = _utc_now_iso()
@@ -126,7 +131,8 @@ class SwarmWorker(ABC):
 
     def mark_completed(self, status: str) -> None:
         """Record completion metadata for status and logs."""
-        self.busy = False
+        self.in_flight = max(0, self.in_flight - 1)
+        self.busy = self.in_flight > 0
         self.last_heartbeat = _utc_now_iso()
         self.logs.append(f"[{self.last_heartbeat}] Task completed with status={status}")
         if len(self.logs) > 100:

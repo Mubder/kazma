@@ -502,18 +502,9 @@ def _backup_one_db(src: Path, dest: Path) -> bool:
     is a longer-held read lock, not a stalled application.
     """
     try:
-        # closing(): a bare ``with sqlite3.connect()`` commits and never
-        # closes (the connection is in a cycle with its statement cache), so
-        # every copied database stayed open until a GC pass — on Windows,
-        # locked against the retention prune and the archive step.
-        from contextlib import closing
+        from kazma_core.db.sqlite_snapshot import snapshot_copy
 
-        with (
-            closing(sqlite3.connect(str(src), timeout=_DB_BUSY_TIMEOUT_S)) as s,
-            closing(sqlite3.connect(str(dest), timeout=_DB_BUSY_TIMEOUT_S)) as d,
-        ):
-            s.backup(d)  # pages=-1: the whole DB, one transaction, no restart
-            d.commit()
+        snapshot_copy(src, dest, timeout_s=_DB_BUSY_TIMEOUT_S)
         return True
     except Exception as exc:
         logger.warning("[universal-backup] DB copy failed %s: %s", src.name, exc)

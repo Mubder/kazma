@@ -69,7 +69,15 @@ async def test_memory_route_and_tools_percent_query_stay_literal_and_tenant_scop
             return capture
     registry = Registry()
     register_memory_tools(registry)
-    beliefs = json.loads(await registry.funcs["memory_list_beliefs"](q="%"))
+    beliefs = _fenced_json(await registry.funcs["memory_list_beliefs"](q="%"))
     assert [b["id"] for b in beliefs["beliefs"]] == ["a"]
-    entities = json.loads(await registry.funcs["memory_admin"](action="list_entities", q="%"))
+    entities = _fenced_json(await registry.funcs["memory_admin"](action="list_entities", q="%"))
     assert [e["id"] for e in entities["entities"]] == ["a"]
+
+
+def _fenced_json(out: str):
+    """The tools fence what they read back as untrusted data (Memory audit
+    M11); the JSON is the observation inside the fence."""
+    assert out.startswith("<kazma:data")
+    body = out.split("--- BEGIN OBSERVATION ---", 1)[1].split("--- END OBSERVATION ---", 1)[0]
+    return json.loads(body)

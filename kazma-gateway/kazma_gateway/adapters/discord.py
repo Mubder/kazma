@@ -681,13 +681,14 @@ class DiscordAdapter(BaseAdapter):
             return
 
         if action.kind == "swarm":
-            task_id = route_swarm_bus(custom_id)
+            # Decide the shared request with the user who pressed; the card
+            # keeps its buttons until the request's owner edits it to the one
+            # final outcome (Swarm audit SW-S05: this branch used to write
+            # "Approved"/"Rejected" itself, whatever the request ended as).
+            task_id = route_swarm_bus(custom_id, actor=f"discord:{_ia_user_id}")
             if task_id is not None:
-                logger.info("[discord] Swarm approval resolved: %s", task_id)
-            old_content = data.get("message", {}).get("content", "")
-            action_label = "✅ Approved" if "approve" in custom_id else "❌ Rejected"
-            new_content = f"{old_content}\n\n*({action_label})*" if old_content else f"*({action_label})*"
-            await _ack({"type": 7, "data": {"content": new_content, "components": []}})
+                logger.info("[discord] Swarm approval answered: %s by %s", task_id, _ia_user_id)
+            await _ack({"type": 6})
             return
 
         # Graph HITL / personality / model pickers → synthetic slash into queue

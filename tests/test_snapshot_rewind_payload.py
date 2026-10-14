@@ -33,6 +33,9 @@ class _Graph:
     def __init__(self) -> None:
         self.writes: list[tuple[dict, dict]] = []
 
+    async def aget_state(self, config: dict) -> None:
+        return None  # an empty thread: nothing to take back from memory
+
     async def aupdate_state(self, config: dict, values: dict) -> None:
         self.writes.append((config, values))
 

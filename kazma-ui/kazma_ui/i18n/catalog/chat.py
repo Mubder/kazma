@@ -143,6 +143,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حُذفت المحادثة ونُسي ما تعلّمه Kazma منها",
         "en": "Chat deleted, and what Kazma learned from it forgotten",
     },
+    "chat.delete_chat_nothing_held": {
+        "ar": "حُذفت المحادثة. لم يكن Kazma يتذكر شيئًا منها.",
+        "en": "Chat deleted. Kazma held no memories of it.",
+    },
     "chat.delete_chat_failed": {
         "ar": "تعذّر الحذف",
         "en": "Delete failed",

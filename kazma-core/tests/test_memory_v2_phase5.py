@@ -50,10 +50,10 @@ def _open_dbs(isolated_data):
     from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
     from kazma_core.paths import memory_ops_db, primary_memory_db
 
-    p = sqlite3.connect(primary_memory_db(), isolation_level=None)
+    p = sqlite3.connect(primary_memory_db(), isolation_level=None, check_same_thread=False)
     p.row_factory = sqlite3.Row
     ensure_primary_schema(p)
-    o = sqlite3.connect(memory_ops_db(), isolation_level=None)
+    o = sqlite3.connect(memory_ops_db(), isolation_level=None, check_same_thread=False)
     ensure_ops_schema(o)
     return p, o
 
@@ -179,7 +179,7 @@ async def test_worker_macro_sleep_handler(isolated_data):
     from kazma_core.paths import memory_ops_db, primary_memory_db
 
     # Seed an old low-importance episode
-    p = sqlite3.connect(primary_memory_db(), isolation_level=None)
+    p = sqlite3.connect(primary_memory_db(), isolation_level=None, check_same_thread=False)
     ensure_primary_schema(p)
     now = time.time()
     p.execute(
@@ -224,9 +224,14 @@ def test_register_v2_handlers_idempotent(isolated_data):
 
 
 @pytest.mark.asyncio
-async def test_procedural_feed_via_tool_registry(isolated_data):
+async def test_procedural_feed_via_tool_registry(isolated_data, monkeypatch):
     from kazma_core.agent.tool_registry import LocalToolRegistry
+    from kazma_core.safety.hitl import TOOL_TIERS
 
+    # A read tool: an unclassified one asks for approval on every path, the
+    # swarm bus included since the Swarm audit (SW-S11), and with no bus it
+    # is refused before it runs -- nothing to record.
+    monkeypatch.setitem(TOOL_TIERS, "echo_tool", "read")
     reg = LocalToolRegistry()
 
     async def echo(**kw):

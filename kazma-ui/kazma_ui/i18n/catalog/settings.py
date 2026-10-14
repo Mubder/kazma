@@ -8,6 +8,10 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "settings.about_me_too_long": {
+        "ar": "نص «عني» أطول من الحد المسموح ({n} / {max}).",
+        "en": "About me is longer than the limit ({n} / {max}).",
+    },
     "settings.connector_status_missing_token": {"en": "Token missing — add a token to connect", "ar": "رمز الوصول مفقود — أضف رمزًا للاتصال"},
     "settings.xt.model_sample_pass": {"en": "Sample content checks passed; production qualification is still required", "ar": "نجحت فحوص محتوى العينة؛ وما زال تأهيل الإنتاج مطلوبًا"},
     "settings.xt.model_sample_hold": {"en": "Model compatibility unconfirmed — inspect the check reasons", "ar": "توافق النموذج غير مؤكّد — راجع أسباب الفحوص"},
@@ -964,8 +968,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Rebuild failed",
     },
     "settings.embedder_rebuild_hint": {
-        "ar": "إعادة البناء تعيد ترميز الصفوف غير الموجودة أصلاً في فضاء المتجهات الحالي فقط (بعد تبديل النموذج يعني ذلك كل الصفوف). يُنشأ نسخ احتياطي (memory_state.db.pre_reembed) تلقائيًا.",
-        "en": "Rebuilding re-encodes only rows not already in the current vector space (after a model switch that is every row). A backup (memory_state.db.pre_reembed) is created automatically.",
+        "ar": "إعادة البناء تعيد ترميز الصفوف غير الموجودة أصلاً في فضاء المتجهات الحالي فقط (بعد تبديل النموذج يعني ذلك كل الصفوف)، ويحتفظ كل صف بمتجهه القديم حتى يُكتب الجديد. تُؤخذ نسخة احتياطية (memory_state.db.pre_reembed) عند كل إعادة بناء وتحل محل السابقة.",
+        "en": "Rebuilding re-encodes only rows not already in the current vector space (after a model switch that is every row); each row keeps its old vector until the new one is written. A backup (memory_state.db.pre_reembed) is taken at each rebuild, replacing the last.",
     },
     "settings.embedder_rebuild_running": {
         "ar": "جارٍ إعادة البناء…",
@@ -1312,16 +1316,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Inject Knowledge Library into every chat turn (with personal memory)",
     },
     "settings.memory_kb_merge_hint": {
-        "ar": "دمج مكتبة المعرفة في مسار المحادثة (حقن موسوم). المخازن تبقى منفصلة؛ النتائج مسيّجة كمستندات غير موثوقة.",
-        "en": "Merge Knowledge Library into the chat path (labeled inject). Stores stay separate; hits are fenced as untrusted docs.",
+        "ar": "دمج مكتبة المعرفة في مسار المحادثة (حقن موسوم). المخازن تبقى منفصلة: لا يُحفظ نص المكتبة في ذاكرة المحادثة، والنتائج مسيّجة كمستندات غير موثوقة.",
+        "en": "Merge Knowledge Library into the chat path (labeled inject). Stores stay separate: library text is never saved into chat memory, and hits are fenced as untrusted docs.",
     },
     "settings.memory_kb_merge_title": {
         "ar": "المعرفة + ذاكرة المحادثة",
         "en": "Knowledge + chat memory",
-    },
-    "settings.memory_kb_promote": {
-        "ar": "ترقية أفضل نتائج المكتبة إلى الذاكرة العرضية (دمج مرن للاستدعاء لاحقًا)",
-        "en": "Promote top KB hits into episodic memory (soft merge for later recall)",
     },
     "settings.memory_kb_smart_search": {
         "ar": "بحث معرفة ذكي — حقن من كل المكتبات النشطة عند الأسئلة التقنية",
@@ -1416,8 +1416,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Sync beliefs + episodes → Postgres",
     },
     "settings.memory_tenant_hint": {
-        "ar": "يتحكم بمشاركة أو عزل الذكريات. المشاركة مناسبة لمستخدم واحد. لكل مستخدم لمواقع متعددة. يسري من الدور التالي.",
-        "en": "Controls whether memories are shared or isolated. Share everything is best for single-user Web+Telegram. Per user is for multi-user SaaS. Takes effect next turn.",
+        "ar": "يتحكم بمشاركة أو عزل الذكريات على تثبيت لمستخدم واحد. مع عدة مستخدمين أو في الإنتاج تكون ذاكرة كل مستأجر له وحده تلقائيًا، ولا يتاح هنا إلا «مشاركة الكل». يسري من الدور التالي.",
+        "en": "Controls whether memories are shared or isolated on a single-user install. With several users or in production each tenant's memory is already its own, and only Share everything is available here. Takes effect next turn.",
     },
     "settings.memory_tenant_mode": {
         "ar": "وضع المستأجر",

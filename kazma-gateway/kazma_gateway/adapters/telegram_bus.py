@@ -11,7 +11,6 @@ code out of kazma-core — maintaining platform neutrality.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from typing import Any
@@ -95,15 +94,14 @@ class TelegramBusAdapter(BusAdapter):
     Features:
     - SwarmReport cards with monospace output blocks
     - Inline keyboard buttons ``[👍 Approve] [👎 Reject]`` for HITL
-    - Callback query routing to resolve ``asyncio.Event``
+    - Callback query routing to decide the shared approval
     - Mobile-friendly card width
     """
 
     def __init__(self, bot_token: str, chat_id: int | str) -> None:
         self._bot_token = bot_token
         self._chat_id = chat_id
-        self._pending_approvals: dict[str, asyncio.Event] = {}
-        self._pending_results: dict[str, bool] = {}
+        self._pending_approvals: set[str] = set()
         self._http: Any = None  # lazy httpx client
 
     @property
@@ -307,8 +305,6 @@ class TelegramBusAdapter(BusAdapter):
     async def request_approval(
         self, approval: ApprovalRequest, timeout: float | None = None
     ) -> bool:
-        if timeout is None:
-            timeout = _APPROVAL_TIMEOUT
         """Post an approval card with inline keyboard buttons.
 
         Buttons: ``[👍 Approve]`` ``[👎 Reject]``
@@ -316,6 +312,8 @@ class TelegramBusAdapter(BusAdapter):
         Waits for the callback query handler to call ``approve()``
         or ``reject()``, or times out after configurable timeout.
         """
+        if timeout is None:
+            timeout = _APPROVAL_TIMEOUT
         safe_name = _escape_md(approval.worker_name)
         safe_task = _escape_md(approval.task_description[:200])
         # Inside a MarkdownV2 ``` code block only `` ` `` and `` \ `` need
@@ -323,7 +321,7 @@ class TelegramBusAdapter(BusAdapter):
         # every other char rendered with a literal backslash — making the HITL
         # approval card hard to read (e.g. `result=\{a:1\}`). Escape only the
         # two characters Telegram requires inside preformatted blocks (audit).
-        _raw_output = approval.proposed_output[:300] if approval.proposed_output else ""
+        _raw_output = approval.proposed_output or ""
         safe_output = _raw_output.replace("\\", "\\\\").replace("`", "\\`")
 
         text = (
@@ -335,7 +333,7 @@ class TelegramBusAdapter(BusAdapter):
         if safe_output:
             text += f"```\n{safe_output}\n```\n"
         text += "━━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"\\(auto\\-reject in {int(timeout)}s\\)"
+        text += f"\\(times out in {int(timeout)}s; the tool does not run unless approved\\)"
 
         # Inline keyboard
         from kazma_gateway.adapters.callback_store import encode_callback_data
@@ -367,81 +365,39 @@ class TelegramBusAdapter(BusAdapter):
             )
             return False
 
-        # Wait for callback — shared store so multi-replica can resolve
+        # The request's one outcome, whatever platform decides it (SW-S04,
+        # SW-S05): shared_approvals waits, and this card shows the outcome.
         from kazma_core.swarm import shared_approvals
 
-        shared_approvals.create_pending(
-            approval.task_id,
-            meta={"platform": "telegram", "worker": approval.worker_name},
-        )
-        # Keep local Event map for same-process fast path
-        event = asyncio.Event()
-        self._pending_approvals[approval.task_id] = event
-        approved: bool = False
-        try:
-            shared_task = asyncio.create_task(
-                shared_approvals.wait_for_resolution(approval.task_id, timeout=timeout)
-            )
-            local_task = asyncio.create_task(
-                asyncio.wait_for(event.wait(), timeout=timeout)
-            )
-            done, pending = await asyncio.wait(
-                [shared_task, local_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for t in pending:
-                t.cancel()
+        msg_id = result.get("result", {}).get("message_id")
+        self._pending_approvals.add(approval.task_id)
 
-            if approval.task_id in self._pending_results:
-                approved = self._pending_results[approval.task_id]
-            elif shared_task in done and not shared_task.cancelled():
-                approved = shared_task.result()
-            else:
-                approved = self._pending_results.get(approval.task_id, False)
-        except (TimeoutError, asyncio.TimeoutError):
-            logger.warning("[TelegramBus] Approval timed out for task %s", approval.task_id)
-            approved = self._pending_results.get(approval.task_id, False)
-        finally:
-            self._pending_approvals.pop(approval.task_id, None)
-            self._pending_results.pop(approval.task_id, None)
-
-        # Edit the original message to show result (remove buttons)
-        if result and result.get("ok"):
-            msg_id = result.get("result", {}).get("message_id")
+        async def _edit(row: dict) -> None:
             if msg_id:
-                result_text = text.replace("⚠️ *APPROVAL REQUIRED*",
-                                           "✅ *APPROVED*" if approved else "❌ *REJECTED*")
-                await self._edit_message(msg_id, result_text)
+                header = _escape_md(shared_approvals.outcome_text(row))
+                body = text.rsplit(chr(10), 1)[0]  # the card without its "times out" line
+                await self._edit_message(msg_id, body.replace("⚠️ *APPROVAL REQUIRED*", f"*{header}*"))
 
-        return approved
+        try:
+            return await shared_approvals.await_card(approval.task_id, _edit)
+        finally:
+            self._pending_approvals.discard(approval.task_id)
 
     # ── Callback handlers (called from telegram.py) ─────────────────
 
-    def approve(self, task_id: str) -> None:
-        """Signal approval for a pending task (local + durable)."""
-        if task_id in self._pending_approvals:
-            self._pending_results[task_id] = True
-            self._pending_approvals[task_id].set()
-        try:
-            from kazma_core.swarm.shared_approvals import resolve
+    def approve(self, task_id: str, *, actor: str = "") -> None:
+        """A human's Approve: decides the request if it is still pending."""
+        from kazma_core.swarm.shared_approvals import resolve_from_callback
 
-            resolve(task_id, True)
-        except Exception:
-            pass
+        resolve_from_callback(task_id, True, actor=actor, platform="telegram")
 
-    def reject(self, task_id: str) -> None:
-        """Signal rejection for a pending task (local + durable)."""
-        if task_id in self._pending_approvals:
-            self._pending_results[task_id] = False
-            self._pending_approvals[task_id].set()
-        try:
-            from kazma_core.swarm.shared_approvals import resolve
+    def reject(self, task_id: str, *, actor: str = "") -> None:
+        """A human's Deny: decides the request if it is still pending (final)."""
+        from kazma_core.swarm.shared_approvals import resolve_from_callback
 
-            resolve(task_id, False)
-        except Exception:
-            pass
+        resolve_from_callback(task_id, False, actor=actor, platform="telegram")
 
-    def handle_callback(self, callback_data: str) -> str | None:
+    def handle_callback(self, callback_data: str, *, actor: str = "") -> str | None:
         """Parse a callback query and resolve the pending approval.
 
         Returns the task_id if handled, None otherwise.
@@ -454,17 +410,9 @@ class TelegramBusAdapter(BusAdapter):
 
         callback_data = decode_callback_data(callback_data)
 
-        if callback_data.startswith("swarm_approve_"):
-            task_id = callback_data[len("swarm_approve_"):]
-            self.approve(task_id)
-            return task_id
+        from kazma_core.swarm.shared_approvals import decide_from_button
 
-        if callback_data.startswith("swarm_reject_"):
-            task_id = callback_data[len("swarm_reject_"):]
-            self.reject(task_id)
-            return task_id
-
-        return None
+        return decide_from_button(callback_data, actor=actor, platform="telegram")
 
     @property
     def pending_count(self) -> int:

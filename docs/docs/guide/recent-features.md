@@ -547,11 +547,14 @@ Chat turn
 | Toggle | Key | Effect |
 |--------|-----|--------|
 | Inject Knowledge into chat | `memory.v2.merge_knowledge_into_chat` | Per-turn KB inject |
-| Promote top KB hits | `memory.v2.promote_kb_to_episodes` | Soft mirror to episodes |
 | **Smart Knowledge search** | `knowledge.smart_search` | On technical Qs, inject from all active libs with chunks |
 | **Explain recall** | `memory.v2.explain_recall` | Channels on the turn's Memory used row (below) |
 
 Kill switch: `KAZMA_KB_AUTO_INJECT=0`.
+
+Library text reaches the turn only: it is never saved into the chat's memory.
+Until 2026-10-13 a "Promote top KB hits" switch (on by default) copied it in as
+if you had said it; the switch is gone, and Kazma clears the copies it made.
 
 **Deep dive:** [Knowledge Library](./knowledge-library) · [Memory best path](./memory-best-path).
 

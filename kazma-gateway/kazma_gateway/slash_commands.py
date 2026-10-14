@@ -394,6 +394,12 @@ def _cmd_memory(text: str, ctx: dict[str, Any]) -> str:
         if not thread:
             return "💾 There is no chat here to set memory for."
         if sub == "off":
+            confirm = parts[2].lower() if len(parts) > 2 else ""
+            if confirm != "confirm":
+                # Forgetting cannot be undone: asked first (Memory audit M36 --
+                # one "/memory off" from any member forgot the whole chat).
+                return ("🔕 This forgets what Kazma remembers from this chat, for good, and stops "
+                        "remembering it. Send `/memory off confirm` to do it.")
             set_chat_remembered(thread, False, tenant_id=tenant)
             n = int(forget_chat(thread, tenant_id=tenant).get("forgotten") or 0)
             forgot = f" Forgot {n} memor{'y' if n == 1 else 'ies'} from it." if n else ""

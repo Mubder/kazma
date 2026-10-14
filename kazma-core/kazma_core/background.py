@@ -97,7 +97,11 @@ def spawn_background(
         The created task. Callers that do not need it may discard it safely;
         the module holds its own reference until completion.
     """
-    task = asyncio.create_task(coro, name=name)
+    # Without the caller's HITL call authority (SW-S01): background work
+    # started from an approved or graph-gated tool call asks the bus itself.
+    from kazma_core.safety.call_authority import detached_context
+
+    task = asyncio.create_task(coro, name=name, context=detached_context())
     _background.add(task)
     if never_completes:
         _never_completes.add(task)

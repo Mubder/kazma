@@ -421,7 +421,6 @@ Full product guide: [Document Intelligence](document-intelligence). Ops:
 | `DEEPSEEK_API_KEY` | **Declared in `.env.example` but not read by code** — set the key via the provider list instead. | empty |
 | `ANTHROPIC_API_KEY` | **Declared in `.env.example` but not read by code.** | empty |
 | `GOOGLE_CLOUD_PROJECT` | GCP project for Vertex AI (if ADC lacks a default). | commented out |
-| `SWARM_BOT_TOKEN` | Swarm output bot token. | empty |
 | `SWARM_CHAT_ID` | Swarm group chat id (feeds `swarm.group_chat_id`). | empty |
 | `KAZMA_SECRET` | HITL shared secret; binds `serve` to `0.0.0.0`; hub write-auth; `kazma hub sign`. | commented out |
 | `KAZMA_VECTOR_PATH` | Vector memory dir. | `~/.kazma/vector_memory` |

@@ -438,7 +438,7 @@ def test_repair_pass_runs_on_the_primary_database(conn, fresh_dims, monkeypatch)
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: _Embedder())
     _episode(conn, "missing", user="alpha")
     conn.commit()
-    assert fresh_dims.run_vector_repair_pass() == {"episodes": 1, "beliefs": 0, "remaining": 0}
+    assert fresh_dims.run_vector_repair_pass() == {"episodes": 1, "beliefs": 0, "remaining": 0, "entities": 0}
 
 
 def test_reconsolidation_repairs_through_the_same_function(conn, fresh_dims, monkeypatch):
@@ -551,6 +551,28 @@ def test_no_meaning_search_takes_an_unordered_slice():
     assert _capped_fetches(source) == []
     old = 'sql = "SELECT id, embedding FROM episodes WHERE tenant_id = ? LIMIT ?"'
     assert _capped_fetches(old) != []  # negative control
+
+
+def _recency_sliced_searches(source: str) -> list[str]:
+    """Keyword searches over the shared store (``kazma_episodes`` /
+    ``kazma_beliefs`` with ``LIKE``) that cap rows without ordering by how
+    many of the question's words a row holds."""
+    return [
+        s for s in _string_constants(source)
+        if re.search(r"\bFROM kazma_(episodes|beliefs)\b", s) and " LIKE " in s
+        and re.search(r"\bLIMIT\b", s) and "ORDER BY words_held" not in s
+    ]
+
+
+def test_no_shared_store_search_takes_a_recency_slice():
+    """Memory audit M06: the Postgres keyword channel took the newest rows
+    holding any word, so an older memory only its words would find was out of
+    reach. The slice gate covers the shared store too."""
+    source = (REPO / "kazma-core" / "kazma_core" / "memory" / "state_backend.py").read_text(encoding="utf-8")
+    assert _recency_sliced_searches(source) == []
+    old = ('sql = """SELECT id FROM kazma_episodes WHERE tenant_id = %s AND (LOWER(user_text) LIKE %s) '
+           'ORDER BY created_at DESC LIMIT %s"""')
+    assert _recency_sliced_searches(old) != []  # negative control
 
 
 _PRODUCT_DIRS = ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway",

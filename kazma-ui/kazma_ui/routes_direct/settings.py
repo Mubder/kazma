@@ -39,7 +39,6 @@ def register_settings_routes(self: Any) -> None:
             smart = False
         return {
             "merge_knowledge_into_chat": bool(v2.get("merge_knowledge_into_chat", True)),
-            "promote_kb_to_episodes": bool(v2.get("promote_kb_to_episodes", True)),
             "explain_recall": bool(v2.get("explain_recall", True)),
             "smart_search": smart,
         }
@@ -60,14 +59,6 @@ def register_settings_routes(self: Any) -> None:
                     (
                         "memory.v2.merge_knowledge_into_chat",
                         bool(body["merge_knowledge_into_chat"]),
-                        "memory",
-                    )
-                )
-            if "promote_kb_to_episodes" in (body or {}):
-                items.append(
-                    (
-                        "memory.v2.promote_kb_to_episodes",
-                        bool(body["promote_kb_to_episodes"]),
                         "memory",
                     )
                 )

@@ -20,6 +20,7 @@ import logging
 import os
 import sqlite3
 import sys
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -257,8 +258,6 @@ def _handle_global_reconsolidation_sync(payload: dict[str, Any]) -> bool:
             # Chain next subject-hash partition for huge corpora
             if stats.get("has_more") and stats.get("next_partition_index") is not None:
                 try:
-                    from kazma_core.memory.task_queue import enqueue_task
-
                     nxt = {
                         "tenant_id": tenant_id,
                         "max_merges": int(payload.get("max_merges") or 50),
@@ -272,7 +271,7 @@ def _handle_global_reconsolidation_sync(payload: dict[str, Any]) -> bool:
                         # Follow-up shards must not re-expand the grid
                         "auto_partition": False,
                     }
-                    enqueue_task("global_reconsolidation", nxt)
+                    _enqueue_checked("global_reconsolidation", nxt)
                     logger.info(
                         "[memory_worker] enqueued reconsolidation partition %s/%s",
                         nxt["partition_index"],
@@ -315,12 +314,15 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
         ensure_primary_schema(primary)
         ensure_ops_schema(ops)
         row = primary.execute(
-            "SELECT user_text, assistant_text, session_id, turn_number, tenant_id, created_at "
+            "SELECT user_text, assistant_text, session_id, turn_number, tenant_id, created_at, "
+            "json_extract(metadata_json, '$.deep_pass.version') AS deep_pass "
             "FROM episodes WHERE id=?",
             (episode_id,),
         ).fetchone()
         if not row:
             return None  # episode gone
+        if int(row["deep_pass"] or 0) >= _DEEP_PASS_VERSION:
+            return None  # done already: a second task for it (a retry, reconcile) does nothing
         # ── Cost-gate (memory.v2.extraction_every_n_turns /
         #   skip_llm_if_heuristic_extracted) ─────────────────────
         from kazma_core.memory.config import read_memory_cfg
@@ -374,6 +376,35 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
             ops.close()
 
 
+#: The deep pass's rules: an episode marked with this version (``metadata.
+#: deep_pass``) is done, and a second task for it does nothing (Memory audit
+#: M26 -- the only de-duplication was process-local).
+_DEEP_PASS_VERSION = 1
+
+
+def _mark_deep_pass(primary: sqlite3.Connection, episode_id: str) -> None:
+    """Record the episode's deep pass as done (``metadata.deep_pass``)."""
+    primary.execute(
+        "UPDATE episodes SET metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.deep_pass', "
+        "json_object('version', ?, 'at', ?)) WHERE id = ?",
+        (_DEEP_PASS_VERSION, time.time(), episode_id))
+    if primary.in_transaction:
+        primary.commit()
+
+
+def _apply_if_still_remembered(raw, primary, ops, *, stats, episode_id: str, now: float,
+                               **kw) -> dict[str, Any]:
+    """``_apply_beliefs_to_v2`` for a deep pass whose turn is still remembered,
+    stated at the turn's time *now*."""
+    from kazma_core.memory.belief_extractor import _apply_beliefs_to_v2
+
+    row = primary.execute("SELECT tier FROM episodes WHERE id = ?", (episode_id,)).fetchone()
+    if row is None or row[0] == "forgotten":
+        logger.info("[memory_worker] micro_consolidation of %s skipped: forgotten meanwhile", episode_id)
+        return {**stats, "applied": 0, "skipped_forgotten": True}
+    return _apply_beliefs_to_v2(raw, primary, ops, stats=stats, now=now, **kw)
+
+
 async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
     """Re-extract beliefs from a stored episode (background deep-consolidation).
 
@@ -387,10 +418,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
         episode_id = payload.get("episode_id")
         if not episode_id:
             return False
-        from kazma_core.memory.belief_extractor import (
-            _apply_beliefs_to_v2,
-            extract_beliefs_for_turn,
-        )
+        from kazma_core.memory.belief_extractor import extract_beliefs_for_turn
 
         prep = await asyncio.to_thread(_micro_consolidation_prepare, str(episode_id))
         if prep is None:
@@ -401,15 +429,31 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                 row["user_text"] or "", row["assistant_text"] or "", use_llm=prep["use_llm"],
                 vocabulary=prep.get("vocabulary"), entities=prep.get("entities"),
             )
+            if prep["use_llm"] and stats.get("model_unavailable"):
+                # The model could not be asked: the deep pass is retried with
+                # backoff, never "done" with the heuristic facts the turn's
+                # own pass already wrote (Memory audit M12).
+                from kazma_core.memory.consolidator import note_deep_pass_failed
+
+                note_deep_pass_failed("the model is unavailable")
+                logger.warning(
+                    "[memory_worker] micro_consolidation of %s: the model is unavailable -- retried later",
+                    episode_id,
+                )
+                return False
             if raw:
                 # The facts were stated when the turn happened, not when this
                 # deep pass got to it (minutes later, or after a restart): a
-                # later turn's facts may already be written (W1).
+                # later turn's facts may already be written (W1). And only
+                # while the turn is still remembered: a forget or a rewind
+                # (undo, edit, replay) during the model call must not bring
+                # its facts back (Memory audit M09).
                 stats = await asyncio.to_thread(
-                    _apply_beliefs_to_v2, raw, primary, ops, stats=stats,
+                    _apply_if_still_remembered, raw, primary, ops, stats=stats, episode_id=str(episode_id),
                     session_id=row["session_id"], turn=row["turn_number"],
                     tenant_id=row["tenant_id"], now=row["created_at"],
                 )
+            await asyncio.to_thread(_mark_deep_pass, primary, str(episode_id))
             logger.info(
                 "[memory_worker] micro_consolidation of %s: applied=%d (llm=%s)",
                 episode_id, stats.get("applied", 0), prep["use_llm"],
@@ -652,14 +696,12 @@ def _start_macro_sleep_scheduler() -> None:
         await asyncio.sleep(60)
         while True:
             try:
-                from kazma_core.memory.task_queue import enqueue_task
-
                 # Fan out over all active tenants so decay/promotion/archival
                 # runs for every tenant, not just "default". In single-user
                 # (shared) mode _distinct_tenants() returns ["default"] —
                 # unchanged from the old hardcoded behavior.
                 for tenant in _distinct_tenants():
-                    await asyncio.to_thread(enqueue_task, "macro_sleep", {"tenant_id": tenant, "live_config": True})
+                    await asyncio.to_thread(_enqueue_checked, "macro_sleep", {"tenant_id": tenant, "live_config": True})
                 logger.debug("[memory_worker] enqueued periodic macro_sleep")
             except Exception:
                 logger.debug("[memory_worker] macro_sleep enqueue failed", exc_info=True)
@@ -722,9 +764,7 @@ def _start_backup_export_scheduler() -> None:
             # boot after the fix would otherwise have waited another 6 h).
             try:
                 if await asyncio.to_thread(_pg_dump_is_stale):
-                    from kazma_core.memory.task_queue import enqueue_task
-
-                    await asyncio.to_thread(enqueue_task, "native_pg_backup", {})
+                    await asyncio.to_thread(_enqueue_checked, "native_pg_backup", {})
                     logger.info(
                         "[memory_worker] the Postgres dump is older than %.0fh -- "
                         "taking one now", _FRESH_BACKUP_HOURS,
@@ -734,32 +774,31 @@ def _start_backup_export_scheduler() -> None:
             await asyncio.sleep(await asyncio.to_thread(_seconds_until_backup_due))
         while True:
             try:
-                from kazma_core.memory.task_queue import enqueue_task
                 from kazma_core.db.pg_backup import pg_backup_enabled
 
-                await asyncio.to_thread(enqueue_task, "native_backup", {"retention": 10})
+                await asyncio.to_thread(_enqueue_checked, "native_backup", {"retention": 10})
                 # Universal backup (all DBs + assets + PG) — separate task so
                 # the native_backup handler stays fast (<300s) and doesn't
                 # trigger the queue's processing-reclaim.
-                await asyncio.to_thread(enqueue_task, "universal_backup", {})
+                await asyncio.to_thread(_enqueue_checked, "universal_backup", {})
                 # Postgres shared-state dump (self-disables on SQLite installs
                 # or the backups.pg.enabled kill-switch — checked live here).
                 if pg_backup_enabled():
-                    await asyncio.to_thread(enqueue_task, "native_pg_backup", {})
+                    await asyncio.to_thread(_enqueue_checked, "native_pg_backup", {})
                 # Retention + verification for the restic repositories. Kept
                 # separate from the snapshot itself (which rides along with
                 # universal_backup) because forget/prune rewrites the repo and
                 # check reads it: neither belongs in the path that has to
                 # finish before the next backup can start.
-                await asyncio.to_thread(enqueue_task, "restic_maintenance", {})
+                await asyncio.to_thread(_enqueue_checked, "restic_maintenance", {})
                 # Connector credentials. The Google grant expires every
                 # 7 days on this install (OAuth status: Testing), so the
                 # useful check is the one that warns a day early.
-                await asyncio.to_thread(enqueue_task, "connector_health", {})
+                await asyncio.to_thread(_enqueue_checked, "connector_health", {})
                 # Export per-tenant so each tenant's beliefs/graph land in
                 # their own file (not overwritten by "default").
                 for tenant in _distinct_tenants():
-                    await asyncio.to_thread(enqueue_task, "nightly_export", {"tenant_id": tenant})
+                    await asyncio.to_thread(_enqueue_checked, "nightly_export", {"tenant_id": tenant})
                 logger.debug("[memory_worker] enqueued nightly backup + export")
             except Exception:
                 logger.debug("[memory_worker] backup/export enqueue failed", exc_info=True)
@@ -866,6 +905,17 @@ def _prune_swarm_tasks() -> None:
     prune_finished_tasks()
 
 
+def _purge_swarm_approvals() -> None:
+    # A swarm-bus approval's shared row is deleted by its owner once read;
+    # one its owner never closed (the process died mid-request) is removed
+    # after a day (Swarm audit SW-S02: rows used to stay forever).
+    from kazma_core.swarm.shared_approvals import purge_stale
+
+    removed = purge_stale()
+    if removed:
+        logger.info("[memory_worker] removed %d unclosed swarm approval row(s)", removed)
+
+
 def _prune_checkpoints() -> None:
     # LangGraph step history, per Settings `checkpoints.retention_days`
     # (default 30, 0 keeps everything): every chat keeps its newest 200
@@ -941,6 +991,26 @@ def _recover_erased_memories() -> None:
     from kazma_core.memory.rehydrate import run_rehydrate_pass
 
     run_rehydrate_pass()
+
+
+def _converge_forgets() -> None:
+    # Forget converges (Memory audits M08/M10): the forget journal's entries
+    # this memory database has not applied (a forget cut short, a restored
+    # older copy), the ledger over rows a race let through, summaries still
+    # active from a forgotten turn, remote deletes that failed. FIRST of the
+    # memory sweeps: turn reconcile and the mirror sync must see the ledger.
+    from kazma_core.memory.forget import converge
+
+    converge()
+
+
+def _retire_knowledge_promotions() -> None:
+    # Knowledge Library excerpts the supervisor copied into chat memory until
+    # 2026-10-13, as the user's words and on the loop (Memory audit M04): the
+    # copy is gone, the library keeps the text. One SELECT once they are.
+    from kazma_core.memory.forget import retire_knowledge_promotions
+
+    retire_knowledge_promotions()
 
 
 def _reconcile_memory_turns() -> None:
@@ -1019,10 +1089,13 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("ended YOLO windows", _purge_ended_yolo),
     ("task queue purge", _purge_task_queue),
     ("swarm task retention", _prune_swarm_tasks),
+    ("swarm approval rows", _purge_swarm_approvals),
     ("checkpoint retention", _prune_checkpoints),
     ("supervisor watch", _watch_supervisor),
+    ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),
+    ("retired knowledge promotions", _retire_knowledge_promotions),
     ("memory turn reconcile", _reconcile_memory_turns),
     ("memory mirror sync", _sync_memory_mirror),
     ("memory topic summaries", _queue_topic_summaries),
@@ -1032,18 +1105,70 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
 
 
 async def _run_maintenance_sweeps() -> None:
-    """One pass of every maintenance sweep, each in a thread and isolated:
-    one that fails is logged and the others still run.
+    """One pass of every maintenance sweep (:func:`_run_sweeps`)."""
+    await _run_sweeps(_MAINTENANCE_SWEEPS)
+
+
+def _enqueue_checked(task_type: str, payload: dict[str, Any], **kw: Any) -> str | None:
+    """``enqueue_task`` for the schedulers: a refused task is a WARNING and an
+    ops alert (Memory audit M20 -- the result was ignored, and a broken
+    ``memory_ops.db`` stopped macro sleep, backups and reconsolidation while
+    health showed an empty queue)."""
+    from kazma_core.memory.task_queue import enqueue_task
+
+    tid = enqueue_task(task_type, payload, **kw)
+    if tid is None:
+        logger.warning("[memory_worker] the memory queue refused %s: it does not run this pass", task_type)
+        from kazma_core.observability.ops_alerts import alert  # never raises
+
+        alert("memory.enqueue_failed", "The memory queue refused a task",
+              f"{task_type} could not be queued and does not run this pass; memory health shows the queue.",
+              severity="warn", cooldown_s=3600.0)
+    return tid
+
+
+#: Each maintenance sweep's last outcome (Memory audit M20): label ->
+#: last_ok_at, last_failed_at, consecutive failures, last error. Health shows it.
+_SWEEP_STATE: dict[str, dict[str, Any]] = {}
+#: A locked or busy database is retried quietly this many passes, then WARNING.
+_BUSY_PASSES_BEFORE_WARNING = 3
+
+
+def sweep_health() -> dict[str, dict[str, Any]]:
+    """The maintenance sweeps' last outcomes, for memory health."""
+    return {label: dict(state) for label, state in _SWEEP_STATE.items()}
+
+
+async def _run_sweeps(sweeps: tuple[tuple[str, Callable[[], None]], ...]) -> None:
+    """Run each of *sweeps* once, each in a thread and isolated: one that
+    fails is logged and the others still run.
 
     At WARNING: a sweep that fails every pass is a feature that is off, and
     at DEBUG nobody would see it (the lesson of the Knowledge Library's
     meaning search, off from 2026-07-31 to 2026-09-26 behind one debug line).
+    A locked or busy database is INFO for its first passes and WARNING from
+    the third in a row. Each outcome is recorded for health (``sweep_health``).
     """
-    for label, sweep in _MAINTENANCE_SWEEPS:
+    for label, sweep in sweeps:
+        state = _SWEEP_STATE.setdefault(label, {"last_ok_at": None, "last_failed_at": None,
+                                                "consecutive_failures": 0, "last_error": None})
         try:
             await asyncio.to_thread(sweep)
-        except Exception:
-            logger.warning("[memory_worker] %s failed", label, exc_info=True)
+        except Exception as exc:
+            state["consecutive_failures"] += 1
+            state["last_failed_at"] = time.time()
+            state["last_error"] = f"{type(exc).__name__}: {exc}"[:300]
+            busy = isinstance(exc, sqlite3.OperationalError) and any(
+                word in str(exc).lower() for word in ("locked", "busy"))
+            if busy and state["consecutive_failures"] < _BUSY_PASSES_BEFORE_WARNING:
+                logger.info("[memory_worker] %s: the database is busy (pass %d); retried next pass",
+                            label, state["consecutive_failures"])
+            else:
+                logger.warning("[memory_worker] %s failed (%d pass(es) in a row)", label,
+                               state["consecutive_failures"], exc_info=True)
+        else:
+            state["consecutive_failures"] = 0
+            state["last_ok_at"] = time.time()
 
 
 def _start_commitment_gc_scheduler() -> None:
@@ -1068,6 +1193,10 @@ def _start_commitment_gc_scheduler() -> None:
         return
 
     async def _loop() -> None:
+        # The forget journal at once: a memory database restored from an
+        # older copy must not show forgotten turns until the first sweep
+        # (Memory audit M10). The rest shortly after boot.
+        await _run_sweeps((("forget convergence at boot", _converge_forgets),))
         await asyncio.sleep(90)  # first sweep shortly after boot
         while True:
             await _run_maintenance_sweeps()
@@ -1100,12 +1229,10 @@ def _start_reconsolidation_scheduler() -> None:
         await asyncio.sleep(180)
         while True:
             try:
-                from kazma_core.memory.task_queue import enqueue_task
-
                 # Fan dedup/re-embed over all active tenants.
                 for tenant in _distinct_tenants():
                     await asyncio.to_thread(
-                        enqueue_task,
+                        _enqueue_checked,
                         "global_reconsolidation",
                         {"tenant_id": tenant, "max_merges": 50, "reembed_limit": 100},
                     )
@@ -1297,6 +1424,12 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
 
         tenant_id = str(payload.get("tenant_id", "default"))
         written = await asyncio.to_thread(export_nightly_snapshots, tenant_id=tenant_id)
+        failed = list(getattr(written, "failed", []))
+        if failed:
+            # A failed piece is a failed export (Memory audit M20): the queue
+            # retries it, then keeps it as a dead letter.
+            logger.warning("[memory_worker] nightly_export of %s incomplete: %s", tenant_id, ", ".join(failed))
+            return False
         logger.info("[memory_worker] nightly_export done: %d file(s)", len(written))
 
         # M-04 guard: nightly mirror-drift assertion (audit
@@ -1403,7 +1536,7 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
             if not verified.ok:
                 logger.error("[memory_worker] restic check FAILED for %s: %s",
                              name, verified.error[:200])
-                _alert_repo_unhealthy(name, verified.error)
+                await asyncio.to_thread(_alert_repo_unhealthy, name, verified.error)
                 continue
             # Logged on success on purpose (AGENTS.md §27C): this spoke only
             # on failure, so the weekly report could not tell a maintenance
@@ -1418,9 +1551,7 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
 def _enqueue_pg_offsite_retry(path: Any) -> None:
     """Queue another copy of an existing dump. Does not run pg_dump."""
     try:
-        from kazma_core.memory.task_queue import enqueue_task
-
-        enqueue_task("native_pg_offsite", {"path": str(path)})
+        _enqueue_checked("native_pg_offsite", {"path": str(path)})
     except Exception:
         logger.warning("[memory_worker] could not queue pg offsite retry", exc_info=True)
 
@@ -1446,11 +1577,11 @@ async def _handle_native_pg_offsite(payload: dict[str, Any]) -> bool:
     raw = str((payload or {}).get("path") or "")
     path = Path(raw)
     if not path.is_file():
-        _alert_pg_offsite(["missing-file"])
+        await asyncio.to_thread(_alert_pg_offsite, ["missing-file"])
         return False
     failed = await asyncio.to_thread(_snapshot_pg_to_restic, path)
     if failed:
-        _alert_pg_offsite(failed)
+        await asyncio.to_thread(_alert_pg_offsite, failed)
         return False
     logger.info("[memory_worker] pg offsite copy done: %s", path.name)
     return True
@@ -1534,8 +1665,8 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
         if path is not None:
             failed = await asyncio.to_thread(_snapshot_pg_to_restic, path)
             if failed:
-                _enqueue_pg_offsite_retry(path)
-                _alert_pg_offsite(failed)
+                await asyncio.to_thread(_enqueue_pg_offsite_retry, path)
+                await asyncio.to_thread(_alert_pg_offsite, failed)
         if path is None:
             from kazma_core.db.pg_backup import last_pg_backup_failure
 
@@ -1546,7 +1677,8 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
 
                 # Say WHY. "produced no dump" alone sent the operator asking;
                 # the cause was one line in a traceback in kazma.log.
-                alert(
+                await asyncio.to_thread(
+                    alert,
                     "backup.pg_dump",
                     "Postgres dump failed",
                     "native_pg_backup produced no dump"
@@ -1563,7 +1695,8 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
         try:
             from kazma_core.observability.ops_alerts import alert
 
-            alert(
+            await asyncio.to_thread(
+                alert,
                 "backup.pg_dump",
                 "Postgres dump failed",
                 "native_pg_backup raised",

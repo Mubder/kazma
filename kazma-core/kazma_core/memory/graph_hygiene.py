@@ -24,7 +24,6 @@ counts live facts, as the purge does.
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from typing import Any
 
@@ -40,9 +39,15 @@ def _same_words_key(entity_id: str) -> str:
     """Key under which ids made of the same words collide: the rule predicate
     names follow (``predicates._predicate_key``: order, filler words and a
     plural "s" aside), so "the same words" means one thing everywhere."""
+    from kazma_core.memory.entity_resolution import slug
     from kazma_core.memory.predicates import _predicate_key
 
-    return " ".join(sorted(_predicate_key(re.sub(r"[^a-z0-9]+", "_", (entity_id or "").lower()))))
+    # Words as the id rule splits them (any script; Memory audit M02): an
+    # a-z0-9 split gave every Arabic id the empty key, one "duplicate" group.
+    try:
+        return " ".join(sorted(_predicate_key(slug(entity_id or ""))))
+    except ValueError:
+        return ""
 
 
 def graph_hygiene_report(conn: sqlite3.Connection, *, tenant_id: str | None = None) -> dict[str, Any]:

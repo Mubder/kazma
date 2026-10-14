@@ -63,7 +63,10 @@ _post_turn_metrics: dict[str, Any] = {
     "extract_fail": 0,
     "enqueue_fail": 0,
     "thread_fail": 0,
-    "deferred": 0,  # turns sent to the durable queue (pool full / no thread)
+    "deferred": 0,  # turns sent to the durable queue (pool full / no thread / a failed write)
+    # LLM deep passes the model could not run (provider down): retried by the
+    # queue with backoff (Memory audit M12) -- never a heuristic-only "done".
+    "deep_pass_failed": 0,
     "last_ok_at": None,
     "last_error": None,
     "last_error_at": None,
@@ -94,6 +97,14 @@ def _metric_fail(kind: str, exc: BaseException | None = None) -> None:
         if exc is not None:
             _post_turn_metrics["last_error"] = f"{type(exc).__name__}: {exc}"[:400]
             _post_turn_metrics["last_error_at"] = time.time()
+
+
+def note_deep_pass_failed(reason: str) -> None:
+    """Count one LLM deep pass the model could not run (health shows it)."""
+    with _metrics_lock:
+        _post_turn_metrics["deep_pass_failed"] = int(_post_turn_metrics.get("deep_pass_failed") or 0) + 1
+        _post_turn_metrics["last_error"] = f"deep pass: {reason}"[:400]
+        _post_turn_metrics["last_error_at"] = time.time()
 
 
 def reset_turn_counter() -> None:
@@ -281,10 +292,17 @@ def _schedule_post_turn_memory(
     # freezes. Concurrency is bounded by _v2_extract_sem (audit: previously
     # unbounded → thread/connection storm).
     def _run_v2_bounded() -> None:
+        done = False
         try:
-            _run_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id, at=at)
+            done = _run_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id, at=at)
         finally:
             _v2_extract_sem.release()
+            if not done:
+                # A failed write is retried by the durable queue, with backoff
+                # (Memory audit M12) -- it used to wait for turn reconcile, and
+                # the turn's facts were never extracted.
+                _defer_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
+                                   why="the memory write failed", at=at)
 
     # A full pool, or a thread that will not start, sends the turn to the
     # durable queue: the memory worker runs the same pipeline later, with
@@ -521,7 +539,7 @@ def _mirror_turn_to_v2(
     Extracts the last user/assistant pair and writes a V2 episode (working
     tier by default; explicit-remember → recall).
     """
-    from kazma_core.memory.dual_write import mirror_episode
+    from kazma_core.memory.dual_write import EpisodeWriteFailed, write_episode
 
     user_text, assistant_text = extract_turn_texts(messages)
     if not (user_text or assistant_text):
@@ -530,7 +548,7 @@ def _mirror_turn_to_v2(
     u = (user_text or "").strip()
     if not u or u.startswith("/"):
         return
-    mirror_episode(
+    status, _eid = write_episode(
         session_id=session_id or "unknown",
         turn_number=int(turn) if turn is not None else 0,
         user_text=user_text,
@@ -538,6 +556,10 @@ def _mirror_turn_to_v2(
         tenant_id=tenant_id,
         created_at=created_at,
     )
+    if status == "failed":
+        # Not remembered: the caller counts it and the queue retries the turn
+        # (Memory audit M12 -- the None was ignored and the turn counted "ok").
+        raise EpisodeWriteFailed(f"episode of turn {turn} of {session_id} was not written")
 
 
 def _v2_extract_sync(

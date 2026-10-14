@@ -770,8 +770,15 @@ _MCP_WRITE_RE = re.compile(
 )
 
 
-def extract_latest_user_text(messages: list[dict[str, Any]] | None) -> str:
-    """Return the text of the most recent user message (multimodal-aware)."""
+def extract_latest_user_text(
+    messages: list[dict[str, Any]] | None, *, image_marker: bool = True,
+) -> str:
+    """Return the text of the most recent user message (multimodal-aware).
+
+    *image_marker* False leaves an image out entirely (no "[image
+    attachment]" words): what recall, the language lock and the router read
+    (Memory audit M17 -- they read ``str(content)``, a photo's base64
+    included)."""
     if not messages:
         return ""
     for m in reversed(messages):
@@ -784,7 +791,7 @@ def extract_latest_user_text(messages: list[dict[str, Any]] | None) -> str:
                 if isinstance(p, dict):
                     if p.get("type") == "text" and p.get("text"):
                         parts.append(str(p["text"]))
-                    elif p.get("type") == "image_url":
+                    elif p.get("type") == "image_url" and image_marker:
                         parts.append("[image attachment]")
                 elif p:
                     parts.append(str(p))

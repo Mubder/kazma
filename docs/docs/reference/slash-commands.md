@@ -153,7 +153,7 @@ been given.
 
 **Response (success):**
 ```
-✅ Removed last assistant response. You can continue the conversation.
+✅ Removed last assistant response, and what Kazma remembered from it. You can continue the conversation.
 ```
 
 **Response (nothing to undo):**
@@ -164,6 +164,8 @@ been given.
 **Side effects:**
 - The reply already sent stays in the chat app; only the conversation Kazma
   keeps changes.
+- What Kazma remembered from that turn -- the memory of it and the facts it
+  learned -- is forgotten too.
 
 **Required permissions:** None.
 
@@ -181,7 +183,7 @@ text, so the next turns build on it.
 
 **Response (success):**
 ```
-✅ Replaced last response. You can continue the conversation.
+✅ Replaced last response, and forgot what Kazma remembered from the old one. You can continue the conversation.
 ```
 
 **Response (missing text):**

@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS swarm_tasks (
     sort_at TEXT,
     cost REAL DEFAULT 0.0,
     tokens INTEGER DEFAULT 0,
-    metadata TEXT DEFAULT '{}'
+    metadata TEXT DEFAULT '{}',
+    generation INTEGER DEFAULT 0,
+    run_id TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_status ON swarm_tasks(status);
@@ -110,6 +112,112 @@ def _utc_today() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
+_TERMINAL_SQL = ", ".join(f"'{v}'" for v in _FINISHED_STATUSES)
+
+#: The transition table as a write guard ({row}: the stored row, {new}: the
+#: write). A finished row is left as it is, unless the write is the row's own
+#: status at its own generation; nothing goes back to pending; an older
+#: generation never overwrites a newer one.
+_PERSIST_GUARD = (
+    "({row}.status = {new}.status AND {row}.generation = {new}.generation) OR ("
+    "{row}.status NOT IN (" + _TERMINAL_SQL + ") "
+    "AND NOT ({new}.status = 'pending' AND {row}.status <> 'pending') "
+    "AND {new}.generation >= {row}.generation)"
+)
+#: Admission to RUNNING: from pending or paused, at the next generation only.
+_ADMIT_GUARD = (
+    "{row}.status IN ('pending', 'paused') AND {row}.generation = {new}.generation - 1"
+)
+
+
+def _pg_execute(sql: str, params: Any = None) -> Any:
+    """Every Postgres statement of this store, with no NUL in any parameter
+    (Swarm audit SW-E16): a worker's text can carry U+0000, which Postgres
+    TEXT refuses -- the result JSON was cleaned, the prompt and context were
+    not, so one such task never reached the table. SQLite keeps NUL; the two
+    backends store the same text now (U+FFFD for NUL, as
+    ``pg_helpers.json_dumps`` does)."""
+    from kazma_core.db.pg_helpers import get_pool, strip_nul
+
+    if params is not None:
+        params = strip_nul(params)
+    return get_pool().execute(sql, params)
+
+
+def _pg_execute_one(sql: str, params: Any = None) -> Any:
+    """:func:`_pg_execute` for a statement that returns one row."""
+    from kazma_core.db.pg_helpers import get_pool, strip_nul
+
+    if params is not None:
+        params = strip_nul(params)
+    return get_pool().execute_one(sql, params)
+
+
+def _like_escape(text: str) -> str:
+    """*text* as a literal inside a LIKE pattern (escape: backslash)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+#: A worker output this long or longer is stored once (SW-E15).
+_REF_MIN_CHARS = 512
+_REF_KEY = "$swarm_output_ref"
+
+
+def _compact_outputs(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Replace each other copy of a large worker output in *result* (the
+    aggregate, the opinions, the blackboard snapshots in its metadata) with
+    a reference to the worker result that holds it. A stored row held each
+    output about four times (Swarm audit SW-E15: 4.51 bytes per byte)."""
+    if not isinstance(result, dict):
+        return result
+    index: dict[str, int] = {}
+    for i, wr in enumerate(result.get("worker_results") or []):
+        out = wr.get("output") if isinstance(wr, dict) else None
+        if isinstance(out, str) and len(out) >= _REF_MIN_CHARS:
+            index.setdefault(out, i)
+    if not index:
+        return result
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, str) and len(value) >= _REF_MIN_CHARS and value in index:
+            return {_REF_KEY: index[value]}
+        if isinstance(value, dict):
+            return {k: walk(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v) for v in value]
+        return value
+
+    compact = dict(result)
+    for key in ("aggregated_output", "synthesized_output", "individual_opinions", "metadata"):
+        if key in compact:
+            compact[key] = walk(compact[key])
+    return compact
+
+
+def _expand_outputs(result: Any) -> Any:
+    """The inverse of :func:`_compact_outputs`."""
+    if not isinstance(result, dict):
+        return result
+    outputs = [wr.get("output") if isinstance(wr, dict) else None
+               for wr in (result.get("worker_results") or [])]
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, dict):
+            if set(value) == {_REF_KEY} and isinstance(value[_REF_KEY], int) \
+                    and 0 <= value[_REF_KEY] < len(outputs):
+                return outputs[value[_REF_KEY]]
+            return {k: walk(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v) for v in value]
+        return value
+
+    expanded = dict(result)
+    for key in ("aggregated_output", "synthesized_output", "individual_opinions", "metadata"):
+        if key in expanded:
+            expanded[key] = walk(expanded[key])
+    return expanded
+
+
 class TaskStore:
     """Persistence for swarm tasks and worker metrics.
 
@@ -128,6 +236,9 @@ class TaskStore:
 
             self._pg = use_postgres()
         except Exception:
+            # Tasks would land in a local file the other replicas never read.
+            logger.warning("[TaskStore] could not tell whether Postgres is configured; "
+                           "using the local SQLite store", exc_info=True)
             self._pg = False
         self._init_db()
 
@@ -142,6 +253,10 @@ class TaskStore:
             self._conn = sqlite3.connect(self._db_path, check_same_thread=False, isolation_level=None)
             self._conn.row_factory = sqlite3.Row
             apply_sqlite_pragmas(self._conn)
+            # The RUNNING row is crash evidence: it must survive a power cut,
+            # not only a process crash (Swarm audit SW-E16; WAL's NORMAL can
+            # lose the last commits to an OS crash).
+            self._conn.execute("PRAGMA synchronous=FULL")
         return self._conn
 
     def _init_db(self) -> None:
@@ -160,6 +275,8 @@ class TaskStore:
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS timeout DOUBLE PRECISION;
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS workspace_id TEXT;
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS sort_at TEXT;
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS generation INTEGER DEFAULT 0;
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS run_id TEXT DEFAULT '';
             CREATE INDEX IF NOT EXISTS idx_kazma_swarm_tasks_sort_at ON kazma_swarm_tasks(sort_at DESC);
             CREATE TABLE IF NOT EXISTS kazma_swarm_worker_metrics (
                 worker TEXT NOT NULL,
@@ -203,6 +320,8 @@ class TaskStore:
                     ("timeout", "REAL"),
                     ("workspace_id", "TEXT"),
                     ("sort_at", "TEXT"),
+                    ("generation", "INTEGER DEFAULT 0"),
+                    ("run_id", "TEXT DEFAULT ''"),
                 ),
             )
             if "sort_at" in added:
@@ -213,19 +332,20 @@ class TaskStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_swarm_tasks_sort_at ON swarm_tasks(sort_at DESC)")
 
     def close(self) -> None:
-        """Close the database connection."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        """Close the database connection. Holds the lock: the engine writes
+        from threads (SW-E07), and freeing the handle under a statement is a
+        crash on Windows (AGENTS §8's ConfigStore lesson)."""
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
     def clear(self) -> None:
         """Delete all rows from both tables. Useful for test isolation."""
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
-                get_pool().execute("DELETE FROM kazma_swarm_tasks")
-                get_pool().execute("DELETE FROM kazma_swarm_worker_metrics")
+                _pg_execute("DELETE FROM kazma_swarm_tasks")
+                _pg_execute("DELETE FROM kazma_swarm_worker_metrics")
                 return
             conn = self._get_conn()
             conn.execute("DELETE FROM swarm_tasks")
@@ -235,17 +355,37 @@ class TaskStore:
     # Task CRUD
     # ------------------------------------------------------------------
 
-    def persist_task(self, task: SwarmTask) -> None:
-        """Persist a swarm task (INSERT or REPLACE).
+    def persist_task(self, task: SwarmTask) -> bool:
+        """Write *task*'s row, if the transition table allows it.
 
-        Should be called when a task reaches a terminal state
-        (completed, failed, timeout) or a paused HITL state.
+        One table for every backend (Swarm audit SW-E03): a finished status
+        is never left; a row is never sent back to ``pending``; a write from
+        an older generation than the row's is refused (a superseded run's
+        late result); writing a row's own status and generation again (its
+        metadata, a repeated save) is allowed. Returns whether the row was
+        written. A refused write changes nothing -- the caller keeps it as
+        orphan evidence (:meth:`record_orphan`) if it carries a result.
         """
+        return self._upsert(task, guard=_PERSIST_GUARD)
+
+    def admit(self, task: SwarmTask) -> bool:
+        """Record *task* RUNNING under its new generation, once.
+
+        The admission compare-and-set: the row must be absent, or ``pending``
+        or ``paused`` at the generation just before *task*'s. A second
+        admission of the same id -- another dispatch of it, another process,
+        a second approval of one checkpoint -- finds the row already at this
+        generation and is refused (False)."""
+        return self._upsert(task, guard=_ADMIT_GUARD)
+
+    def _upsert(self, task: SwarmTask, *, guard: str) -> bool:
         result_json: str | None = None
         if task.result is not None:
             # Re-encoded NUL-free: worker output can carry tool text with
             # U+0000, which Postgres jsonb rejects (pg_helpers.strip_nul).
-            result_json = _pg_json(json.loads(task.result.to_json()))
+            # Each large worker output once (SW-E15): its other copies are
+            # references, expanded when the row is read.
+            result_json = _pg_json(_compact_outputs(json.loads(task.result.to_json())))
 
         cost = 0.0
         tokens = 0
@@ -265,22 +405,22 @@ class TaskStore:
         )
         meta_j = _pg_json(task.metadata)
         sort_at = task.completed_at or task.created_at or _utc_now_iso()
+        generation = int(getattr(task, "generation", 0) or 0)
+        run_id = str(getattr(task, "run_id", "") or "")
 
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
-                get_pool().execute(
-                    """
+                rows = _pg_execute(
+                    f"""
                     INSERT INTO kazma_swarm_tasks (
                         id, type, prompt, status, workers, result, context,
                         dependencies, fallback_chain, validation_schema, aggregation,
                         timeout, created_at, started_at, completed_at, sort_at, cost, tokens,
-                        metadata, workspace_id
+                        metadata, workspace_id, generation, run_id
                     ) VALUES (
                         %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s,
                         %s::jsonb, %s::jsonb, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s
                     )
                     ON CONFLICT (id) DO UPDATE SET
                         type = EXCLUDED.type,
@@ -301,7 +441,11 @@ class TaskStore:
                         cost = EXCLUDED.cost,
                         tokens = EXCLUDED.tokens,
                         metadata = EXCLUDED.metadata,
-                        workspace_id = EXCLUDED.workspace_id
+                        workspace_id = EXCLUDED.workspace_id,
+                        generation = EXCLUDED.generation,
+                        run_id = EXCLUDED.run_id
+                    WHERE {guard.format(row="kazma_swarm_tasks", new="EXCLUDED")}
+                    RETURNING id
                     """,
                     (
                         task.id, type_s, task.prompt, status_s, workers_j,
@@ -313,18 +457,33 @@ class TaskStore:
                         task.created_at, task.started_at, task.completed_at, sort_at,
                         cost, tokens, meta_j,
                         getattr(task, "workspace_id", None),
+                        generation, run_id,
                     ),
                 )
-                return
+                return bool(rows)
             conn = self._get_conn()
-            conn.execute(
-                """INSERT OR REPLACE INTO swarm_tasks
+            cur = conn.execute(
+                f"""INSERT INTO swarm_tasks
                    (id, type, prompt, status, workers, result,
                     context, dependencies, fallback_chain,
                     validation_schema, aggregation, timeout,
                     created_at, started_at, completed_at, sort_at, cost, tokens,
-                    metadata, workspace_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    metadata, workspace_id, generation, run_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                    type = excluded.type, prompt = excluded.prompt,
+                    status = excluded.status, workers = excluded.workers,
+                    result = excluded.result, context = excluded.context,
+                    dependencies = excluded.dependencies,
+                    fallback_chain = excluded.fallback_chain,
+                    validation_schema = excluded.validation_schema,
+                    aggregation = excluded.aggregation, timeout = excluded.timeout,
+                    created_at = excluded.created_at, started_at = excluded.started_at,
+                    completed_at = excluded.completed_at, sort_at = excluded.sort_at,
+                    cost = excluded.cost, tokens = excluded.tokens,
+                    metadata = excluded.metadata, workspace_id = excluded.workspace_id,
+                    generation = excluded.generation, run_id = excluded.run_id
+                   WHERE {guard.format(row="swarm_tasks", new="excluded")}""",
                 (
                     task.id, type_s, task.prompt, status_s, workers_j, result_json,
                     task.context or "", deps_j, fb_j, vs,
@@ -333,16 +492,37 @@ class TaskStore:
                     task.created_at, task.started_at, task.completed_at, sort_at,
                     cost, tokens, meta_j,
                     getattr(task, "workspace_id", None),
+                    generation, run_id,
                 ),
             )
+            return cur.rowcount > 0
+
+    def record_orphan(self, task_id: str, evidence: dict[str, Any]) -> None:
+        """Keep a refused late result as evidence on the task's row
+        (``metadata.orphan_results``, the newest five), never as its result.
+        A superseded run's outcome is what happened to that run; the row's
+        own outcome stands (Swarm audit SW-E03)."""
+        current = self.get_task(task_id)
+        if current is None:
+            return
+        meta = dict(current.metadata or {})
+        orphans = list(meta.get("orphan_results") or [])
+        orphans.append(evidence)
+        meta["orphan_results"] = orphans[-5:]
+        meta_j = _pg_json(meta)
+        with self._lock:
+            if self._pg:
+                _pg_execute(
+                    "UPDATE kazma_swarm_tasks SET metadata = %s::jsonb WHERE id = %s", (meta_j, task_id),
+                )
+                return
+            self._get_conn().execute("UPDATE swarm_tasks SET metadata = ? WHERE id = ?", (meta_j, task_id))
 
     def get_task(self, task_id: str) -> SwarmTask | None:
         """Retrieve a persisted task by its id, or ``None``."""
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
-                row = get_pool().execute_one(
+                row = _pg_execute_one(
                     "SELECT * FROM kazma_swarm_tasks WHERE id = %s", (task_id,)
                 )
                 if row is None:
@@ -367,6 +547,7 @@ class TaskStore:
         worker: str | None = None,
         include_count: bool = False,
         metadata_filter: dict[str, str] | None = None,
+        query: str | None = None,
     ) -> list[SwarmTask] | tuple[list[SwarmTask], int]:
         """Return persisted tasks with optional filtering and pagination.
 
@@ -408,14 +589,13 @@ class TaskStore:
                 if metadata_filter.get("tenant_id") == "*":
                     metadata_filter.pop("tenant_id", None)
         except Exception:
-            pass
+            # Without the tenant filter the list is every tenant's (SW-E14).
+            logger.warning("[TaskStore] could not apply the tenant filter to the task list", exc_info=True)
         if not metadata_filter:
             metadata_filter = None
 
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
                 conditions: list[str] = []
                 params: list[Any] = []
                 if status:
@@ -430,15 +610,18 @@ class TaskStore:
                 if metadata_filter:
                     conditions.append("metadata @> %s::jsonb")
                     params.append(_pg_json(metadata_filter))
+                if query:
+                    conditions.append("prompt ILIKE %s ESCAPE '\\'")
+                    params.append(f"%{_like_escape(query)}%")
                 where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
                 total = 0
                 if include_count:
-                    count_row = get_pool().execute_one(
+                    count_row = _pg_execute_one(
                         f"SELECT COUNT(*) AS cnt FROM kazma_swarm_tasks {where_clause}",
                         params,
                     )
                     total = int(count_row["cnt"]) if count_row else 0
-                rows = get_pool().execute(
+                rows = _pg_execute(
                     f"""SELECT * FROM kazma_swarm_tasks {where_clause}
                         ORDER BY COALESCE(sort_at, completed_at, created_at) DESC
                         LIMIT %s OFFSET %s""",
@@ -467,6 +650,9 @@ class TaskStore:
                     conditions.append("json_extract(metadata, ?) = ?")
                     params.append(f"$.{mkey}")
                     params.append(mval)
+            if query:
+                conditions.append("prompt LIKE ? ESCAPE '\\'")
+                params.append(f"%{_like_escape(query)}%")
 
             where_clause = ""
             if conditions:
@@ -504,12 +690,10 @@ class TaskStore:
         cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(retention_days)))).isoformat()
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
                 # RETURNING is what makes the count: the pool hands back rows
                 # only for a statement that produces them, so without it a
                 # delete of any size came back as [] and this reported 0.
-                res = get_pool().execute(
+                res = _pg_execute(
                     """DELETE FROM kazma_swarm_tasks
                        WHERE status = ANY(%s)
                          AND COALESCE(sort_at, completed_at, created_at) < %s
@@ -519,6 +703,12 @@ class TaskStore:
                 deleted = len(res)
                 if deleted:
                     logger.info("[TaskStore] pruned %d terminal tasks older than %d days", deleted, retention_days)
+                gone = _pg_execute(
+                    "DELETE FROM kazma_swarm_worker_metrics WHERE date < %s RETURNING worker",
+                    (cutoff[:10],),
+                )
+                if gone:
+                    logger.info("[TaskStore] pruned %d worker-metric days older than %d days", len(gone), retention_days)
                 return deleted
 
             conn = self._get_conn()
@@ -532,6 +722,9 @@ class TaskStore:
             deleted = cur.rowcount
             if deleted:
                 logger.info("[TaskStore] pruned %d terminal tasks older than %d days", deleted, retention_days)
+            gone = conn.execute("DELETE FROM swarm_worker_metrics WHERE date < ?", (cutoff[:10],)).rowcount
+            if gone:
+                logger.info("[TaskStore] pruned %d worker-metric days older than %d days", gone, retention_days)
             return deleted
 
     def delete_task(self, task_id: str) -> bool:
@@ -543,9 +736,7 @@ class TaskStore:
         """
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
-                return bool(get_pool().execute(
+                return bool(_pg_execute(
                     "DELETE FROM kazma_swarm_tasks WHERE id = %s RETURNING id", (task_id,)
                 ))
             conn = self._get_conn()
@@ -556,9 +747,7 @@ class TaskStore:
         """Return all tasks with status='paused' (for HITL restore on restart)."""
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
-                rows = get_pool().execute(
+                rows = _pg_execute(
                     "SELECT * FROM kazma_swarm_tasks WHERE status = %s ORDER BY created_at DESC",
                     ("paused",),
                 )
@@ -585,9 +774,7 @@ class TaskStore:
         failed: list[str] = []
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
-                rows = get_pool().execute(
+                rows = _pg_execute(
                     "SELECT * FROM kazma_swarm_tasks WHERE status = %s",
                     ("running",),
                 )
@@ -608,9 +795,15 @@ class TaskStore:
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.now(UTC).isoformat()
             metadata["execution_outcome"] = "unknown"
+            journal = metadata.get("step_journal") or {}
+            where = (
+                f" It stopped in step {journal.get('step')} ({journal.get('state')})."
+                if journal else ""
+            )
             metadata["recovery_error"] = (
-                "Interrupted by process exit; external effects may already have completed. "
-                "Inspect checkpoints, Temporal history and actual effects before resubmitting. "
+                "Interrupted by process exit; external effects may already have completed."
+                + where
+                + " Inspect checkpoints, Temporal history and actual effects before resubmitting. "
                 "Automatic replay was refused."
             )
             task.result = TaskResult(
@@ -661,11 +854,9 @@ class TaskStore:
 
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
                 # M-14: SQL-side increments so two replicas cannot lose a
                 # SELECT-then-UPDATE race. PRIMARY KEY (worker, date).
-                get_pool().execute(
+                _pg_execute(
                     """INSERT INTO kazma_swarm_worker_metrics
                            (worker, date, tasks_completed, tasks_failed,
                             avg_latency, total_tokens, total_cost)
@@ -739,9 +930,7 @@ class TaskStore:
         """Return daily metrics for a given worker, newest first."""
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
-                rows = get_pool().execute(
+                rows = _pg_execute(
                     """SELECT worker, date, tasks_completed, tasks_failed,
                               avg_latency, total_tokens, total_cost
                        FROM kazma_swarm_worker_metrics
@@ -765,9 +954,7 @@ class TaskStore:
         """Return aggregated metrics for all workers."""
         with self._lock:
             if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-
-                rows = get_pool().execute(
+                rows = _pg_execute(
                     """SELECT worker, SUM(tasks_completed) AS tasks_completed,
                               SUM(tasks_failed) AS tasks_failed,
                               AVG(avg_latency) AS avg_latency,
@@ -811,7 +998,7 @@ class TaskStore:
                     return default
             return default
 
-        result_data = _j("result")
+        result_data = _expand_outputs(_j("result"))
         metadata = _j("metadata") or {}
         workers = _j("workers") or []
         task = SwarmTask(
@@ -836,12 +1023,14 @@ class TaskStore:
             task.timeout = float(row["timeout"])
         if row.get("workspace_id"):
             task.workspace_id = row["workspace_id"]
+        task.generation = int(row.get("generation") or 0)
+        task.run_id = str(row.get("run_id") or "")
         return task
 
     @staticmethod
     def _row_to_task(row: sqlite3.Row) -> SwarmTask:
         """Convert a SQLite row into a :class:`SwarmTask`."""
-        result_data = json.loads(row["result"]) if row["result"] else None
+        result_data = _expand_outputs(json.loads(row["result"]) if row["result"] else None)
         metadata = json.loads(row["metadata"]) if row["metadata"] else {}
         workers = json.loads(row["workers"]) if row["workers"] else []
 
@@ -878,6 +1067,10 @@ class TaskStore:
             task.timeout = float(row["timeout"])
         if "workspace_id" in row.keys() and row["workspace_id"]:
             task.workspace_id = row["workspace_id"]
+        if "generation" in row.keys():
+            task.generation = int(row["generation"] or 0)
+        if "run_id" in row.keys():
+            task.run_id = str(row["run_id"] or "")
         return task
 
 

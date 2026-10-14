@@ -594,13 +594,39 @@ def _retire_older(conn: sqlite3.Connection, tenant_id: str, period_key: str) -> 
     return len(old)
 
 
+def _live_turn_ids(conn: sqlite3.Connection, ids: list[str]) -> set[str]:
+    """Which of *ids* are still memories recall may use (not forgotten)."""
+    from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
+    if not ids:
+        return set()
+    return {str(r[0]) for r in conn.execute(
+        f"SELECT id FROM episodes WHERE id IN ({','.join('?' for _ in ids)}) "
+        f"AND tier IN ({','.join('?' for _ in RECALLABLE_TIERS)})",
+        (*ids, *RECALLABLE_TIERS),
+    )}
+
+
 def _store(
     conn: sqlite3.Connection, *, tenant_id: str, period_key: str, start: float, end: float,
     turns: list[_Turn], title: str, summary: str, model: str, summary_id: str | None = None,
-) -> str:
-    """Write a new summary with its turns, or (*summary_id*) write one again."""
+    min_turns: int = 1,
+) -> str | None:
+    """Write a new summary with its turns, or (*summary_id*) write one again.
+
+    A compare-and-set (Memory audit M05, 2026-10-13). The text was written
+    by a model call that may have taken a minute, and the user may have
+    forgotten one of its turns -- or the summary itself -- meanwhile. So,
+    inside one write transaction: the turns are read again, and a text
+    written from a turn forgotten since is never stored (a new summary of
+    the turns left, when enough are, waits to be written again); a summary
+    written again must still be waiting for that (``status = 'rebuild'``),
+    so one the user forgot stays a tombstone. Returns the id written, or
+    None when nothing was.
+    """
     from kazma_core.memory.embedder import encode_text_to_blob, get_embedding_model_name
 
+    # The vector is made before the write transaction, never inside it.
     blob = encode_text_to_blob(f"{title}\n{summary}")
     now = time.time()
     fields = (
@@ -608,38 +634,67 @@ def _store(
         max(t.at for t in turns), model, now, blob, get_embedding_model_name() if blob else None,
         json.dumps({"version": _VERSION}),
     )
-    if summary_id:
-        conn.execute(
-            "UPDATE memory_summaries SET title = ?, summary_text = ?, turn_count = ?, chat_count = ?, "
-            "first_turn_at = ?, last_turn_at = ?, model = ?, updated_at = ?, embedding = ?, "
-            "embedding_model_version = ?, metadata_json = ?, status = 'active', queued_at = NULL "
-            "WHERE id = ?",
-            (*fields, summary_id),
-        )
+    if conn.in_transaction:
         conn.commit()
-        return summary_id
-    sid = _summary_id(tenant_id, period_key, [t.id for t in turns])
-    # The same turns as a summary an older version wrote (now retired): that
-    # row is written again. Any other existing row is left as it is.
-    conn.execute(
-        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, "
-        "title, summary_text, turn_count, chat_count, first_turn_at, last_turn_at, model, updated_at, "
-        "embedding, embedding_model_version, metadata_json, created_at, status) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active') "
-        "ON CONFLICT(id) DO UPDATE SET title = excluded.title, summary_text = excluded.summary_text, "
-        "turn_count = excluded.turn_count, chat_count = excluded.chat_count, "
-        "first_turn_at = excluded.first_turn_at, last_turn_at = excluded.last_turn_at, "
-        "model = excluded.model, updated_at = excluded.updated_at, embedding = excluded.embedding, "
-        "embedding_model_version = excluded.embedding_model_version, "
-        "metadata_json = excluded.metadata_json, status = 'active', queued_at = NULL "
-        "WHERE memory_summaries.status = 'retired'",
-        (sid, tenant_id, period_key, start, end, *fields, now),
-    )
-    conn.executemany(
-        "INSERT OR IGNORE INTO memory_summary_sources (summary_id, episode_id) VALUES (?, ?)",
-        [(sid, t.id) for t in turns],
-    )
-    conn.commit()
+    ids = [t.id for t in turns]
+    # One write transaction: ``with conn`` commits it, or rolls it back when a
+    # statement raises.
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        live = _live_turn_ids(conn, ids)
+        if summary_id:
+            if live != set(ids):
+                return None  # forgotten meanwhile: still 'rebuild', written again later
+            cur = conn.execute(
+                "UPDATE memory_summaries SET title = ?, summary_text = ?, turn_count = ?, chat_count = ?, "
+                "first_turn_at = ?, last_turn_at = ?, model = ?, updated_at = ?, embedding = ?, "
+                "embedding_model_version = ?, metadata_json = ?, status = 'active', queued_at = NULL "
+                "WHERE id = ? AND status = 'rebuild'",
+                (*fields, summary_id),
+            )
+            # Forgotten, retired or written meanwhile: nothing changed.
+            return summary_id if cur.rowcount == 1 else None
+        if live != set(ids):
+            left = [t for t in turns if t.id in live]
+            if len(left) >= min_turns:
+                # The turns left are a topic still: waiting, written later.
+                left_id = _summary_id(tenant_id, period_key, [t.id for t in left])
+                conn.execute(
+                    "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, "
+                    "title, summary_text, turn_count, chat_count, first_turn_at, last_turn_at, model, "
+                    "updated_at, metadata_json, created_at, status) "
+                    "VALUES (?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?, ?, ?, 'rebuild') "
+                    "ON CONFLICT(id) DO NOTHING",
+                    (left_id, tenant_id, period_key, start, end, len(left), len({t.chat for t in left}),
+                     min(t.at for t in left), max(t.at for t in left), model, now,
+                     json.dumps({"version": _VERSION}), now),
+                )
+                conn.executemany(
+                    "INSERT OR IGNORE INTO memory_summary_sources (summary_id, episode_id) VALUES (?, ?)",
+                    [(left_id, t.id) for t in left],
+                )
+            return None
+        sid = _summary_id(tenant_id, period_key, ids)
+        # The same turns as a summary an older version wrote (now retired): that
+        # row is written again. Any other existing row is left as it is.
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, "
+            "title, summary_text, turn_count, chat_count, first_turn_at, last_turn_at, model, updated_at, "
+            "embedding, embedding_model_version, metadata_json, created_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active') "
+            "ON CONFLICT(id) DO UPDATE SET title = excluded.title, summary_text = excluded.summary_text, "
+            "turn_count = excluded.turn_count, chat_count = excluded.chat_count, "
+            "first_turn_at = excluded.first_turn_at, last_turn_at = excluded.last_turn_at, "
+            "model = excluded.model, updated_at = excluded.updated_at, embedding = excluded.embedding, "
+            "embedding_model_version = excluded.embedding_model_version, "
+            "metadata_json = excluded.metadata_json, status = 'active', queued_at = NULL "
+            "WHERE memory_summaries.status = 'retired'",
+            (sid, tenant_id, period_key, start, end, *fields, now),
+        )
+        conn.executemany(
+            "INSERT OR IGNORE INTO memory_summary_sources (summary_id, episode_id) VALUES (?, ?)",
+            [(sid, t.id) for t in turns],
+        )
     return sid
 
 
@@ -703,7 +758,7 @@ async def summarize_period(
     conn, turns, grouping = await asyncio.to_thread(prepare)
     if conn is None:
         return True
-    counts = {"written": 0, "skipped": 0, "covered": 0, "unusable": 0}
+    counts = {"written": 0, "skipped": 0, "covered": 0, "unusable": 0, "forgotten_meanwhile": 0}
     try:
         if chat is None and grouping.groups:
             chat, model = _default_chat()
@@ -724,11 +779,12 @@ async def summarize_period(
             elif parsed["skip"]:
                 counts["skipped"] += 1
             else:
-                await asyncio.to_thread(
+                stored = await asyncio.to_thread(
                     _store, conn, tenant_id=tenant_id, period_key=period_key, start=start, end=end,
                     turns=group, title=parsed["title"], summary=parsed["summary"], model=model,
+                    min_turns=cfg["min_turns"],
                 )
-                counts["written"] += 1
+                counts["written" if stored else "forgotten_meanwhile"] += 1
         detail = {"chats": grouping.chats, "by_meaning": grouping.by_meaning, "bar": grouping.bar,
                   "topics": len(grouping.groups), **counts}
         await asyncio.to_thread(_finish_period, conn, tenant_id, period_key, turns=len(turns), detail=detail)
@@ -924,18 +980,25 @@ def _reembed(conn: sqlite3.Connection) -> int:
 # ── The user's side ──────────────────────────────────────────────────────
 
 
-def on_turns_forgotten(conn: sqlite3.Connection, episode_ids: Iterable[str]) -> list[str]:
+def on_turns_forgotten(
+    conn: sqlite3.Connection, episode_ids: Iterable[str], *, only_active: bool = False,
+) -> list[str]:
     """Empty every summary written from one of *episode_ids* and mark it to be
     written again without them. ``forget.forget_episode`` calls it before it
-    commits; returns the summaries emptied."""
+    commits; returns the summaries emptied.
+
+    *only_active*: leave a summary already waiting (``rebuild``) as it is --
+    its rewrite reads the turns as they are then (``_store``, Memory audit
+    M05) -- so asking again, or the maintenance pass, does not restart it."""
     ids = list(dict.fromkeys(str(i) for i in episode_ids if i))
     if not ids:
         return []
+    statuses = "('active')" if only_active else "('active', 'rebuild')"
     touched = [
         str(r[0]) for r in conn.execute(
             "SELECT DISTINCT s.id FROM memory_summaries s JOIN memory_summary_sources src "
             f"ON src.summary_id = s.id WHERE src.episode_id IN ({','.join('?' for _ in ids)}) "
-            "AND s.status IN ('active', 'rebuild')",
+            f"AND s.status IN {statuses}",
             ids,
         ).fetchall()
     ]
@@ -951,10 +1014,16 @@ def on_turns_forgotten(conn: sqlite3.Connection, episode_ids: Iterable[str]) -> 
 
 def forget_summary(
     summary_id: str, *, tenant_id: str, conn: sqlite3.Connection | None = None, by: str = "user",
+    journal: bool = True,
 ) -> dict[str, Any]:
     """Forget one summary: its text and vector go, the row stays as a
     tombstone, and its week never writes it again. Another tenant's summary
-    reads as not found; the install's own tenant may forget any."""
+    reads as not found; the install's own tenant may forget any. Journaled
+    (``forget_journal``): a restored memory database forgets it again."""
+    from kazma_core.memory import forget_journal
+
+    seq = (forget_journal.append("summary", tenant_id=tenant_id or "default", summary_id=summary_id)
+           if journal else None)
     own = conn is None
     conn = conn or _open()
     if conn is None:
@@ -967,6 +1036,8 @@ def forget_summary(
         if row is None or (caller != "default" and str(row["tenant_id"]) != caller):
             return {"ok": False, "error": "not_found"}
         if row["status"] == "forgotten":
+            forget_journal.mark_applied(conn, seq)
+            conn.commit()
             return {"ok": True, "summary_id": summary_id, "already": True}
         try:
             meta = json.loads(row["metadata_json"] or "{}")
@@ -982,6 +1053,7 @@ def forget_summary(
             "metadata_json = ? WHERE id = ?",
             (now, json.dumps(meta), summary_id),
         )
+        forget_journal.mark_applied(conn, seq)
         conn.commit()
         return {"ok": True, "summary_id": summary_id}
     finally:
@@ -989,26 +1061,37 @@ def forget_summary(
             conn.close()
 
 
-def list_summaries(
-    conn: sqlite3.Connection, *, tenant_id: str, limit: int = 30, include_hidden: bool = False,
-) -> list[dict[str, Any]]:
-    """The tenant's summaries, newest week first (``"default"`` is the
-    install's view: every tenant). Forgotten and retired ones only with
-    *include_hidden*; they hold no text."""
+def _summary_filter(tenant_id: str, include_hidden: bool) -> tuple[str, list[Any]]:
     where, params = ["1 = 1"], []
     if (tenant_id or "default") != "default":
         where.append("tenant_id = ?")
         params.append(tenant_id)
     if not include_hidden:
         where.append("status IN ('active', 'rebuild')")
+    return " AND ".join(where), params
+
+
+def list_summaries(
+    conn: sqlite3.Connection, *, tenant_id: str, limit: int = 30, include_hidden: bool = False, offset: int = 0,
+) -> list[dict[str, Any]]:
+    """The tenant's summaries, newest week first (``"default"`` is the
+    install's view: every tenant), from *offset*. Forgotten and retired ones
+    only with *include_hidden*; they hold no text."""
+    where, params = _summary_filter(tenant_id, include_hidden)
     rows = conn.execute(
         "SELECT id, tenant_id, period_key, period_start, period_end, title, summary_text, status, "
         "turn_count, chat_count, first_turn_at, last_turn_at, created_at, updated_at "
-        f"FROM memory_summaries WHERE {' AND '.join(where)} "
-        "ORDER BY period_start DESC, turn_count DESC LIMIT ?",
-        (*params, max(1, min(int(limit), 500))),
+        f"FROM memory_summaries WHERE {where} "
+        "ORDER BY period_start DESC, turn_count DESC LIMIT ? OFFSET ?",
+        (*params, max(1, min(int(limit), 500)), max(0, int(offset))),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def count_summaries(conn: sqlite3.Connection, *, tenant_id: str, include_hidden: bool = False) -> int:
+    """How many :func:`list_summaries` pages through."""
+    where, params = _summary_filter(tenant_id, include_hidden)
+    return int(conn.execute(f"SELECT COUNT(*) FROM memory_summaries WHERE {where}", params).fetchone()[0])
 
 
 def summary_health(conn: sqlite3.Connection, *, tenant_id: str = "default") -> dict[str, int]:

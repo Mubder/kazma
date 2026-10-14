@@ -59,8 +59,7 @@ Do **not** merge these — background consolidation must not WAL-contend with ch
 | Control | Effect |
 |---------|--------|
 | Tenant mode | `shared` / `per_platform` / `per_user` |
-| Inject Knowledge into chat | `merge_knowledge_into_chat` (default on) |
-| Promote KB hits to episodes | `promote_kb_to_episodes` (tagged soft-copy) |
+| Inject Knowledge into chat | `merge_knowledge_into_chat` (default on; library text is injected into the turn, never saved into chat memory) |
 | Graph store | `sqlite` (default) or `neo4j` dual-write |
 | Vector / embedder | sqlite-vec on one node; **pgvector** when `KAZMA_DATABASE_URL` / state URL is set (`KAZMA_PGVECTOR=0` to keep local) |
 
@@ -111,12 +110,17 @@ earlier chats; a chat must hold more than half of the question's content
 words.
 
 **Quality is measured.** `python scripts/memory_bench.py run` scores recall
-on a persona's life -- 1,109 chat turns and 72 facts inside unrelated chat,
-76 questions (single facts, paraphrases, things only the assistant said,
-updates, codes, Arabic, questions with no answer). CI replays the real
-model's recorded vectors and holds every score to a ratchet
-(`tests/test_memory_benchmark.py`); `lock` raises it, and it cannot be
-lowered.
+on a persona's life -- 1,120 chat turns and 69 facts inside unrelated chat,
+89 questions (single facts, paraphrases, things only the assistant said,
+updates, codes, Arabic, overviews, questions with no answer) -- and 40 more
+held out: written after the last tuning and never used to choose a
+threshold, so their scores say how far the tuning carries. CI replays the
+real model's recorded vectors and holds every score to a ratchet
+(`tests/test_memory_benchmark.py`); `lock` raises it. A score can fall only
+in a reviewed trade (`lock --trade "why"`: no score falls by more than 0.05,
+one rises by 0.05 or more, abstention never falls), written into the
+thresholds file with its reason. The report for this dataset is under
+"Benchmark report" below.
 
 **Meaning search is exact over every memory** (`vector_engine.py`, since
 2026-09-26): every episode and every current fact whose vector comes from
@@ -134,7 +138,21 @@ stays on sqlite-vec, says so once at boot, and Settings → Memory shows why
 ([Postgres & SaaS](../ops/postgres-and-saas) has the states and the fix).
 Postgres-primary ranks the mirror's keyword matches and the index's
 nearest memories on the same evidence (a keyword match's meaning comes from
-the index) — not keyword-only. Explicit Qdrant in Settings is never overridden.
+the index) — not keyword-only. On the retrieval benchmark (dataset v5) it
+finds nearly the same answers as local recall: hit rate 0.895 against 0.925,
+MRR 0.83 against 0.84, precision 0.62 against 0.64; the gap is one
+stopword-heavy question its keyword search misses. It reads only memories
+recall may show, ranks the mirror's keyword matches by how many of your
+words each holds, and leaves out anything this install forgot, even when the
+shared copy still holds it; the 15-minute mirror sync then repairs that copy.
+Explicit Qdrant in Settings is never overridden.
+
+Recall waits at most `memory.v2.recall_deadline_s` (default 5 seconds) for
+the question's meaning vector and asks the embedder once per question. When
+the embedder is slow or failing, recall answers from keywords, the memory
+search tool says its search was incomplete (never "nothing remembered"),
+and the embedder rests for 30 seconds, then longer, before it is asked again;
+memory health shows it as degraded meanwhile.
 Kill-switch: `KAZMA_PGVECTOR=0`.
 
 ### Post-turn
@@ -177,6 +195,8 @@ last won.
 - Dual-write: optional Postgres state mirror + Neo4j edge upsert  
 - **Ego-graph anchor** — every non-hub subject that does not already reach `user` gets `user → related_to → <subject>` at write time (payload leaves **and** floating entity clusters). Payload objects (`fully_clean`, paths) are **not** minted as concept entities (that mint used to skip the hub edge). Idempotent backfill on the 6h sweep.  
 - Invalidate / supersede / graph-clear **tombstone the Postgres mirror** and best-effort **delete Neo4j edges** (mass clear uses `clear_tenant_edges`).  
+
+A turn whose memory could not be written, or whose fact pass found the model unavailable, is not counted as remembered: it goes back to the memory queue and is tried again later, waiting longer each time (30 seconds, then 2, 8 and 32 minutes, at most an hour). A task that fails every attempt stays in the Memory page's task queue, marks memory health as degraded and sends an operations alert until you retry or clear it. Memory writes have queue slots of their own, so a backup never holds up a turn.
 
 ### Schedulers (`worker_bootstrap`)
 
@@ -235,9 +255,11 @@ the stub fallback used `COALESCE` on an empty string, so every chat memory
 became an empty shell on day 30 however often it was recalled. The live
 install had 341 such shells; all were restored from backups.
 
-Export writes `kazma_beliefs_latest.jsonl`, GraphML, plus episodes, `beliefs_archive`, `entity_merges` (+ archive), and `memory_audit_log` (per-tenant filenames when not `default`). Native `.db` backups remain the restore SoT.
+Export writes `kazma_beliefs_latest.jsonl`, GraphML, plus episodes, `beliefs_archive`, `entity_merges` (+ archive), and `memory_audit_log` (per-tenant filenames when not `default`), each table whole and as plain text: vectors are left out (they are rebuilt), other binary values are base64. A piece that cannot be written fails the export task, which the memory queue retries. Native `.db` backups remain the restore SoT: each is one consistent copy, taken in a single step while Kazma keeps writing.
 
-The Postgres mirror is kept whole by a sync pass on the 15-minute maintenance cadence: every memory and fact it is missing, or holds in an older state (a tier move, a forgotten memory, an ended fact), is pushed again, newest first. A row only the mirror holds is counted in memory health and left alone. Recall tops up a thin answer only with memories another install wrote; a memory this install removed never comes back through the mirror.
+Memory health shows how long the oldest queued task has waited, how long the oldest running one has run, when each kind of task last succeeded, and each maintenance sweep's last outcome. A sweep that fails three passes in a row, a task the queue refuses, and a task that fails every attempt are reported, not just logged.
+
+The Postgres mirror is kept whole by a sync pass on the 15-minute maintenance cadence. Every memory or fact written here, or changed in something the mirror holds (a tier move, a forgotten memory, an ended fact), is queued in the same transaction as the change, and the pass pushes the queued rows as they are now, in batches over pooled connections. Once a day (`memory.v2.mirror_verify_hours`, 1-168) it also compares every row with the mirror and pushes whatever differs, newest first, up to 5,000 rows a pass; while it is still pushing with more behind, the next pass compares again rather than a day later. A pass also asks the mirror for the newest rows it was already sent, and compares in full at once when one is missing: a restore of the shared database takes rows back that no pass would push again (at most once an hour). A push that keeps failing is retried five times and then left to that comparison. A row only the mirror holds is counted in memory health and left alone. Recall tops up a thin answer only with memories another install wrote; a memory this install removed never comes back through the mirror.
 
 What the agent stores with its memory tools (`memory_store`, linking two entities) records the chat and turn it was said in: forgetting that turn or chat forgets those notes and facts too, and in a chat kept out of memory the tools store nothing. Compacting a long conversation no longer stores its summary as a memory; the turns themselves are remembered.
 
@@ -303,10 +325,16 @@ If unset, default graph provider stays **sqlite**. Server down → topology fall
 You decide what Kazma keeps:
 
 - **Forget one memory.** The Memory page lists what Kazma remembers of your
-  conversations ("Memories of conversations"); **Forget** removes one. Kazma
-  keeps nothing it said -- the question, the answer, the search vector -- and
-  the facts it learned from that part of the conversation stop being used.
-  The chat itself stays as it is.
+  conversations ("Memories of conversations"), newest first, a page at a
+  time ("1–30 of 412", **Older** and **Newer**), with a search box that finds
+  the memories holding every word you type. **Forget** removes one, from
+  that list or from a search result on the same page (the memory search and
+  "Search both stores"); weekly summaries page and forget the same way. Kazma
+  keeps nothing it said -- the question, the answer, the search vector --
+  and the facts it learned from that part of the conversation lose their
+  value, their vector and their edit history, wherever a copy was kept: the
+  fact archive, the record of changes to facts, a turn still waiting to be
+  processed, the search index. The chat itself stays as it is.
 - **Don't remember a chat.** In the chat list, a chat's menu has
   **Memory...**: turn it off and Kazma remembers nothing new from that chat
   and forgets what it already remembered from it. In Telegram, Discord or
@@ -318,13 +346,30 @@ You decide what Kazma keeps:
 - **Notes Kazma saves with its memory tools belong to the chat** they were
   saved in: forgetting that chat (or that turn) forgets them too, and in a
   chat you keep out of memory Kazma saves nothing.
-- **Take it with you.** **Export** on the Memory page downloads everything
-  Kazma remembers as JSON: your About me, facts (current and past, with the
-  chat they came from), memories of conversations, weekly summaries,
-  entities, and when things were forgotten (never what).
+- **Take it with you.** **Export** on the Memory page downloads what Kazma
+  remembers as JSON: your About me, facts (current, past and archived, with
+  the chat they came from), every change made to a fact, memories of
+  conversations, weekly summaries, entities and their merges, the groupings
+  you made on the graph, the tool procedures Kazma learned, and when things
+  were forgotten (never what). The file's `not_included` part names what it
+  leaves out and why: work still queued, the safety layer's approval
+  records, search indexes rebuilt from the rest.
 
 A forgotten memory stays forgotten: nothing that rebuilds memory from your
 chat history brings it back.
+
+**Rewinding a chat rewinds what Kazma remembers of it.** `/undo`, `/edit`,
+restoring an earlier point in Time Travel and aborting a turn take the
+rewound turns out of memory as well -- the memory of each and the facts it
+taught -- so the old answer cannot come back as something Kazma "remembers".
+A fork starts a new chat and leaves the original's memory as it is.
+
+**What Forget cannot reach.** Copies made before you forgot keep it until
+they are replaced: the memory backups (ten, one every six hours), Kazma's
+full backups (seven), the offsite backups (up to twelve monthly), the
+memory export written every six hours, the copy kept before an embedding
+rebuild, and space the database has freed but not yet reused. The Forget
+dialog says so too.
 
 ## About me
 
@@ -332,7 +377,9 @@ chat history brings it back.
 that you write: your name, your work, where you are, how you like to be
 answered. Kazma reads it at the start of every reply, in every chat. It is
 never filled in by Kazma, and what you say later in a conversation wins over
-it. Clear the text to remove it.
+it. Clear the text to remove it. On an install with several users, only an
+administrator can change it: Kazma takes it into account for everyone who
+uses that tenant.
 
 ## One fact, one name
 
@@ -344,6 +391,39 @@ it when the words are the same, so a new value replaces the old one; the daily
 memory maintenance retires facts already stored twice (keeping the latest).
 Where your own words and something Kazma inferred disagree, both are kept for
 you to settle.
+
+What you say about yourself outranks what Kazma works out or stores on its
+own. A fact Kazma saved with its memory tools without you asking -- from a
+page it read, an email, its own reading of the chat -- never stands in the
+way of you correcting it: say "I live in Lisbon now" and that is what Kazma
+remembers. When you ask Kazma to remember something ("remember that ...",
+"تذكر أن ..."), what it stores in your words counts as yours. Text that reads
+like instructions to Kazma is refused; anything a page or an email slips past
+that check is still never treated as your own words.
+
+## Names in any language
+
+A person, a company or a place Kazma learns about keeps its name in the
+language you used: "شركة الخليج", "東京タワー" and "Gulf Company" are three
+different things to it. Until 2026-10-13 a name with no Latin letters was
+filed under one shared id, so two Arabic facts about different things could
+replace each other, and a later Arabic name could be stored as the word
+"entity". Names that differ only by vowel marks or the form of a letter
+("أحمد", "أَحْمَد", "احمد") are recognised as one name.
+
+Facts the old rule filed under "entity" can be repaired. Size it first (this
+only reads):
+
+```bash
+python scripts/memory_entity_repair.py size
+```
+
+Then repair a copy of `memory_state.db` (`apply --db <copy> --yes
+--no-queue`) to see the result, and, when Kazma is idle, the install's own
+database (`apply --db <path> --yes`). Each collapsed fact is set aside --
+kept, no longer used -- and the turn it came from is read again by Kazma's
+memory worker, which files its facts under their real names. A fact whose
+turn is gone stays set aside; nothing is guessed.
 
 ## Weekly summaries
 
@@ -359,7 +439,8 @@ left open.
 - **Where to see them:** the Memory page, "Weekly summaries". Forget one and
   Kazma never writes it again; the conversations it was written from stay.
 - **Forgetting a conversation turn** also removes it from every summary: the
-  summary is emptied at once and written again without it.
+  summary is emptied at once and written again without it -- also when you
+  forget it while that summary is being written.
 - **Settings** (`memory.v2`): `summaries_enabled` (on), `summaries_min_turns`
   (4), `summaries_max_per_week` (24 topics, largest first). One model call per
   topic.
@@ -376,6 +457,11 @@ left open.
 
 Single operator surface for **topology + entities + beliefs + hygiene**
 (`memory.html` + `memory_console.js` + `memory.js` + `memory_api.py`).
+
+Every change made here leaves a trail: a log line and an audit row naming
+the action, who made it, the tenant and the ids, never a value. The daily
+digest counts the memories forgotten from this page, and `/metrics` counts
+the changes requested per action (`kazma_memory_operator_actions_total`).
 
 ### Layout
 
@@ -510,7 +596,142 @@ the hub, never from its code (`memory/entity_protection.py`).
 | Multi-region + conflicts | [#77](https://github.com/Mubder/kazma/issues/77) |
 | Hosted embed-only fleet | [#78](https://github.com/Mubder/kazma/issues/78) |
 
-Postgres dual-mirror and sparse ILIKE assist already exist as **optional** foundations. Tombstones propagate, and the 15-minute mirror sync pushes whatever the mirror is missing or holds stale (a row only the mirror holds is counted, never deleted).
+Postgres dual-mirror and sparse ILIKE assist already exist as **optional** foundations. Tombstones propagate, and the 15-minute mirror sync pushes what changed (and, once a day, whatever the mirror is missing or holds stale; a row only the mirror holds is counted, never deleted).
+
+### Benchmark report (dataset v5, 2026-10-14)
+
+Recall on the retrieval benchmark, the tuning questions and the held-out
+ones, on both paths (vectors replayed from bge-m3):
+
+| | Local (SQLite) tuning | Local held out | Postgres-primary tuning | Postgres-primary held out |
+|---|---|---|---|---|
+| Questions | 89 | 40 | 89 | 40 |
+| Hit rate (every piece of the answer shown) | 0.925 | 0.891 | 0.895 | 0.891 |
+| MRR (how high the first answer ranks) | 0.844 | 0.845 | 0.830 | 0.845 |
+| Precision (share of what is shown that answers) | 0.644 | 0.646 | 0.621 | 0.630 |
+| Abstention (nothing shown when nothing answers) | 0.28 (5 of 18) | 0.00 (0 of 8) | 0.28 | 0.00 |
+| Questions across languages (held out, `mixed`) | | hit 1.0, MRR 0.90 | | hit 1.0, MRR 0.90 |
+
+- **The ranking carries over:** the held-out hit rate, MRR and precision are
+  within a few points of the tuning set's, on both paths, and a question in
+  Arabic about something said in English (or the reverse, or both in one
+  sentence) is answered as well as any other.
+- **Abstention does not.** Recall shows something for most questions nothing
+  answers: 13 of 18 tuning questions and every one of the 8 held out, which
+  were written to come close to a real memory (another person's dentist, a
+  car's colour). The target is 0.6 on both sets (`TARGETS` in
+  `scripts/memory_bench.py`); it is a goal recorded beside the floors, not a
+  gate, and abstention is the one score no trade may lower.
+- **The thresholds cannot buy it** (swept 2026-10-14: the memory floor 0.04
+  to 0.10 against the fact floor 0.06 to 0.12, 16 settings). Every setting
+  that shows nothing for a held-out question loses answers elsewhere past the
+  trade rule's 0.05 -- Arabic hit rate 0.25, "noise" 0.33, overviews 0.5 --
+  and the one setting inside the rule raises tuning abstention only (0.28 to
+  0.39) and leaves the held-out set at 0: a choice fitted to the tuning
+  questions. What these questions share with their near-miss memories is the
+  person or thing (Noor, Maya, the car); telling "Noor's dentist" from
+  "Noor's school" needs a signal of what is asked about, not a higher floor.
+  Most of what is shown for them is marked "(possibly related)" to the
+  model.
+
+Extraction (`python scripts/memory_bench.py extraction`): 30 single turns
+in English, Arabic and both, scored on what a reader would keep from each.
+
+| Heuristic pass | Recall | Precision | Turns with nothing to keep that kept nothing |
+|---|---|---|---|
+| English (12 turns) | 0.46 | 1.0 | 3 of 3 |
+| Arabic (10 turns) | 0.64 | 1.0 | 2 of 2 |
+| Mixed (8 turns) | 0.60 | 1.0 | 1 of 1 |
+
+The heuristic pass is the quick first look at every turn. Until 2026-10-14 it
+had English patterns only and kept nothing from Arabic (0.00, mixed 0.20);
+it now reads the same kinds of fact in Arabic and in Arabic mixed with
+English -- name, where you live (or moved to), where you work, a favourite,
+a preference, an allergy (`memory/arabic_facts.py`). Its rules come from the
+grammar, so it keeps nothing from a negation ("ما أحب"), an instruction to
+Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن في دبي") or a
+field of work ("أشتغل في المبيعات", like "I work in sales"). What it misses --
+relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
+replies (`extraction --record`, one model call per turn); until they are
+recorded the report says "not recorded" and nothing is assumed.
+
+### Measured limits
+
+Measured on 2026-10-14 at the live size (about 1,700 memories; as many facts
+assumed, the live count was not taken) and at 10 and 100 times it. Text
+follows a natural word distribution, every memory and fact has a
+1024-dimension vector, and the Postgres mirror was a disposable PostgreSQL
+16.15 in Docker, limited to 1 CPU and 1 GB. Machine: Intel Core (family 6,
+model 183), 32 logical CPUs, 64 GB RAM, Windows 11, Python 3.12.9, SQLite
+3.47.1, sqlite-vec 0.1.9, NumPy 2.5.0, the test process at below-normal
+priority. Seconds:
+
+| | 1x (1,700) | 10x (17,000) | 100x (170,000) |
+|---|---|---|---|
+| A whole recall (one question) | 0.08 | 0.67 | 8.2 |
+| Exact meaning search, every memory (sqlite-vec) | 0.007 | 0.20 | 1.8 |
+| The same without sqlite-vec (NumPy) | 0.012 | 0.27 | 2.7 |
+| Keyword search | 0.0002 | 0.003 | 0.03 |
+| A first macro-sleep pass, mirror on (moves most rows) | 0.40 | 7.0 | 53 |
+| Mirror: a pass with nothing changed | 0.0001 | 0.0001 | 0.0001 |
+| Mirror: a pass with 100 changed memories | 0.014 | 0.016 | 0.024 |
+| Mirror: the daily full comparison, nothing to push | 0.06 | 0.35 | 4.9 |
+| Mirror: 100 single pushes, pooled / a connection each | 0.24 / 2.0 | 0.26 / 2.1 | 0.46 / 2.3 |
+
+What the numbers mean:
+
+- **Recall is the limit.** Meaning search compares the question with every
+  memory and every fact (no approximate index), so its cost grows with the
+  store: about 0.7 s at 17,000 memories, 8 s at 170,000. Keep a store under
+  roughly 40,000 memories and as many facts for recall under two seconds on
+  a machine like this one. Past that, an approximate vector index is the
+  change to make.
+- **The mirror no longer grows with the store.** A pass pushes only what
+  changed; only the daily comparison reads everything (5 s at 100x). Before
+  this, every 15-minute pass read every text and both digests, and pushed
+  each row on a new connection: the first macro-sleep pass at 10x took 336 s
+  pushing 16,000 moves one by one, 7 s in batches.
+- **Macro-sleep** is linear: one pass reads every memory of a tenant once.
+
+The run is opt-in (`tests/test_memory_scale_bench.py`,
+`KAZMA_TEST_MEMORY_SCALE=1,10,100`, with `KAZMA_DATABASE_URL` and
+`KAZMA_TEST_ALLOW_REAL_DB=1` for the mirror half on a disposable database).
+It fails when a size goes over the limits it names.
+
+### Restore drills (RPO and RTO)
+
+Run on 2026-10-14 on the same machine, at the live size (1,700 chat turns,
+half of them before the backup). Each drill uses the product's own steps on
+private stores:
+
+| | Local memory (SQLite) | Postgres-primary memory |
+|---|---|---|
+| The backup | the native memory backup (6-hourly) | the Postgres dump of the mirror tables (6-hourly) |
+| The disaster | the memory database restored from it | the shared database restored from the dump |
+| Lost (RPO) | nothing a chat turn holds: the 850 turns since the backup were rebuilt from the chat store; an agent's note saved since the backup is lost | nothing: the 850 memories since the dump were pushed back from the local store |
+| A forget made after the backup | stays forgotten (the forget journal) | stays forgotten, in the mirror and in recall |
+| Time to whole (RTO) | 0.95 s, at the restore | 0.11 s, the next maintenance pass (at most 15 minutes) |
+
+Meaning search for the rebuilt turns follows as the vector repair pass
+embeds them (about 20 seconds a pass, every 15 minutes). The drills run in
+CI (`tests/test_memory_restore_drill.py`; `tests/test_memory_restore_drill_pg.py`
+on a disposable Postgres with `pg_dump`), each with the setting that lost
+data as its negative control: before the drills, a restored memory database
+lost every turn of a chat changed since the backup (turn reconcile's cursor
+lived in the settings store, past them), forgets made since came back for up
+to 15 minutes, and a restored mirror waited up to a day.
+`KAZMA_TEST_MEMORY_RESTORE_DRILL_TURNS` sets the size.
+
+### The soak
+
+`scripts/memory_soak.py` runs the memory lifecycle on private stores, one
+process per cycle (every cycle a restart), killing some cycles partway:
+turns live and missed, forgets and chats kept out, the maintenance passes,
+backups and restores from older ones. After every cycle it checks that each
+chat turn is a memory unless forgotten, that a forget leaves nothing behind,
+that both databases are intact and that recall finds what it is asked. A
+60-cycle pilot (10 killed, 13 restores) was clean; the multi-day run the
+audit asks for has not been run.
 
 ---
 

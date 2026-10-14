@@ -73,9 +73,13 @@ def register_system_tools(registry: Any) -> None:
                     str((t.get("function") or {}).get("name") or t.get("name") or "")
                     for t in manager.get_all_tool_schemas()
                 ]
+                # The tool names are the server's own text (fenced).
+                from kazma_core.safety.prompt_fence import fence_untrusted
+
+                names = ", ".join(t for t in tools[:20] if t)
                 return (
                     f"OK: '{target.get('name')}' connected — {count} tool(s): "
-                    + (", ".join(t for t in tools[:20] if t) or "(none)")
+                    + (fence_untrusted(names, source=f"mcp_server:{target.get('name')}") if names else "(none)")
                 )
             finally:
                 try:
@@ -725,7 +729,12 @@ def register_system_tools(registry: Any) -> None:
         import asyncio as _asyncio
 
         from kazma_core.swarm import SwarmTask, TaskType, get_swarm_engine
+        from kazma_core.swarm.single_operator import swarm_refusal
 
+        # A single-operator surface (SW-S16, decision D1).
+        refusal = await _asyncio.to_thread(swarm_refusal)
+        if refusal:
+            return f"Error: {refusal}"
         engine = get_swarm_engine()
         if engine is None:
             return (
@@ -796,7 +805,11 @@ def register_system_tools(registry: Any) -> None:
         # Dispatch in the background so the tool returns immediately.
         # Register on engine._task_handles so cancel_task / panel Stop
         # can cancel the live asyncio work (not just mark maps cancelled).
-        _bg_task = _asyncio.create_task(engine.dispatch(task))
+        # Without this turn's HITL call authority (SW-S01): the swarm
+        # worker's danger tools ask the bus.
+        from kazma_core.safety.call_authority import detached_context
+
+        _bg_task = _asyncio.create_task(engine.dispatch(task), context=detached_context())
         _pending_dispatch_tasks.add(_bg_task)
         try:
             engine.register_task_handle(task.id, _bg_task)
@@ -831,15 +844,25 @@ def register_system_tools(registry: Any) -> None:
         category="swarm",
     )
     async def check_swarm_task(task_id: str) -> str:
-        from kazma_core.swarm import get_swarm_engine
+        import asyncio as _asyncio
 
+        from kazma_core.swarm import get_swarm_engine
+        from kazma_core.swarm.single_operator import swarm_refusal
+
+        # A single-operator surface (SW-S16, decision D1).
+        refusal = await _asyncio.to_thread(swarm_refusal)
+        if refusal:
+            return f"Error: {refusal}"
         engine = get_swarm_engine()
-        # Check in-memory active tasks first, then TaskStore (persisted).
+        # Check in-memory active tasks first, then TaskStore (persisted) --
+        # a database read, in a thread (this tool runs on the event loop).
         task = None
         if engine:
             task = engine.get_active_task(task_id)
         if task is None and engine and getattr(engine, "_task_store", None):
-            task = engine._task_store.get_task(task_id)
+            import asyncio as _asyncio
+
+            task = await _asyncio.to_thread(engine._task_store.get_task, task_id)
         if task is None:
             return f"Task {task_id} not found."
 
@@ -862,9 +885,16 @@ def register_system_tools(registry: Any) -> None:
                 f"Check again in a moment."
             )
 
+        # A worker's text is what it read and wrote -- web pages, files, other
+        # tools: the model reads it as data, never as instructions (Swarm
+        # audit SW-S10: it came back unfenced). Our own scaffolding stays out.
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        worker_name = (task.workers[0] if task.workers else "swarm")
         result = task.result
         if result and result.error:
-            return f"Task {task_id} failed: {result.error}"
+            return (f"Task {task_id} failed:\n"
+                    + fence_untrusted(result.error, source=f"swarm_worker:{worker_name}"))
         if result:
             output = (
                 result.aggregated_output
@@ -879,7 +909,7 @@ def register_system_tools(registry: Any) -> None:
                 f"Task {task_id} completed.\n"
                 f"Cost: ${cost:.4f}\n"
                 f"Duration: {duration:.1f}s\n\n"
-                f"{output}"
+                + fence_untrusted(output or "", source=f"swarm_worker:{worker_name}")
             )
         return f"Task {task_id} status: {status_str} (no result yet)."
 

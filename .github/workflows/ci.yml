@@ -562,6 +562,14 @@ jobs:
         run: python -m pytest tests/e2e/test_acquisition_alerts.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Swarm page through a proxy that cuts long answers (2026-10-14)
+        # Swarm audit SW-S08/SW-S09: approve answers 202, the page reads every
+        # answer and follows the task on a resumable stream, in English and
+        # Arabic, through a proxy that cuts a request held open (the
+        # Cloudflare Tunnel shape the live page sits behind).
+        run: python -m pytest tests/e2e/test_swarm_through_a_cutting_proxy.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,
@@ -582,7 +590,10 @@ jobs:
             tests/e2e/test_instant_reply_closes.py \
             tests/e2e/test_dashboard_session_table.py \
             tests/e2e/test_settings_restore_browser.py \
-            tests/e2e/test_soft_nav_into_chat.py
+            tests/e2e/test_soft_nav_into_chat.py \
+            tests/e2e/test_about_me_limit_arabic.py \
+            tests/e2e/test_memory_forget_older.py \
+            tests/e2e/test_memory_hostile_type.py
         env:
           KAZMA_DB_BACKEND: sqlite
 

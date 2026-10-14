@@ -111,6 +111,8 @@ STORES: dict[str, Store] = {
         "long-term memory: beliefs, entities and episodes", "bundle"),
     "memory_ops.db": Store(
         "the memory task queue and the memory audit log", "bundle"),
+    "memory_forget_journal.db": Store(
+        "every forget, keep-out and summary forget, in order: ids and hashes, never text", "bundle"),
     "knowledge_graph.db": Store("the swarm memory property graph", "bundle"),
     "checkpoints.db": Store("conversation state checkpoints", "bundle"),
     "snapshots.db": Store("time-travel snapshots of the agent's state", "bundle"),
@@ -583,7 +585,7 @@ def distinctive_store_names() -> frozenset[str]:
         for helper in (
             "vault_db_path", "checkpoints_db", "settings_db", "snapshots_db",
             "swarm_tasks_db", "audit_db", "rbac_db", "hub_registry_db",
-            "primary_memory_db", "memory_ops_db", "knowledge_graph_db",
+            "primary_memory_db", "memory_ops_db", "memory_forget_journal_db", "knowledge_graph_db",
         ):
             fn = getattr(_paths, helper, None)
             if fn is None:

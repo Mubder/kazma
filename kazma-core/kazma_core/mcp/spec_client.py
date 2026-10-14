@@ -228,7 +228,7 @@ async def request_sampling_hitl(
                     return bool(
                         await safety.check(
                             "mcp_sampling",
-                            tool_args=str(payload["args"])[:200],
+                            tool_args=json.dumps(payload["args"], default=str),
                             force_danger=True,
                         )
                     )

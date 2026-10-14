@@ -199,6 +199,17 @@ code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
 - Both `record_success()` and `record_failure()` reset it
 - Never remove this flag or concurrent calls bypass the probe semantics
 - ReliabilityRegistry (P2-1 refactor) owns all breaker/retry/timeout/validator state
+- **An outcome names its admission** (Swarm audit SW-E11, 2026-10-14).
+  `admit()` / `check_or_raise()` return a `BreakerAdmission(generation,
+  probe)`; every change of state bumps `generation`. An outcome from an older
+  generation, or any outcome but the probe's own while a probe is in flight, is
+  stale: counted (`stale_outcomes`), never applied. A dispatch admitted before
+  the trip closed a half-open breaker while its probe still ran. Callers pass
+  the admission (`record_success(admission)`); one without it cannot resolve a
+  probe. Shared breakers write by compare-and-set: never over a newer
+  generation. A dispatch is one in-flight count whatever its retries
+  (`SwarmWorker.in_flight`); the autoscaler never reaps an instance with one in
+  flight (SW-E12). Gate: `tests/test_swarm_boundaries_and_signals.py`.
 
 ### 6. TaskStore WAL Mode (`kazma-core/kazma_core/swarm/task_store.py`)
 - SQLite uses WAL + `busy_timeout=5000` for concurrent read/write
@@ -239,8 +250,17 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   Telegram gate (2026-10-09). Within-turn duplicate/burst suppression remains.
   Gate: `tests/test_gateway_approval_card_retry.py` (all three transports,
   unchanged throttle as negative control, resume and other-thread isolation).
-- Double-gating prevention: graph sets ContextVars (`_graph_hitl_gate_ctx` /
-  `_hitl_approved_ctx`) so `LocalToolRegistry.execute` does **not** re-prompt the bus
+- Double-gating prevention, for ONE call (Swarm audit SW-S01, 2026-10-14):
+  the graph binds `_graph_hitl_gate_ctx` / `_hitl_approved_ctx` to the tool it
+  decided about (`safety/call_authority.py`: `call_authority(var, tool)`), and
+  that call's first execution consumes it (`claim_call_authority`). Work the
+  call starts -- `dispatch_swarm`'s task, a thread, another tool -- finds it
+  spent and asks the bus; detached starters run in `detached_context()`. The
+  old step-wide booleans travelled through `asyncio.create_task`'s context copy,
+  and a swarm worker's `file_write`/`send_message` ran with no card anywhere.
+  §30's "decision truth = hitl_gates.db" holds for detached swarm work and the
+  bus too: a bus request is a gate row (mechanism `swarm_bus`) with the human
+  actor and its own `timeout`/`cancelled` endings.
 
 **B. Swarm bus — `/swarm` + IDE `LocalToolRegistry.execute` path**
 - `tool_registry.py:execute()` calls `safety.check()` (async) for danger tools
@@ -253,14 +273,27 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   The drift warning repeats every 15 min either way.
 - Bus adapters: `TelegramBusAdapter`, `DiscordBusAdapter`, `SlackBusAdapter`
 - App wiring: **one** adapter if only one platform; **`FanOutBusAdapter`** when
-  multiple are configured. Swarm fan-out is **tri-state** (Wave 6 H-12): `True`
-  settles immediately; `False` is a vote until `expected_voters` or the deadline.
-  This is **not** web `claim_gate` (first claim 200, second 409). Do not restore
-  "first boolean / first approval wins" — a Discord Deny used to kill a Telegram
-  Approve. NullBus = internal-only / fail-closed danger
-- H-9: `is_danger_tool()` must call `requires_approval()` (tier floor), not a
-  name list that can un-gate by omission
-- Approval buttons resolve via `handle_callback()` on each adapter
+  multiple are configured. NullBus = internal-only / fail-closed danger.
+- **One request, one decision** (`swarm/shared_approvals.py`, Swarm audit
+  Stage 1, 2026-10-14; replaces Wave 6 H-12's tri-state vote). `check()` opens
+  the request under a freshly minted id bound to the tool and an arguments hash
+  -- never an id from the tool's arguments (SW-S02: one click approved every
+  later call carrying that `task_id`). Every platform's card shows every
+  argument, bounded and marked when cut (`swarm/approval_card.py`, SW-S03), and
+  waits on ONE shared row (`swarm.approval.<id>` in the settings store,
+  compare-and-set). The first human decision on any platform decides it -- an
+  Approve, or a Deny, which is final (owner decision D7) -- and every card shows
+  that outcome (SW-S05). The request's deadline is the only one: `timeout` and
+  `cancelled` are outcomes, never a deny (SW-S04). Do not bring back per-adapter
+  timers or votes. This is still **not** web `claim_gate`.
+- H-9: `is_danger_tool()` is `safety.hitl.approval_floor()`, the floor
+  `requires_approval()` uses (SW-S11: it gated only `danger`/`unsafe`, so an
+  unclassified tool passed the bus)
+- Approval buttons: `shared_approvals.decide_from_button(data, actor=,
+  platform=)` from each platform's click handler; no adapter instance is needed,
+  and a decision that cannot be recorded is a WARNING with the actor
+  (`kazma_swarm_failures_total{site="approval_resolve"}`). The gate row records
+  the human who pressed. Gate: `tests/test_swarm_bus_approvals.py`.
 
 **C. Pipeline checkpoints — swarm PIPELINE tasks** (separate from A and B)
 - `engine.py:_handle_pipeline_checkpoint` + `approve_checkpoint`
@@ -270,8 +303,10 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   the close and left Approve on cancelled tasks. Code that sets a terminal
   status itself must be declared in `tests/test_swarm_paused_task_endings.py`
   with how it covers those three.
-- A pipeline paused before a restart is restored into history only, never
-  `_active_tasks`; reject and cancel reach it there. `reject_checkpoint`
+- A pipeline paused before a restart is restored as a PAUSED in-flight task
+  (`_active_tasks`, Swarm audit SW-E09: the history is an LRU, and an evicted
+  restored pipeline could not be cancelled and came back paused at every boot);
+  paused tasks do not count against admission. `reject_checkpoint`
   decides "already finished?" BEFORE the handler runs — the handler marks the
   shared task failed, and judging after it left restored rejects unsaved
   (2026-09-25: four `200`s, still paused at the next boot).
@@ -371,11 +406,47 @@ compatibility. **All public API methods and constructors are unchanged.**
 |--------|---------------|-----------------|
 | `engine.py` | Dispatch, handoff, task lifecycle, worker registry | Always — the orchestrator |
 | `reliability_registry.py` | Circuit breakers, retries, timeouts, validators, concurrency | Configuring per-worker reliability |
-| `phonebook.py` | WorkerRegistry summon + dispatch_by_name | Topology/DAG worker lookup |
+| `phonebook.py` | WorkerRegistry summon + the fenced memory context of `dispatch_by_name` (which runs through `dispatch()`) | Topology/DAG worker lookup |
 | `checkpoint_manager.py` | HITL pipeline checkpoint state, timeout auto-reject, persistence | Pipeline pause/resume logic |
+| `shared_approvals.py` / `approval_card.py` | A bus approval request's one decision; the card's text | Swarm-bus HITL (§7B) |
+| `limits.py` | Input, pause and parallelism limits | A new task field or limit |
+| `single_operator.py` | The multi-user refusal (decision D1) | A new swarm surface |
 
 **Rules after refactor:**
 - New reliability features go in `reliability_registry.py`, not `engine.py`.
+- **The engine owns every run** (Swarm audit Stage 2-3, 2026-10-14):
+  `_run_owned` registers it before its first await, one run per task id; the
+  RUNNING row is an admission compare-and-set (`TaskStore.admit`, `generation`
+  and `run_id`); `persist_task` follows one transition table (a finished
+  status is never left, an older generation's write is refused and kept as
+  `orphan_results`). An interrupted run records `interrupted_by` and
+  `execution_outcome` (`none_invoked` / `unknown` with `invoked_tools`) from
+  its effect tracker; an uncertain result is stored `failed`; retrying an
+  unknown outcome needs `acknowledge_unknown`; a resumed pipeline skips its
+  journaled steps. Task writes run in threads, one task's in order
+  (`_persist` / `_flush_writes`). Gates: `tests/test_swarm_owned_lifecycle.py`,
+  `tests/test_swarm_interrupted_effects.py`.
+- **Swarm failures are loud and counted** (SW-E14): lost evidence or a lost
+  decision is a WARNING and `kazma_core.metrics.record_swarm_failure(site)`
+  (`kazma_swarm_failures_total{site}`). A catch-all handler in `swarm/` or the
+  bus adapters that stays below WARNING is declared with its reason in
+  `tests/test_swarm_boundaries_and_signals.py::_QUIET_HANDLERS`. Each worker
+  result is counted once in the worker metrics (`_finalize_task`).
+- **A worker's text reaches a model fenced** (SW-S10): `check_swarm_task`,
+  pipeline and handoff hand-ons, the synthesis prompt, the Refiner. Same gate
+  file (`_RESULT_TEXT_ONLY` declares the stored-result builders).
+- **`/api/swarm/*` has one role table** (`kazma_ui/swarm_panel/route_roles.py`,
+  SW-S07): GET is any signed-in user, everything else admin, enforced by the
+  routers' `RoleCheckedRoute`. On an install with platform users every swarm
+  surface refuses (`409 swarm_single_operator`, decision D1). Gate:
+  `tests/test_swarm_route_roles.py`.
+- **Bus posts are mention-safe** (SW-S13): every Discord and Slack bus post and
+  edit goes through `_post_message` / `_patch_message` / `_update_message`,
+  which apply the chat adapters' `sanitize_outbound` (and Discord's
+  `allowed_mentions: {"parse": []}`).
+- **The task store** strips NUL from every Postgres parameter
+  (`_pg_execute`) and runs SQLite at `synchronous=FULL` (the RUNNING row is
+  crash evidence, SW-E16); worker-metric days follow the task retention.
 - `engine.py` public methods are thin delegates — the real logic lives in the extracted modules.
 - The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
 - Constructor signature is unchanged — test fixtures work without modification.
@@ -642,6 +713,20 @@ after every supervisor iteration and persists it to
   need `graph.aupdate_state`. The resolver only handles read-only subcommands
   (`list`, `compare`, `clear`) which don't need graph access.
 
+**D2. A rewind rewinds memory** (Memory audit M09, 2026-10-13, decided with
+TT-03: memory is rewound, not kept). `/undo`, `/edit`, a restore
+(`apply_snapshot_to_thread`) and abort call `memory.forget.rewind_memory`
+after they write: the turns they took back -- episodes, the agent's notes,
+facts -- are forgotten under every key and tenant that holds them, journaled,
+with ledger rows from the old questions (a deferred write, the deep pass and
+turn reconcile from the unchanged transcript do not bring them back); a fork
+touches the original chat's memory not at all. The deep pass applies facts
+only while its turn is still remembered (`_apply_if_still_remembered`). The
+transforms are `agent/rewind.py`. Gate: `tests/test_memory_rewind.py` (each
+rewrite through a real LangGraph graph, recall after; the rewrite alone as
+the negative control; every product function calling `.aupdate_state(`
+calls `rewind_memory` or is declared not a rewind).
+
 **E. The web chat answers `/replay` and `/fork` without the model**
 (`kazma_ui/sse_chat/_time_travel.py`, 2026-09-28): the chat's saved steps and
 a link, `/replay?thread=<id>`, that `replay.js` opens on that chat's
@@ -744,7 +829,11 @@ swarm works with zero pre-registered workers.
   mutates the active profile. Env-lock (`KAZMA_MODEL`) always wins.
 - **Handoff cycle guards (§4) still apply** to auto-spawned instances — they are
   regular `InProcessWorker`s once spawned. Idle-reap after 5 min;
-  `record_activity` refreshes the timer.
+  `record_activity` refreshes the timer, and an instance with a dispatch in
+  flight is never reaped (`SwarmWorker.in_flight`, SW-E12). Instances are named
+  `<template>-pool-<boot tag>-<n>` (a new tag each start, so an earlier run's
+  shared breaker is never inherited); a reaped instance's shared breaker keys
+  are deleted.
 - **The Swarm page offers "auto"** in both worker pickers, chosen by default
   when nothing is registered, and the status says "On demand" when templates
   exist and nothing runs (`/api/swarm/status` `templates`). Until 2026-09-28
@@ -817,7 +906,23 @@ scheduler needs a case there.
   native `sqlite3.backup()` of both memory DBs (`backup.py`) + JSONL/GraphML
   dumps (`export.py`) + a filtered `pg_dump` of Kazma's Postgres
   shared-state tables (§21). First sweep 120s after boot. Kept separate
-  from macro_sleep so a slow disk on backup can't stall decay.
+  from macro_sleep so a slow disk on backup can't stall decay. The export is
+  a portable text snapshot, whole (2026-10-13, Memory audit M30): no vector
+  column, other bytes as base64 (it wrote Python `b'...'` literals), every
+  table paged through (the audit log stopped at its newest 20,000 rows), a
+  count per piece; a piece that fails fails the task (`_ExportResult.failed`,
+  M20 -- failures were logged at DEBUG and counted done).
+- **Lifecycle failures are seen** (2026-10-13, Memory audit M20): the
+  schedulers enqueue through `worker_bootstrap._enqueue_checked` (a refused
+  task is a WARNING and the ops alert `memory.enqueue_failed`; the result was
+  ignored, and a broken `memory_ops.db` stopped every cadence while health
+  showed an empty queue). Vector repair and recovery let a locked or busy
+  database reach the runner (they reported it as nothing to do); the runner
+  logs it at INFO for two passes, WARNING from the third, and every sweep's
+  last outcome is in memory health (`sweeps`, `sweep_health()`), with the
+  queue's oldest pending and running ages and each task type's last success
+  (`queue`). Three failed passes in a row degrade health (`sweep_failing`).
+  Gate: `tests/test_memory_lifecycle_signals.py`.
 - **24h reconsolidation:** `global_reconsolidation` (dedupe + re-embed of
   beliefs, subject-hash partitioned).
 - **15-min commitment GC:** TTL expiry + tiered retention (§20). Every
@@ -828,7 +933,8 @@ scheduler needs a case there.
   `swarm.task_retention_days`, default 30, 0 keeps all — checkpoint
   retention, §41, the supervisor
   watch, §39, memory vector repair, knowledge vector repair (§24F), memory
-  recovery and memory turn reconcile, §15F, memory mirror sync, §15K,
+  recovery, retired knowledge promotions and memory turn reconcile, §15F,
+  memory mirror sync, §15K,
   weekly topic summaries, §15J, entity count repair, §15L),
   run by ONE isolated
   runner so a failing sweep never stops the rest -- and is logged at WARNING
@@ -850,10 +956,64 @@ re-boot / repeated calls and let the backup handlers register
 independently of the core V2 set.
 
 **D. The durable queue lives in `memory_ops.db` (`task_queue.py`).** Bounded
-retries: `max_attempts` (default 3) then dead-letter (`status='failed'`);
-stuck `processing` rows past 300s are reclaimed. Per-task short-lived
-SQLite connections (no WAL contention with chat reads on
-`memory_state.db`). `enqueue_task` is best-effort and never raises.
+retries: `max_attempts` (6 for a memory write, `MEMORY_LANE`; 3 for
+maintenance) then dead-letter (`status='failed'`); stuck `processing` rows
+past 300s are reclaimed. Per-task short-lived SQLite connections (no WAL
+contention with chat reads on `memory_state.db`). `enqueue_task` is
+best-effort and never raises. Since 2026-10-13 (Memory audits M12, M13):
+- **A failed attempt waits its backoff** (`next_attempt_at`, `_retry_delay`:
+  30 s, x4 each time, at most an hour). It went back to `pending` at once:
+  three attempts in three polls, so a ten-minute provider outage
+  dead-lettered every deep pass of it.
+- **A dead letter is kept until the operator retries or clears it** (the
+  Memory page's queue): `purge_completed_tasks` deletes completed rows only.
+  One dead letter degrades memory health (`status_detail: dead_letters`) and
+  raises the ops alert `memory.dead_letter`. They were deleted after a week,
+  and health (five or more) cleared itself.
+- **A failure is a failure.** `dual_write.write_episode` says `written`,
+  `refused` (the user keeps the turn out) or `failed`; a failed write raises
+  `EpisodeWriteFailed` in the post-turn pipeline, counts `mirror_fail`, and
+  the live thread hands the turn to the queue (`post_turn_memory`) -- the
+  None was ignored and the turn counted `ok`. The deep pass tells "the model
+  is unavailable" (`belief_extractor._llm_extract`: no client, or the call
+  raised -- retried, `deep_pass_failed`) from "it answered with nothing"
+  (done); an outage ended as a heuristic-only "done", never redone.
+- **A lane claims no more rows than it has free slots, and memory writes
+  have their own lane** (`MEMORY_LANE`: post-turn memory, the deep pass,
+  entity merges, summary rebuilds). The worker claimed eight and ran two:
+  a row that waited past the stuck threshold was claimed again and ran
+  twice, and a pg_dump or a restic check held up a user's turn.
+Gate: `tests/test_memory_queue_retries.py` (each with its negative control:
+the ignored None, the one-None extractor, no backoff, the old purge, the old
+batch-claim loop, one lane).
+
+**D2. No slow call under a memory write lock; one vector per row** (2026-10-13,
+Memory audits M14, M15, `memory/vector_write.py`). No embedding, Postgres
+mirror, graph or vector-index call runs inside a memory SQLite write
+transaction, `belief_mutation._mutation_lock` or the episode writer's lock:
+a fact was embedded inside the mutation's `BEGIN IMMEDIATE` under the
+process-wide lock (every belief write waited on one embedder call, up to two
+minutes), the superseded fact's graph delete and mirror tombstone ran there,
+and `macro_sleep` made a Postgres round trip per archived fact inside its
+transaction. Now `mutate_belief` writes the vector after the commit
+(`_store_belief_vector`), the superseded edge and tombstone after it too, and
+`macro_sleep` unmirrors after its commit. A row's vector is embedded ONCE
+(`encode_vector`, no lock held), written by one guarded `UPDATE`
+(`write_local_vector`: no vector yet and the row still holds what was embedded;
+it commits only a transaction it began), and sent to the remote index only
+(`index_remotely` through `backends.get_remote_vector_backend`, taken back out
+if a forget landed meanwhile). An episode was embedded twice, the second write
+ran on the shared connection without the lock or the tier guard (a forgotten
+memory got its vector back), and `LocalSqliteVectorBackend.upsert` committed
+the caller's transaction; no memory writer upserts through it now. Recall's
+access bump waits at most 50 ms for the write lock and keeps its counts when
+the database is busy (`recall.flush_access_bumps`, written by the next recall
+or `macro_sleep`) -- it waited the full busy timeout (5.54 s measured) on the
+turn path and dropped them. Gate: `tests/test_memory_io_outside_locks.py`
+(a probe in every embed, mirror, graph and vector hook used by
+`belief_mutation`, `macro_sleep`, `hygiene`, `forget` and the episode writer
+finds the database free and no memory lock held; one embedding per write; the
+forget race; a gate on local upserts; each with its negative control).
 
 **E. The split-DB design is load-bearing.** `memory_state.db` (hot reads:
 beliefs, episodes, entities, procedural DAGs) is isolated from
@@ -881,7 +1041,7 @@ came up short, and archiving had erased 76 memories.
   sources are earlier backups of the memory DB (a same-row copy whose text
   reproduces the stub), the chat store + spool and checkpoint history
   (`chat_history.py`, both backends), `noted` beliefs, `memory_store` tool
-  calls (resumable scan), the knowledge library. Anything but a backup must
+  calls (resumable scan). Anything but a backup must
   reproduce the episode id (`dual_write._episode_id` /
   `swarm_bridge.bridge_episode_id`) AND the stub (`_archive_stub`, checked
   against the old SQL). Sources must agree or nothing is restored; text is
@@ -899,6 +1059,19 @@ came up short, and archiving had erased 76 memories.
   previous turn's when there was none); the episode `turn_number` is the
   turn index (`user_turn_index`), not the iteration count that made a
   repeated question collide into one memory.
+- **A poison turn is set aside** (2026-10-13, Memory audit M27): a
+  reconciled turn whose fact extraction fails `_FACT_ATTEMPTS` (3) passes in
+  a row is marked `metadata.facts_failed` (a WARNING names it) and the facts
+  cursor moves on; the count rides the reconcile state (`fact_attempts`). A
+  locked database is never a verdict: it raises to the runner. One failing
+  turn used to keep the cursor before it for good. The embedding rebuild
+  (M28) loads the model first and re-encodes in place (a row keeps its old
+  vector until the new one is written; it NULLed every vector and committed
+  before the model loaded), and takes its pre-rebuild copy again each time
+  (it kept the first one forever). `macro_sleep`'s tier moves are
+  compare-and-set on the tier and last touch it read (M29: a forget during
+  the sweep had its "forgotten" overwritten; `moves_skipped` counts them).
+  Gate: `tests/test_memory_lifecycle_cas.py`.
 - **Turn reconcile** (`turn_reconcile.run_turn_reconcile_pass`, 15 min, ~60
   s): every chat-store turn older than 10 minutes without an episode gets
   one, with its own time, through `mirror_episode`. Then the turns it wrote
@@ -907,7 +1080,36 @@ came up short, and archiving had erased 76 memories.
   pass) -- at the turn's own time (§15H; a rowid cursor, `facts_after`).
   Repeated questions are counted, erased-row stubs count as present, and the
   cursor passes only settled sessions. On live it found 1,004 of 1,174 chat
-  turns missing.
+  turns missing. **The cursors live in `memory_state.db`**
+  (`memory_reconcile_state`, `turn_reconcile.read_state`, 2026-10-14): in
+  the settings store a restored older memory database met a cursor already
+  past the chats changed since its backup, and their newer turns were never
+  memories again. Without the row (an older build's database, an older
+  backup) every chat is read once. `memory.backup.restore_memory_backup` --
+  the Memory page's restore -- copies the backup over the live file, then
+  applies the forget journal and runs turn reconcile at once (forgets made
+  since came back until the next 15-minute pass). Gates:
+  `tests/test_memory_restore_drill.py` (RPO/RTO at any size,
+  `KAZMA_TEST_MEMORY_RESTORE_DRILL_TURNS`; the cursor of after the backup as
+  the negative control). `scripts/memory_soak.py` is the soak harness
+  (private stores, a process per cycle, killed cycles, restores; checks every
+  cycle), held by `tests/test_memory_soak_harness.py`.
+- **Knowledge Library text is injected, never written into memory** (Memory
+  audit M04, 2026-10-13). The supervisor copied up to two injected chunks a
+  turn into the chat's memory (`promote_kb_hits_to_episodes`, setting
+  `memory.v2.promote_kb_to_episodes`, on by default), inline in the async
+  node -- a chat-store read, an insert, embeddings, the vector index and the
+  Postgres mirror on the loop -- as `user_text="[Knowledge: ...] ..."`:
+  crawled text recalled as history, grouped into summaries as the user's,
+  and kept after its library was deleted. The promotion, its setting and
+  Settings toggle, and recovery's library source are gone; the maintenance
+  sweep "retired knowledge promotions" (`forget.retire_knowledge_promotions`)
+  empties the copies an earlier build left -- no ledger row, the library
+  keeps the text. `mirror_episode` is a loop-stall helper. Gate:
+  `tests/test_memory_kb_never_in_memory.py` (a real supervisor call that
+  injects library text under a loop SQLite/embedder tracer: no memory write;
+  recall shows none; the old call on the loop as the tracer's control; the
+  retirement; nothing writes the old source).
 - **Nothing repoints live memory** (item I): no product code rebinds a
   `kazma_core.paths` function or resets the shared `dual_write` writer
   (`_reset_mirror` is a test helper; gate in `tests/test_memory_every_turn.py`).
@@ -990,6 +1192,15 @@ four injected were noise.
   and as whole words with an optional و/ف prefix -- "تذكرة" (a ticket) is
   not "تذكر". It promotes the turn to the recall tier (`episode_row`) and is
   a durable cue (`is_filler_turn`: "تذكر هذا" is eight characters).
+- **Write-path details** (2026-10-13, Memory audit M26): English "remember"
+  phrases match whole words, and one right after "do/did you" is a question
+  ("Can you denote that" matched "note that" and became a recall-tier
+  memory); `dual_write.mirror_belief` (no caller, past the trust gate, the
+  ledger and supersede) is deleted; a single-valued fact's current value is
+  the newest, and extra current rows are closed at its start; the deep pass
+  marks its episode (`metadata.deep_pass`, `_DEEP_PASS_VERSION`) and a
+  second task for it does nothing; the embedder singleton is built once
+  under a lock. Gate: `tests/test_memory_write_path_items.py`.
 - **Small talk is kept, never recalled (W5).** `episode_text.is_small_talk`:
   the whole message is small talk by its words, never by length ("Pixel's
   age?" is short and a question). A greeting, thanks or goodbye with a reply
@@ -1006,6 +1217,32 @@ four injected were noise.
   (one round past the walk's radius, so the edges between its outermost
   nodes are there); the seeds come from every entity name. Same graph as
   before whenever the old cut held everything.
+- **Recall has a deadline and embeds the question once** (2026-10-13, Memory
+  audit M16). `recall()` wraps the body (`_recall`) with a per-recall memo
+  (`_QUERY_MEMO`): each text is embedded at most once, a failure included
+  (a failed embedding was tried by every channel, four times a recall), in a
+  bounded daemon thread (`_embed_within`, two in flight at most) waited on
+  until `memory.v2.recall_deadline_s` (default 5 s). Past it, or with the
+  embedder failing, recall answers from keywords and sets
+  `RecallResult.degraded`; `memory_search` then says the search was
+  incomplete, never "No relevant memories found.". Both embedders carry a
+  circuit breaker (`embedder._EmbedderBreaker`: 30 s doubling to ten
+  minutes, no call and no log while open, one log line per opening) shown in
+  memory health (`embedder`, `status_detail: embedder_unavailable`). Gate:
+  `tests/test_memory_recall_deadline.py` (negative controls: the body
+  without its memo or deadline, a breaker that never opens).
+- **Recall reads the question's text, bounded** (2026-10-13, Memory audits
+  M17, M25). The supervisor's latest user text is
+  `turn_input.extract_latest_user_text(messages, image_marker=False)`: the
+  text parts only. It was `str(content)` -- on a photo turn the Python repr of
+  the parts, base64 included (recall embedded 200,125 characters and built a
+  6,029-term keyword query; the language lock and the router read it too).
+  `recall()` reads at most `_QUESTION_MAX_CHARS` (2,000: the start and the
+  end of a long paste), the keyword query and the graph walk's seeds at most
+  `_QUESTION_MAX_TERMS` (32) words, each once. Gate:
+  `tests/test_memory_question_bounds.py` (a photo turn through the real
+  supervisor node; recall at 2,000 words within twice 20 words on a seeded
+  store; the bounds lifted as the negative control).
 - **Hybrid vector search merges (R8).** `HybridVectorBackend.search`
   returned the remote index's hits alone whenever it had any, so a memory
   not yet in the remote index was invisible to meaning search. Both are
@@ -1031,7 +1268,7 @@ four injected were noise.
 - **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
   private database the product's way -- turns via `episode_row`, facts via
   `mutate_belief(private=True)`, which keeps every write in that database (no
-  state mirror, graph, unified index or remote vector index), and (v3) weekly
+  state mirror, graph or remote vector index), and (v3) weekly
   summaries as `topic_summaries` stores them, a summary answering when it
   stands for an answering turn -- and asks the real `recall()`. CI replays bge-m3's recorded vectors
   (`tests/fixtures/memory_bench/vectors.npz`); `thresholds.json` is a
@@ -1040,7 +1277,25 @@ four injected were noise.
   dataset version only. A change to the dataset's texts needs `vectors`
   re-recorded with the real model. The Dashboard's golden eval seeds facts
   the same way; a case marked `needs_meaning` is skipped without an
-  embedder and must pass with one.
+  embedder and must pass with one. **Dataset v5 (2026-10-14, Memory audit
+  M24)** adds 40 held-out questions (`HELDOUT`: never used to choose a
+  threshold; the builder refuses one that repeats a tuning question; a
+  `mixed` category asks across languages), scored apart
+  (`report["heldout"]`, gated as `heldout.*`); an extraction benchmark
+  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 30 turns
+  EN/AR/mixed, recall, precision and "quiet" per language; the heuristic
+  pass in CI, the model's deep pass from recorded replies,
+  `tests/fixtures/memory_bench/extraction_llm.json`, recorded with
+  `extraction --record` on the configured model -- the owner's to run, it
+  costs a call a turn; a turn with no recording is an error, never "the
+  model was down"); explicit abstention targets (`TARGETS`, 0.6, goals not
+  gates); a reviewed trade (`lock --trade "why"`, `trade_problems`: no
+  score falls more than 0.05, one rises 0.05 or more, abstention never
+  falls; recorded in `trades`); and the Postgres-primary run
+  (`tests/test_memory_benchmark_pg.py`, opt-in, pgvector, floors in
+  `postgres_primary`). The report (both backends, held out, extraction) is
+  the guide's "Benchmark report"; the measured limits at 10x and 100x are
+  the guide's "Measured limits" (`tests/test_memory_scale_bench.py`).
 - **Nothing on the hot path parses `kazma.yaml` (S4):**
   `config_loader.install_yaml_section` -- the install root's file, parsed
   once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.
@@ -1084,7 +1339,7 @@ four injected were noise.
   statement, cuts the previous one short, and never becomes current. It adds
   nothing when a neighbour says the same, and the trust gate applies to the
   value it would cut short. History rows reach the state mirror, never the
-  graph or the unified index. Until 2026-09-27 the last WRITE won, so any
+  graph. Until 2026-09-27 the last WRITE won, so any
   late writer could put an old "I live in Paris" over "I moved to London".
 - **Every writer that runs after its turn passes the turn's time.** The
   post-turn scheduler stamps `at` when the turn closes; the durable queue
@@ -1094,6 +1349,15 @@ four injected were noise.
   heuristic and the deep pass means the deep pass may still correct its own
   turn. Gate: `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
   (every call in the late-writer modules names its time).
+- The quick (heuristic) pass reads Arabic and mixed text too
+  (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
+  0.00 Arabic recall). Token rules from the grammar, compared folded: a
+  negation, an imperative without its hamza ("استخدم البحث"), a question, a
+  participle outside the user's own clause ("أخوي ساكن في دبي") and "work in
+  a field" keep nothing; a place must end where it is read. One fact per
+  kind, the English reading first. Gate: `tests/test_memory_arabic_facts.py`
+  (sentences not in the benchmark, both ways; the pass switched off as the
+  negative control).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each
@@ -1123,10 +1387,60 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   Every product site that inserts an episode is declared in
   `tests/test_memory_forget.py`, and the live writers must ask the ledger.
 - The facts a forgotten turn produced (`source_session`/`source_turn`) are
-  invalidated and lose their value (`object = ''`, `metadata.forgotten`);
-  a forget cut short (`invalidate_belief` commits as it goes) is finished by
-  asking again. The Postgres mirror gets the tombstones; the remote vector
-  index loses the vectors.
+  invalidated and lose their value, their vector and every metadata field
+  but where they came from (`object = ''`, `embedding = NULL`; an operator
+  edit's `previous` goes with it); a forget cut short (`invalidate_belief`
+  commits as it goes) is finished by asking again. The Postgres mirror gets
+  the tombstones; the remote vector index loses the turn's AND its facts'
+  vectors.
+- **Every copy is on one list** (`memory/memory_stores.py`, Memory audit
+  M01, 2026-10-13): each table of `memory_state.db` and `memory_ops.db`,
+  and each store outside them, with what Forget does there, its export
+  section or why it has none, its retention and its bound. Forget reached
+  the episode and the fact's value column only: the value stayed in the
+  fact's vector and edit history, `beliefs_archive` (Hygiene and the
+  180-day sweep), `memory_audit_log` (now redacted to a hash, the event
+  kept), a queued turn's payload, the legacy tables, the full-text index
+  segments (`purge_search_index`: FTS5 keeps a deleted row's words until a
+  merge) and `unified_items`, a copy of every fact and Knowledge chunk with
+  no delete path that federated search served -- retired, dropped by
+  `ensure_ops_schema`. A tool record keeps argument NAMES, never values
+  (`procedural.strip_argument_values` rewrites older ones). What Forget
+  cannot reach is the erasure horizon (`ERASURE_HORIZON`: backups, restic,
+  exports, the pre-rebuild copy, freed SQLite pages), said in the Forget
+  dialog and the guide. Gates: `tests/test_memory_store_registry.py` (one
+  word planted through every writer, forget, every column of every table of
+  both databases read for it -- the forget of the day before and the
+  missing purge as negative controls; every table declared, a planted one
+  fails), `tests/test_memory_forget_witnesses.py` (the audit's witnesses,
+  inverted).
+- **Forget converges, and a restore does not undo it** (Memory audits
+  M08/M10, 2026-10-13; `memory/forget_journal.py`). Every forget, keep-out,
+  "remember again" and summary forget is appended to the forget journal
+  (`<data dir>/memory_forget_journal.db`, its own file) BEFORE it changes
+  anything; the memory database records what it applied
+  (`memory_forget_applied`, inside it, so a restored older copy lacks the
+  marks of later forgets). `forget_episode` runs EVERY step every time (the
+  "already" path finished the facts only; summaries stayed active) and
+  marks its entry applied only after the last one. The maintenance entry
+  "forget convergence" (first of the memory sweeps, and at boot) applies
+  pending entries in order, stopping at a failure (a keep-out then
+  "remember" must keep their order), enforces the ledger on stored rows
+  (`forget.enforce_ledger`: a forgotten turn's copy, a row written into a
+  kept-out chat after the keep-out, a chat's past forgotten in the last day,
+  an active summary from a forgotten turn) and retries remote deletes that
+  failed (`forget_remote_pending`, also in the journal file). The writer's
+  ledger check and insert are one `BEGIN IMMEDIATE`, and it pushes the row
+  as it is now to the mirror and the remote index, never its arguments.
+  Recovery and `scripts/scan_old_sessions.py` ask the ledger. A tombstone
+  keeps a note's chat and turn (provenance, not content). The restore drill
+  reports the forgets a backup would replay. Gate:
+  `tests/test_memory_forget_converges.py` (a fault after each of ten steps,
+  then one pass -> the M01 completeness scan passes; without the pass each
+  leaves something; the three L05 witnesses inverted; a keep-out racing the
+  writer on another thread; a pre-forget copy restored -> forgotten again,
+  reconcile does not rebuild; negative control without the replay; only the
+  forget code may pass `journal=False`).
 - **"Don't remember this chat"** is the whole-chat ledger row: the writer
   refuses its turns, the post-turn worker (`_run_turn_memory`) extracts no
   facts, the past-chats search skips the chat -- and reads other chats
@@ -1155,17 +1469,40 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   and `graph_helpers._ensure_about_user` places it right after the system
   prompt and personality, replacing an earlier copy. Never inferred: a
   profile built from facts would have shown 4 past reset dates every turn.
-  `tests/test_memory_about_me.py`.
+  Changing it is admin-only under RBAC (`platform_rbac.role_allows`, Memory
+  audit M11): it is guidance for every user of the tenant, like the
+  personality. `tests/test_memory_about_me.py`, `tests/test_memory_tools_fenced.py`.
 - **Deleting a chat keeps its memories (S3, the owner's rule)** unless the
   dialog's "Also forget what Kazma learned from this chat" is ticked: then
   the page asks `PUT .../chats/{id}/memory {remember: false, forget_past:
   true}` FIRST (the forget finds the chat's other key through the chat
   store, which the delete empties) and deletes only if that succeeded.
   `tests/e2e/test_chat_delete_forget.py` (unticked makes no forget request).
-- **Export** (`GET /api/memory/v2/export`): the caller's tenant's facts
-  (with provenance), memories, weekly summaries, entities and what was
-  forgotten (when, never what). The Memory page's "Memories of
-  conversations" panel forgets one.
+- **Export** (`GET /api/memory/v2/export`, M22 2026-10-13): one section
+  per `memory_stores` export section (`memory_api._EXPORT_QUERIES`; the
+  export refuses to run when the two disagree) -- About me, facts, archived
+  facts, every change to a fact, memories, weekly summaries, entities,
+  entity merges, graph groupings, tool procedures, what was forgotten --
+  and `not_included`, each table left out with why. A forgotten fact shows
+  when, never what (no subject, predicate, chat or turn). Streamed, 500
+  rows at a time, never built in memory. Gates in
+  `tests/test_memory_store_registry.py` (every table with a tenant names
+  its section or why not; a planted table and a section without a reader
+  fail). The Memory page's "Memories of conversations" panel forgets one.
+  **Every memory and weekly summary is reachable there** (Memory audit M23,
+  2026-10-14): the panel listed the newest 30 memories and 40 summaries, and
+  an older one could be forgotten only through the API. Both routes page
+  (`offset`, `total`; the page shows "1–30 of N"), the memories route takes
+  `q` (`routes_direct/memory._every_word_match`: every content word, each in
+  any of its search forms -- recall's OR expression, newest first, filled the
+  page with any memory sharing one word), and the probe's and "Search both
+  stores" memory and summary hits carry Forget (`_forgetEpisode`,
+  `_forgetSummary`, one dialog each). Gates:
+  `tests/test_memory_forget_reachable.py` (every row reached page by page,
+  the first page alone as the negative control; a list with Forget that
+  loads without an offset fails), `tests/e2e/test_memory_forget_older.py`
+  (the oldest of 35 forgotten through the page, English by paging, Arabic by
+  search; ledger and tier checked).
 
 **J. Weekly topic summaries (C2, 2026-09-27, `memory/topic_summaries.py`).**
 Recall injects five turns and five facts; one topic on live ran to 100+
@@ -1204,7 +1541,17 @@ queued by the maintenance sweep with at most two weeks in flight.
   user forgets is a tombstone its week never writes again (`_covered`: a
   topic mostly made of another summary's turns is that summary, even after a
   late turn joins it). The model's text passes `prompt_fence.filter_injection`
-  and a credential mask.
+  and a credential mask. **The store is a compare-and-set** (`_store`,
+  Memory audit M05, 2026-10-13): the model call takes up to a minute per
+  topic, so inside one write transaction the source turns are read again --
+  a text written from a turn forgotten meanwhile is never stored (the turns
+  left, if still a topic, wait as `rebuild`) -- and a summary written again
+  must still be `rebuild` (a forgotten one stays a tombstone). Until then a
+  forget during the weekly run landed in an ACTIVE summary, and a rebuild
+  overwrote a summary the user had just forgotten. Gate:
+  `tests/test_memory_summary_store_cas.py` (both witnesses inverted; every
+  statement that sets a summary active names the status it replaces; the
+  old store as negative control).
 - **Local only:** summaries live in the local memory database, like the
   graph, and are not mirrored to the Postgres state backend; they are
   rebuilt from turns. The Memory page's "Weekly summaries" panel lists and
@@ -1244,11 +1591,61 @@ an answer ("User prefers dark mode").
 - **The mirror sync** (maintenance entry "memory mirror sync",
   `sync_state_mirror`): compares the whole mirror with the local store -- id,
   tier and an md5 of the texts; for a fact, current or not and the value --
-  and pushes what differs, newest first, at most 500 rows a pass. A row only
+  and pushes what differs, newest first, at most 5,000 rows a pass
+  (`_SYNC_LIMIT`; 500 while every push had its own connection), episodes in
+  batches. A comparison still pushing with more behind is not stamped, so the
+  next pass compares again (`catching_up`). A row only
   the mirror holds is counted (memory health `mirror`) and left alone, never
-  deleted or copied back. Skipped with no mirror and when Postgres is the
-  primary store. Digests match Postgres's own (real-Postgres test, Arabic,
-  emoji, NULLs); NUL bytes are dropped on every mirror write.
+  deleted or copied back. Skipped with no mirror only: it runs when Postgres
+  is the primary store too (2026-10-13, Memory audit M06) -- recall reads the
+  mirror there, and a forget whose mirror write failed stayed whole in it for
+  good. Digests match Postgres's own (real-Postgres test, Arabic, emoji,
+  NULLs); NUL bytes are dropped on every mirror write.
+- **A pass pushes what changed; the full comparison runs daily** (2026-10-14,
+  Memory audit M31). Triggers (`schema_v2._ensure_mirror_outbox`) queue each
+  episode or fact written, or changed in a column the mirror holds, in
+  `memory_mirror_outbox` -- in the change's own transaction -- and a deleted
+  fact (its mirror copy goes). The pass drains the queue (each row once, as
+  it is now; a failed push retried 5 times, then left to the comparison; a
+  row another region owns dequeued and counted, `outbox_conflicts`). The full
+  comparison above runs once in `memory.v2.mirror_verify_hours` (24, 1-168;
+  stamp `memory.v2.mirror_full_verify`, its findings kept in
+  `memory.v2.mirror_verify_result`, both runtime). No mirror configured: the
+  queue is emptied; configured but down: kept. A new mirrored column needs a
+  trigger column -- `test_every_column_the_mirror_holds_queues_its_row` reads
+  the upserts' SQL. Pushes go through a pool (`PostgresStateBackend._connect`,
+  psycopg_pool, §44's `check=`) and in batches (`mirror_episode_rows`, 500 a
+  batch, one region read per batch; `remirror_episodes` uses it and takes
+  what it pushed off the queue, entries queued before its read only). Every
+  row on its own connection, the first macro-sleep pass at 10x the live size
+  took 336 s; batched, 7 s. **A mirror that went back is compared at once**
+  (`_mirror_went_back`, 2026-10-14): a pass asks the mirror
+  (`present_ids`) for the newest local rows it was already sent, and one
+  missing (a `pg_restore` of an older dump) forces the full comparison, at
+  most once an hour. The outbox had been drained for those rows, so recall
+  on the primary path missed every memory since the dump until the daily
+  comparison. Gates: `tests/test_memory_restore_drill_pg.py` (real Postgres,
+  `pg_dump`/`pg_restore`; the incremental pass alone as the negative
+  control), `tests/test_memory_mirror_incremental.py`. Measured limits (recall is the ceiling: 8 s a
+  question at 170,000 memories) are in the guide, from the opt-in
+  `tests/test_memory_scale_bench.py`. Gates:
+  `tests/test_memory_mirror_incremental.py` (each with its negative control:
+  a full pass reads both digests, a backend without batches pushes per row,
+  the pool's connection count against a connection each, real Postgres).
+- **Postgres-primary recall reads only what this install still remembers**
+  (2026-10-13, M06). The mirror's keyword search and id fetch read only
+  `RECALLABLE_TIERS`; the keyword channel orders by how many of the
+  question's words a row holds (`words_held`), then by time -- it took the
+  newest rows holding ANY word, so an older memory only its words would find
+  fell out of the slice (the slice gate in `test_memory_nothing_lost.py`
+  covers `state_backend.py`). Recall drops every row whose local copy is a
+  tombstone or whose turn the forget ledger names (`recall._locally_forgotten`),
+  whoever wrote it. Measured on the retrieval benchmark with the mirror as
+  primary and the index on the same vectors: hit rate and MRR equal to local,
+  precision 0.0166 lower (`PRIMARY_DELTA`). Gate:
+  `tests/test_memory_pg_primary.py` (real Postgres: a forget with the mirror
+  write failing, left out of recall, repaired by one pass; each with its
+  negative control). The mirror tables are in `KAZMA_PG_TABLES` (§21A).
 - **The top-up reads only other installs' rows.** Mirror writes carry the
   writer's install id (`metadata.install`, `<data dir>/install_id`);
   `written_elsewhere` admits a remote-only row only when another install
@@ -1283,6 +1680,34 @@ drawing, the rest by extraction.
   auto-merge raised (logged at DEBUG) and created a duplicate. Quarantine
   creates the new entity before its ledger row for the same reason. The
   extractor files a fact under the id a name resolved onto.
+- **An entity's id keeps its script** (`entity_resolution.slug`, the ONE
+  id rule, Memory audit M02, 2026-10-13): NFKC, casefolded, the letters,
+  marks and digits of every script, other runs one `_`, 80 characters; an
+  id for a label with no letter (an emoji) from its own text; an empty label
+  has none (`ValueError`; `mutate_belief` refuses it). The rule kept
+  `a-z0-9` and fell back to `"entity"`, in four copies plus the Memory
+  API's: every all-Arabic, Persian or CJK subject was `entity`, unrelated
+  facts superseded each other, and later non-Latin objects were rewritten to
+  `entity`. ASCII ids are unchanged. Spellings that differ by vowel marks or
+  letter forms meet in the alias hash (`documents.arabic.fold_for_search`),
+  never in the id. Service names (`current_facts`) and the same-words key
+  (`graph_hygiene`) use it too. Rows the old rule wrote: `entity_repair`
+  (`scripts/memory_entity_repair.py size`, then `apply` on a copy) quarantines
+  each collapsed fact and queues its turn for the deep pass -- nothing is
+  guessed; the live run is the owner's. Gate: `tests/test_memory_entity_ids.py`
+  (Arabic, Persian, CJK, emoji through the writer and the extractor; no
+  `a-z0-9` keep-list or `"entity"` fallback in memory code, the old rule as
+  the negative control; the repair on a copy).
+- **Tier-2 resolution queries stored name vectors** (2026-10-13, Memory audit
+  M18): an entity keeps its name's vector (`entities.embedding`, stored at
+  creation, by `_store_name_vector` on an exact match, and by the vector
+  repair pass for older rows, `repair_entity_name_vectors`), and
+  `resolve_entity` asks `VectorEngine.nearest_entities` for the nearest. Every
+  extraction embedded every entity name of the tenant (93 names, seconds of
+  CPU a turn on live; past 4,096 names the short-text cache thrashed). An
+  extraction now embeds only the names it resolves. Gate:
+  `tests/test_memory_entity_name_vectors.py` (the same embed calls at 60 and
+  6,000 entities; the old scan as the negative control).
 - **Subjects that are work items are not entities**
   (`ego_anchor.subject_should_mint_entity`: phases, tickets, versions,
   hashes, paths, mostly-digit and sentence-length slugs). The fact is still
@@ -1327,6 +1752,54 @@ drawing, the rest by extraction.
   counted redirects and stayed above zero after a purge.
   `tests/test_entity_count_repair.py` (the source-and-target-only
   recompute as the negative control).
+- **The Memory page says what happened** (2026-10-13, Memory audit M32):
+  hygiene is `ok` only when every action it ran is (`failed`, `error:
+  hygiene_partial`; it said "Hygiene complete" over a failed archive); the
+  Episodes chip counts `RECALLABLE_TIERS` only (it counted tombstones); the
+  archive of ended facts returns `remaining` and its `cap` (2,000 a run, said
+  in the label and the toast); a forget whose remote vector delete is pending
+  says so; the probe panel shows weekly summaries and a degraded search;
+  server messages the page shows are codes (`not_found`, `protected`,
+  `about_too_long` with `length`/`max`) worded by the page in its language.
+  Gates: `tests/test_memory_page_truth.py`,
+  `tests/e2e/test_about_me_limit_arabic.py`.
+- **Every operator memory change leaves a trail and a real status** (2026-10-13,
+  Memory audit M35, `kazma_ui/memory_actions.py`): `MemoryActionRecorder`,
+  mounted with the memory API, records every POST/PUT/PATCH/DELETE under
+  `/api/memory` -- an INFO line (`[memory] operator action=... actor=...
+  tenant=... ids=... status=...`) and a `memory_audit_log` row
+  (`operator_action`): route, actor from the session (never the body),
+  tenant, the path's ids, the status; never a value. It answers a handler's
+  `ok: false` with 404 (not found), 409 (refused), 422 (a wrong request) or
+  500 (`safe_error`); most routes answered 200 for every failure. One
+  recorder, so a new memory route is recorded the day it is added. The daily
+  digest counts the forgets ("Planned work"), and `/metrics` carries
+  `kazma_memory_operator_actions_total{action=}` (this process, any
+  outcome). `invalidate_belief` returns
+  `safe_error`, never the exception's text. Gate: `tests/test_memory_actions.py`
+  (every mutating memory route requested and recorded; the routes without the
+  recorder as the negative control). The tenant gate takes a handler's own
+  4xx (a body with `ok`) as reached.
+- **Memory input is bounded and escaped** (2026-10-13, Memory audit M36): one
+  set of length limits (`memory/limits.py`: subject 200, predicate 120,
+  object 4,000, a name 120) checked first in `mutate_belief` -- refused, never
+  cut -- and by the edit, link and group routes (the edit route alone capped,
+  `mutate_belief` and group fields nothing); a memory request body is refused
+  past 256 KiB (`memory_api._bounded_body`, declared or streamed; bodies were
+  read whole); the entity search applies the tenant inside its full-text
+  subquery (its 2,000 rows were taken across every tenant first); every
+  database value the Memory console puts in an HTML attribute goes through
+  `_attr` (`_esc` left quotes, and a migrated entity type wrote its own
+  attributes); `/memory off` in a chat app asks for `/memory off confirm`
+  before it forgets. Gates: `tests/test_memory_input_bounds.py`,
+  `tests/e2e/test_memory_hostile_type.py` (a hostile type renders as text, no
+  handler, the filter still toggles).
+- **The graph export is well-formed and says when it was cut** (2026-10-13,
+  Memory audit M33): `GET /api/memory/v2/graph/export` builds GraphML with
+  ElementTree (`saxutils.escape` left `"` in attributes: any fact with a quote
+  made the file unreadable), drops characters XML cannot hold, and both
+  formats carry `truncated` (and the `X-Kazma-Truncated` header) when the
+  graph passed `limit`. Gate: `tests/test_memory_graph_export.py`.
 - **The Entities search finds an entity by its id**
   (`memory_api._fts_match_expr`): words split where the index splits them
   (an underscore separates), the id matches even when the index holds no
@@ -1394,7 +1867,17 @@ gate.
 
 **Multi-tenant memory:** tenants are enforced with
 `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with
-multi-user on (`memory_api._memory_tenant_id`). Then every `/api/memory` route
+multi-user on (`memory.config.memory_tenant_enforced`, the one answer for
+turns and surfaces). **Turns and surfaces resolve the same tenant** (Memory
+audit M07, 2026-10-13): under enforcement both are the principal's tenant in
+every mode (`resolve_tenant_id` wrote shared-mode turns to "default" while the
+page looked in the principal's), and only `shared` can be saved
+(`settings_validation`, key `memory.config.TENANT_MODE_KEY`); not enforced,
+the page keeps the install's own view, and its "Don't remember" ledger rows
+and About me (`profile.about_for_turn`) reach every tenant's turns. The chat
+delete says when there was nothing to forget. Gate:
+`tests/test_memory_tenant_matrix.py` (mode x enforcement x principal; the old
+resolver as negative control). Then every `/api/memory` route
 reads, counts and changes only the request tenant's rows -- another tenant's
 id reads as not found (`memory_api._row_tenant_ok`,
 `hygiene.invalidate_belief(tenant_id=)`) -- and the engine's own maintenance
@@ -1404,7 +1887,17 @@ binding) is the install's view (`_tenant_clause`). Gate:
 `tests/test_memory_routes_tenant_scope.py` -- every route, enumerated from the
 app, called as one tenant with another's ids; nothing of the other shown or
 changed, and the caller's own rows shown. Note: `entities.id` is a global PK,
-not per-tenant.
+not per-tenant -- so the boundary is held by rules (Memory audit M21,
+2026-10-13): entity creation never appends to another tenant's row
+(`entity_resolution._create_entity`), the hub sync (`self_hub.ensure_user_hub`)
+writes only the caller's own `user` row (the install's tenant may write any),
+rename promotes only a node of the caller's own facts (an id another tenant
+holds and an unused one both answer not_found), and the agent merge tool asks
+the routes' tenant rule. Gate: `tests/test_memory_entity_tenancy.py` (the four
+witnesses inverted; every agent tool taking an id, as another tenant, leaves
+beta's rows unchanged; the install's tenant as negative control). Keying
+entities by `(tenant_id, id)` -- every entity statement and a migration of
+non-default tenants' rows -- is not built.
 
 ### 17. Lifecycle Status Notifier (`kazma-core/kazma_core/lifecycle_notifier.py`)
 
@@ -2179,8 +2672,8 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   the exec denylist / outbound allowlist / config protected-key resolvers DO
   enforce here).
 - `memory/belief_mutation.py:_mutate_functional` — the memory corruption half
-  is gated by its OWN source-trust check (a `user_explicit` functional belief
-  cannot be superseded by `llm_inferred`/`system_tool`), NOT by an
+  is gated by its OWN source-trust check (a fact the user stated yields only
+  to the user's own words, `memory.provenance.may_overrule`), NOT by an
   `authorize_effect` call — two independent defenses, by design.
 
 **B. The decision mapping (§3.4). `authorize_effect` returns one of:**
@@ -2199,9 +2692,27 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   `delegate` (HMAC trust at skill-load).
 
 **C. Invariants — removing any reintroduces the incident class:**
-- **Source-trust gate** (`_mutate_functional`): a `user_explicit` functional
-  belief may NOT be superseded by a lower-trust (`llm_inferred`/`system_tool`)
-  source. Kill-switch: `cfg.v2.functional_supersede_requires_user_assert`.
+- **Source-trust gate** (`_mutate_functional`, and the history path): a fact
+  the user stated may NOT be superseded by a lower-trust source. Kill-switch:
+  `cfg.v2.functional_supersede_requires_user_assert`. **The provenance
+  ladder** (`memory/provenance.py`, Memory audit M03, 2026-10-13):
+  `user_explicit` -- the user's own channel only (the Memory page, a chat
+  command, or a memory tool on a turn whose latest user message asks to
+  remember AND holds 80 % of the stored words); `user_stated` -- the user's
+  literal statement read by the heuristic pass from their own message;
+  then `system_tool`, `agent_asserted` (a memory tool the user did not ask
+  for) and `llm_inferred`. A `user_*` fact yields only to `user_*`, except
+  the model pass correcting the heuristic reading of the SAME turn (§15H).
+  Until then `memory_store` / `memory_link_entities` wrote `user_explicit`
+  for anything the model chose (a fetched page, an email), unscreened, and
+  the user's own words were `llm_inferred`: the model's fact blocked the
+  user's correction. The tools now screen (`filter_injection`,
+  `is_override_delta`; refused, nothing stored) and answer
+  `user_fact_stands` when a write would replace the user's fact -- the user
+  corrects their own facts. Gate: `tests/test_memory_provenance.py` (the
+  R02 witnesses inverted, EN/AR remember requests, the injection corpus,
+  the same-turn rule, the old gate as negative control, every product site
+  writing `user_explicit` declared as a user channel).
 - **Rewrite-on-allow**: the gate's fire_at wins over the model's args — do not
   let the original (possibly wrong) `timing` reach the scheduler for remind.
 - **Exec denylist**: catastrophic commands (`rm -rf /`, fork bombs, `curl|sh`,
@@ -2285,7 +2796,10 @@ ownership and admission (`document_intake_reservations`,
 `document_intake_mutex`, §19 B2), **and** the document catalog from H-13
 (`documents`, `document_blobs`, `document_versions`, `document_artifacts`,
 `document_acl`, `document_tombstones`, `document_chunks`,
-`document_audit_events`). A new shared-state PG table MUST be added to that
+`document_audit_events`), and the memory mirror (`kazma_episodes`,
+`kazma_beliefs`, §15K: recall's store when Postgres is the primary, and the
+only copy of what other replicas wrote; boot requires them only when memory's
+state backend is Postgres, `pg_backup._required_pg_tables`). A new shared-state PG table MUST be added to that
 Python list or it silently stops being backed up
 (`tests/test_pg_backup.py::test_kazma_pg_tables_covers_document_ddl` reads the
 document stores' DDL). This dump does not carry the document store's content
@@ -2375,6 +2889,16 @@ Delete/archive/download: `DELETE /api/backup/{name}`,
 `POST …/archive` (zip), `GET …/download`. The per-file copy MUST be robust
 (`_robust_copytree`) — `shutil.copytree` aborts on one vanishing file and
 loses the entire `document-store`. Do NOT revert to `copytree`.
+**Every copy of a live SQLite database is one step, through one helper**
+(`kazma_core.db.sqlite_snapshot.snapshot_copy`, 2026-10-13, Memory audit M19):
+the universal backup, the native memory backup (`memory/backup.backup_one`,
+also the migration importer's pre-swap copy), the embedding rebuild's
+pre-copy, the memory restore route and the X shadow script. A batched copy
+(`pages=N`) restarts whenever the source is written: the native memory
+backup -- the declared restore source -- finished only in a quiet window (778
+restarts in two seconds). Gate: `tests/test_sqlite_snapshot.py` (the copy
+finishes under a writer every 2 ms; `pages=100` as the negative control; no
+`.backup(` call outside the helper).
 
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
@@ -2947,7 +3471,11 @@ module was deleted and the import's `except` said "chromadb not installed".
   other. The memory Rebuild (`reembed.rebuild_embeddings`) used to finish
   with `shutil.rmtree(data_dir/vector_memory)` -- the V1 chat index once,
   the Knowledge Library's live store since 2026-09-26; it no longer touches
-  it.
+  it. Nor does `scripts/reembed.py` (2026-10-14): it kept its own copy of the
+  rebuild, step 7 included, and now runs `rebuild_embeddings`. No function
+  deletes a folder tree and names the store
+  (`tests/test_reembed_keeps_knowledge_vectors.py`, the old step as the
+  negative control).
 - Gate: `tests/test_knowledge_meaning_search.py` (a fake chromadb in CI, the
   real one where the `rag` extra is installed).
 
@@ -3092,9 +3620,15 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
 
 **G. Fenced tool output.**
 - Fetched pages, search results, saved research chunks and MCP resource
-  bodies go through `prompt_fence.fence_untrusted()`. They are the largest
-  source of attacker-controlled text in the system and used to reach the
-  model raw. CI: `test_no_unfenced_web_tool_output`.
+  bodies go through `prompt_fence.fence_untrusted()`. So do memory and
+  Knowledge read back by a tool (Memory audit M11, Knowledge KB-S01,
+  2026-10-13): `memory_search`, `memory_list_*`, `memory_admin`'s lists and
+  `knowledge_search` (its citation directive stays outside the fence).
+  `memory_search` shows a memory's display text and says "unavailable, NOT
+  an empty result" when recall fails. The per-function gate
+  (`FENCED_TOOL_FUNCTIONS`) reads tools registered inside `register_*` too.
+  They are the largest source of attacker-controlled text in the system and
+  used to reach the model raw. CI: `test_no_unfenced_web_tool_output`.
 
 **H. One writer for the procedural recorder.**
 - A thread-per-tool-call used to crash Windows (`AccessViolation` in FTS /
@@ -3526,8 +4060,10 @@ keep both in sync):
 2. **H-8 / `tool_registry.execute`:** apply `rewritten_args`; `clarify`/`confirm`
    fail closed (“run from chat”). Never mint a second gate row on the web path.
 3. **T-2 pipeline timeout:** finalize the task **and** `settle_gate`.
-4. **H-9 bus:** `is_danger_tool()` → `requires_approval()`. Not FanOut first-wins.
-5. **H-12:** swarm bus tri-state only. Must not retarget web `claim_gate`.
+4. **H-9 bus:** `is_danger_tool()` → `approval_floor()` (the `requires_approval()` floor).
+5. **H-12 (superseded 2026-10-14):** a bus request has one shared decision
+   (`shared_approvals`): the first human Approve or Deny decides, every card
+   shows it, timeout/cancel are their own outcomes. Must not retarget web `claim_gate`.
 
 Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`,
 `_hitlAlreadyClaimed`, `_serverGates`), `turn_document.js`,
@@ -3832,6 +4368,10 @@ witness is archived in `docs/audits/evidence/browser_redirect_before_broker_2026
 
 Model fallbacks (§38) ride the second row plus the web banner
 (`AlertDispatcher.post_banner`, banner only) — not a fourth notifier.
+Swarm results take the swarm output target (`/swarm config`, Settings). The
+separate `swarm_notify` module (`SWARM_BOT_TOKEN`), a fourth notifier that
+reported a send Telegram refused as sent, was removed on 2026-10-14 (Swarm
+audit SW-S15); a set `SWARM_BOT_TOKEN` is a startup WARNING.
 
 **An alert reaches someone, or says it did not (2026-10-02).**
 - An alert raised in a worker thread is delivered ON the server's loop
@@ -4136,6 +4676,19 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   research loaders, the MCP manager's path gate, the gateway's web-session
   sync (four per turn, chat-store writes), the document tools'
   `_resolve_input` (8), `x_test`'s status payload.
+- **On the memory path the inference follows imports** (2026-10-13, Memory
+  audit M34): `test_the_memory_path_reaches_no_helper_through_another_module`
+  resolves calls through each module's own `from kazma_... import` bindings,
+  public functions included, to a fixed point (`_qualified_stall_helpers`),
+  and holds the memory modules to it. Undo resolved its tenant on the loop
+  through three hops in two modules (`_consume_undo` -> `_memory_tenant_id`
+  -> `multi_user_or_production` -> a settings read); the memory worker raised
+  ops alerts and queued retries on the loop. Product-wide the same inference
+  names ~130 sites in other areas: each area's own change. The memory GET
+  routes write nothing (`test_a_memory_get_route_writes_nothing`, every GET
+  traced): `memory_api._conn()` makes the schema ready once per process
+  (it ran the entity-count backfill on every request), and the operator's
+  graph search is a read-only diagnostic (no access bump).
 - **The settings store is never used on the loop** (2026-09-30,
   `test_the_settings_store_is_not_used_on_the_loop`, negative control beside
   it). On Postgres a settings read that misses the cache, and every write, is a

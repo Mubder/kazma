@@ -155,3 +155,13 @@ Run rules:
 ## Execution log
 
 - 2026-10-13: tracker opened from the merged audit. No remediation started.
+- 2026-10-13 (from the Memory tracker, M09/M10, shared defects fixed once):
+  the TT-03 memory question is decided -- memory is rewound. A restore
+  (`apply_snapshot_to_thread`), `/undo`, `/edit` and abort call
+  `memory.forget.rewind_memory`, which forgets the rewound turns, journaled
+  (`tests/test_memory_rewind.py`). Every memory writer and rebuilder asks the
+  forget ledger, and a restored `memory_state.db` replays the forget journal
+  (`tests/test_memory_forget_converges.py`), so the memory side of TT-05 is
+  covered. Still open here: the transcript and scratchpad after a restore
+  (TT-03), the rewriters' shared lock (TT-04), and the copies `snapshots.db`
+  itself keeps of forgotten and deleted chats (TT-05).

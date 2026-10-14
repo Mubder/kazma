@@ -85,7 +85,25 @@ KAZMA_PG_TABLES: list[str] = [
     "document_tombstones",
     "document_chunks",
     "document_audit_events",
+    # The memory state mirror (memory/state_backend.py; Memory audit M06):
+    # the recall store when Postgres is the primary, and the only copy of
+    # what other replicas wrote. Required at boot only when memory's state
+    # backend is Postgres (:func:`_required_pg_tables`).
+    "kazma_episodes",
+    "kazma_beliefs",
 ]
+
+#: Tables in the dump that only some installs have.
+_MEMORY_MIRROR_TABLES = ("kazma_episodes", "kazma_beliefs")
+
+
+def _required_pg_tables() -> list[str]:
+    """The tables boot requires: every Kazma table, the memory mirror's only
+    when memory's state backend is configured as Postgres."""
+    from kazma_core.memory.state_backend import mirrors_to_postgres
+
+    mirror = mirrors_to_postgres()
+    return [t for t in KAZMA_PG_TABLES if mirror or t not in _MEMORY_MIRROR_TABLES]
 
 #: Functions the triggers on Kazma's tables call. ``pg_dump -t`` dumps a
 #: table's triggers but never the functions they call, so every restore
@@ -378,4 +396,4 @@ def verify_required_pg_tables(pool: Any) -> list[str] | None:
     except Exception:
         logger.warning("[pg_backup] schema verification skipped (pool unavailable)", exc_info=True)
         return None
-    return [t for t in KAZMA_PG_TABLES if t not in present]
+    return [t for t in _required_pg_tables() if t not in present]

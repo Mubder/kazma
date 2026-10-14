@@ -208,6 +208,36 @@ def _check_sqlite(
     res.add(f"sqlite:{name}", True, f"{tables} tables")
 
 
+def _check_forget_journal(scratch: Path, res: DrillResult) -> None:
+    """Restoring this backup's memory database does not undo the forgets made
+    since (Memory audit M10): the forget journal, outside it, names them, and
+    they are applied again at boot. Reads the journal; writes nothing."""
+    state = scratch / "memory_state.db"
+    if not state.is_file():
+        return
+    try:
+        from kazma_core.memory.forget_journal import journaled_seqs
+
+        seqs = journaled_seqs()
+        conn = sqlite3.connect(f"file:{state}?mode=ro", uri=True)
+        try:
+            try:
+                applied = {int(r[0]) for r in conn.execute("SELECT seq FROM memory_forget_applied")}
+            except sqlite3.OperationalError:  # a backup from before the journal
+                applied = set()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - the drill reports, never raises
+        res.add("memory:forget_journal", False, f"the forget journal cannot be read: {exc}")
+        return
+    replay = [s for s in seqs if s not in applied]
+    res.add(
+        "memory:forget_journal", True,
+        f"{len(seqs)} forget(s) journaled; restoring this backup, the {len(replay)} made since "
+        "it are applied again at boot",
+    )
+
+
 def _check_vault_opens(backup: Path, res: DrillResult) -> None:
     """Prove the backup's own ``.env`` key decrypts the backup's own vault.
 
@@ -500,6 +530,7 @@ def verify_backup(
             _check_sqlite(db, scratch, res, _src_tables.get(_key))
         _check_vault_opens(d, res)
         _check_completeness(d, res)
+        _check_forget_journal(scratch, res)
     finally:
         if owns_scratch:
             shutil.rmtree(scratch, ignore_errors=True)

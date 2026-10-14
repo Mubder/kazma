@@ -106,8 +106,8 @@ bodies and credential-bearing request URLs are excluded from diagnostics.
 | `GET`/`POST`/`DELETE` | `/api/swarm/workers[/\{name\}]` | Worker CRUD. |
 | `POST` | `/api/swarm/dispatch` | Dispatch a task (all patterns via `type`). |
 | `GET` | `/api/swarm/tasks[/\{id\}]` | Task list / detail. |
-| `POST` | `/api/swarm/tasks/\{id\}/approve` | Approve pipeline checkpoint. (`routes_tasks.py:612`) |
-| `POST` | `/api/swarm/tasks/\{id\}/reject` | Reject pipeline checkpoint. (line 657) |
+| `POST` | `/api/swarm/tasks/\{id\}/approve` | Approve a pipeline checkpoint: `202` once the resumed run is recorded; progress on the task stream. Admin. |
+| `POST` | `/api/swarm/tasks/\{id\}/reject` | Reject a pipeline checkpoint. Admin. |
 | `GET` | `/api/swarm/workers/\{name\}/metrics` | Worker metrics. |
 | `GET` | `/api/swarm/circuit-breakers` | Breaker states. |
 

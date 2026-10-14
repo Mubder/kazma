@@ -163,7 +163,9 @@ async def test_activity_routes_broadcast_to_broadcast_executor(monkeypatch):
     from kazma_core.swarm.task import TaskType
     engine = SwarmEngine()
     direct = AsyncMock(return_value="broadcast-result")
-    monkeypatch.setattr(engine, "broadcast", direct)
+    # The broadcast executor (``broadcast`` is now a wrapper over dispatch,
+    # Swarm audit SW-E06; the activity runs the executor inside it).
+    monkeypatch.setattr(engine, "_broadcast_task", direct)
     task = SwarmTask(prompt="fixture", type=TaskType.BROADCAST)
     assert await engine._dispatch_inner(task, 0, None) == "broadcast-result"
     direct.assert_awaited_once_with(task)

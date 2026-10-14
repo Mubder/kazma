@@ -37,6 +37,8 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from kazma_core.memory.memory_stores import MEMORY_TABLES
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -143,7 +145,7 @@ def refuses_write(
     return bool(
         _ledger_rows(
             conn,
-            f"SELECT 1 FROM memory_forgotten WHERE tenant_id = ? AND session_key IN ({marks}) "
+            f"SELECT 1 FROM memory_forgotten WHERE tenant_id IN (?, 'default') AND session_key IN ({marks}) "
             "AND ((turn_number = 0 AND question_sha = '') "
             "OR (turn_number = ? AND question_sha = ?)) LIMIT 1",
             (tenant_id or "default", *names, int(turn_number or 0), question_sha(user_text)),
@@ -163,7 +165,7 @@ def forgotten_turns(
     rows = _ledger_rows(
         conn,
         f"SELECT turn_number, question_sha FROM memory_forgotten "
-        f"WHERE tenant_id = ? AND session_key IN ({marks})",
+        f"WHERE tenant_id IN (?, 'default') AND session_key IN ({marks})",
         (tenant_id or "default", *keys),
     )
     whole = any(int(r[0]) == 0 and not r[1] for r in rows)
@@ -193,21 +195,27 @@ def chat_remembered(key: str, *, tenant_id: str, conn: sqlite3.Connection | None
 
 
 def set_chat_remembered(
-    key: str, remembered: bool, *, tenant_id: str, conn: sqlite3.Connection | None = None
+    key: str, remembered: bool, *, tenant_id: str, conn: sqlite3.Connection | None = None,
+    journal: bool = True,
 ) -> dict[str, Any]:
     """Keep the chat *key* out of memory from now on, or let it back in.
 
     Letting it back in affects new turns only: turns forgotten one by one stay
     forgotten, and nothing is written for the turns in between (turn reconcile
-    writes them, like any turn memory missed).
+    writes them, like any turn memory missed). Journaled (``forget_journal``):
+    a restored memory database gets the same answer.
     """
     keys = chat_keys(key)
     if not keys:
         return {"ok": False, "error": "chat required"}
+    tid = tenant_id or "default"
+    from kazma_core.memory import forget_journal
+
+    seq = (forget_journal.append("remember" if remembered else "keep_out", tenant_id=tid, session_key=key)
+           if journal else None)
     own = conn is None
     conn = conn or _open()
     try:
-        tid = tenant_id or "default"
         if remembered:
             marks = ",".join("?" for _ in keys)
             conn.execute(
@@ -223,6 +231,7 @@ def set_chat_remembered(
                 "VALUES (?, ?, 0, '', NULL, ?)",
                 [(tid, k, now) for k in keys],
             )
+        forget_journal.mark_applied(conn, seq)
         conn.commit()
         return {"ok": True, "remembered": bool(remembered), "chat_keys": keys}
     finally:
@@ -236,9 +245,22 @@ def forget_episode(
     tenant_id: str,
     conn: sqlite3.Connection | None = None,
     by: str = "user",
+    purge_index: bool = True,
+    journal: bool = True,
 ) -> dict[str, Any]:
     """Forget one memory: tombstone, ledger under every key of its chat, the
-    facts its turn produced, the mirrors. Idempotent.
+    facts its turn produced, every copy the memory store registry names
+    (``memory_stores``), the mirrors. Idempotent.
+
+    Journaled (``forget_journal``, Memory audits M08/M10): the entry is
+    written before anything changes, every step below is re-runnable, and
+    asking again -- or the journal's replay, or the maintenance pass -- runs
+    them ALL (until 2026-10-13 asking again finished the facts only, and a
+    forget cut short kept its summaries active). *journal* False is for a
+    caller that journaled already (:func:`forget_chat`, the replay).
+
+    *purge_index* False leaves the full-text indexes to a caller that forgets
+    several memories and purges once (:func:`forget_chat`).
 
     *tenant_id* is the caller's: another tenant's memory reads as not found;
     the install's own tenant (``"default"``) may forget any (the rule of
@@ -262,67 +284,168 @@ def forget_episode(
 
         owner = str(row["tenant_id"] or "default")
         turn = int(row["turn_number"] or 0)
-        keys = chat_keys(str(row["session_id"] or ""))
-        now = time.time()
-        if row["tier"] == FORGOTTEN_TIER:
-            # Done before -- but ``invalidate_belief`` commits as it goes, so
-            # a forget cut short may have left facts to finish.
-            facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
-            conn.commit()
-            _remirror_facts(conn, facts)
-            return {"ok": True, "episode_id": eid, "already": True, "facts_forgotten": len(facts)}
+        session = str(row["session_id"] or "")
+        keys = chat_keys(session)
+        already = row["tier"] == FORGOTTEN_TIER
+        sha = _ledger_sha(conn, eid) if already else question_sha(row["user_text"])
+        seq = None
+        if journal:
+            from kazma_core.memory import forget_journal
 
-        sha = question_sha(row["user_text"])
-        # Every copy of the turn goes: the live write and turn reconcile use
-        # different keys of the chat, and a legacy restore may hold another.
-        marks = ",".join("?" for _ in keys)
-        copies = [
-            str(r["id"])
-            for r in conn.execute(
-                f"SELECT id, user_text FROM episodes WHERE tenant_id = ? AND turn_number = ? "
-                f"AND tier != ? AND session_id IN ({marks})",
-                (owner, turn, FORGOTTEN_TIER, *keys),
-            ).fetchall()
-            if question_sha(r["user_text"]) == sha
-        ]
-        # And what the agent noted with its memory tools during that turn.
-        notes = _chat_notes(conn, tenant_id=owner, keys=keys, turn=turn)
-        ids = list(dict.fromkeys([eid, *copies, *notes]))
+            seq = forget_journal.append("turn", tenant_id=owner, session_key=session, turn_number=turn,
+                                        question_sha=sha, episode_id=eid)
+        out = _forget_turn(conn, eid=eid, owner=owner, keys=keys, turn=turn, sha=sha, by=by,
+                           purge_index=purge_index, seq=seq)
+        if already:
+            out["already"] = True
+        return out
+    finally:
+        if own:
+            conn.close()
 
+
+def _ledger_sha(conn: sqlite3.Connection, eid: str) -> str:
+    """The question hash a forgotten memory's ledger rows carry ("" when none:
+    a retired duplicate, or a forget from before the hash)."""
+    row = conn.execute(
+        "SELECT question_sha FROM memory_forgotten WHERE episode_id = ? AND turn_number > 0 LIMIT 1", (eid,)
+    ).fetchone()
+    return str(row[0]) if row else ""
+
+
+def _forget_turn(
+    conn: sqlite3.Connection, *, eid: str, owner: str, keys: list[str], turn: int, sha: str, by: str,
+    purge_index: bool, seq: int | None,
+) -> dict[str, Any]:
+    """Every step of forgetting one turn; each re-runnable."""
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.topic_summaries import on_turns_forgotten
+
+    now = time.time()
+    marks = ",".join("?" for _ in keys) if keys else "''"
+    # Every copy of the turn still held: the live write and turn reconcile use
+    # different keys of the chat, and a legacy restore may hold another.
+    alive = conn.execute("SELECT 1 FROM episodes WHERE id = ? AND tier != ?", (eid, FORGOTTEN_TIER)).fetchone()
+    copies = [
+        str(r["id"])
+        for r in conn.execute(
+            f"SELECT id, user_text FROM episodes WHERE tenant_id = ? AND turn_number = ? "
+            f"AND tier != ? AND session_id IN ({marks})",
+            (owner, turn, FORGOTTEN_TIER, *keys),
+        ).fetchall()
+        if sha and question_sha(r["user_text"]) == sha
+    ] if keys else []
+    # And what the agent noted with its memory tools during that turn.
+    notes = _chat_notes(conn, tenant_id=owner, keys=keys, turn=turn)
+    ids = list(dict.fromkeys(([eid] if alive else []) + copies + notes))
+
+    if keys and turn > 0 and sha:
         conn.executemany(
             "INSERT OR IGNORE INTO memory_forgotten "
             "(tenant_id, session_key, turn_number, question_sha, episode_id, forgotten_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             [(owner, k, turn, sha, eid, now) for k in keys],
         )
-        for one in ids:
-            _tombstone(conn, one, now=now, by=by)
-        facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
-        # A weekly summary written from the turn keeps nothing of it: emptied
-        # now, written again without it (plan C2).
-        from kazma_core.memory.topic_summaries import on_turns_forgotten
+    texts = _memory_texts(conn, ids)
+    for one in ids:
+        _tombstone(conn, one, now=now, by=by)
+    _scrub_legacy_copies(conn, list(dict.fromkeys([eid, *ids])), texts)
+    facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+    _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+    # Every memory of the turn now forgotten -- also copies an earlier forget
+    # tombstoned, if it was cut short before their summaries were emptied.
+    gone = list(dict.fromkeys([eid, *ids, *_forgotten_of_turn(conn, owner=owner, keys=keys, turn=turn)]))
+    # A weekly summary written from the turn keeps nothing of it: emptied
+    # now, written again without it (plan C2). One already waiting to be
+    # written again is not touched: its rewrite reads the turns as they are
+    # then (topic_summaries._store, M05).
+    summaries = on_turns_forgotten(conn, gone, only_active=True)
+    if purge_index:
+        purge_search_index(conn)
+    conn.commit()
 
-        summaries = on_turns_forgotten(conn, ids)
-        conn.commit()
+    from kazma_core.memory.state_backend import remirror_episode_by_id
 
-        from kazma_core.memory.state_backend import remirror_episode_by_id
+    for one in gone:
+        remirror_episode_by_id(conn, one)
+    remote = [_delete_remote_vector(conn, one, owner) for one in gone]
+    remote += _after_facts(conn, owner=owner, changed=facts, keys=keys, turn=turn)
+    # Applied only once EVERY step ran: a step that raises after the commit
+    # above leaves the entry pending, and the next pass runs them all again.
+    forget_journal.mark_applied(conn, seq)
+    conn.commit()
+    return {
+        "ok": True,
+        "episode_id": eid,
+        "copies": len(ids),
+        "facts_forgotten": len(facts),
+        "summaries_emptied": len(summaries),
+        "chat_keys": keys,
+        "remote_vector_deleted": all(remote),
+    }
 
-        for one in ids:
-            remirror_episode_by_id(conn, one)
-        _remirror_facts(conn, facts)
-        remote = [_delete_remote_vector(conn, one, owner) for one in ids]
-        return {
-            "ok": True,
-            "episode_id": eid,
-            "copies": len(ids),
-            "facts_forgotten": len(facts),
-            "summaries_emptied": len(summaries),
-            "chat_keys": keys,
-            "remote_vector_deleted": all(remote),
-        }
-    finally:
-        if own:
-            conn.close()
+
+def _forgotten_of_turn(conn: sqlite3.Connection, *, owner: str, keys: list[str], turn: int) -> list[str]:
+    """The forgotten memories of a chat's turn, and of its notes."""
+    if not keys:
+        return []
+    marks = ",".join("?" for _ in keys)
+    ids = [str(r[0]) for r in conn.execute(
+        f"SELECT id FROM episodes WHERE tenant_id = ? AND turn_number = ? AND tier = ? "
+        f"AND session_id IN ({marks})",
+        (owner, turn, FORGOTTEN_TIER, *keys),
+    )]
+    ids += [str(r[0]) for r in conn.execute(
+        "SELECT id FROM episodes WHERE session_id = ? AND tier = ? AND tenant_id = ? AND json_valid(metadata_json) "
+        f"AND json_extract(metadata_json, '$.chat') IN ({marks}) "
+        "AND json_extract(metadata_json, '$.chat_turn') = ?",
+        (_NOTES_SESSION, FORGOTTEN_TIER, owner, *keys, int(turn)),
+    )]
+    return ids
+
+
+def replay_turn(conn: sqlite3.Connection, entry: Any) -> None:
+    """Apply a journaled forget of one turn to *conn* (a restored copy may
+    hold the turn, its ledger rows, or neither). Raises when a step fails."""
+    keys = chat_keys(entry.session_key) or ([entry.session_key] if entry.session_key else [])
+    owner = entry.tenant_id or "default"
+    turn = int(entry.turn_number or 0)
+    if keys and turn > 0 and entry.question_sha:
+        conn.executemany(
+            "INSERT OR IGNORE INTO memory_forgotten "
+            "(tenant_id, session_key, turn_number, question_sha, episode_id, forgotten_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(owner, k, turn, entry.question_sha, entry.episode_id or None, entry.at) for k in keys],
+        )
+    held = conn.execute("SELECT id FROM episodes WHERE id = ?", (entry.episode_id,)).fetchone() \
+        if entry.episode_id else None
+    target = str(held[0]) if held else None
+    if target is None and keys and entry.question_sha:
+        marks = ",".join("?" for _ in keys)
+        for r in conn.execute(
+            f"SELECT id, user_text FROM episodes WHERE tenant_id = ? AND turn_number = ? "
+            f"AND session_id IN ({marks})",
+            (owner, turn, *keys),
+        ).fetchall():
+            if question_sha(r[1]) == entry.question_sha:
+                target = str(r[0])
+                break
+    if target is not None:
+        _forget_turn(conn, eid=target, owner=owner, keys=keys, turn=turn, sha=entry.question_sha,
+                     by="journal", purge_index=True, seq=None)
+        return
+    # No memory of the turn in this copy: the agent's notes from it and its
+    # facts may still be.
+    notes = _chat_notes(conn, tenant_id=owner, keys=keys, turn=turn) if keys and turn > 0 else []
+    if notes:
+        _forget_turn(conn, eid=notes[0], owner=owner, keys=keys, turn=turn, sha=entry.question_sha,
+                     by="journal", purge_index=True, seq=None)
+        return
+    now = time.time()
+    facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+    _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+    conn.commit()
+    _after_facts(conn, owner=owner, changed=facts, keys=keys, turn=turn)
 
 
 def retire_copy(
@@ -372,6 +495,54 @@ def retire_copy(
             conn.close()
 
 
+#: ``metadata.source`` of the Knowledge Library excerpts the supervisor copied
+#: into a chat's memory until 2026-10-13 (Memory audit M04).
+KNOWLEDGE_PROMOTION_SOURCES = ("knowledge_library_promote", "kb_promote")
+
+
+def retire_knowledge_promotions(conn: sqlite3.Connection | None = None, *, limit: int = 500) -> dict[str, Any]:
+    """Retire the Knowledge Library excerpts copied into chat memory.
+
+    Until 2026-10-13 every turn that injected library chunks also stored up to
+    two of them in the chat's memory, as ``user_text="[Knowledge: ...] ..."``
+    -- crawled third-party text recalled as "Relevant History" and grouped
+    into weekly summaries as if the user had said it (Memory audit M04). The
+    copy is gone; the library still holds the text and is searched as it is.
+    Each copy is emptied like a retired duplicate (no ledger row: the user
+    forgot nothing), its summaries rebuilt, its mirrors and remote vector
+    updated. A maintenance sweep; with nothing left, one SELECT.
+    """
+    own = conn is None
+    conn = conn or _open()
+    try:
+        marks = ",".join("?" for _ in KNOWLEDGE_PROMOTION_SOURCES)
+        rows = conn.execute(
+            f"SELECT id, tenant_id FROM episodes WHERE tier != ? AND json_valid(metadata_json) "
+            f"AND json_extract(metadata_json, '$.source') IN ({marks}) LIMIT ?",
+            (FORGOTTEN_TIER, *KNOWLEDGE_PROMOTION_SOURCES, int(limit)),
+        ).fetchall()
+        if not rows:
+            return {"retired": 0}
+        ids = [str(r[0]) for r in rows]
+        now = time.time()
+        for eid in ids:
+            _tombstone(conn, eid, now=now, by="knowledge_promotion_retired")
+        from kazma_core.memory.topic_summaries import on_turns_forgotten
+
+        summaries = on_turns_forgotten(conn, ids)
+        purge_search_index(conn)
+        conn.commit()
+        from kazma_core.memory.state_backend import remirror_episodes
+
+        remirror_episodes(conn, ids)
+        remote = [_delete_remote_vector(conn, str(r[0]), str(r[1] or "default")) for r in rows]
+        logger.info("[forget] retired %d Knowledge Library copies from chat memory", len(ids))
+        return {"retired": len(ids), "summaries_emptied": len(summaries), "remote_vector_deleted": all(remote)}
+    finally:
+        if own:
+            conn.close()
+
+
 def _tombstone(
     conn: sqlite3.Connection, eid: str, *, now: float, by: str, note: dict[str, Any] | None = None
 ) -> None:
@@ -381,9 +552,12 @@ def _tombstone(
         meta = json.loads((row[0] if row else None) or "{}")
     except (TypeError, ValueError):
         meta = {}
-    # Keep only what says where the memory came from; nothing it said.
+    # Keep only what says where the memory came from; nothing it said. A
+    # note keeps the chat and turn it was saved in: a forget cut short finds
+    # it again by them (Memory audit M08).
     stamp = {
         "source": meta.get("source") if isinstance(meta, dict) else None,
+        **{k: meta[k] for k in ("chat", "chat_turn") if isinstance(meta, dict) and k in meta},
         "forgotten": {"at": now, "by": by, **(note or {})},
     }
     conn.execute(
@@ -430,8 +604,26 @@ def _forget_chat_facts(
     return _forget_fact_rows(conn, conn.execute(sql, params).fetchall(), now=now)
 
 
+#: What a forgotten fact keeps of its metadata: where it came from, never
+#: what it said (an operator edit kept the earlier value under
+#: ``operator_edit.previous``; Memory audit M01, 2026-10-13).
+_FACT_PROVENANCE = ("source", "chat", "chat_turn", "forgotten")
+
+#: What a redacted audit field says instead of the value.
+REDACTED = "[redacted: forgotten]"
+
+
+def _provenance_only(meta: Any, *, now: float) -> dict[str, Any]:
+    kept = {k: meta[k] for k in _FACT_PROVENANCE if isinstance(meta, dict) and k in meta}
+    kept.setdefault("forgotten", {"at": now})
+    return kept
+
+
 def _forget_fact_rows(conn: sqlite3.Connection, rows: list[Any], *, now: float) -> list[str]:
-    """No longer current, and without their value. Skips those done already."""
+    """No longer current, without their value, vector or edit history.
+
+    Returns the ids it changed. A fact forgotten before 2026-10-13 kept its
+    vector and its metadata; asking again finishes it (and returns it)."""
     from kazma_core.memory.hygiene import invalidate_belief
 
     changed: list[str] = []
@@ -441,19 +633,181 @@ def _forget_fact_rows(conn: sqlite3.Connection, rows: list[Any], *, now: float) 
             meta = json.loads(r["metadata_json"] or "{}")
         except (TypeError, ValueError):
             meta = {}
-        if not isinstance(meta, dict):
-            meta = {}
-        if "forgotten" in meta:
+        kept = _provenance_only(meta, now=now)
+        done = conn.execute(
+            "SELECT 1 FROM beliefs WHERE id = ? AND object = '' AND embedding IS NULL "
+            "AND metadata_json = ?",
+            (r["id"], json.dumps(kept)),
+        ).fetchone()
+        if done is not None:
             continue
         if r["invalidated_at"] is None and r["valid_until"] is None:
             invalidate_belief(r["id"], conn=conn, now=now, tenant_id=tenant_id)
-        meta["forgotten"] = {"at": now}
         conn.execute(
-            "UPDATE beliefs SET object = '', metadata_json = ? WHERE id = ?",
-            (json.dumps(meta), r["id"]),
+            "UPDATE beliefs SET object = '', embedding = NULL, metadata_json = ? WHERE id = ?",
+            (json.dumps(kept), r["id"]),
         )
         changed.append(str(r["id"]))
     return changed
+
+
+def _forget_archived_facts(
+    conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str], turn: int | None, now: float,
+) -> list[str]:
+    """The archived copies (``beliefs_archive``: superseded long ago, or an
+    operator's "Archive invalidated") of the facts the forgotten turn -- or,
+    with *turn* None, the chat -- produced: kept as a row, without the value,
+    vector or metadata. Returns the ids it changed."""
+    if not keys:
+        return []
+    marks = ",".join("?" for _ in keys)
+    sql = (
+        "SELECT id, original_belief_json FROM beliefs_archive WHERE json_valid(original_belief_json) "
+        f"AND json_extract(original_belief_json, '$.source_session') IN ({marks})"
+    )
+    params: list[Any] = [*keys]
+    if turn is not None:
+        sql += " AND json_extract(original_belief_json, '$.source_turn') = ?"
+        params.append(int(turn))
+    if tenant_id is not None:
+        sql += " AND tenant_id = ?"
+        params.append(tenant_id)
+    changed: list[str] = []
+    for r in conn.execute(sql, params).fetchall():
+        try:
+            original = json.loads(r[1])
+        except (TypeError, ValueError):
+            continue
+        meta = original.get("metadata_json")
+        try:
+            meta = json.loads(meta) if isinstance(meta, str) else meta
+        except (TypeError, ValueError):
+            meta = {}
+        scrubbed = {k: v for k, v in original.items() if k not in ("object", "embedding", "metadata_json")}
+        scrubbed["object"] = ""
+        scrubbed["metadata_json"] = json.dumps(_provenance_only(meta, now=now))
+        blob = json.dumps(scrubbed, ensure_ascii=False, default=str)
+        if blob != r[1]:
+            conn.execute("UPDATE beliefs_archive SET original_belief_json = ? WHERE id = ?", (blob, r[0]))
+            changed.append(str(r[0]))
+    return changed
+
+
+#: The full-text indexes over memory text (``memory_stores``: erase "index").
+#: Each is external-content: a trigger keeps it in step with its table.
+_FTS_INDEXES = tuple(e.name for e in MEMORY_TABLES if e.erase == "index")
+
+
+def purge_search_index(conn: sqlite3.Connection) -> None:
+    """Rewrite each full-text index without the words of deleted rows.
+
+    FTS5 records a removed row as a delete marker in a new segment; the old
+    segment, the forgotten words in it, stays in ``*_fts_data`` until a merge
+    happens to reach it (Memory audit M01, 2026-10-13). ``optimize`` merges
+    the whole index into one segment, which drops them. It runs in the
+    caller's transaction.
+    """
+    for name in _FTS_INDEXES:
+        try:
+            conn.execute(f"INSERT INTO {name}({name}) VALUES('optimize')")
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+
+
+def _redacted(text: str | None) -> str | None:
+    if text is None:
+        return None
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return json.dumps({"redacted": "forgotten", "sha256": digest})
+
+
+def _scrub_ops(fact_ids: list[str], *, keys: list[str], turn: int | None) -> dict[str, int]:
+    """The operations database's copies: the audit log keeps each event and
+    loses the forgotten values (their hash stays, so an event still matches
+    its own record); a queued turn the user forgot loses its text."""
+    import os
+
+    from kazma_core.paths import memory_ops_db
+
+    path = str(memory_ops_db())
+    if not os.path.exists(path):
+        return {"audit": 0, "queue": 0}
+    ops = sqlite3.connect(path, check_same_thread=False, timeout=30)
+    try:
+        audit = _redact_audit(ops, fact_ids)
+        queue = _scrub_queue(ops, keys=keys, turn=turn)
+        ops.commit()
+        return {"audit": audit, "queue": queue}
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc):
+            return {"audit": 0, "queue": 0}
+        raise
+    finally:
+        ops.close()
+
+
+def _redact_audit(ops: sqlite3.Connection, fact_ids: list[str]) -> int:
+    """Rows about a forgotten fact lose its value: its own events whole
+    (reason and both states), another fact's event the side that named it --
+    a supersede records the fact it replaced in ``state_before_json``."""
+    if not fact_ids:
+        return 0
+    marks = ",".join("?" for _ in fact_ids)
+    n = 0
+    for column in ("state_before_json", "state_after_json"):
+        rows = ops.execute(
+            f"SELECT id, {column} FROM memory_audit_log WHERE json_valid({column}) "
+            f"AND json_extract({column}, '$.id') IN ({marks})",
+            fact_ids,
+        ).fetchall()
+        for r in rows:
+            ops.execute(f"UPDATE memory_audit_log SET {column} = ? WHERE id = ?", (_redacted(r[1]), r[0]))
+            n += 1
+    rows = ops.execute(
+        f"SELECT id, reason, state_before_json, state_after_json FROM memory_audit_log "
+        f"WHERE target_id IN ({marks}) AND reason != ?",
+        (*fact_ids, REDACTED),
+    ).fetchall()
+    for r in rows:
+        before = r[2] if (r[2] or "").startswith('{"redacted"') else _redacted(r[2])
+        after = r[3] if (r[3] or "").startswith('{"redacted"') else _redacted(r[3])
+        ops.execute(
+            "UPDATE memory_audit_log SET reason = ?, state_before_json = ?, state_after_json = ? WHERE id = ?",
+            (REDACTED, before, after, r[0]),
+        )
+        n += 1
+    return n
+
+
+#: Queued tasks that carry a turn's text (``consolidator._defer_turn``).
+_TURN_TEXT_TASKS = ("post_turn_memory",)
+
+
+def _scrub_queue(ops: sqlite3.Connection, *, keys: list[str], turn: int | None) -> int:
+    """A queued turn (pending or kept after it ran) loses its question and
+    answer; the ledger already refuses its write."""
+    if not keys:
+        return 0
+    marks = ",".join("?" for _ in keys)
+    kinds = ",".join("?" for _ in _TURN_TEXT_TASKS)
+    sql = (
+        f"SELECT id, payload_json FROM memory_task_queue WHERE task_type IN ({kinds}) "
+        f"AND json_valid(payload_json) AND json_extract(payload_json, '$.session_id') IN ({marks})"
+    )
+    params: list[Any] = [*_TURN_TEXT_TASKS, *keys]
+    if turn is not None:
+        sql += " AND json_extract(payload_json, '$.turn') = ?"
+        params.append(int(turn))
+    n = 0
+    for r in ops.execute(sql, params).fetchall():
+        payload = json.loads(r[1])
+        if not (payload.get("user_text") or payload.get("assistant_text")):
+            continue
+        payload.update(user_text="", assistant_text="", forgotten=True)
+        ops.execute("UPDATE memory_task_queue SET payload_json = ? WHERE id = ?", (json.dumps(payload), r[0]))
+        n += 1
+    return n
 
 
 def _remirror_facts(conn: sqlite3.Connection, fact_ids: list[str]) -> None:
@@ -463,26 +817,164 @@ def _remirror_facts(conn: sqlite3.Connection, fact_ids: list[str]) -> None:
         remirror_belief_by_id(conn, bid)
 
 
+def _memory_texts(conn: sqlite3.Connection, ids: list[str]) -> list[tuple[str, str, str]]:
+    """``(tenant, question, answer)`` of each memory, read before its tombstone
+    empties it: a legacy table may hold the same text under another id."""
+    if not ids:
+        return []
+    marks = ",".join("?" for _ in ids)
+    return [
+        (str(r[0] or "default"), str(r[1] or ""), str(r[2] or ""))
+        for r in conn.execute(
+            f"SELECT tenant_id, user_text, assistant_text FROM episodes WHERE id IN ({marks})", ids
+        ).fetchall()
+    ]
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(r[1]) for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall()}
+
+
+#: The shortest text a legacy truncation is matched by (shorter is too
+#: likely to be a phrase two memories share).
+_LEGACY_MATCH_MIN = 40
+
+
+def _scrub_legacy_copies(
+    conn: sqlite3.Connection, ids: list[str], texts: list[tuple[str, str, str]]
+) -> int:
+    """The tables a one-off 2026-08 operation left (``memory/legacy_tables.py``):
+    ``episodes_archive`` keeps a restored memory's text under its id, or under
+    another id with the same question; ``entities_archive`` keeps 200-character
+    "memory_chunk" truncations of memories. Nothing reads them, but they are
+    copies: a forgotten memory leaves none (Memory audit M01, 2026-10-13)."""
+    n = 0
+    episode_cols = _table_columns(conn, "episodes_archive")
+    if episode_cols and ids:
+        blank = [c for c in ("user_text", "assistant_text", "summary_text") if c in episode_cols]
+        sets = ", ".join([f"{c} = ''" for c in blank] + (["embedding = NULL"] if "embedding" in episode_cols else []))
+        marks = ",".join("?" for _ in ids)
+        if sets:
+            n += conn.execute(f"UPDATE episodes_archive SET {sets} WHERE id IN ({marks})", ids).rowcount
+            if "user_text" in episode_cols and "tenant_id" in episode_cols:
+                for tenant, question, _answer in texts:
+                    if question.strip():
+                        n += conn.execute(
+                            f"UPDATE episodes_archive SET {sets} WHERE tenant_id = ? AND user_text = ?",
+                            (tenant, question),
+                        ).rowcount
+    entity_cols = _table_columns(conn, "entities_archive")
+    if entity_cols and texts:
+        searched = [c for c in ("name", "metadata_json", "aliases_json") if c in entity_cols]
+        pieces = [
+            part[:120].strip()
+            for _t, question, answer in texts
+            for part in (question, answer)
+            if len(part.strip()) >= _LEGACY_MATCH_MIN
+        ]
+        for piece in dict.fromkeys(pieces):
+            where = " OR ".join(f"instr({c}, ?) > 0" for c in searched)
+            clear = ", ".join(
+                f"{c} = " + ("'{}'" if c == "metadata_json" else "'[]'" if c == "aliases_json" else "''")
+                for c in searched
+            )
+            if where:
+                n += conn.execute(
+                    f"UPDATE entities_archive SET {clear} WHERE {where}", tuple(piece for _ in searched)
+                ).rowcount
+    return n
+
+
+def _source_fact_ids(
+    conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str], turn: int | None
+) -> list[str]:
+    """Every fact (current, history or archived) the turn -- or, with *turn*
+    None, the chat -- produced."""
+    if not keys:
+        return []
+    marks = ",".join("?" for _ in keys)
+    live_sql = f"SELECT id FROM beliefs WHERE source_session IN ({marks})"
+    arch_sql = (
+        "SELECT id FROM beliefs_archive WHERE json_valid(original_belief_json) "
+        f"AND json_extract(original_belief_json, '$.source_session') IN ({marks})"
+    )
+    live_params: list[Any] = [*keys]
+    arch_params: list[Any] = [*keys]
+    if turn is not None:
+        live_sql += " AND source_turn = ?"
+        arch_sql += " AND json_extract(original_belief_json, '$.source_turn') = ?"
+        live_params.append(int(turn))
+        arch_params.append(int(turn))
+    if tenant_id is not None:
+        live_sql += " AND tenant_id = ?"
+        arch_sql += " AND tenant_id = ?"
+        live_params.append(tenant_id)
+        arch_params.append(tenant_id)
+    ids = [str(r[0]) for r in conn.execute(live_sql, live_params).fetchall()]
+    ids += [str(r[0]) for r in conn.execute(arch_sql, arch_params).fetchall()]
+    return list(dict.fromkeys(ids))
+
+
+def _after_facts(
+    conn: sqlite3.Connection, *, owner: str | None, changed: list[str], keys: list[str],
+    turn: int | None,
+) -> list[bool]:
+    """After the commit: the mirrors, the remote vectors, the operations
+    database. Every fact the turn or chat produced is asked about, not only
+    the ones changed now -- a forget from before 2026-10-13 left these."""
+    _remirror_facts(conn, changed)
+    every = _source_fact_ids(conn, tenant_id=owner, keys=keys, turn=turn)
+    tenants = {
+        str(r[0]): str(r[1] or "default")
+        for r in conn.execute(
+            f"SELECT id, tenant_id FROM beliefs WHERE id IN ({','.join('?' for _ in every)})", every
+        )
+    } if every else {}
+    remote = [_delete_remote_vector(conn, bid, tenants.get(bid, owner or "default")) for bid in every]
+    _scrub_ops(every, keys=keys, turn=turn)
+    return remote
+
+
 def _delete_remote_vector(conn: sqlite3.Connection, eid: str, tenant_id: str) -> bool:
     """The vector a remote index holds for the memory. The local copy went with
     the tombstone (``embedding = NULL``)."""
-    from kazma_core.memory.backends import get_vector_backend
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.backends import get_remote_vector_backend
 
+    del conn
+    # The remote index only: the local backend's delete re-wrote the row and
+    # committed the forget's connection (Memory audit M15).
+    backend = get_remote_vector_backend()
+    if backend is None:
+        return True  # vectors are local only: the tombstone took this one
     try:
-        backend = get_vector_backend(conn)
-    except RuntimeError:
-        # failover=raise with the remote down: the memory is forgotten here,
-        # the remote copy is not. Said, so it can be retried.
-        logger.warning("[forget] remote vector index unreachable; %s kept there", eid)
-        return False
-    return bool(backend.delete(eid, tenant_id=tenant_id))
+        done = bool(backend.delete(eid, tenant_id=tenant_id))
+    except (RuntimeError, OSError, sqlite3.Error, ValueError):
+        # failover=raise with the remote down, or the remote call failing:
+        # the memory is forgotten here, the remote copy is not yet.
+        logger.debug("[forget] remote delete of %s failed", eid, exc_info=True)
+        done = False
+    if not done:
+        # Retried every maintenance pass until it is gone (Memory audit M08:
+        # the log line said "can be retried" and nothing retried it).
+        logger.warning("[forget] remote vector of %s not deleted yet; retried each pass", eid)
+        forget_journal.queue_remote_delete(eid, tenant_id)
+    return done
 
 
-def forget_chat(key: str, *, tenant_id: str, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
-    """Forget every memory the chat *key* left, under either of its keys."""
+def forget_chat(
+    key: str, *, tenant_id: str, conn: sqlite3.Connection | None = None, journal: bool = True,
+) -> dict[str, Any]:
+    """Forget every memory the chat *key* left, under either of its keys.
+    Journaled as one entry (``forget_journal``)."""
     keys = chat_keys(key)
     if not keys:
         return {"ok": False, "error": "chat required"}
+    seq = None
+    if journal:
+        from kazma_core.memory import forget_journal
+
+        seq = forget_journal.append("chat", tenant_id=tenant_id or "default", session_key=key)
     own = conn is None
     conn = conn or _open()
     try:
@@ -498,7 +990,10 @@ def forget_chat(key: str, *, tenant_id: str, conn: sqlite3.Connection | None = N
         ]
         facts = 0
         for eid in ids:
-            facts += int(forget_episode(eid, tenant_id=caller, conn=conn).get("facts_forgotten") or 0)
+            facts += int(
+                forget_episode(eid, tenant_id=caller, conn=conn, purge_index=False, journal=False)
+                .get("facts_forgotten") or 0
+            )
         # What the agent noted during the chat in turns that left no memory of
         # their own, and every fact naming the chat whatever its turn.
         owner = None if caller == "default" else caller
@@ -510,13 +1005,17 @@ def forget_chat(key: str, *, tenant_id: str, conn: sqlite3.Connection | None = N
             )
         } if notes else {}
         now = time.time()
+        note_texts = _memory_texts(conn, notes)
         for note in notes:
             _tombstone(conn, note, now=now, by="user")
+        _scrub_legacy_copies(conn, notes, note_texts)
         chat_facts = _forget_chat_facts(conn, tenant_id=owner, keys=keys, now=now)
+        _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=None, now=now)
         if notes:
             from kazma_core.memory.topic_summaries import on_turns_forgotten
 
             on_turns_forgotten(conn, notes)
+        purge_search_index(conn)
         conn.commit()
         if notes:
             from kazma_core.memory.state_backend import remirror_episodes
@@ -524,9 +1023,197 @@ def forget_chat(key: str, *, tenant_id: str, conn: sqlite3.Connection | None = N
             remirror_episodes(conn, notes)
             for note in notes:
                 _delete_remote_vector(conn, note, note_tenants.get(note, caller))
-        _remirror_facts(conn, chat_facts)
+        _after_facts(conn, owner=owner, changed=chat_facts, keys=keys, turn=None)
+        from kazma_core.memory import forget_journal
+
+        forget_journal.mark_applied(conn, seq)
+        conn.commit()
         return {"ok": True, "forgotten": len(ids) + len(notes),
                 "facts_forgotten": facts + len(chat_facts), "chat_keys": keys}
+    finally:
+        if own:
+            conn.close()
+
+
+def _first_rewound_turn(messages: list[Any]) -> int:
+    """The first turn a chat state left as *messages* no longer holds an
+    answer to: its user messages, counted, when the last one is unanswered;
+    the next turn otherwise (``consolidator.user_turn_index``'s counting)."""
+    from kazma_core.memory.consolidator import user_turn_index
+
+    def role(m: Any) -> str:
+        return str((m.get("role") if isinstance(m, dict) else getattr(m, "type", "")) or "")
+
+    count = user_turn_index(messages)
+    last_user = max((i for i, m in enumerate(messages or []) if role(m) in ("user", "human")), default=-1)
+    answered = any(role(m) in ("assistant", "ai") for m in (messages or [])[last_user + 1:])
+    return count + 1 if answered or last_user < 0 else count
+
+
+def _forget_rewound_turns(
+    thread_id: str, old_messages: list[Any], *, from_turn: int, tenant_id: str = "default",
+) -> dict[str, Any]:
+    """Forget what memory holds of a chat's turns from *from_turn* on: undo,
+    edit, a replay restore and abort took them back (Memory audit M09).
+
+    By position, every memory of those turns goes -- the episodes, the
+    agent's notes, the facts (``source_turn``) -- under every key of the chat
+    and every tenant that holds them; the questions the old state asked
+    (*old_messages*) get ledger rows too, journaled, so a deferred write, the
+    deep pass and turn reconcile (the transcript still holds the old turn)
+    do not write them again. Until 2026-10-13 a rewind left them all, and
+    after ``/edit`` both answers were memories of the same turn.
+    """
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.consolidator import extract_turn_texts
+
+    keys = chat_keys(thread_id) or ([thread_id] if thread_id else [])
+    if not keys or from_turn < 1:
+        return {"ok": False, "error": "chat required"}
+    conn = _open()
+    try:
+        marks = ",".join("?" for _ in keys)
+        tenants = {tenant_id or "default"} | {
+            str(r[0] or "default") for r in conn.execute(
+                f"SELECT DISTINCT tenant_id FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ?",
+                (*keys, int(from_turn)),
+            )
+        }
+        # The questions of the rewound turns, as memory records them.
+        questions: dict[int, str] = {}
+        seen = 0
+        for i, m in enumerate(old_messages or []):
+            r = m.get("role") if isinstance(m, dict) else getattr(m, "type", "")
+            if r in ("user", "human"):
+                seen += 1
+                if seen >= from_turn:
+                    questions[seen] = extract_turn_texts(list(old_messages)[: i + 1])[0]
+        stored = {int(r[0]) for r in conn.execute(
+            f"SELECT DISTINCT turn_number FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ?",
+            (*keys, int(from_turn)),
+        )}
+        stored |= {int(r[0]) for r in conn.execute(
+            f"SELECT DISTINCT source_turn FROM beliefs WHERE source_session IN ({marks}) AND source_turn >= ?",
+            (*keys, int(from_turn)),
+        )}
+        turns = 0
+        for turn in sorted(stored | set(questions)):
+            for owner in sorted(tenants):
+                sha = question_sha(questions.get(turn)) if turn in questions else ""
+                seq = forget_journal.append("turn", tenant_id=owner, session_key=thread_id, turn_number=turn,
+                                            question_sha=sha)
+                for (eid,) in conn.execute(
+                    f"SELECT id FROM episodes WHERE tenant_id = ? AND session_id IN ({marks}) "
+                    "AND turn_number = ? AND tier != ?",
+                    (owner, *keys, turn, FORGOTTEN_TIER),
+                ).fetchall():
+                    forget_episode(str(eid), tenant_id=owner, conn=conn, journal=False, by="rewind")
+                entry = forget_journal.Entry(seq, time.time(), "turn", owner, thread_id, turn, sha, "", "")
+                replay_turn(conn, entry)
+                forget_journal.mark_applied(conn, seq)
+                conn.commit()
+            turns += 1
+        if turns:
+            logger.info("[forget] rewind of %s took back %d turn(s) from memory", thread_id, turns)
+        return {"ok": True, "turns": turns}
+    finally:
+        conn.close()
+
+
+async def rewind_memory(
+    thread_id: str, old_messages: list[Any], new_messages: list[Any], *,
+    tenant_id: str = "default", from_turn: int | None = None,
+) -> dict[str, Any]:
+    """What every chat-state rewrite (undo, edit, replay restore, abort) calls
+    after it writes: the turns it took back leave memory too
+    (:func:`_forget_rewound_turns`, in a thread). *from_turn* when the rewrite
+    replaced a turn it kept (``/edit``); else the first turn *new_messages*
+    holds no answer to. Never raises: the rewrite already happened."""
+    import asyncio
+
+    turn = from_turn if from_turn is not None else _first_rewound_turn(new_messages)
+    try:
+        return await asyncio.to_thread(_forget_rewound_turns, thread_id, list(old_messages or []),
+                                       from_turn=turn, tenant_id=tenant_id or "default")
+    except (sqlite3.Error, OSError, RuntimeError, ValueError, TypeError):
+        logger.warning("[forget] the rewind of %s could not take its turns back from memory; "
+                       "the maintenance pass applies the journal", thread_id, exc_info=True)
+        return {"ok": False}
+
+
+def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, int]:
+    """Forget every stored memory the ledger refuses (Memory audit M08).
+
+    The writer checks the ledger before it inserts; a forget or a keep-out
+    that lands in the window, or a restore, could still leave a row the
+    ledger refuses, and nothing applied the ledger to rows already written:
+
+    - a memory of a turn the user forgot (same chat, turn and question);
+    - a memory written into a chat while it was kept out (written after the
+      keep-out);
+    - a memory of a chat whose past the user forgot in the last day (the
+      race window), written before that forget;
+    - a weekly summary still active though a turn it was written from is
+      forgotten.
+    """
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.topic_summaries import on_turns_forgotten
+
+    targets: dict[str, str] = {}
+    for eid, tenant, text, sha in conn.execute(
+        "SELECT e.id, e.tenant_id, e.user_text, f.question_sha FROM memory_forgotten f "
+        "JOIN episodes e ON e.tenant_id = f.tenant_id AND e.session_id = f.session_key "
+        "AND e.turn_number = f.turn_number WHERE f.turn_number > 0 AND e.tier != ?",
+        (FORGOTTEN_TIER,),
+    ).fetchall():
+        if question_sha(text) == sha:
+            targets[str(eid)] = str(tenant or "default")
+    for eid, tenant in conn.execute(
+        "SELECT e.id, e.tenant_id FROM memory_forgotten f JOIN episodes e ON e.tenant_id = f.tenant_id "
+        "AND e.session_id = f.session_key WHERE f.turn_number = 0 AND f.question_sha = '' "
+        "AND e.tier != ? AND e.created_at >= f.forgotten_at",
+        (FORGOTTEN_TIER,),
+    ).fetchall():
+        targets.setdefault(str(eid), str(tenant or "default"))
+    for entry in forget_journal.recent_chat_forgets():
+        keys = chat_keys(entry.session_key) or [entry.session_key]
+        marks = ",".join("?" for _ in keys)
+        for (eid,) in conn.execute(
+            f"SELECT id FROM episodes WHERE tenant_id = ? AND session_id IN ({marks}) AND tier != ? "
+            "AND created_at <= ?",
+            (entry.tenant_id, *keys, FORGOTTEN_TIER, entry.at),
+        ).fetchall():
+            targets.setdefault(str(eid), entry.tenant_id)
+    forgotten = 0
+    for eid, tenant in list(targets.items())[:limit]:
+        if forget_episode(eid, tenant_id=tenant, conn=conn, journal=False, by="ledger").get("ok"):
+            forgotten += 1
+    stale = [str(r[0]) for r in conn.execute(
+        "SELECT DISTINCT src.episode_id FROM memory_summaries s JOIN memory_summary_sources src "
+        "ON src.summary_id = s.id JOIN episodes e ON e.id = src.episode_id "
+        "WHERE s.status = 'active' AND e.tier = ?",
+        (FORGOTTEN_TIER,),
+    )]
+    summaries = on_turns_forgotten(conn, stale, only_active=True) if stale else []
+    conn.commit()
+    if forgotten or summaries:
+        logger.warning("[forget] the ledger refused %d stored memorie(s) and %d active summarie(s): applied",
+                       forgotten, len(summaries))
+    return {"memories": forgotten, "summaries": len(summaries)}
+
+
+def converge(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """The maintenance pass "forget convergence" (Memory audits M08/M10): the
+    journal's pending entries, the ledger over stored rows, remote deletes."""
+    from kazma_core.memory import forget_journal
+
+    own = conn is None
+    conn = conn or _open()
+    try:
+        journal = forget_journal.apply_pending(conn)
+        ledger = enforce_ledger(conn)
+        remote = forget_journal.retry_remote_deletes(conn)
+        return {"journal": journal, "ledger": ledger, "remote": remote}
     finally:
         if own:
             conn.close()

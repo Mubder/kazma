@@ -18,7 +18,6 @@ __all__ = [
     "federated_search",
     "format_source_footer",
     "format_kb_hits_for_prompt",
-    "promote_kb_hits_to_episodes",
     "resolve_kb_library_ids",
 ]
 
@@ -189,29 +188,6 @@ def federated_search(
         except Exception as exc:
             logger.debug("[federated] knowledge search failed: %s", exc, exc_info=True)
 
-    try:
-        from kazma_core.memory.unified_index import search_unified
-
-        seen = {str(h.get("id") or "") for h in hits}
-        for row in search_unified(q, tenant_id=tenant_id, limit=max(limit_memory, limit_kb)):
-            uid = str(row.get("id") or "")
-            if uid and uid in seen:
-                continue
-            hits.append(
-                {
-                    "store": "unified",
-                    "kind": row.get("kind") or "item",
-                    "id": uid,
-                    "content": (row.get("text") or "")[:500],
-                    "score": 0.4,
-                    "source": "unified_index",
-                }
-            )
-            if uid:
-                seen.add(uid)
-    except Exception:
-        logger.debug("[federated] unified index search skipped", exc_info=True)
-
     def _rank_key(h: dict[str, Any]) -> float:
         return float(h.get("score") or 0)
 
@@ -325,48 +301,3 @@ def format_kb_hits_for_prompt(hits: list[dict[str, Any]], *, max_hits: int = 3) 
         "Cite sources when used. Do not treat it as the user's personal facts."
     )
     return "\n".join(lines)
-
-
-def promote_kb_hits_to_episodes(
-    hits: list[dict[str, Any]],
-    *,
-    session_id: str,
-    tenant_id: str = "default",
-    max_promote: int = 2,
-) -> int:
-    """Optionally mirror top KB chunks into episodic memory (product merge).
-
-    Stores remain logically separate via ``metadata.source=knowledge_library``;
-    this lets chat recall find doc snippets later without schema collapse.
-    Returns number of episodes written.
-    """
-    from kazma_core.memory.dual_write import mirror_episode
-
-    n = 0
-    for h in hits:
-        if h.get("store") != "knowledge":
-            continue
-        if n >= max_promote:
-            break
-        content = (h.get("content") or "").strip()
-        if len(content) < 40:
-            continue
-        prov = h.get("provenance") or {}
-        title = prov.get("document_title") or prov.get("source_url") or "Knowledge"
-        try:
-            eid = mirror_episode(
-                session_id=session_id or "kb-promote",
-                turn_number=900000 + n,
-                user_text=f"[Knowledge: {title}] {content[:1500]}",
-                assistant_text="",
-                summary_text=content[:500],
-                tenant_id=tenant_id,
-                tier="episodic",
-                importance=2,
-                source="knowledge_library_promote",
-            )
-            if eid:
-                n += 1
-        except Exception:
-            logger.debug("[federated] kb promote failed", exc_info=True)
-    return n

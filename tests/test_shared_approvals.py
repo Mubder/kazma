@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,62 +11,58 @@ import pytest
 from kazma_core.swarm import shared_approvals
 
 
-@pytest.mark.asyncio
-async def test_resolve_wakes_waiter() -> None:
+def _mock_store() -> MagicMock:
     store: dict = {}
-
-    mock_cs = MagicMock()
+    mock_cs = MagicMock(spec=["get", "set", "delete"])
     mock_cs.get.side_effect = lambda k, d=None: store.get(k, d)
     mock_cs.set.side_effect = lambda k, v, category="general": store.__setitem__(k, v)
+    mock_cs.delete.side_effect = lambda k: store.pop(k, None) is not None
+    return mock_cs
 
-    with patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
-        shared_approvals.create_pending("task-abc")
+
+@pytest.mark.asyncio
+async def test_resolve_wakes_waiter() -> None:
+    with patch("kazma_core.config_store.get_config_store", return_value=_mock_store()):
+        shared_approvals.open_request("task-abc", tool="shell_exec", args="{}", deadline=time.time() + 5)
 
         async def _approve_soon() -> None:
             await asyncio.sleep(0.05)
-            shared_approvals.resolve("task-abc", True)
+            shared_approvals.resolve("task-abc", True, actor="telegram:1")
 
         asyncio.create_task(_approve_soon())
-        ok = await shared_approvals.wait_for_resolution("task-abc", timeout=2.0)
-        assert ok is True
+        row = await shared_approvals._wait_outcome("task-abc")
+        assert (row["status"], row["actor"]) == ("approved", "telegram:1")
 
 
 @pytest.mark.asyncio
 async def test_timeout_returns_false() -> None:
-    store: dict = {}
-    mock_cs = MagicMock()
-    mock_cs.get.side_effect = lambda k, d=None: store.get(k, d)
-    mock_cs.set.side_effect = lambda k, v, category="general": store.__setitem__(k, v)
-
-    with patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
-        shared_approvals.create_pending("task-timeout")
-        ok = await shared_approvals.wait_for_resolution("task-timeout", timeout=0.3)
-        assert ok is False
+    """The request's own deadline ends it as ``timeout``, never a deny."""
+    with patch("kazma_core.config_store.get_config_store", return_value=_mock_store()):
+        shared_approvals.open_request("task-timeout", tool="shell_exec", args="{}", deadline=time.time() + 0.3)
+        row = await shared_approvals._wait_outcome("task-timeout")
+        assert row["status"] == "timeout"
 
 
 @pytest.mark.asyncio
 async def test_fanout_true_beats_earlier_false() -> None:
-    """H-12: a False vote must not settle when expected_voters=2; True still wins.
-
-    This is the swarm-bus shared wait (NOT web claim_gate).
-    """
-    store: dict = {}
-    mock_cs = MagicMock()
-    mock_cs.get.side_effect = lambda k, d=None: store.get(k, d)
-    mock_cs.set.side_effect = lambda k, v, category="general": store.__setitem__(k, v)
-
-    with patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
-        shared_approvals.create_pending("task-h12", expected_voters=2)
+    """H-12, re-pointed by the Swarm audit's stage 1 (2026-10-13): the first
+    human decision is the decision -- a Deny is final (owner decision D7) and a
+    later Approve changes nothing. What H-12 fixed stays fixed differently: no
+    platform's wait or timeout is a vote, only a click or the one deadline."""
+    with patch("kazma_core.config_store.get_config_store", return_value=_mock_store()):
+        shared_approvals.open_request("task-h12", tool="shell_exec", args="{}", deadline=time.time() + 5)
 
         async def _deny_then_approve() -> None:
             await asyncio.sleep(0.02)
-            shared_approvals.resolve("task-h12", False)
+            shared_approvals.resolve("task-h12", False, actor="discord:1")
             await asyncio.sleep(0.02)
-            shared_approvals.resolve("task-h12", True)
+            shared_approvals.resolve("task-h12", True, actor="telegram:1")
 
-        asyncio.create_task(_deny_then_approve())
-        ok = await shared_approvals.wait_for_resolution("task-h12", timeout=2.0)
-        assert ok is True
+        clicks = asyncio.create_task(_deny_then_approve())
+        row = await shared_approvals._wait_outcome("task-h12")
+        assert (row["status"], row["actor"]) == ("denied", "discord:1")
+        await clicks  # the later Approve has been pressed
+        assert shared_approvals.get("task-h12")["status"] == "denied"
 
 
 def test_client_tenant_spoof_blocked_in_multi_user(monkeypatch: pytest.MonkeyPatch) -> None:

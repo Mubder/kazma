@@ -5,8 +5,31 @@ handled by all three platform bus adapters. Prevents reintroduction of
 the "dead seam" where callbacks were not routed.
 """
 
+import time
+import uuid
+
 import pytest
-from unittest.mock import MagicMock, patch
+
+
+def _open() -> str:
+    """A pending swarm-bus request, as SafetyMiddleware.check opens it.
+
+    The dead-seam lock now reads the shared decision row: since the Swarm
+    audit's stage 1 a button decides that row (``shared_approvals``), not an
+    in-process event of the adapter that posted the card.
+    """
+    from kazma_core.swarm import shared_approvals
+
+    approval_id = "task-" + uuid.uuid4().hex[:12]
+    shared_approvals.open_request(approval_id, tool="file_write", args="{}", deadline=time.time() + 60)
+    return approval_id
+
+
+def _status(approval_id: str) -> str | None:
+    from kazma_core.swarm import shared_approvals
+
+    row = shared_approvals.get(approval_id)
+    return row.get("status") if row else None
 
 
 class TestTelegramBusAdapterCallbacks:
@@ -17,25 +40,24 @@ class TestTelegramBusAdapterCallbacks:
         from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
         
         adapter = TelegramBusAdapter(bot_token="test_token", chat_id="12345")
-        adapter._pending_approvals["task-123"] = MagicMock()
-        
-        task_id = adapter.handle_callback("swarm_approve_task-123")
-        
-        assert task_id == "task-123"
-        assert adapter._pending_results["task-123"] is True
-        # Note: approve() doesn't remove from _pending_approvals, only sets result
+        approval_id = _open()
+
+        task_id = adapter.handle_callback("swarm_approve_" + approval_id)
+
+        assert task_id == approval_id
+        assert _status(approval_id) == "approved"
     
     def test_handle_callback_reject(self):
         """swarm_reject_<task_id> marks task as rejected."""
         from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
         
         adapter = TelegramBusAdapter(bot_token="test_token", chat_id="12345")
-        adapter._pending_approvals["task-456"] = MagicMock()
-        
-        task_id = adapter.handle_callback("swarm_reject_task-456")
-        
-        assert task_id == "task-456"
-        assert adapter._pending_results["task-456"] is False
+        approval_id = _open()
+
+        task_id = adapter.handle_callback("swarm_reject_" + approval_id)
+
+        assert task_id == approval_id
+        assert _status(approval_id) == "denied"
     
     def test_handle_callback_unknown_returns_none(self):
         """Unknown callback prefix returns None (doesn't crash)."""
@@ -48,17 +70,18 @@ class TestTelegramBusAdapterCallbacks:
         assert result is None
     
     def test_handle_callback_for_unknown_task(self):
-        """Callback for non-existent task still returns task_id but doesn't set result (no pending approval)."""
+        """A button for a request nobody opened returns its id and decides
+        nothing: no row appears (Swarm audit SW-S02 -- a click on an unknown
+        id used to create a decided row a later request inherited)."""
         from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
-        
+
         adapter = TelegramBusAdapter(bot_token="test_token", chat_id="12345")
-        
-        # Even if task_id wasn't in pending, it still returns the task_id
-        result = adapter.handle_callback("swarm_approve_nonexistent")
-        
-        assert result == "nonexistent"
-        # But _pending_results is not set because there was no pending approval
-        assert "nonexistent" not in adapter._pending_results
+        unknown = "nonexistent-" + uuid.uuid4().hex[:8]
+
+        result = adapter.handle_callback("swarm_approve_" + unknown)
+
+        assert result == unknown
+        assert _status(unknown) is None
 
 
 class TestDiscordBusAdapterCallbacks:
@@ -69,24 +92,24 @@ class TestDiscordBusAdapterCallbacks:
         from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
         
         adapter = DiscordBusAdapter(bot_token="test_token", channel_id="12345")
-        adapter._pending_approvals["task-123"] = MagicMock()
-        
-        task_id = adapter.handle_callback("swarm_approve_task-123")
-        
-        assert task_id == "task-123"
-        assert adapter._pending_results["task-123"] is True
+        approval_id = _open()
+
+        task_id = adapter.handle_callback("swarm_approve_" + approval_id)
+
+        assert task_id == approval_id
+        assert _status(approval_id) == "approved"
     
     def test_handle_callback_reject(self):
         """swarm_reject_<task_id> marks task as rejected."""
         from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
         
         adapter = DiscordBusAdapter(bot_token="test_token", channel_id="12345")
-        adapter._pending_approvals["task-456"] = MagicMock()
-        
-        task_id = adapter.handle_callback("swarm_reject_task-456")
-        
-        assert task_id == "task-456"
-        assert adapter._pending_results["task-456"] is False
+        approval_id = _open()
+
+        task_id = adapter.handle_callback("swarm_reject_" + approval_id)
+
+        assert task_id == approval_id
+        assert _status(approval_id) == "denied"
     
     def test_handle_callback_unknown_returns_none(self):
         """Unknown callback prefix returns None."""
@@ -107,24 +130,24 @@ class TestSlackBusAdapterCallbacks:
         from kazma_gateway.adapters.slack_bus import SlackBusAdapter
         
         adapter = SlackBusAdapter(bot_token="test_token", channel_id="12345")
-        adapter._pending_approvals["task-123"] = MagicMock()
-        
-        task_id = adapter.handle_callback("swarm_approve_task-123")
-        
-        assert task_id == "task-123"
-        assert adapter._pending_results["task-123"] is True
+        approval_id = _open()
+
+        task_id = adapter.handle_callback("swarm_approve_" + approval_id)
+
+        assert task_id == approval_id
+        assert _status(approval_id) == "approved"
     
     def test_handle_callback_reject(self):
         """swarm_reject_<task_id> marks task as rejected."""
         from kazma_gateway.adapters.slack_bus import SlackBusAdapter
         
         adapter = SlackBusAdapter(bot_token="test_token", channel_id="12345")
-        adapter._pending_approvals["task-456"] = MagicMock()
-        
-        task_id = adapter.handle_callback("swarm_reject_task-456")
-        
-        assert task_id == "task-456"
-        assert adapter._pending_results["task-456"] is False
+        approval_id = _open()
+
+        task_id = adapter.handle_callback("swarm_reject_" + approval_id)
+
+        assert task_id == approval_id
+        assert _status(approval_id) == "denied"
     
     def test_handle_callback_unknown_returns_none(self):
         """Unknown callback prefix returns None."""
@@ -154,8 +177,9 @@ class TestCallbackRoutingIntegration:
 
         src = inspect.getsource(TelegramAdapter._handle_callback_query)
         assert "parse_callback_data" in src
-        assert "get_message_bus" in src
-        assert "handle_callback" in src
+        # The swarm button decides the shared request directly, with the user
+        # who pressed it (no bus adapter lookup to fail under FanOut).
+        assert "decide_from_button" in src and "actor=_approver" in src
 
         # The extracted parser recognizes the swarm approval prefixes.
         assert parse_callback_data("swarm_approve_task-1").kind == "swarm"

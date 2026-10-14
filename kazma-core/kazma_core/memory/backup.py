@@ -15,14 +15,13 @@ backed up on each call.
 from __future__ import annotations
 
 import logging
-import sqlite3
 import time
-from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["perform_native_backups", "prune_old_backups", "backup_one"]
+__all__ = ["perform_native_backups", "prune_old_backups", "backup_one", "restore_memory_backup"]
 
 # Default retention: keep the most recent N backups per database.
 _DEFAULT_RETENTION = 10
@@ -47,17 +46,11 @@ def _backup_one(src_path: Path, dest_path: Path) -> bool:
     :func:`backup_one`.
     """
     try:
-        # closing(), not a bare ``with sqlite3.connect()``: that block commits
-        # and does NOT close, and a Connection sits in a reference cycle with
-        # its statement cache, so the file stays open until a GC pass. On
-        # Windows an open file cannot be renamed — every ``kazma migrate
-        # import`` died at its first ``os.replace(swap_tmp, dest)`` with
-        # WinError 32 (measured 3/3, 2026-09-25).
-        with closing(sqlite3.connect(str(src_path))) as src, closing(
-            sqlite3.connect(str(dest_path))
-        ) as dst:
-            src.backup(dst, pages=100, sleep=0.01)
-            dst.commit()
+        # One step (db/sqlite_snapshot.py, Memory audit M19): the batched copy
+        # restarted on every write and finished only in a quiet window.
+        from kazma_core.db.sqlite_snapshot import snapshot_copy
+
+        snapshot_copy(src_path, dest_path)
         return True
     except Exception as exc:
         logger.warning("[backup] failed for %s → %s: %s", src_path, dest_path, exc)
@@ -144,3 +137,37 @@ def prune_old_backups(*, retention: int = _DEFAULT_RETENTION) -> int:
                     "[backup] could not prune old backup %s; old backups will pile up", stale, exc_info=True,
                 )
     return deleted
+
+
+def restore_memory_backup(src: Path, *, reconcile_budget_s: float = 120.0) -> dict[str, Any]:
+    """Restore the memory database from one of these backups, and catch up.
+
+    The copy is one step over the live file (``db/sqlite_snapshot``). Then
+    what a start would do, at once rather than at the next 15-minute pass:
+
+    * the forget journal is applied (``forget.converge``): the forgets made
+      since the backup are applied again -- until then the restored copy
+      answered with what the user had taken back;
+    * turn reconcile reads the chat store from the restored copy's own
+      cursor (``turn_reconcile.read_state``) and writes the turns since the
+      backup back as memories. What is lost is only what never was a chat
+      turn (an agent's saved note since the backup). A large gap goes on at
+      the next pass (``more``).
+
+    Measured by ``tests/test_memory_restore_drill.py`` (RPO and RTO).
+    """
+    from kazma_core.db.sqlite_snapshot import snapshot_copy
+    from kazma_core.memory import forget
+    from kazma_core.memory.turn_reconcile import run_turn_reconcile_pass
+    from kazma_core.paths import primary_memory_db
+
+    started = time.monotonic()
+    snapshot_copy(Path(src), Path(primary_memory_db()))
+    forgets = forget.converge()
+    reconcile = run_turn_reconcile_pass(time_budget_s=reconcile_budget_s)
+    return {
+        "forgets_applied": int((forgets.get("journal") or {}).get("applied") or 0),
+        "turns_rebuilt": int(reconcile.get("turns_written") or 0),
+        "more": not reconcile.get("done", True),
+        "seconds": round(time.monotonic() - started, 3),
+    }

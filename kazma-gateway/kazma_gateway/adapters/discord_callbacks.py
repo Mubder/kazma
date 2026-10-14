@@ -13,27 +13,16 @@ def parse_custom_id(custom_id: str) -> CallbackAction:
     return parse_callback_data(custom_id or "")
 
 
-def route_swarm_bus(custom_id: str) -> str | None:
-    """If *custom_id* is a swarm approve/reject, resolve the bus and return task_id."""
+def route_swarm_bus(custom_id: str, *, actor: str = "") -> str | None:
+    """If *custom_id* is a swarm approve/reject, decide that request and return
+    its id. The decision is the shared row's (``shared_approvals``): no
+    adapter instance is needed, and every platform's card shows the outcome."""
     action = parse_custom_id(custom_id)
     if action.kind != "swarm":
         return None
-    try:
-        from kazma_core.swarm.bus import FanOutBusAdapter, get_message_bus
-        from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
+    from kazma_core.swarm.shared_approvals import decide_from_button
 
-        adapter = get_message_bus().adapter
-        # Fan-out: try each child adapter
-        if isinstance(adapter, FanOutBusAdapter):
-            for child in adapter.adapters:
-                if isinstance(child, DiscordBusAdapter):
-                    return child.handle_callback(action.swarm_data)
-            return None
-        if isinstance(adapter, DiscordBusAdapter):
-            return adapter.handle_callback(action.swarm_data)
-    except Exception:
-        return None
-    return None
+    return decide_from_button(action.swarm_data, actor=actor, platform="discord")
 
 
 def is_install_action(custom_id: str) -> bool:

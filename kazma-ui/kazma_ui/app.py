@@ -236,6 +236,14 @@ class KazmaAppBuilder:
                 "for later, different requests (audit AUD-001). The variable does nothing; "
                 "remove it from .env."
             )
+        if (os.environ.get("SWARM_BOT_TOKEN") or "").strip():
+            logger.warning(
+                "[startup] SWARM_BOT_TOKEN is set, but the separate swarm notifier it "
+                "fed was removed on 2026-10-14 (Swarm audit SW-S15): it was a fourth "
+                "notifier beside the ops-alert routes and reported refused sends as "
+                "sent. Swarm results go to the swarm output target (Settings -> Swarm, "
+                "or /swarm config); the variable does nothing, remove it from .env."
+            )
 
     def _bootstrap_services(self) -> None:
         """Logging, config store, agent, registry, secret, workspace, FastAPI app.
@@ -2382,6 +2390,14 @@ class KazmaAppBuilder:
                     engine.stop_maintenance_loop()
                 except Exception:
                     pass
+                # Stop every running task through the engine, which records
+                # each ending as a shutdown with what the work had run (Swarm
+                # audit SW-E04), then cancel any other handle left.
+                stop_runs = getattr(engine, "stop_all_runs", None)
+                if callable(stop_runs):
+                    stopped = await stop_runs()
+                    if stopped:
+                        logger.info("[app] stopped %d running swarm task(s) for shutdown", stopped)
                 handles = getattr(engine, "_task_handles", None) or {}
                 for _tid, handle in list(handles.items()):
                     if handle is not None and hasattr(handle, "done") and not handle.done():

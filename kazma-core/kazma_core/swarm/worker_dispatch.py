@@ -116,7 +116,10 @@ async def dispatch_worker(
         if _t <= 0:
             timeout = NO_DEADLINE_SENTINEL
 
-    breaker = engine.get_circuit_breaker(worker.name)
+    reliability = getattr(engine, "_reliability", None)
+    breaker = (reliability.breaker_for_dispatch(worker.name)
+               if reliability is not None and hasattr(reliability, "breaker_for_dispatch")
+               else engine.get_circuit_breaker(worker.name))
     retry_policy = engine.get_retry_policy(worker.name)
     timeout_guard = engine.get_timeout_guard(worker.name)
     output_validator = engine.get_output_validator(worker.name, validation_schema)
@@ -128,12 +131,14 @@ async def dispatch_worker(
             trace_id, worker.name
         )
 
+    admission = None  # the breaker's admission of this dispatch (SW-E11)
     # Circuit breaker pre-check: reject immediately if open.
     try:
         # allow_probe sets _probe_in_flight in half-open; the finally below
         # releases it via `recorded` (not a separate probe_held flag — that
         # var was assigned 3x but never read, dead code) (audit finding).
-        breaker.check_or_raise(worker.name)
+        # The shared breaker reads the settings store: in a thread (SW-E07).
+        admission = await asyncio.to_thread(breaker.check_or_raise, worker.name)
     except CircuitBreakerOpenError as exc:
         logger.warning("[SwarmEngine] %s", exc)
         if dispatch_span:
@@ -146,7 +151,9 @@ async def dispatch_worker(
             output="",
             error=str(exc),
         )
-        engine._metrics_collector.record_worker_result(result)
+        # Counted once, by _finalize_task with the task's other results
+        # (Swarm audit SW-E19: recorded here too, one refusal was two
+        # failures in the worker's metrics).
         return [result]
 
     # Execute with retry policy.
@@ -200,7 +207,10 @@ async def dispatch_worker(
     try:
         async def _attempt() -> dict[str, Any]:
             nonlocal dispatched
-            worker.mark_dispatched(prompt)
+            # One dispatch is one in-flight count, however many attempts its
+            # retry policy makes: mark_completed runs once (SW-E12).
+            if not dispatched:
+                worker.mark_dispatched(prompt)
             dispatched = True
             # Record activity for auto-scaler reaping
             if engine._autoscaler is not None:
@@ -248,12 +258,17 @@ async def dispatch_worker(
                 logger.exception(
                     "[SwarmEngine] dispatch failed for worker '%s'", worker.name
                 )
+                from kazma_core.swarm.reliability import _is_retryable_exception
+
                 raw_result = {
                     "worker": worker.name,
                     "task_id": "",
                     "status": "error",
                     "output": "",
                     "error": str(exc)[:500],
+                    # Permanent failures (401, an invalid key) are not retried
+                    # (SW-E08: the classifier said so and they were anyway).
+                    "retryable": _is_retryable_exception(exc),
                 }
 
             # Validate output on success.
@@ -271,7 +286,9 @@ async def dispatch_worker(
                 raw_result["retry_safe"] = False
                 raw_result["error"] = (
                     str(raw_result.get("error") or "Worker did not complete")
-                    + " Whole-worker retry withheld because a mutating tool was invoked; inspect its effects."
+                    + " Whole-worker retry withheld because a mutating tool was invoked"
+                    + (f" ({', '.join(effects.tools)})" if effects.tools else "")
+                    + "; inspect its effects."
                 )
             return raw_result
 
@@ -297,6 +314,7 @@ async def dispatch_worker(
                 validation_schema=validation_schema,
                 started=started,
                 breaker=breaker,
+                admission=admission,
                 trace_id=trace_id,
                 _visited=_visited,
                 _depth=_depth + 1,
@@ -326,22 +344,26 @@ async def dispatch_worker(
                 dispatch_span.set_attribute("error.message", worker_result.error[:200])
             engine._tracing_emitter.end_span(dispatch_span, status=span_status)
 
-        # Update circuit breaker based on outcome.
-        if worker_result.status == "success":
-            breaker.record_success()
-        else:
-            breaker.record_failure()
-        recorded = True
-        # Multi-replica: dual-write breaker state to ConfigStore
-        try:
-            if hasattr(engine, "_reliability") and hasattr(
-                engine._reliability, "note_breaker_outcome"
-            ):
-                engine._reliability.note_breaker_outcome(worker.name)
+        # Update circuit breaker based on outcome -- and the shared copy, a
+        # settings write -- in a thread (SW-E07).
+        def _record_outcome(success: bool = worker_result.status == "success") -> None:
+            if success:
+                breaker.record_success(admission)
             else:
-                breaker.persist_shared(worker.name)
-        except Exception:
-            pass
+                breaker.record_failure(admission)
+            try:
+                if hasattr(engine, "_reliability") and hasattr(
+                    engine._reliability, "note_breaker_outcome"
+                ):
+                    engine._reliability.note_breaker_outcome(worker.name)
+                else:
+                    breaker.persist_shared(worker.name)
+            except Exception:
+                logger.warning("[SwarmEngine] could not share the breaker of '%s'", worker.name,
+                               exc_info=True)
+
+        await asyncio.to_thread(_record_outcome)
+        recorded = True
 
         worker.mark_completed(worker_result.status)
         dispatched = False  # busy released on the normal result path
@@ -395,11 +417,22 @@ async def dispatch_worker(
         return [worker_result]
     except BaseException as exc:
         if not recorded:
-            try:
-                breaker.record_failure()
-                recorded = True
-            except Exception:
-                pass
+            # Unwinding (often a cancellation): not awaited here; the
+            # breaker's lock orders it with any other outcome (SW-E07).
+            from kazma_core.background import spawn_background
+
+            # A stop the user asked for (or a shutdown) says nothing about the
+            # worker: no breaker failure (SW-E11). A deadline does.
+            cause = engine._interrupt_cause(getattr(context, "task_id", None) or "") \
+                if hasattr(engine, "_interrupt_cause") else None
+            if isinstance(exc, asyncio.CancelledError) and cause in (
+                    "cancelled_by_user", "caller_stopped", "shutdown"):
+                spawn_background(asyncio.to_thread(breaker.release_probe),
+                                 name=f"swarm-breaker-release:{worker.name}")
+            else:
+                spawn_background(asyncio.to_thread(breaker.record_failure, admission),
+                                 name=f"swarm-breaker-failure:{worker.name}")
+            recorded = True
         # Cancellation (cancel_task / a pattern-level wait_for timeout)
         # unwinds before the normal path's mark_completed() — release the
         # busy flag here or the worker object stays busy for the process
@@ -417,7 +450,8 @@ async def dispatch_worker(
                 if engine._autoscaler is not None:
                     engine._autoscaler.record_activity(worker.name)
             except Exception:
-                logger.debug(
+                # The worker stays "busy" to the autoscaler: say so (SW-E14).
+                logger.warning(
                     "[SwarmEngine] mark_completed on abort failed for worker '%s'",
                     worker.name,
                     exc_info=True,
@@ -426,4 +460,7 @@ async def dispatch_worker(
     finally:
         # Audit H8: never leave half-open stuck if cancel/timeout skipped record_*.
         if not recorded and hasattr(breaker, "release_probe"):
-            breaker.release_probe()
+            from kazma_core.background import spawn_background
+
+            spawn_background(asyncio.to_thread(breaker.release_probe),
+                             name=f"swarm-breaker-release:{worker.name}")

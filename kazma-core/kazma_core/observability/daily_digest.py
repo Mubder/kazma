@@ -81,6 +81,9 @@ _APP_MARKERS = {
 # (kazma_ui.turn_runtime._note_finished_turn). Turns were counted from "SSE
 # turn complete", which only the web stream writes.
 _TURN_MARKER = "[turn] Turn finished:"
+# The memory changes the operator made (kazma_ui.memory_actions, Memory audit
+# M35): one line each, with the route and the status. The forgets are counted.
+_MEMORY_ACTION = "[memory] operator action="
 _TURN_LINE = re.compile(r"\[turn\] Turn finished: platform=(\S+) key=(\S+) failed=(\S+)")
 
 # Every ops alert leaves this line, sent or held back by its cooldown
@@ -231,12 +234,16 @@ def _scan_app_log(
     counts: Counter = Counter()
     turns: dict[str, tuple[str, bool]] = {}
     alerts: dict[str, list[int]] = {}
-    needles = (*_APP_MARKERS, _TURN_MARKER, _ALERT_MARKER)
+    needles = (*_APP_MARKERS, _TURN_MARKER, _ALERT_MARKER, _MEMORY_ACTION)
     for _ts, rec in _records(_app_log_path, since, "timestamp", needles):
         msg = str(rec.get("message", ""))
         turn = _TURN_LINE.search(msg)
         if turn:
             turns[turn.group(2)] = (turn.group(1), turn.group(3) == "yes")
+            continue
+        if msg.startswith(_MEMORY_ACTION):
+            if "/forget " in msg and " status=200" in msg:
+                counts["memory forgets"] += 1
             continue
         if msg.startswith(_ALERT_MARKER):
             key = msg[len(_ALERT_MARKER):].split(" | ", 1)[0].strip()
@@ -305,11 +312,14 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
         lines.append(f"  {approvals_note}")
 
     # Planned work: what the operator did on purpose. Context, never a fault.
-    if reloads or pauses:
+    forgets = app.get("memory forgets", 0)
+    if reloads or pauses or forgets:
         lines.append("")
         lines.append("Planned work:")
         if reloads:
             lines.append(f"  reloads: {reloads}")
+        if forgets:
+            lines.append(f"  memories forgotten from the Memory page: {forgets}")
         if pauses:
             ended = [d for d in pauses if d is not None]
             detail = [f"longest {_human_duration(max(ended))}"] if ended else []

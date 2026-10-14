@@ -46,6 +46,16 @@
   function _memDay(epochSeconds) {
     return window.KazmaFormat ? window.KazmaFormat.date(epochSeconds) : new Date(epochSeconds * 1000).toLocaleDateString();
   }
+  // A server error code, worded in the page's language (Memory audit M32).
+  var _ERR = {
+    not_found: ['memory.err.not_found', 'Not found: it may have been changed or removed meanwhile'],
+    protected: ['memory.err.protected', 'This entity is protected'],
+  };
+  function _errText(key, fallback, d) {
+    var code = d && (d.code || d.error);
+    if (code && _ERR[code]) return _mt(_ERR[code][0], _ERR[code][1]);
+    return (d && (d.error || d.detail)) || _mt(key, fallback);
+  }
   // A value from the data shown as a label (an entity type, a predicate
   // type): the catalog's name for it, else the value itself, marked as
   // content (translate="no") -- it is the data's own word.
@@ -149,7 +159,7 @@
       var st = f.status || (f.ok ? 'ok' : 'off');
       var s = _chipStyle(st);
       return (
-        '<span' + (f.detail ? ' translate="no"' : '') + ' title="' + String(f.detail || ch.label).replace(/"/g, '&quot;') + '" style="display:inline-flex;align-items:center;gap:5px;font-size:0.68rem;font-weight:600;padding:3px 8px;border-radius:999px;border:' + s.border + ';background:' + s.bg + ';color:' + s.label + ';">' +
+        '<span' + (f.detail ? ' translate="no"' : '') + ' title="' + _attr(f.detail || ch.label) + '" style="display:inline-flex;align-items:center;gap:5px;font-size:0.68rem;font-weight:600;padding:3px 8px;border-radius:999px;border:' + s.border + ';background:' + s.bg + ';color:' + s.label + ';">' +
           '<span style="width:6px;height:6px;border-radius:50%;background:' + s.dot + ';"></span><span translate="yes">' + ch.label + '</span>' +
         '</span>'
       );
@@ -777,10 +787,12 @@
       if (okEl) {
         okEl.textContent = !installView
           ? _mt('memory.console.post_turn_none', 'post-turn: –')
-          : _mt('memory.console.post_turn_ok', 'ok: {ok} · fail m/e/q: {m}/{e}/{q}', {
-            ok: pt.ok || 0, m: pt.mirror_fail || 0, e: pt.extract_fail || 0, q: pt.enqueue_fail || 0,
+          : _mt('memory.console.post_turn_ok', 'ok: {ok} · fail m/e/d/q: {m}/{e}/{d}/{q}', {
+            ok: pt.ok || 0, m: pt.mirror_fail || 0, e: pt.extract_fail || 0,
+            d: pt.deep_pass_failed || 0, q: pt.enqueue_fail || 0,
           });
-        okEl.title = _mt('memory.console.post_turn_ok_title', 'Failed post-turn steps: m = mirror write, e = fact extraction, q = queue');
+        okEl.title = _mt('memory.console.post_turn_ok_title',
+          "Failed post-turn steps: m = memory write, e = fact extraction, d = the model's deep pass (retried later), q = queue");
       }
       const errEl = document.getElementById('v2-post-turn-err');
       if (errEl) {
@@ -868,7 +880,7 @@
           const pct = Math.round(((count||0) / total) * 100);
           const name = _mt('memory.console.tier_' + id, full);
           const tip = _mt('memory.console.tier_title', '{name}: {count} ({pct}%)', { name: name, count: count || 0, pct: pct });
-          return '<span title="' + _esc(tip) + '" style="display:inline-flex;align-items:center;gap:4px;font-size:0.65rem;padding:2px 6px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);">' +
+          return '<span title="' + _attr(tip) + '" style="display:inline-flex;align-items:center;gap:4px;font-size:0.65rem;padding:2px 6px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);">' +
                  '<span style="width:7px;height:7px;border-radius:50%;background:' + color + ';flex-shrink:0;"></span>' +
                  '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.tier_short_' + id, short)) + '</span>' +
                  '<span style="font-family:var(--font-mono);color:var(--text-primary);">' + (count||0) + '</span>' +
@@ -900,6 +912,21 @@
     });
     _v2gLastQuerySeeds = seeds;
   }
+  // A Forget button for a memory or a weekly summary a search found.
+  function _hitForget(kind, id) {
+    if (!id || (kind !== 'episode' && kind !== 'summary')) return '';
+    return ' <button type="button" class="btn btn-sm v2-hit-forget" data-kind="' + kind + '" data-id="' + _attr(id) +
+      '" style="font-size:0.62rem;padding:0 6px;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button>';
+  }
+  function _wireHitForgets(out) {
+    out.querySelectorAll('.v2-hit-forget').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        var id = btn.getAttribute('data-id');
+        if (btn.getAttribute('data-kind') === 'summary') await _forgetSummary(id);
+        else await _forgetEpisode(id);
+      });
+    });
+  }
   async function runV2Probe() {
     const input = document.getElementById('v2-probe-input');
     const out = document.getElementById('v2-probe-results');
@@ -914,7 +941,7 @@
         body: JSON.stringify({ query: q, limit: 5 }),
       });
       const data = await resp.json();
-      if (!data.ok) { out.textContent = data.error || _mt('memory.console.probe_failed', 'Probe failed'); return; }
+      if (!data.ok) { out.textContent = _errText('memory.console.probe_failed', 'Probe failed', data); return; }
       _v2gCollectSeedsFromHits([].concat(data.beliefs || [], data.episodes || []));
       // also seed from query words
       q.split(/\s+/).forEach(function(w) { if (w.length > 2) _v2gLastQuerySeeds.push(w); });
@@ -941,9 +968,18 @@
       });
       (data.episodes || []).forEach(function(h) {
         lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(96,165,250,0.06);"><span style="color:#60a5fa;font-size:0.65rem;font-weight:700;">' + _esc(_mt('memory.console.hit_episode', 'EPISODE')) + '</span> ' +
-          '<span translate="no">' + _esc((h.content || '').slice(0, 200)) + '</span>' +
+          '<span translate="no">' + _esc((h.content || '').slice(0, 200)) + '</span>' + _hitForget('episode', h.id) +
           '<div style="margin-top:3px;">' + _srcChips(h) + '</div></div>');
       });
+      // Weekly topic summaries, as the model is shown them (Memory audit M32:
+      // the panel dropped them).
+      (data.weekly_summaries || []).forEach(function(h) {
+        lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(251,191,36,0.06);"><span style="color:#fbbf24;font-size:0.65rem;font-weight:700;">' + _esc(_mt('memory.console.hit_summary', 'WEEKLY SUMMARY')) + '</span> ' +
+          '<span translate="no">' + _esc((h.content || '').slice(0, 300)) + '</span>' + _hitForget('summary', h.id) + '</div>');
+      });
+      if (data.degraded) {
+        lines.unshift('<div style="margin-bottom:6px;color:#fbbf24;font-size:0.72rem;">' + _esc(_mt('memory.console.probe_degraded', 'Meaning search was unavailable: keyword matches only.')) + '</div>');
+      }
       if (!lines.length) {
         const hints = (data.hints || []).map(function(hh) {
           return '<div translate="no" style="color:#fbbf24;margin-top:4px;">• ' + _esc(hh) + '</div>';
@@ -956,6 +992,7 @@
           '<button type="button" class="btn btn-sm" id="v2-eval-golden-btn" style="margin-top:8px;margin-left:6px;font-size:0.72rem;">' + _esc(_mt('memory.console.run_golden_eval', 'Run golden eval')) + '</button>';
         document.getElementById('v2-probe-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
         document.getElementById('v2-eval-golden-btn')?.addEventListener('click', runGoldenEval);
+        _wireHitForgets(out);
       }
     } catch (e) {
       out.textContent = _mt('memory.console.probe_error', 'Probe error: {error}', { error: e });
@@ -974,7 +1011,7 @@
       const resp = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId));
       const data = await resp.json();
       if (!data.ok || !data.belief) {
-        body.textContent = data.error || _mt('memory.console.not_found', 'Not found');
+        body.textContent = _errText('memory.console.not_found', 'Not found', data);
         return;
       }
       const b = data.belief;
@@ -1059,7 +1096,7 @@
       await window.kazmaSave('/api/memory/v2/beliefs/' + encodeURIComponent(_openBeliefId) + '/invalidate', { method: 'POST' });
     } catch (e) {
       // Keep the drawer open: the belief is still active.
-      window.kazmaAlert({ title: _mt('memory.console.unlink_failed', 'Unlink failed'), message: e.message, variant: 'btn-danger' });
+      window.kazmaAlert({ title: _mt('memory.console.unlink_failed', 'Unlink failed'), message: (e && e.body) ? _errText('memory.console.failed', 'Failed', e.body) : e.message, variant: 'btn-danger' });
       return;
     }
     const d = document.getElementById('v2-belief-drawer');
@@ -1095,7 +1132,7 @@
         const label = QUEUE_STATUS[st];
         const stHtml = label ? _esc(_mt(label[0], label[1])) : '<span translate="no">' + _esc(st) + '</span>';
         const retry = st === 'failed'
-          ? ' <button type="button" data-retry="' + _esc(t.id) + '" class="v2-queue-retry" style="font-size:0.65rem;padding:1px 6px;cursor:pointer;">' + _esc(_mt('memory.console.retry', 'retry')) + '</button>'
+          ? ' <button type="button" data-retry="' + _attr(t.id) + '" class="v2-queue-retry" style="font-size:0.65rem;padding:1px 6px;cursor:pointer;">' + _esc(_mt('memory.console.retry', 'retry')) + '</button>'
           : '';
         return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
           '<span translate="no">' + _esc(t.task_type) + '</span> · ' + stHtml + ' · ' +
@@ -1107,7 +1144,7 @@
           try {
             await window.kazmaSave('/api/memory/v2/queue/' + encodeURIComponent(id) + '/retry', { method: 'POST' });
           } catch (e) {
-            window.kazmaAlert({ title: _mt('memory.console.retry_failed', 'Retry failed'), message: e.message, variant: 'btn-danger' });
+            window.kazmaAlert({ title: _mt('memory.console.retry_failed', 'Retry failed'), message: (e && e.body) ? _errText('memory.console.failed', 'Failed', e.body) : e.message, variant: 'btn-danger' });
           }
           loadV2Queue();
         });
@@ -1144,8 +1181,8 @@
           '<span translate="no">' + _esc(m.source_entity_id) + ' → ' + _esc(m.target_entity_id) +
           ' <span style="color:var(--text-muted);">(' + _esc(m.merge_tier) + ' · ' +
           (m.confidence != null ? Number(m.confidence).toFixed(2) : '') + ')</span></span>' +
-          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="approve" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="' + _esc(_mt('memory.console.approve', 'Approve')) + '">' + KazmaIcons.span('check') + '</button>' +
-          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="reject" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="' + _esc(_mt('memory.console.reject', 'Reject')) + '">' + KazmaIcons.span('x') + '</button>' +
+          '<button type="button" data-mid="' + _attr(m.id) + '" data-act="approve" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="' + _attr(_mt('memory.console.approve', 'Approve')) + '">' + KazmaIcons.span('check') + '</button>' +
+          '<button type="button" data-mid="' + _attr(m.id) + '" data-act="reject" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="' + _attr(_mt('memory.console.reject', 'Reject')) + '">' + KazmaIcons.span('x') + '</button>' +
           '</div>';
       }).join('');
       el.querySelectorAll('.v2-merge-act').forEach(function(btn) {
@@ -1159,7 +1196,7 @@
               body: JSON.stringify({ action: act }),
             });
           } catch (e) {
-            window.kazmaAlert({ title: _mt('memory.console.merge_action_failed', 'Merge action failed'), message: e.message, variant: 'btn-danger' });
+            window.kazmaAlert({ title: _mt('memory.console.merge_action_failed', 'Merge action failed'), message: (e && e.body) ? _errText('memory.console.failed', 'Failed', e.body) : e.message, variant: 'btn-danger' });
           }
           loadV2Merges();
         });
@@ -1190,7 +1227,7 @@
         }),
       });
       const data = await resp.json();
-      if (!data.ok) { out.textContent = data.error || _mt('memory.console.search_failed', 'Search failed'); return; }
+      if (!data.ok) { out.textContent = _errText('memory.console.search_failed', 'Search failed', data); return; }
       const s = data.summary || {};
       if (sum) {
         sum.textContent = _mt('memory.console.fed_summary',
@@ -1209,6 +1246,7 @@
           '<span translate="no" style="color:' + color + ';font-size:0.65rem;font-weight:700;">' + store + '/' + _esc(kind) + '</span> ' +
           '<span translate="no">' + _esc((h.content || '').slice(0, 220)) + '</span>' +
           (extra ? ' <span translate="no" style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(String(extra).slice(0, 80)) + ']</span>' : '') +
+          (h.store === 'knowledge' ? '' : _hitForget(h.kind === 'weekly_summary' ? 'summary' : h.kind, h.id)) +
           '</div>';
       });
       _v2gCollectSeedsFromHits(data.hits || []);
@@ -1218,6 +1256,7 @@
         out.innerHTML = lines.join('') +
           '<button type="button" class="btn btn-sm" id="v2-fed-path-btn" style="margin-top:8px;font-size:0.72rem;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>';
         document.getElementById('v2-fed-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
+        _wireHitForgets(out);
       } else {
         out.innerHTML = '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.no_hits_either', 'No hits in either store.')) + '</span>';
       }
@@ -1242,7 +1281,7 @@
         return;
       }
       if (!data.ok && data.error && !data.total) {
-        out.textContent = data.error || _mt('memory.console.eval_failed', 'Eval failed');
+        out.textContent = _errText('memory.console.eval_failed', 'Eval failed', data);
         return;
       }
       const lines = [
@@ -1320,14 +1359,75 @@
 
   // What Kazma remembers of conversations, each with Forget (plan U1). A
   // forgotten memory keeps nothing it said, and nothing brings it back.
+  // Every memory reachable from the page (Memory audit M23: it listed the
+  // newest 30 and an older one could not be forgotten): a page at a time,
+  // searchable, with where the page is in the whole.
+  var _MEM_PAGE = 30;
+  var _memOffset = 0;
+  var _memQuery = '';
+  function _pageRange(id, offset, shown, total) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = total ? _mt('memory.console.page_range', '{from}–{to} of {total}', {
+      from: (window.KazmaFormat ? window.KazmaFormat.number(offset + 1) : offset + 1),
+      to: (window.KazmaFormat ? window.KazmaFormat.number(offset + shown) : offset + shown),
+      total: (window.KazmaFormat ? window.KazmaFormat.number(total) : total),
+    }) : '';
+  }
+  function _pagerButtons(prefix, offset, shown, total) {
+    var newer = document.getElementById(prefix + '-newer');
+    var older = document.getElementById(prefix + '-older');
+    if (newer) newer.disabled = offset <= 0;
+    if (older) older.disabled = offset + shown >= total;
+  }
+  // Forget one memory: asked first, then said how it went (Memory audit M23:
+  // the list's own button, a search result's and a probe hit's).
+  async function _forgetEpisode(id) {
+    const ok = await window.kazmaConfirm({
+      title: _mt('memory.console.forget_memory_title', 'Forget this memory?'),
+      message: _mt('memory.console.forget_memory_message', 'Kazma stops remembering this part of the conversation and the facts it learned from it, wherever a copy was kept. The chat itself stays as it is. Backups made before now keep it until they are replaced (up to a year for offsite backups).'),
+      confirmText: _mt('memory.console.forget', 'Forget'),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const r = await window.kazmaSave('/api/memory/v2/episodes/' + encodeURIComponent(id) + '/forget', { method: 'POST' });
+      if (window.showToast) {
+        const forgotText = !r || !r.ok
+          ? (_errText('memory.console.forget_failed', 'Forget failed', r))
+          : (r.remote_vector_deleted === false
+            // Forgotten here; the remote index's copy is retried each
+            // maintenance pass -- partial, said so (Memory audit M32).
+            ? _mt('memory.console.forgotten_remote_pending', 'Forgotten. The copy in the remote vector index is removed at the next maintenance pass.')
+            : (!r.facts_forgotten
+              ? _mt('memory.console.forgotten', 'Forgotten')
+              : window.kazmaCount('memory.console.forgotten_with_facts', r.facts_forgotten)));
+        window.showToast(forgotText, r && r.ok ? 'success' : 'error');
+      }
+    } catch (e) {
+      window.kazmaAlert({ title: _mt('memory.console.forget_failed', 'Forget failed'), message: (e && e.body) ? _errText('memory.console.failed', 'Failed', e.body) : e.message, variant: 'btn-danger' });
+    }
+    loadV2Memories();
+    pollV2Health();
+  }
   async function loadV2Memories() {
     const el = document.getElementById('v2-memories-list');
     if (!el) return;
     try {
-      const resp = await fetch('/api/memory/v2/episodes?limit=30');
+      const url = '/api/memory/v2/episodes?limit=' + _MEM_PAGE + '&offset=' + _memOffset +
+        (_memQuery ? '&q=' + encodeURIComponent(_memQuery) : '');
+      const resp = await fetch(url);
       const data = await resp.json();
       const eps = data.episodes || [];
-      if (!eps.length) { el.textContent = _mt('memory.console.no_memories', 'No memories of conversations yet.'); return; }
+      const total = Number(data.total || 0);
+      _pageRange('v2-memories-range', _memOffset, eps.length, total);
+      _pagerButtons('v2-memories', _memOffset, eps.length, total);
+      if (!eps.length) {
+        el.textContent = _memQuery
+          ? _mt('memory.console.no_memory_matches', 'No memory holds these words.')
+          : _mt('memory.console.no_memories', 'No memories of conversations yet.');
+        return;
+      }
       el.innerHTML = eps.map(function(ep) {
         const when = ep.created_at ? _memWhen(ep.created_at) : '';
         // The id is isolated left to right: on an Arabic page its leading
@@ -1339,50 +1439,63 @@
           // English memory sat on the right (2026-10-02).
           '<span style="min-width:0;overflow-wrap:anywhere;"><span translate="no" style="display:block;color:var(--text-primary);">' + _esc(ep.preview || ep.id) + '</span>' +
           '<span style="display:block;color:var(--text-muted);font-size:0.65rem;"><bdi>' + _esc(when) + '</bdi>' + chat + '</span></span>' +
-          '<button type="button" class="btn btn-sm v2-memory-forget" data-id="' + _esc(ep.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
+          '<button type="button" class="btn btn-sm v2-memory-forget" data-id="' + _attr(ep.id) + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-memory-forget').forEach(function(btn) {
-        btn.addEventListener('click', async function() {
-          const ok = await window.kazmaConfirm({
-            title: _mt('memory.console.forget_memory_title', 'Forget this memory?'),
-            message: _mt('memory.console.forget_memory_message', 'Kazma stops remembering this part of the conversation and the facts it learned from it. The chat itself stays as it is.'),
-            confirmText: _mt('memory.console.forget', 'Forget'),
-            danger: true,
-          });
-          if (!ok) return;
-          try {
-            const r = await window.kazmaSave('/api/memory/v2/episodes/' + encodeURIComponent(btn.getAttribute('data-id')) + '/forget', { method: 'POST' });
-            if (window.showToast) {
-              const forgotText = !r || !r.ok
-                ? ((r && r.error) || _mt('memory.console.forget_failed', 'Forget failed'))
-                : (!r.facts_forgotten
-                  ? _mt('memory.console.forgotten', 'Forgotten')
-                  : window.kazmaCount('memory.console.forgotten_with_facts', r.facts_forgotten));
-              window.showToast(forgotText, r && r.ok ? 'success' : 'error');
-            }
-          } catch (e) {
-            window.kazmaAlert({ title: _mt('memory.console.forget_failed', 'Forget failed'), message: e.message, variant: 'btn-danger' });
-          }
-          loadV2Memories();
-          pollV2Health();
-        });
+        btn.addEventListener('click', function() { _forgetEpisode(btn.getAttribute('data-id')); });
       });
     } catch (e) { el.textContent = _mt('memory.console.memories_load_failed', 'Memories load failed'); }
   }
   document.getElementById('v2-memories-refresh')?.addEventListener('click', loadV2Memories);
+  document.getElementById('v2-memories-newer')?.addEventListener('click', function() {
+    _memOffset = Math.max(0, _memOffset - _MEM_PAGE); loadV2Memories();
+  });
+  document.getElementById('v2-memories-older')?.addEventListener('click', function() {
+    _memOffset += _MEM_PAGE; loadV2Memories();
+  });
+  (function() {
+    var box = document.getElementById('v2-memories-search');
+    var timer = null;
+    if (box) box.addEventListener('input', function() {
+      clearTimeout(timer);
+      timer = setTimeout(function() { _memQuery = (box.value || '').trim(); _memOffset = 0; loadV2Memories(); }, 300);
+    });
+  })();
   loadV2Memories();
 
   // Weekly topic summaries (plan C2): what each week's conversations said
   // about each topic. Forget one and its week never writes it again; the
   // conversations themselves stay.
+  async function _forgetSummary(id) {
+    const ok = await window.kazmaConfirm({
+      title: _mt('memory.console.forget_summary_title', 'Forget this summary?'),
+      message: _mt('memory.console.forget_summary_message', 'Kazma stops using this summary and never writes it again. The conversations it was written from stay as they are.'),
+      confirmText: _mt('memory.console.forget', 'Forget'),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const r = await window.kazmaSave('/api/memory/v2/summaries/' + encodeURIComponent(id) + '/forget', { method: 'POST' });
+      if (window.showToast) {
+        window.showToast(r && r.ok ? _mt('memory.console.summary_forgotten', 'Summary forgotten') : (_errText('memory.console.forget_failed', 'Forget failed', r)), r && r.ok ? 'success' : 'error');
+      }
+    } catch (e) {
+      window.kazmaAlert({ title: _mt('memory.console.forget_failed', 'Forget failed'), message: (e && e.body) ? _errText('memory.console.failed', 'Failed', e.body) : e.message, variant: 'btn-danger' });
+    }
+    loadV2Summaries();
+  }
+  var _SUM_PAGE = 40;
+  var _sumOffset = 0;
   async function loadV2Summaries() {
     const el = document.getElementById('v2-summaries-list');
     const stateEl = document.getElementById('v2-summaries-state');
     if (!el) return;
     try {
-      const resp = await fetch('/api/memory/v2/summaries?limit=40');
+      const resp = await fetch('/api/memory/v2/summaries?limit=' + _SUM_PAGE + '&offset=' + _sumOffset);
       const data = await resp.json();
       const st = data.state || {};
+      _pageRange('v2-summaries-range', _sumOffset, (data.summaries || []).length, Number(data.total || 0));
+      _pagerButtons('v2-summaries', _sumOffset, (data.summaries || []).length, Number(data.total || 0));
       if (stateEl) {
         const parts = [window.kazmaCount('memory.console.weeks_done', st.weeks_done || 0)];
         if (st.weeks_queued) parts.push(_mt('memory.console.weeks_queued', '{n} in progress', { n: st.weeks_queued }));
@@ -1408,31 +1521,20 @@
           '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">' + _esc(_mt('memory.console.week_of', 'Week of {date}', { date: monday })) + ' · ' + _esc(size) + '</span>' +
           (pending ? '' : '<span translate="no" style="display:block;margin-top:2px;white-space:pre-wrap;">' + _esc(s.summary_text || '') + '</span>') +
           '</span>' +
-          '<button type="button" class="btn btn-sm v2-summary-forget" data-id="' + _esc(s.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
+          '<button type="button" class="btn btn-sm v2-summary-forget" data-id="' + _attr(s.id) + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-summary-forget').forEach(function(btn) {
-        btn.addEventListener('click', async function() {
-          const ok = await window.kazmaConfirm({
-            title: _mt('memory.console.forget_summary_title', 'Forget this summary?'),
-            message: _mt('memory.console.forget_summary_message', 'Kazma stops using this summary and never writes it again. The conversations it was written from stay as they are.'),
-            confirmText: _mt('memory.console.forget', 'Forget'),
-            danger: true,
-          });
-          if (!ok) return;
-          try {
-            const r = await window.kazmaSave('/api/memory/v2/summaries/' + encodeURIComponent(btn.getAttribute('data-id')) + '/forget', { method: 'POST' });
-            if (window.showToast) {
-              window.showToast(r && r.ok ? _mt('memory.console.summary_forgotten', 'Summary forgotten') : ((r && r.error) || _mt('memory.console.forget_failed', 'Forget failed')), r && r.ok ? 'success' : 'error');
-            }
-          } catch (e) {
-            window.kazmaAlert({ title: _mt('memory.console.forget_failed', 'Forget failed'), message: e.message, variant: 'btn-danger' });
-          }
-          loadV2Summaries();
-        });
+        btn.addEventListener('click', function() { _forgetSummary(btn.getAttribute('data-id')); });
       });
     } catch (e) { el.textContent = _mt('memory.console.summaries_load_failed', 'Weekly summaries load failed'); }
   }
   document.getElementById('v2-summaries-refresh')?.addEventListener('click', loadV2Summaries);
+  document.getElementById('v2-summaries-newer')?.addEventListener('click', function() {
+    _sumOffset = Math.max(0, _sumOffset - _SUM_PAGE); loadV2Summaries();
+  });
+  document.getElementById('v2-summaries-older')?.addEventListener('click', function() {
+    _sumOffset += _SUM_PAGE; loadV2Summaries();
+  });
   loadV2Summaries();
   loadV2Queue();
   loadV2Merges();
@@ -1463,7 +1565,7 @@
         const objRaw = String(b.object || '');
         const objFull = _esc(objRaw);
         const objShown = objRaw.length > 160 ? objFull.slice(0, 160) + '…' : objFull;
-        return '<div class="v2-belief-row" data-id="' + _esc(b.id) + '" data-subject="' + _esc(b.subject) + '" data-object="' + _esc(b.object) + '" data-predicate="' + _esc(b.predicate) + '" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
+        return '<div class="v2-belief-row" data-id="' + _attr(b.id) + '" data-subject="' + _attr(b.subject) + '" data-object="' + _attr(b.object) + '" data-predicate="' + _attr(b.predicate) + '" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
                '<span' + ptype.attr + ' style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;margin-top:2px;">' + _esc(ptype.text) + '</span>' +
                '<div translate="no" style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b title="' + objFull + '">' + objShown + '</b></div>' +
                '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0;margin-top:2px;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
@@ -1625,6 +1727,9 @@
   }
 
   function _esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  // For an attribute value: _esc leaves quotes as they are (Memory audit M36 --
+  // a migrated entity type holding a quote wrote its own attributes).
+  function _attr(s) { return _esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
   // Wire V2 controls + boot
   try {
@@ -2619,7 +2724,7 @@
         body: JSON.stringify({ subject: src, predicate: pred, object: tgt }),
       });
       if (!data.ok) {
-        _v2gToast(data.error || _mt('memory.console.link_failed', 'Link failed'), 'error');
+        _v2gToast(_errText('memory.console.link_failed', 'Link failed', data), 'error');
         console.warn('[v2g] link failed', data);
         return false;
       }
@@ -2673,7 +2778,7 @@
       });
       var data = await resp.json().catch(function() { return {}; });
       if (!resp.ok || !data.ok) {
-        _v2gToast(data.error || _mt('memory.console.merge_failed', 'Merge failed'), 'error');
+        _v2gToast(_errText('memory.console.merge_failed', 'Merge failed', data), 'error');
         return false;
       }
       _v2gToast(_mt('memory.console.merged', 'Merged {source} → {target}', { source: _v2gShortId(src), target: _v2gShortId(tgt) }), 'success');
@@ -2788,7 +2893,7 @@
       }
       if (!data.ok) {
         if (!opts.silent) {
-          _v2gToast(data.error || _mt('memory.console.cut_failed', 'Cut failed'), 'error');
+          _v2gToast(_errText('memory.console.cut_failed', 'Cut failed', data), 'error');
           console.warn('[v2g] unlink failed', data, { beliefId: beliefId, seed: seed });
         }
         return false;
@@ -2976,7 +3081,7 @@
       });
       var data = await resp.json().catch(function() { return {}; });
       if (!resp.ok || !data.ok) {
-        _v2gToast(data.error || _mt('memory.console.edit_failed', 'Edit failed'), 'error');
+        _v2gToast(_errText('memory.console.edit_failed', 'Edit failed', data), 'error');
         return false;
       }
       _v2gToast(_mt('memory.console.belief_updated', 'Belief updated'), 'success');
@@ -3035,7 +3140,7 @@
         body: JSON.stringify(payload),
       });
       if (!data.ok) {
-        _v2gToast(data.error || _mt('memory.console.move_failed', 'Move failed'), 'error');
+        _v2gToast(_errText('memory.console.move_failed', 'Move failed', data), 'error');
         return false;
       }
       var warn = data.warn_orphaned && data.warn_orphaned.length
@@ -3073,7 +3178,7 @@
         method: 'POST',
         body: JSON.stringify({ major: newMajor }),
       });
-      if (!data.ok) { _v2gToast(data.error || _mt('memory.console.toggle_failed', 'Toggle failed'), 'error'); return; }
+      if (!data.ok) { _v2gToast(_errText('memory.console.toggle_failed', 'Toggle failed', data), 'error'); return; }
       p.isMajor = newMajor;
       _v2gToast(newMajor
         ? _mt('memory.console.marked_major', 'Marked {id} as major', { id: _v2gShortId(p.id) })
@@ -3123,7 +3228,7 @@
           body: JSON.stringify({ group_root: rootId, member: memberId }),
         });
       if (!data.ok) {
-        _v2gToast(data.error || _mt('memory.console.group_failed', 'Group failed'), 'error');
+        _v2gToast(_errText('memory.console.group_failed', 'Group failed', data), 'error');
         return false;
       }
       var tier = current ? data.new_tier : data.member_tier;
@@ -3182,7 +3287,7 @@
         body: JSON.stringify({ tier: Number(text) }),
       });
       if (!data.ok) {
-        _v2gToast(data.error || _mt('memory.console.tier_failed', 'Setting the tier failed'), 'error');
+        _v2gToast(_errText('memory.console.tier_failed', 'Setting the tier failed', data), 'error');
         return false;
       }
       _v2gToast(_mt('memory.console.tier_set', '{id} is now tier {tier} · view-only, memory untouched', {
@@ -3210,7 +3315,7 @@
         method: 'DELETE',
       });
       if (!data.ok) {
-        _v2gToast(data.error || _mt('memory.console.ungroup_failed', 'Ungroup failed'), 'error');
+        _v2gToast(_errText('memory.console.ungroup_failed', 'Ungroup failed', data), 'error');
         return false;
       }
       _v2gToast(_mt('memory.console.ungrouped', 'Ungrouped {id} · view-only, memory untouched', { id: _v2gShortId(memberId) }), 'success');
@@ -3240,7 +3345,7 @@
       });
       var data = await resp.json().catch(function() { return {}; });
       if (!resp.ok || !data.ok) {
-        _v2gToast(data.error || _mt('memory.console.delete_failed', 'Delete failed'), 'error');
+        _v2gToast(_errText('memory.console.delete_failed', 'Delete failed', data), 'error');
         return false;
       }
       _v2gToast(_mt('memory.console.deleted', 'Deleted {id}', { id: _v2gShortId(id) }), 'success');
@@ -3336,7 +3441,7 @@
     el.classList.add('is-open');
     el.innerHTML =
       '<div class="v2g-inspect-head">' +
-        '<button type="button" class="v2g-inspect-close" aria-label="' + _esc(_mt('memory.console.close', 'Close')) + '">×</button>' +
+        '<button type="button" class="v2g-inspect-close" aria-label="' + _attr(_mt('memory.console.close', 'Close')) + '">×</button>' +
       '</div>' + (bodyHtml || '');
     var close = el.querySelector('.v2g-inspect-close');
     if (close) {
@@ -3940,7 +4045,7 @@
       });
       var data = await resp.json().catch(function() { return {}; });
       if (!resp.ok || !data.ok) {
-        if (window.showToast) window.showToast(data.error || _mt('memory.console.rename_failed', 'Rename failed'), 'error');
+        if (window.showToast) window.showToast(_errText('memory.console.rename_failed', 'Rename failed', data), 'error');
         return;
       }
       if (window.showToast) window.showToast(_mt('memory.console.renamed_to', 'Renamed to “{name}”', { name: name }), 'success');
@@ -4100,7 +4205,7 @@
     var parts = [];
     if (hasUser) {
       parts.push(
-        '<span title="' + _esc(_mt('memory.mc.legend_you', 'You')) + '"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
+        '<span title="' + _attr(_mt('memory.mc.legend_you', 'You')) + '"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
         theme.user + ';margin-right:4px;box-shadow:0 0 6px ' + _v2gHexAlpha(theme.user, 0.5) +
         ';"></span>' + _esc(_mt('memory.mc.legend_you', 'You')) + '</span>'
       );
@@ -4286,7 +4391,7 @@
       if (name.length < 4) continue;
       if (typed !== name && typedTokens.indexOf(name) >= 0) {
         hintEl.innerHTML = _mtHtml('memory.console.similar_predicate', 'Similar to {name}? Click to reuse.', {
-          name: '<b translate="no" style="color:var(--accent);cursor:pointer;" data-adopt="' + _esc(name) + '">' + _esc(name) + '</b>',
+          name: '<b translate="no" style="color:var(--accent);cursor:pointer;" data-adopt="' + _attr(name) + '">' + _esc(name) + '</b>',
         });
         var adopt = hintEl.querySelector('[data-adopt]');
         if (adopt) adopt.addEventListener('click', function () {
@@ -4335,9 +4440,9 @@
       var lbl = _mtData(group === 'entity' ? 'memory.console.etype_' : 'memory.console.ptype_', value);
       var label = _esc(lbl.text);
       var cnt = (count != null && count > 0) ? ' <span style="opacity:0.7;font-family:var(--font-mono);">' + count + '</span>' : '';
-      return '<label' + lbl.attr + ' title="' + label + (count != null ? ': ' + count : '') + '" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.65rem;padding:2px 7px;border-radius:999px;border:1px solid ' + (active ? color : 'var(--border-subtle)') + ';background:' + (active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)') + ';' + (active ? 'color:var(--text-primary);' : 'color:var(--text-muted);') + '">' +
+      return '<label' + lbl.attr + ' title="' + _attr(lbl.text) + (count != null ? ': ' + count : '') + '" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.65rem;padding:2px 7px;border-radius:999px;border:1px solid ' + (active ? color : 'var(--border-subtle)') + ';background:' + (active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)') + ';' + (active ? 'color:var(--text-primary);' : 'color:var(--text-muted);') + '">' +
              '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (active ? color : 'transparent') + ';border:1px solid ' + color + ';flex-shrink:0;"></span>' +
-             '<input type="checkbox" id="' + id + '" ' + (active ? 'checked' : '') + ' style="display:none;">' + label + cnt + '</label>';
+             '<input type="checkbox" id="' + _attr(id) + '" ' + (active ? 'checked' : '') + ' style="display:none;">' + label + cnt + '</label>';
     }
     if (entBox) entBox.innerHTML = entTypes.map(function(t) {
       return makeToggle(t, 'entity', t, _V2G_TYPE_COLORS[t] || '#94a3b8', entCounts[t] || 0);
@@ -4371,7 +4476,7 @@
         return { group: 'predicate', key: k, label: _esc(_mt('memory.console.filter_pred', 'pred:{type}', { type: _mtData('memory.console.ptype_', k).text })) };
       }));
       var html = all.map(function(c, idx) {
-        return '<span data-fg="' + c.group + '" data-fk="' + c.key + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(59,130,246,0.15);color:#93c5fd;cursor:pointer;display:inline-flex;align-items:center;gap:3px;">' + c.label + ' ' + KazmaIcons.span('x') + '</span>';
+        return '<span data-fg="' + _attr(c.group) + '" data-fk="' + _attr(c.key) + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(59,130,246,0.15);color:#93c5fd;cursor:pointer;display:inline-flex;align-items:center;gap:3px;">' + c.label + ' ' + KazmaIcons.span('x') + '</span>';
       }).join('');
       if (all.length) html += '<span id="v2g-reset-filters" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.12);color:#f87171;cursor:pointer;margin-left:4px;">' + _esc(_mt('memory.console.reset_all', 'Reset all')) + '</span>';
       chips.innerHTML = html;

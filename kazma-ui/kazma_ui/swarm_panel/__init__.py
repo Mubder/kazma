@@ -77,10 +77,14 @@ class SwarmRouterBuilder:
         self.swarm_manager = swarm_manager
         self.config_store = config_store
 
-        self.router = APIRouter(tags=["swarm"])
-        self.tasks_router = APIRouter()
-        self.workers_router = APIRouter()
-        self.general_router = APIRouter()
+        # Every swarm route asks the one role table before it runs (Swarm
+        # audit SW-S07, swarm_panel/route_roles.py).
+        from .route_roles import RoleCheckedRoute
+
+        self.router = APIRouter(tags=["swarm"], route_class=RoleCheckedRoute)
+        self.tasks_router = APIRouter(route_class=RoleCheckedRoute)
+        self.workers_router = APIRouter(route_class=RoleCheckedRoute)
+        self.general_router = APIRouter(route_class=RoleCheckedRoute)
         self._sse_bus: Any = None
 
         # Mount swarm task SSE stream on the parent router (used by swarm.js).

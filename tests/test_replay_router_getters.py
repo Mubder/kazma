@@ -38,6 +38,9 @@ class _Graph:
         self.name = name
         self.writes: list[str] = []
 
+    async def aget_state(self, config: dict[str, Any]) -> None:
+        return None  # an empty thread: nothing to take back from memory
+
     async def aupdate_state(self, config: dict[str, Any], values: dict[str, Any], **_: Any) -> None:
         self.writes.append(config["configurable"]["thread_id"])
 

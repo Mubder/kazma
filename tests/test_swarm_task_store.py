@@ -160,20 +160,31 @@ class TestTaskPersistence:
         assert result_data["total_cost"] == 0.003
 
     def test_persist_updates_on_duplicate(self, store: TaskStore, sample_task: SwarmTask) -> None:
-        """Persisting the same task id twice updates the existing row."""
-        store.persist_task(sample_task)
+        """Persisting the same task id again updates the existing row -- while
+        it is not finished. A finished row is never reopened or rewritten to
+        another ending (Swarm audit SW-E03); its own status at its own
+        generation may be written again (its metadata)."""
+        sample_task.status = TaskStatus.RUNNING
+        assert store.persist_task(sample_task) is True
         sample_task.status = TaskStatus.FAILED
         sample_task.result.status = "failed"
-        store.persist_task(sample_task)
+        assert store.persist_task(sample_task) is True
+
+        sample_task.status = TaskStatus.COMPLETED
+        assert store.persist_task(sample_task) is False, "a finished row is absorbing"
+        sample_task.status = TaskStatus.FAILED
+        sample_task.metadata["archived"] = True
+        assert store.persist_task(sample_task) is True, "its own state, written again"
 
         conn = sqlite3.connect(store._db_path)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT status FROM swarm_tasks WHERE id = ?", (sample_task.id,)
+            "SELECT status, metadata FROM swarm_tasks WHERE id = ?", (sample_task.id,)
         ).fetchone()
         conn.close()
 
         assert row["status"] == "failed"
+        assert '"archived": true' in row["metadata"]
 
     def test_get_task_by_id(self, store: TaskStore, sample_task: SwarmTask) -> None:
         """Retrieve a persisted task by its id."""

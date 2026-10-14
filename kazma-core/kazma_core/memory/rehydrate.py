@@ -10,7 +10,6 @@ still stored somewhere else:
   checkpoint history (:mod:`kazma_core.memory.chat_history`);
 * a note the agent saved (``memory_store``) -- in the ``noted`` belief the
   note left, and in the tool call itself, in checkpoint history;
-* a knowledge-library excerpt copied into memory -- in the library's chunk;
 * any of them -- in an earlier backup of this database, taken before the row
   was archived (the 6-hourly copies, snapshots saved beside them, universal
   backups).
@@ -78,7 +77,6 @@ STATE_KEY = "memory.v2.rehydrate"
 NOTE_CALL_MARK = b"\xa4name\xacmemory_store"
 
 _NOTE_SOURCE = "memory_store_tool"
-_KNOWLEDGE_SOURCE = "knowledge_library_promote"
 
 #: What each writer stores: ``dual_write.mirror_episode`` keeps 4,000
 #: characters of text and 2,000 of summary; ``swarm_bridge`` keeps 8,000.
@@ -87,9 +85,6 @@ _BRIDGE_CAPS = (8000, 8000)
 #: The ``noted`` belief a memory note leaves holds the note's first 1,000
 #: characters -- a shorter one is the whole note.
 _NOTED_CAP = 1000
-#: ``federated_search.promote_kb_hits_to_episodes``: the excerpt's text and summary.
-_KB_TEXT_CAP = 1500
-_KB_SUMMARY_CAP = 500
 
 #: Rows the old rule may have erased. ``dual_write`` (``e_`` ids) writes empty
 #: text as ``''``, so a NULL pair there is always the rule's work, in any tier
@@ -285,26 +280,6 @@ def _noted_index(conn: sqlite3.Connection) -> dict[str, list[str]]:
     return index
 
 
-def _knowledge_candidates(stub: str) -> list[_Candidate]:
-    """The library chunk a knowledge excerpt was copied from, in the forms the
-    copy could have taken (the title is the document title, else the URL)."""
-    from kazma_core.stores.knowledge import get_knowledge_store
-
-    out: list[_Candidate] = []
-    for chunk in get_knowledge_store().chunks_starting_with(stub, limit=5):
-        content = str(chunk.get("content") or "").strip()
-        titles = [chunk.get("document_title"), chunk.get("source_url"), "Knowledge"]
-        for title in dict.fromkeys(t for t in titles if t):
-            out.append(
-                _Candidate(
-                    user=f"[Knowledge: {title}] {content[:_KB_TEXT_CAP]}",
-                    summary=content[:_KB_SUMMARY_CAP],
-                    source="knowledge_library",
-                )
-            )
-    return out
-
-
 def _conversation_candidates(key: str) -> tuple[set[_Candidate], bool]:
     """Every turn and saved note of the conversation *key* names -- the chat
     store's copies and every checkpoint version of its threads -- and whether
@@ -349,7 +324,6 @@ _SOURCE_RANK = {
     "chat_store": 1,
     "checkpoint_note": 2,
     "noted_belief": 3,
-    "knowledge_library": 4,
     "stub": 9,
 }
 
@@ -458,6 +432,18 @@ def _from_backups(rows: list[Any]) -> dict[str, tuple[str | None, str | None]]:
     return found
 
 
+def _forgotten_by_the_user(conn: sqlite3.Connection, row: Any, question: str | None) -> bool:
+    """Whether the user forgot this memory's turn (the forget ledger, under
+    every key of its chat). A chat kept out of memory without forgetting its
+    past keeps what it had, so a whole-chat entry alone does not count."""
+    from kazma_core.memory.forget import chat_keys, forgotten_turns, question_sha
+
+    session = str(row["session_id"] or "")
+    keys = list(dict.fromkeys([session, *chat_keys(session)]))
+    _whole, turns = forgotten_turns(conn, tenant_id=str(row["tenant_id"] or "default"), keys=keys)
+    return (int(row["turn_number"] or 0), question_sha(question)) in turns
+
+
 def _restore(conn: sqlite3.Connection, row: Any, decision: dict[str, Any]) -> bool:
     meta = _meta(row)
     meta.pop("rehydrate", None)
@@ -552,7 +538,6 @@ def _rehydrate_erased(
     backups = _from_backups(rows)
     noted = _noted_index(conn)
     cands: dict[str, set[_Candidate]] = {}
-    unreadable: set[str] = set()
     for row in rows:
         eid, stub = str(row["id"]), str(row["summary_text"] or "")
         found = cands.setdefault(eid, set())
@@ -566,12 +551,9 @@ def _rehydrate_erased(
             else:
                 found.add(_Candidate(user=stub, source="stub"))
             found.update(_Candidate(user=t, source="noted_belief") for t in noted.get(stub, []))
-        if stub and _meta(row).get("source") == _KNOWLEDGE_SOURCE:
-            try:
-                found.update(_knowledge_candidates(stub))
-            except (sqlite3.Error, OSError):  # the library unreadable: retry next pass
-                logger.debug("[rehydrate] knowledge library unreadable", exc_info=True)
-                unreadable.add(eid)
+        # A Knowledge Library excerpt copied into memory is not refilled: the
+        # copy is retired (forget.retire_knowledge_promotions, Memory audit
+        # M04) and the library keeps the text.
 
     def settle(row: Any, *, final: bool) -> bool:
         """Apply what the candidates prove. True when the row got a verdict."""
@@ -596,6 +578,13 @@ def _rehydrate_erased(
         if decision["result"] in ("ambiguous", "nothing_lost"):
             _mark(conn, row, decision["result"], decision.get("sources"))
             report[decision["result"]] += 1
+            return True
+        if _forgotten_by_the_user(conn, row, decision["user"]):
+            # Recovery restores what an accident erased, never what the user
+            # took back: an erased copy of a forgotten turn under the chat's
+            # other key was refilled from the chat store (Memory audit M08).
+            _mark(conn, row, "forgotten")
+            report["forgotten"] = report.get("forgotten", 0) + 1
             return True
         if _restore(conn, row, decision):
             key = "restored" if decision["answer"] == "full" else "restored_question_only"
@@ -630,7 +619,7 @@ def _rehydrate_erased(
 
     def searched(row: Any) -> bool:
         eid = str(row["id"])
-        return eid in conv_read and eid not in unreadable
+        return eid in conv_read
 
     open_rows = [
         r for r in open_rows if not settle(r, final=searched(r) and not _is_note(r))
@@ -747,7 +736,9 @@ def run_rehydrate_pass(*, time_budget_s: float = 90.0) -> dict[str, Any]:
             note_scan_after=str(state.get("note_scan_after") or ""),
         )
         report["legacy_archive"] = legacy
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as exc:
+        if "no such" not in str(exc).lower():
+            raise  # locked or busy: the maintenance runner counts and reports it (Memory audit M20)
         logger.debug("[rehydrate] memory database not ready", exc_info=True)
         return {}
     finally:

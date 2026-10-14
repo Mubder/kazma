@@ -35,12 +35,13 @@ logger = logging.getLogger(__name__)
 def _can_auto_execute(tool_executor: Any) -> bool:
     """Check whether we're in a context where execute() is safe.
 
-    Safe when: HITL is off, the mutating tools are not approval-gated, or
-    the graph HITL gate ContextVar is set (we're inside tool_worker_node).
+    Safe when: HITL is off, or the mutating tools are not approval-gated.
     Otherwise escalate so the supervisor loop performs the writes with the
-    HITL card. YOLO is intentionally not checked here — it requires a
-    thread_id that supervisor_node does not carry; the loop handles YOLO
-    via tool_worker_node instead.
+    HITL card. The graph's authority is per call now (SW-S01: it covers the
+    one call the graph classified, never a write this handler adds), so it
+    is not a reason to write without a card. YOLO is intentionally not
+    checked here -- it requires a thread_id that supervisor_node does not
+    carry; the loop handles YOLO via tool_worker_node instead.
     """
     try:
         from kazma_core.safety.hitl import get_hitl_config
@@ -51,15 +52,6 @@ def _can_auto_execute(tool_executor: Any) -> bool:
         danger = cfg.get("require_approval_for") or []
         if "file_write" not in danger and "generate_pdf" not in danger:
             return True
-
-        # Check ContextVars (set by graph tool_worker_node)
-        try:
-            from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx, _hitl_approved_ctx
-
-            if _graph_hitl_gate_ctx.get(None) or _hitl_approved_ctx.get(None):
-                return True
-        except Exception:
-            pass
 
         return False
     except Exception:

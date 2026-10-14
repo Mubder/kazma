@@ -8,9 +8,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kazma_core.agent.dispatch_effects import DispatchEffects, track_effects
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
-from kazma_core.swarm.dispatch_helpers import pattern_dispatch_context, wait_timeout
+from kazma_core.swarm.dispatch_helpers import pattern_dispatch_context, step_timeout_result, wait_timeout
 from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerCapabilities, WorkerResult
 from kazma_core.swarm.worker import SwarmWorker
@@ -163,25 +164,21 @@ async def execute_consult(
             system_prompt=system_prompt,
         )
 
+        step_effects = DispatchEffects()
         try:
             async with concurrency:
-                worker_result = await asyncio.wait_for(
-                    dispatch_worker_by_name(worker_name, task.prompt, dispatch_context),
-                    timeout=wait_timeout(task.timeout),
-                )
+                with track_effects(step_effects):
+                    worker_result = await asyncio.wait_for(
+                        dispatch_worker_by_name(worker_name, task.prompt, dispatch_context),
+                        timeout=wait_timeout(task.timeout),
+                    )
         except TimeoutError:
             logger.warning(
                 "[Consultation] worker '%s' timed out after %.2fs",
                 worker_name,
                 task.timeout,
             )
-            worker_result = WorkerResult(
-                worker=worker_name,
-                task_id=task.id,
-                status="timeout",
-                output="",
-                error=f"Worker '{worker_name}' timed out after {task.timeout:g}s.",
-            )
+            worker_result = step_timeout_result(task, worker_name, step_effects)
         except Exception as exc:
             logger.exception(
                 "[Consultation] worker '%s' raised unexpectedly",

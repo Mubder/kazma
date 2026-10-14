@@ -65,18 +65,26 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         # 0.98 is about one place behind an active memory that matches as well.
         # (The 400-row dense_belief_candidate_cap is gone: every belief is scored.)
         "archived_recall_weight": 0.98,
+        # How long a recall waits for the question's embedding (seconds,
+        # 0.5-60): past it, keyword search only, marked degraded (Memory audit
+        # M16 -- a hanging embedder could hold a turn for minutes).
+        "recall_deadline_s": 5.0,
+        # The Postgres mirror: each 15-minute pass pushes what changed (the
+        # outbox); every this many hours (1-168) it compares every row too
+        # (Memory audit M31).
+        "mirror_verify_hours": 24,
         # Working-tier TTL (hours) — macro_sleep demotes stale working → episodic
         "working_ttl_hours": 24,
         # Tier-3 LLM entity disambiguation (opt-in; costs tokens)
         "entity_llm_disambiguate": False,
         # Merge Knowledge Library into chat path (inject labeled KB + memory)
         "merge_knowledge_into_chat": True,
-        # Mirror top KB hits into episodic memory after inject (soft merge)
-        "promote_kb_to_episodes": True,
-        # Source trust weights (belief_mutation: a lower-trust source may not
-        # supersede a higher-trust functional belief)
+        # Source trust weights (memory.provenance: a fact the user stated
+        # yields only to the user's own words; the weights rank recall)
         "trust_weight_user": 1.0,
+        "trust_weight_user_stated": 0.90,
         "trust_weight_tool": 0.85,
+        "trust_weight_agent": 0.65,
         "trust_weight_llm": 0.60,
         # The V_retention blend weights and decay λs lived here. No rule read
         # them, and the λs were per-second (a "general" memory's usage term
@@ -182,12 +190,15 @@ def _read_store_overlay() -> dict[str, Any]:
             "session_boost",
             "explain_recall",
             "archived_recall_weight",
+            "recall_deadline_s",
+            "mirror_verify_hours",
             "working_ttl_hours",
             "entity_llm_disambiguate",
             "merge_knowledge_into_chat",
-            "promote_kb_to_episodes",
             "trust_weight_user",
+            "trust_weight_user_stated",
             "trust_weight_tool",
+            "trust_weight_agent",
             "trust_weight_llm",
             "identity_min_importance",
             "ephemeral_max_importance",
@@ -277,18 +288,20 @@ _V2_BOOL_KEYS = (
     "explain_recall",
     "entity_llm_disambiguate",
     "merge_knowledge_into_chat",
-    "promote_kb_to_episodes",
 )
 # Floats (trust weights, thresholds)
 _V2_FLOAT_KEYS = (
     "trust_weight_user",
+    "trust_weight_user_stated",
     "trust_weight_tool",
+    "trust_weight_agent",
     "trust_weight_llm",
     "procedural_quarantine_threshold",
     "entity_vector_merge_threshold",
     "ppr_alpha",
     "session_boost",
     "archived_recall_weight",
+    "recall_deadline_s",
 )
 # Integers (TTLs, days, counts, iteration caps)
 _V2_INT_KEYS = (
@@ -307,6 +320,7 @@ _V2_INT_KEYS = (
     "ppr_hop_radius",
     "extraction_every_n_turns",
     "working_ttl_hours",
+    "mirror_verify_hours",
 )
 
 
@@ -410,6 +424,10 @@ def memory_auto_store_mode(cfg: dict[str, Any] | None = None) -> str:
     return mode
 
 
+#: The setting that chooses the isolation mode (validated in settings_validation).
+TENANT_MODE_KEY = "memory.tenant_mode"
+
+
 def memory_tenant_mode(cfg: dict[str, Any] | None = None) -> str:
     """Return the active tenant isolation mode.
 
@@ -422,6 +440,24 @@ def memory_tenant_mode(cfg: dict[str, Any] | None = None) -> str:
     if mode not in ("shared", "per_platform", "per_user"):
         return "shared"
     return mode
+
+
+def memory_tenant_enforced() -> bool:
+    """Whether memory is isolated by tenant: ``KAZMA_MEMORY_ENFORCE_TENANT``,
+    production, or multi-user (a failed probe counts as enforced). The one
+    answer for turns and memory surfaces (Memory audit M07)."""
+    import os
+
+    if str(os.environ.get("KAZMA_MEMORY_ENFORCE_TENANT", "")).strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    try:
+        from kazma_core.tenant_isolation import multi_user_or_production
+
+        return bool(multi_user_or_production())
+    except Exception:
+        # Audit F-05: a failed probe used to silently disable isolation.
+        logger.warning("[tenant] multi-user probe failed — enforcing isolation", exc_info=True)
+        return True
 
 
 def resolve_tenant_id(
@@ -446,6 +482,18 @@ def resolve_tenant_id(
         prefer_context: When True and mode is ``per_user``, honor
             ``get_current_tenant_id()`` if set by auth middleware (JWT/principal).
     """
+    if memory_tenant_enforced():
+        # Under enforcement a turn's memory belongs to its principal's tenant,
+        # in every mode: the Memory page, Forget, Export, "Don't remember" and
+        # About me act on that tenant (Memory audit M07 -- turns wrote under
+        # "default" and the page under the principal, so a user's own memory
+        # read as not found). A chat-app turn with no principal bound follows
+        # the mode below.
+        from kazma_core.tenant_context import get_current_tenant_id  # a ContextVar read: never raises
+
+        ctx = (get_current_tenant_id() or "").strip()
+        if ctx and ctx != "default":
+            return ctx
     mode = memory_tenant_mode()
     if mode == "shared":
         return "default"

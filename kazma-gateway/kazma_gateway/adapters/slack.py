@@ -967,23 +967,12 @@ class SlackAdapter(BaseAdapter):
                                                     exc,
                                                 )
                                     elif action.kind == "swarm":
-                                        try:
-                                            route_swarm_bus(value)
-                                            if response_url:
-                                                label = "✅ Approved" if "approve" in value else "❌ Rejected"
-                                                async with httpx.AsyncClient(verify=shared_ssl_context()) as client:
-                                                    await client.post(
-                                                        response_url,
-                                                        json={
-                                                            "text": f"Task approval: {label}",
-                                                            "replace_original": True,
-                                                        },
-                                                    )
-                                        except Exception as exc:
-                                            logger.warning(
-                                                "[Slack] Swarm approval callback failed: %s",
-                                                exc,
-                                            )
+                                        # Decide the shared request with the user who
+                                        # pressed; the request's owner edits the card
+                                        # to the one final outcome (Swarm audit SW-S05:
+                                        # this branch replaced the card with its own
+                                        # "Approved"/"Rejected" label).
+                                        route_swarm_bus(value, actor=f"slack:{_ia_user_id}")
                                     elif action.kind in (
                                         "hitl",
                                         "personality",

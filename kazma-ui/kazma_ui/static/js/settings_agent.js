@@ -168,11 +168,21 @@
                     method: 'PUT',
                     body: { about: this.aboutMe || '' },
                 });
+                if (r && r.code === 'about_too_long') {
+                    // Worded here, in the page's language (Memory audit M32).
+                    throw new Error(_k('settings.about_me_too_long', 'About me is longer than the limit ({n} / {max}).',
+                        { n: r.length, max: r.max }));
+                }
                 if (!r || !r.ok) throw new Error((r && r.error) || _k('settings.agentjs.save_failed_2', 'Save failed'));
                 this.aboutMe = this.aboutMeSaved = r.about || '';
                 showToast(this.t ? this.t('settings.about_me_saved') : 'Saved', 'success');
             } catch (e) {
-                this.aboutMeError = (e && e.message) || 'Save failed';
+                // A 422 carries the code in its body (Memory audits M32, M35).
+                const body = e && e.body;
+                this.aboutMeError = body && body.code === 'about_too_long'
+                    ? _k('settings.about_me_too_long', 'About me is longer than the limit ({n} / {max}).',
+                        { n: body.length, max: body.max })
+                    : ((e && e.message) || _k('settings.agentjs.save_failed_2', 'Save failed'));
             } finally {
                 this.aboutMeSaving = false;
             }
@@ -185,7 +195,6 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
                         merge_knowledge_into_chat: !!this.memoryMergeKb,
-                        promote_kb_to_episodes: !!this.memoryPromoteKb,
                         smart_search: !!this.memorySmartSearch,
                         explain_recall: !!this.memoryExplainRecall,
                     }),

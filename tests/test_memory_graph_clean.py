@@ -202,9 +202,14 @@ def _fake_vectors(monkeypatch):
 
 
 def _qudrax_ai(p):
+    """An entity written before name vectors were stored: the vector repair
+    pass stores its name's (Memory audit M18), as it does on every install."""
+    from kazma_core.memory.entity_resolution import repair_entity_name_vectors
+
     p.execute("INSERT INTO entities (id, tenant_id, type, name) "
               "VALUES ('qudrax_ai','default','concept','qudrax ai')")
     p.commit()
+    repair_entity_name_vectors(p)
 
 
 def _live_entities(p) -> set[str]:
@@ -217,8 +222,8 @@ def test_a_fact_about_a_merged_name_is_filed_under_the_kept_entity(dbs, monkeypa
     from kazma_core.memory.belief_extractor import _apply_beliefs_to_v2
 
     p, o = dbs
-    _qudrax_ai(p)
     _fake_vectors(monkeypatch)
+    _qudrax_ai(p)
     _apply_beliefs_to_v2([_raw("qudrax", "status", "fully_clean")], p, o)
     assert _subjects(p) == {"qudrax_ai"}
     assert _live_entities(p) == {"user", "qudrax_ai"}
@@ -245,8 +250,8 @@ def test_the_old_merge_broke_on_the_ledger_and_left_a_duplicate(dbs, monkeypatch
                                         tier="tier2_vector", status="auto_merged")
 
     p, o = dbs
-    _qudrax_ai(p)
     _fake_vectors(monkeypatch)
+    _qudrax_ai(p)
     monkeypatch.setattr(entity_resolution, "_auto_merge", old_auto_merge)
     _apply_beliefs_to_v2([_raw("qudrax", "status", "fully_clean")], p, o)
     assert _live_entities(p) == {"user", "qudrax_ai", "qudrax"}

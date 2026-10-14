@@ -545,6 +545,7 @@
       task: task,
       context: context,
       pattern: pattern,
+      background: true,  // answered at once; progress and result on the stream (SW-S08)
       timeout: parseFloat(($('adv-timeout') || {}).value) || 300,
       aggregation: ($('adv-aggregation') || {}).value || 'collect',
       max_retries: parseInt(($('adv-retries') || {}).value, 10) || 0,
@@ -600,8 +601,12 @@
           var dispatchedCount = (data.dispatched || []).length;
           showToast(window.kazmaCount('swarm.task_dispatched_to', dispatchedCount), true);
 
-          // Connect SSE for live updates using the real task id.
+          // Connect SSE for live updates using the real task id; a
+          // background dispatch's results arrive on it (SW-S08).
           if (data.task_id) {
+            data.task = data.task || task;
+            data.pattern = data.pattern || pattern;
+            data.renderOnComplete = !(data.results && data.results.length);
             upgradePendingTaskCard(pendingTaskId, data.task_id, data);
             connectSSE(data.task_id, data);
           }
@@ -617,7 +622,7 @@
         } else {
           // Dispatch failed: remove the optimistic card and notify the user.
           removeActiveTaskCard(pendingTaskId);
-          showError(data.message || t('swarm.dispatch_failed'));
+          showError(dispatchRefusalText(data, t('swarm.dispatch_failed')));
         }
         refreshStatus();
       })
@@ -722,12 +727,23 @@
     this.isClosedManually = false;
     this.onerror = null;
     this.onopen = null;
+    // The last event id seen: a reconnect asks only for what came after it,
+    // and an event at or below it is a repeat (Swarm audit SW-S09).
+    this.lastEventId = null;
+
+    function fresh(e) {
+      var id = e && e.lastEventId ? Number(e.lastEventId) : NaN;
+      if (isNaN(id)) return true;
+      if (self.lastEventId !== null && id <= self.lastEventId) return false;
+      self.lastEventId = id;
+      return true;
+    }
 
     this.addEventListener = function(event, callback) {
       if (!self.listeners[event]) self.listeners[event] = [];
       self.listeners[event].push(callback);
       if (self.source) {
-        self.source.addEventListener(event, callback);
+        self.source.addEventListener(event, function(e) { if (fresh(e)) callback(e); });
       }
     };
 
@@ -740,14 +756,18 @@
 
     function connect() {
       if (self.isClosedManually) return;
-      self.source = new EventSource(self.url);
+      var url = self.url;
+      if (self.lastEventId !== null) {
+        url += (url.indexOf('?') === -1 ? '?' : '&') + 'last_event_id=' + encodeURIComponent(self.lastEventId);
+      }
+      self.source = new EventSource(url);
 
       // Re-bind all registered event listeners
       Object.keys(self.listeners).forEach(function(event) {
         self.listeners[event].forEach(function(callback) {
           self.source.addEventListener(event, function(e) {
             self.retryCount = 0; // reset on message/event
-            callback(e);
+            if (fresh(e)) callback(e);
           });
         });
       });
@@ -861,6 +881,14 @@
         delete activeTasks[taskId];
       }
 
+      // A background dispatch's results are rendered when it ends.
+      if (data.result && initialData && initialData.renderOnComplete) {
+        renderTaskResults({
+          results: data.result.worker_results || [],
+          synthesized_output: data.result.synthesized_output,
+          aggregated_output: data.result.aggregated_output,
+        }, initialData.task || '', initialData.pattern || 'dispatch');
+      }
       // Store result for dashboard
       if (data.result) {
         data.result._prompt = initialData.task || '';
@@ -917,26 +945,44 @@
   // HITL CHECKPOINT (VAL-HITL-002)
   // ══════════════════════════════════════════════════════
 
+  // An approve/reject answer (Swarm audit SW-S08): ok only when the server
+  // says so -- the page used to report any answer, a 403 included, as done.
+  function readDecision(r) {
+    return r.json().catch(function() { return {}; }).then(function(data) {
+      data = data || {};
+      data._ok = r.ok && data.status === 'ok';
+      return data;
+    });
+  }
+
+  function decisionErrorText(data) {
+    if (data.code === 'swarm_at_capacity') return t('swarm.at_capacity', {n: data.max_concurrent_tasks});
+    if (data.code === 'not_pending') return t('swarm.checkpoint_not_pending');
+    return data.message || t('common.error');
+  }
+
   function approveCheckpoint(taskId) {
     fetch('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/approve', { method: 'POST' })
-      .then(function(r) { return r.json(); })
+      .then(readDecision)
       .then(function(data) {
+        if (!data._ok) { showError(t('swarm.approve_failed', {msg: decisionErrorText(data)})); return; }
         showToast(t('swarm.checkpoint_approved'), true);
         var cpEl = $('checkpoint-' + taskId);
         if (cpEl) cpEl.style.display = 'none';
       })
-      .catch(function(err) { showError(t('swarm.approve_failed', {msg: err.message})); });
+      .catch(function(err) { showError(t('swarm.network_error_approving', {msg: err.message})); });
   }
 
   function rejectCheckpoint(taskId) {
     fetch('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/reject', { method: 'POST' })
-      .then(function(r) { return r.json(); })
+      .then(readDecision)
       .then(function(data) {
+        if (!data._ok) { showError(t('swarm.reject_failed', {msg: decisionErrorText(data)})); return; }
         showToast(t('swarm.checkpoint_rejected'), false);
         var cpEl = $('checkpoint-' + taskId);
         if (cpEl) cpEl.style.display = 'none';
       })
-      .catch(function(err) { showError(t('swarm.reject_failed', {msg: err.message})); });
+      .catch(function(err) { showError(t('swarm.network_error_rejecting', {msg: err.message})); });
   }
 
   function cancelTask(taskId) {
@@ -954,16 +1000,36 @@
       .catch(function(err) { showError(t('swarm.cancel_failed', {msg: err.message})); });
   }
 
-  function retryTask(taskId) {
-    fetch('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/retry', { method: 'POST' })
+  // A refusal the server names by code is worded here, in the page's
+  // language; any other answer shows the server's message.
+  function dispatchRefusalText(data, fallback) {
+    if (data && data.code === 'swarm_at_capacity') {
+      return t('swarm.at_capacity', {n: data.max_concurrent_tasks});
+    }
+    return (data && data.message) || fallback;
+  }
+
+  function retryTask(taskId, acknowledged) {
+    var url = '/api/swarm/tasks/' + encodeURIComponent(taskId) + '/retry' +
+      (acknowledged ? '?acknowledge_unknown=1' : '');
+    fetch(url, { method: 'POST' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
           showToast(t('swarm.task_retried', {id: data.new_task_id}), true);
           closeTaskDetail();
           loadActiveTasks();
+        } else if (data.code === 'retry_outcome_unknown' && !acknowledged) {
+          // The original may already have changed things: ask before a retry
+          // that could do it again (Swarm audit SW-E08).
+          window.kazmaConfirm({
+            title: t('swarm.retry_unknown_title'),
+            message: t('swarm.retry_unknown_body', {tools: (data.tools || []).join(', ')}),
+            confirmText: t('swarm.retry_task'),
+            danger: true,
+          }).then(function(ok) { if (ok) retryTask(taskId, true); });
         } else {
-          showError(data.message || t('swarm.retry_failed'));
+          showError(dispatchRefusalText(data, t('swarm.retry_failed')));
         }
       })
       .catch(function(err) { showError(t('swarm.retry_failed_msg', {msg: err.message})); });
@@ -2358,6 +2424,7 @@
     var fallbackChain = fallbackWorker ? [fallbackWorker] : [];
 
     var payload = {
+      background: true,  // answered at once; the stream carries the run (SW-S08)
       workers: workers,
       task: prompt,
       pattern: 'pipeline',
@@ -2422,7 +2489,7 @@
             resetPipelineRunBtn();
           }
         } else {
-          addPipelineTerminalLine('', esc(t('swarm.dispatch_failed_msg', {msg: (data.message || '')})));
+          addPipelineTerminalLine('', esc(t('swarm.dispatch_failed_msg', {msg: dispatchRefusalText(data, '')})));
           resetPipelineRunBtn();
         }
       })
@@ -2544,16 +2611,16 @@
     if (hitlGate) hitlGate.style.display = 'none';
 
     fetch('/api/swarm/tasks/' + encodeURIComponent(pipelineActiveTaskId) + '/approve', { method: 'POST' })
-      .then(function(r) { return r.json(); })
+      .then(readDecision)
       .then(function(data) {
-        if (data.status === 'ok') {
+        if (data._ok) {
           addPipelineTerminalLine('', esc(t('swarm.pipeline_checkpoint_approved')));
         } else {
-          addPipelineTerminalLine('', esc(t('swarm.approval_failed', {msg: (data.message || '')})));
+          addPipelineTerminalLine('', esc(t('swarm.approval_failed', {msg: decisionErrorText(data)})));
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('', esc(t('swarm.network_error_action', {action: 'approving', msg: err.message})));
+        addPipelineTerminalLine('', esc(t('swarm.network_error_approving', {msg: err.message})));
       });
   }
 
@@ -2563,17 +2630,17 @@
     if (hitlGate) hitlGate.style.display = 'none';
 
     fetch('/api/swarm/tasks/' + encodeURIComponent(pipelineActiveTaskId) + '/reject', { method: 'POST' })
-      .then(function(r) { return r.json(); })
+      .then(readDecision)
       .then(function(data) {
-        if (data.status === 'ok') {
+        if (data._ok) {
           addPipelineTerminalLine('', esc(t('swarm.pipeline_checkpoint_rejected')));
           cleanupPipelineSession();
         } else {
-          addPipelineTerminalLine('', esc(t('swarm.rejection_failed', {msg: (data.message || '')})));
+          addPipelineTerminalLine('', esc(t('swarm.rejection_failed', {msg: decisionErrorText(data)})));
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('', esc(t('swarm.network_error_action', {action: 'rejecting', msg: err.message})));
+        addPipelineTerminalLine('', esc(t('swarm.network_error_rejecting', {msg: err.message})));
       });
   }
 
@@ -2624,6 +2691,7 @@
     }
 
     var payload = {
+      background: true,  // answered at once; the stream carries the run (SW-S08)
       workers: workerList,
       task: task,
       pattern: pattern,
@@ -2691,7 +2759,7 @@
             resetPlaygroundBtn();
           }
         } else {
-          addTerminalLine('', esc(t('swarm.dispatch_failed_msg', {msg: (data.message || '')})));
+          addTerminalLine('', esc(t('swarm.dispatch_failed_msg', {msg: dispatchRefusalText(data, '')})));
           resetPlaygroundBtn();
         }
       })
@@ -2837,8 +2905,9 @@
     if (btnReject) btnReject.disabled = true;
     
     fetch('/api/swarm/tasks/' + encodeURIComponent(currentPlaygroundTaskId) + '/approve', { method: 'POST' })
-      .then(function(r) { return r.json(); })
+      .then(readDecision)
       .then(function(data) {
+        if (!data._ok) { showError(t('swarm.approve_failed', {msg: decisionErrorText(data)})); return; }
         showToast(t('swarm.playground_approved'), true);
         var hitlGate = $('play-hitl-gate');
         if (hitlGate) hitlGate.style.display = 'none';
@@ -2847,7 +2916,7 @@
         if (statusBadge) statusBadge.className = 'badge badge-warning';
       })
       .catch(function(err) {
-        showError(t('swarm.approve_failed', {msg: err.message}));
+        showError(t('swarm.network_error_approving', {msg: err.message}));
       })
       .finally(function() {
         if (btnApprove) btnApprove.disabled = false;
@@ -2863,8 +2932,9 @@
     if (btnReject) btnReject.disabled = true;
     
     fetch('/api/swarm/tasks/' + encodeURIComponent(currentPlaygroundTaskId) + '/reject', { method: 'POST' })
-      .then(function(r) { return r.json(); })
+      .then(readDecision)
       .then(function(data) {
+        if (!data._ok) { showError(t('swarm.reject_failed', {msg: decisionErrorText(data)})); return; }
         showToast(t('swarm.playground_rejected'), true);
         var hitlGate = $('play-hitl-gate');
         if (hitlGate) hitlGate.style.display = 'none';
@@ -2874,7 +2944,7 @@
         if (statusBadge) statusBadge.className = 'badge badge-danger';
       })
       .catch(function(err) {
-        showError(t('swarm.reject_failed', {msg: err.message}));
+        showError(t('swarm.network_error_rejecting', {msg: err.message}));
       })
       .finally(function() {
         if (btnApprove) btnApprove.disabled = false;

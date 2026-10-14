@@ -56,7 +56,29 @@ class TestBothGatesHonourTheSameGrants:
             return names
 
         agent_path = called_names(inspect.getsource(hitl.requires_approval))
-        swarm_path = called_names(inspect.getsource(safety.SafetyMiddleware.check))
+        # `check` and every SafetyMiddleware method it reaches: the standing
+        # grants are read in `_allowed_without_asking`, run in a thread by
+        # `_precheck` (Swarm audit SW-S12 moved the settings reads off the
+        # loop), so `check`'s own body no longer names them.
+        swarm_path: set[str] = set()
+        todo, seen = ["check"], set()
+        while todo:
+            name = todo.pop()
+            if name in seen or not callable(getattr(safety.SafetyMiddleware, name, None)):
+                continue
+            seen.add(name)
+            import textwrap
+
+            source = textwrap.dedent(inspect.getsource(getattr(safety.SafetyMiddleware, name)))
+            calls = called_names(source)
+            # A method handed to a thread (`to_thread(self._precheck, ...)`)
+            # is reached too.
+            handed = {n.attr for n in ast.walk(ast.parse(source.lstrip()))
+                      if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+                      and n.value.id == "self"}
+            swarm_path |= calls
+            todo.extend(calls | handed)
+        assert "_allowed_without_asking" in seen, "the walk reaches the grant reader"
         # The swarm module wraps them so the hot path avoids a re-import.
         swarm_path |= {
             "has_tool_grant" if "_grant_tool" in swarm_path else "",

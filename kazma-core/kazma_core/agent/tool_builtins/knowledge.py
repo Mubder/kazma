@@ -248,7 +248,9 @@ def register_knowledge_tools(registry: Any) -> None:
                 scope = f"library '{lib_id}'" if lib_id else "any library"
                 return f"No knowledge hits in {scope} for: {query!r}"
 
-            lines = [f"# Knowledge search — {len(hits)} hit(s)"]
+            from kazma_core.safety.prompt_fence import fence_untrusted
+
+            lines = []
             for i, h in enumerate(hits, start=1):
                 cite = f"{h.source_url}"
                 if h.section_header:
@@ -269,12 +271,15 @@ def register_knowledge_tools(registry: Any) -> None:
                     "📚 This data is from Knowledge libraries: "
                     + ", ".join(f'"{l}"' for l in cited_libs) + "."
                 )
-            lines.append(
-                "\n---\n"
-                + lib_footer + "\n"
+            # The crawled text is data, never instructions: fenced like a
+            # fetched page (Knowledge KB-S01, fixed with Memory M11). The
+            # citation directive is ours and stays outside the fence.
+            return "\n".join([
+                f"# Knowledge search — {len(hits)} hit(s)",
+                fence_untrusted("\n".join(lines).strip(), source="knowledge_search"),
+                "\n---\n" + lib_footer + "\n"
                 "You MUST include this footer verbatim at the end of any answer "
-                "that uses the material above."
-            )
-            return "\n".join(lines)
+                "that uses the material above.",
+            ])
         except Exception as exc:
             return f"Error: knowledge search failed — {exc}"

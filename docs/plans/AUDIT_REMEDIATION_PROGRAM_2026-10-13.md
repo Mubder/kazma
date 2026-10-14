@@ -358,3 +358,16 @@ decision that removes a feature the owner may want (D6, D8) is asked first.
 - 2026-10-13: Program planned from the five merged audits and the Documents
   tracker. Q05 (Documents docs review) running. Nothing committed yet (W0.1
   waits for the owner).
+- 2026-10-14: S3 Memory M01-M36 implemented in the working tree (M21, M24
+  partial; Stage 4 soak and Postgres restore drill open; owner items in the
+  Memory tracker). Not committed.
+- 2026-10-14: S1 Swarm Stages 1-5 implemented in the working tree, with
+  SCH-S01 (one fix with SW-S01). Swarm witnesses: 35 of 39 red on
+  2026-10-14. Green: the SW-E10 and SW-E13 witnesses (owner decisions D8,
+  D6), and SW-S07 and SW-S13, whose audit witnesses bypass the enforcement
+  point (a bare APIRouter; a replaced `_post_message`); their regressions
+  test the mounted router and the HTTP client below the chokepoint. 116
+  postgres-marked swarm tests green on a disposable container. Open for the
+  owner: D6 (SW-E13 handoff), D8 (SW-E10 semantic routing, SW-E15 Refiner),
+  D9 (SQ03 Temporal download), D3 (SQ01 soak); still open: SW-S03's dashboard
+  link, SQ04. Not committed.

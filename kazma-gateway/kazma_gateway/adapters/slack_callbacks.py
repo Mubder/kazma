@@ -22,22 +22,13 @@ def iter_block_actions(payload: dict[str, Any]) -> list[tuple[str, CallbackActio
     return out
 
 
-def route_swarm_bus(value: str) -> str | None:
+def route_swarm_bus(value: str, *, actor: str = "") -> str | None:
+    """If *value* is a swarm approve/reject, decide that request and return
+    its id. The decision is the shared row's (``shared_approvals``): no
+    adapter instance is needed, and every platform's card shows the outcome."""
     action = parse_action_value(value)
     if action.kind != "swarm":
         return None
-    try:
-        from kazma_core.swarm.bus import FanOutBusAdapter, get_message_bus
-        from kazma_gateway.adapters.slack_bus import SlackBusAdapter
+    from kazma_core.swarm.shared_approvals import decide_from_button
 
-        adapter = get_message_bus().adapter
-        if isinstance(adapter, FanOutBusAdapter):
-            for child in adapter.adapters:
-                if isinstance(child, SlackBusAdapter):
-                    return child.handle_callback(action.swarm_data)
-            return None
-        if isinstance(adapter, SlackBusAdapter):
-            return adapter.handle_callback(action.swarm_data)
-    except Exception:
-        return None
-    return None
+    return decide_from_button(action.swarm_data, actor=actor, platform="slack")

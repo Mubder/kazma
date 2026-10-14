@@ -101,6 +101,9 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(sb, "get_state_backend", lambda: mirror)
     monkeypatch.setattr(sb, "is_state_primary", lambda cfg=None: False)
     monkeypatch.setattr(sb, "_this_install_id", lambda: THIS)
+    # These tests hold the full comparison; every pass here is one (the
+    # incremental passes between them: tests/test_memory_mirror_incremental.py).
+    monkeypatch.setattr(sb, "_full_verify_due", lambda now: True)
     sb._last_sync.clear()
     yield conn, mirror
     conn.close()
@@ -260,9 +263,24 @@ def test_no_mirror_no_pass(world, monkeypatch):
     conn, _ = world
     monkeypatch.setattr(sb, "get_state_backend", lambda: sb._NullStateBackend())
     assert sb.sync_state_mirror(conn) == {"skipped": "no mirror"}
-    monkeypatch.setattr(sb, "get_state_backend", lambda: _Mirror())
+
+
+def test_the_pass_runs_when_postgres_is_the_primary(world, monkeypatch):
+    """Memory audit M06: recall reads the shared store in primary mode, and
+    the pass that repairs it was skipped there -- a tombstone a blip kept from
+    Postgres was served for good. It runs now (the skip is the negative
+    control: its result was {"skipped": "postgres is the primary store"})."""
+    conn, mirror = world
     monkeypatch.setattr(sb, "is_state_primary", lambda cfg=None: True)
-    assert sb.sync_state_mirror(conn) == {"skipped": "postgres is the primary store"}
+    _episode(conn, "e1", "where I work")
+    mirror.episodes["e1"] = {"tier": "episodic", "user_text": "where I work: Acme", "assistant_text": "",
+                             "summary_text": "", "metadata_json": "{}"}
+    conn.execute("UPDATE episodes SET tier = 'forgotten', user_text = '', assistant_text = '', "
+                 "summary_text = '' WHERE id = 'e1'")
+    conn.commit()
+    out = sb.sync_state_mirror(conn)
+    assert "skipped" not in out
+    assert mirror.episodes["e1"]["tier"] == "forgotten" and mirror.episodes["e1"]["user_text"] == ""
 
 
 def test_the_sync_runs_on_the_maintenance_cadence():
@@ -438,6 +456,7 @@ def test_the_region_of_a_mirrored_row_is_read_from_postgres():
         cur.execute("DELETE FROM kazma_episodes WHERE id = ANY(%s)", (list(rows),))
         pg.commit()
         pg.close()
+        backend.close()
 
 
 @pytest.mark.postgres
@@ -474,13 +493,13 @@ def test_the_sync_digests_match_what_postgres_computes(tmp_path, monkeypatch):
                  (bid, time.time(), time.time()))
     conn.commit()
     try:
-        sb.sync_state_mirror(conn)
+        sb.sync_state_mirror(conn, full=True)
         remote = backend.episode_digest()
         for eid in ids:
             row = conn.execute("SELECT tier, user_text, assistant_text, summary_text FROM episodes WHERE id = ?",
                                (eid,)).fetchone()
             assert remote[eid] == sb._episode_digest(*row)
-        again = sb.sync_state_mirror(conn)
+        again = sb.sync_state_mirror(conn, full=True)
         assert again["episodes_pushed"] == 0 and again["beliefs_pushed"] == 0
     finally:
         pg = backend._connect()
@@ -492,3 +511,4 @@ def test_the_sync_digests_match_what_postgres_computes(tmp_path, monkeypatch):
         finally:
             pg.close()
         conn.close()
+        backend.close()

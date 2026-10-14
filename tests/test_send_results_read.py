@@ -99,7 +99,9 @@ def _product_files() -> list[str]:
         ["git", "ls-files", "kazma-*/*.py", "kazma-*/**/*.py"],
         cwd=ROOT, capture_output=True, text=True, check=True,
     ).stdout.split()
-    return sorted({p for p in out if "/tests/" not in p and "_tests/" not in p})
+    # A file deleted in the working tree is still listed until it is staged.
+    return sorted({p for p in out if "/tests/" not in p and "_tests/" not in p
+                   and (ROOT / p).exists()})
 
 
 def test_every_send_answer_is_read() -> None:

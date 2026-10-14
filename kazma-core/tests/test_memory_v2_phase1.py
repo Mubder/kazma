@@ -176,34 +176,35 @@ def test_memory_v2_gated_by_master_switch():
 # ── 3. Dual-write tests ────────────────────────────────────────────────────
 
 
-def test_dual_write_mirror_belief_functional(isolated_data):
+def test_facts_are_written_by_mutate_belief_with_their_type(isolated_data):
+    """Facts have one writer, ``mutate_belief`` (Memory audit M26 removed
+    ``DualWriteMirror.mirror_belief``, which wrote past the trust gate, the
+    forget ledger and supersede): a functional fact supersedes, a set-valued
+    one accumulates."""
     from kazma_core.memory import dual_write
+    from kazma_core.memory.belief_mutation import mutate_belief
 
-    m = dual_write._get_mirror()
-    bid = m.mirror_belief(
-        "John Smith", "lives_in", "Paris",
-        importance=4, source_session="s1", source_turn=1,
-    )
-    assert bid is not None
-    row = m._primary.execute(
-        "SELECT predicate_type, object, structural_importance FROM beliefs WHERE id=?",
-        (bid,),
-    ).fetchone()
-    assert row["predicate_type"] == "functional"
-    assert row["object"] == "Paris"
-    assert row["structural_importance"] == 4
+    import sqlite3
 
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.paths import primary_memory_db
 
-def test_dual_write_mirror_belief_set_valued(isolated_data):
-    from kazma_core.memory import dual_write
-
-    m = dual_write._get_mirror()
-    bid = m.mirror_belief("user", "uses_tool", "git")
-    assert bid is not None
-    row = m._primary.execute(
-        "SELECT predicate_type FROM beliefs WHERE id=?", (bid,)
-    ).fetchone()
-    assert row["predicate_type"] == "set"
+    assert not hasattr(dual_write.DualWriteMirror, "mirror_belief")
+    conn = sqlite3.connect(primary_memory_db())
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    first = mutate_belief(conn, "john_smith", "lives_in", "Paris", predicate_type="functional",
+                          importance=4, tenant_id="default")
+    second = mutate_belief(conn, "john_smith", "lives_in", "Lyon", predicate_type="functional",
+                           tenant_id="default")
+    assert first["belief_id"] and first["superseded_id"] is None, first
+    assert second["superseded_id"] == first["belief_id"], second
+    mutate_belief(conn, "user", "uses_tool", "git", predicate_type="set", tenant_id="default")
+    mutate_belief(conn, "user", "uses_tool", "docker", predicate_type="set", tenant_id="default")
+    current = conn.execute("SELECT COUNT(*) FROM beliefs WHERE subject='user' AND predicate='uses_tool' "
+                           "AND valid_until IS NULL AND invalidated_at IS NULL").fetchone()[0]
+    assert current == 2
+    conn.close()
 
 
 def test_dual_write_mirror_episode(isolated_data):
@@ -250,12 +251,10 @@ def test_dual_write_best_effort_no_raise(isolated_data):
     m = dual_write._get_mirror()
     # Close the connection to force a failure path
     m.close()
-    # These should return None, not raise
-    bid = m.mirror_belief("x", "y", "z")
+    # This should return None, not raise
     eid = m.mirror_episode(session_id="s", turn_number=0)
-    # After close, _ensure reopens — so these may succeed or fail, but
+    # After close, _ensure reopens — so it may succeed or fail, but
     # the contract is: never raise. Either outcome is acceptable.
-    assert bid is None or isinstance(bid, str)
     assert eid is None or isinstance(eid, str)
 
 

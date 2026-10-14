@@ -94,6 +94,23 @@ def _lifecycle_events(value: Any) -> Any:
     return known
 
 
+def _tenant_mode(value: Any) -> Any:
+    # Under enforcement memory belongs to each principal's tenant whatever the
+    # mode; a per-platform or per-user mode there split one user's memory
+    # between the page and the turns (Memory audit M07). Refused, until one
+    # resolver serves both for those modes.
+    from kazma_core.memory.config import memory_tenant_enforced
+
+    mode = str(value or "").strip().lower()
+    if mode not in ("shared", "per_platform", "per_user"):
+        raise SettingRejected("Memory isolation is one of: shared, per_platform, per_user.")
+    if mode != "shared" and memory_tenant_enforced():
+        raise SettingRejected(
+            "With tenants enforced (production or several users), memory is already kept per "
+            "tenant: only 'shared' is available here.")
+    return mode
+
+
 @functools.cache
 def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     """key -> (normalize, category the key is stored under or None).
@@ -103,10 +120,12 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     package for every settings read."""
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.lifecycle_notifier import EVENTS_KEY
+    from kazma_core.memory.config import TENANT_MODE_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
     return {
         "cron.timezone": (_timezone, None),
+        TENANT_MODE_KEY: (_tenant_mode, "memory"),
         TASK_RETENTION_KEY: (_task_retention, "swarm"),
         RETENTION_KEY: (_checkpoint_retention, "system"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
@@ -133,6 +152,8 @@ def validate_setting(key: str, value: Any) -> tuple[Any, str | None]:
         if name in ("security", "security.execution") and isinstance(value, dict):
             return {child: validate_setting(name + "." + child, item)[0]
                     for child, item in value.items()}, "security"
+        if name == "memory" and isinstance(value, dict) and "tenant_mode" in value:
+            return {**value, "tenant_mode": _tenant_mode(value["tenant_mode"])}, "memory"
     except ValueError as exc:
         raise SettingRejected(str(exc)) from None
     rule = _rules().get(name)

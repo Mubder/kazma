@@ -63,6 +63,57 @@ def _safe_count(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> int:
         return 0
 
 
+def _lifecycle_signals(out: dict[str, Any], *, install_details: bool) -> None:
+    """Mark *out* degraded for what memory gave up on or cannot do:
+
+    * a dead letter -- kept until the operator retries or clears it, so one is
+      enough (Memory audit M12: the threshold was five, and purging them after
+      a week cleared it);
+    * a maintenance sweep failing three passes in a row (M20, ``sweeps``);
+    * the embedder's breaker open: meaning search is off and recall answers
+      from keywords, marked degraded (M16, ``embedder``).
+    """
+    from kazma_core.memory.embedder import embedder_health
+    from kazma_core.memory.worker_bootstrap import sweep_health
+
+    out["sweeps"] = sweep_health() if install_details else {}
+    out["embedder"] = embedder_health()
+    for failing, detail in (
+        (out["queue"]["failed"] >= 1, "dead_letters"),
+        (any(int(s.get("consecutive_failures") or 0) >= 3 for s in out["sweeps"].values()), "sweep_failing"),
+        (out["embedder"].get("state") == "open", "embedder_unavailable"),
+    ):
+        if failing:
+            out["status"] = "DEGRADED"
+            out["status_detail"] = detail
+
+
+def _queue_ages(ops_conn: Any) -> dict[str, Any]:
+    """How long the oldest pending task has waited and the oldest running one
+    has run, and each task type's last success (Memory audit M20: health
+    showed counts only, so a stuck queue read as a busy one)."""
+    import time as _time
+
+    now = _time.time()
+    out: dict[str, Any] = {"oldest_pending_s": None, "oldest_processing_s": None, "last_success": {}}
+    try:
+        row = ops_conn.execute(
+            "SELECT MIN(CASE WHEN status = 'pending' THEN created_at END), "
+            "MIN(CASE WHEN status = 'processing' THEN updated_at END) FROM memory_task_queue").fetchone()
+        if row and row[0] is not None:
+            out["oldest_pending_s"] = round(now - float(row[0]), 1)
+        if row and row[1] is not None:
+            out["oldest_processing_s"] = round(now - float(row[1]), 1)
+        out["last_success"] = {
+            str(t): float(at) for t, at in ops_conn.execute(
+                "SELECT task_type, MAX(updated_at) FROM memory_task_queue WHERE status = 'completed' "
+                "GROUP BY task_type")
+        }
+    except sqlite3.Error:
+        logger.warning("[v2_health] queue ages unreadable", exc_info=True)
+    return out
+
+
 #: The install's own state. Shown with ``install_details`` only: to the
 #: install's own tenant and to an admin, never to a principal of another
 #: tenant (engine errors and queue rows can carry any tenant's text).
@@ -75,6 +126,8 @@ _INSTALL_ONLY = (
     "findability",
     "vector_capability",
     "mirror",
+    "embedder",
+    "sweeps",
 )
 
 
@@ -288,6 +341,7 @@ def build_v2_health(
                 out["queue"][st] = _safe_count(
                     ops_conn, "SELECT COUNT(*) FROM memory_task_queue WHERE status=?", (st,)
                 )
+            out["queue"].update(_queue_ages(ops_conn))
             out["recent_audits"] = _safe_count(
                 ops_conn,
                 "SELECT COUNT(*) FROM memory_audit_log WHERE timestamp > ?",
@@ -300,8 +354,7 @@ def build_v2_health(
             # injection/post-turn disabled, not "legacy RRF active".
             out["status"] = "ACTIVE" if use_new_stack else "OFF"
         # Degraded if queue has many failed tasks or recent post-turn errors
-        if out["queue"]["failed"] >= 5:
-            out["status"] = "DEGRADED"
+        _lifecycle_signals(out, install_details=install_details)
         pt = out.get("post_turn") or {}
         if int(pt.get("mirror_fail") or 0) + int(pt.get("extract_fail") or 0) >= 3:
             out["status"] = "DEGRADED"

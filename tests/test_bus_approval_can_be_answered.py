@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import re
 from pathlib import Path
 
 import pytest
@@ -51,18 +50,24 @@ _MANAGER = _ROOT / "kazma-core" / "kazma_core" / "mcp" / "manager.py"
 
 
 class TestAnEmptyIdIsInstantRejection:
-    """The mechanism that made the card decorative, stated as a test."""
+    """The mechanism that made the card decorative, stated as a test.
+
+    Re-pointed by the Swarm audit's stage 1: a request is a row opened under
+    a minted id, and an empty id cannot be opened at all."""
 
     def test_wait_for_resolution_refuses_an_empty_id_immediately(self) -> None:
-        from kazma_core.swarm.shared_approvals import wait_for_resolution
+        import time as _time
 
-        async def go() -> bool:
-            # A 30s timeout it will not use: the empty id short-circuits.
-            return await asyncio.wait_for(
-                wait_for_resolution("", timeout=30.0), timeout=2.0
-            )
+        from kazma_core.swarm import shared_approvals
 
-        assert asyncio.run(go()) is False
+        with pytest.raises(ValueError):
+            shared_approvals.open_request("", tool="shell_exec", args="{}", deadline=_time.time() + 30)
+
+        async def go() -> dict:
+            # Never opened: answered at once, and never as a yes.
+            return await asyncio.wait_for(shared_approvals._wait_outcome(""), timeout=2.0)
+
+        assert asyncio.run(go())["status"] == "cancelled"
 
 
 class TestTheCardGetsARealId:
@@ -80,7 +85,11 @@ class TestTheCardGetsARealId:
 
             async def request_approval(self, **kwargs):
                 seen.update(kwargs)
+                # A human's Approve on the card: it decides the shared row.
+                await asyncio.to_thread(shared_approvals.resolve, kwargs["task_id"], True)
                 return True
+
+        from kazma_core.swarm import shared_approvals
 
         mw = safety_mod.SafetyMiddleware()
         mw.enabled = True
@@ -112,9 +121,11 @@ class TestTheCardGetsARealId:
 
             async def request_approval(self, **kwargs):
                 ids.append(str(kwargs.get("task_id") or ""))
+                await asyncio.to_thread(shared_approvals.resolve, kwargs["task_id"], True)
                 return True
 
         import kazma_core.swarm.bus as bus_mod
+        from kazma_core.swarm import shared_approvals
 
         monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
         mw = safety_mod.SafetyMiddleware()
@@ -131,12 +142,36 @@ class TestTheCardGetsARealId:
         assert len(ids) == 2 and all(ids), ids
         assert ids[0] != ids[1], "parallel calls collided on one approval key"
 
-    def test_an_explicit_task_id_is_still_used(self) -> None:
-        """Minting must not override a caller that knows the real id."""
+    def test_an_explicit_task_id_is_still_used(self, monkeypatch) -> None:
+        """Re-pointed (Swarm audit SW-S02): a caller's ``task_id`` is never the
+        approval id. It came from the tool's own arguments, so an id approved
+        once approved every later request carrying it. ``check`` mints one per
+        request; the caller's ``task_id`` is context for the log only."""
+        from kazma_core.swarm import safety as safety_mod
+        from kazma_core.swarm import shared_approvals
+
+        seen: list[str] = []
+
+        class _Bus:
+            class _Adapter:
+                pass
+
+            adapter = _Adapter()
+
+            async def request_approval(self, **kwargs):
+                seen.append(str(kwargs["task_id"]))
+                await asyncio.to_thread(shared_approvals.resolve, kwargs["task_id"], True)
+                return True
+
+        import kazma_core.swarm.bus as bus_mod
+
+        monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
+        mw = safety_mod.SafetyMiddleware()
+        assert asyncio.run(mw.check("shell_exec", "ls", task_id="known-task", force_danger=True))
+        assert asyncio.run(mw.check("shell_exec", "ls", task_id="known-task", force_danger=True))
+        assert "known-task" not in seen and len(set(seen)) == 2, seen
         src = _SAFETY.read_text(encoding="utf-8")
-        assert "approval_id = task_id" in src
-        assert "if not approval_id:" in src
-        assert "task_id=approval_id," in src
+        assert "approval_id = task_id" not in src
 
 
 class TestTheGraphIsNotOverruled:
@@ -163,7 +198,8 @@ class TestTheGraphIsNotOverruled:
     def test_it_turns_the_prompt_off_rather_than_approving(self) -> None:
         """A recorded approval skips the ASK. It must not invent a yes."""
         src = _MANAGER.read_text(encoding="utf-8")
-        assert "_hitl_already_approved = _hitl_approved_ctx.get()" in src
+        # The approval of THIS call, consumed by it (SW-S01), never a flag.
+        assert "_hitl_already_approved = claim_call_authority(_hitl_approved_ctx, tool_name)" in src
         assert "if not _hitl_already_approved and not _server_trusted:" in src
         assert "force_hitl = False" not in src
         assert "approved = True" not in src.split("force_hitl = not mcp_safe_allowlisted", 1)[-1][:500]
@@ -171,33 +207,66 @@ class TestTheGraphIsNotOverruled:
     def test_both_gates_honour_an_actual_approval(self) -> None:
         """Local tools and MCP tools skip a second prompt on the same signal.
 
-        That signal is ``_hitl_approved_ctx``. The graph-authority flag stays
-        on the local registry, where the tool list is ours. It is not an
-        MCP approval.
+        That signal is ``_hitl_approved_ctx``, claimed by the one call it
+        names (Swarm audit SW-S01, 2026-10-14: as a flag it reached the work
+        that call started, and a swarm worker's danger tools ran with no
+        card). The graph's authority stays on the local registry, where the
+        tool list is ours, and is claimed per call too. It is not an MCP
+        approval. Behaviour: ``tests/test_swarm_detached_work_asks_the_bus.py``.
         """
         registry = (
             _ROOT / "kazma-core" / "kazma_core" / "agent" / "tool_registry.py"
         ).read_text(encoding="utf-8")
         manager = _MANAGER.read_text(encoding="utf-8")
-        assert "_hitl_approved_ctx" in registry
-        assert "_hitl_approved_ctx" in manager
-        assert "_graph_hitl_gate_ctx" in registry
+        assert "claim_call_authority(_hitl_approved_ctx, tool_name)" in registry
+        assert "claim_call_authority(_hitl_approved_ctx, tool_name)" in manager
+        assert "claim_call_authority(_graph_hitl_gate_ctx, tool_name)" in registry
         assert "_graph_hitl_gate_ctx" not in manager
 
 
 class TestTheCountdownIsHonest:
-    def test_the_adapter_prints_the_timeout_it_will_actually_wait(self) -> None:
+    def test_the_adapter_prints_the_timeout_it_will_actually_wait(self, monkeypatch) -> None:
         """The card said 300s while the answer came in 2.
 
-        The countdown text is fine; it was the id that made the wait a lie.
-        Pinned so a future change cannot print one number and use another.
+        Re-pointed by the Swarm audit (SW-S04): the request's row carries the
+        one deadline. The card prints the timeout ``check`` opened the row
+        with, and the bus passes it through unchanged, so a change cannot
+        print one number and enforce another.
         """
-        tg = (
-            _ROOT / "kazma-gateway" / "kazma_gateway" / "adapters" / "telegram_bus.py"
-        ).read_text(encoding="utf-8")
-        body = tg.split("async def request_approval", 1)[1]
-        assert "reject in {int(timeout)}s" in body
-        wait_call = re.search(
-            r"wait_for_resolution\(\s*approval\.task_id,\s*timeout=timeout", body
-        )
-        assert wait_call, "the wait must use the same timeout the card advertises"
+        from kazma_core.swarm import safety as safety_mod
+        from kazma_core.swarm import shared_approvals
+        from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
+
+        tg = TelegramBusAdapter("demo-telegram-token", 1)
+        seen: dict = {}
+
+        async def post(payload, method="sendMessage"):
+            seen["text"] = payload["text"]
+            row = await asyncio.to_thread(shared_approvals.get, _approval_id(payload))
+            seen["window"] = row["deadline_at"] - row["opened_at"]
+            await asyncio.to_thread(shared_approvals.settle, _approval_id(payload), "cancelled")
+            return {"ok": True, "result": {"message_id": 1}}
+
+        def _approval_id(payload) -> str:
+            from kazma_gateway.adapters.callback_store import decode_callback_data
+
+            data = decode_callback_data(payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"])
+            return data[len("swarm_approve_"):]
+
+        async def edit(*a, **k):
+            return {"ok": True}
+
+        monkeypatch.setattr(tg, "_post", post)
+        monkeypatch.setattr(tg, "_edit_message", edit)
+        import kazma_core.swarm.bus as bus_mod
+        from kazma_core.swarm.bus import SwarmMessageBus
+
+        bus = SwarmMessageBus(tg)
+        monkeypatch.setattr(bus_mod, "get_message_bus", lambda: bus)
+
+        class _Middleware(safety_mod.SafetyMiddleware):
+            approval_timeout = 37.0
+
+        assert asyncio.run(_Middleware().check("shell_exec", "ls", force_danger=True)) is False
+        assert "times out in 37s" in seen["text"]
+        assert abs(seen["window"] - 37.0) < 1.0, seen["window"]

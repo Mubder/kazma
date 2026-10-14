@@ -341,7 +341,6 @@ def test_a_history_row_reaches_the_mirror_but_never_the_graph(conn, monkeypatch)
                         lambda c, bid: mirrored.append(bid))
     monkeypatch.setattr("kazma_core.memory.graph_backend.upsert_belief_edge",
                         lambda **kw: graphed.append(kw["obj"]))
-    monkeypatch.setattr("kazma_core.memory.unified_index.upsert_unified", lambda **kw: None)
     mutate_belief(conn, "user", "lives_in", "London", now=T5, extraction_method="user_explicit")
     assert graphed == ["London"]
     result = mutate_belief(conn, "user", "lives_in", "Paris", now=T1, extraction_method="user_explicit")

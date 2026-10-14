@@ -149,3 +149,18 @@ Each ID keeps the audit's original identifier, so the witness for a row is the o
 ## Execution log
 
 - 2026-10-13: Tracker opened from the merged audit. No remediation has started.
+- 2026-10-13 (from the Memory tracker, shared defects fixed once): Memory M01
+  retired `unified_items` -- no writer, no reader, the table dropped -- so the
+  unified halves of KB-S02 and KB-E08/KB-S03 are gone, and a deleted library's
+  text is no longer served through it (gate in
+  `tests/test_memory_forget_witnesses.py`). Memory M04 removed the supervisor's
+  promotion of library hits into chat memory and its setting, and a maintenance
+  sweep retires the copies an earlier build left: the promotion half of
+  KB-E08/KB-S03 and the supervisor bullet of KB-S06 (`mirror_episode` is a
+  loop-stall helper; `tests/test_memory_kb_never_in_memory.py`). The rest of
+  those rows -- ranking, explain payload, provenance files, Documents record,
+  KB tools and `/kb` on the loop -- stays open here.
+- 2026-10-13 (Memory M11): `knowledge_search` returns the crawled hits
+  inside the untrusted-data fence, its citation directive outside, and the
+  per-function fence gate covers `tool_builtins/knowledge.py`
+  (`tests/test_memory_tools_fenced.py`): the tool half of KB-S01.
