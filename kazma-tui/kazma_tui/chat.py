@@ -50,8 +50,8 @@ class ChatPanel(Vertical):
         ("/context", "Season usage + server context window"),
         ("/personality [list|<name>]", "Show/switch live server personality"),
         ("/config [show|model|personality|memory|tools|export]", "Live server config"),
-        ("/replay [list|clear|<n>]", "Time travel: list or rewind this season"),
-        ("/fork <n>", "Branch this season from snapshot n (new thread)"),
+        ("/replay [list|clear|<step>]", "Time travel: list or restore this season"),
+        ("/fork <step>", "Branch this season from a saved step (new thread)"),
         ("/export", "Export session to file"),
         ("/swarm [status|list|<task>]", "Swarm dispatch and management"),
         ("/quit", "Exit Kazma TUI"),
@@ -1014,6 +1014,21 @@ class ChatPanel(Vertical):
         except Exception as e:
             self.write("error", f"Config command failed: {e}")
 
+    async def _replay_steps(self, thread_id: str) -> list[dict]:
+        """This season's saved steps from the live server, oldest first."""
+        data = await self._api("GET", f"/api/replay/snapshots/{thread_id}")
+        return list((data or {}).get("snapshots") or [])
+
+    async def _replay_step_id(self, thread_id: str, ref: str) -> str:
+        """The full id of the step *ref* names (its first characters are
+        enough); "" when none or more than one matches."""
+        ref = (ref or "").strip().lower()
+        if len(ref) < 6:
+            return ""
+        ids = [str(s.get("id") or "") for s in await self._replay_steps(thread_id)]
+        hits = [i for i in ids if i.startswith(ref)]
+        return hits[0] if len(hits) == 1 else ""
+
     async def _cmd_replay(self, text: str) -> None:
         parts = text.strip().split()
         sub = parts[1].lower() if len(parts) > 1 else ""
@@ -1021,10 +1036,10 @@ class ChatPanel(Vertical):
         if not sub:
             self.write("system",
                 "Replay Commands:\n"
-                "  /replay list          — snapshots from the live server\n"
-                "  /replay <iteration>   — rewind this season's graph\n"
-                "  /replay show <n>      — snapshot details (no rewind)\n"
-                "  /replay clear         — clear snapshots for this season")
+                "  /replay list          — this season's saved steps, with their ids\n"
+                "  /replay <step>        — restore this season to that step\n"
+                "  /replay show <step>   — a step's details (no restore)\n"
+                "  /replay clear         — delete this season's saved steps")
             return
 
         thread_id = self._replay_thread_id()
@@ -1034,25 +1049,21 @@ class ChatPanel(Vertical):
 
         try:
             if sub == "list":
-                data = await self._api("GET", f"/api/replay/snapshots/{thread_id}")
-                items = (data or {}).get("snapshots") or []
+                items = await self._replay_steps(thread_id)
                 if not items and thread_id != self._session_id and self._session_id:
-                    data = await self._api(
-                        "GET", f"/api/replay/snapshots/{self._session_id}"
-                    )
-                    items = (data or {}).get("snapshots") or []
+                    items = await self._replay_steps(self._session_id)
                     if items:
                         thread_id = self._session_id
                         self._thread_id = thread_id
                 if not items:
-                    self.write("system", "No snapshots available for this season.")
+                    self.write("system", "No steps of this season have been saved.")
                     return
-                lines = ["Available snapshots (live graph):", ""]
+                lines = ["Saved steps (live server), oldest first:", ""]
                 for rec in items:
+                    turn = rec.get("turn_index") or "?"
                     lines.append(
-                        f"  Iteration {rec.get('iteration')}  |  "
-                        f"{rec.get('timestamp') or '?'}  |  "
-                        f"model={rec.get('model') or '?'}  |  "
+                        f"  {str(rec.get('id') or '')[:8]}  |  turn {turn}, step {rec.get('step')}  |  "
+                        f"{rec.get('timestamp') or '?'}  |  model={rec.get('model_used') or '?'}  |  "
                         f"{count_noun(rec.get('message_count') or 0, 'message')}"
                     )
                 self.write("system", "\n".join(lines))
@@ -1061,28 +1072,27 @@ class ChatPanel(Vertical):
             if sub == "clear":
                 data = await self._api("DELETE", f"/api/replay/threads/{thread_id}")
                 count = (data or {}).get("cleared", 0)
-                self.write("system", f"Cleared {count} snapshot(s) for this season.")
+                self.write("system", f"Deleted {count_noun(count, 'saved step')} of this season.")
                 return
 
             show_only = sub == "show"
-            raw_iter = parts[2] if show_only and len(parts) > 2 else sub
-            try:
-                iteration = int(raw_iter)
-            except ValueError:
+            ref = parts[2] if show_only and len(parts) > 2 else parts[1]
+            snapshot_id = await self._replay_step_id(thread_id, ref)
+            if not snapshot_id:
                 self.write(
                     "system",
-                    "Unknown sub-command. Use: /replay list, /replay clear, "
-                    "/replay show <n>, or /replay <number>",
+                    f"No step '{ref}' in this season. /replay list shows each step's id.",
                 )
                 return
 
             if show_only:
                 data = await self._api(
-                    "GET", f"/api/replay/snapshots/{thread_id}/{iteration}"
+                    "GET", f"/api/replay/snapshots/{thread_id}/{snapshot_id}"
                 )
                 self.write(
                     "system",
-                    f"Snapshot {iteration}  |  model={data.get('model') or '?'}  |  "
+                    f"Step {snapshot_id[:8]}  |  turn {data.get('turn_index') or '?'}  |  "
+                    f"model={data.get('model') or '?'}  |  "
                     f"{count_noun(data.get('message_count') or 0, 'message')}",
                 )
                 return
@@ -1090,8 +1100,11 @@ class ChatPanel(Vertical):
             data = await self._api(
                 "POST",
                 "/api/replay/restore",
-                {"thread_id": thread_id, "iteration": iteration},
+                {"thread_id": thread_id, "snapshot_id": snapshot_id},
             )
+            if not (data or {}).get("ok"):
+                self.write("error", f"Restore refused: {(data or {}).get('detail') or (data or {}).get('error')}")
+                return
             n = int((data or {}).get("message_count") or 0)
             try:
                 loaded = await self._load_season_messages(
@@ -1102,8 +1115,9 @@ class ChatPanel(Vertical):
                 loaded = n
             self.write(
                 "system",
-                f"Rewound season to iteration {iteration} "
-                f"({count_noun(loaded, 'message')}). Next send continues from here.",
+                f"Restored season to step {snapshot_id[:8]} (turn {data.get('turn_index')}, "
+                f"{count_noun(loaded, 'message')}). The later turns were taken back; files written, "
+                "commands run and messages sent are not undone.",
             )
         except Exception as e:
             self.write("error", f"Replay command failed: {e}")
@@ -1113,28 +1127,27 @@ class ChatPanel(Vertical):
         if len(parts) < 2:
             self.write(
                 "system",
-                "Usage: /fork <iteration> — branch this season from a snapshot "
-                "into a new thread (original stays put).",
+                "Usage: /fork <step> — branch this season from a saved step "
+                "into a new thread (original stays put). /replay list shows each step's id.",
             )
-            return
-        try:
-            iteration = int(parts[1])
-        except ValueError:
-            self.write("system", "Usage: /fork <iteration>")
             return
         thread_id = self._replay_thread_id()
         if not thread_id:
             self.write("system", "No season yet — send a message or /session first.")
             return
         try:
+            snapshot_id = await self._replay_step_id(thread_id, parts[1])
+            if not snapshot_id:
+                self.write("system", f"No step '{parts[1]}' in this season. /replay list shows each step's id.")
+                return
             data = await self._api(
                 "POST",
                 "/api/replay/fork",
-                {"thread_id": thread_id, "iteration": iteration},
+                {"thread_id": thread_id, "snapshot_id": snapshot_id},
             )
             new_tid = str((data or {}).get("new_thread_id") or "")
             if not new_tid:
-                self.write("error", "Fork returned no new_thread_id.")
+                self.write("error", f"Fork refused: {(data or {}).get('detail') or (data or {}).get('error')}")
                 return
             self._session_id = new_tid
             self._thread_id = new_tid
@@ -1145,7 +1158,7 @@ class ChatPanel(Vertical):
                 n = int((data or {}).get("message_count") or 0)
             self.write(
                 "system",
-                f"Forked iteration {iteration} → #{new_tid[-8:]} ({count_noun(n, 'message')}). "
+                f"Forked step {snapshot_id[:8]} → #{new_tid[-8:]} ({count_noun(n, 'message')}). "
                 "This mouth is now on the new season.",
             )
         except Exception as e:

@@ -7100,7 +7100,7 @@
   async function deleteSession(sessionId) {
     var choice = await window.kazmaConfirm({
       title: ti('delete_chat_title', 'Delete chat'),
-      message: ti('delete_chat_body', 'Delete this chat? This cannot be undone. What Kazma learned from it stays in its memory unless you tick the box below.'),
+      message: ti('delete_chat_body', 'Delete this chat? This cannot be undone. Its saved Time Travel steps are deleted with it. What Kazma learned from it stays in its memory unless you tick the box below.'),
       confirmText: ti('delete_chat_confirm', 'Delete'),
       danger: true,
       checkbox: ti('delete_chat_forget', 'Also forget what Kazma learned from this chat'),
@@ -8648,6 +8648,18 @@
     },
 
     refreshCapacity: refreshCapacity,
+    /**
+     * Time Travel (TT-03): this chat was restored to a saved step, on this
+     * page or another surface. The transcript in the store was cut to that
+     * step; reload it so no tab keeps showing the rewound turns.
+     */
+    applyThreadRewound: function(data) {
+      if (!chatSessionId || !data) return;
+      var tid = String(data.thread_id || '');
+      if (tid !== currentThreadId() && String(data.session_id || '') !== chatSessionId) return;
+      _loadInFlightFor = null;
+      loadSession(chatSessionId);
+    },
     /**
      * Context-integrity S3-1: a compact "earlier context compacted" chip in
      * the transcript. The user should never have to ask why the agent

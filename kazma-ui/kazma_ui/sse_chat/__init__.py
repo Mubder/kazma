@@ -39,6 +39,8 @@ code to one another).
   snapshot           snapshot_id, iteration, model (Time Travel saved a step)
   user_message       content, turn_id, client_msg_id, session_id, ts
                      (another tab's turn; streams attached to the thread)
+  thread_rewound     thread_id, session_id, snapshot_id, turn_index,
+                     message_count (a Time Travel restore; tabs reload)
 """
 
 from __future__ import annotations
@@ -511,12 +513,17 @@ def create_sse_chat_router(
         if is_time_travel_command(raw_msg):
             import sqlite3
 
+            from kazma_core.time_travel import SnapshotStoreError
+            from kazma_ui.i18n import current_language
+            from kazma_ui.i18n import t as _t_tt
+
             _recorder = getattr(_get_agent(), "_snapshot_recorder", None)
+            _tt_lang = current_language()
             try:
-                _tt = await asyncio.to_thread(time_travel_reply, raw_msg, thread_id, _recorder)
-            except (sqlite3.Error, OSError, ValueError) as exc:
+                _tt = await asyncio.to_thread(time_travel_reply, raw_msg, thread_id, _recorder, _tt_lang)
+            except (SnapshotStoreError, sqlite3.Error, OSError, ValueError) as exc:
                 logger.warning("[SSE] time-travel command could not read snapshots: %s", exc)
-                _tt = "Could not read this chat's saved steps; the server log says why."
+                _tt = _t_tt("replay.chat_store_unreadable", _tt_lang)
             _persist_instant_turn(session, thread_id, raw_msg, _tt)
 
             async def _time_travel_gen() -> AsyncGenerator[str, None]:
@@ -549,7 +556,11 @@ def create_sse_chat_router(
             live_graph = _get_graph()
             if live_graph and hasattr(live_graph, "checkpointer") and live_graph.checkpointer:
                 try:
-                    await live_graph.checkpointer.adelete_thread(thread_id)
+                    # The thread's checkpoint-mutation lock (TT-04).
+                    from kazma_ui.thread_locks import thread_mutation
+
+                    async with thread_mutation(thread_id):
+                        await live_graph.checkpointer.adelete_thread(thread_id)
                 except Exception as exc:
                     logger.debug("[SSE] failed to delete thread checkpoints on /reset: %s", exc)
             
@@ -951,6 +962,13 @@ def create_sse_chat_router(
         except Exception:
             logger.debug("[SSE] HITL supersede cancel skipped", exc_info=True)
 
+        # The rewinds of this thread so far: a restore that lands after the
+        # checkpoint is read below must not be overwritten by this turn's
+        # older messages (TT-04). Compared under the thread's lock right
+        # before the graph starts.
+        from kazma_ui.thread_locks import rewind_generation
+
+        _rewind_gen = rewind_generation(thread_id)
         messages = await build_turn_messages(
             current_graph,
             graph_config,
@@ -1191,17 +1209,34 @@ def create_sse_chat_router(
                     },
                 )
                 _journal_head = get_turn_broker().head_seq(thread_id)
-                _drive = asyncio.create_task(
-                    _drive_graph_to_journal(
-                        current_graph,
-                        input_state,
-                        graph_config,
-                        thread_id=thread_id,
-                        session_id=session_id,
-                        reply_turn_id=_reply_turn,
-                    )
-                )
-                register_turn(thread_id, _drive)
+                # Start the graph under the thread's checkpoint-mutation lock
+                # (TT-04): a restore either finished before (and this turn,
+                # built from the older state, does not run) or sees this
+                # turn registered and refuses.
+                from kazma_ui.thread_locks import thread_mutation
+
+                async with thread_mutation(thread_id):
+                    _restored_meanwhile = rewind_generation(thread_id) != _rewind_gen
+                    if not _restored_meanwhile:
+                        _drive = asyncio.create_task(
+                            _drive_graph_to_journal(
+                                current_graph,
+                                input_state,
+                                graph_config,
+                                thread_id=thread_id,
+                                session_id=session_id,
+                                reply_turn_id=_reply_turn,
+                            )
+                        )
+                        register_turn(thread_id, _drive)
+                if _restored_meanwhile:
+                    from kazma_ui.i18n import current_language
+                    from kazma_ui.i18n import t as _t_rw
+
+                    logger.info("[SSE] thread=%s was restored while this turn was prepared; not run",
+                                thread_id[:12])
+                    yield _sse_frame("error", {"content": _t_rw("replay.turn_after_restore", current_language())})
+                    return
 
                 def _on_drive_done(t: asyncio.Task, tid: str = thread_id) -> None:
                     unregister_turn(tid, t)
@@ -1485,11 +1520,29 @@ def create_sse_chat_router(
             if thread_id:
                 try:
                     from kazma_ui import dashboard as _dash
+                    from kazma_ui.thread_locks import thread_mutation
+
                     cm = _dash._checkpoint_manager
                     if cm and hasattr(cm, "adelete_thread"):
-                        await cm.adelete_thread(thread_id)
+                        # The thread's checkpoint-mutation lock (TT-04).
+                        async with thread_mutation(thread_id):
+                            await cm.adelete_thread(thread_id)
                 except Exception as exc:
                     logger.debug("Checkpoint cleanup for %s failed: %s", thread_id, exc)
+            # Its Time Travel steps go with it, under each of its keys (TT-05):
+            # they are copies of the chat, like the checkpoints above. What
+            # Kazma learned is memory, kept unless the dialog's "also forget"
+            # was ticked (§15I; the page asks the memory route first).
+            import sqlite3
+
+            from kazma_core.time_travel import SnapshotStoreError, forget_thread_snapshots
+
+            try:
+                await asyncio.to_thread(
+                    forget_thread_snapshots, [k for k in (session_id, thread_id) if k]
+                )
+            except (SnapshotStoreError, sqlite3.Error, OSError):
+                logger.warning("[chat] %s deleted, but its saved steps were NOT", session_id, exc_info=True)
             return {"status": "ok"}
         except Exception as exc:
             logger.error("delete_session failed: %s", exc)
@@ -2243,20 +2296,24 @@ def create_sse_chat_router(
             "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
         }
         try:
-            snap = await graph_inst.aget_state(config)
-            values = (snap.values if snap and snap.values else {})
-            msgs = list(values.get("messages") or [])
-            before = list(msgs)
-            msgs.append({"role": "system", "content": abort_marker()})
-            await graph_inst.aupdate_state(config, {
-                "messages": msgs,
-                "task_status": "abandoned",
-                "auto_continue": False,
-            })
-            # A turn aborted before its answer leaves memory too (M09).
-            from kazma_core.memory.forget import rewind_memory
+            # The thread's checkpoint-mutation lock (TT-04), as every rewriter.
+            from kazma_ui.thread_locks import thread_mutation
 
-            await rewind_memory(thread_id, before, msgs, tenant_id=str(values.get("tenant_id") or "default"))
+            async with thread_mutation(thread_id):
+                snap = await graph_inst.aget_state(config)
+                values = (snap.values if snap and snap.values else {})
+                msgs = list(values.get("messages") or [])
+                before = list(msgs)
+                msgs.append({"role": "system", "content": abort_marker()})
+                await graph_inst.aupdate_state(config, {
+                    "messages": msgs,
+                    "task_status": "abandoned",
+                    "auto_continue": False,
+                })
+                # A turn aborted before its answer leaves memory too (M09).
+                from kazma_core.memory.forget import rewind_memory
+
+                await rewind_memory(thread_id, before, msgs, tenant_id=str(values.get("tenant_id") or "default"))
             try:
                 from kazma_ui.hitl_gate_bridge import abort_thread_hitl
 

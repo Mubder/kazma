@@ -301,10 +301,13 @@ async def test_watchdog_auto_deny_claims_gate(monkeypatch):
     payload = {"interrupt_id": "gwd1", "tool": "file_write", "kind": "security"}
     register_gate(GateRow(gate_id="gwd1", thread_id="t-wd-1", tool="file_write"))
 
+    # Re-pointed 2026-10-14 (Time Travel TT-02): the watchdog resumes the
+    # interrupt it read BY ITS ID (``pending_interrupt``: payload and
+    # LangGraph's id from one checkpoint read), so that is what is faked.
     async def _read_pending(graph, cfg):
-        return dict(payload)
+        return dict(payload), ""
 
-    monkeypatch.setattr(resume_mod, "read_pending_interrupt", _read_pending)
+    monkeypatch.setattr(resume_mod, "pending_interrupt", _read_pending)
     monkeypatch.setattr(
         resume_mod, "build_resume_command", lambda *a, **k: object()
     )

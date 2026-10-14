@@ -140,32 +140,22 @@ def _load_config() -> dict[str, Any]:
     return _apply_overrides(base, overrides)
 
 
-# Lazy-loaded time-travel components — may not be available if time_travel
-# module is absent. Cached so the import is attempted only once per process.
-_replay_recorder = None
-_replay_engine = None
-_replay_import_attempted = False
+# Time-travel components: the process's one recorder (kazma_core.time_travel.
+# process_recorder) and an engine over it. The resolver kept a recorder of
+# its own, whose clear left the agent's copy serving the cleared steps
+# (Time Travel audit TT-05); the database is the only source of truth now.
 
 
 def _get_replay_components():
-    """Try to import SnapshotRecorder + ReplayEngine from kazma_core.time_travel.
-
-    Returns ``(recorder, engine)`` instances if available, ``(None, None)``
-    otherwise. Caches the result so the import is attempted only once.
-    """
-    global _replay_recorder, _replay_engine, _replay_import_attempted
-    if _replay_import_attempted:
-        return _replay_recorder, _replay_engine
-    _replay_import_attempted = True
+    """``(recorder, engine)`` for the process, or ``(None, None)``."""
     try:
-        from kazma_core.time_travel import ReplayEngine, create_recorder
-        _replay_recorder = create_recorder()
-        _replay_engine = ReplayEngine(_replay_recorder)
+        from kazma_core.time_travel import ReplayEngine, process_recorder
+
+        recorder = process_recorder()
+        return recorder, ReplayEngine(recorder)
     except ImportError:
         logger.info("[slash] kazma_core.time_travel not available — /replay will show fallback")
-        _replay_recorder = None
-        _replay_engine = None
-    return _replay_recorder, _replay_engine
+        return None, None
 
 
 def is_slash_command(text: str) -> bool:
@@ -271,11 +261,11 @@ def _cmd_help() -> str:
         "• `/compact` — Manually trigger context window compaction\n"
         "• `/undo` — Remove the last reply from the conversation\n"
         "• `/edit <text>` — Replace the last reply with your corrected text\n"
-        "• `/replay list` — Show available snapshots\n"
-        "• `/replay <iteration>` — Restore from iteration (rewinds in-place)\n"
-        "• `/replay compare <a> <b>` — Compare two snapshots\n"
-        "• `/replay clear` — Clear snapshots for this thread\n"
-        "• `/fork <iteration>` — Fork from iteration into a new thread\n\n"
+        "• `/replay list` — This chat's saved steps, turn by turn, with their ids\n"
+        "• `/replay <step>` — Restore this chat to that step (later turns are taken back)\n"
+        "• `/replay compare <a> <b>` — Compare two steps\n"
+        "• `/replay clear` — Delete this chat's saved steps\n"
+        "• `/fork <step>` — Branch that step into a new chat\n\n"
         "🧭 *Running task*\n"
         "• `/steer <text>` — Add context to the running task (applies next step)\n"
         "• `/steer! <text>` — Pause the task, inject a requirement, then resume\n"
@@ -442,16 +432,18 @@ def _cmd_cost(ctx: dict[str, Any]) -> str:
 
 
 def _cmd_replay(text: str, ctx: dict[str, Any]) -> str | None:
-    """Handle /replay commands for time-travel debugging.
+    """Handle /replay commands for time travel.
 
     Sub-commands:
-        /replay list               — show available snapshots
-        /replay <iteration>        — restore from that iteration (graph handler)
-        /replay compare <a> <b>    — compare two snapshots
-        /replay clear              — clear snapshots for current thread
+        /replay list               — this chat's saved steps, turn by turn
+        /replay <step>             — restore to that step (graph handler)
+        /replay compare <a> <b>    — compare two steps
+        /replay clear              — delete this chat's saved steps
 
-    Returns None for ``/replay <iteration>`` so it falls through to the graph
-    handler (``_handle_replay``) which can call ``graph.aupdate_state``.
+    A step is named by its id as the list shows it (an iteration number is
+    no address: it restarts every turn, TT-01). Returns None for
+    ``/replay <step>`` so it falls through to the graph handler
+    (``_handle_replay``), which restores through ``kazma_ui.thread_rewind``.
     """
     recorder, engine = _get_replay_components()
     if recorder is None or engine is None:
@@ -459,78 +451,80 @@ def _cmd_replay(text: str, ctx: dict[str, Any]) -> str | None:
 
     parts = text.strip().split()
     # parts[0] is "/replay"
-    sub = parts[1] if len(parts) > 1 else ""
+    sub = parts[1].lower() if len(parts) > 1 else ""
 
     thread_id = ctx.get("thread_id", "default")
 
     if sub == "list" or sub == "":
         return _replay_list(recorder, thread_id)
     if sub == "compare":
-        return _replay_compare(engine, parts, thread_id)
+        return _replay_compare(recorder, engine, parts, thread_id)
     if sub == "clear":
-        return _replay_clear(recorder, thread_id)
-    # Numeric iteration → fall through to the graph handler for restore.
-    # Validate it's a number so we can give immediate feedback if not.
-    try:
-        int(sub)
-    except (ValueError, TypeError):
-        return f"⚠️ Unknown /replay sub-command: `{sub}`. Use `list`, `compare`, `clear`, or a number."
+        return _replay_clear(recorder, thread_id, ctx)
+    if len(parts) > 2:
+        return "⚠️ Usage: `/replay <step>` — one step id from `/replay list`."
     return None  # graph handler (_handle_replay) does the restore
 
 
 def _replay_list(recorder, thread_id: str) -> str:
-    """List available snapshots for a thread."""
+    """This chat's saved steps, each turn once, each step once inside it."""
+    from kazma_core.time_travel import SnapshotStoreError
+
     try:
         snapshots = recorder.list_snapshots(thread_id)
-    except Exception as exc:
+    except SnapshotStoreError as exc:
         logger.warning("[slash] /replay list failed: %s", exc)
-        return f"⚠️ Could not list snapshots: {exc}"
+        return "⚠️ The saved steps could not be read (the server log says why)."
 
     if not snapshots:
-        return "📭 No snapshots available for this thread."
+        return "📭 No steps of this chat have been saved."
 
-    lines = ["🕰️ *Available snapshots:*\n"]
-    for snap in snapshots:
-        it = snap.iteration
-        ts = snap.timestamp
-        model = snap.model_used or "—"
-        lines.append(f"• Iteration `{it}` — {ts} — {model}")
+    from kazma_ui.replay_routes import group_steps
+
+    lines = ["🕰️ *Saved steps* (restore with `/replay <id>`, branch with `/fork <id>`):\n"]
+    for turn in group_steps(snapshots):
+        label = f"turn {turn['turn_index']}" if turn["turn_index"] else "an earlier turn"
+        lines.append(f"*{label}*")
+        for step in turn["steps"]:
+            model = step.get("model_used") or "—"
+            when = str(step.get("timestamp") or "")[:16].replace("T", " ")
+            mark = " (too large to restore)" if step.get("truncated") else ""
+            lines.append(f"• `{str(step['id'])[:8]}` step {step['step']} — {when} — {model}{mark}")
     return "\n".join(lines)
 
 
-def _replay_compare(engine, parts: list, thread_id: str) -> str:
-    """Compare two snapshots via ReplayEngine.compare_replays()."""
+def _replay_compare(recorder, engine, parts: list, thread_id: str) -> str:
+    """Compare two steps via ReplayEngine.compare_replays()."""
+    from kazma_core.time_travel import SnapshotStoreError
+
     if len(parts) < 4:
-        return "⚠️ Usage: `/replay compare <a> <b>` — provide two iteration numbers."
-
+        return "⚠️ Usage: `/replay compare <a> <b>` — two step ids from `/replay list`."
     try:
-        iter_a = int(parts[2])
-        iter_b = int(parts[3])
-    except (ValueError, TypeError):
-        return "⚠️ Both iterations must be numbers (e.g. `/replay compare 1 3`)."
-
-    try:
-        state_a = engine.replay_from(thread_id, iter_a)
-        state_b = engine.replay_from(thread_id, iter_b)
+        a = recorder.resolve_ref(thread_id, parts[2])
+        b = recorder.resolve_ref(thread_id, parts[3])
+        if a is None or b is None:
+            return f"📭 No step `{parts[2] if a is None else parts[3]}` in this chat. `/replay list` shows each step's id."
+        state_a = engine.replay_from(thread_id, a)
+        state_b = engine.replay_from(thread_id, b)
         if state_a is None or state_b is None:
-            return f"📭 Could not load snapshots for iterations `{iter_a}`/`{iter_b}`."
+            return "📭 Those steps could not be loaded."
         diff = engine.compare_replays(state_a, state_b)
-    except Exception as exc:
-        logger.warning("[slash] /replay compare %s vs %s failed: %s", iter_a, iter_b, exc)
-        return f"⚠️ Could not compare iterations `{iter_a}` and `{iter_b}`: {exc}"
+    except SnapshotStoreError as exc:
+        logger.warning("[slash] /replay compare failed: %s", exc)
+        return "⚠️ The saved steps could not be read (the server log says why)."
 
-    return _format_compare_diff(iter_a, iter_b, diff)
+    return _format_compare_diff(a[:8], b[:8], diff)
 
 
-def _format_compare_diff(iter_a: int, iter_b: int, diff: dict[str, Any]) -> str:
+def _format_compare_diff(iter_a: str, iter_b: str, diff: dict[str, Any]) -> str:
     """Render a compare_replays() diff dict as a Markdown table."""
     def _arrow(delta: int | float) -> str:
         if delta > 0:
             return f"+{delta}"
         return str(delta)
 
-    lines = [f"🕰️ *Comparison: iteration {iter_a} vs {iter_b}:*\n"]
-    lines.append("| Metric | Iter {} | Iter {} | Delta |".format(iter_a, iter_b))
+    lines = [f"🕰️ *Comparison: step {iter_a} vs {iter_b}:*\n"]
+    lines.append("| Metric | Step {} | Step {} | Delta |".format(iter_a, iter_b))
     lines.append("|---|---|---|---|")
     lines.append("| Messages | {} | {} | {} |".format(
         diff["original_message_count"], diff["replayed_message_count"],
@@ -555,15 +549,23 @@ def _format_compare_diff(iter_a: int, iter_b: int, diff: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _replay_clear(recorder, thread_id: str) -> str:
-    """Clear all snapshots for a thread."""
-    try:
-        count = recorder.clear_snapshots(thread_id)
-    except Exception as exc:
-        logger.warning("[slash] /replay clear failed: %s", exc)
-        return f"⚠️ Could not clear snapshots: {exc}"
+def _replay_clear(recorder, thread_id: str, ctx: dict[str, Any] | None = None) -> str:
+    """Delete every saved step of this chat, under each of its keys (TT-05)."""
+    from kazma_core.english_count import count_noun
+    from kazma_core.time_travel import SnapshotStoreError, forget_thread_snapshots
+    from kazma_core.time_travel_audit import write_audit_row
 
-    return f"🗑️ Cleared {count} snapshot(s) for this thread."
+    try:
+        from kazma_ui.thread_rewind import chat_keys_for
+
+        count = forget_thread_snapshots(chat_keys_for(thread_id), recorder=recorder)
+    except SnapshotStoreError as exc:
+        logger.warning("[slash] /replay clear failed: %s", exc)
+        return f"⚠️ Could not delete the saved steps: {exc}"
+    platform = str((ctx or {}).get("platform") or "gateway")
+    write_audit_row("clear", "ok", actor=f"{platform}:{(ctx or {}).get('sender_id') or ''}",
+                    surface=platform, thread_id=thread_id, detail={"deleted": count})
+    return f"🗑️ Deleted {count_noun(count, 'saved step')} of this chat."
 
 
 # ── Config Wizard ──────────────────────────────────────────────────────

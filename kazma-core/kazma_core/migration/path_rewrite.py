@@ -2,8 +2,8 @@
 
 On export, Kazma captures the source machine's workspace root and data dir
 into ``pathmap.json``. On import, this module rewrites every embedded
-absolute path (in ``workspaces.root_path``, ``snapshots.state_json``,
-``chat_sessions.messages``, memory episodes, cron prompts, config) to the
+absolute path (in ``workspaces.root_path``, ``chat_sessions.messages``,
+memory episodes, cron prompts, config) to the
 target machine's equivalent — across OS path-separator conventions
 (``/home/user/kazma`` ↔ ``C:\\Users\\user\\kazma``).
 
@@ -15,11 +15,15 @@ This is the single place path-translation logic lives. Three design points:
    rewrite it and leave a broken hybrid.
 
 2. **Substitution is byte-level on the column text**, not a JSON parse.
-   The 304 MB ``snapshots.db`` ``state_json`` column holds full
-   SupervisorState blobs that may contain paths inside tool results, file
-   refs, environment blocks — anywhere. Parsing every JSON value to walk
-   for paths would be slow and fragile; a verified substring replacement
-   over known-absolute path prefixes is correct and fast.
+   JSON columns hold whole conversation and state blobs that may contain
+   paths inside tool results, file refs, environment blocks -- anywhere.
+   Parsing every JSON value to walk for paths would be slow and fragile; a
+   verified substring replacement over known-absolute path prefixes is
+   correct and fast. Inside JSON each backslash of a Windows path is
+   escaped (written twice): that form is rewritten too, in both
+   directions, and a JSON row whose rewrite would no longer parse is left
+   as it was and counted (Time Travel audit TT-09). ``snapshots.db`` is no
+   longer carried in a bundle (TT-05), so its rows are never rewritten.
 
 3. **Both separator forms are generated for each source root.** A Linux
    source path ``/home/user/kazma`` may appear in JSON as ``/home/user/kazma``
@@ -34,7 +38,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
-from typing import Iterator
+from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +167,48 @@ def rewrite_text(text: str, path_map: PathMap) -> tuple[str, int]:
             if bs_source in out:
                 out, count = _boundary_aware_replace(out, bs_source, bs_target)
                 total += count
+            # The JSON-escaped form: a Windows path inside a JSON column is
+            # stored with every backslash doubled (``C:\\Users\\...``), which
+            # neither form above matches -- a Windows-source migration left
+            # every snapshot's workspace_root, and the chat messages' paths,
+            # on the old machine (Time Travel audit TT-09).
+            js_source = bs_source.replace("\\", "\\\\")
+            if js_source in out:
+                out, count = _json_escaped_replace(out, js_source, target)
+                total += count
     return out, total
+
+
+def _json_escaped_replace(text: str, js_source: str, target: str) -> tuple[str, int]:
+    """Replace a JSON-escaped Windows path prefix *js_source* with *target*.
+
+    The rest of the path (``\\\\ws\\\\notes.md``) follows the target's
+    separators: a POSIX target turns it into ``/ws/notes.md``, a Windows
+    target keeps it escaped. Boundaries as :func:`_boundary_aware_replace`.
+    """
+    import re as _re
+
+    posix = target.startswith("/")
+    pattern = _re.compile(
+        r"(?<![A-Za-z0-9_.-])" + _re.escape(js_source)
+        + r"((?:\\\\[^\"\\\\/\s]+)*)(?![A-Za-z0-9_.-])"
+    )
+
+    def _sub(match: Any) -> str:
+        rest = match.group(1)
+        if posix:
+            return target + rest.replace("\\\\", "/")
+        return target.replace("\\", "\\\\") + rest
+
+    return pattern.subn(_sub, text)
+
+
+def _parses(text: str) -> bool:
+    try:
+        json.loads(text)
+        return True
+    except ValueError:
+        return False
 
 
 # ── SQLite column rewriting ──────────────────────────────────────────────
@@ -260,6 +305,7 @@ def _rewrite_one_column(
         return 0
 
     rows = cursor.fetchall()
+    broken = 0
     for row in rows:
         done += 1
         *pk_values, value = row
@@ -269,6 +315,11 @@ def _rewrite_one_column(
         if n == 0:
             if progress and done % progress_every == 0:
                 progress(done, total)
+            continue
+        # A JSON column must still be JSON after the rewrite (TT-09): a row
+        # the rewrite would break keeps its old paths, and is counted.
+        if value[:1] in "{[" and _parses(value) and not _parses(new_value):
+            broken += 1
             continue
 
         # Build the UPDATE keyed on the PK / rowid.
@@ -288,6 +339,11 @@ def _rewrite_one_column(
             progress(done, total)
     if progress:
         progress(done, total)
+    if broken:
+        logger.warning(
+            "[migrate] %s.%s: %d JSON row(s) kept their old paths: the rewrite would not "
+            "parse as JSON", table, col, broken,
+        )
     return changed
 
 

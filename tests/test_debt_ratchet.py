@@ -88,7 +88,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3448,
+    "blind_except": 3444,
     # ...whose body is only `pass` (or a docstring): the error vanishes
     "silent_except": 417,
 }
@@ -96,7 +96,7 @@ BASELINE = {
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
     # Turn workspace entry consumes the binding resolver through its module.
-    "module_local_public_symbols": 544,
+    "module_local_public_symbols": 543,
     "patched_value_imports": 72,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

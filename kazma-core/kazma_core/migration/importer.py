@@ -8,8 +8,8 @@ Entry point: :func:`import_bundle`. Orchestrates:
   3. **stage** everything to ``kazma-data/.migrate-staging-<ts>/`` (never
      touch live DBs mid-import).
   4. **path translation** (invariant B) — rewrite embedded source paths to
-     the target root across snapshots.state_json, workspaces.root_path,
-     chat_sessions.messages, memory episodes, cron prompts, config.yaml.
+     the target root across workspaces.root_path, chat_sessions.messages,
+     memory episodes, cron prompts, config.yaml.
   5. **backup** the existing live DBs to ``.migrate-backup-<ts>/`` (WAL-safe).
   6. **preflight** Postgres-bundle vs SQLite-target (abort before live writes).
      Then **pg_restore** (if dump present), then **swap** SQLite atomically.
@@ -48,8 +48,8 @@ _PATH_REWRITE_TARGETS: list[tuple[str, list[tuple[str, str]]]] = [
     # workspaces.db — the workspace root_path pointer (rewritten first; merged
     # into settings.db after the swap).
     ("workspaces.db", [("workspaces", "root_path")]),
-    # snapshots.db — full SupervisorState in state_json (the big one).
-    ("snapshots.db", [("snapshots", "state_json")]),
+    # snapshots.db is not carried (store_registry, Time Travel audit TT-05);
+    # an older bundle's copy is not restored.
     # chat history — tool results / file refs inside the messages JSON.
     ("chat_sessions.db", [("sessions", "messages")]),
     ("chat_sessions_spool.db", [("spool", "payload")]),
@@ -101,7 +101,6 @@ _PATH_REWRITE_TARGETS: list[tuple[str, list[tuple[str, str]]]] = [
 # is a store the importer restores. (Both used to be hand-kept, and both
 # lacked agent_artifacts.db, x_scheduled.db, hitl_gates.db and five more.)
 _BUNDLE_DB_TO_DEST_RESOLVER: dict[str, str | None] = {
-    "snapshots.db": "snapshots_db",
     "memory_state.db": "primary_memory_db",
     "memory_ops.db": "memory_ops_db",
     "swarm_tasks.db": "swarm_tasks_db",

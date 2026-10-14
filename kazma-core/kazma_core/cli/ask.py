@@ -655,6 +655,8 @@ async def _invoke_supervisor(
                 hitl_payload,
                 approved=bool(decision.get("approved")),
                 reason="cli" if decision.get("approved") else "denied",
+                # The interrupt this decision answers (TT-02).
+                interrupt_id=str(hitl_payload.get("interrupt_id") or ""),
             )
             if payload is None:
                 # Stale HITL card — nothing pending to resume.

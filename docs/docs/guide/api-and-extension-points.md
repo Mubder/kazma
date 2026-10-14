@@ -142,7 +142,7 @@ criterion. Restore remains available through
 
 `POST /api/chat/stream` answers with Server-Sent Events: an `event:` line naming the frame and one `data:` line holding a JSON object. Source: `kazma-ui/kazma_ui/sse_chat/` (the route and the turn streamer `_streaming.py`) and the turn journal `kazma-ui/kazma_ui/delivery.py`; the browser reads it with `dispatch` in `static/js/streaming.js`.
 
-**The turn's frames are journaled first.** Each one is written to the thread's journal before it is sent, so it also carries an `id:` line, and its data carries `seq` (the same number) and `turn_id`. A client that loses the stream sends the request again with `last_event_id` (or `last_seq`) in the body instead of a message: it gets a `resumed` frame, then every frame it missed, then the live turn. A frame replayed as history carries `replay: true`; a pending approval in it is shown only after the gate registry confirms it is still open. `error`, `capacity` and `user_message` frames, and any frame whose data says `capacity: true`, are never replayed. During a silence the stream sends `: keepalive` comment lines.
+**The turn's frames are journaled first.** Each one is written to the thread's journal before it is sent, so it also carries an `id:` line, and its data carries `seq` (the same number) and `turn_id`. A client that loses the stream sends the request again with `last_event_id` (or `last_seq`) in the body instead of a message: it gets a `resumed` frame, then every frame it missed, then the live turn. A frame replayed as history carries `replay: true`; a pending approval in it is shown only after the gate registry confirms it is still open. `error`, `capacity`, `user_message` and `thread_rewound` frames, and any frame whose data says `capacity: true`, are never replayed. During a silence the stream sends `: keepalive` comment lines.
 
 | `event:` | When | `data` fields |
 |---|---|---|
@@ -164,6 +164,7 @@ criterion. Restore remains available through
 | `turn_complete` | Right after `done`, with the same data. | as `done` |
 | `snapshot` | After `done`, when Time Travel saved this step. | `snapshot_id`, `iteration`, `model` |
 | `user_message` | Another tab started a turn on this thread. Only on streams already attached to the thread, never on the sender's own and never replayed; the chat page takes it from its WebSocket, which carries the same journal. | `content`, `turn_id`, `client_msg_id`, `session_id`, `ts` |
+| `thread_rewound` | The thread was restored to a Time Travel step (on any surface). Every open tab reloads the chat from the store; never replayed. | `thread_id`, `session_id`, `snapshot_id`, `turn_index`, `message_count` |
 
 **Replies without the model.** `/reset`, `/compact` and the bare `/swarm` usage answer with a `token` and a `done` carrying `content`, `tokens`, `cost` and `duration_ms`; they are not journaled. The `/research` usage, `/replay` and `/fork` send the same two frames with `capacity: true`, journaled so the thread's other tabs see them. An attached stream ends after `done` or `turn_complete` (unless `interrupted`), or after `error`.
 

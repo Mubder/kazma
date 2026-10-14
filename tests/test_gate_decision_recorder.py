@@ -182,13 +182,16 @@ async def test_the_watchdog_stamps_the_transcript_timeout(wired, monkeypatch):
 
     payload = {"interrupt_id": "gwd9", "tool": "python_exec", "kind": "security"}
 
+    # Re-pointed 2026-10-14 (Time Travel TT-02): the watchdog resumes the
+    # interrupt it read BY ITS ID (``pending_interrupt``: payload and
+    # LangGraph's id from one checkpoint read), so that is what is faked.
     async def _read_pending(graph, cfg):
-        return dict(payload)
+        return dict(payload), ""
 
     async def _no_drive(*a, **k):
         return None
 
-    monkeypatch.setattr(resume_mod, "read_pending_interrupt", _read_pending)
+    monkeypatch.setattr(resume_mod, "pending_interrupt", _read_pending)
     monkeypatch.setattr(resume_mod, "build_resume_command", lambda *a, **k: object())
     monkeypatch.setattr(hs, "is_resume_claimed", lambda t: False)
     monkeypatch.setattr(tr_mod, "ensure_session_for_thread", lambda t: "sess-wd")
@@ -214,13 +217,16 @@ async def test_the_watchdog_names_the_card_when_the_checkpoint_does_not(wired, m
     import kazma_ui.sse_chat._streaming as streaming
     import kazma_ui.turn_runtime as tr_mod
 
+    # Re-pointed 2026-10-14 (Time Travel TT-02): the watchdog resumes the
+    # interrupt it read BY ITS ID (``pending_interrupt``: payload and
+    # LangGraph's id from one checkpoint read), so that is what is faked.
     async def _read_pending(graph, cfg):
-        return {"tool": "python_exec", "kind": "security"}  # no interrupt_id
+        return {"tool": "python_exec", "kind": "security"}, ""  # no interrupt_id
 
     async def _no_drive(*a, **k):
         return None
 
-    monkeypatch.setattr(resume_mod, "read_pending_interrupt", _read_pending)
+    monkeypatch.setattr(resume_mod, "pending_interrupt", _read_pending)
     monkeypatch.setattr(resume_mod, "build_resume_command", lambda *a, **k: object())
     monkeypatch.setattr(hs, "is_resume_claimed", lambda t: False)
     monkeypatch.setattr(hs, "persisted_hitl_for_thread",

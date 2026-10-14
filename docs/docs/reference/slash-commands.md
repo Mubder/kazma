@@ -114,7 +114,7 @@ checkpoints) is deleted and the Web UI's copy of the season is emptied.
 **Side effects:**
 - What Kazma learned is not forgotten: memory keeps it (`/memory off` keeps
   a chat out of memory and forgets what it left).
-- Snapshot history is kept (`/replay clear` purges it).
+- The chat's saved Time Travel steps are kept (`/replay clear` deletes them).
 
 **Required permissions:** None.
 
@@ -207,49 +207,56 @@ Replaces the last assistant message in conversation history.
 
 ### `/replay`
 
-Time-travel debugging: list snapshots, restore from a specific iteration, compare two runs, or clear snapshot history. Snapshots are captured after every supervisor iteration automatically.
+Time travel: list this chat's saved steps, restore the chat to one, compare two, or delete them. A step is saved after each supervisor iteration (see [Time travel](../guide/time-travel-and-replay.md)). A step is named by its id: the first eight characters `/replay list` shows are enough. An iteration number is not an address, because it restarts every turn.
 
 Sub-commands:
 
 | Command | Description |
 |:---|:---|
-| `/replay list` | Show all snapshots for the current thread |
-| `/replay <N>` | **Restore** — rewind the live thread to iteration N (later turns are lost; use `/fork` to preserve them) |
-| `/replay compare <A> <B>` | Diff two snapshots (messages, cost, model, routing) |
-| `/replay clear` | Purge all snapshots for this thread |
+| `/replay list` | This chat's saved steps, turn by turn, with their ids |
+| `/replay <step>` | **Restore**: the later turns are taken back from the chat, from what Kazma remembered of them, and from its saved steps. Refused while a turn runs or an approval is waiting |
+| `/replay compare <a> <b>` | Diff two steps (messages, cost, model, routing) |
+| `/replay clear` | Delete this chat's saved steps |
 
 ### `/fork`
 
-Branch from a snapshot into a **new thread** — the original stays intact.
+Branch a saved step into a **new chat**; the original stays intact.
 
 | Command | Description |
 |:---|:---|
-| `/fork <N>` | Fork from iteration N into a new thread (seeded with the snapshot state + session context; appears in the Web UI sidebar) |
+| `/fork <step>` | Branch that step into a new chat, owned by you, with the questions and answers up to it (it appears in the Web UI sidebar) |
 
 **Usage:**
 ```
 /replay list
-/replay 3
-/replay compare 1 3
+/replay 3f2a91bc
+/replay compare 3f2a91bc 8c41d0e7
 /replay clear
+/fork 3f2a91bc
 ```
 
 **Response (`/replay list`):**
 ```
-🕰️ *Available snapshots:*
+🕰️ *Saved steps* (restore with `/replay <id>`, branch with `/fork <id>`):
 
-• Iteration `1` — 2026-06-26T14:30:00 — file_write: app.py
-• Iteration `2` — 2026-06-26T14:31:15 — git_commit
+*turn 1*
+• `3f2a91bc` step 1 — 2026-10-14 09:30 — deepseek-chat
+• `8c41d0e7` step 2 — 2026-10-14 09:31 — deepseek-chat
 ```
 
-**Response (no snapshots):**
+**Response (no steps):**
 ```
-📭 No snapshots available for this thread.
+📭 No steps of this chat have been saved.
 ```
 
 **Response (`/replay clear`):**
 ```
-🗑️ Cleared 5 snapshot(s) for this thread.
+🗑️ Deleted 5 saved steps of this chat.
+```
+
+**Response (a restore while an approval waits):**
+```
+⏸️ An approval is waiting in this chat (shell_exec). Approve or deny it first, then restore.
 ```
 
 **Dependency:** The `SnapshotRecorder` is wired into all graph-build sites by default (enabled via `time_travel.enabled: true` in `kazma.yaml`). If disabled:
@@ -555,11 +562,11 @@ Lists all available commands grouped by category.
 • `/compact` — Manually trigger context window compaction
 • `/undo` — Remove the last reply from the conversation
 • `/edit <text>` — Replace the last reply with your corrected text
-• `/replay list` — Show available snapshots
-• `/replay <iteration>` — Restore from iteration (rewinds in-place)
-• `/replay compare <a> <b>` — Compare two snapshots
-• `/replay clear` — Clear snapshots for this thread
-• `/fork <iteration>` — Fork from iteration into a new thread
+• `/replay list` — This chat's saved steps, turn by turn, with their ids
+• `/replay <step>` — Restore this chat to that step (later turns are taken back)
+• `/replay compare <a> <b>` — Compare two steps
+• `/replay clear` — Delete this chat's saved steps
+• `/fork <step>` — Branch that step into a new chat
 
 🧭 *Running task*
 • `/steer <text>` — Add context to the running task (applies next step)
@@ -862,7 +869,7 @@ A chat-app message that starts with `/` reaches the gateway's handler
 1. The commands that act on the chat's saved conversation or on a running
    turn: `/model`, `/hitl`, the session commands, `/reset`, `/compact`,
    `/long` / `/mission` / `/yolo` / `/unrestricted`, `/plan`, `/undo`,
-   `/edit`, `/replay <n>`, `/fork`, `/steer`, `/abort`.
+   `/edit`, `/replay <step>`, `/fork`, `/steer`, `/abort`.
 2. The resolver. `_build_slash_ctx()` (`agent_handler/commands.py`) reads
    what the command reports from where it lives, and `resolve_slash_command()`
    (`kazma_gateway/slash_commands.py`) answers `/help`, `/status`, `/memory`,

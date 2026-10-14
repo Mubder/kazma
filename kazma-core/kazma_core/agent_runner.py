@@ -1119,7 +1119,7 @@ class KazmaAgent:
             if self._snapshot_recorder is None:
                 try:
                     from kazma_core.time_travel import create_recorder
-                    self._snapshot_recorder = create_recorder(config=self.config.raw)
+                    self._snapshot_recorder = await asyncio.to_thread(create_recorder, config=self.config.raw)
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Snapshot recorder unavailable: %s", exc)
 

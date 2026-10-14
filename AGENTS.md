@@ -677,41 +677,77 @@ them into every future system prompt. Two invariants must hold:
 
 ### 12. Time Travel Replay (`kazma-core/kazma_core/time_travel.py`)
 
-The time-travel subsystem captures a snapshot of the full `SupervisorState`
-after every supervisor iteration and persists it to
-`kazma-data/snapshots.db` (SQLite WAL, LRU-capped per-thread at 50).
+The time-travel subsystem saves the `SupervisorState` after supervisor
+iterations to `<data dir>/snapshots.db` (SQLite WAL). Hardened to the
+2026-10-13 audit (TT-01..TT-12, tracker
+`docs/plans/TIME_TRAVEL_INDUSTRIAL_HARDENING_GOAL.md`). Every restore, fork
+and approve test runs on the real graph and saver of `tests/_tt_graph.py`
+(the product SQLite saver; Postgres when a throwaway database is set).
 
 **A. The recorder must be wired into ALL graph-build sites.**
 - `SnapshotRecorder` is created once per agent (`agent_runner.py` via
   `create_recorder(config=...)`) and passed to `build_supervisor_graph(...,
   snapshot_recorder=...)` at all 3 call sites: the run graph
   (`_ensure_graph`), the streaming graph (`_ensure_streaming_graph`), and
-  child graphs (`build_child_graph`). The app.py post-startup recompile also
-  passes it. If any site omits the recorder, that path stops capturing
-  snapshots silently.
+  child graphs (`build_child_graph`); also the app.py post-startup recompile
+  and `kazma_core/cli/ask.py`. If any site omits the recorder, that path stops
+  capturing snapshots silently. The server registers it as the process's
+  recorder (`set_process_recorder`); the chat apps, the slash resolver and the
+  forget fan-out use `process_recorder()` (they each built their own).
 
-**B. Capture hook lives in the supervisor node.**
-- `graph_builder.py:_supervisor` calls `snapshot_recorder.capture(merged)`
-  after each iteration and stamps `snapshot_id`/`snapshot_iteration` into
-  the result state. This is conditional on `snapshot_recorder is not None`.
-  The SSE path reads `snapshot_id` from the terminal graph state to emit a
-  `snapshot` SSE event (Part 6).
+**B. One source of truth, one identity (TT-01).** The database only: no
+in-memory copy (it keyed `(thread_id, iteration)`, disagreed with SQLite and
+kept serving cleared steps). A step is addressed by its snapshot id;
+`iteration` restarts every turn and is a step number inside a turn. Rows carry
+`turn_key` (the turn's `created_at`), `turn_index` (user messages held, the
+memory turn number), `seq` (capture order), `message_count`, `nbytes`,
+`truncated`; an older file is backfilled from its own JSON at open. Restore,
+fork, detail and compare take the id on every surface (the chat apps accept
+its first 8+ characters, `resolve_ref`); listings group turns then steps
+(`replay_routes.group_steps`). Retention evicts by capture order.
 
-**C. Restore vs Fork — in-place vs branch.**
-- `/replay <n>` (`_handle_replay` in `graph.py`): loads a snapshot via
-  `ReplayEngine.replay_from(thread_id, iteration)` and writes it back to the
-  SAME thread via `graph.aupdate_state(config, state)` — rewinding the live
-  conversation. Same pattern as `/undo`.
-- `/fork <n>` (`_handle_fork` in `graph.py`): loads the same snapshot but
-  writes it under a NEW `thread_id` (mints `gw-{platform}-{sender}-{uuid}`).
-  Also copies session context + creates a Web UI session. The original
-  thread is NOT modified. Do NOT overwrite `active_thread.{sender}` — the
-  user stays on the original; the fork appears in the Web UI sidebar.
+**C. Capture (TT-06, TT-11).** `graph_builder._supervisor` calls
+`time_travel.capture_after_supervisor` (one function: the test graph runs the
+same path): off the loop, never failing the turn, thinned in a long turn
+(`_capture_due`: every step to 20, every 10th after, always the last), and
+stamping `snapshot_id` only when the durable write succeeded (`capture`
+returns None on failure; `kazma_time_travel_capture_total{result}`). Budgets
+are enforced in SQLite on every save, oldest first: per step
+(`max_snapshot_bytes`, 2 MB: a larger state is stored cut with
+`_time_travel_truncated` and can be read, never restored or forked), per turn
+(`max_per_turn`, first and newest), per chat (`max_snapshots`,
+`max_thread_bytes`) and in total (`max_global_snapshots`, `max_total_bytes`).
+Read failures raise `SnapshotStoreError`: 503 `store_unavailable` on the
+routes, a plain sentence in the chats -- never "no steps saved".
+`maintain_snapshots` VACUUMs only when a quarter of the file and 8 MB are
+free; a prune that did not stick is an ops alert
+(`time_travel.prune_not_sticking`); the run has a firing-ledger signature.
 
-**D. The slash-command resolver returns `None` for `/replay <n>` and `/fork`.**
-- These fall through to the graph handler (like `/undo`/`/edit`) because they
-  need `graph.aupdate_state`. The resolver only handles read-only subcommands
-  (`list`, `compare`, `clear`) which don't need graph access.
+**D. Restore and fork are one service (`kazma_ui/thread_rewind.py`, TT-02,
+TT-04, TT-G1).** Every surface calls `rewind_thread` / `fork_thread`: the
+page's routes (the TUI uses them), the chat apps' `/replay <step>` and
+`/fork <step>` (`_handle_replay` / `_handle_fork` in gateway `graph.py`; the
+slash resolver answers `list`, `compare`, `clear` and returns None for a
+step). Under the thread's mutation lock a restore refuses 409 `turn_running`
+(a registered turn, or the lock held by another task) and 409
+`approval_pending` naming the cards (registry or live interrupt; decision
+D11: nothing is settled behind the human), writes a turn-boundary state
+(`turn_boundary_payload`: nothing pending, tool chains sanitized,
+`SCRATCHPAD_CLEAR` first, written `as_node="respond"` so `next == ()`), takes
+the later turns back from memory (`rewind_memory`, D2), from the transcript
+(`_transcript_cut`: the chat-store rows after the step) and from Time Travel
+(the steps saved after it), bumps the thread's rewind generation, journals
+`thread_rewound` (every tab reloads; never replayed) and writes an audit row
+(`kazma_core/time_travel_audit.py`, `time_travel_audit.db`, refusals too). A
+fork records a chat app's owner first, off the loop (`record_thread_owner`
+returns False and logs WARNING; a failure refuses the fork), writes the
+boundary state under the new id, and saves a projected chat row (questions
+and answers only) with a catalog title (`replay.fork_title`). Do NOT
+overwrite `active_thread.{sender}` on a fork. Gates in
+`tests/test_time_travel_rewind.py`: only `thread_rewind` calls
+`apply_snapshot_to_thread`; every product function that calls
+`aupdate_state`/`adelete_thread` holds `thread_locks.thread_mutation` or is
+declared.
 
 **D2. A rewind rewinds memory** (Memory audit M09, 2026-10-13, decided with
 TT-03: memory is rewound, not kept). `/undo`, `/edit`, a restore
@@ -727,20 +763,66 @@ rewrite through a real LangGraph graph, recall after; the rewrite alone as
 the negative control; every product function calling `.aupdate_state(`
 calls `rewind_memory` or is declared not a rewind).
 
-**E. The web chat answers `/replay` and `/fork` without the model**
-(`kazma_ui/sse_chat/_time_travel.py`, 2026-09-28): the chat's saved steps and
-a link, `/replay?thread=<id>`, that `replay.js` opens on that chat's
-timeline, where restore and fork are buttons beside what each step holds.
-Before, the text reached the model, which searched the source for what
-"replay" means. `tests/test_web_time_travel_command.py`.
+**E. One per-thread checkpoint-mutation lock (`kazma_ui/thread_locks.py`,
+TT-04).** Task-reentrant, per loop, bounded. Gateway turns and commands
+(`cmd_lock`), the approve route (`_approve_lock_for`), the web abort, `/reset`
+and chat delete, the dashboard delete, and the start of a web turn take it.
+A web turn reads the checkpoint before its stream starts; it starts the graph
+under the lock only if the thread's rewind generation is unchanged (else it
+answers `replay.turn_after_restore` and runs nothing).
 
-**F. `/api/replay/*` is mounted when the app is built** (2026-10-01), and
+**F. The approve route resumes only a live interrupt, keyed (TT-02,
+§30 B2).** `next` without an interrupt is a 409 (it was "still try resume"
+with a gate-less security command: the restored step's denied call ran); a
+card the registry knows as another gate is a 409
+(`hitl_gate_bridge.gate_names_interrupt`); there is no gate-less fallback.
+`build_resume_command(..., interrupt_id=)` keys every approval and deny
+resume by LangGraph's interrupt id (web route, gateway `/hitl`, timeout
+auto-deny, supersede, CLI): a resume whose interrupt is gone resumes nothing.
+Gate: `test_every_approval_resume_is_keyed_by_its_interrupt`.
+
+**G. Delete and Forget reach the steps (TT-05).** Chat delete
+(`sse_chat` delete route), forgetting a chat (`forget_chat`), a user's Forget
+of a memory (`forget_episode`, by "user": the chat's steps from that turn on,
+under every key) and `/replay clear` on every surface go through
+`forget_thread_snapshots` / `forget_turn_snapshots`; a rewind's own
+`forget_episode(by="rewind")` leaves the steps to the restore. Registered in
+`memory_stores.EXTERNAL_STORES`. `snapshots.db` is `machine` in
+`store_registry` (not carried in a bundle) and in `NOT_BACKED_UP` (the
+universal backup leaves it out): a copy elsewhere would bring back deleted or
+forgotten chats. `/reset` keeps the steps (documented).
+
+**H. The web chat answers `/replay` and `/fork` without the model**
+(`kazma_ui/sse_chat/_time_travel.py`, 2026-09-28), in the page's language:
+the saved steps (plural forms) and a link, `/replay?thread=<id>`, that
+`replay.js` opens on that chat's timeline; `/replay clear` deletes the steps.
+Before, the text reached the model. `tests/test_web_time_travel_command.py`.
+
+**I. `/api/replay/*` is mounted when the app is built** (2026-10-01), and
 reads the recorder and the graph per request (`create_replay_router(
 recorder_getter=, graph_getter=)`): 503 `time_travel_unavailable` until
-startup makes a recorder. It was mounted in `_on_startup` with the graph of
-that moment, so a model switch left restore and fork writing through the old
-graph, and no route-table gate saw it. A fork's chat is saved in a thread, and
-a failure to save it is a WARNING. `tests/test_replay_router_getters.py`.
+startup makes a recorder. A model switch rebuilds the graph, which a router
+given one at mount time never saw. `tests/test_replay_router_getters.py`.
+
+**J. Settings reads the live recorder (TT-08):** `max_snapshots`,
+`max_global_snapshots` and `limits` are public properties;
+`/api/settings/time_travel` reports them and the live retention, so "restart
+required" clears after a restart. **Migration (TT-09):** `path_rewrite`
+rewrites JSON-escaped Windows paths (`C:\\Users\\...`) both ways, converts the
+path's rest to the target's separators, and keeps a JSON row whose rewrite
+would not parse. Gates: `tests/test_time_travel_bounds.py`,
+`tests/test_time_travel_identity.py`.
+
+**K. Off the loop, and every surface driven (TT-Q1).** Building a recorder
+(`create_recorder` reads the settings store), the process recorder, the
+fan-out deletes, the owner record, the fork's chat row, the web chat's reply
+and the audit store are loop-stall helpers (`_LOOP_STALL_HELPERS`; Time Travel
+is a `_CROSS_MODULE_AREAS` area). The chat apps' real handler and the TUI's
+commands list, restore and fork on the fixture graph
+(`tests/test_time_travel_surfaces.py`); the page, reached by the sidebar, in
+English and Arabic, a restored chat, and a failed step list shown as an error
+are `tests/e2e/test_time_travel_page.py` (run explicitly: `fast_test` skips
+`tests/e2e`).
 
 ### 13. Proxy Provider Addon (`kazma-core/kazma_core/proxy/`)
 
@@ -2119,16 +2201,21 @@ copy-paste migration.
 
 **B. Embedded absolute paths are rewritten to the target root.** A Linux
 source (`/home/user/kazma`) has its workspace root baked into
-`workspaces.root_path`, `snapshots.state_json` (full SupervisorState blobs),
-`chat_sessions.messages`, memory entities/episodes, cron prompts. The
-importer rewrites them all to the target path across OS separator
-conventions (`migration/path_rewrite.py`). Two correctness properties: (1)
+`workspaces.root_path`, `chat_sessions.messages`, memory entities/episodes,
+cron prompts. The importer rewrites them all to the target path across OS
+separator conventions (`migration/path_rewrite.py`). Time-travel snapshots
+(`snapshots.db`) are no longer carried at all (2026-10-14, Time Travel audit
+TT-05: a copy elsewhere would bring back chats the owner deleted or forgot;
+§12, `store_registry`: `machine`). Three correctness properties: (1)
 `PathMap` is ordered **longest-source-first** so `/home/u/kazma` doesn't
 partially rewrite `/home/u/kazma-repos/ShipX`; (2) substitution is
-byte-level substring on the column text (NOT a JSON parse — the state_json
-blob is huge and paths appear anywhere), with both forward-slash and
-backslash variants handled. No false positives (e.g. `barcode` ≠ `code`).
-Workspace root rewrite also fires `notify_root_changed()` so MCP rebinds.
+byte-level substring on the column text (NOT a JSON parse -- paths appear
+anywhere), with forward-slash, backslash AND the JSON-escaped Windows form
+(`C:\\Users\\...`, every backslash doubled inside a JSON column; TT-09: a
+Windows-source migration left those paths on the old machine) handled. No
+false positives (e.g. `barcode` ≠ `code`); (3) a JSON column whose rewritten
+text would no longer parse keeps its original text (`_parses`). Workspace
+root rewrite also fires `notify_root_changed()` so MCP rebinds.
 
 **C. Import is atomic — never corrupt the target mid-flight.** The importer
 (`migration/importer.py:import_bundle`) stages to `kazma-data/.migrate-staging-<ts>/`,
@@ -4077,8 +4164,15 @@ verifies the body's `interrupt_id` against the registry BEFORE resuming
 (`_gate_not_pending`, `routes_direct/misc.py`). Only a `pending` row may
 be resumed; `claimed`/`resuming`/terminal answer 409 `not_pending` with
 the server's actual view, and a row owned by another thread answers 409
-`foreign`. A missing row or id can still reach the checkpoint liveness
-check for legacy dashboard/TUI/platform clients, but execution now requires
+`foreign`. The route resumes only a LIVE approval interrupt
+(`_live_hitl_interrupt`: a checkpoint with a next step and no interrupt is
+not paused, 409), keyed by that interrupt's id, and a gate the registry
+knows that is not the live interrupt answers 409 (`gate_names_interrupt`);
+the gate-less "security resume" fallback is gone on the web and the
+gateway (2026-10-14, Time Travel audit TT-02: after a restore wrote a
+mid-turn step, a still-live card resumed it and ran a call the human had
+denied). A missing row or id can still reach the live interrupt
+for legacy dashboard/TUI/platform clients, but execution now requires
 `record_gate_decision(..., require_durable=True)` (2026-10-05). It backfills
 the verified gate, strictly claims it once and records resuming before any
 projection or drive. Registry off/unreadable answers 503 and stays paused;

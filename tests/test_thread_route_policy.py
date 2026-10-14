@@ -52,7 +52,9 @@ POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
     ),
     # Replay: reads and rewrites conversation state.
     ("GET", "/api/replay/snapshots/{thread_id}", REPLAY): ("owner", ""),
-    ("GET", "/api/replay/snapshots/{thread_id}/{iteration}", REPLAY): ("owner", ""),
+    # A step is addressed by its snapshot id since 2026-10-14 (Time Travel
+    # TT-01; was {iteration}, which restarts every turn).
+    ("GET", "/api/replay/snapshots/{thread_id}/{snapshot_id}", REPLAY): ("owner", ""),
     ("POST", "/api/replay/restore", REPLAY): ("owner", ""),
     ("POST", "/api/replay/fork", REPLAY): ("owner", ""),
     ("POST", "/api/replay/compare", REPLAY): ("owner", ""),

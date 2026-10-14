@@ -23,9 +23,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["register_misc_routes"]
 
-_approve_locks: dict[str, asyncio.Lock] = {}
-_approve_locks_activity: dict[str, float] = {}
-_APPROVE_LOCKS_MAX: int = 512
 _resume_inflight: set[str] = set()
 
 
@@ -207,26 +204,31 @@ async def _await_segment_tail(thread_id: str, timeout: float = _SEGMENT_TAIL_WAI
 
 
 def _approve_lock_for(thread_id: str) -> asyncio.Lock:
-    import time
-    now = time.monotonic()
-    lock = _approve_locks.get(thread_id)
-    if lock is None:
-        if len(_approve_locks) >= _APPROVE_LOCKS_MAX:
-            candidates = [
-                tid for tid, lk in _approve_locks.items()
-                if not lk.locked() and tid != thread_id
-            ]
-            if candidates:
-                victim = min(
-                    candidates,
-                    key=lambda tid: _approve_locks_activity.get(tid, 0.0),
-                )
-                _approve_locks.pop(victim, None)
-                _approve_locks_activity.pop(victim, None)
-        lock = asyncio.Lock()
-        _approve_locks[thread_id] = lock
-    _approve_locks_activity[thread_id] = now
-    return lock
+    """The thread's checkpoint-mutation lock (``kazma_ui.thread_locks``).
+
+    It was a lock of the approve route's own, so a restore, a fork or a
+    gateway command on the same thread did not wait for it (Time Travel
+    audit TT-04). One lock per thread now, shared by every rewriter.
+    """
+    from kazma_ui.thread_locks import thread_mutation
+
+    return thread_mutation(thread_id)
+
+
+def _live_hitl_interrupt(snapshot: Any) -> tuple[str, dict[str, Any] | None, int]:
+    """``(LangGraph interrupt id, payload, interrupts)`` of the approval the
+    checkpoint is paused at; ``("", None, n)`` when it is paused at none."""
+    found_id, found = "", None
+    count = 0
+    for task in getattr(snapshot, "tasks", None) or ():
+        for intr in getattr(task, "interrupts", None) or ():
+            count += 1
+            value = getattr(intr, "value", None)
+            if isinstance(value, (list, tuple)) and value:
+                value = value[0]
+            if found is None and isinstance(value, dict) and value.get("type") == "hitl_approval":
+                found_id, found = str(getattr(intr, "id", "") or ""), value
+    return found_id, found, count
 
 
 def _apply_scope_grants(
@@ -629,48 +631,46 @@ def register_misc_routes(self: Any) -> None:
             pending_tools: list[Any] = []
             try:
                 pre = await graph_ref.aget_state(config)
-                has_interrupt = False
-                if pre and getattr(pre, "tasks", None):
-                    for task in pre.tasks or []:
-                        if getattr(task, "interrupts", None):
-                            has_interrupt = True
-                            break
-                if pre and getattr(pre, "next", None) and not has_interrupt:
-                    # Pending next but no interrupt payload — still try resume.
-                    has_interrupt = True
-                if not has_interrupt and not (pre and getattr(pre, "next", None)):
-                    logger.warning(
-                        "[HITL] No pending interrupt for thread=%s — approve is a no-op",
-                        thread_id,
-                    )
-                    return _JSONResponse(
-                        _attach_hitl_view(
-                            {
-                                "ok": False,
-                                "status": "expired",
-                                "thread_id": thread_id,
-                                "content": "",
-                                "error": "No pending approval for this thread (already resumed or expired).",
-                                "reason": "not_pending",
-                                "running": False,
-                                "hitl_state": "settled",
-                            },
-                            thread_id,
-                            _body_interrupt_id(body),
-                            state_hint="settled",
-                        ),
-                        status_code=409,
-                    )
-                if pre is not None:
-                    for task in getattr(pre, "tasks", None) or []:
-                        for intr in getattr(task, "interrupts", None) or []:
-                            payload = getattr(intr, "value", None)
-                            if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
-                                pending_tool_name = str(payload.get("tool") or "")
-                                pending_tools = list(payload.get("tools") or [])
-                                break
             except Exception:
-                logger.debug("[HITL] pre-resume state probe failed", exc_info=True)
+                logger.warning("[HITL] state of thread=%s unreadable; approval stays paused",
+                               thread_id, exc_info=True)
+                return _JSONResponse(
+                    {"error": "Approval remains paused: the chat's state could not be read.",
+                     "code": "state_unavailable"},
+                    status_code=503, headers={"Retry-After": "5"},
+                )
+            # Only a LIVE approval interrupt is resumed. A checkpoint with a
+            # next step and no interrupt used to count as paused ("still try
+            # resume") with a gate-less security resume: after a restore wrote
+            # a mid-turn step, gate A's still-live card ran the restored
+            # step's tool call -- one the human had denied (Time Travel audit
+            # TT-02).
+            _live_iid, _live_payload, _interrupts = _live_hitl_interrupt(pre)
+            if _live_payload is None:
+                logger.warning(
+                    "[HITL] No live approval interrupt for thread=%s (next=%s, interrupts=%d) — refused",
+                    thread_id, list(getattr(pre, "next", None) or ()), _interrupts,
+                )
+                return _JSONResponse(
+                    _attach_hitl_view(
+                        {
+                            "ok": False,
+                            "status": "expired",
+                            "thread_id": thread_id,
+                            "content": "",
+                            "error": "No pending approval for this thread (already resumed or expired).",
+                            "reason": "not_pending",
+                            "running": False,
+                            "hitl_state": "settled",
+                        },
+                        thread_id,
+                        _body_interrupt_id(body),
+                        state_hint="settled",
+                    ),
+                    status_code=409,
+                )
+            pending_tool_name = str(_live_payload.get("tool") or "")
+            pending_tools = list(_live_payload.get("tools") or [])
 
             # Audit identity from the SERVER-side session, not the client
             # body: body session_id is attacker-chosen text and made the
@@ -756,12 +756,41 @@ def register_misc_routes(self: Any) -> None:
                     status_code=409,
                 )
 
-            from kazma_core.safety.commitment.resume import (
-                build_resume_command,
-                read_pending_interrupt,
-            )
+            # The card the human answered must be the interrupt the graph is
+            # paused at (TT-02, §30 B2). A gate the registry knows that is not
+            # this interrupt answers 409; an id it has never heard of reaches
+            # the live interrupt as before (legacy dashboard/TUI clients).
+            from kazma_ui.hitl_gate_bridge import gate_names_interrupt
 
-            _intr_payload = await read_pending_interrupt(graph_ref, config, snapshot=pre)
+            if _req_gate and not await gate_names_interrupt(thread_id, _req_gate, _live_iid, _live_payload):
+                logger.info("[HITL] gate=%s is not the live interrupt of thread=%s — refused",
+                            _req_gate, thread_id)
+                return _JSONResponse(
+                    _attach_hitl_view(
+                        {
+                            "ok": False,
+                            "status": "expired",
+                            "thread_id": thread_id,
+                            "content": "",
+                            "error": "This approval card is not the one the chat is waiting on.",
+                            "reason": "not_pending",
+                            "running": False,
+                            "hitl_state": "settled",
+                            "interrupt_id": _req_gate,
+                        },
+                        thread_id,
+                        _req_gate,
+                        state_hint="settled",
+                    ),
+                    status_code=409,
+                )
+
+            from kazma_core.safety.commitment.resume import build_resume_command
+
+            _intr_payload = _live_payload
+            # Keyed by the live interrupt's id: the resume answers that
+            # interrupt and no other (a resume whose interrupt is gone
+            # resumes nothing; the graph asks again).
             resume_cmd = build_resume_command(
                 _intr_payload,
                 approved=approved,
@@ -769,13 +798,14 @@ def register_misc_routes(self: Any) -> None:
                 scope=scope,
                 reason=body.get("reason", ""),
                 approved_ids=body.get("approved_ids") if isinstance(body.get("approved_ids"), list) else None,
+                interrupt_id=_live_iid,
             )
             if resume_cmd is None:
-                # Stale card (race with the earlier 409 guard): fall back to a
-                # security resume so the stream still completes deterministically.
-                resume_cmd = build_resume_command(
-                    {"type": "hitl_approval", "kind": "security"},
-                    approved=approved, scope=scope, reason=body.get("reason", ""),
+                # No gate-less fallback: a resume that names no interrupt is
+                # not an answer to the card the human saw (TT-02).
+                return _JSONResponse(
+                    {"ok": False, "error": "No pending approval for this thread.", "reason": "not_pending"},
+                    status_code=409,
                 )
 
             # JSON command, not a second graph SSE. The live tail is the
@@ -1095,14 +1125,18 @@ def register_misc_routes(self: Any) -> None:
                 thread_id = str(item["thread_id"])
                 if thread_id not in owned:
                     continue
-                if hasattr(checkpointer, "adelete_thread"):
-                    await checkpointer.adelete_thread(thread_id)
-                elif hasattr(checkpointer, "_saver") and hasattr(
-                    checkpointer._saver, "adelete_thread"
-                ):
-                    await checkpointer._saver.adelete_thread(thread_id)
-                else:
-                    continue
+                from kazma_ui.thread_locks import thread_mutation
+
+                # The thread's checkpoint-mutation lock (Time Travel TT-04).
+                async with thread_mutation(thread_id):
+                    if hasattr(checkpointer, "adelete_thread"):
+                        await checkpointer.adelete_thread(thread_id)
+                    elif hasattr(checkpointer, "_saver") and hasattr(
+                        checkpointer._saver, "adelete_thread"
+                    ):
+                        await checkpointer._saver.adelete_thread(thread_id)
+                    else:
+                        continue
                 cleared += 1
                 # Keep the gate registry honest: the pause is gone.
                 try:

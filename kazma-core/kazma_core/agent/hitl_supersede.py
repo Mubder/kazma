@@ -73,17 +73,19 @@ async def cancel_pending_hitl(
         # {approved:false}).
         from kazma_core.safety.commitment.resume import (
             build_resume_command,
-            read_pending_interrupt,
+            pending_interrupt,
         )
 
         async def _deny_resume_cmd():
-            _payload = await read_pending_interrupt(graph, config)
-            _cmd = build_resume_command(_payload, approved=False, reason=reason)
+            # Keyed by the interrupt being denied (TT-02): a deny answers
+            # that question and no other.
+            _payload, _iid = await pending_interrupt(graph, config)
+            _cmd = build_resume_command(_payload, approved=False, reason=reason, interrupt_id=_iid)
             if _cmd is None:
                 # No semantic payload — security deny.
                 _cmd = build_resume_command(
                     {"type": "hitl_approval", "kind": "security"},
-                    approved=False, reason=reason,
+                    approved=False, reason=reason, interrupt_id=_iid,
                 )
             return _cmd
 

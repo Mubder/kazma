@@ -119,7 +119,12 @@ class TestSnapshotStoreRetrieve:
     """Verify snapshots round-trip through SQLite."""
 
     def test_store_and_get(self, store: SnapshotStore):
-        """Save a record and retrieve it by (thread_id, iteration)."""
+        """Save a record and retrieve it by its id.
+
+        Re-pointed 2026-10-14 (Time Travel TT-01): it was retrieved by
+        ``(thread_id, iteration)``, which is no address -- iterations restart
+        every turn, so two turns' steps shared it.
+        """
         record = SnapshotRecord(
             thread_id="thread-A",
             iteration=3,
@@ -128,7 +133,7 @@ class TestSnapshotStoreRetrieve:
         )
         store.save(record)
 
-        retrieved = store.get("thread-A", 3)
+        retrieved = store.get_by_id(record.id)
         assert retrieved is not None
         assert retrieved.id == record.id
         assert retrieved.thread_id == "thread-A"
@@ -137,14 +142,20 @@ class TestSnapshotStoreRetrieve:
 
     def test_get_nonexistent_returns_none(self, store: SnapshotStore):
         """get() returns None for missing snapshots."""
-        assert store.get("no-such-thread", 99) is None
+        # By id since TT-01 (was a (thread, iteration) lookup).
+        assert store.get_by_id("no-such-snapshot") is None
 
     def test_recorder_get_from_memory(self, recorder: SnapshotRecorder, tmp_db: str):
-        """recorder.get_snapshot prefers in-memory over SQLite."""
-        state = _make_state(thread_id="mem-test", iteration=1)
-        recorder.capture(state, db_path=tmp_db)
+        """recorder.get returns what capture stored.
 
-        snap = recorder.get_snapshot("mem-test", 1, db_path=tmp_db)
+        Re-pointed 2026-10-14 (TT-01/TT-05): there is no in-memory copy any
+        more -- it disagreed with SQLite and kept serving cleared steps. The
+        database is the only source of truth, read by id.
+        """
+        state = _make_state(thread_id="mem-test", iteration=1)
+        record = recorder.capture(state, db_path=tmp_db)
+
+        snap = recorder.get(record.id)
         assert snap is not None
         assert snap.iteration == 1
 
@@ -160,8 +171,8 @@ class TestSnapshotStoreRetrieve:
         store.save(record)
         store.close()
 
-        # Not in memory — should hit SQLite
-        snap = recorder.get_snapshot("db-only", 7, db_path=tmp_db)
+        # Another store's write is read back: the database is the truth (TT-01).
+        snap = recorder.get(record.id)
         assert snap is not None
         assert snap.iteration == 7
 
@@ -175,16 +186,19 @@ class TestSnapshotMaxLimit:
     """Verify LRU eviction at the per-thread cap."""
 
     def test_memory_eviction(self, tmp_db: str):
-        """In-memory store evicts oldest snapshots beyond max_snapshots."""
+        """The oldest snapshots beyond max_snapshots are evicted.
+
+        Re-pointed 2026-10-14 (TT-01): asserted on the in-memory dict, which
+        is gone; eviction is by capture order, in SQLite.
+        """
         recorder = SnapshotRecorder(enabled=True, max_snapshots=3, db_path=tmp_db)
 
         for i in range(5):
             state = _make_state(thread_id="evict-test", iteration=i)
             recorder.capture(state, db_path=tmp_db)
 
-        # Only iterations 2,3,4 should remain in memory
-        memory_keys = [k for k in recorder._memory if k[0] == "evict-test"]
-        iterations = sorted(k[1] for k in memory_keys)
+        # Only iterations 2,3,4 remain (the newest three by capture order)
+        iterations = [s.iteration for s in recorder.list_snapshots("evict-test")]
         assert iterations == [2, 3, 4]
 
     def test_db_eviction(self, store: SnapshotStore):
@@ -211,10 +225,9 @@ class TestSnapshotMaxLimit:
             recorder.capture(_make_state(thread_id="A", iteration=i), db_path=tmp_db)
             recorder.capture(_make_state(thread_id="B", iteration=i), db_path=tmp_db)
 
-        a_keys = [k for k in recorder._memory if k[0] == "A"]
-        b_keys = [k for k in recorder._memory if k[0] == "B"]
-        assert len(a_keys) == 2
-        assert len(b_keys) == 2
+        # In SQLite since TT-01 (the in-memory dict is gone).
+        assert len(recorder.list_snapshots("A")) == 2
+        assert len(recorder.list_snapshots("B")) == 2
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -228,10 +241,11 @@ class TestReplayFromSnapshot:
     def test_replay_returns_state(self, recorder: SnapshotRecorder, tmp_db: str):
         """replay_from returns the captured state dict."""
         state = _make_state(thread_id="replay-t", iteration=3, last_model="gpt-4o")
-        recorder.capture(state, db_path=tmp_db)
+        record = recorder.capture(state, db_path=tmp_db)
 
         engine = ReplayEngine(recorder)
-        loaded = engine.replay_from("replay-t", 3, db_path=tmp_db)
+        # By snapshot id since TT-01 (was the iteration).
+        loaded = engine.replay_from("replay-t", record.id)
 
         assert loaded is not None
         assert loaded["thread_id"] == "replay-t"
@@ -241,19 +255,19 @@ class TestReplayFromSnapshot:
     def test_replay_nonexistent_returns_none(self, recorder: SnapshotRecorder, tmp_db: str):
         """replay_from returns None for missing snapshot."""
         engine = ReplayEngine(recorder)
-        assert engine.replay_from("nope", 0, db_path=tmp_db) is None
+        assert engine.replay_from("nope", "no-such-snapshot") is None
 
     def test_replay_state_is_independent_copy(self, recorder: SnapshotRecorder, tmp_db: str):
         """Mutating the replayed state does not affect the stored snapshot."""
         state = _make_state(thread_id="copy-test", iteration=0)
-        recorder.capture(state, db_path=tmp_db)
+        record = recorder.capture(state, db_path=tmp_db)
 
         engine = ReplayEngine(recorder)
-        loaded = engine.replay_from("copy-test", 0, db_path=tmp_db)
+        loaded = engine.replay_from("copy-test", record.id)
         loaded["iteration"] = 999  # mutate
 
         # Original should be unchanged
-        loaded_again = engine.replay_from("copy-test", 0, db_path=tmp_db)
+        loaded_again = engine.replay_from("copy-test", record.id)
         assert loaded_again["iteration"] == 0
 
 
@@ -403,6 +417,7 @@ class TestSnapshotIntegration:
 
         # Simulate 5 supervisor iterations
         thread_id = "integration-thread"
+        ids = []
         for i in range(5):
             state = _make_state(
                 thread_id=thread_id,
@@ -410,20 +425,20 @@ class TestSnapshotIntegration:
                 last_model="gpt-4o-mini" if i < 3 else "gpt-4o",
                 last_cost_usd=0.01 * (i + 1),
             )
-            recorder.capture(state, db_path=tmp_db)
+            ids.append(recorder.capture(state, db_path=tmp_db).id)
 
         # List all snapshots
         snapshots = recorder.list_snapshots(thread_id, db_path=tmp_db)
         assert len(snapshots) == 5
 
-        # Replay from iteration 2
-        replayed = engine.replay_from(thread_id, 2, db_path=tmp_db)
+        # Replay from iteration 2 (addressed by its snapshot id, TT-01)
+        replayed = engine.replay_from(thread_id, ids[2])
         assert replayed is not None
         assert replayed["iteration"] == 2
         assert replayed["last_model"] == "gpt-4o-mini"
 
         # Get the "final" state (iteration 4)
-        final = engine.replay_from(thread_id, 4, db_path=tmp_db)
+        final = engine.replay_from(thread_id, ids[4])
         assert final is not None
         assert final["iteration"] == 4
         assert final["last_model"] == "gpt-4o"

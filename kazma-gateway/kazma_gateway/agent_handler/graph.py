@@ -626,16 +626,6 @@ def create_graph_handler(
     _sessions: OrderedDict[str, str] = OrderedDict()
     _sessions_lock = asyncio.Lock()
 
-    # Per-thread_id serialization lock. Two concurrent messages for the same
-    # thread_id must not interleave graph.ainvoke() / checkpoint writes, or
-    # the LangGraph state and SQLite checkpoint will corrupt. Each distinct
-    # thread_id gets its own asyncio.Lock so unrelated threads stay parallel.
-    #
-    # Bounded LRU: evicts the least-recently-used lock when the store
-    # exceeds _MAX_DICT_ENTRIES (default 10 000).
-    _thread_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
-    _thread_locks_lock = asyncio.Lock()
-
     # Session TTL: entries survive agent replies (for crash-recovery routing)
     # and are evicted lazily by this many seconds of inactivity.
     # FOOTGUN: do NOT look up chat_id / user_id here for jobs older than
@@ -645,33 +635,18 @@ def create_graph_handler(
     from kazma_core.sessions.ttl import SESSION_TTL_SECONDS as _session_ttl_seconds
 
     async def _get_thread_lock(thread_id: str) -> asyncio.Lock:
-        """Return (creating if needed) the serialization lock for a thread_id.
+        """The thread's checkpoint-mutation lock, shared with every transport.
 
-        Uses LRU ordering: existing entries are moved to the end
-        (most-recently-used) and the oldest entry is evicted when the
-        bound is exceeded.
+        Two concurrent messages for the same thread_id must not interleave
+        graph.ainvoke() / checkpoint writes. This was a lock of the gateway's
+        own, so a web restore, fork or approval on the same thread did not
+        wait for a gateway turn (Time Travel audit TT-04). It is now
+        ``kazma_ui.thread_locks.thread_mutation`` (bounded, per event loop,
+        reentrant for the task that holds it).
         """
-        async with _thread_locks_lock:
-            lock = _thread_locks.get(thread_id)
-            if lock is not None:
-                _thread_locks.move_to_end(thread_id)
-                return lock
-            lock = asyncio.Lock()
-            _thread_locks[thread_id] = lock
-            # Evict oldest entries, but skip any that are currently held
-            while len(_thread_locks) > _MAX_DICT_ENTRIES:
-                # Find the oldest non-held lock to evict
-                evicted = False
-                for key in list(_thread_locks.keys()):
-                    if not _thread_locks[key].locked():
-                        _thread_locks.pop(key)
-                        evicted = True
-                        break
-                if not evicted:
-                    # All locks are held — keep growing rather than
-                    # breaking mutual exclusion
-                    break
-            return lock
+        from kazma_ui.thread_locks import thread_mutation
+
+        return thread_mutation(thread_id)
 
     async def handler(msg: IncomingMessage) -> None:
         """Process a single IncomingMessage through the agent graph."""
@@ -930,9 +905,12 @@ def create_graph_handler(
         # ── Checkpoint-mutating commands serialize per thread ─────
         # /reset, /compact, /undo, /edit, /replay, /fork all write the
         # LangGraph checkpointer. The main turn below acquires the same
-        # per-thread lock; without it, a command racing a running turn
-        # (or another command) corrupts checkpoints/messages.
-        cmd_lock = await _get_thread_lock(thread_id)
+        # per-thread lock -- the one every transport shares (TT-04); without
+        # it, a command racing a running turn (or another command) corrupts
+        # checkpoints/messages.
+        from kazma_ui.thread_locks import thread_mutation
+
+        cmd_lock = thread_mutation(thread_id)
 
         # ── /reset: Clear conversation checkpoints and settings ───
         if msg.text and msg.text.strip().lower() == "/reset":
@@ -1173,7 +1151,7 @@ def create_graph_handler(
         replay_match = _extract_replay_command(msg.text)
         if replay_match is not None:
             async with cmd_lock:
-                replay_result = await _handle_replay(thread_id, config, replay_match)
+                replay_result = await _handle_replay(thread_id, config, replay_match, msg)
                 ctx = await _store.get(thread_id) or msg.context_metadata
                 replay_text, replay_ctx = _prepare_tg_outbound(msg, replay_result, ctx)
                 await manager.send(OutboundMessage(
@@ -1533,7 +1511,7 @@ def create_graph_handler(
         # Two concurrent messages for the same thread_id must NOT interleave
         # graph.ainvoke() calls, or LangGraph checkpoints and messages will
         # corrupt. Different thread_ids use different locks and stay parallel.
-        thread_lock = await _get_thread_lock(thread_id)
+        thread_lock = thread_mutation(thread_id)
 
         async with thread_lock:
             # ── Cancel stale HITL if user sent a new normal message ──
@@ -2140,13 +2118,18 @@ def create_graph_handler(
                 return "↩️ No assistant response to undo."
             messages = dropped
 
-            await graph.aupdate_state(config, {"messages": messages})
-            logger.info("[agent-handler] /undo thread=%s msgs_left=%d", thread_id, len(messages))
-            # The undone answer leaves memory too (Memory audit M09).
-            from kazma_core.memory.forget import rewind_memory
+            # The thread's checkpoint-mutation lock (TT-04; the handler
+            # already holds it, and it is reentrant for this task).
+            from kazma_ui.thread_locks import thread_mutation
 
-            await rewind_memory(thread_id, before, messages,
-                                tenant_id=str(snap.values.get("tenant_id") or "default"))
+            async with thread_mutation(thread_id):
+                await graph.aupdate_state(config, {"messages": messages})
+                logger.info("[agent-handler] /undo thread=%s msgs_left=%d", thread_id, len(messages))
+                # The undone answer leaves memory too (Memory audit M09).
+                from kazma_core.memory.forget import rewind_memory
+
+                await rewind_memory(thread_id, before, messages,
+                                    tenant_id=str(snap.values.get("tenant_id") or "default"))
             return (
                 "✅ Removed last assistant response, and what Kazma remembered from it. "
                 "You can continue the conversation."
@@ -2194,17 +2177,21 @@ def create_graph_handler(
 
             before = list(messages)
             messages, edited = replace_last_answer(messages, corrected_text)
-            await graph.aupdate_state(config, {"messages": messages})
-            if edited is None:
-                return corrected_text, "✅ Added corrected text as new message."
-            # The replaced answer leaves memory: its turn is forgotten, never
-            # kept beside the correction (Memory audit M09).
-            from kazma_core.memory.consolidator import user_turn_index
-            from kazma_core.memory.forget import rewind_memory
+            # The thread's checkpoint-mutation lock (TT-04; reentrant here).
+            from kazma_ui.thread_locks import thread_mutation
 
-            await rewind_memory(thread_id, before, messages,
-                                tenant_id=str(snap.values.get("tenant_id") or "default"),
-                                from_turn=max(1, user_turn_index(messages[: edited + 1])))
+            async with thread_mutation(thread_id):
+                await graph.aupdate_state(config, {"messages": messages})
+                if edited is None:
+                    return corrected_text, "✅ Added corrected text as new message."
+                # The replaced answer leaves memory: its turn is forgotten, never
+                # kept beside the correction (Memory audit M09).
+                from kazma_core.memory.consolidator import user_turn_index
+                from kazma_core.memory.forget import rewind_memory
+
+                await rewind_memory(thread_id, before, messages,
+                                    tenant_id=str(snap.values.get("tenant_id") or "default"),
+                                    from_turn=max(1, user_turn_index(messages[: edited + 1])))
             logger.info("[agent-handler] /edit thread=%s len=%d", thread_id, len(corrected_text))
             return (
                 corrected_text,
@@ -2215,160 +2202,154 @@ def create_graph_handler(
             logger.warning("[agent-handler] /edit failed: %s", exc, exc_info=True)
             return corrected_text, f"⚠️ Could not edit: {exc}"
 
-    # ── /replay <n> + /fork <n>: Time-travel restore + branch ────────
+    # ── /replay <step> + /fork <step>: Time-travel restore + branch ──
+    #
+    # A step is named by its id as `/replay list` shows it (the first eight
+    # characters are enough); an iteration number is no address, it restarts
+    # every turn (Time Travel audit TT-01). Both go through
+    # kazma_ui.thread_rewind, the one service every surface calls.
 
-    def _extract_replay_command(text: str | None) -> int | None:
-        """Extract the iteration from ``/replay <n>``.
+    _REPLAY_SUBCOMMANDS = ("list", "compare", "clear")
 
-        Returns the int iteration, or None if the text isn't a numeric
-        /replay command. Bare ``/replay`` (no arg) and ``/replay list``
-        etc. return None (handled by the slash resolver).
-        """
+    def _extract_replay_command(text: str | None) -> str | None:
+        """The step named by ``/replay <step>``; None for anything else
+        (bare ``/replay`` and ``/replay list|compare|clear`` are the slash
+        resolver's)."""
         if not text:
             return None
         parts = text.strip().split()
         if len(parts) != 2 or parts[0].lower() != "/replay":
             return None
-        try:
-            return int(parts[1])
-        except (ValueError, TypeError):
+        if parts[1].lower() in _REPLAY_SUBCOMMANDS:
             return None
+        return parts[1]
 
-    def _extract_fork_command(text: str | None) -> int | None:
-        """Extract the iteration from ``/fork <n>``."""
+    def _extract_fork_command(text: str | None) -> str | None:
+        """The step named by ``/fork <step>``; ``""`` for a bare ``/fork``."""
         if not text:
             return None
         parts = text.strip().split()
-        if parts[0].lower() != "/fork":
+        if not parts or parts[0].lower() != "/fork":
             return None
-        if len(parts) < 2:
-            return 0  # bare /fork → show usage
-        try:
-            return int(parts[1])
-        except (ValueError, TypeError):
-            return None
+        return parts[1] if len(parts) >= 2 else ""
 
-    async def _handle_replay(thread_id: str, config: dict[str, Any], iteration: int) -> str:
-        """Restore a snapshot in-place: rewind the live thread to *iteration*."""
-        try:
-            from kazma_core.time_travel import (
-                ReplayEngine,
-                apply_snapshot_to_thread,
-                create_recorder,
-            )
+    _REFUSAL_TEXT = {
+        "turn_running": "⏳ A turn is running in this chat. Try again when it ends.",
+        "not_found": "📭 No such step in this chat. `/replay list` shows each step's id.",
+        "snapshot_truncated": (
+            "⚠️ That step was too large to keep whole. It can be read on the Time Travel page, "
+            "but not restored or forked."
+        ),
+        "store_unavailable": "⚠️ The saved steps could not be read (the server log says why).",
+        "owner_unavailable": "⚠️ The new chat's owner could not be recorded, so nothing was forked.",
+    }
 
-            # Opening the snapshot DB and decoding a full state is blocking
-            # work; keep it off the gateway's event loop.
-            def _load() -> dict[str, Any] | None:
-                return ReplayEngine(create_recorder()).replay_from(thread_id, iteration)
-
-            state = await asyncio.to_thread(_load)
-            if state is None:
-                return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
-
-            # Same payload a fork persists, written onto this thread id.
-            payload = await apply_snapshot_to_thread(graph, state, thread_id)
-            msg_count = len(payload.get("messages") or [])
-            model = payload.get("last_model", "unknown")
-            logger.info(
-                "[agent-handler] /replay restored thread=%s iter=%d msgs=%d",
-                thread_id, iteration, msg_count,
-            )
+    def _refusal_text(refused: Any) -> str:
+        if refused.code == "approval_pending":
+            tools = ", ".join(sorted({g.get("tool") or "a tool" for g in refused.gates})) or "a tool"
             return (
-                f"🕰️ *Restored from iteration {iteration}.*\n\n"
-                f"The conversation has been rewound to that point.\n"
-                f"  Messages: {msg_count}\n"
-                f"  Model: {model}\n\n"
-                f"Your next message continues from here."
+                f"⏸️ An approval is waiting in this chat ({tools}). "
+                "Approve or deny it first, then restore."
             )
+        return _REFUSAL_TEXT.get(refused.code, f"⚠️ {refused.detail}")
+
+    async def _resolve_step(thread_id: str, ref: str) -> str | None:
+        from kazma_core.time_travel import process_recorder
+
+        recorder = await asyncio.to_thread(process_recorder)
+        return await asyncio.to_thread(recorder.resolve_ref, thread_id, ref)
+
+    async def _handle_replay(thread_id: str, config: dict[str, Any], ref: str, msg: Any = None) -> str:
+        """Restore this chat to the step *ref* names."""
+        from kazma_core.time_travel import SnapshotStoreError
+        from kazma_ui.thread_rewind import RewindRefused, rewind_thread
+
+        try:
+            snapshot_id = await _resolve_step(thread_id, ref)
+            if snapshot_id is None:
+                return _REFUSAL_TEXT["not_found"]
+            platform = str(getattr(msg, "platform", "") or "gateway")
+            out = await rewind_thread(
+                graph, thread_id, snapshot_id,
+                actor=f"{platform}:{getattr(msg, 'sender_id', '') or ''}", surface=platform,
+            )
+        except RewindRefused as refused:
+            return _refusal_text(refused)
+        except SnapshotStoreError:
+            return _REFUSAL_TEXT["store_unavailable"]
         except Exception as exc:
             logger.warning("[agent-handler] /replay failed: %s", exc, exc_info=True)
-            return f"⚠️ Could not replay iteration `{iteration}`: {exc}"
+            return f"⚠️ Could not restore step `{ref}`: {exc}"
+        return (
+            f"🕰️ *Restored this chat to step `{snapshot_id[:8]}` (turn {out['turn_index']}).*\n\n"
+            "The later turns were taken back: from this chat, from what Kazma remembered of "
+            "them, and from its saved steps. Files written, commands run and messages sent "
+            "are not undone.\n\n"
+            "Your next message continues from here."
+        )
 
     async def _handle_fork(
-        thread_id: str, config: dict[str, Any], iteration: int,
+        thread_id: str, config: dict[str, Any], ref: str,
         msg: Any, _store: Any, sender: str,
     ) -> str:
-        """Fork from a snapshot into a NEW thread (original stays intact)."""
-        if iteration == 0:
-            return "✏️ *Usage:* `/fork <iteration>` — branches from that snapshot into a new thread.\n\nUse `/replay list` to see available iterations."
+        """Fork the step *ref* names into a NEW thread (original stays intact)."""
+        if not ref:
+            return (
+                "✏️ *Usage:* `/fork <step>` — branches that step into a new chat.\n\n"
+                "`/replay list` shows each step's id."
+            )
+        import uuid
+
+        from kazma_core.time_travel import SnapshotStoreError
+        from kazma_ui.thread_rewind import RewindRefused, fork_thread
 
         try:
-            import uuid
-
-            from kazma_core.time_travel import (
-                ReplayEngine,
-                apply_snapshot_to_thread,
-                create_recorder,
-            )
-
-            # Opening the snapshot DB and decoding a full state is blocking
-            # work; keep it off the gateway's event loop.
-            def _load() -> dict[str, Any] | None:
-                return ReplayEngine(create_recorder()).replay_from(thread_id, iteration)
-
-            state = await asyncio.to_thread(_load)
-            if state is None:
-                return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
-
-            # Mint a new thread id (copy /new pattern).
+            snapshot_id = await _resolve_step(thread_id, ref)
+            if snapshot_id is None:
+                return _REFUSAL_TEXT["not_found"]
+            # Mint a new thread id (copy /new pattern). The forking sender owns
+            # it (ownership gate, audit H-3): the service records the owner
+            # first, off the loop, and refuses when it cannot.
             new_thread_id = f"gw-{msg.platform}-{sender.replace(':', '_')}-{uuid.uuid4().hex[:8]}"
-            # The forking sender owns the branch (ownership gate, audit H-3).
-            from kazma_core.sessions.directory import record_thread_owner
-
-            record_thread_owner(new_thread_id, sender)
-
-            # Same payload rewind uses. The new id is the destination, so
-            # scratchpad and the other snapshot fields travel with the fork
-            # and the source thread id stays on the source snapshot.
             # chat_id/user_id/message_id stay out of graph state (AGENTS.md §2).
             # Do not touch active_thread.{sender}.
-            state = await apply_snapshot_to_thread(graph, state, new_thread_id)
-            logger.info("[agent-handler] /fork seeded new thread=%s from %s iter=%d", new_thread_id, thread_id, iteration)
-
-            # Copy platform context so the fork can route replies. Override
-            # the source thread_id (injected at handler entry) so consumers
-            # reading ctx["thread_id"] on the fork's row get the fork id,
-            # not the original thread (deep-audit 2026-08-19, finding #6).
-            try:
-                src_ctx = await _store.get(thread_id)
-                if src_ctx:
-                    fork_ctx = dict(src_ctx)
-                    fork_ctx["thread_id"] = new_thread_id
-                    await _store.put(new_thread_id, fork_ctx)
-            except Exception:
-                logger.debug("[agent-handler] /fork: could not copy session context", exc_info=True)
-
-            # Create a Web UI session for the fork (visible in the sidebar).
-            try:
-                from kazma_ui.session_manager import ChatSession, get_session_manager
-
-                web_store = get_session_manager()
-                username = msg.context_metadata.get("username") or "fork"
-                # Convert snapshot messages to plain dicts — the raw state can
-                # contain LangGraph message objects the session store / sidebar
-                # renderer don't understand.
-                _fork_messages = _convert_messages_to_dicts(state.get("messages", []))
-                web_session = ChatSession(
-                    session_id=new_thread_id,
-                    thread_id=new_thread_id,
-                    title=f"Fork of {username} (iter {iteration})",
-                    messages=_fork_messages,
-                )
-                web_store.put(web_session)
-            except Exception:
-                logger.debug("[agent-handler] /fork: could not create Web UI session", exc_info=True)
-
-            msg_count = len(state.get("messages", []))
-            return (
-                f"🌿 *Forked from iteration {iteration} into a new thread.*\n\n"
-                f"  New thread: `{new_thread_id}`\n"
-                f"  Messages carried over: {msg_count}\n\n"
-                f"The original thread is unchanged. The fork is available in the Web UI sidebar."
+            out = await fork_thread(
+                graph, thread_id, snapshot_id,
+                actor=f"{msg.platform}:{sender}", surface=str(msg.platform or "gateway"),
+                new_thread_id=new_thread_id, owner=sender,
             )
+        except RewindRefused as refused:
+            return _refusal_text(refused)
+        except SnapshotStoreError:
+            return _REFUSAL_TEXT["store_unavailable"]
         except Exception as exc:
             logger.warning("[agent-handler] /fork failed: %s", exc, exc_info=True)
-            return f"⚠️ Could not fork from iteration `{iteration}`: {exc}"
+            return f"⚠️ Could not fork step `{ref}`: {exc}"
+
+        # Copy platform context so the fork can route replies. Override the
+        # source thread_id (injected at handler entry) so consumers reading
+        # ctx["thread_id"] on the fork's row get the fork id, not the original
+        # thread (deep-audit 2026-08-19, finding #6).
+        try:
+            src_ctx = await _store.get(thread_id)
+            if src_ctx:
+                fork_ctx = dict(src_ctx)
+                fork_ctx["thread_id"] = new_thread_id
+                await _store.put(new_thread_id, fork_ctx)
+        except Exception:
+            logger.warning("[agent-handler] /fork: could not copy session context", exc_info=True)
+
+        listed = (
+            "The fork is in the Web UI sidebar."
+            if out.get("chat_saved")
+            else "Its chat could not be saved, so it is not in the Web UI sidebar."
+        )
+        return (
+            f"🌿 *Forked step `{snapshot_id[:8]}` into a new chat.*\n\n"
+            f"  New thread: `{new_thread_id}`\n"
+            f"  Title: {out.get('title')}\n\n"
+            f"The original chat is unchanged. {listed}"
+        )
 
     # ── Register send_message backends (telegram + discord + slack) ──
     # Cron captures delivery_target as "discord:…" / "slack:…" at schedule

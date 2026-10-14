@@ -57,6 +57,7 @@ __all__ = [
     "DATA_DIR_ENTRIES",
     "DYNAMIC_NAME_SITES",
     "MIGRATION_DISPOSITIONS",
+    "NOT_BACKED_UP",
     "STORES",
     "STORE_FAMILIES",
     "TOOL_WRITES",
@@ -115,7 +116,17 @@ STORES: dict[str, Store] = {
         "every forget, keep-out and summary forget, in order: ids and hashes, never text", "bundle"),
     "knowledge_graph.db": Store("the swarm memory property graph", "bundle"),
     "checkpoints.db": Store("conversation state checkpoints", "bundle"),
-    "snapshots.db": Store("time-travel snapshots of the agent's state", "bundle"),
+    # Time Travel audit TT-05 (2026-10-14): not carried, not backed up
+    # (NOT_BACKED_UP below). It was a bundle store and two thirds of a
+    # universal backup by volume.
+    "snapshots.db": Store(
+        "time-travel snapshots of the agent's state", "machine",
+        reason="a 30-day view of this machine's chats, each step a full plaintext copy of the "
+               "agent's state (tool results and secrets included); a copy elsewhere would bring "
+               "back chats deleted or forgotten since. The chats and checkpoints travel"),
+    "time_travel_audit.db": Store(
+        "the Time Travel audit trail: who restored, forked or cleared which chat (ids, no text)",
+        "bundle"),
     # ── conversations and sessions ─────────────────────────────────────
     "chat_sessions.db": Store("chat transcripts", "bundle"),
     "chat_sessions_spool.db": Store(
@@ -215,6 +226,17 @@ STORES: dict[str, Store] = {
     "chat_sessions_test.db": Store(
         "the transcript store of test mode", "machine",
         reason="test mode only; a real install never writes it"),
+}
+
+#: Databases the universal backup leaves out, and why
+#: (``backup.universal.selectable_databases``). Their disposition above says
+#: they do not travel either.
+NOT_BACKED_UP: dict[str, str] = {
+    "snapshots.db": (
+        "Time Travel steps are a 30-day view of the chats; a backup would bring back the "
+        "steps of a chat deleted or forgotten since (TT-05), and they were two thirds of a "
+        "backup by volume"
+    ),
 }
 
 #: Stores whose file names are built at runtime, by glob pattern (relative to

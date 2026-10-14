@@ -447,7 +447,11 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         # Postgres checkpointers reject the SQLite '?' placeholder. The
         # saver's own delete knows the dialect and the related tables.
         if hasattr(_checkpoint_manager, "adelete_thread"):
-            await _checkpoint_manager.adelete_thread(thread_id)
+            # The thread's checkpoint-mutation lock (Time Travel TT-04).
+            from kazma_ui.thread_locks import thread_mutation
+
+            async with thread_mutation(thread_id):
+                await _checkpoint_manager.adelete_thread(thread_id)
         else:
             conn = _checkpoint_manager.conn if hasattr(_checkpoint_manager, "conn") else None
             if not conn:

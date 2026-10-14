@@ -1004,10 +1004,15 @@ class SettingsRouterBuilder:
 
             store = _get_sm().get_time_travel_settings()
             effective: int | None = None
+            limits: dict[str, Any] = {}
             try:
                 rec = agent.snapshot_recorder
                 if rec is not None:
+                    # Public properties (TT-08): this read an attribute the
+                    # recorder did not have, the AttributeError was swallowed,
+                    # and "Restart required" never cleared after a restart.
                     effective = int(rec.max_snapshots)
+                    limits = dict(rec.limits)
             except Exception:
                 logger.debug("[Settings] live time-travel cap unavailable", exc_info=True)
             if effective is None:
@@ -1018,7 +1023,17 @@ class SettingsRouterBuilder:
                     yaml_cfg = {}
                 yaml_val = yaml_cfg.get("max_snapshots")
                 effective = int(yaml_val) if yaml_val is not None else DEFAULT_MAX_SNAPSHOTS
-            return {"store": store, "effective": effective}
+            from kazma_core.time_travel import live_maintenance_config
+
+            # The clean-up reads these live on each run (no restart).
+            maintenance = live_maintenance_config()
+            return {
+                "store": store,
+                "effective": effective,
+                "limits": limits,
+                "effective_retention_days": maintenance["retention_days"],
+                "effective_auto_maintain": maintenance["auto_maintain"],
+            }
 
         @router.put("/api/settings/time_travel")
         def api_save_time_travel(req: dict[str, Any]) -> dict[str, Any]:

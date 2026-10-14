@@ -9,7 +9,7 @@ Strategy (v1, "SQLite-portable"):
   * **Config**: read via ``ConfigStore.export_yaml()`` (handles either backend,
     resolves vault refs to their ``cfg:`` pointers, NOT plaintext). The
     matching ``vault.db`` travels separately + encrypted.
-  * **SQLite data files** (snapshots, memory_state, memory_ops, cron,
+  * **SQLite data files** (memory_state, memory_ops, cron,
     sessions, swarm_tasks, sandbox_emails, research_sessions, pipeline_logs,
     knowledge_graph, workspaces): copied via the WAL-safe online-backup API
     (:func:`kazma_core.memory.backup._backup_one`). These are the portable
@@ -63,8 +63,9 @@ __all__ = ["export_bundle"]
 # SQLite data files to copy as-is when they exist on disk (WAL-safe copy).
 # Path is the kazma_core.paths resolver function name; archive name is the
 # filename to use inside the bundle's data/ dir.
+#: snapshots.db is not carried (store_registry: a 30-day view of this
+#: machine's chats, Time Travel audit TT-05).
 _DATA_DBS: list[tuple[str, str]] = [
-    ("snapshots_db", "snapshots.db"),
     ("primary_memory_db", "memory_state.db"),
     ("memory_ops_db", "memory_ops.db"),
     ("swarm_tasks_db", "swarm_tasks.db"),
@@ -638,7 +639,7 @@ def _dump_postgres_shared_state(
     ``pg_restore`` it into a target Postgres.
 
     Best-effort at the bundle level: a failure here logs + continues, because
-    the SQLite files (vault, memory, snapshots) are still valuable on their
+    the SQLite files (vault, memory, cron) are still valuable on their
     own. The importer will warn that the Postgres dump is missing.
     """
     try:

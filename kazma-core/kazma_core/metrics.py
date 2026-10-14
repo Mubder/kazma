@@ -28,6 +28,8 @@ __all__ = [
     "record_voice_utterance",
     "record_voice_barge_in",
     "record_voice_first_audio",
+    "record_time_travel_capture",
+    "record_time_travel_rewind",
 ]
 
 logger = logging.getLogger(__name__)
@@ -192,6 +194,21 @@ if _PROMETHEUS_AVAILABLE:
         "kazma_voice_first_audio_seconds",
         "Live voice: VAD segment close → first TTS audio chunk (WS path)",
     )
+
+    # Time Travel (time_travel.py, thread_rewind.py). capture counts every
+    # supervisor step by what happened to its snapshot; a growing ``failed``
+    # is steps the stream no longer announces (TT-11). rewind counts each
+    # restore and fork by outcome (ok, or the refusal code).
+    TIME_TRAVEL_CAPTURE_TOTAL = Counter(
+        "kazma_time_travel_capture_total",
+        "Time Travel snapshot captures by result",
+        ["result"],  # stored | truncated | skipped | failed
+    )
+    TIME_TRAVEL_REWIND_TOTAL = Counter(
+        "kazma_time_travel_rewind_total",
+        "Time Travel restores and forks by outcome",
+        ["action", "outcome"],
+    )
 else:
     # Stub objects for type checking
     LLM_CALLS_TOTAL = None
@@ -217,6 +234,8 @@ else:
     VOICE_UTTERANCES_TOTAL = None
     VOICE_BARGE_IN_TOTAL = None
     VOICE_FIRST_AUDIO_SECONDS = None
+    TIME_TRAVEL_CAPTURE_TOTAL = None
+    TIME_TRAVEL_REWIND_TOTAL = None
 
 
 # ── Metrics Endpoint ───────────────────────────────────────────────────
@@ -397,3 +416,19 @@ def record_voice_first_audio(seconds: float) -> None:
     if not _PROMETHEUS_AVAILABLE or VOICE_FIRST_AUDIO_SECONDS is None:
         return
     VOICE_FIRST_AUDIO_SECONDS.observe(max(0.0, float(seconds or 0.0)))
+
+def record_time_travel_capture(result: str) -> None:
+    """Record what happened to one supervisor step's snapshot
+    (stored | truncated | skipped | failed). No-op without prometheus."""
+    if not _PROMETHEUS_AVAILABLE or TIME_TRAVEL_CAPTURE_TOTAL is None:
+        return
+    TIME_TRAVEL_CAPTURE_TOTAL.labels(result=(result or "unknown")[:16]).inc()
+
+
+def record_time_travel_rewind(action: str, outcome: str) -> None:
+    """Record one Time Travel restore or fork by outcome (ok or a refusal code)."""
+    if not _PROMETHEUS_AVAILABLE or TIME_TRAVEL_REWIND_TOTAL is None:
+        return
+    TIME_TRAVEL_REWIND_TOTAL.labels(
+        action=(action or "unknown")[:16], outcome=(outcome or "unknown")[:32]
+    ).inc()

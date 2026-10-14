@@ -577,6 +577,13 @@ jobs:
         run: python -m pytest tests/e2e/test_scheduled_reads_in_arabic.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Time travel page restores and reads in Arabic (2026-10-14)
+        # Time Travel audit TT-Q1: reached by the sidebar, a restore that
+        # rewinds the chat, the restored chat, Arabic with no English, and
+        # the error state.
+        run: python -m pytest tests/e2e/test_time_travel_page.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,

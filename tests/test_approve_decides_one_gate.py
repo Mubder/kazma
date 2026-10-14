@@ -171,7 +171,10 @@ def test_the_route_consults_the_guard_before_resuming() -> None:
     ).read_text(encoding="utf-8")
 
     guard_at = src.index("_already = await _gate_not_pending(")
-    read_at = src.index("_intr_payload = await read_pending_interrupt(")
+    # Re-pointed 2026-10-14 (Time Travel TT-02): the route reads the live
+    # interrupt once, before the guard (to key the resume by its id), and
+    # takes the payload it resumes here; this is where the question is chosen.
+    read_at = src.index("_intr_payload = _live_payload")
     assert guard_at < read_at, (
         "the gate-identity check now runs AFTER the pending interrupt is "
         "read; a retry can reach the resume again"
@@ -282,7 +285,9 @@ def test_an_inflight_refusal_converges_instead_of_erroring() -> None:
         / "kazma-ui" / "kazma_ui" / "routes_direct" / "misc.py"
     ).read_text(encoding="utf-8")
     guard = src[src.index("_already = await _gate_not_pending("):]
-    guard = guard[: guard.index("_intr_payload = await read_pending_interrupt(")]
+    # Re-pointed 2026-10-14 (TT-02): the resumed payload is the live one read
+    # before the guard (``_live_payload``), keyed by its interrupt id.
+    guard = guard[: guard.index("_intr_payload = _live_payload")]
 
     assert '"inflight" if _already in ("claimed", "resuming")' in guard, (
         "the 409 no longer translates the registry's live states into the "

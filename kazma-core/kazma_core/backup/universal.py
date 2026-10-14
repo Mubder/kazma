@@ -453,10 +453,15 @@ def selectable_databases(data_root: Path) -> list[Path]:
     "missing" — a completeness check is only meaningful against the set the
     backup actually intends to take.
     """
+    from kazma_core.store_registry import NOT_BACKED_UP
+
     return [
         f
         for f in sorted(data_root.rglob("*.db"))
         if not any(p in _EXCLUDE_DIRS for p in f.parts)
+        # A store the registry keeps out of backups, and says why: the Time
+        # Travel steps (snapshots.db, TT-05).
+        and not (f.parent == data_root and f.name in NOT_BACKED_UP)
     ]
 
 

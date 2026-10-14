@@ -1034,6 +1034,15 @@ _LOOP_STALL_HELPERS = frozenset({
     "get_mcp_servers", "_get_configured_servers",
     # A server's stored OAuth token (settings and vault), read for its badge.
     "oauth_status",
+    # Time Travel (audit TT-07/TT-11, 2026-10-14): the gateway fork recorded
+    # the new chat's owner (a settings write) and saved its chat row on the
+    # loop. The snapshot store's reads and deletes, the recorder built from
+    # the settings, the web chat's /replay answer and the audit trail are
+    # SQLite and settings reads too.
+    "record_thread_owner", "_save_fork_chat", "forget_thread_snapshots",
+    "forget_turn_snapshots", "process_recorder", "create_recorder",
+    "time_travel_reply", "write_audit_row", "_recent_audit_rows",
+    "live_maintenance_config",
 })
 
 
@@ -1210,6 +1219,9 @@ _CROSS_MODULE_AREAS: dict[str, tuple[str, ...]] = {
     "scheduled": ("kazma-core/kazma_core/cron/", "kazma-ui/kazma_ui/scheduled_api.py",
                   "kazma-skills/kazma_skills/native/task_scheduler_cron/",
                   "kazma-skills/kazma_skills/native/x_publisher/tools.py"),
+    "time_travel": ("kazma-core/kazma_core/time_travel.py", "kazma-core/kazma_core/time_travel_audit.py",
+                    "kazma-ui/kazma_ui/thread_rewind.py", "kazma-ui/kazma_ui/thread_locks.py",
+                    "kazma-ui/kazma_ui/replay_routes.py", "kazma-ui/kazma_ui/sse_chat/_time_travel.py"),
 }
 
 

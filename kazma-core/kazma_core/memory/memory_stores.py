@@ -263,10 +263,15 @@ EXTERNAL_STORES: tuple[MemoryStore, ...] = (
         export="", excluded="current facts as edges, rebuilt from them",
     ),
     MemoryStore(
-        "time-travel snapshots (snapshots.db)", "external", "retention", "turn_text",
-        forget="not memory: the chat's own saved steps, like the chat store; the ledger keeps a "
-               "restored turn out of memory (deleted chats: Time Travel TT-05)",
+        "time-travel snapshots (snapshots.db)", "external", "forget", "turn_text",
+        forget="forget._forget_snapshots: forgetting a turn deletes the chat's steps from that turn "
+               "on (each holds the conversation up to it), forgetting the chat all of them, under "
+               "every key (time_travel.forget_turn_snapshots / forget_thread_snapshots, TT-05); a "
+               "rewind drops the steps after the restored one (kazma_ui.thread_rewind). Not backed "
+               "up or carried in a migration (store_registry), so no restore brings one back",
         export="", excluded="the chat's state, not memory",
+        retention="time_travel.retention_days (30) and the per-chat and total budgets",
+        bound="50 steps a chat, 2,000 and 512 MB in all (time_travel.DEFAULT_*)",
     ),
     MemoryStore(
         "chat store and checkpoints", "external", "retention", "turn_text",

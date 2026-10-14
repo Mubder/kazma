@@ -1,21 +1,27 @@
-/* Time Travel Replay panel — vanilla IIFE (mirrors swarm.js / hitl_approval.js).
+/* Time Travel page — vanilla IIFE (mirrors swarm.js / hitl_approval.js).
  *
  * Exposes window.KazmaReplay with:
  *   init()                    — bootstrap on page load
  *   switchTab(name)           — tab switcher
  *   loadThreads()             — GET /api/replay/threads → populate picker
- *   loadTimeline(threadId)    — GET /api/replay/snapshots/{id} → render cards
- *   viewSnapshot(iteration)   — GET /api/replay/snapshots/{id}/{it} → detail
- *   restoreCurrent()          — POST /api/replay/restore (rewind live thread)
- *   forkCurrent()             — POST /api/replay/fork (branch into new thread)
+ *   loadTimeline(threadId)    — GET /api/replay/snapshots/{id} → turns, then steps
+ *   viewSnapshot(snapshotId)  — GET /api/replay/snapshots/{id}/{snapshot} → detail
+ *   restoreCurrent()          — POST /api/replay/restore (restore the chat to a step)
+ *   forkCurrent()             — POST /api/replay/fork (branch a step into a new chat)
  *   compare()                 — POST /api/replay/compare → diff table
  *   onLiveSnapshot(data)      — hook called by streaming.js on 'snapshot' events
+ *
+ * A step is addressed by its snapshot id: an iteration number restarts every
+ * turn, so "iteration 1" named a different step on each surface (Time Travel
+ * audit TT-01). A failed load is shown as a failure, never as "no steps"
+ * (TT-10/TT-11).
  */
 (function () {
   'use strict';
 
   var currentThread = '';
-  var currentIteration = null;
+  var currentSnapshot = null;   // {id, turn, step}
+  var stepsById = {};
   var pollTimer = null;
   var unavailable = false;  // set when the replay API is missing (404/503)
 
@@ -39,6 +45,25 @@
     var text = window.tOr ? window.tOr(key, fallback) : fallback;
     for (var k in (vars || {})) text = text.split('{' + k + '}').join(String(vars[k]));
     return text;
+  }
+  function stepLabel(s) {
+    return tx('replay.step_label', 'Turn {turn}, step {step}', { turn: s.turn_index || 0, step: s.step || 1 });
+  }
+  /* The words for a refusal the restore and fork routes answer with. */
+  function refusalText(data, status) {
+    var code = (data && data.error) || '';
+    if (code === 'turn_running') return tx('replay.refused_turn_running', 'A turn is running in this chat. Restore it when the turn ends.');
+    if (code === 'approval_pending') {
+      var tools = ((data && data.gates) || []).map(function (g) { return g.tool; }).filter(Boolean).join(', ');
+      return tx('replay.refused_approval_pending', 'An approval is waiting in this chat ({tools}). Approve or deny it first.', { tools: tools || '—' });
+    }
+    if (code === 'not_found') return tx('replay.refused_not_found', 'This step no longer exists. Reload the list.');
+    if (code === 'snapshot_truncated') return tx('replay.refused_truncated', 'This step was too large to keep whole: it can be read, not restored or forked.');
+    if (code === 'store_unavailable') return tx('replay.store_unavailable', 'The saved steps could not be read. The server log says why.');
+    return tx('replay.load_error', 'Could not load the steps (HTTP {status}).', { status: status });
+  }
+  function emptyState(html) {
+    return '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + html + '</div>';
   }
 
   // ── Public API ──
@@ -106,14 +131,24 @@
       if (unavailable) return;
       fetch('/api/replay/threads', { credentials: 'same-origin' })
         .then(function (r) {
-          if (r.status === 404 || r.status === 503) {
-            KazmaReplay._markUnavailable(r.status);
-            return null;
-          }
-          return r.ok ? r.json() : { threads: [], count: 0 };
+          if (r.ok) return r.json();
+          return r.json().then(function (body) { return body || {}; }, function () { return {}; })
+            .then(function (body) {
+              if (r.status === 503 && body.error === 'store_unavailable') {
+                // The store cannot be read: say so, and keep polling.
+                var listEl = $('replay-timeline-list');
+                if (listEl) {
+                  listEl.innerHTML = '<div class="replay-load-error" role="alert" style="padding:1rem;color:var(--error);">' +
+                    esc(refusalText(body, r.status)) + '</div>';
+                }
+              } else if (r.status === 404 || r.status === 503) {
+                KazmaReplay._markUnavailable(r.status);
+              }
+              return null;
+            });
         })
         .then(function (data) {
-          if (data === null) return;  // unavailable — already handled
+          if (!data) return;  // unavailable or failed — already shown
           var sel = $('replay-thread-select');
           if (!sel) return;
           var prev = sel.value;
@@ -145,83 +180,108 @@
 
     loadTimeline: function (threadId) {
       currentThread = threadId;
-      currentIteration = null;
+      currentSnapshot = null;
+      stepsById = {};
       $('replay-snapshot-detail').style.display = 'none';
       var listEl = $('replay-timeline-list');
 
       if (!threadId) {
-        listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(tx('replay.pick_thread_hint', 'Select a thread above to see its snapshot timeline.')) + '</div>';
+        listEl.innerHTML = emptyState(esc(tx('replay.pick_thread_hint', 'Select a thread above to see its snapshot timeline.')));
         $('replay-snapshot-count').textContent = '';
         return;
       }
 
-      listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(tx('common.loading', 'Loading…')) + '</div>';
+      listEl.innerHTML = emptyState(esc(tx('common.loading', 'Loading…')));
 
       fetch('/api/replay/snapshots/' + encodeURIComponent(threadId), { credentials: 'same-origin' })
-        .then(function (r) { return r.ok ? r.json() : { snapshots: [], count: 0 }; })
-        .then(function (data) {
+        .then(function (r) {
+          return r.json().then(function (body) { return { status: r.status, ok: r.ok, body: body }; },
+            function () { return { status: r.status, ok: false, body: {} }; });
+        })
+        .then(function (res) {
+          if (!res.ok) {
+            // An error is an error: a 403 or a broken store read as "no
+            // snapshots yet" (TT-10).
+            $('replay-snapshot-count').textContent = '';
+            listEl.innerHTML = '<div class="replay-load-error" role="alert" style="padding:1rem;color:var(--error);">' +
+              esc(refusalText(res.body, res.status)) + '</div>';
+            return;
+          }
+          var data = res.body || {};
+          var turns = data.turns || [];
           var snaps = data.snapshots || [];
-          $('replay-snapshot-count').textContent = tx('replay.snapshot_count', 'Snapshots: {n}', { n: snaps.length });
+          snaps.forEach(function (s) { stepsById[s.id] = s; });
+          $('replay-snapshot-count').textContent = tx('replay.snapshot_count', 'Saved steps: {n}', { n: snaps.length });
 
-          // Populate diff dropdowns too
+          // The diff dropdowns: every step once, named by its turn and step.
           ['replay-diff-a', 'replay-diff-b'].forEach(function (id) {
             var dd = $(id);
             if (!dd) return;
             dd.innerHTML = '';
             snaps.forEach(function (s) {
               var opt = document.createElement('option');
-              opt.value = s.iteration; opt.textContent = tx('replay.iteration_n', 'Iteration {n}', { n: s.iteration });
+              opt.value = s.id; opt.textContent = stepLabel(s);
               dd.appendChild(opt);
             });
-            if (snaps.length >= 2) { $(id).value = snaps[Math.max(0, snaps.length - 2)].iteration; }
-            if (id === 'replay-diff-b' && snaps.length >= 1) { $(id).value = snaps[snaps.length - 1].iteration; }
+            if (snaps.length >= 2 && id === 'replay-diff-a') { dd.value = snaps[snaps.length - 2].id; }
+            if (id === 'replay-diff-b' && snaps.length >= 1) { dd.value = snaps[snaps.length - 1].id; }
           });
 
           if (!snaps.length) {
-            listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(tx('replay.no_snapshots', 'No snapshots for this thread yet. Snapshots are captured after each agent turn.')) + '</div>';
+            listEl.innerHTML = emptyState(esc(tx('replay.no_snapshots', 'No steps of this chat have been saved yet. A step is saved after each supervisor iteration.')));
             return;
           }
 
-          listEl.innerHTML = snaps.map(function (s) {
-            return '<div class="card replay-snap-card" style="padding:12px 16px;cursor:pointer;" data-iteration="' + s.iteration + '">' +
-              '<div style="display:flex;align-items:center;justify-content:space-between;">' +
-                '<div>' +
-                  '<span style="font-weight:600;color:var(--text-primary);">' + esc(tx('replay.iteration_n', 'Iteration {n}', { n: s.iteration })) + '</span>' +
-                  '<span translate="no" style="margin-inline-start:8px;font-size:0.85rem;color:var(--text-muted);">' + esc(s.model || '—') + '</span>' +
-                '</div>' +
-                '<div style="display:flex;gap:12px;font-size:0.85rem;color:var(--text-muted);">' +
-                  '<span>' + esc(tx('replay.messages_n', 'Messages: {n}', { n: s.message_count })) + '</span>' +
-                  '<span>' + timeAgo(s.timestamp) + '</span>' +
-                '</div>' +
-              '</div>' +
+          listEl.innerHTML = turns.map(function (turn) {
+            var head = turn.turn_index
+              ? tx('replay.turn_n', 'Turn {turn}', { turn: turn.turn_index })
+              : tx('replay.turn_earlier', 'Earlier steps');
+            return '<div class="replay-turn" style="display:grid;gap:6px;">' +
+              '<div class="replay-turn-head" style="font-weight:600;color:var(--text-secondary);margin-top:8px;">' + esc(head) + '</div>' +
+              (turn.steps || []).map(function (s) {
+                return '<div class="card replay-snap-card" style="padding:12px 16px;cursor:pointer;" data-snapshot="' + esc(s.id) + '">' +
+                  '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
+                    '<div>' +
+                      '<span style="font-weight:600;color:var(--text-primary);">' + esc(tx('replay.step_n', 'Step {step}', { step: s.step })) + '</span>' +
+                      '<span translate="no" style="margin-inline-start:8px;font-size:0.85rem;color:var(--text-muted);">' + esc(s.model_used || '—') + '</span>' +
+                      (s.truncated ? '<span class="badge" style="margin-inline-start:8px;">' + esc(tx('replay.step_truncated', 'Too large to restore')) + '</span>' : '') +
+                    '</div>' +
+                    '<div style="display:flex;gap:12px;font-size:0.85rem;color:var(--text-muted);">' +
+                      '<span>' + esc(tx('replay.messages_n', 'Messages: {n}', { n: s.message_count })) + '</span>' +
+                      '<span>' + esc(timeAgo(s.timestamp)) + '</span>' +
+                    '</div>' +
+                  '</div>' +
+                '</div>';
+              }).join('') +
             '</div>';
           }).join('');
           if (!listEl._boundClick) {
             listEl._boundClick = true;
             listEl.addEventListener('click', function (e) {
               var card = e.target.closest('.replay-snap-card');
-              if (card && card.dataset.iteration) {
-                KazmaReplay.viewSnapshot(parseInt(card.dataset.iteration, 10));
+              if (card && card.dataset.snapshot) {
+                KazmaReplay.viewSnapshot(card.dataset.snapshot);
               }
             });
           }
         })
         .catch(function (err) {
-          listEl.innerHTML = '<div style="padding:1rem;color:var(--error);">' + esc(tx('replay.load_failed', 'Failed to load: {error}', { error: err.message })) + '</div>';
+          listEl.innerHTML = '<div class="replay-load-error" role="alert" style="padding:1rem;color:var(--error);">' + esc(tx('replay.load_failed', 'Failed to load: {error}', { error: err.message })) + '</div>';
         });
     },
 
-    viewSnapshot: function (iteration) {
+    viewSnapshot: function (snapshotId) {
       if (!currentThread) return;
-      currentIteration = iteration;
+      var step = stepsById[snapshotId] || { id: snapshotId };
+      currentSnapshot = { id: snapshotId, turn: step.turn_index || 0, step: step.step || 1, truncated: !!step.truncated };
       var detailEl = $('replay-snapshot-detail');
       detailEl.style.display = 'block';
 
-      fetch('/api/replay/snapshots/' + encodeURIComponent(currentThread) + '/' + iteration, { credentials: 'same-origin' })
+      fetch('/api/replay/snapshots/' + encodeURIComponent(currentThread) + '/' + encodeURIComponent(snapshotId), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
           if (!data || data.error) { toast(tx('replay.snapshot_failed', 'Could not load snapshot'), 'error'); return; }
-          $('replay-detail-title').textContent = tx('replay.iteration_n', 'Iteration {n}', { n: iteration });
+          $('replay-detail-title').textContent = stepLabel(step);
           $('replay-detail-meta').innerHTML =
             '<span>' + esc(tx('replay.meta_model', 'Model')) + ': <strong translate="no">' + esc(data.model || '—') + '</strong></span> · ' +
             '<span>' + esc(tx('replay.meta_cost', 'Cost')) + ': $' + (data.cost_usd || 0).toFixed(4) + '</span> · ' +
@@ -242,34 +302,61 @@
     },
 
     restoreCurrent: async function () {
-      if (!currentThread || currentIteration == null) { toast(tx('replay.pick_snapshot', 'Select a snapshot first'), 'error'); return; }
-      if (!await confirm(tx('replay.confirm_restore', 'Rewind this thread to iteration {n}? Later turns will be lost (use Fork to preserve them).', { n: currentIteration }))) return;
+      if (!currentThread || !currentSnapshot) { toast(tx('replay.pick_snapshot', 'Select a step first'), 'error'); return; }
+      var target = currentSnapshot;
+      var ok = await window.kazmaConfirm({
+        message: tx('replay.confirm_restore', 'Restore this chat to turn {turn}, step {step}? The later turns are taken back: from the chat, from what Kazma remembered of them, and from its saved steps. Files written, commands run and messages sent are not undone. Use Fork to keep the later turns.', { turn: target.turn, step: target.step }),
+        confirmText: tx('replay.restore', 'Restore here'),
+      });
+      if (!ok) return;
       fetch('/api/replay/restore', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread_id: currentThread, iteration: currentIteration }),
+        body: JSON.stringify({ thread_id: currentThread, snapshot_id: target.id }),
       })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (data.error) { toast(tx('replay.restore_failed', 'Restore failed: {error}', { error: data.error }), 'error'); return; }
-          toast(window.kazmaCount('replay.restored', data.message_count || 0, { iteration: currentIteration }), 'success');
+        .then(function (r) {
+          return r.json().then(function (body) { return { status: r.status, ok: r.ok, body: body }; },
+            function () { return { status: r.status, ok: false, body: {} }; });
+        })
+        .then(function (res) {
+          if (!res.ok || !res.body || !res.body.ok) {
+            toast(refusalText(res.body, res.status), 'error');
+            return;
+          }
+          toast(window.kazmaCount('replay.restored', res.body.message_count || 0, { turn: target.turn, step: target.step }), 'success');
+          KazmaReplay.loadTimeline(currentThread);
         })
         .catch(function () { toast(tx('replay.restore_request_failed', 'Restore request failed'), 'error'); });
     },
 
     forkCurrent: function () {
-      if (!currentThread || currentIteration == null) { toast(tx('replay.pick_snapshot', 'Select a snapshot first'), 'error'); return; }
+      if (!currentThread || !currentSnapshot) { toast(tx('replay.pick_snapshot', 'Select a step first'), 'error'); return; }
       fetch('/api/replay/fork', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread_id: currentThread, iteration: currentIteration }),
+        body: JSON.stringify({ thread_id: currentThread, snapshot_id: currentSnapshot.id }),
       })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (data.error) { toast(tx('replay.fork_failed', 'Fork failed: {error}', { error: data.error }), 'error'); return; }
-          toast(tx('replay.forked', 'Forked into {thread}', { thread: data.new_thread_id }), 'success');
+        .then(function (r) {
+          return r.json().then(function (body) { return { status: r.status, ok: r.ok, body: body }; },
+            function () { return { status: r.status, ok: false, body: {} }; });
+        })
+        .then(async function (res) {
+          if (!res.ok || !res.body || !res.body.ok) {
+            toast(refusalText(res.body, res.status), 'error');
+            return;
+          }
+          var data = res.body;
+          // Say what was made, and offer to open it (TT-07): the toast used
+          // to show the raw thread id and nothing to click.
+          var open = await window.kazmaConfirm({
+            title: tx('replay.fork', 'Fork'),
+            message: tx('replay.forked', 'Forked into a new chat: {title}', { title: data.title || data.new_thread_id }),
+            confirmText: tx('replay.fork_open', 'Open the new chat'),
+            danger: false,
+          });
+          if (open) window.location.href = '/chat?s=' + encodeURIComponent(data.session_id || data.new_thread_id);
         })
         .catch(function () { toast(tx('replay.fork_request_failed', 'Fork request failed'), 'error'); });
     },
@@ -278,17 +365,26 @@
       if (!currentThread) { toast(tx('replay.pick_thread_first', 'Select a thread first'), 'error'); return; }
       var a = $('replay-diff-a').value;
       var b = $('replay-diff-b').value;
-      if (!a || !b) { toast(tx('replay.pick_two', 'Pick two iterations'), 'error'); return; }
+      if (!a || !b) { toast(tx('replay.pick_two', 'Pick two steps'), 'error'); return; }
+      var labelA = stepsById[a] ? stepLabel(stepsById[a]) : a;
+      var labelB = stepsById[b] ? stepLabel(stepsById[b]) : b;
       $('replay-diff-result').innerHTML = '<div style="padding:1rem;color:var(--text-muted);">' + esc(tx('replay.comparing', 'Comparing…')) + '</div>';
       fetch('/api/replay/compare', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread_id: currentThread, a: parseInt(a), b: parseInt(b) }),
+        body: JSON.stringify({ thread_id: currentThread, a: a, b: b }),
       })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (data.error) { $('replay-diff-result').innerHTML = '<div translate="no" style="color:var(--error);">' + esc(data.error) + '</div>'; return; }
+        .then(function (r) {
+          return r.json().then(function (body) { return { status: r.status, ok: r.ok, body: body }; },
+            function () { return { status: r.status, ok: false, body: {} }; });
+        })
+        .then(function (res) {
+          var data = res.body || {};
+          if (!res.ok || data.error) {
+            $('replay-diff-result').innerHTML = '<div role="alert" style="color:var(--error);">' + esc(refusalText(data, res.status)) + '</div>';
+            return;
+          }
           var d = data.diff;
           if (!d) { $('replay-diff-result').innerHTML = '<div>' + esc(tx('replay.no_diff', 'No diff available.')) + '</div>'; return; }
           function arrow(v) { return v > 0 ? '+' + v : String(v); }
@@ -297,8 +393,8 @@
           $('replay-diff-result').innerHTML =
             '<table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.9rem;">' +
               '<thead><tr><th style="text-align:start;padding:8px;border-bottom:1px solid var(--border);">' + esc(tx('replay.col_metric', 'Metric')) + '</th>' +
-              '<th style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(tx('replay.iteration_n', 'Iteration {n}', { n: a })) + '</th>' +
-              '<th style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(tx('replay.iteration_n', 'Iteration {n}', { n: b })) + '</th>' +
+              '<th style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(labelA) + '</th>' +
+              '<th style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(labelB) + '</th>' +
               '<th style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(tx('replay.col_delta', 'Delta')) + '</th></tr></thead>' +
               '<tbody>' +
                 row(tx('replay.row_messages', 'Messages'), d.original_message_count, d.replayed_message_count, arrow(d.message_count_delta)) +

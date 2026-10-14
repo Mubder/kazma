@@ -77,20 +77,29 @@ async def test_rewind_and_fork_keep_scratchpad_and_thread_identity() -> None:
 
 
 def test_replay_and_fork_call_sites_use_that_payload() -> None:
-    """The handlers must apply the shared payload, not a messages-only dict."""
+    """The handlers must apply the shared payload, not a messages-only dict.
+
+    Re-pointed 2026-10-14 (Time Travel TT-G1): the four surfaces call the one
+    service, ``kazma_ui.thread_rewind`` (``rewind_thread`` / ``fork_thread``),
+    and the service applies the shared payload. The gate in
+    ``tests/test_time_travel_rewind.py`` holds that no other module calls
+    ``apply_snapshot_to_thread``.
+    """
     gateway = (
         _ROOT / "kazma-gateway" / "kazma_gateway" / "agent_handler" / "graph.py"
     ).read_text(encoding="utf-8")
     web = (_ROOT / "kazma-ui" / "kazma_ui" / "replay_routes.py").read_text(encoding="utf-8")
+    service = (_ROOT / "kazma-ui" / "kazma_ui" / "thread_rewind.py").read_text(encoding="utf-8")
     replay = gateway.split("async def _handle_replay", 1)[1].split("async def _handle_fork", 1)[0]
-    fork = gateway.split("async def _handle_fork", 1)[1].split("async def ", 1)[0]
+    fork = gateway.split("async def _handle_fork", 1)[1].split("    # ── Register", 1)[0]
     restore = web.split("async def restore_snapshot", 1)[1].split("async def fork_snapshot", 1)[0]
     web_fork = web.split("async def fork_snapshot", 1)[1].split("@router.", 1)[0]
-    for body, label in (
-        (replay, "gateway replay"),
-        (fork, "gateway fork"),
-        (restore, "web restore"),
-        (web_fork, "web fork"),
+    for body, label, call in (
+        (replay, "gateway replay", "rewind_thread("),
+        (fork, "gateway fork", "fork_thread("),
+        (restore, "web restore", "rewind_thread("),
+        (web_fork, "web fork", "fork_thread("),
     ):
-        assert "apply_snapshot_to_thread" in body, label
+        assert call in body, label
         assert '{"messages":' not in body, label
+    assert service.count("apply_snapshot_to_thread(graph, record.get_state()") == 2

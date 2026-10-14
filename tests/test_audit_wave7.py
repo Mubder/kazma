@@ -82,7 +82,13 @@ def test_fork_writes_full_state_not_just_messages() -> None:
         encoding="utf-8"
     )
     fork = src.split("async def _handle_fork", 1)[1].split("async def ", 1)[0]
-    assert "apply_snapshot_to_thread(graph, state, new_thread_id)" in fork
+    # Re-pointed 2026-10-14 (Time Travel TT-07/TT-G1): the gateway fork is
+    # the one fork routine every surface calls (``thread_rewind.fork_thread``),
+    # which writes the whole snapshot through ``apply_snapshot_to_thread``.
+    assert "fork_thread(" in fork and "new_thread_id=new_thread_id" in fork
+    service = Path("kazma-ui/kazma_ui/thread_rewind.py").read_text(encoding="utf-8")
+    service_fork = service.split("async def fork_thread", 1)[1].split("\nasync def ", 1)[0]
+    assert "apply_snapshot_to_thread(graph, record.get_state(), new_id)" in service_fork
     assert 'aupdate_state(new_config, {"messages": state.get("messages", [])})' not in fork
     assert "active_thread" in fork  # comment: do not overwrite
 

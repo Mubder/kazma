@@ -21,7 +21,6 @@ This module keeps the public import path and compiles the graph.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -159,29 +158,13 @@ def build_supervisor_graph(
         except Exception:
             pass
         # ── Time Travel: capture snapshot after supervisor iteration ──
-        if snapshot_recorder is not None and snapshot_recorder.enabled:
-            # Merge current state with result to get the full picture
-            merged = {**state, **result}
-            # Capture does json.dumps(O(state)) + sync SQLite write on EVERY
-            # supervisor iteration — run it off the event loop (M35).
-            #
-            # A snapshot is observability. It must never fail the turn it is
-            # observing: this await had no guard, so a capture error (a race
-            # in the recorder's cache, a state json.dumps cannot encode)
-            # propagated out of the supervisor node and the user's turn died
-            # with it (audit 2026-09-22).
-            try:
-                record = await asyncio.to_thread(snapshot_recorder.capture, merged)
-            except Exception:
-                logger.warning(
-                    "[TimeTravel] snapshot capture failed; turn continues",
-                    exc_info=True,
-                )
-                record = None
-            if record is not None:
-                result["snapshot_id"] = record.id
-                result["snapshot_iteration"] = merged.get("iteration", 0)
-        return result
+        # One function (time_travel.capture_after_supervisor), so the
+        # real-graph tests run the product's capture path: off the loop
+        # (M35), never failing the turn (audit 2026-09-22), thinned inside a
+        # long turn, and stamping nothing when the write failed (TT-11).
+        from kazma_core.time_travel import capture_after_supervisor
+
+        return await capture_after_supervisor(snapshot_recorder, state, result)
 
     async def _tool_worker(state: SupervisorState) -> dict[str, Any]:
         try:

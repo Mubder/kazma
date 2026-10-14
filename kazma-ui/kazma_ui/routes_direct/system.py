@@ -887,10 +887,10 @@ def register_system_routes(self: Any) -> None:
         Retention is read LIVE from the ConfigStore (Settings UI), so the
         manual run and the daily auto-loop always agree.
         """
-        from kazma_core.time_travel import _live_maintenance_config, maintain_snapshots
+        from kazma_core.time_travel import live_maintenance_config, maintain_snapshots
 
         try:
-            cfg = _live_maintenance_config()
+            cfg = live_maintenance_config()
             stats = maintain_snapshots(retention_days=cfg["retention_days"])
             return {"status": "success", "stats": stats, "auto_maintain": cfg["auto_maintain"]}
         except Exception as e:

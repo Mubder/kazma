@@ -298,10 +298,32 @@ def forget_episode(
                            purge_index=purge_index, seq=seq)
         if already:
             out["already"] = True
+        if by == "user" and journal:
+            # The user's own Forget reaches the chat's Time Travel steps too:
+            # each holds the whole conversation up to it, so every step from
+            # the forgotten turn on goes (TT-05). A rewind leaves this to the
+            # restore, which drops the steps after the restored one.
+            out["snapshots_deleted"] = _forget_snapshots(keys or [session], turn=turn)
         return out
     finally:
         if own:
             conn.close()
+
+
+def _forget_snapshots(keys: list[str], *, turn: int | None) -> int:
+    """Delete the chat's Time Travel steps that hold what was forgotten: from
+    *turn* on, or all of them (*turn* None). Never raises -- the memory forget
+    is done; a step left behind is a WARNING (snapshots.db is not backed up,
+    so nothing restores one later)."""
+    from kazma_core.time_travel import SnapshotStoreError, forget_thread_snapshots, forget_turn_snapshots
+
+    try:
+        if turn is None:
+            return forget_thread_snapshots(list(keys))
+        return forget_turn_snapshots(list(keys), int(turn)) if int(turn) > 0 else 0
+    except (SnapshotStoreError, sqlite3.Error, OSError):
+        logger.warning("[forget] the Time Travel steps of %s were NOT deleted", ",".join(keys), exc_info=True)
+        return -1
 
 
 def _ledger_sha(conn: sqlite3.Connection, eid: str) -> str:
@@ -1028,8 +1050,11 @@ def forget_chat(
 
         forget_journal.mark_applied(conn, seq)
         conn.commit()
+        # Forgetting the chat takes its Time Travel steps too (TT-05).
+        snapshots = _forget_snapshots(keys, turn=None)
         return {"ok": True, "forgotten": len(ids) + len(notes),
-                "facts_forgotten": facts + len(chat_facts), "chat_keys": keys}
+                "facts_forgotten": facts + len(chat_facts), "chat_keys": keys,
+                "snapshots_deleted": snapshots}
     finally:
         if own:
             conn.close()

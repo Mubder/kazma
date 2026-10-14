@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Time Travel: the industrial audit (2026-10-14)
+
+- One rewind for every surface (`kazma_ui/thread_rewind.py`): the web page,
+  `/replay` and `/fork` in the chat apps and the API restore and fork under
+  the same per-thread lock turns, approvals, `/undo`, `/edit` and `/compact`
+  take. A restore refuses while a turn runs or an approval waits, writes a
+  turn-boundary state (a step's unfinished tool calls are dropped), rewinds
+  the chat's transcript and scratchpad, and repaints open tabs. The approve
+  route resumes only the live approval interrupt, by its id: a late answer
+  to a card whose question is gone resumes nothing.
+- Steps are addressed by a unique id with the turn they belong to, never by
+  a bare iteration number that repeats every turn. Restoring a step deletes
+  the steps after it.
+- Deleting a chat, forgetting its past or `/replay clear` deletes its steps
+  under every key the chat has. `snapshots.db` is not backed up and does not
+  travel in a migration bundle: a copy elsewhere would bring a deleted chat
+  back.
+- Declared byte budgets per step, per chat and in total, enforced in the
+  database; a failed capture says so (no step id, no frame); a store that
+  cannot be read answers 503; each restore and fork leaves an audit row.
+  Settings shows the recorder's real limits.
+- Migration rewrites JSON-escaped Windows paths and keeps a JSON row whose
+  rewrite would not parse.
+- One fork for the web and the chat apps: the transcript without system
+  notes or raw tool messages, a title in the chat's language, failures
+  reported.
+- Open: the long soak (owner, D3) and an independent review. Tracker:
+  `docs/plans/TIME_TRAVEL_INDUSTRIAL_HARDENING_GOAL.md`.
+
 ## Scheduled: the industrial audit (2026-10-14)
 
 - A scheduled job says what it may do, and does only that. A reminder

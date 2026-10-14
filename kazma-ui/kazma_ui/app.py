@@ -1905,11 +1905,17 @@ class KazmaAppBuilder:
             if _recorder is None:
                 try:
                     from kazma_core.time_travel import create_recorder
-                    _recorder = create_recorder(config=self.config.raw)
+                    _recorder = await asyncio.to_thread(create_recorder, config=self.config.raw)
                     self.agent._snapshot_recorder = _recorder
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[Replay] snapshot recorder creation failed: %s", exc, exc_info=True)
             self._snapshot_recorder = _recorder
+            # One recorder for the process: the page, the chat apps' /replay
+            # and /fork, and the slash resolver all read this one (TT-01).
+            if _recorder is not None:
+                from kazma_core.time_travel import set_process_recorder
+
+                set_process_recorder(_recorder)
 
             def _recompile_holder_graph() -> None:
                 # Re-read HITL config LIVE on every recompile: the boot-time
