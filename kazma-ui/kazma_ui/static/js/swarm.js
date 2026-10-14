@@ -108,6 +108,7 @@
     pollInterval = setInterval(refreshStatus, 5000);
     loadOutputTarget();
     loadActiveTasks();
+    loadApproval();
 
     bindAutoExclusive('worker-checkboxes', 'selected_workers');
     bindAutoExclusive('play-worker-checkboxes', 'play_selected_workers');
@@ -141,6 +142,8 @@
       else if (btn.dataset.action === 'cancel') cancelTask(btn.dataset.taskId);
       else if (btn.dataset.action === 'retry') retryTask(btn.dataset.taskId);
       else if (btn.dataset.action === 'view-task') viewTaskDetail(btn.dataset.taskId);
+      else if (btn.dataset.action === 'approval-approve') decideApproval('approve');
+      else if (btn.dataset.action === 'approval-deny') decideApproval('deny');
     });
 
     // Event delegation for clickable task cards and rows with data-task-id
@@ -159,6 +162,101 @@
         }
       }
     });
+  }
+
+  // ══════════════════════════════════════════════════════
+  // APPROVAL REQUEST (a chat card's link, Swarm audit SW-S03)
+  // ══════════════════════════════════════════════════════
+
+  var approvalPoll = null;
+  var _APPROVAL_STATES = { pending: 1, approved: 1, denied: 1, timeout: 1, cancelled: 1, ended: 1 };
+
+  function approvalStateLabel(s) {
+    var k = String(s || '');
+    return _APPROVAL_STATES[k] ? t('swarm.approval.st_' + k) : k;
+  }
+
+  // The call as the gate record keeps it, laid out to read; text that is not
+  // JSON is shown as it is.
+  function approvalCall(raw) {
+    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch (e) { return String(raw); }
+  }
+
+  function renderApproval(view) {
+    var body = $('swarm-approval-body');
+    var actions = $('swarm-approval-actions');
+    if (!body) return;
+    if (!view) {
+      body.textContent = t('swarm.approval.not_found');
+      if (actions) actions.style.display = 'none';
+      return;
+    }
+    var html = '<div><strong>' + esc(t('swarm.approval.tool')) + ':</strong> <bdi translate="no" dir="ltr">'
+      + esc(view.tool) + '</bdi></div>'
+      + '<div data-approval-state="' + esc(view.status) + '"><strong>' + esc(t('swarm.approval.state'))
+      + ':</strong> ' + esc(approvalStateLabel(view.status)) + '</div>';
+    if (view.decided_by) {
+      html += '<div><strong>' + esc(t('swarm.approval.decided')) + '</strong> <bdi translate="no">'
+        + esc(view.decided_by + (view.decided_on ? ' (' + view.decided_on + ')' : '')) + '</bdi></div>';
+    }
+    if (view.status === 'pending' && view.deadline_at && window.KazmaFormat) {
+      html += '<div>' + esc(t('swarm.approval.deadline', { time: window.KazmaFormat.time(view.deadline_at) })) + '</div>';
+    }
+    if (view.arguments === null || view.arguments === undefined) {
+      html += '<p>' + esc(t('swarm.approval.no_arguments')) + '</p>';
+    } else {
+      html += '<div style="margin-top:10px;"><strong>' + esc(t('swarm.approval.arguments')) + '</strong></div>'
+        + '<pre class="swarm-approval-call" translate="no" dir="ltr" style="white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto;">'
+        + esc(approvalCall(view.arguments)) + '</pre>'
+        + '<div>' + esc(t('swarm.approval.digest')) + ' <code translate="no" dir="ltr">'
+        + esc(view.arguments_digest) + '</code></div>';
+    }
+    body.innerHTML = html;
+    var pending = view.status === 'pending';
+    if (actions) actions.style.display = pending ? 'flex' : 'none';
+    if (!pending && approvalPoll) { clearInterval(approvalPoll); approvalPoll = null; }
+  }
+
+  function loadApproval() {
+    var panel = $('swarm-approval');
+    if (!panel) return;
+    var url = '/api/swarm/approvals/' + encodeURIComponent(panel.dataset.approvalId || '');
+    fetch(url, { credentials: 'same-origin' })
+      .then(function (r) {
+        return r.json().catch(function () { return null; })
+          .then(function (data) { return { status: r.status, data: data }; });
+      })
+      .then(function (res) {
+        if (res.status === 404) { renderApproval(null); return; }
+        if (res.data && res.data.ok) renderApproval(res.data.approval);
+      })
+      .catch(function () { /* a restart: the next poll reads it again */ });
+    // While it waits, another platform may answer it: show that here too.
+    if (!approvalPoll) approvalPoll = setInterval(loadApproval, 5000);
+  }
+
+  function decideApproval(decision) {
+    var panel = $('swarm-approval');
+    if (!panel) return;
+    var buttons = Array.prototype.slice.call(document.querySelectorAll('#swarm-approval-actions button'));
+    buttons.forEach(function (b) { b.disabled = true; });
+    var url = '/api/swarm/approvals/' + encodeURIComponent(panel.dataset.approvalId || '') + '/decide';
+    window.kazmaSave(url, { method: 'POST', body: { decision: decision } })
+      .then(function (data) {
+        showToast(t(decision === 'approve' ? 'swarm.approval.done_approved' : 'swarm.approval.done_denied'), true);
+        renderApproval(data && data.approval);
+      })
+      .catch(function (err) {
+        if (err && err.status === 409) {
+          showError(t('swarm.approval.not_pending'));
+          if (err.body && err.body.approval) renderApproval(err.body.approval);
+        } else if (err && err.status === 403) {
+          showError(t('swarm.approval.forbidden'));
+        } else {
+          showError(t('swarm.approval.failed'));
+        }
+      })
+      .then(function () { buttons.forEach(function (b) { b.disabled = false; }); });
   }
 
   // ══════════════════════════════════════════════════════
@@ -2959,6 +3057,8 @@
   function destroySwarmMouth() {
     try { if (pollInterval) clearInterval(pollInterval); } catch (e) {}
     pollInterval = null;
+    try { if (approvalPoll) clearInterval(approvalPoll); } catch (e) {}
+    approvalPoll = null;
     try { if (playgroundSSE && playgroundSSE.close) playgroundSSE.close(); } catch (e) {}
     playgroundSSE = null;
     try { if (playgroundTimer) clearInterval(playgroundTimer); } catch (e) {}

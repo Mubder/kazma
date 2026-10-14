@@ -10,6 +10,20 @@
   {% if single_operator_refusal %}
   <div id="swarm-single-operator" role="alert" style="background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:8px;padding:12px 16px;margin-bottom:16px;color:var(--warning);">{{ t('swarm.single_operator') }}</div>
   {% endif %}
+
+  {# A chat approval card's link (Swarm audit SW-S03): the whole call and the
+     same decision. The id comes from the server: a soft navigation runs the
+     page script before the address bar changes. #}
+  {% if approval_id %}
+  <div class="card" id="swarm-approval" data-approval-id="{{ approval_id }}" style="margin-bottom:1.5rem;">
+    <h3 style="margin:0 0 10px;display:flex;align-items:center;gap:8px;"><span class="ki" data-icon="swarm" aria-hidden="true"></span> {{ t('swarm.approval.title') }}</h3>
+    <div id="swarm-approval-body" aria-live="polite">{{ t('swarm.approval.loading') }}</div>
+    <div id="swarm-approval-actions" style="display:none;gap:8px;margin-top:12px;flex-wrap:wrap;">
+      <button type="button" class="btn btn-primary" data-action="approval-approve">{{ t('swarm.approval.approve') }}</button>
+      <button type="button" class="btn btn-danger" data-action="approval-deny">{{ t('swarm.approval.deny') }}</button>
+    </div>
+  </div>
+  {% endif %}
   <div id="setup-banner" style="display:none;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
     <div style="display:flex;align-items:center;gap:8px;color:var(--warning);">
       <span style="font-size:1.2rem;"><span x-html="KazmaIcons.alert()"></span></span>

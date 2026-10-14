@@ -584,6 +584,20 @@ jobs:
         run: python -m pytest tests/e2e/test_time_travel_page.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Swarm approval panel answers a chat card's request (2026-10-14)
+        # Swarm audit SW-S03: the card's link opens the whole call on the
+        # Swarm page, reached by soft navigation, in English and Arabic, and
+        # its Approve decides the shared request as the web.
+        run: python -m pytest tests/e2e/test_swarm_approval_panel.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Knowledge page words a refused and a partial crawl (2026-10-14)
+        # Knowledge audit KB-S05/KB-S15: a refused crawl in the page's
+        # language through the real route; a crawl with failed pages never
+        # titled "Done". English and Arabic, arriving by the sidebar.
+        run: python -m pytest tests/e2e/test_knowledge_outcomes_browser.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,

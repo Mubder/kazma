@@ -44,6 +44,8 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 |--------|------|------|-------------|
 | * | `/api/swarm/*` | Session (GET) / Admin (everything else) | Workers, dispatch, tasks, metrics. One table, `kazma_ui/swarm_panel/route_roles.py`; refused with `409 swarm_single_operator` on an install with platform users |
 | POST | `/api/swarm/workers/{name}/circuit-breaker/reset` | Admin | Close a worker's breaker now (the worker card's **Reset**, shown while the breaker is open or half-open) |
+| GET | `/api/swarm/approvals/{id}` | Session | One swarm-bus approval request, for the Swarm page's approval panel (the link on every chat approval card): the tool, its state, the whole call the gate record keeps, the hash the card shows, and who decided. A chat approval's gate is not found here |
+| POST | `/api/swarm/approvals/{id}/decide` | Admin | `{"decision": "approve" \| "deny"}`: answers the request from the web, the same shared decision as the chat buttons (`platform: web`). `409 not_pending` once it was answered or ended |
 | GET | `/api/swarm/tasks/export` | Session | Task history as JSON, or CSV with `?format=csv` (newest 1,000; filters `type`, `status`, `q` as the history list). Task History's **Export CSV** |
 | GET | `/api/swarm/tasks/{id}/stream` | Session | Live task stream (`swarm_sse`): the task's events so far, then live ones until it ends. A finished task's stream always ends with `task_completed` and the task's result, rebuilt from the stored task when the server no longer holds its events (after a restart). |
 | GET | `/swarm` | Session | Swarm panel page |

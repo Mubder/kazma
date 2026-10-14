@@ -14,6 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from kazma_ui.services import SWARM_CORE_MISSING, get_swarm_service
+from kazma_ui.swarm_panel.routes_approvals import valid_approval_id
 from kazma_core.errors import safe_error, validation_error
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,10 @@ def register_general_routes(
                         "active_page": "swarm",
                         # SW-S16 / D1: set by RoleCheckedRoute on a multi-user install.
                         "single_operator_refusal": bool(getattr(request.state, "swarm_refusal", None)),
+                        # A chat card's link (SW-S03): the request to show. The
+                        # template carries it: a soft navigation runs the page
+                        # script before the address bar changes.
+                        "approval_id": valid_approval_id(request.query_params.get("approval")),
                     },
                 ),
             )

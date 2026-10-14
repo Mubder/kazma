@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import sqlite3
 import threading
 import time
 from typing import Any
@@ -50,6 +51,8 @@ __all__ = [
     "await_card",
     "close",
     "decide_from_button",
+    "decide_from_web",
+    "describe",
     "get",
     "open_request",
     "outcome_text",
@@ -96,6 +99,62 @@ def get(approval_id: str) -> dict[str, Any] | None:
         return None
     raw = _store().get(_key(approval_id))
     return dict(raw) if isinstance(raw, dict) else None
+
+
+#: A gate record's terminal state -> the request's outcome (the decision
+#: column holds approve/deny, or the ending ``settle_gate`` was given).
+_GATE_OUTCOMES = {"approve": "approved", "deny": "denied", "cancelled": "cancelled"}
+
+
+def describe(approval_id: str) -> dict[str, Any] | None:
+    """What the Web dashboard shows of one request (Swarm audit SW-S03).
+
+    The whole call comes from the gate record (``hitl_gates``, kept after the
+    request ends); the state from this row while it is open, else from that
+    record. None when neither knows the id -- or when the id names another
+    mechanism's gate: a chat approval is not this page's to show. Blocking:
+    a settings read and a SQLite read.
+    """
+    from kazma_core.swarm.approval_card import arguments_digest
+
+    if not approval_id:
+        return None
+    row = get(approval_id)
+    if row is not None and row.get("status") == "closed":
+        row = None
+    gate = None
+    try:
+        from kazma_core.safety.hitl_gates import gate_for, gate_registry_enabled
+
+        if gate_registry_enabled():
+            gate = gate_for(approval_id)
+    except (sqlite3.Error, OSError):  # the open row still answers
+        logger.warning("[shared_approvals] could not read the gate record of %s", approval_id, exc_info=True)
+    if gate is not None and gate.mechanism != "swarm_bus":
+        return None
+    if row is None and gate is None:
+        return None
+    if row is not None:
+        status = str(row.get("status") or "pending")
+    elif gate.state == "timeout":
+        status = "timeout"
+    elif gate.state == "settled":
+        status = _GATE_OUTCOMES.get(gate.decision, "ended")
+    else:  # the request ended without its outcome on record (a crash)
+        status = "ended"
+    args = gate.args_json if gate is not None else None
+    return {
+        "id": approval_id,
+        "tool": str((row or {}).get("tool") or (gate.tool if gate else "")),
+        "status": status,
+        "arguments": args,
+        "arguments_digest": arguments_digest(args) if args is not None else "",
+        "opened_at": float((row or {}).get("opened_at") or (gate.created_at if gate else 0) or 0),
+        "deadline_at": float((row or {}).get("deadline_at") or 0) or None,
+        "decided_by": str((row or {}).get("actor") or (gate.actor if gate else "") or ""),
+        "decided_on": str((row or {}).get("platform") or ""),
+        "decided_at": (row or {}).get("decided_at") or (gate.settled_at if gate else None),
+    }
 
 
 def _transition(approval_id: str, mutate) -> tuple[dict[str, Any] | None, bool]:
@@ -351,10 +410,18 @@ def resolve_from_callback(approval_id: str, approved: bool, *, actor: str = "", 
     )
 
 
-def _resolve_reported(approval_id: str, approved: bool, *, actor: str, platform: str) -> bool:
+def decide_from_web(approval_id: str, approved: bool, *, actor: str) -> bool | None:
+    """The Web dashboard's Approve or Deny (SW-S03): the same decision as a
+    button, recorded as ``web``. True decided, False not pending (answered,
+    ended or unknown), None not recorded (said, as for a button)."""
+    return _resolve_reported(approval_id, approved, actor=actor, platform="web")
+
+
+def _resolve_reported(approval_id: str, approved: bool, *, actor: str, platform: str) -> bool | None:
     """:func:`resolve`, saying when the decision could not be recorded (Swarm
     audit SW-S15: the adapters swallowed it -- the human pressed a button, the
-    request stayed pending and timed out, and nothing said why)."""
+    request stayed pending and timed out, and nothing said why). None when it
+    could not be recorded."""
     try:
         return resolve(approval_id, approved, actor=actor, platform=platform)
     except Exception:
@@ -367,7 +434,7 @@ def _resolve_reported(approval_id: str, approved: bool, *, actor: str, platform:
         from kazma_core.metrics import record_swarm_failure
 
         record_swarm_failure("approval_resolve")
-        return False
+        return None
 
 
 #: A swarm card's button data: the decision and the request's id.
