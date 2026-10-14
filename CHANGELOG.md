@@ -21,6 +21,17 @@
   then left the next boot to record them as failures of unknown outcome. The
   shutdown now waits for those writes (bounded, with a warning when one is
   left).
+- Scheduled qualification soak (`scripts/scheduled_soak.py`, the Stage 5
+  gate): the real cron scheduler on a private store through seven simulated
+  days in minutes, with thousands of reminders and tasks in three zones
+  (one changing its clocks), edits and cancels, failing turns, refused and
+  interrupted deliveries, a locked database, restarts, a downtime past the
+  catch-up window and a dead poll loop. It checks every due occurrence ended
+  exactly once (delivered, missed with one notice, or failed with its reason
+  and one alert), nothing was sent twice, lateness stayed within a poll plus
+  the turn, and readiness saw the dead loop. The scheduler and its store now
+  read time from one clock object, which the soak replaces with a fake one;
+  the server's clock is the real one, as before.
 
 ## Swarm approvals on the web; Knowledge outcomes checked in a browser (2026-10-14)
 

@@ -183,6 +183,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "soaks the swarm engine on a private SQLite task and settings store; an "
         "install's .env would point thousands of task writes at its databases"
     ),
+    "scripts/scheduled_soak.py": (
+        "soaks the cron scheduler on a private temporary cron.db and a fake clock; an "
+        "install's .env would point thousands of bookings at its schedule and chats"
+    ),
     "scripts/shipped_defaults.py": "compares kazma.yaml with its committed snapshot; reads no install",
 }
 

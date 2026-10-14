@@ -1,6 +1,6 @@
 # Scheduled industrial hardening — continuous execution
 
-Status: OPEN -- 2026-10-14: every finding row implemented; the Stage 5 qualification soak (D3, owner) and an independent review remain
+Status: OPEN -- 2026-10-15: every finding row implemented; the Stage 5 soak's harness is built (`scripts/scheduled_soak.py`); the qualification run itself (D3, owner) and an independent review remain
 
 ## Objective
 
@@ -119,6 +119,76 @@ when its gate passes on current evidence.
    The 1,000-job / 50-due load test must stay within its bound. Every
    witness must be inverted, and the docs checks must pass.
 
+   **Harness: built 2026-10-15.** `scripts/scheduled_soak.py` runs the
+   real `CronScheduler` on a private SQLite cron.db, through `--days` (7)
+   simulated days of a fake clock, in minutes. The engine now reads every
+   time it records, and its poll wait, from one injectable clock
+   (`kazma_core/cron/clock.py`; behaviour and gate in
+   `tests/test_cron_clock.py`, negative control included).
+
+   *What it runs:*
+   - Thousands of jobs (`--jobs`, 2,000), booked through
+     `CronScheduler.schedule`, the path the agent tool and the page use:
+     - reminders, and tasks run by a scripted graph;
+     - one-offs written four ways: a UTC `Z` time, a Kuwait offset, the
+       operator's zone, or relative;
+     - daily, weekday and weekly series, friendly or RRULE, with or
+       without COUNT/UNTIL;
+     - in America/New_York (which falls back during the window), in
+       Asia/Kuwait and in UTC;
+     - some with their own catch-up window.
+   - A fifth of the jobs are booked mid-run. Some are edited or cancelled
+     through the versioned actions, and a stale version must be refused.
+   - Provider failures: a turn raises, fails, or stops at an approval;
+     outage windows in which no graph builds; jobs that always fail, so
+     their budget runs out.
+   - Delivery failures: refused, raised, Kazma dying mid-send, a chat that
+     always refuses, a job with no address.
+   - Database failures: cron.db's write lock is held from another
+     connection until a poll pass, and a fire's own finish, have failed on
+     it.
+   - A restart every `--restart-hours` (3): graceful, or abrupt mid-turn or
+     mid-send.
+   - One downtime longer than the catch-up window.
+   - A dead poll loop.
+
+   *What it checks:* ground truth comes from the harness, not the
+   scheduler. It enumerates each job's due occurrences from the job's own
+   definition, with `timing.py` as a second opinion at booking. It checks:
+   - every due occurrence ends exactly once: delivered; missed with one
+     notice; failed, undeliverable or delivery-unknown, with its reason on
+     the job and exactly one alert; or cancelled;
+   - nothing is delivered twice, and nothing fires at a time it was not
+     due;
+   - a missed occurrence was really due while the scheduler was down;
+   - a series across the clock change fires once per local day, at its
+     wall time;
+   - p95 lateness (claim to due, on fires due while the scheduler was up)
+     is at most one poll interval plus the turn time;
+   - readiness is degraded within one interval of the dead loop.
+
+   *Evidence it writes:* the report is rewritten whole as the run goes,
+   and a ledger is kept so `analyse` can re-check the run.
+
+   *Its test:* `tests/test_scheduled_soak_harness.py`. A three-day run
+   with 240 jobs ends healthy, having done each kind of work. The report
+   is on disk while the run goes. The check reports each planted
+   violation: a message delivered twice, an occurrence that never fired,
+   and a failure with no alert.
+
+   **Still open:** the 7-day qualification run itself (D3: a separate
+   machine or an agreed overnight slot).
+
+   **Found while building it, and out of the soak's reach** (two narrow
+   windows in which an alert can be lost, for the owner to decide; a crash
+   inside either loses the one alert, never the job's visible state):
+   - `_alert_failed_deliveries` marks a delivery alerted before it raises
+     the alert (at most once: a crash between the two drops it);
+   - a failed fire's alert is raised after `finish_fire` commits.
+   Closing them means an alert outbox recorded in the same transaction and
+   drained after it (at least once, so a crash can repeat an alert); the
+   soak's in-process kills land at quiet points and cannot reach either.
+
 ## Execution rules
 
 - **Keep the boundaries the design already has:**
@@ -147,6 +217,34 @@ when its gate passes on current evidence.
 
 - 2026-10-13: Tracker opened from the merged audit. No implementation yet.
 - 2026-10-14: Stages 1-4 and the Stage 5 rows implemented in one pass (stream S2), on branch `worktree-agent-afe34e1f329b02268`. All 31 witnesses run red from a scratch copy (each for its fixed reason), copy deleted. Area tests, the touched-module selection (217 files) and the listed global gates green; Arabic page tour and the new Arabic Scheduled e2e green. Load test (1,000 pending / 50 due) in `tests/test_cron_load.py`. No Postgres run was needed by a row. Open: the 7-day fake-clock soak with injected failures and restarts (Stage 5 exit gate; D3, owner), the full suite (`scripts/fast_test.py`, the coordinator's), an independent review, and per-user scheduling (D1).
+- 2026-10-15: Stage 5 soak harness built.
+  - **What was added.** `scripts/scheduled_soak.py`, with its test
+    `tests/test_scheduled_soak_harness.py`. A product seam the harness needs:
+    the cron engine now reads every time it records, and its poll loop's
+    wait, from one injectable clock (`kazma_core/cron/clock.py`; the store
+    takes `clock=`, and the scheduler uses the store's). Its behaviour test
+    and gate are in `tests/test_cron_clock.py`; the old reads are the
+    negative control.
+  - **A development run.** The defaults (7 simulated days, 2,000 jobs, seed
+    20261015) passed on the dev machine in 169 s of wall time:
+    - 5,228 due occurrences, each ended exactly once:
+      - 4,932 delivered;
+      - 24 missed, with one notice each;
+      - 188 failed (51 provider outage, 137 failed turns);
+      - 65 undeliverable;
+      - 13 delivery unknown;
+      - 6 not due, because their failure budget had run out.
+    - 57 restarts: 28 graceful, 14 killed mid-turn, 13 killed mid-send, one
+      105-minute gap, one after the dead loop.
+    - 7 lock holds, which failed 8 writes, 4 of them a fire's own finish.
+    - 257 alerts, exactly the 257 the rules expect.
+    - p95 lateness 26 s while the scheduler was up; the bound is 50 s.
+    - Readiness was degraded at once when the loop died.
+    - 176 series crossed the New York fall-back.
+    A second run with the same seed gave the same report, except for wall
+    time and memory.
+  - **This is not the qualification run.** It shows that the harness
+    works. The qualification run stays open (D3, owner).
 
 ## Start here
 

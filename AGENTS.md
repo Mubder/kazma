@@ -1933,7 +1933,8 @@ The agent's `schedule_task` / `list_scheduled` / `edit_scheduled` /
 store's operations (§29C). Hardened 2026-10-14 against the Scheduled audit
 (`docs/audits/AUDIT_SCHEDULED_2026-10-13.md`, tracker
 `docs/plans/SCHEDULED_INDUSTRIAL_HARDENING_GOAL.md`; the 7-day fake-clock
-soak is still open). Every rule below must hold:
+soak's harness is built, I; the run itself is still open). Every rule below
+must hold:
 
 **A. The scheduler MUST be constructed with a `graph_builder=`.**
 `app.py` builds `CronScheduler(store=…, graph_builder=_cron_graph_builder,
@@ -2105,6 +2106,14 @@ Gates: `tests/test_scheduled_api.py` (real scheduler and store),
 - **Dates and origin:** dates on the page and in X Studio go through
   `KazmaFormat`. `kazma_ui/same_origin.verify_same_origin` is the one
   same-origin check for the Scheduled, X and email routes.
+- **Qualification soak:** `scripts/scheduled_soak.py` (Stage 5) runs the real
+  scheduler and store on a private cron.db through seven simulated days of a
+  fake clock -- the engine reads every time and its poll wait from one
+  `CronClock` (`cron/clock.py`; gate `tests/test_cron_clock.py`) -- with
+  thousands of jobs, injected provider, delivery and database failures and
+  restarts, and checks each due occurrence against its own ground truth
+  (`tests/test_scheduled_soak_harness.py`: a short run, and planted losses as
+  negative controls).
 
 **Multi-tenant memory:** tenants are enforced with
 `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with
