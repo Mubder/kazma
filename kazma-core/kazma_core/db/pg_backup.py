@@ -31,6 +31,7 @@ Env kill-switch / tuning: ``KAZMA_PG_BACKUP_ENABLED=0``,
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -49,6 +50,8 @@ __all__ = [
     "perform_pg_backup",
     "prune_pg_backups",
     "latest_pg_backup",
+    "recheck_new_tables",
+    "report_missing_tables",
     "verify_required_pg_tables",
 ]
 
@@ -381,7 +384,8 @@ def verify_required_pg_tables(pool: Any) -> list[str] | None:
 
     ``pool`` is the shared ``PostgresPool`` (psycopg ConnectionPool). Returns
     None when the schema can't be checked at all (pool down) — callers must
-    treat None as "unknown", not "all present". Never raises.
+    treat None as "unknown", not "all present". Never raises. The Kazma
+    tables found are added to this install's record (:func:`_tables_seen`).
     """
     try:
         with pool.connection() as conn:
@@ -396,4 +400,126 @@ def verify_required_pg_tables(pool: Any) -> list[str] | None:
     except Exception:
         logger.warning("[pg_backup] schema verification skipped (pool unavailable)", exc_info=True)
         return None
+    _record_tables_seen(present)
     return [t for t in _required_pg_tables() if t not in present]
+
+
+# ── Dropped, or not created yet? ──────────────────────────────────────
+#
+# The boot check runs before Kazma's stores start, on purpose: a store
+# recreates a dropped table empty (CREATE TABLE IF NOT EXISTS), and the check
+# exists to catch the drop (2026-08-14). So a table a newer build adds is
+# also missing at that moment, until its store creates it a few seconds
+# later -- and the first boot of the Documents hardening (2026-10-14) logged
+# a CRITICAL telling the owner to restore a backup over two tables that had
+# never existed. Restoring would have rolled back every other table. A table
+# this install has seen in its Postgres and now misses was dropped; one it
+# has never seen is new. The record is a file beside the install, so a
+# Postgres that lost the tables cannot lose the record too.
+
+_SEEN_FILE = "pg_tables_seen.json"
+
+
+def _seen_path() -> Path:
+    from kazma_core.paths import data_dir
+
+    return Path(data_dir()) / _SEEN_FILE
+
+
+def _tables_seen() -> set[str] | None:
+    """Kazma's tables this install has found in its Postgres; None before
+    the first record, or when the record cannot be read."""
+    path = _seen_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        logger.warning("[pg_backup] the record of Kazma's Postgres tables is unreadable: %s",
+                       path, exc_info=True)
+        return None
+    tables = data.get("tables") if isinstance(data, dict) else None
+    return {str(t) for t in tables} if isinstance(tables, list) else None
+
+
+def _record_tables_seen(present: set[str]) -> None:
+    """Add the Kazma tables in *present* to the record (never removes one)."""
+    found = set(KAZMA_PG_TABLES) & set(present)
+    before = _tables_seen() or set()
+    if found <= before:
+        return
+    path = _seen_path()
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps({"tables": sorted(before | found), "updated": time.time()}),
+                       encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        logger.warning("[pg_backup] could not record Kazma's Postgres tables at %s",
+                       path, exc_info=True)
+
+
+def report_missing_tables(missing: list[str]) -> list[str]:
+    """Log the boot check's finding; return the tables to look for again.
+
+    A missing table on the record was dropped: CRITICAL, with the restore
+    command. One not on it is new in this build (INFO), or cannot be told
+    apart before the first record (WARNING); both are checked again once
+    the stores have started (:func:`recheck_new_tables`). Blocking: it
+    reads the record and lists the dumps.
+    """
+    seen = _tables_seen()
+    lost = [t for t in missing if seen is not None and t in seen]
+    later = [t for t in missing if t not in lost]
+    if lost:
+        hint = (
+            "Restore the latest backup with: python scripts/pg_backup.py restore --latest"
+            if latest_pg_backup()
+            else "No pg_backup dump exists yet — restore from your migration bundle, "
+            "then run: python scripts/pg_backup.py backup"
+        )
+        logger.critical(
+            "[PG-BACKUP] REQUIRED POSTGRES TABLES MISSING: %s. These were in this "
+            "install's Postgres before. Chat history / settings / document jobs are "
+            "broken until restored. %s",
+            ", ".join(lost), hint,
+        )
+    if later and seen is None:
+        logger.warning(
+            "[PG-BACKUP] Postgres tables not there yet: %s. This install has no record "
+            "of its earlier boots, so a dropped table cannot be told from one this "
+            "build adds; checked again once Kazma has started.",
+            ", ".join(later),
+        )
+    elif later:
+        logger.info(
+            "[PG-BACKUP] tables this build adds, created by their stores at start: %s "
+            "(checked again once Kazma has started)",
+            ", ".join(later),
+        )
+    return later
+
+
+async def recheck_new_tables(pool: Any, tables: list[str], *, delay: float = 60.0) -> list[str] | None:
+    """Look again for *tables* once the stores have had *delay* seconds to
+    create them. Returns the ones still missing (None: could not check)."""
+    import asyncio
+
+    await asyncio.sleep(delay)
+    missing = await asyncio.to_thread(verify_required_pg_tables, pool)
+    if missing is None:
+        logger.warning("[PG-BACKUP] could not check again for %s (pool unavailable)",
+                       ", ".join(tables))
+        return None
+    still = [t for t in tables if t in missing]
+    if still:
+        logger.warning(
+            "[PG-BACKUP] Postgres tables still missing after start: %s. The store that "
+            "creates them has not run; if they held data before, restore with: "
+            "python scripts/pg_backup.py restore --latest",
+            ", ".join(still),
+        )
+    else:
+        logger.info("[PG-BACKUP] the new tables are there: %s", ", ".join(tables))
+    return still
