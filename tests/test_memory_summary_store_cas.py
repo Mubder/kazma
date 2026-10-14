@@ -165,6 +165,46 @@ def test_a_turn_forgotten_during_a_rebuild_is_not_written(mem):
     assert status == "active" and "phase 1 " not in text and "phase 5" not in text
 
 
+def _rebuilt_without_ship4(mem) -> str:
+    from kazma_core.memory import forget
+    from kazma_core.memory import topic_summaries as ts
+
+    _ship_week(mem)
+    key, start, end = _week()
+    assert asyncio.run(ts.summarize_period("default", key, start, end, chat=_fake_chat()))
+    sid = mem.db.execute("SELECT id FROM memory_summaries WHERE status = 'active'").fetchone()[0]
+    assert forget.forget_episode("ship4", tenant_id="default")["ok"]
+    assert asyncio.run(ts.rebuild_summary(sid, chat=_fake_chat()))
+    assert mem.db.execute("SELECT status FROM memory_summaries WHERE id = ?", (sid,)).fetchone()[0] == "active"
+    return sid
+
+
+def test_a_rebuilt_summary_names_only_the_turns_it_was_written_from(mem):
+    """Live 2026-10-14: a rebuild wrote the summary from the turns left and kept
+    the forgotten turn's source row, so the ledger check found an active
+    summary of a forgotten turn and sent it back after every rebuild."""
+    from kazma_core.memory import forget
+
+    sid = _rebuilt_without_ship4(mem)
+    sources = {r[0] for r in mem.db.execute(
+        "SELECT episode_id FROM memory_summary_sources WHERE summary_id = ?", (sid,))}
+    assert sources == {"ship0", "ship1", "ship2", "ship3"}
+    assert forget.enforce_ledger(mem.db) == {"memories": 0, "summaries": 0}
+    assert mem.db.execute("SELECT status FROM memory_summaries WHERE id = ?", (sid,)).fetchone()[0] == "active"
+
+
+def test_a_stale_source_row_sends_the_summary_back(mem):
+    """Negative control: the row the old rebuild left makes the ledger check
+    refuse the rebuilt summary again."""
+    from kazma_core.memory import forget
+
+    sid = _rebuilt_without_ship4(mem)
+    mem.db.execute("INSERT INTO memory_summary_sources (summary_id, episode_id) VALUES (?, 'ship4')", (sid,))
+    mem.db.commit()
+    assert forget.enforce_ledger(mem.db) == {"memories": 0, "summaries": 1}
+    assert mem.db.execute("SELECT status FROM memory_summaries WHERE id = ?", (sid,)).fetchone()[0] == "rebuild"
+
+
 OLD_STORE_UPDATE = (
     "UPDATE memory_summaries SET title = ?, summary_text = ?, turn_count = ?, chat_count = ?, "
     "first_turn_at = ?, last_turn_at = ?, model = ?, updated_at = ?, embedding = ?, "
