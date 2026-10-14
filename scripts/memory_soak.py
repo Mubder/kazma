@@ -53,6 +53,11 @@ from pathlib import Path
 from typing import Any
 
 _HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))  # the shared report helpers sit beside this file
+from soak_report import percentile as _percentile  # noqa: E402
+from soak_report import utc_stamp  # noqa: E402
+from soak_report import write_report as _write_report  # noqa: E402
+
 _ROOT = _HERE.parent
 for _pkg in ("kazma-core", "kazma-ui"):
     _p = str(_ROOT / _pkg)
@@ -280,13 +285,6 @@ def _size_mb(path: Path) -> float:
     return round(total / 1048576, 2)
 
 
-def _percentile(values: list[float], q: float) -> float | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int(round(q * (len(ordered) - 1))))]
-
-
 def _plan(cycle: int, rng: random.Random, args: argparse.Namespace, chats: dict[str, int],
           memory: list[dict[str, Any]], backups: list[Path]) -> dict[str, Any]:
     now = time.time()
@@ -422,7 +420,7 @@ def _summary(report: dict[str, Any], started: float, memory: list[dict[str, Any]
     out = {k: v for k, v in report.items() if k not in ("recall_ms", "child_seconds", "peak_rss_mb")}
     out.update({
         "status": status,
-        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "updated_at": utc_stamp(),
         "seconds": round(time.monotonic() - started, 1),
         "turns": len(memory),
         "recall_ms": {"p50": _percentile(lat, 0.5), "p95": _percentile(lat, 0.95),
@@ -434,16 +432,6 @@ def _summary(report: dict[str, Any], started: float, memory: list[dict[str, Any]
         "healthy": not report["violations"],
     })
     return out
-
-
-def _write_report(path: str | None, summary: dict[str, Any]) -> None:
-    """Replace the report file whole (a reader never sees half of one)."""
-    if not path:
-        return
-    target = Path(path)
-    tmp = target.with_name(target.name + ".tmp")
-    tmp.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, target)
 
 
 def _held(data_dir: Path) -> dict[str, Any]:
