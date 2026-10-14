@@ -744,8 +744,16 @@ are enforced in SQLite on every save, oldest first: per step
 Read failures raise `SnapshotStoreError`: 503 `store_unavailable` on the
 routes, a plain sentence in the chats -- never "no steps saved".
 `maintain_snapshots` VACUUMs only when a quarter of the file and 8 MB are
-free; a prune that did not stick is an ops alert
+free, then truncates the WAL the VACUUM wrote through (`_truncate_wal`), and
+reports sizes as the file plus its WAL and shared memory (`_disk_bytes`):
+with the recorder's connection open the WAL kept the rewritten file's size,
+and the "reclaimed" it reported was not the disk's (found by the TT-G3 soak,
+2026-10-15). A prune that did not stick is an ops alert
 (`time_travel.prune_not_sticking`); the run has a firing-ledger signature.
+The long soak (TT-G3) is `scripts/time_travel_soak.py`: a restart per cycle
+on private stores, 2,000-iteration turns, every restore/fork/forget path,
+injected faults and kills, these budgets checked after every cycle
+(`tests/test_time_travel_soak_harness.py`, with planted violations).
 
 **D. Restore and fork are one service (`kazma_ui/thread_rewind.py`, TT-02,
 TT-04, TT-G1).** Every surface calls `rewind_thread` / `fork_thread`: the

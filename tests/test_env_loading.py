@@ -187,6 +187,11 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "soaks the cron scheduler on a private temporary cron.db and a fake clock; an "
         "install's .env would point thousands of bookings at its schedule and chats"
     ),
+    "scripts/time_travel_soak.py": (
+        "soaks Time Travel on private temporary stores, forced to SQLite; an "
+        "install's .env would point its captures, restores, forgets and "
+        "injected faults at that install's databases"
+    ),
     "scripts/shipped_defaults.py": "compares kazma.yaml with its committed snapshot; reads no install",
 }
 

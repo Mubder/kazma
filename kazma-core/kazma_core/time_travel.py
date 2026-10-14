@@ -1152,6 +1152,30 @@ def _free_pages(db: Path) -> tuple[int, int, int]:
         conn.close()
 
 
+def _disk_bytes(db: Path) -> int:
+    """What the store holds on disk: the file, its WAL and its shared memory.
+
+    In WAL mode a VACUUM writes the rewritten file into the WAL; the file is
+    cut only at a checkpoint, and the WAL keeps its size until truncated.
+    Counting the file alone, the TT-G3 soak saw maintenance report 27.5 MB
+    reclaimed while the disk use went from 81.6 MB to 108.2 MB.
+    """
+    return sum(p.stat().st_size for p in (db, Path(f"{db}-wal"), Path(f"{db}-shm")) if p.exists())
+
+
+def _truncate_wal(conn: sqlite3.Connection) -> str:
+    """Checkpoint the VACUUM's WAL into the file and truncate it to zero.
+
+    A reader holding an older snapshot (the recorder between statements does
+    not) keeps part of it; that is said, never hidden: the next checkpoint
+    finishes it.
+    """
+    busy, wal_pages, moved = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    if busy:
+        return f"ok; WAL not truncated yet ({moved} of {wal_pages} pages checkpointed, a reader is busy)"
+    return "ok"
+
+
 def maintain_snapshots(
     db_path: str | Path | None = None,
     retention_days: int = 30,
@@ -1168,7 +1192,7 @@ def maintain_snapshots(
         ``reclaimed`` (bytes), ``retention_days``, and per-step status.
     """
     db = Path(_resolve_db_path(db_path))
-    size_before = db.stat().st_size if db.exists() else 0
+    size_before = _disk_bytes(db)
     deleted = 0
     cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(retention_days)))).isoformat()
 
@@ -1209,9 +1233,9 @@ def maintain_snapshots(
             try:
                 apply_sqlite_pragmas(conn)
                 conn.execute("VACUUM")
+                vacuum_status = _truncate_wal(conn)
             finally:
                 conn.close()
-            vacuum_status = "ok"
         else:
             vacuum_status = f"skipped: {ratio:.0%} free ({free_bytes} bytes)"
     except Exception as exc:  # noqa: BLE001
@@ -1234,7 +1258,7 @@ def maintain_snapshots(
     except Exception:
         logger.debug("[TimeTravel] prune verification skipped", exc_info=True)
 
-    size_after = db.stat().st_size if db.exists() else 0
+    size_after = _disk_bytes(db)
     if remaining_old > 0:
         logger.error(
             "[TimeTravel] prune did NOT stick: %d rows older than %dd are still "

@@ -32,6 +32,18 @@
   the turn, and readiness saw the dead loop. The scheduler and its store now
   read time from one clock object, which the soak replaces with a fake one;
   the server's clock is the real one, as before.
+- Time Travel long soak (`scripts/time_travel_soak.py`, tracker row TT-G3):
+  a fresh process per cycle on private stores, with turns of 2,000 steps,
+  states past the per-step ceiling, every restore, fork, forget and delete
+  path, maintenance, and injected faults and kills. After every cycle it
+  checks every step and byte budget, the file and WAL bounds, memory, and
+  that a restored or forked chat equals its step and deleted steps never
+  come back.
+- Its first runs found that Time Travel's clean-up did not give the disk
+  back as it reported: on a running server a VACUUM left a write-ahead log
+  the size of the rewritten file, so the disk use rose while the clean-up
+  reported space reclaimed. It now truncates that log after the VACUUM, and
+  reports the sizes of the file and its log together.
 
 ## Swarm approvals on the web; Knowledge outcomes checked in a browser (2026-10-14)
 
