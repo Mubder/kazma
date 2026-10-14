@@ -121,6 +121,7 @@ async def _soak(args: argparse.Namespace, root: Path, data_dir: str) -> dict:
     next_restart = started + args.restart_every
     next_crash = started + args.crash_every
     interval = 60.0 / max(1, args.rate)
+    next_report = started + _PROGRESS_EVERY_S
     svc = DocumentIngestionService(config=_config(root))
     await svc.start_workers()
     try:
@@ -156,6 +157,19 @@ async def _soak(args: argparse.Namespace, root: Path, data_dir: str) -> dict:
                 restarts += 1
                 next_restart = now + args.restart_every
             samples.append({"t": round(now - started, 1), **_tree_sample()})
+            if now >= next_report:
+                # The run so far, so a reboot or a kill still leaves evidence.
+                latencies = [ready_at[j] - submitted[j] for j in ready_at]
+                _write_report(getattr(args, "report", None), {
+                    "status": "running",
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "seconds": round(now - started, 1), "submitted": len(submitted),
+                    "finished": len(ready_at), "restarts": restarts, "crashes_injected": crashes,
+                    "latency_seconds": {"p50": _percentile(latencies, 0.50),
+                                        "p95": _percentile(latencies, 0.95)},
+                    "resources_now": samples[-1], "error_count": len(errors), "errors": errors[-20:],
+                })
+                next_report = now + _PROGRESS_EVERY_S
             await asyncio.sleep(interval)
         # Drain: everything submitted must end.
         drain_until = time.monotonic() + args.drain
@@ -256,11 +270,25 @@ def main(argv: list[str] | None = None) -> int:
         and report["scratch_left"] == 0
     )
     report["healthy"] = healthy
-    text = json.dumps(report, indent=2, sort_keys=True, default=str)
-    if args.report:
-        Path(args.report).write_text(text, encoding="utf-8")
-    print(text)
+    report["status"] = "passed" if healthy else "failed"
+    report["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _write_report(args.report, report)
+    print(json.dumps(report, indent=2, sort_keys=True, default=str))
     return 0 if healthy else 1
+
+
+#: How often a running soak rewrites its report.
+_PROGRESS_EVERY_S = 60.0
+
+
+def _write_report(path: str | None, report: dict) -> None:
+    """Replace the report file whole (a reader never sees half of one)."""
+    if not path:
+        return
+    target = Path(path)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(json.dumps(report, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    os.replace(tmp, target)
 
 
 if __name__ == "__main__":
