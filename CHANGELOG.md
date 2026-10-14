@@ -44,6 +44,14 @@
   the size of the rewritten file, so the disk use rose while the clean-up
   reported space reclaimed. It now truncates that log after the VACUUM, and
   reports the sizes of the file and its log together.
+- Knowledge Library scale and soak harness (`scripts/knowledge_soak.py`,
+  tracker row KB-Q01): `scale` measures ingest, keyword, meaning and hybrid
+  search, the repair sweep, library delete and the re-embed time after a
+  restore at 10k, 100k and 1M chunks in English, Arabic and mixed text, and
+  names the machine; `soak` runs crawls, refreshes, document publications,
+  deletes, model switches and restarts, checking after every cycle that
+  nothing published is lost or doubled, the keyword index matches, meaning
+  search converges, and a deleted library leaves nothing behind.
 
 ## Swarm approvals on the web; Knowledge outcomes checked in a browser (2026-10-14)
 

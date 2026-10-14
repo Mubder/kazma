@@ -192,6 +192,11 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "install's .env would point its captures, restores, forgets and "
         "injected faults at that install's databases"
     ),
+    "scripts/knowledge_soak.py": (
+        "measures and soaks the Knowledge Library on private temporary SQLite "
+        "stores; an install's .env would point its crawls, deletes and model "
+        "switches at the install's library and vectors"
+    ),
     "scripts/shipped_defaults.py": "compares kazma.yaml with its committed snapshot; reads no install",
 }
 

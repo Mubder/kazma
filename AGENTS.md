@@ -3846,6 +3846,12 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   its negative control.
 - Gate: `tests/test_knowledge_meaning_search.py` (a fake chromadb in CI, the
   real one where the `rag` extra is installed).
+- KB-Q01's harness is `scripts/knowledge_soak.py` (`scale`: ingest, search,
+  idle-sweep, restore re-embed and delete measured per size and language on
+  named hardware; `soak`: crawls, refreshes, documents, deletes, model
+  switches, crashes, a restart every cycle, checked from the stores), held by
+  `tests/test_knowledge_soak_harness.py` (its runs need the real chromadb;
+  the negative controls run everywhere).
 
 ### 25. Long-Task Continue Protocol & Partial Pause (`agent/long_task.py`)
 
