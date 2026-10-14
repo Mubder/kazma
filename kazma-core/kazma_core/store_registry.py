@@ -152,9 +152,12 @@ STORES: dict[str, Store] = {
         "approval decisions (the gate registry)", "bundle"),
     "vault.db": Store("encrypted secrets", "bundle"),
     "settings.db": Store(
-        "settings, knowledge libraries, workspaces and bookmarks", "settings",
-        reason="exported as config.yaml plus its knowledge and workspace tables",
+        "settings, workspaces and bookmarks", "settings",
+        reason="exported as config.yaml plus its workspace table",
         ambiguous_name=True),
+    "knowledge.db": Store(
+        "the Knowledge Library: libraries, chunks and their keyword index "
+        "(in settings.db until 2026-10-14, Knowledge audit KB-E10)", "bundle"),
     "rbac.db": Store("roles and permissions", "bundle"),
     "audit.db": Store("the audit log", "bundle", ambiguous_name=True),
     "security_audit.db": Store(
@@ -306,6 +309,9 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "vector_memory": DataDirEntry(
         "the Knowledge Library's vectors", "rebuilt",
         reason="the knowledge vector repair sweep re-embeds every chunk"),
+    "knowledge_provenance": DataDirEntry(
+        "each Knowledge Library page's fetched text, by library: removed with its library",
+        "bundle"),
     "code-index": DataDirEntry(
         "codebase search indexes", "rebuilt", reason="re-indexed from the workspace"),
     "vuln_cache.json": DataDirEntry(
@@ -409,11 +415,11 @@ TOOL_WRITES: dict[str, Write] = {
     "memory_merge_entities": Write(("memory_state.db",), _MEMORY_READERS),
     "memory_purge_empty_entities": Write(("memory_state.db",), _MEMORY_READERS),
     "knowledge_create_library": Write(
-        ("settings.db",), ("knowledge_list_libraries", "knowledge_search")),
+        ("knowledge.db",), ("knowledge_list_libraries", "knowledge_search")),
     "knowledge_ingest_url": Write(
-        ("settings.db",), ("knowledge_list_libraries", "knowledge_search")),
+        ("knowledge.db",), ("knowledge_list_libraries", "knowledge_search")),
     "knowledge_ingest_site": Write(
-        ("settings.db",), ("knowledge_list_libraries", "knowledge_search", "research_readiness")),
+        ("knowledge.db",), ("knowledge_list_libraries", "knowledge_search", "research_readiness")),
     "config_save": Write(("settings.db",), ("config_read",)),
     "request_path_access": Write(("settings.db",), ("config_read",)),
     "vault_store": Write(("vault.db",), ("vault_list",)),
@@ -605,7 +611,7 @@ def distinctive_store_names() -> frozenset[str]:
         from kazma_core import paths as _paths
 
         for helper in (
-            "vault_db_path", "checkpoints_db", "settings_db", "snapshots_db",
+            "vault_db_path", "checkpoints_db", "settings_db", "knowledge_db", "snapshots_db",
             "swarm_tasks_db", "audit_db", "rbac_db", "hub_registry_db",
             "primary_memory_db", "memory_ops_db", "memory_forget_journal_db", "knowledge_graph_db",
         ):

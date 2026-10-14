@@ -74,8 +74,8 @@ Env: `KAZMA_MULTI_USER=1`, `KAZMA_PRODUCTION=1`, `KAZMA_DATABASE_URL`,
 | MCP servers (user-added) | Global ConfigStore | **Tenant-scoped** key `tenant.<id>.mcp.servers` |
 | Cron job list | Global | **tenant_id** column; UI list filtered |
 | `_active_tasks` | Process memory | Still process-local; persist via TaskStore for history |
-| KB crawl jobs | Process + ConfigStore | Durable ConfigStore (`stores/kb_jobs.py`) |
-| Knowledge libraries | Global | **tenant_id** column + list/get filter when multi-user/prod |
+| KB crawl jobs | Process + ConfigStore | The crawl journal (`web_acquire/crawl_jobs.py`): one row per job, owners scoped to this install |
+| Knowledge libraries | Global | Own `knowledge.db`; refused on an install with platform users (single-operator) |
 | Swarm bus adapters | Process singleton | Fan-out multi-platform; still one process |
 | Browser affinity | None | Cookie ``kazma-replica`` (`KAZMA_REPLICA_ID`, LB sticky) |
 

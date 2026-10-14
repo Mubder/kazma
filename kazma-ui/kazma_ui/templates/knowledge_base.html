@@ -24,6 +24,8 @@
     searching: {{ t('knowledge.searching') | tojson }},
     meaning_search: {{ t('knowledge.meaning_search') | tojson }},
     keyword_only: {{ t('knowledge.keyword_only') | tojson }},
+    meaning_rebuilding: {{ t('knowledge.meaning_rebuilding') | tojson }},
+    meaning_unknown: {{ t('knowledge.meaning_unknown') | tojson }},
     delete_confirm_title: {{ t('knowledge.delete_confirm_title') | tojson }},
     delete_confirm_msg: {{ t('knowledge.delete_confirm_msg') | tojson }},
     refresh_started: {{ t('knowledge.refresh_started') | tojson }},
@@ -49,6 +51,9 @@
     refresh_confirm_msg: {{ t('knowledge.refresh_confirm_msg') | tojson }},
   };
 </script>
+{% if kb_single_operator %}
+<div id="knowledge-single-operator" role="alert" style="max-width:1000px;margin:0 auto 1rem auto;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:8px;padding:12px 16px;color:var(--warning);">{{ t('knowledge.single_operator') }}</div>
+{% endif %}
 <div
   id="knowledge-root" data-job="{{ request.query_params.get('job', '') | e }}" x-data="knowledgePage()"
   style="max-width:1000px;margin:0 auto;padding:0 1rem;box-sizing:border-box;"
@@ -142,7 +147,7 @@
                   <span x-text="balance.fresh ? KazmaFormat.number(balance.remaining) : S.credits_unavailable"></span>
                   <bdi translate="no" x-text="balance.status"></bdi>
                   <span x-show="balance.observed_at" x-cloak x-text="balance.observed_at ? KazmaFormat.dateTime(new Date(balance.observed_at * 1000)) : ''"></span>
-                  <a x-show="balance.dashboard" x-cloak :href="balance.dashboard" target="_blank" rel="noopener noreferrer">{{ t('knowledge.provider_dashboard') }}</a>
+                  <a x-show="safeHref(balance.dashboard)" x-cloak :href="safeHref(balance.dashboard)" target="_blank" rel="noopener noreferrer">{{ t('knowledge.provider_dashboard') }}</a>
                 </div>
               </template>
               <button class="btn btn-secondary btn-sm" x-show="activeJob.acquisition.provider_balances[0].status !== 'disabled' && activeJob.acquisition.provider_balances[0].status !== 'not_configured'" x-cloak :disabled="!!_creditsAbort" @click="refreshCredits()">{{ t('knowledge.credits_refresh') }}</button>
@@ -157,11 +162,10 @@
         {{ t('knowledge.job_ingested') }}: <span x-text="activeJob.ingested || 0"></span> ·
         {{ t('knowledge.job_skipped') }}: <span x-text="activeJob.skipped || 0"></span> ·
         {{ t('knowledge.job_unchanged') }}: <span x-text="activeJob.pages_unchanged || 0"></span> ·
-        {{ t('knowledge.job_pruned') }}: <span x-text="activeJob.pruned_urls || 0"></span> ·
         {{ t('knowledge.job_failed') }}: <span x-text="activeJob.failed || 0"></span>
       </div>
       <div x-show="activeJob.current_url" style="margin-top:4px;font-size:0.78rem;color:var(--text-secondary);word-break:break-all;" x-cloak>
-        {{ t('knowledge.job_current') }} <code x-text="activeJob.current_url"></code>
+        {{ t('knowledge.job_current') }} <code translate="no" dir="ltr"><bdi x-text="activeJob.current_url"></bdi></code>
       </div>
       <template x-if="activeJob.errors && activeJob.errors.length">
         <div style="margin-top:8px;font-size:0.75rem;color:var(--danger,#e53935);border-top:1px dashed var(--border);padding-top:6px;">
@@ -233,7 +237,7 @@
               </label>
             </div>
             <div x-show="lib.seed_url" style="font-size:0.8rem;color:var(--text-secondary);margin-top:3px;word-break:break-all;" x-cloak>
-              {{ t('knowledge.seed_label') }} <a :href="lib.seed_url" target="_blank" rel="noopener" x-text="lib.seed_url"></a>
+              {{ t('knowledge.seed_label') }} <a translate="no" dir="ltr" :href="safeHref(lib.seed_url)" target="_blank" rel="noopener noreferrer"><bdi x-text="lib.seed_url"></bdi></a>
             </div>
           </div>
           <div style="display:flex;gap:4px;flex-shrink:0;">
@@ -267,7 +271,7 @@
                 <div style="margin-bottom:0.5rem;border-left:2px solid var(--primary);padding-left:8px;">
                   <div style="font-size:0.75rem;color:var(--text-secondary);word-break:break-all;">
                     [<span x-text="i + 1"></span>] {{ t('knowledge.hit_score') }} <span x-text="h.score.toFixed(4)"></span> ·
-                    <a translate="no" :href="h.source_url" target="_blank" rel="noopener" x-text="h.source_url"></a>
+                    <a translate="no" dir="ltr" :href="safeHref(h.source_url)" target="_blank" rel="noopener noreferrer"><bdi x-text="h.source_url"></bdi></a>
                     <span x-show="h.section_header" x-cloak> — <span translate="no" x-text="h.section_header"></span></span>
                   </div>
                   <pre style="margin:4px 0 0 0;font-size:0.78rem;white-space:pre-wrap;background:var(--bg-accent,#1e1e2a);padding:6px;border-radius:4px;max-height:240px;overflow:auto;" x-text="h.content"></pre>
@@ -287,7 +291,7 @@
                   <span :translate="(c.section_header || c.document_title) ? 'no' : null" x-text="c.section_header || c.document_title || {{ t('knowledge.untitled') | tojson | forceescape }}"></span>
                   <span x-show="c.has_code" style="color:var(--primary);" x-cloak>⌗</span>
                   <div translate="no" style="color:var(--text-secondary);font-size:0.74rem;word-break:break-all;">
-                    <a :href="c.source_url" target="_blank" rel="noopener" x-text="c.source_url"></a>
+                    <a translate="no" dir="ltr" :href="safeHref(c.source_url)" target="_blank" rel="noopener noreferrer"><bdi x-text="c.source_url"></bdi></a>
                   </div>
                   <pre style="margin:2px 0;font-size:0.74rem;color:var(--text-secondary);white-space:pre-wrap;" x-text="c.preview + '…'"></pre>
                 </div>

@@ -77,6 +77,37 @@ def reset_failover_cache() -> None:
     _failover_cooldowns.clear()
 
 
+_KNOWLEDGE_NOTE = '<kazma:data source="knowledge"'
+
+
+def _is_knowledge_note(message: Any) -> bool:
+    return (isinstance(message, dict) and message.get("role") == "system"
+            and str(message.get("content") or "").startswith(_KNOWLEDGE_NOTE))
+
+
+def _knowledge_inject_for_turn(user_text: str) -> Any:
+    """The turn's Knowledge block, or None (blocking: run in a thread).
+
+    None when the Settings switch "Inject Knowledge into chat"
+    (``memory.v2.merge_knowledge_into_chat``) is off. The kill switch and
+    each library's opt-in are checked by
+    :func:`kazma_core.stores.knowledge_index.build_knowledge_inject`. The
+    caller removes any Knowledge note already in the messages first: a turn
+    carries ONE (KB-S08).
+    """
+    try:
+        from kazma_core.memory.config import read_memory_cfg
+
+        if not ((read_memory_cfg() or {}).get("v2") or {}).get("merge_knowledge_into_chat", True):
+            return None
+        from kazma_core.stores.knowledge_index import build_knowledge_inject
+
+        return build_knowledge_inject(user_text)
+    except Exception:
+        logger.warning("[Supervisor] Knowledge Library inject skipped", exc_info=True)
+        return None
+
+
 def _last_tool_tests_failed(messages: list[Any]) -> bool:
     """True when the most recent tool result is a failed nearby-pytest verify."""
     for msg in reversed(messages or []):
@@ -981,6 +1012,17 @@ async def supervisor_node(
     except Exception:
         pass
 
+    # ── Knowledge Library (one injection per turn, KB-S08) ───────
+    # The supervisor is the ONE place a turn's Knowledge block is built:
+    # the transports (web, voice, chat apps) used to inject the same
+    # chunks a second time, so the first model call carried them twice.
+    # Built off the loop (SQLite, the vector index, a settings read);
+    # injected next to memory, never written into it (Memory audit M04).
+    _kb_inject = None
+    if iteration == 0 and last_user_content:
+        messages = [m for m in messages if not _is_knowledge_note(m)]
+        _kb_inject = await asyncio.to_thread(_knowledge_inject_for_turn, last_user_content)
+
     if _suppress_recall and iteration == 0:
         logger.info(
             "[Supervisor] V2 recall suppressed (intent=%s constraints=%s)",
@@ -1077,69 +1119,12 @@ async def supervisor_node(
                         logger.debug(
                             "[Supervisor] transcript fallback failed", exc_info=True
                         )
-                # Merge Knowledge Library into chat path (labeled, fenced).
-                # Injected next to memory, never written into it: the old
-                # "promote to episodes" stored crawled text in the chat's
-                # memory as the user's words, on this loop (Memory audit M04).
-                _kb_hits_for_explain: list[dict[str, Any]] = []
-                try:
-                    from kazma_core.memory.config import read_memory_cfg
-                    from kazma_core.safety.prompt_fence import format_untrusted_block
-
-                    _v2m = (read_memory_cfg() or {}).get("v2") or {}
-                    if _v2m.get("merge_knowledge_into_chat", True):
-                        from kazma_core.memory.federated_search import (
-                            federated_search,
-                            format_kb_hits_for_prompt,
-                        )
-
-                        # Industry path: hybrid RRF over inject-scoped libs first
-                        # (auto_inject + optional smart search), same stack as
-                        # get_knowledge_auto_inject_block — not a parallel FTS path.
-                        # to_thread: SQLite + the knowledge index, like recall above.
-                        fed = await asyncio.to_thread(
-                            federated_search,
-                            last_user_content,
-                            tenant_id=state.get("tenant_id", "default"),
-                            session_id=state.get("thread_id"),
-                            limit_memory=0,
-                            limit_kb=3,
-                            include_memory=False,
-                            include_knowledge=True,
-                            kb_mode="inject",
-                        )
-                        _kb_hits_for_explain = list(fed.get("hits") or [])
-                        kb_md = format_kb_hits_for_prompt(
-                            _kb_hits_for_explain, max_hits=3
-                        )
-                        if not kb_md:
-                            # Fallback: explicit inject helper (same RRF; handles
-                            # footer wording if federated returned empty edge case)
-                            try:
-                                from kazma_core.stores.knowledge_index import (
-                                    get_knowledge_auto_inject_block,
-                                )
-
-                                kb_md = await get_knowledge_auto_inject_block(
-                                    last_user_content
-                                )
-                            except Exception:
-                                kb_md = ""
-                        if kb_md:
-                            messages.insert(
-                                1,
-                                {
-                                    "role": "system",
-                                    "content": format_untrusted_block(
-                                        kb_md, source="knowledge"
-                                    ),
-                                },
-                            )
-                            logger.info("[Supervisor] Knowledge Library merged into chat inject")
-                except Exception:
-                    logger.debug(
-                        "[Supervisor] knowledge merge inject skipped", exc_info=True
-                    )
+                # The Knowledge block of this turn (injected below, after
+                # this block): the "Memory used" record lists exactly the
+                # chunks it holds (Knowledge audit KB-S02).
+                _kb_hits_for_explain: list[dict[str, Any]] = list(
+                    _kb_inject.hits if _kb_inject is not None else []
+                )
                 # Chat-turn Memory context (always when inject ran; full chips
                 # when explain_recall is on — industry observability default).
                 try:
@@ -1210,6 +1195,26 @@ async def supervisor_node(
                     "[Supervisor] V2 recall failed — skipping memory injection",
                     exc_info=True,
                 )
+
+    if _kb_inject is not None and _kb_inject.block:
+        from kazma_core.safety.prompt_fence import format_untrusted_block
+
+        messages.insert(1, {"role": "system",
+                            "content": format_untrusted_block(_kb_inject.block, source="knowledge")})
+        logger.info("[Supervisor] Knowledge Library: %d chunk(s) injected for the turn",
+                    len(_kb_inject.hits))
+        # Recall suppressed or off: the turn still says which chunks it
+        # injected (KB-S02), as the summary record.
+        if _memory_explain_cv.get() is None:
+            try:
+                from kazma_core.memory.recall import build_memory_explain_payload
+
+                _kb_payload = build_memory_explain_payload(
+                    query=last_user_content, kb_hits=list(_kb_inject.hits), explain="summary")
+                if _kb_payload is not None:
+                    _memory_explain_cv.set(_kb_payload)
+            except Exception:
+                logger.debug("[Supervisor] knowledge explain payload skipped", exc_info=True)
 
     # Per-turn language lock (graph level so Telegram/Discord/Web share one path).
     # Always replace any prior LANGUAGE LOCK messages so a session that started

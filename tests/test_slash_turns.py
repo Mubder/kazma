@@ -39,6 +39,11 @@ def test_bare_swarm_mention_rewrites():
 def test_kb_and_skill_work_vs_list():
     assert rewrite_work_slash("/kb list") is None
     assert is_control_slash("/kb list")
-    assert rewrite_work_slash("/kb crawl docs https://example.com") is not None
+    # Re-pointed (Knowledge KB-S07): /kb is never rewritten into a model
+    # turn -- the gateway's _try_kb_command handles every subcommand,
+    # admin-gated where it changes a library (tests/test_kb_gateway_commands.py).
+    for text in ("/kb crawl docs https://example.com", "/kb add docs https://x.test",
+                 "/kb refresh docs", "/kb delete docs"):
+        assert rewrite_work_slash(text) is None and is_control_slash(text)
     assert rewrite_work_slash("/skill list") is None
     assert rewrite_work_slash("/skill install owner/repo") is not None

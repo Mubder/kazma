@@ -1,150 +1,211 @@
 """Knowledge Base API — Web transport for Knowledge Libraries.
 
 Thin FastAPI layer that exposes the Knowledge Library subsystem
-(``kazma_core.stores.knowledge*``) to the ``/knowledge`` page.  It adds
-**zero** business logic: library CRUD delegates to
-``KnowledgeStore``; ingestion runs ``ingest_url`` / ``ingest_site`` as
-background ``asyncio`` tasks; search delegates to ``KnowledgeIndex``.
+(``kazma_core.stores.knowledge*``) to the ``/knowledge`` page. Library CRUD
+delegates to ``KnowledgeStore``, deletion to
+``knowledge_lifecycle.delete_library``, ingestion to ``ingest_url`` /
+``ingest_site`` (a crawl runs as a background ``asyncio`` task), search to
+``KnowledgeIndex``.
 
-Endpoints (all under ``/api/kb``):
-  GET    /libraries                       — list libraries
-  POST   /libraries      {id,name,...}    — create a library
-  GET    /libraries/{id}                  — one library
-  PATCH  /libraries/{id} {auto_inject?}   — update a library
-  DELETE /libraries/{id}                  — delete library + chunks
-  GET    /libraries/{id}/chunks           — paginated chunk browser
-  POST   /ingest         {library_id,url,mode,max_pages?}
-                                           — page (sync) or site (background)
-  GET    /jobs/{job_id}                   — live ingestion progress
-  POST   /search         {library_id,query,top_k?}
-                                           — in-page test search
-  POST   /libraries/{id}/refresh          — re-ingest from seed_url
+Endpoints (all under ``/api/kb``; 16 routes):
+  GET    /libraries                         — list libraries (no storage side effects)
+  POST   /libraries        {id,name,...}    — create an empty library
+  GET    /libraries/archived/list           — the archived libraries
+  GET    /libraries/{id}                    — one library
+  PATCH  /libraries/{id}   {auto_inject?..} — update a library
+  DELETE /libraries/{id}                    — delete a library and every derived copy
+  POST   /libraries/{id}/archive            — archive
+  POST   /libraries/{id}/unarchive          — restore from the archive
+  GET    /libraries/{id}/chunks             — paginated chunk browser
+  POST   /libraries/{id}/refresh            — re-crawl from the seed URL
+  POST   /ingest           {library_id,url,mode,max_pages?,name?}
+                                             — one page now, or a crawl in the background
+  GET    /jobs                              — this install's Knowledge crawls (the journal)
+  GET    /jobs/{job_id}                     — one crawl's progress, from the journal
+  POST   /jobs/{job_id}/resume              — resume an interrupted crawl (the one resume path)
+  POST   /search           {library_id,query,top_k?}
+                                             — the page's test search
+  POST   /services/firecrawl/credits/refresh — refresh the hosted crawler's balance
 
-Security:
-  - Ingestion targets are validated by the shared SSRF guard inside
-    ``_fetch_full_text`` (no parallel un-checked path).
-  - Failures return HTTP 200 with ``{"ok": false, "error": ...}`` so the
-    UI renders messages uniformly (matches ``ide_api.py``).
+Contract (Knowledge audit 2026-10-13):
+  - Every refusal answers a non-2xx status with ``{"ok": false, "code",
+    "transient", "error"}``: ``code`` is stable and the page words it from
+    the ``knowledge.err.<code>`` catalog entry in its own language (KB-S05);
+    ``error`` is the English text. An expected refusal (a full journal, a
+    policy change, a URL that is not http(s)) is logged once at INFO or
+    WARNING, never as an ERROR with a traceback.
+  - Every request body is read through a bounded reader and validated by a
+    model with bounds (KB-S13): ``top_k`` 1-20, ``query`` up to 2,000
+    characters, ids up to 200 (48 after slugging), names and descriptions up
+    to 500, URLs up to 2,048 and http(s) only.
+  - On an install with platform users every route refuses with 409
+    ``kb_single_operator`` (decision D1, KB-S04): libraries, chunks and
+    crawl jobs are not separated per user.
+  - A crawl's state has one source, the crawl journal (KB-E14).
 """
 
 from __future__ import annotations
 
 import asyncio
-from contextlib import aclosing
-import uuid
-from collections import OrderedDict
+import json
 import logging
-from datetime import UTC, datetime
-from typing import Any
+import uuid
+from collections.abc import Callable, Coroutine
+from contextlib import aclosing
+from typing import Any, Literal
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
 from kazma_core.background import spawn_background
 from kazma_core.errors import safe_error
-from kazma_core.web_acquire.result import AcquisitionError
 from kazma_core.playwright_loop import finish_owned
+from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["create_kb_router"]
+__all__ = ["KB_ERROR_CODES", "create_kb_router"]
+
+#: The most a Knowledge request body may hold: the largest one is a URL and a
+#: few short fields.
+_BODY_MAX_BYTES = 64 * 1024
+
+#: Every ``code`` a Knowledge route answers with, beyond the acquisition
+#: codes (``FetchErrorCode``): each has a ``knowledge.err.<code>`` catalog
+#: entry in English and Arabic (tests/test_kb_api_contract.py).
+KB_ERROR_CODES = (
+    "kb_single_operator", "invalid_request", "invalid_json", "request_too_large",
+    "not_found", "library_exists", "url_refused", "kb_storage_full", "library_busy",
+    "crawl_owns_library", "documents_unavailable", "page_not_ingested", "no_seed",
+    "resume_refused", "internal_error",
+)
+
+#: How each acquisition refusal is answered: (HTTP status, log level).
+_ACQUISITION_STATUS: dict[str, tuple[int, int]] = {
+    FetchErrorCode.INVALID_URL.value: (422, logging.INFO),
+    FetchErrorCode.POLICY.value: (409, logging.INFO),
+    FetchErrorCode.EXISTS.value: (409, logging.INFO),
+    FetchErrorCode.LIMIT.value: (429, logging.INFO),
+    FetchErrorCode.STORAGE.value: (503, logging.WARNING),
+    FetchErrorCode.ROUTING.value: (503, logging.WARNING),
+    FetchErrorCode.ROBOTS.value: (409, logging.INFO),
+    FetchErrorCode.ROBOTS_UNAVAILABLE.value: (503, logging.INFO),
+    FetchErrorCode.SECURITY.value: (422, logging.INFO),
+    FetchErrorCode.SCOPE.value: (422, logging.INFO),
+}
 
 
-# In-process job registry for low-latency polling.  Durable mirror lives
-# in ConfigStore via ``kazma_core.stores.kb_jobs`` so restarts don't
-# orphan the UI on "Unknown job_id".
-#
-# Bounded LRU (audit F-14): this was an unbounded dict that kept every job
-# ever run resident for the process lifetime, and `_bootstrap_jobs` reloaded
-# the entire durable history at router construction. The durable store stays
-# the source of truth — `job_status` already falls back to it — so evicting
-# the oldest in-memory entries costs one lookup, not correctness.
-_KB_JOBS_MAX = 500
-_kb_api_jobs: OrderedDict[str, dict[str, Any]] = OrderedDict()
-_kb_jobs_bootstrapped = False
+class _KbRoute(APIRoute):
+    """Refuses every Knowledge route on an install with platform users
+    (decision D1, KB-S04), with the shared single-operator rule."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def checked(request: Request) -> Response:
+            from kazma_core.stores.knowledge_lifecycle import kb_refusal
+
+            refusal = await asyncio.to_thread(kb_refusal)
+            if refusal:
+                return _fail("kb_single_operator", refusal, 409)
+            return await handler(request)
+
+        return checked
 
 
-def _remember_job_in_memory(job_id: str, data: dict[str, Any]) -> None:
-    _kb_api_jobs[job_id] = data
-    _kb_api_jobs.move_to_end(job_id)
-    while len(_kb_api_jobs) > _KB_JOBS_MAX:
-        _kb_api_jobs.popitem(last=False)
+def _fail(code: str, error: str, status: int, *, transient: bool = False, **extra: Any) -> JSONResponse:
+    return JSONResponse({"ok": False, "code": code, "transient": transient, "error": error, **extra},
+                        status_code=status)
 
 
-def _persist_job(job_id: str, data: dict[str, Any]) -> None:
+def _acquisition_failure(exc: AcquisitionError) -> JSONResponse:
+    """A typed acquisition refusal as a stable code, logged once (KB-S05).
+    ``safe_error`` turned each into ``internal_error`` with an ERROR log and
+    a traceback -- every 2 s while the page polled a journal outage."""
+    from kazma_core.web_acquire.crawl_jobs import CrawlLibraryBusy
+
+    if isinstance(exc, CrawlLibraryBusy):
+        code, status, level = "library_busy", 409, logging.INFO
+    else:
+        code = exc.code.value
+        status, level = _ACQUISITION_STATUS.get(code, (409, logging.INFO))
+    logger.log(level, "[kb_api] refused (%s): %s", code, exc)
+    return _fail(code, str(exc), status, transient=bool(exc.transient))
+
+
+class _Body(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+
+class _CreateBody(_Body):
+    id: str = Field(min_length=1, max_length=200)
+    name: str = Field("", max_length=500)
+    description: str = Field("", max_length=500)
+    seed_url: str = Field("", max_length=2048)
+
+
+class _UpdateBody(_Body):
+    name: str | None = Field(None, max_length=500)
+    description: str | None = Field(None, max_length=500)
+    seed_url: str | None = Field(None, max_length=2048)
+    auto_inject: bool | None = None
+
+
+class _IngestBody(_Body):
+    library_id: str = Field(min_length=1, max_length=200)
+    url: str = Field(min_length=1, max_length=2048)
+    mode: Literal["page", "site"] = "page"
+    max_pages: int | None = Field(None, ge=1, le=1000)
+    name: str = Field("", max_length=500)
+
+
+class _SearchBody(_Body):
+    library_id: str = Field(min_length=1, max_length=200)
+    query: str = Field(min_length=1, max_length=2000)
+    top_k: int = Field(5, ge=1, le=20)
+
+
+async def _body(request: Request, model: type[_Body]) -> Any:
+    """The request's JSON object read under :data:`_BODY_MAX_BYTES` and
+    validated by *model* (KB-S13), or the refusal to return. A declared
+    length past the cap is refused before a byte is read; an undeclared one
+    is cut off as soon as it passes the cap."""
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > _BODY_MAX_BYTES:
+                return _fail("request_too_large", "Request body is too large", 413)
+        except ValueError:
+            return _fail("invalid_request", "Invalid Content-Length", 400)
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > _BODY_MAX_BYTES:
+            return _fail("request_too_large", "Request body is too large", 413)
     try:
-        from kazma_core.stores.kb_jobs import upsert_job
-
-        upsert_job(job_id, **data)
-    except Exception as exc:
-        logger.debug("[kb_api] durable job write failed: %s", exc)
-
-
-async def _record_job(job_id: str, data: dict[str, Any]) -> None:
-    """Job snapshot from the event loop.
-
-    The in-memory registry is updated on the loop (it is what polling reads,
-    and only the loop mutates it); the durable ConfigStore write — one per
-    crawl progress update — runs in a thread (AGENTS.md §26E).
-    """
-    _remember_job_in_memory(job_id, data)
-    await asyncio.to_thread(_persist_job, job_id, dict(data))
-
-
-#: Only jobs this recent (or still running) are pre-loaded into memory at boot.
-_KB_BOOTSTRAP_MAX_AGE_S = 7 * 24 * 3600
-
-#: Phases that mean "not finished" — always reloaded regardless of age.
-_KB_LIVE_PHASES = frozenset({"queued", "running", "crawling", "indexing", "starting"})
-
-
-def _job_is_recent(row: dict[str, Any]) -> bool:
-    """True when a durable job row is still live or finished within the window."""
-    if str(row.get("phase") or "").lower() in _KB_LIVE_PHASES:
-        return True
-    stamp = row.get("finished_at") or row.get("started_at") or ""
-    if not stamp:
-        return True  # no timestamp — keep rather than silently drop
+        value = json.loads(bytes(raw) or b"null")
+    except (ValueError, RecursionError):
+        return _fail("invalid_json", "Request body is not valid JSON", 422)
+    if not isinstance(value, dict):
+        return _fail("invalid_json", "Request body must be a JSON object", 422)
     try:
-        from datetime import UTC, datetime
-
-        ts = datetime.fromisoformat(str(stamp))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=UTC)
-        return (datetime.now(UTC) - ts).total_seconds() <= _KB_BOOTSTRAP_MAX_AGE_S
-    except (ValueError, TypeError):
-        return True
+        return model.model_validate(value)
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        field = ".".join(str(part) for part in first.get("loc", ())) or "body"
+        return _fail("invalid_request", f"{field}: {first.get('msg', 'invalid value')}", 422)
 
 
-def _bootstrap_jobs() -> None:
-    """Load recent/live durable jobs + mark mid-crawl jobs interrupted."""
-    global _kb_jobs_bootstrapped
-    if _kb_jobs_bootstrapped:
-        return
-    _kb_jobs_bootstrapped = True
-    try:
-        from kazma_core.stores.kb_jobs import list_jobs, mark_stale_jobs_interrupted
-        from kazma_core.web_acquire.crawl_jobs import recover
-
-        recover()
-        mark_stale_jobs_interrupted()
-        loaded = 0
-        for row in list_jobs():
-            jid = row.pop("job_id", None)
-            if not jid or not _job_is_recent(row):
-                continue
-            _kb_api_jobs[jid] = row
-            loaded += 1
-            if loaded >= _KB_JOBS_MAX:
-                break
-        logger.debug("[kb_api] bootstrapped %d recent job(s)", loaded)
-    except Exception as exc:
-        logger.debug("[kb_api] job bootstrap failed: %s", exc)
+def _not_found() -> JSONResponse:
+    return _fail("not_found", "Not found", 404)
 
 
 def create_kb_router() -> APIRouter:
     """Create and return the Knowledge Base API router."""
 
-    _bootstrap_jobs()
-    router = APIRouter(prefix="/api/kb", tags=["knowledge"])
+    router = APIRouter(prefix="/api/kb", tags=["knowledge"], route_class=_KbRoute)
 
     def _store():
         from kazma_core.stores.knowledge import get_knowledge_store
@@ -159,18 +220,19 @@ def create_kb_router() -> APIRouter:
     # ── Libraries ───────────────────────────────────────────────────────
 
     def _meaning_search(index: Any, library_id: str) -> dict[str, Any]:
-        """How much of a library meaning search reaches (keyword search reaches
-        all of it). Shown per library: from 2026-07-31 to 2026-09-26 meaning
-        search was off everywhere and nothing on the page said so."""
+        """How much of a library meaning search reaches, as the repair sweep
+        last recorded it (keyword search reaches all of it). Read from the
+        store: no collection is opened and no model loaded (KB-S15)."""
         health = index.health(library_id)
         return {
             "available": bool(health.get("vector_available")),
+            "state": health.get("state", "unknown"),
             "vectors": int(health.get("vector_chunks") or 0),
             "chunks": int(health.get("sqlite_chunks") or 0),
         }
 
     @router.get("/libraries")
-    def list_libraries() -> dict[str, Any]:
+    def list_libraries() -> Any:
         try:
             libs = _store().list_libraries()
             index = _index()
@@ -179,110 +241,119 @@ def create_kb_router() -> APIRouter:
             return {"ok": True, "libraries": libs}
         except Exception as exc:
             logger.exception("[kb_api] list_libraries failed")
-            return {"ok": False, "error": safe_error(exc), "libraries": []}
+            return _fail("internal_error", safe_error(exc), 500, libraries=[])
 
     @router.post("/libraries")
-    def create_library(
-        payload: dict[str, Any] = Body(...),
-    ) -> dict[str, Any]:
-        from kazma_core.stores.knowledge import slugify_library_id
+    async def create_library(request: Request) -> Any:
+        data = await _body(request, _CreateBody)
+        if isinstance(data, JSONResponse):
+            return data
+        return await asyncio.to_thread(_create, data)
 
-        raw_id = (payload.get("id") or "").strip()
-        lib_id = slugify_library_id(raw_id)
-        name = (payload.get("name") or raw_id).strip() or lib_id
-        if not raw_id:
-            return {"ok": False, "error": "Missing 'id'"}
+    def _create(data: _CreateBody) -> Any:
+        from kazma_core.stores.knowledge import KnowledgeUrlRefused, slugify_library_id
+
+        lib_id = slugify_library_id(data.id)
         try:
-            existing = _store().get_library(lib_id)
-            if existing:
-                return {"ok": False, "error": f"Library '{lib_id}' already exists"}
-            lib = _store().create_library(
-                lib_id,
-                name=name,
-                description=(payload.get("description") or "").strip(),
-                seed_url=(payload.get("seed_url") or "").strip(),
-            )
+            if _store().get_library(lib_id):
+                return _fail("library_exists", f"Library '{lib_id}' already exists", 409, library_id=lib_id)
+            lib = _store().create_library(lib_id, name=data.name or data.id,
+                                          description=data.description, seed_url=data.seed_url)
             return {"ok": True, "library": lib}
+        except KnowledgeUrlRefused as exc:
+            return _fail("url_refused", str(exc), 422)
+        except ValueError as exc:
+            return _fail("invalid_request", str(exc), 422)
         except Exception as exc:
             logger.exception("[kb_api] create_library failed")
-            return {"ok": False, "error": safe_error(exc)}
+            return _fail("internal_error", safe_error(exc), 500)
 
     @router.get("/libraries/{library_id}")
-    def get_library(library_id: str) -> dict[str, Any]:
+    def get_library(library_id: str) -> Any:
         lib = _store().get_library(library_id)
         if not lib:
-            return {"ok": False, "error": "Not found"}
+            return _not_found()
         return {"ok": True, "library": lib}
 
     @router.get("/libraries/archived/list")
-    def list_archived() -> dict[str, Any]:
+    def list_archived() -> Any:
         """List archived libraries for the Archived tab."""
         try:
             libs = _store().list_archived_libraries()
             return {"ok": True, "libraries": libs}
         except Exception as exc:
             logger.exception("[kb_api] list_archived failed")
-            return {"ok": False, "error": safe_error(exc), "libraries": []}
+            return _fail("internal_error", safe_error(exc), 500, libraries=[])
 
-    @router.post("/libraries/{library_id}/archive")
-    def archive_library(library_id: str) -> dict[str, Any]:
+    def _set_archived(library_id: str, archived: bool) -> Any:
         try:
-            ok = _store().archive_library(library_id, archived=True)
-            if not ok:
-                return {"ok": False, "error": "Not found"}
+            if not _store().archive_library(library_id, archived=archived):
+                return _not_found()
             return {"ok": True}
         except Exception as exc:
             logger.exception("[kb_api] archive_library failed")
-            return {"ok": False, "error": safe_error(exc)}
+            return _fail("internal_error", safe_error(exc), 500)
+
+    @router.post("/libraries/{library_id}/archive")
+    def archive_library(library_id: str) -> Any:
+        return _set_archived(library_id, True)
 
     @router.post("/libraries/{library_id}/unarchive")
-    def unarchive_library(library_id: str) -> dict[str, Any]:
-        try:
-            ok = _store().archive_library(library_id, archived=False)
-            if not ok:
-                return {"ok": False, "error": "Not found"}
-            return {"ok": True}
-        except Exception as exc:
-            logger.exception("[kb_api] unarchive_library failed")
-            return {"ok": False, "error": safe_error(exc)}
+    def unarchive_library(library_id: str) -> Any:
+        return _set_archived(library_id, False)
 
     @router.patch("/libraries/{library_id}")
-    def update_library(
-        library_id: str,
-        payload: dict[str, Any] = Body(...),
-    ) -> dict[str, Any]:
+    async def update_library(library_id: str, request: Request) -> Any:
+        data = await _body(request, _UpdateBody)
+        if isinstance(data, JSONResponse):
+            return data
+        return await asyncio.to_thread(_update, library_id, data)
+
+    def _update(library_id: str, data: _UpdateBody) -> Any:
+        from kazma_core.stores.knowledge import KnowledgeUrlRefused
+
         try:
-            auto = payload.get("auto_inject")
-            auto_bool = None
-            if isinstance(auto, bool):
-                auto_bool = auto
-            elif isinstance(auto, str) and auto.lower() in ("true", "false"):
-                auto_bool = auto.lower() == "true"
-            lib = _store().update_library(
-                library_id,
-                name=payload.get("name"),
-                description=payload.get("description"),
-                seed_url=payload.get("seed_url"),
-                auto_inject=auto_bool,
-            )
+            lib = _store().update_library(library_id, name=data.name, description=data.description,
+                                          seed_url=data.seed_url, auto_inject=data.auto_inject)
             if not lib:
-                return {"ok": False, "error": "Not found"}
+                return _not_found()
             return {"ok": True, "library": lib}
+        except KnowledgeUrlRefused as exc:
+            return _fail("url_refused", str(exc), 422)
+        except ValueError as exc:
+            return _fail("invalid_request", str(exc), 422)
         except Exception as exc:
             logger.exception("[kb_api] update_library failed")
-            return {"ok": False, "error": safe_error(exc)}
+            return _fail("internal_error", safe_error(exc), 500)
 
     @router.delete("/libraries/{library_id}")
-    def delete_library(library_id: str) -> dict[str, Any]:
+    def delete_library(library_id: str) -> Any:
+        """Delete the library and every copy derived from it; 409 while a
+        crawl owns it (KB-E02, KB-E08)."""
+        from kazma_core.stores.knowledge_lifecycle import (
+            KnowledgeDocumentsUnavailable,
+            KnowledgeLibraryBusy,
+            delete_library as delete_everything,
+        )
+
         try:
-            # delete_library on the index drops ChromaDB + SQLite rows.
-            ok = _index().delete_library(library_id)
-            if not ok:
-                return {"ok": False, "error": "Not found"}
-            return {"ok": True}
+            if _store().get_library(library_id) is None:
+                return _not_found()
+            outcome = delete_everything(library_id)
+            if not outcome["deleted"]:
+                return _not_found()
+            return {"ok": True, **outcome}
+        except KnowledgeLibraryBusy as exc:
+            logger.info("[kb_api] delete of %s refused: a crawl owns it", library_id)
+            return _fail("crawl_owns_library", str(exc), 409, transient=True, jobs=exc.jobs)
+        except KnowledgeDocumentsUnavailable as exc:
+            logger.warning("[kb_api] delete of %s refused: %s", library_id, exc)
+            return _fail("documents_unavailable", str(exc), 503, transient=True)
+        except AcquisitionError as exc:
+            return _acquisition_failure(exc)
         except Exception as exc:
             logger.exception("[kb_api] delete_library failed")
-            return {"ok": False, "error": safe_error(exc)}
+            return _fail("internal_error", safe_error(exc), 500)
 
     # ── Chunk browser ───────────────────────────────────────────────────
 
@@ -290,13 +361,14 @@ def create_kb_router() -> APIRouter:
     def list_chunks(
         library_id: str,
         limit: int = Query(50, ge=1, le=500),
-        offset: int = Query(0, ge=0),
-    ) -> dict[str, Any]:
+        offset: int = Query(0, ge=0, le=10_000_000),
+    ) -> Any:
         try:
+            if _store().get_library(library_id) is None:
+                return _not_found()
             chunks = _store().list_chunks(library_id, limit=limit, offset=offset)
             total = _store().count_chunks(library_id)
-            # Strip the full content for the list view; UI fetches one chunk
-            # in full via the existing knowledge_search or a dedicated call.
+            # Strip the full content for the list view.
             slim = [
                 {
                     "id": c["id"],
@@ -313,130 +385,91 @@ def create_kb_router() -> APIRouter:
             return {"ok": True, "chunks": slim, "total": total}
         except Exception as exc:
             logger.exception("[kb_api] list_chunks failed")
-            return {"ok": False, "error": safe_error(exc), "chunks": [], "total": 0}
+            return _fail("internal_error", safe_error(exc), 500, chunks=[], total=0)
 
-    # ── Ingestion (page sync / site background) ─────────────────────────
+    # ── Ingestion (page now / site in the background) ───────────────────
 
     @router.post("/ingest")
-    async def ingest(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-        return await _ingest(payload)
-
-    async def _ingest(payload, *, kind='site'):
-        lib_id = (payload.get("library_id") or "").strip()
-        url = (payload.get("url") or "").strip()
-        mode = (payload.get("mode") or "page").strip().lower()
-        max_pages = payload.get("max_pages")
-        if not lib_id or not url:
-            return {"ok": False, "error": "Missing 'library_id' or 'url'"}
-        if mode not in ("page", "site"):
-            return {"ok": False, "error": "mode must be 'page' or 'site'"}
-
-        # Create-or-use library.  Slugify ONCE at the boundary so the
-        # existence check and the insert agree on the ID (otherwise a raw
-        # user input like "ShipX WhatsApp API" passes get_library() as
-        # None but create_library() slugifies it to an existing slug and
-        # raises UNIQUE constraint).
+    async def ingest(request: Request) -> Any:
+        data = await _body(request, _IngestBody)
+        if isinstance(data, JSONResponse):
+            return data
         from kazma_core.stores.knowledge import slugify_library_id
 
-        lib_id = slugify_library_id(lib_id)
+        lib_id = slugify_library_id(data.library_id)
+        if data.mode == "page":
+            return await _ingest_page(lib_id, data.url, name=data.name)
+        return await _start_site(lib_id, data.url, max_pages=data.max_pages, kind="site", name=data.name)
 
-        def _ensure_library() -> None:
-            store = _store()
-            if not store.get_library(lib_id):
-                store.create_library(lib_id, name=lib_id, seed_url=url)
-            else:
-                store.update_library(lib_id, seed_url=url)
+    async def _ingest_page(lib_id: str, url: str, *, name: str) -> Any:
+        """One page now. ``ok`` is the page's outcome (KB-S13): a page that
+        was not stored answers 422 ``page_not_ingested`` with its reasons,
+        and the library is created only once the page was fetched (KB-S09)."""
+        from kazma_core.stores.knowledge_ingest import ingest_url
 
         try:
-            await asyncio.to_thread(_ensure_library)
+            result = await ingest_url(lib_id, url, name=name)
         except Exception as exc:
-            logger.exception("[kb_api] library setup failed")
-            return {"ok": False, "error": f"library setup failed: {safe_error(exc)}"}
+            logger.exception("[kb_api] page ingest failed")
+            return _fail("internal_error", safe_error(exc), 500)
+        if result.pages_failed or not result.pages_fetched:
+            reason = result.errors[0] if result.errors else "The page was not stored."
+            logger.info("[kb_api] page not ingested into %s: %s", lib_id, reason)
+            return _fail("page_not_ingested", reason, 422, errors=result.errors[:5],
+                         library_created=result.library_created)
+        return {
+            "ok": True,
+            "mode": "page",
+            "library_id": lib_id,
+            "pages_fetched": result.pages_fetched,
+            "chunks_new": result.chunks_new,
+            "chunks_skipped": result.chunks_skipped,
+            "pages_unchanged": result.pages_unchanged,
+            "library_created": result.library_created,
+            "errors": result.errors[:5],
+        }
 
-        if mode == "page":
-            # Synchronous single-page ingest.
-            try:
-                from kazma_core.stores.knowledge_ingest import ingest_url
-
-                result = await ingest_url(lib_id, url)
-                return {
-                    "ok": True,
-                    "mode": "page",
-                    "pages_fetched": result.pages_fetched,
-                    "chunks_new": result.chunks_new,
-                    "chunks_skipped": result.chunks_skipped,
-                    "errors": result.errors[:5],
-                }
-            except Exception as exc:
-                logger.exception("[kb_api] page ingest failed")
-                return {"ok": False, "error": safe_error(exc)}
-
-        # mode == "site" → background job.
-        resume_id = payload.get('resume_job_id')
-        job_id = resume_id or f"{lib_id}:{uuid.uuid4().hex}"
+    async def _start_site(lib_id: str, url: str, *, max_pages: int | None, kind: str,
+                          name: str = "", resume_job_id: str | None = None) -> Any:
+        """Admit a crawl in the journal, make sure its library exists, and
+        run it in the background. The library is created only once the
+        crawl was admitted (KB-S09)."""
+        from kazma_core.stores.knowledge import KnowledgeStorageFull
         from kazma_core.stores.knowledge_ingest import _prepare_ingest_site
         from kazma_core.web_acquire.crawl_jobs import call
 
+        job_id = resume_job_id or f"{lib_id}:{uuid.uuid4().hex}"
         try:
-            prepared = await _prepare_ingest_site(lib_id, url, max_pages=max_pages, job_id=job_id, resume=bool(resume_id))
+            prepared = await _prepare_ingest_site(lib_id, url, max_pages=max_pages, job_id=job_id,
+                                                  resume=bool(resume_job_id))
         except AcquisitionError as exc:
-            return {'ok': False, 'error': safe_error(exc)}
+            return _acquisition_failure(exc)
+        except KnowledgeStorageFull as exc:
+            logger.warning("[kb_api] crawl of %s refused: %s", lib_id, exc)
+            return _fail("kb_storage_full", str(exc), 507)
         dispatched = False
         try:
             await call(prepared[0].update, lambda row: row.update(kind=kind))
-            await _record_job(
-                job_id,
-                {
-                    "phase": "starting",
-                    "library_id": lib_id,
-                    "url": url,
-                    "kind": kind,
-                    "started_at": datetime.now(UTC).isoformat(),
-                },
-            )
+
+            def _ensure_library() -> None:
+                store = _store()
+                if store.get_library(lib_id) is None:
+                    store.create_library(lib_id, name=name or lib_id, seed_url=url)
+                elif kind == "site" and not resume_job_id:
+                    store.update_library(lib_id, seed_url=url)
+
+            await asyncio.to_thread(_ensure_library)
 
             async def _run() -> None:
                 from kazma_core.stores.knowledge_ingest import ingest_site
 
                 try:
-                    async with aclosing(ingest_site(lib_id, url, max_pages=max_pages, job_id=job_id, resume=bool(resume_id), _prepared=prepared)) as updates:
-                        async for update in updates:
-                            snap = dict(_kb_api_jobs.get(job_id) or {})
-                            snap.update(
-                                {
-                                    "phase": update.phase,
-                                    "discovered": update.discovered,
-                                    "fetched": update.fetched,
-                                    "ingested": update.ingested,
-                                    "skipped": update.skipped,
-                                    "failed": update.failed,
-                                    "pages_unchanged": getattr(update, "pages_unchanged", 0) or 0,
-                                    "pruned_urls": getattr(update, "pruned_urls", 0) or 0,
-                                    "current_url": update.current_url,
-                                    "message": update.message,
-                                    "errors": list(update.errors or []),
-                                    "library_id": lib_id,
-                                    "url": url,
-                                }
-                            )
-                            await _record_job(job_id, snap)
-                    snap = dict(_kb_api_jobs.get(job_id) or {})
-                    snap["finished_at"] = datetime.now(UTC).isoformat()
-                    if snap.get("phase") not in ("error", "interrupted"):
-                        snap.setdefault("phase", "done")
-                    await _record_job(job_id, snap)
+                    async with aclosing(ingest_site(lib_id, url, max_pages=max_pages, job_id=job_id,
+                                                    resume=bool(resume_job_id), _prepared=prepared)) as updates:
+                        async for _update in updates:
+                            pass  # the journal records every update (job.progress)
                 except Exception as exc:
-                    logger.exception("[kb_api] site ingest failed")
-                    snap = dict(_kb_api_jobs.get(job_id) or {})
-                    snap.update(
-                        {
-                            "phase": "error",
-                            "message": safe_error(exc),
-                            "finished_at": datetime.now(UTC).isoformat(),
-                        }
-                    )
-                    await _record_job(job_id, snap)
-
+                    logger.warning("[kb_api] crawl %s of %s ended with an error: %s", job_id, lib_id, exc)
                 finally:
                     def release_unclaimed():
                         job = prepared[0]
@@ -448,91 +481,82 @@ def create_kb_router() -> APIRouter:
                                 raise
                     await finish_owned(call(release_unclaimed))
 
-            spawn_background(_run(), name=f"kb-ingest-url:{job_id}")
+            spawn_background(_run(), name=f"kb-crawl:{job_id}")
             dispatched = True
             return {"ok": True, "mode": "site", "job_id": job_id}
+        except Exception as exc:
+            logger.exception("[kb_api] crawl %s could not start", job_id)
+            return _fail("internal_error", safe_error(exc), 500)
         finally:
             if not dispatched:
                 await finish_owned(call(prepared[0].finish, 'interrupted'))
 
     @router.post('/services/firecrawl/credits/refresh')
-    async def refresh_firecrawl_credits() -> dict[str, Any]:
+    async def refresh_firecrawl_credits() -> Any:
         from kazma_core.web_acquire.credits import refresh_firecrawl_balance
 
         try:
             return {'ok': True, 'balances': await refresh_firecrawl_balance()}
         except AcquisitionError as exc:
-            return {'ok': False, 'error': safe_error(exc)}
+            return _acquisition_failure(exc)
 
     @router.get('/jobs')
-    def durable_jobs() -> dict[str, Any]:
+    def durable_jobs() -> Any:
         from kazma_core.web_acquire.crawl_jobs import inspect_jobs
 
         try:
             return {'ok': True, 'jobs': sorted((row for row in inspect_jobs() if row['kind'] in {'site', 'refresh'}),
                 key=lambda row: row['updated_at'], reverse=True)}
         except AcquisitionError as exc:
-            return {'ok': False, 'error': safe_error(exc)}
+            return _acquisition_failure(exc)
 
     @router.get("/jobs/{job_id}")
-    def job_status(job_id: str) -> dict[str, Any]:
+    def job_status(job_id: str) -> Any:
         from kazma_core.web_acquire.crawl_jobs import projection
 
         try:
             durable = projection(job_id)
         except AcquisitionError as exc:
-            return {'ok': False, 'error': safe_error(exc)}
-        if durable is not None:
-            if durable['kind'] not in {'site', 'refresh'}:
-                return {'ok': False, 'error': 'This job belongs to research; inspect acquisition readiness.'}
-            return {'ok': True, 'job': durable}
-        job = _kb_api_jobs.get(job_id)
-        if not job:
-            try:
-                from kazma_core.stores.kb_jobs import get_job
-
-                job = get_job(job_id)
-            except Exception:
-                job = None
-        if not job:
-            return {
-                "ok": False,
-                "error": (
-                    "Unknown job_id — it may have expired, or the server "
-                    "restarted before durable status was written. Re-run crawl."
-                ),
-            }
-        return {"ok": True, "job": job}
+            return _acquisition_failure(exc)
+        if durable is None:
+            return _fail("not_found", "Unknown crawl job; it may have been evicted from the journal.", 404)
+        if durable['kind'] not in {'site', 'refresh'}:
+            return _fail("not_found", 'This job belongs to research; inspect acquisition readiness.', 404)
+        return {'ok': True, 'job': durable}
 
     @router.post('/jobs/{job_id}/resume')
-    async def resume_job(job_id: str) -> dict[str, Any]:
+    async def resume_job(job_id: str) -> Any:
+        """The one resume path (KB-S13: ``/ingest`` no longer takes a job id)."""
         from kazma_core.web_acquire.crawl_jobs import call, inspect_jobs, recover
 
         try:
             await call(recover)
             row = await call(inspect_jobs, job_id)
-            if row is None or row['status'] != 'interrupted':
-                return {'ok': False, 'error': 'Only an interrupted durable crawl can resume.'}
-            if row.get('kind', 'site') not in {'site', 'refresh'}:
-                return {'ok': False, 'error': 'Research crawls resume through crawl_site with identical options.'}
-            if not await asyncio.to_thread(lambda: _store().get_library(row['library_id'])):
-                return {'ok': False, 'error': 'The crawl library no longer exists.'}
-            return await _ingest({'mode': 'site', 'library_id': row['library_id'], 'url': row['seed'],
-                'max_pages': row['policy']['max_pages'], 'resume_job_id': job_id}, kind=row.get('kind', 'site'))
         except AcquisitionError as exc:
-            return {'ok': False, 'error': safe_error(exc)}
+            return _acquisition_failure(exc)
+        if row is None:
+            return _fail("not_found", "Unknown crawl job.", 404)
+        if row['status'] != 'interrupted':
+            return _fail("resume_refused", 'Only an interrupted durable crawl can resume.', 409)
+        if row.get('kind', 'site') not in {'site', 'refresh'}:
+            return _fail("resume_refused", 'Research crawls resume through crawl_site with identical options.', 409)
+        if not await asyncio.to_thread(lambda: _store().get_library(row['library_id'])):
+            return _fail("not_found", 'The crawl library no longer exists.', 404)
+        return await _start_site(row['library_id'], row['seed'], max_pages=row['policy']['max_pages'],
+                                 kind=row.get('kind', 'site'), resume_job_id=job_id)
 
     # ── Search (UI "Test search") ───────────────────────────────────────
 
     @router.post("/search")
-    async def search(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-        lib_id = (payload.get("library_id") or "").strip()
-        query = (payload.get("query") or "").strip()
-        top_k = int(payload.get("top_k") or 5)
-        if not lib_id or not query:
-            return {"ok": False, "error": "Missing 'library_id' or 'query'"}
+    async def search(request: Request) -> Any:
+        data = await _body(request, _SearchBody)
+        if isinstance(data, JSONResponse):
+            return data
+        if not await asyncio.to_thread(lambda: _store().get_library(data.library_id)):
+            return _not_found()
         try:
-            hits = await _index().search(query, lib_id, top_k=top_k)
+            index = await asyncio.to_thread(_index)
+            hits = await index.search(data.query, data.library_id, top_k=data.top_k)
             return {
                 "ok": True,
                 "hits": [
@@ -550,18 +574,18 @@ def create_kb_router() -> APIRouter:
             }
         except Exception as exc:
             logger.exception("[kb_api] search failed")
-            return {"ok": False, "error": safe_error(exc), "hits": []}
+            return _fail("internal_error", safe_error(exc), 500, hits=[])
 
-    # ── Refresh (re-ingest from seed_url) ───────────────────────────────
+    # ── Refresh (re-crawl from seed_url) ───────────────────────────────
 
     @router.post("/libraries/{library_id}/refresh")
-    async def refresh(library_id: str) -> dict[str, Any]:
+    async def refresh(library_id: str) -> Any:
         lib = await asyncio.to_thread(lambda: _store().get_library(library_id))
         if not lib:
-            return {"ok": False, "error": "Not found"}
+            return _not_found()
         seed = lib.get("seed_url") or ""
         if not seed:
-            return {"ok": False, "error": "Library has no seed_url to refresh from"}
-        return await _ingest({'mode': 'site', 'library_id': library_id, 'url': seed}, kind='refresh')
+            return _fail("no_seed", "Library has no seed_url to refresh from", 409)
+        return await _start_site(library_id, seed, max_pages=None, kind='refresh')
 
     return router

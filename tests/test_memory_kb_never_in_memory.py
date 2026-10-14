@@ -128,9 +128,13 @@ class _Fake:
 def _turn(monkeypatch) -> list[dict]:
     """One supervisor call on a turn whose library search finds *HIT*."""
     from kazma_core.agent.graph_builder import supervisor_node
+    from kazma_core.memory.federated_search import format_kb_hits_for_prompt
+    from kazma_core.stores.knowledge_index import KnowledgeInject
 
-    monkeypatch.setattr("kazma_core.memory.federated_search.federated_search",
-                        lambda *a, **k: {"ok": True, "hits": [HIT], "summary": {"knowledge": 1}})
+    # The supervisor builds the turn's one Knowledge block through
+    # build_knowledge_inject since Knowledge audit KB-S08.
+    monkeypatch.setattr("kazma_core.stores.knowledge_index.build_knowledge_inject",
+                        lambda text: KnowledgeInject(block=format_kb_hits_for_prompt([HIT]), hits=[HIT]))
     llm = _LLM()
     fake = _Fake()
     asyncio.run(supervisor_node(

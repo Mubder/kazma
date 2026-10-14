@@ -33,12 +33,16 @@ function knowledgePage() {
 
   // How much of a library meaning search reaches (keyword search reaches
   // all of it); empty when the server did not say.
+  // The repair sweep's last record: "unknown" until it ran, "rebuilding"
+  // while fewer than all chunks carry a vector of the model in use.
   function meaningLabel(m) {
     if (!m) return "";
+    if (m.state === "unknown") return S.meaning_unknown || "Meaning search: not checked yet";
     if (!m.available) return S.keyword_only || "Keyword search only";
-    return (S.meaning_search || "Meaning search: {v} of {n}")
-      .replace("{v}", String(m.vectors))
-      .replace("{n}", String(m.chunks));
+    const template = m.state === "rebuilding"
+      ? (S.meaning_rebuilding || "Meaning search: rebuilding, {v} of {n}")
+      : (S.meaning_search || "Meaning search: {v} of {n}");
+    return template.replace("{v}", String(m.vectors)).replace("{n}", String(m.chunks));
   }
 
   // Decorate a library row with the per-row UI strings (so Alpine x-text
@@ -91,6 +95,20 @@ function knowledgePage() {
     if (vars) for (const v in vars) s = s.split("{" + v + "}").join(String(vars[v]));
     return s;
   }
+  // A refusal in the page's language: the route's stable code names a
+  // knowledge.err.<code> entry (Knowledge audit KB-S05); its English text is
+  // the fallback and the {reason} where the entry has one.
+  function errorText(data, fallbackKey, fallbackEn) {
+    const reason = (data && data.error) || "";
+    if (data && data.code) return _k("knowledge.err." + data.code, reason || fallbackEn, { reason: reason });
+    return reason || _k(fallbackKey, fallbackEn);
+  }
+  // A link only for an http(s) address (KB-S09): a stored javascript: or
+  // data: URL is shown as text and never becomes a link.
+  function safeHref(url) {
+    const value = String(url || "").trim();
+    return /^https?:\/\/[^\s]+$/i.test(value) ? value : null;
+  }
 
   return {
     // The page's own strings, for the template's `S.tab_active` and friends.
@@ -98,6 +116,7 @@ function knowledgePage() {
     // defined" on every load and the tab labels fell to nothing (2026-09-26,
     // tests/e2e/test_pages_load_clean.py).
     S,
+    safeHref,
     // A chunk count with its noun in the page's language (the browse view's
     // "100 of 4539 chunks").
     chunkCount(n) {
@@ -156,7 +175,7 @@ function knowledgePage() {
           : "/api/kb/libraries";
         const r = await fetch(url);
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || "failed");
+        if (!data.ok) throw new Error(errorText(data, "knowledge.ui.load_failed", "failed"));
         this.libraries = (data.libraries || []).map(withStrings);
       } catch (e) {
         toast(_k("knowledge.ui.load_failed", "Failed to load libraries: {error}", { error: e.message }), "error");
@@ -171,27 +190,18 @@ function knowledgePage() {
       const name = (this.form.name || lib_id).trim();
       const url = this.form.seed_url.trim();
 
-      // Create the library first.
-      let r = await fetch("/api/kb/libraries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: lib_id, name: name, seed_url: url }),
-      });
-      let data = await r.json();
-      if (!data.ok && !(data.error || "").includes("already exists")) {
-        toast(data.error || _k("knowledge.ui.create_failed", "Create failed"), "error");
-        return;
-      }
-
+      // The library is created by its first ingest, once the page was
+      // fetched or the crawl admitted (KB-S09): a refused address leaves
+      // no empty library behind.
       this.creating = true;
       try {
-        r = await fetch("/api/kb/ingest", {
+        const r = await fetch("/api/kb/ingest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ library_id: lib_id, url: url, mode: mode }),
+          body: JSON.stringify({ library_id: lib_id, name: name, url: url, mode: mode }),
         });
-        data = await r.json();
-        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.ingest_failed", "Ingest failed"));
+        const data = await r.json();
+        if (!data.ok) throw new Error(errorText(data, "knowledge.ui.ingest_failed", "Ingest failed"));
 
         if (mode === "page") {
           // Page ingest: show clean toast from structured fields, not raw internal message.
@@ -227,7 +237,7 @@ function knowledgePage() {
         const response = await fetch('/api/kb/jobs', { signal: controller.signal });
         const data = await response.json();
         if (this._destroyed) return;
-        if (!data.ok) throw new Error(data.error || _k('knowledge.status_unavailable', 'Crawl status unavailable; retrying'));
+        if (!data.ok) throw new Error(errorText(data, 'knowledge.status_unavailable', 'Crawl status unavailable; retrying'));
         const rows = data.jobs || [];
         const root = typeof document !== 'undefined' && document.getElementById ? document.getElementById('knowledge-root') : null;
         const requested = root && typeof root.getAttribute === 'function' ? root.getAttribute('data-job') :
@@ -259,7 +269,7 @@ function knowledgePage() {
         const response = await fetch(`/api/kb/jobs/${encodeURIComponent(jobId)}/resume`, { method: 'POST', signal: controller.signal });
         const data = await response.json();
         if (this._destroyed) return;
-        if (!data.ok) throw new Error(data.error || _k('knowledge.resume_failed', 'Could not resume crawl'));
+        if (!data.ok) throw new Error(errorText(data, 'knowledge.resume_failed', 'Could not resume crawl'));
         this.activeJob = { ...this.activeJob, phase: 'starting', poll_error: '' };
         this._pollJob(data.job_id);
       } catch (error) {
@@ -281,7 +291,7 @@ function knowledgePage() {
         const response = await fetch('/api/kb/services/firecrawl/credits/refresh', { method: 'POST', signal: controller.signal });
         const data = await response.json();
         if (this._destroyed) return;
-        if (!data.ok) throw new Error(data.error || _k('knowledge.credits_unavailable', 'Credit balance unavailable'));
+        if (!data.ok) throw new Error(errorText(data, 'knowledge.credits_unavailable', 'Credit balance unavailable'));
         if (this.activeJob?.acquisition) this.activeJob.acquisition.provider_balances = data.balances;
       } catch (error) {
         if (!this._destroyed && this.activeJob) this.activeJob.poll_error = error.message;
@@ -307,7 +317,7 @@ function knowledgePage() {
           const r = await fetch(`/api/kb/jobs/${encodeURIComponent(jobId)}`, { signal: controller.signal });
           const data = await r.json();
           if (epoch !== this._pollEpoch) return;
-          if (!data.ok) throw new Error(data.error || _k('knowledge.status_unavailable', 'Crawl status unavailable; retrying'));
+          if (!data.ok) throw new Error(errorText(data, 'knowledge.status_unavailable', 'Crawl status unavailable; retrying'));
           this.activeJob = { ...data.job, poll_error: '' };
           if (this.jobDone()) {
             clearInterval(this._pollTimer);
@@ -328,10 +338,8 @@ function knowledgePage() {
             const ingested = j.ingested || 0;
             const failed = j.failed || 0;
             const unchanged = j.pages_unchanged || 0;
-            const pruned = j.pruned_urls || 0;
             const extra =
-              (unchanged ? " · " + _k("knowledge.crawl_unchanged", "{n} unchanged", { n: unchanged }) : "") +
-              (pruned ? " · " + _k("knowledge.crawl_pruned", "{n} pruned", { n: pruned }) : "");
+              (unchanged ? " · " + _k("knowledge.crawl_unchanged", "{n} unchanged", { n: unchanged }) : "");
             // Each count in its plural form: "200 pages", "210 مقاطع".
             const pages = window.kazmaCount("knowledge.pages_count", discovered);
             const chunks = chunkCountLabel(ingested);
@@ -367,9 +375,17 @@ function knowledgePage() {
       }, 2000);
     },
 
+    // A crawl that finished with failed pages, or with discovery cut short,
+    // is never shown as plainly "Done" (KB-S15).
+    jobPartial() {
+      const a = this.activeJob && this.activeJob.acquisition;
+      return !!(this.activeJob && this.activeJob.phase === "done"
+        && ((a && (a.status === "partial" || a.discovery_limited)) || (this.activeJob.failed || 0) > 0));
+    },
     jobTitle() {
       if (!this.activeJob) return "";
       const p = this.activeJob.phase;
+      if (p === "done" && this.jobPartial()) return _k("knowledge.phase_partial", "Finished with failures");
       if (p === "done") return _k("knowledge.phase_done", "Done");
       if (p === "error") return _k("knowledge.phase_error", "Error");
       if (p === "interrupted") return _k("knowledge.phase_interrupted", "Interrupted");
@@ -377,7 +393,7 @@ function knowledgePage() {
     },
     jobIcon() {
       if (!this.activeJob) return "info";
-      if (this.activeJob.phase === "done") return "check-circle";
+      if (this.activeJob.phase === "done") return this.jobPartial() ? "alert" : "check-circle";
       if (["error", "interrupted"].includes(this.activeJob.phase)) return "alert";
       return "spider";
     },
@@ -400,7 +416,7 @@ function knowledgePage() {
       try {
         const r = await fetch(`/api/kb/libraries/${lib.id}/archive`, { method: "POST" });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.archive_failed", "Archive failed"));
+        if (!data.ok) throw new Error(errorText(data, "knowledge.ui.archive_failed", "Archive failed"));
         toast(S.archived_msg || "Library archived.", "info");
         await this.load();
       } catch (e) {
@@ -412,7 +428,7 @@ function knowledgePage() {
       try {
         const r = await fetch(`/api/kb/libraries/${lib.id}/unarchive`, { method: "POST" });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.unarchive_failed", "Unarchive failed"));
+        if (!data.ok) throw new Error(errorText(data, "knowledge.ui.unarchive_failed", "Unarchive failed"));
         toast(S.restored_msg || "Library restored.", "success");
         await this.load();
       } catch (e) {
@@ -435,7 +451,7 @@ function knowledgePage() {
           body: JSON.stringify({ library_id: lib.id, query: lib._query, top_k: 5 }),
         });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.search_failed", "Search failed"));
+        if (!data.ok) throw new Error(errorText(data, "knowledge.ui.search_failed", "Search failed"));
         lib._hits = data.hits;
       } catch (e) {
         toast(e.message, "error");
@@ -451,7 +467,7 @@ function knowledgePage() {
         try {
           const r = await fetch(`/api/kb/libraries/${lib.id}/chunks?limit=100`);
           const data = await r.json();
-          if (!data.ok) throw new Error(data.error || _k("knowledge.ui.browse_failed", "Browse failed"));
+          if (!data.ok) throw new Error(errorText(data, "knowledge.ui.browse_failed", "Browse failed"));
           lib._chunks = data.chunks;
           lib._chunk_total = data.total;
         } catch (e) {
@@ -475,7 +491,7 @@ function knowledgePage() {
       try {
         const r = await fetch(`/api/kb/libraries/${lib.id}/refresh`, { method: "POST" });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.refresh_failed", "Refresh failed"));
+        if (!data.ok) throw new Error(errorText(data, "knowledge.ui.refresh_failed", "Refresh failed"));
         this.activeJob = { phase: "starting", message: "refreshing…", library_id: lib.id };
         this._pollJob(data.job_id);
         toast(S.refresh_started || "Refresh started.", "info");
@@ -495,7 +511,7 @@ function knowledgePage() {
           body: JSON.stringify({ auto_inject: value }),
         });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.update_failed", "Update failed"));
+        if (!data.ok) throw new Error(errorText(data, "knowledge.ui.update_failed", "Update failed"));
         toast(
           value ? (S.auto_on_msg || "Auto-inject ON.") : (S.auto_off_msg || "Auto-inject OFF."),
           value ? "success" : "info",
@@ -523,7 +539,7 @@ function knowledgePage() {
       try {
         const r = await fetch(`/api/kb/libraries/${lib.id}`, { method: "DELETE" });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.delete_failed", "Delete failed"));
+        if (!data.ok) throw new Error(errorText(data, "knowledge.ui.delete_failed", "Delete failed"));
         toast(S.library_deleted || "Library deleted.", "success");
         await this.load();
       } catch (e) {

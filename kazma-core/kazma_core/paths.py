@@ -279,6 +279,13 @@ def settings_db() -> str:
     return str(data_dir() / "settings.db")
 
 
+def knowledge_db() -> str:
+    """The Knowledge Library's database: libraries, chunks and their keyword
+    index (Knowledge audit KB-E10; it shared ``settings.db`` until
+    2026-10-14)."""
+    return str(data_dir() / "knowledge.db")
+
+
 def snapshots_db() -> str:
     """Time-travel snapshots database."""
     return str(data_dir() / "snapshots.db")

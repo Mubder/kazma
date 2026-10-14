@@ -55,8 +55,10 @@ function fill(text, vars) {
   return s;
 }
 
-/** A Settings page in a sandbox, with *patch* applied to one file's source. */
-function load(patch) {
+/** A Settings page in a sandbox, with *patch* applied to one file's source.
+ * With *refuse*, the server answers every request 200 {"ok": false} (the
+ * Knowledge audit KB-S10 shape) and the page uses the real kazmaSave. */
+function load(patch, refuse) {
   const toasts = [];
   const calls = [];
   const sb = { console, setTimeout, clearTimeout, setInterval, clearInterval, URL, URLSearchParams };
@@ -68,12 +70,23 @@ function load(patch) {
   sb.kazmaCount = (key, n) => String(n);
   sb.t = (key) => key;
   sb.tOr = (key, fallback) => fallback;
-  const answer = { ok: true, success: true, message: "", adapters_count: 0, adapters: [] };
+  const answer = refuse
+    ? { ok: false, success: false, error: "Refused by the server", adapters_count: 0, adapters: [] }
+    : { ok: true, success: true, message: "", adapters_count: 0, adapters: [] };
   sb.fetch = async (url) => {
     calls.push(String(url));
     return { ok: true, status: 200, statusText: "OK", json: async () => answer, text: async () => "{}" };
   };
-  sb.kazmaSave = async (url) => { calls.push(String(url)); return answer; };
+  if (refuse) {
+    let guard = fs.readFileSync(path.join(jsDir, "auth-guard.js"), "utf8");
+    if (patch && patch.file === "auth-guard.js") {
+      if (!guard.includes(patch.from)) throw new Error("negative control: patch target moved in auth-guard.js");
+      guard = guard.replace(patch.from, patch.to);
+    }
+    vm.runInNewContext(guard, sb, { filename: "auth-guard.js" });
+  } else {
+    sb.kazmaSave = async (url) => { calls.push(String(url)); return answer; };
+  }
   sb.kazmaConfirm = async () => true;
   sb.kazmaAlert = async () => undefined;
   sb.kazmaPrompt = async () => null;
@@ -102,16 +115,16 @@ function load(patch) {
 }
 
 /** Each save* method: what it showed and whether it reached the server. */
-async function runSaves(patch, only) {
+async function runSaves(patch, only, refuse) {
   const out = {};
-  const first = load(patch).sb.settingsApp();
+  const first = load(patch, refuse).sb.settingsApp();
   const names = Object.keys(Object.getOwnPropertyDescriptors(first))
     .filter((k) => /^save/.test(k) && typeof first[k] === "function")
     .filter((k) => !only || only.includes(k));
   for (const name of names) {
     // A page of its own: a timer another save left running cannot call
     // the server during this one.
-    const { sb, toasts, calls } = load(patch);
+    const { sb, toasts, calls } = load(patch, refuse);
     const app = sb.settingsApp();
     let threw = null;
     let settled = false;
@@ -126,6 +139,7 @@ async function runSaves(patch, only) {
     }
     out[name] = {
       errors: toasts.filter((t) => t.type === "error").map((t) => t.msg),
+      successes: toasts.filter((t) => t.type === "success").map((t) => t.msg),
       calledServer: calls.length > 0,
       settled,
       threw,
@@ -159,6 +173,24 @@ async function runSaves(patch, only) {
   }, ["saveProxy"]);
   ok("negative control: a save whose success line throws is caught",
     broken.saveProxy && broken.saveProxy.errors.length > 0, broken.saveProxy);
+
+  // Knowledge audit KB-S10: a server that refuses every write with a 200
+  // {"ok": false}. No save may say it saved.
+  const refused = await runSaves(undefined, undefined, true);
+  for (const name of Object.keys(refused)) {
+    const r = refused[name];
+    if (VALIDATES[name] || !r.calledServer) continue;
+    ok(name + " never reports saved over a refusal", r.successes.length === 0, r);
+  }
+  // Negative control: kazmaSave's old check (the HTTP status and
+  // `status: "error"` only) let a refused write say saved.
+  const old = await runSaves({
+    file: "auth-guard.js",
+    from: 'if (!res.ok || (body && (body.status === "error" || body.ok === false))) {',
+    to: 'if (!res.ok || (body && body.status === "error")) {',
+  }, undefined, true);
+  ok("negative control: the old kazmaSave check reports a refused write as saved",
+    Object.values(old).some((r) => r.calledServer && r.successes.length > 0));
 
   if (fail) {
     console.error(fail + " failure(s)");

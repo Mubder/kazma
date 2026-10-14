@@ -95,7 +95,9 @@ helpers['install'](pytest.MonkeyPatch(),Path({str(tmp_path / 'workspace')!r}),st
                    crash={stage!r},published={published!r},fixed={fixed!r})
 asyncio.run(pipeline.run_research_pipeline('fixture topic',**{OPTIONS!r}))
 """
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path'}
+    # The child is a process of THIS install (its data dir): the crawl
+    # journal is scoped per install since Knowledge audit KB-E07.
+    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'kazma_data_dir'}
     result = await run_bounded_async([sys.executable, '-I', '-X', 'utf8', '-c', program],
         env={key: value for key, value in os.environ.items() if key.lower() in allowed},
         timeout=45, output_bytes=32768, memory_bytes=1024**3, text=True)
@@ -290,16 +292,17 @@ def test_invalid_stage_metadata_is_a_typed_storage_failure(journal, broken):
             await job.effect('plan', {}, lambda: asyncio.sleep(0, result='fixture'))
     asyncio.run(seed())
     row, = crawl_jobs.inspect_jobs()
-    def corrupt(jobs):
-        effect = jobs[row['job_id']]['effects']['plan']
+    def corrupt(job):
+        effect = job['effects']['plan']
         if broken == 'files':
             effect['files'] = {'path': 'wrong type'}
         elif broken == 'reservation':
             effect['reserved_bytes'] = 'wrong type'
         else:
             effect['reserved_bytes'] = 512 * 1024**2 + 1
-        return jobs
-    store.atomic_update(crawl_jobs._KEY, corrupt, category=crawl_jobs._CATEGORY)
+        return job
+    # Each job is its own row since Knowledge audit KB-E04.
+    store.atomic_update(crawl_jobs._job_key(row['job_id']), corrupt, category=crawl_jobs._CATEGORY)
     with pytest.raises(AcquisitionError) as error:
         crawl_jobs.inspect_jobs()
     assert error.value.code == FetchErrorCode.STORAGE

@@ -132,7 +132,9 @@ async def run():
     await sessions._RUNNING[session.id]
 asyncio.run(run())
 """
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path'}
+    # The child is a process of THIS install (its data dir): the crawl
+    # journal is scoped per install since Knowledge audit KB-E07.
+    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'kazma_data_dir'}
     receipt = await run_bounded_async([sys.executable, '-I', '-X', 'utf8', '-c', program], env={k:v for k,v in os.environ.items() if k.lower() in allowed}, timeout=45, output_bytes=32768, memory_bytes=1024**3, text=True)
     assert receipt.returncode == 23, receipt.stderr + receipt.stdout
     with monkeypatch.context() as control:

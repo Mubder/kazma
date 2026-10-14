@@ -818,18 +818,23 @@ dispatches still go through the [swarm bus HITL gate](../guide/security-and-safe
 ## `/kb` — Knowledge Library (chat)
 
 **Where handled:** `kazma_gateway/agent_handler/commands.py:_try_kb_command`.
-Ingest documentation sites into searchable RAG corpora from any chat platform.
+Ingest documentation sites into searchable libraries from any chat app. The
+gateway answers every `/kb` command itself, with no model call. Commands that
+change a library are for the gateway's admins only
+(`slash_commands.changes_global_config`): the libraries are the install's,
+and every chat can inject from them. On an install with platform users every
+`/kb` command is refused, because libraries are not separated per user yet.
 
-| Command | Description |
-|---------|-------------|
-| `/kb` | Show help + library list |
-| `/kb list` | List libraries (id, chunks, seed) |
-| `/kb add <id> <url>` | Create-or-use a library, ingest **one** page (sync) |
-| `/kb crawl <id> <url> [N]` | Ingest the **whole** doc tree (background job) |
-| `/kb refresh <id>` | Re-crawl a library from its seed URL (background) |
-| `/kb search <id> <query>` | Direct search (useful without an LLM call) |
-| `/kb status <id>` | Live progress of a running crawl/refresh |
-| `/kb delete <id>` | Delete a library + all its chunks |
+| Command | Admin only | Description |
+|---------|------------|-------------|
+| `/kb` | no | Show help and the library list |
+| `/kb list` | no | List libraries (id, chunks, seed) |
+| `/kb add <id> <url>` | yes | Ingest **one** page now; the library is created once the page was fetched. The reply says whether the page was stored, unchanged or refused. `/kb ingest` is the same command |
+| `/kb crawl <id> <url> [N]` | yes | Crawl the doc tree in the background; the reply when it ends is the crawl journal's outcome (finished, finished with failures, or did not finish) |
+| `/kb refresh <id>` | yes | Crawl the library again from its seed URL, in the background |
+| `/kb search <id> <query>` | no | Direct search (no model call) |
+| `/kb status <id>` | no | The library's latest crawl, from the crawl journal |
+| `/kb delete <id>` | yes | Delete a library with its chunks, vectors and fetched pages; refused while a crawl of it runs |
 
 ### Example
 ```

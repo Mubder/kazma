@@ -148,8 +148,10 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("acquisition.outputs_revision", RUNTIME, "standalone output conditional-write revision"),
     KeyRule("acquisition.artifacts", RUNTIME, "retained artifact storage reservations"),
     KeyRule("acquisition.artifacts_revision", RUNTIME, "artifact conditional-write revision"),
-    KeyRule("acquisition.crawls", RUNTIME, "durable crawl effects and ownership; restoring a journal could repeat requests or indexing"),
-    KeyRule("acquisition.crawls_revision", RUNTIME, "conditional-write revision for durable crawl effects"),
+    KeyRule("acquisition.crawls", RUNTIME, "the crawl journal before one row per job (moved in at the first read)"),
+    KeyRule("acquisition.crawls_revision", RUNTIME, "conditional-write revision for crawl admission"),
+    KeyRule("acquisition.crawl.", RUNTIME, "durable crawl effects and ownership, one row and revision per job; "
+            "restoring a journal could repeat requests or indexing"),
     KeyRule("acquisition.monitor", RUNTIME, "research/crawl alerts already raised and whether each was "
             "delivered; restoring an older ledger would raise them again"),
     KeyRule("acquisition.monitor_revision", RUNTIME, "conditional-write revision for the alert ledger"),

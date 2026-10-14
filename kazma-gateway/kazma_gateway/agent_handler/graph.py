@@ -1655,36 +1655,9 @@ def create_graph_handler(
                     exc_info=True,
                 )
 
-            # ── Knowledge Library auto-inject (Phase 2) ────────────
-            # For libraries with ``auto_inject=1``, fold the top-k chunks
-            # relevant to this user message into the prompt — fenced as
-            # untrusted data (doc content may be adversarial).  Kill switch
-            # ``KAZMA_KB_AUTO_INJECT=0`` checked live inside the getter.
-            try:
-                from kazma_core.safety.prompt_fence import format_untrusted_block
-                from kazma_core.stores.knowledge_index import (
-                    get_knowledge_auto_inject_block,
-                )
-
-                kb_block = await get_knowledge_auto_inject_block(msg.text or "")
-                if kb_block:
-                    msgs = list(state.get("messages") or [])
-                    kb_sys = {
-                        "role": "system",
-                        "content": format_untrusted_block(kb_block, source="knowledge"),
-                    }
-                    insert_at = 0
-                    for i, m in enumerate(msgs):
-                        if isinstance(m, dict) and m.get("role") == "user":
-                            insert_at = i
-                            break
-                    msgs.insert(insert_at, kb_sys)
-                    state = {**state, "messages": msgs}
-            except Exception:
-                logger.debug(
-                    "[agent-handler] knowledge auto-inject skipped",
-                    exc_info=True,
-                )
+            # The Knowledge Library block is the supervisor's, once per
+            # turn (Knowledge audit KB-S08: this handler injected the same
+            # chunks a second time).
 
             # Sync turn start to Web UI so the session appears immediately in sidebar
             await asyncio.to_thread(

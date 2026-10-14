@@ -978,10 +978,27 @@ def _embed_knowledge_chunks() -> None:
     # keyword-only until 2026-09-26: ~40 minutes of CPU to catch up on the
     # live install, so a pass may take 5; it is last in the cycle so the
     # memory sweeps never wait on it. With nothing to do it lists each
-    # library's ids and returns; it logs what it changes.
-    from kazma_core.stores.knowledge_index import get_knowledge_index
+    # library's ids and returns; it logs what it changes. Its report is
+    # kept for metrics, readiness and the digest, a vector store that stays
+    # down raises an ops alert, the keyword index's coverage is checked too,
+    # and a library that fails makes the pass raise -- the runner logs it at
+    # WARNING (Knowledge audit KB-E11: the report used to be discarded).
+    from kazma_core.stores.knowledge_index import run_repair_sweep
 
-    get_knowledge_index().backfill_vectors(time_budget_s=300.0)
+    _compact_knowledge_store()
+    run_repair_sweep(time_budget_s=300.0)
+
+
+def _compact_knowledge_store() -> None:
+    # Freed pages of the Knowledge database go back to the file system
+    # (incremental vacuum, never VACUUM: it renumbers the rowids the keyword
+    # index is keyed by). KB-E10.
+    from kazma_core.stores.knowledge import get_knowledge_store
+
+    store = get_knowledge_store()
+    status = store.storage_status()
+    if status["free_bytes"] > max(64 * 1024**2, status["file_bytes"] // 5):
+        store.compact()
 
 
 def _recover_erased_memories() -> None:

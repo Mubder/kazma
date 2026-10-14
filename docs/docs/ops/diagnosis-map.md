@@ -386,9 +386,9 @@ KB ingest and research use **`kazma_core.web_acquire`** (`fetch_text` / `search`
 |------|------|
 | `KnowledgeIndex.search_all_sync` | **SoT retrieval** — Chroma semantic + FTS5 BM25 → RRF |
 | `federated_search(..., kb_mode=inject\|all_active)` | Chat merge + tools; labels `store=knowledge` (no schema merge with V2) |
-| `get_knowledge_auto_inject_block` | Same RRF via federated `kb_mode=inject` + prompt fence at caller |
-| Smart re-index | Unchanged page hashes → skip; change → purge URL; gone scoped URLs pruned |
-| Isolation | Per-lib Chroma `kazma_kb_*`; SQLite SoT; tenant/archive on list/inject |
+| `build_knowledge_inject` | Same RRF via `kb_mode=inject`; the supervisor fences and injects it once per turn (`graph_supervisor`) |
+| Re-index | Unchanged page → skip; changed page → replaced in one transaction; a URL missing from discovery is kept |
+| Isolation | Own `knowledge.db`; per-lib Chroma `kazma_kb_*`; archive on list/inject; single-operator installs only |
 
 Live smoke: `scripts/smoke_research_stack.py`.
 

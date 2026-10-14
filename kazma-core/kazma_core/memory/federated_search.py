@@ -90,6 +90,12 @@ def federated_search(
     KB side uses the same **RRF** path as auto-inject / ``knowledge_search``
     (semantic Chroma + FTS5), not FTS-only — industry hybrid retrieval.
 
+    The two stores are never ranked against each other: ``hits`` holds the
+    memory hits (best first by memory's evidence score, at most
+    ``limit_memory``) and then the Knowledge hits (best first by RRF, at
+    most ``limit_kb``). ``include_memory`` / ``include_knowledge`` decide
+    whether a store is searched at all.
+
     Returns::
 
         {
@@ -175,7 +181,16 @@ def federated_search(
         except Exception as exc:
             logger.debug("[federated] memory search failed: %s", exc, exc_info=True)
 
-    if include_knowledge:
+    # Each store keeps its own ranking and its own budget (Knowledge audit
+    # KB-S02): memory scores are evidence on 0..1, Knowledge scores are RRF
+    # sums near 0.02, and the old merged sort-and-cut compared them -- a
+    # fixed 0.4 score on the retired unified rows pushed every Knowledge hit
+    # out of an inject while the turn still reported them as used.
+    hits.sort(key=lambda h: float(h.get("score") or 0), reverse=True)  # memory's own scale
+    hits = hits[:max(0, limit_memory)] if include_memory else []
+    mem_n = len(hits)
+
+    if include_knowledge and limit_kb > 0:
         try:
             kb_hits = _search_knowledge(
                 q,
@@ -183,19 +198,11 @@ def federated_search(
                 mode=kb_mode,
                 user_message=q,
             )
+            kb_hits = kb_hits[:limit_kb]
             hits.extend(kb_hits)
             kb_n = len(kb_hits)
         except Exception as exc:
-            logger.debug("[federated] knowledge search failed: %s", exc, exc_info=True)
-
-    def _rank_key(h: dict[str, Any]) -> float:
-        return float(h.get("score") or 0)
-
-    hits.sort(key=_rank_key, reverse=True)
-    # Cap total while preserving store diversity
-    cap = max(limit_memory, 0) + max(limit_kb, 0)
-    if len(hits) > cap > 0:
-        hits = hits[:cap]
+            logger.warning("[federated] knowledge search failed: %s", exc)
 
     return {
         "ok": True,

@@ -47,7 +47,7 @@ eval, and docs presence. **Live network / LLM rows below still need a human.**
 |---|--------|--------|------|
 | K1 | Create lib + crawl a small public docs root | Job shows discovered/fetched/ingested | ☐ |
 | K2 | **Refresh** same lib immediately | `unchanged` / skipped rise; few or zero new embeds | ☐ |
-| K3 | Remove a page from scope (or prune via re-discover) | `pruned` count or gone URL absent from search | ☐ |
+| K3 | Remove a page from scope, then refresh | The page is kept (a refresh never deletes indexed pages); delete the library to remove it | ☐ |
 | K4 | Enable **auto_inject** on lib; ask in chat about a doc fact | Answer cites KB / footer | ☐ |
 | K5 | Settings → Memory → **Smart Knowledge search** on; technical Q without auto_inject | Still injects from active libs with chunks | ☐ |
 

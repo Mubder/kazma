@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## Knowledge Library: the industrial audit (2026-10-14)
+
+- The Knowledge Library has its own database, `knowledge.db`, with a 1 GiB
+  quota that refuses a crawl before it fetches. On first open the old tables
+  move in from `settings.db`, and a migration bundle in the older layout is
+  staged the same way. A page is published in one transaction (its old chunks
+  retired, the new ones and the keyword index written together). A deleted
+  library refuses late writes. Chunk ids carry their position.
+- One delete, from the page and from `/kb`: refused while a crawl owns the
+  library; the documents it holds are taken out through the Documents
+  service, then vectors, chunks and the fetched pages.
+- The crawl journal is the only crawl state: one row per job with its own
+  revision, bounded by count and bytes, owners with a renewed lease, and one
+  crawl per library. `kb.ingest_jobs` and `stores/kb_jobs.py` are retired;
+  `kazma acquisition purge-finished` clears finished jobs.
+- Meaning search tags a vector with the embedder that made it (class, model,
+  size, endpoint), so a model switch or a fallback re-embeds instead of
+  mixing vectors. The repair sweep isolates each library, says when the
+  vector store is away (WARNING, an ops alert after three passes, `/metrics`,
+  readiness and the daily digest), and checks the keyword index each pass.
+- What the model sees: the supervisor builds the turn's one Knowledge block
+  (the transports no longer inject their own), "Memory used" lists exactly
+  the chunks injected, and `knowledge_search` fences the page text while its
+  own scaffolding stays outside. Stored URLs are http(s) only.
+- Surfaces: stable error codes in English and Arabic, bounded request
+  bodies, `/kb add|crawl|refresh|delete` handled by the gateway (admin
+  only), every Knowledge surface refuses an install with platform users
+  (decision D1), and `window.kazmaSave` treats `{ok: false}` as a failure on
+  every Settings save.
+- Open: the scale measurement and multi-day soak (owner, D3), the retrieval
+  benchmark, and an independent review. Error wording and page polish
+  (KB-S05, KB-S15) are partial. Tracker:
+  `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`.
+
 ## Time Travel: the industrial audit (2026-10-14)
 
 - One rewind for every surface (`kazma_ui/thread_rewind.py`): the web page,

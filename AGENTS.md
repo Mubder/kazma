@@ -3370,9 +3370,20 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   requires the qualified Linux namespace; Windows refuses strict launch. See
   `docs/audits/WEB_ACQUISITION_IMPLEMENTATION_2026-10-10.md` for remaining gates.
   `web_acquire.crawl_jobs` persists KB ownership before Web acceptance, bounded
-  page/BFS frontiers and metadata effects before fetch/indexing. Four active
-  jobs, 24 retained, 8MiB; explicit resume requires identical policy and skips
-  completed/uncertain effects. Metadata keeps parsed links, never raw bodies.
+  page/BFS frontiers and metadata effects before fetch/indexing. One settings
+  row per job (`acquisition.crawl.<digest>`, its own CAS revision; Knowledge
+  audit KB-E04, 2026-10-14): a page update writes its own job only. Four
+  active, 24 retained, 16 MiB, 4 MiB a job (frontier admission checks it);
+  finished jobs are evicted by count AND bytes, never a running one;
+  `kazma acquisition purge-finished` is the operator's purge. Owners carry
+  install, host, pid, start time and a lease renewed on every write (300 s,
+  KB-E07): a dead owner on this host is recovered, another host's only after
+  its lease lapsed, and the taken-over owner's next write is refused; rows of
+  another install are never read. One crawl per KB library (`CrawlLibraryBusy`,
+  KB-E14); the journal is the only crawl state (`kb.ingest_jobs` and
+  `stores/kb_jobs.py` retired). An explicit KB resume fetches uncertain pages
+  again and skips completed ones; resume requires identical policy. Gate:
+  `tests/test_knowledge_crawl_journal.py`. Metadata keeps parsed links, never raw bodies.
   Faithful identity preserves `.md`, slash, matrix parameters and query bytes;
   do not infer aliases without an observed redirect. Web recovery uses the
   journal as truth; errors/partial coverage cannot become a success toast.
@@ -3706,6 +3717,77 @@ module was deleted and the import's `except` said "chromadb not installed".
   deletes a folder tree and names the store
   (`tests/test_reembed_keeps_knowledge_vectors.py`, the old step as the
   negative control).
+- **A vector's tag names the embedder INSTANCE** (`embedder_identity`: class,
+  model, size, endpoint digest; Knowledge audit KB-E03, 2026-10-14), never the
+  configured name: a Settings change waiting for a restart, or a remote model
+  that fell back to the local one, tagged vectors with a model that had not
+  made them. Search filters on the active identity (`_raw_layers`), an
+  untagged vector is re-made, and a query against a collection of another
+  size waits for the sweep (one INFO). Health is the sweep's recorded
+  coverage (`knowledge_vector_status`, states unknown/ok/rebuilding/
+  unavailable/failed): listing libraries opens no collection and loads no
+  model (KB-S15).
+- **The sweep is isolated per library and observed** (`run_repair_sweep`,
+  KB-E11): a failing library is recorded and the others repaired, then the
+  pass raises for the runner's WARNING; the first unavailable pass and the
+  recovery are WARNINGs; three bad passes raise the ops alert
+  `knowledge.meaning_search` (6 h cooldown); `/metrics` carries
+  `kazma_kb_vector_*`, readiness `knowledge_vectors` (never critical,
+  `topology: single_install`), the daily digest a "Needs attention" line.
+  The keyword index's coverage is checked each pass and rebuilt with a
+  WARNING; an FTS storage error is a WARNING and `keyword_index_ok: false`,
+  a query syntax error stays DEBUG. `KB_FOLD_VERSION` is stored in
+  `knowledge_meta`; a new value rebuilds the index at open (a fingerprint
+  test fails when `fold_for_search` changes without it).
+- **One `KnowledgeIndex` per store** (`knowledge_index_for`, shared with
+  Documents; KB-E12), and a collection another handle dropped is re-opened
+  by name and the call retried once (`VectorStore._reopen_if_missing`). Only
+  `knowledge_index_for` constructs an index in product code (gate in
+  `tests/test_knowledge_vectors.py`).
+
+**G. The Knowledge store and its surfaces** (Knowledge audit 2026-10-13,
+tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
+- **Own file** `knowledge.db` (`paths.knowledge_db`, a `bundle` store; KB-E10):
+  a quota on the store's own pages in use (1 GiB, refused before fetch with
+  `KnowledgeStorageFull`, reads unaffected), `auto_vacuum=INCREMENTAL` and the
+  maintenance pass's `compact()` (never `VACUUM`: it renumbers the rowids the
+  FTS is keyed by). `settings.db`'s old tables move in on the first open
+  (`copy_legacy_knowledge`, explicit columns, FTS rebuilt, a non-http seed
+  blanked) and a bundle in the older layout is staged the same way
+  (`importer._stage_legacy_knowledge`; no Knowledge DDL in `migration/`,
+  KB-E01). Every connection sets the pragmas, `foreign_keys` included, and
+  `close()` takes the store lock (KB-E13).
+- **One publication path** (`KnowledgeStore.publish_page`, KB-E02): a page's
+  retire and insert, FTS included, in one `BEGIN IMMEDIATE`; a deleted
+  library refuses (`KnowledgeLibraryGone`), a failed page fails and the crawl
+  ends `partial`. Chunk ids carry the position (`make_chunk_id`, KB-E05). The
+  FTS is keyed by rowid and deleted by `rowid AND chunk_id` (KB-E06); library
+  deletes run in 500-row batches with the lock released between them.
+- **Delete goes through `knowledge_lifecycle.delete_library`** (KB-E08): 409
+  while a crawl owns the library, the documents it holds unindexed through
+  the Documents service first, then vectors, chunks and the fetched pages
+  (`<data dir>/knowledge_provenance/<library>`, a `bundle` entry).
+- **Model boundary**: the supervisor builds the turn's ONE Knowledge block
+  (`_knowledge_inject_for_turn`, off the loop; KB-S08), stripping an earlier
+  turn's note at iteration 0; the transports inject nothing. The "Memory
+  used" record lists exactly the injected chunks (KB-S02), even with recall
+  suppressed. `knowledge_search` keeps its scaffolding outside the fence and
+  the page's text inside (KB-S01). Federated search ranks each store on its
+  own budget. Stored URLs are http(s) only (`validate_web_url`, every
+  writer), rendered through `safeHref` (KB-S09).
+- **Surfaces**: `/api/kb/*` refuses with stable codes (`KB_ERROR_CODES`,
+  `knowledge.err.<code>` EN+AR; KB-S05) and reads bodies under 64 KiB with
+  bounded models (KB-S13); every KB surface refuses an install with platform
+  users (`kb_refusal`, the shared single-operator rule; KB-S04); `/kb
+  add|crawl|refresh|delete` are handled in the gateway, admin-only through
+  `changes_global_config`, and report the journal's outcome (KB-S07).
+  `window.kazmaSave` rejects `{ok: false}` and every Settings save does too
+  (KB-S10).
+- Gates: `tests/test_knowledge_publication.py`, `test_knowledge_crawl_journal.py`,
+  `test_knowledge_vectors.py`, `test_knowledge_model_boundary.py`,
+  `test_kb_api_contract.py`, `test_kb_gateway_commands.py`,
+  `test_knowledge_migration.py`, `test_knowledge_docs_claims.py`, each with
+  its negative control.
 - Gate: `tests/test_knowledge_meaning_search.py` (a fake chromadb in CI, the
   real one where the `rag` extra is installed).
 

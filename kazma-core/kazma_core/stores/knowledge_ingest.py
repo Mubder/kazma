@@ -53,8 +53,10 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from collections import deque
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, AsyncIterator
 from urllib.parse import urljoin, urlparse
 
@@ -209,7 +211,6 @@ class ProgressUpdate:
     skipped: int = 0         # chunks skipped (dedup / unchanged pages)
     failed: int = 0          # pages that failed
     pages_unchanged: int = 0  # smart re-index full-page skips
-    pruned_urls: int = 0      # gone URLs removed at end of site crawl
     current_url: str = ""
     message: str = ""
     errors: list[str] = field(default_factory=list)  # per-page failure reasons
@@ -225,7 +226,9 @@ class IngestResult:
     pages_fetched: int = 0
     pages_failed: int = 0
     chunks_new: int = 0
-    chunks_skipped: int = 0
+    chunks_skipped: int = 0   # chunks of pages stored unchanged
+    pages_unchanged: int = 0
+    library_created: bool = False
     failed_urls: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -1126,6 +1129,7 @@ async def _extract_page(url: str, *, scope_check=None) -> tuple[str | None, str,
     deadlines and policy. Partial or failed results never reach the index.
     """
     checker = scope_check or (lambda target: _in_scope(url, target, "domain"))
+    _OBSERVED_URL.set(None)
     fr = await _web_fetch_text(url, purpose="kb", scope_check=checker)
     from kazma_core.web_acquire.crawl_jobs import call, current_crawl
 
@@ -1143,7 +1147,27 @@ async def _extract_page(url: str, *, scope_check=None) -> tuple[str | None, str,
         if len(text.split()) >= 8:
             return text, "ok", f"short static page ({len(text)} chars)"
         return None, "error", f"Insufficient readable content ({len(text)} chars); no page was indexed."
+    _OBSERVED_URL.set(_observed_page_url(url, fr.final_url, checker))
     return text, "ok", ""
+
+
+def _observed_page_url(requested: str, final: str | None, checker: Any) -> str | None:
+    """The page an acquisition landed on, as page identity (KB-E14), when it
+    was observed, is http(s) and is inside the crawl's scope."""
+    if not final or final == requested:
+        return None
+    from kazma_core.stores.knowledge import KnowledgeUrlRefused, validate_web_url
+
+    try:
+        final = validate_web_url(final)
+    except KnowledgeUrlRefused:
+        return None
+    try:
+        if not checker(final):
+            return None
+    except Exception:
+        return None
+    return _canonical_page_url(final) or None
 
 
 def _check_playwright_available() -> str:
@@ -1196,27 +1220,41 @@ async def _extract_playwright_full_dom(url: str) -> str | None:
 # ── Ingestion: single page + whole tree ─────────────────────────────────────
 
 
-def _save_provenance(library_id: str, url: str, text: str) -> None:
-    """Best-effort save of a fetched page's raw markdown under the workspace.
+#: The most pages one library keeps a fetched copy of (KB-E08); past it the
+#: oldest copies go first.
+_PROVENANCE_MAX_FILES = 5000
 
-    Stored under ``{KAZMA_RESEARCH_DIR}/kb/{library_id}/<slug>.md`` so the
-    original page text is inspectable later (the chunker is lossy at the
-    boundaries; this is the source-of-truth copy for re-debugging).  All
-    failures are swallowed — ingestion must not depend on it.
+
+def _provenance_dir(library_id: str) -> Path:
+    """Where a library's fetched pages are kept: ``<data dir>/
+    knowledge_provenance/<library>``. They used to go into the ACTIVE
+    WORKSPACE (``research/kb/<library>``) -- after a Switch Repo, the
+    operator's own repository -- and stayed there after the library was
+    deleted (Knowledge audit KB-E08)."""
+    from kazma_core.paths import data_dir
+
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in library_id)[:80] or "library"
+    return data_dir() / "knowledge_provenance" / safe
+
+
+def _save_provenance(library_id: str, url: str, text: str) -> None:
+    """Keep a fetched page's raw markdown with its library.
+
+    ``<data dir>/knowledge_provenance/<library>/<slug>-<digest>.md``: the
+    original page text, inspectable later (the chunker is lossy at the
+    boundaries). Bounded at :data:`_PROVENANCE_MAX_FILES` per library and
+    removed with the library (:func:`delete_provenance`). A failure is a
+    WARNING; the page is stored either way.
     """
     try:
         import hashlib
 
-        from kazma_core.tools.read_url import _workspace_root
-
-        root = _workspace_root()
+        folder = _provenance_dir(library_id)
+        folder.mkdir(parents=True, exist_ok=True)
         slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", url)[:80].strip("-") or "page"
         digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
-        fname = f"{slug}-{digest}.md"
-        target = (root / "research" / "kb" / library_id / fname).resolve()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Containment check — never escape the workspace.
-        target.relative_to(root.resolve())
+        target = folder / f"{slug}-{digest}.md"
+        new = not target.exists()
         header = (
             f"# Source: {url}\n"
             f"# Library: {library_id}\n"
@@ -1224,8 +1262,38 @@ def _save_provenance(library_id: str, url: str, text: str) -> None:
             f"# Chars: {len(text)}\n\n"
         )
         target.write_text(header + text, encoding="utf-8")
+        if new:
+            files = [entry for entry in os.scandir(folder) if entry.is_file()]
+            if len(files) > _PROVENANCE_MAX_FILES:
+                files.sort(key=lambda entry: entry.stat().st_mtime)
+                for entry in files[: len(files) - _PROVENANCE_MAX_FILES]:
+                    os.unlink(entry.path)
     except Exception as exc:
-        logger.debug("[kb_ingest] provenance save failed for %s: %s", url, exc)
+        logger.warning("[kb_ingest] the fetched copy of %s was not kept: %s", url[:120], exc)
+
+
+def delete_provenance(library_id: str) -> bool:
+    """Remove a library's fetched pages (its delete, KB-E08). True when
+    nothing is left; a failure is a WARNING and False."""
+    import shutil
+
+    folder = _provenance_dir(library_id)
+    if not folder.exists():
+        return True
+    try:
+        shutil.rmtree(folder)
+        return True
+    except OSError as exc:
+        logger.warning("[kb_ingest] the fetched pages of library %s were not removed: %s",
+                       library_id, exc)
+        return False
+
+
+#: The page a fetch landed on, when the acquisition observed it (set by
+#: :func:`_extract_page`, read by the crawl in the same task): a page is
+#: stored under where it was found, so two links that redirect to one page
+#: index it once (KB-E14).
+_OBSERVED_URL: ContextVar[str | None] = ContextVar("kb_observed_url", default=None)
 
 
 async def ingest_url(
@@ -1233,12 +1301,38 @@ async def ingest_url(
     url: str,
     *,
     document_title: str = "",
+    name: str = "",
 ) -> IngestResult:
     """Ingest a single page into a library.
 
-    Fetches → chunks → indexes.  Returns a :class:`IngestResult` summary.
+    Fetches → chunks → publishes. Returns an :class:`IngestResult` summary.
+    The library is created only once the page was fetched (KB-S09: a
+    refused or failed first fetch left an empty library behind, with the
+    refused URL as its seed). A URL that is not http(s), or a store at its
+    quota, is refused before anything is fetched.
     """
+    from kazma_core.stores.knowledge import (
+        KnowledgeStorageFull,
+        KnowledgeUrlRefused,
+        validate_web_url,
+    )
+
     result = IngestResult(pages_discovered=1)
+    try:
+        url = validate_web_url(url)
+    except KnowledgeUrlRefused as exc:
+        result.errors.append(f"refused URL: {exc}")
+        result.failed_urls.append(str(url)[:200])
+        result.pages_failed = 1
+        return result
+    store = await asyncio.to_thread(get_knowledge_store)
+    try:
+        await asyncio.to_thread(store.ensure_capacity)
+    except KnowledgeStorageFull as exc:
+        result.errors.append(str(exc))
+        result.failed_urls.append(url)
+        result.pages_failed = 1
+        return result
     index = await asyncio.to_thread(get_knowledge_index)
     try:
         from kazma_core.security.ssrf import validate_url
@@ -1264,26 +1358,44 @@ async def ingest_url(
         result.errors.append(msg)
         return result
 
-    new, skipped, _ = await asyncio.to_thread(
-        _store_page, index, library_id, url, text, document_title
-    )
+    page_url = _OBSERVED_URL.get() or url
+
+    def _ensure_library() -> bool:
+        if store.get_library(library_id) is not None:
+            return False
+        store.create_library(library_id, (name or "").strip() or library_id,
+                             description="", seed_url=url)
+        return True
+
+    result.library_created = await asyncio.to_thread(_ensure_library)
+    try:
+        new, unchanged, _ = await asyncio.to_thread(
+            _store_page, index, library_id, page_url, text, document_title
+        )
+    except Exception as exc:
+        result.pages_failed = 1
+        result.failed_urls.append(url)
+        result.errors.append(f"not stored: {url} — {exc}")
+        return result
     result.pages_fetched = 1
     result.chunks_new += new
-    result.chunks_skipped += skipped
+    result.chunks_skipped += unchanged
+    result.pages_unchanged = int(bool(new == 0 and unchanged))
     return result
 
 
 def _store_page(
     index: Any, library_id: str, url: str, text: str, document_title: str = ""
 ) -> tuple[int, int, int]:
-    """Provenance, chunking and indexing for one fetched page.
+    """Chunking, publication and provenance for one fetched page.
 
-    Returns ``(new, skipped, chunk_count)``. All of it blocks — indexing embeds
-    every chunk and writes the vector store and SQLite, seconds for a large
-    page — so the async ingest paths run it through ``asyncio.to_thread``
-    instead of on the loop that serves every chat stream (AGENTS.md §26E).
+    Returns ``(new, unchanged, chunk_count)``. The page is published in one
+    transaction (KB-E02); a page that could not be stored raises
+    (:class:`~kazma_core.stores.knowledge_index.KnowledgePublishError`, or
+    ``KnowledgeLibraryGone`` when the library was deleted) -- it is never
+    counted as unchanged. All of it blocks (the vector store, SQLite), so
+    the async ingest paths run it through ``asyncio.to_thread``.
     """
-    _save_provenance(library_id, url, text)
     chunks = chunk_markdown_doc(
         text,
         source_url=url,
@@ -1292,36 +1404,40 @@ def _store_page(
     )
     if not chunks:
         return 0, 0, 0
-    new, skipped = index.index(library_id, [chunk_to_dict(c) for c in chunks])
-    return new, skipped, len(chunks)
+    new, unchanged = index.index(library_id, [chunk_to_dict(c) for c in chunks])
+    _save_provenance(library_id, url, text)
+    return new, unchanged, len(chunks)
 
 
-def _prune_gone_urls(
-    index: Any, store: Any, library_id: str, seed_url: str, pages: list[str]
-) -> int:
-    """Refresh the chunk count without inferring deletion from discovery.
+def _refresh_chunk_count(store: Any, library_id: str) -> None:
+    """Record the library's final chunk count after a crawl.
 
-    Blocking (SQLite + vector store): called through ``asyncio.to_thread``.
+    A crawl never deletes a page it did not find (KB-S14): discovery is not
+    an authoritative deletion manifest -- a sitemap or map can omit pages,
+    and a page cap, a bot wall or a sparse fallback makes absence weaker
+    still. Retained content stays until it is removed explicitly.
+    Blocking (SQLite): called through ``asyncio.to_thread``.
     """
-    pruned_urls = 0
-    # Discovery is not an authoritative deletion manifest. Even a successful
-    # sitemap/map can omit pages; a page cap, bot wall or sparse fallback makes
-    # absence weaker still. Keep retained content until explicit removal or
-    # independently verified deletion, never infer deletion from this list.
-
-    # Persist final chunk_count on the library row (index() also updates it,
-    # but this is the authoritative post-crawl value).
     try:
         store.set_chunk_count(library_id, store.count_chunks(library_id))
     except Exception as exc:
-        logger.debug("[kb_ingest] set_chunk_count failed: %s", exc)
-    return pruned_urls
+        logger.warning("[kb_ingest] the chunk count of %s was not refreshed: %s", library_id, exc)
 
 
 async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=None, resume=False):
+    """Admit a crawl: a refused seed (not http(s), KB-S09) or a store at its
+    quota (KB-E10) is refused here, before anything is fetched; the journal
+    refuses a second crawl of the same library (KB-E14)."""
+    from kazma_core.stores.knowledge import KnowledgeUrlRefused, validate_web_url
     from kazma_core.web_acquire import crawl_jobs
     from kazma_core.web_acquire.policy import acquisition_policy
 
+    try:
+        seed_url = validate_web_url(seed_url)
+    except KnowledgeUrlRefused as exc:
+        raise AcquisitionError(FetchErrorCode.INVALID_URL, str(exc)) from None
+    store = await asyncio.to_thread(get_knowledge_store)
+    await asyncio.to_thread(store.ensure_capacity)  # KnowledgeStorageFull, typed
     policy = acquisition_policy()
     with crawl_policy(purpose="kb") as robots:
         respect = robots.enforce()
@@ -1491,16 +1607,25 @@ async def _ingest_site_impl(
     )
 
     # ── Fetch + ingest each page (shared Playwright for the job) ─────
+    from kazma_core.stores.knowledge import KnowledgeLibraryGone, KnowledgeStorageFull
+
     index = await call(get_knowledge_index)
     store = await call(get_knowledge_store)
     fetched = saved['fetched']
     failed = saved['failed'] + sum(page['status'] == 'ambiguous' for page in saved['pages'])
     chunks_new = saved['ingested']
     chunks_skipped = saved['skipped']
+    stored_as: set[str] = set()  # page identities stored by this run (KB-E14)
+    stopped = ""  # why the crawl stopped early, if it did
 
     pages_unchanged = saved['pages_unchanged']
     async with _pw_browser_scope():
         for i, url in enumerate(pages):
+            # A deleted library stops its crawl before the next fetch: no
+            # more egress, allowance or writes for it (KB-E02).
+            if not await call(store.library_exists, library_id):
+                stopped = "the library was deleted; the crawl stopped"
+                break
             if not await call(checkpoint.begin_page, url):
                 continue
             yield ProgressUpdate(
@@ -1535,21 +1660,42 @@ async def _ingest_site_impl(
                         started_at=started,
                     )
                     continue
-                new, skipped, n_chunks = await call(
-                    _store_page, index, library_id, url, text
+                # The page is stored under where the fetch landed: two links
+                # that redirect to one page index it once (KB-E14).
+                identity = _OBSERVED_URL.get() or url
+                if identity in stored_as:
+                    fetched += 1
+                    result.pages_fetched += 1
+                    await call(checkpoint.end_page, url, unchanged=True)
+                    continue
+                new, unchanged_chunks, n_chunks = await call(
+                    _store_page, index, library_id, identity, text
                 )
+                stored_as.add(identity)
                 chunks_new += new
-                chunks_skipped += skipped
-                # Smart re-index: every chunk of the page already indexed →
-                # the page is unchanged. (This compared the page's own
-                # `skipped` with the crawl's running total, so after the
-                # first unchanged page no later one was ever counted.)
-                if n_chunks and new == 0 and skipped >= n_chunks:
-                    pages_unchanged += 1
+                chunks_skipped += unchanged_chunks
+                # Unchanged means the page's stored chunks equal the fetched
+                # ones; a page that could not be stored raises below and is
+                # failed, never counted here (KB-E02).
+                unchanged = bool(n_chunks and new == 0 and unchanged_chunks >= n_chunks)
+                pages_unchanged += int(unchanged)
                 fetched += 1
                 result.pages_fetched += 1
-                await call(checkpoint.end_page, url, new=new, skipped=skipped,
-                    unchanged=bool(n_chunks and new == 0 and skipped >= n_chunks))
+                await call(checkpoint.end_page, url, new=new, skipped=unchanged_chunks,
+                    unchanged=unchanged)
+            except KnowledgeLibraryGone:
+                failed += 1
+                result.failed_urls.append(url)
+                await call(checkpoint.end_page, url, error="The library was deleted.")
+                stopped = "the library was deleted; the crawl stopped"
+                break
+            except KnowledgeStorageFull as exc:
+                failed += 1
+                result.failed_urls.append(url)
+                result.errors.append(f"{url}: {exc}")
+                await call(checkpoint.end_page, url, error=str(exc))
+                stopped = str(exc)
+                break
             except Exception as exc:
                 if isinstance(exc, AcquisitionError) and exc.code.value in ('storage_error', 'policy_error', 'resource_limit'):
                     raise
@@ -1563,19 +1709,26 @@ async def _ingest_site_impl(
                 await asyncio.sleep(delay_ms / 1000.0)
 
     # Refresh counts; discovery absence never authorizes deletion of old pages.
-    pruned_urls = await call(
-        _prune_gone_urls, index, store, library_id, seed_url, pages
-    )
+    await call(_refresh_chunk_count, store, library_id)
+
+    if stopped:
+        yield ProgressUpdate(
+            phase="error",
+            discovered=len(pages), fetched=fetched, ingested=chunks_new,
+            skipped=chunks_skipped, failed=failed, pages_unchanged=pages_unchanged,
+            message=f"stopped: {stopped}", errors=list(result.errors) or [stopped],
+            started_at=started,
+        )
+        return
 
     # If everything failed, surface the FIRST failure reason in the done
     # message — that's what the user sees in the toast/progress panel, and
     # "0/1 pages, 0 chunks, 1 failed" without a reason is unactionable.
     done_msg = (
         f"{'done' if fetched else 'failed'}: {fetched}/{len(pages)} pages, "
-        f"{chunks_new} new chunks (+{chunks_skipped} deduped"
+        f"{chunks_new} new chunks"
         + (f", {pages_unchanged} pages unchanged" if pages_unchanged else "")
-        + (f", {pruned_urls} gone URLs pruned" if pruned_urls else "")
-        + f"), {failed} failed"
+        + f", {failed} failed"
     )
     if failed > 0 and fetched == 0 and result.errors:
         # All pages failed — append the first reason to the summary so the
@@ -1588,7 +1741,6 @@ async def _ingest_site_impl(
         discovered=len(pages), fetched=fetched, ingested=chunks_new,
         skipped=chunks_skipped, failed=failed,
         pages_unchanged=pages_unchanged,
-        pruned_urls=pruned_urls,
         message=done_msg,
         errors=list(result.errors),
         started_at=started,

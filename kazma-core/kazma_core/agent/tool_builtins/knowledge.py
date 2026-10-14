@@ -1,16 +1,33 @@
 """Knowledge-library and document-ingest tools.
 
 Extracted from the former ``tool_builtins.py`` god module (2,833
-lines) — audit O5. Tool bodies are unchanged; registration order
-within this group is preserved.
+lines) — audit O5.
+
+Knowledge audit 2026-10-13: no Knowledge store, settings or embedding work
+runs on the event loop (KB-S06: the two tools that never awaited are plain
+``def``s, which the registry runs in a thread; the others await
+``asyncio.to_thread``); a library is created only once its first page was
+fetched or its crawl admitted, and only an http(s) seed is stored (KB-S09);
+every crawled text a hit carries reaches the model inside the untrusted-data
+fence, with Kazma's own scaffolding outside it (KB-S01); and on an install
+with platform users every tool refuses (decision D1, KB-S04).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _refusal() -> str | None:
+    """The single-operator refusal, as a tool answer (blocking)."""
+    from kazma_core.stores.knowledge_lifecycle import kb_refusal
+
+    refusal = kb_refusal()
+    return f"Error: {refusal}" if refusal else None
 
 
 def register_knowledge_tools(registry: Any) -> None:
@@ -23,8 +40,11 @@ def register_knowledge_tools(registry: Any) -> None:
         ),
         category="knowledge",
     )
-    async def knowledge_list_libraries() -> str:
+    def knowledge_list_libraries() -> str:
         try:
+            refused = _refusal()
+            if refused:
+                return refused
             from kazma_core.stores.knowledge import get_knowledge_store
 
             libs = get_knowledge_store().list_libraries()
@@ -47,15 +67,17 @@ def register_knowledge_tools(registry: Any) -> None:
             return "\n".join(lines)
         except Exception as exc:
             return f"Error: list libraries failed — {exc}"
+
     @registry.register(
         description=(
             "Create a Knowledge Library (empty corpus) for documentation RAG. "
             "library_id should be a short slug (e.g. smoke_realwork_kb). "
+            "seed_url, when given, must be an http(s) URL. "
             "Then call knowledge_ingest_url to add pages. Search with knowledge_search."
         ),
         category="knowledge",
     )
-    async def knowledge_create_library(
+    def knowledge_create_library(
         library_id: str,
         name: str = "",
         description: str = "",
@@ -63,12 +85,23 @@ def register_knowledge_tools(registry: Any) -> None:
         exist_ok: bool = True,
     ) -> str:
         try:
-            from kazma_core.stores.knowledge import get_knowledge_store
+            refused = _refusal()
+            if refused:
+                return refused
+            from kazma_core.stores.knowledge import (
+                KnowledgeUrlRefused,
+                get_knowledge_store,
+                validate_web_url,
+            )
 
             store = get_knowledge_store()
             lib_id = (library_id or "").strip()
             if not lib_id:
                 return "Error: library_id is required."
+            try:
+                validate_web_url(seed_url, allow_empty=True)
+            except KnowledgeUrlRefused as exc:
+                return f"Error: seed_url refused — {exc}"
             display = (name or "").strip() or lib_id.replace("_", " ").replace("-", " ")
             existing = store.get_library(lib_id)
             if existing:
@@ -95,12 +128,13 @@ def register_knowledge_tools(registry: Any) -> None:
             )
         except Exception as exc:
             return f"Error: create library failed — {exc}"
+
     @registry.register(
         description=(
             "Ingest a single documentation page URL into a Knowledge Library "
-            "(fetch → chunk → index). Creates the library if missing. "
+            "(fetch → chunk → index). Creates the library once the page was fetched. "
             "For multi-page trees prefer knowledge_ingest_site with a small max_pages. "
-            "Then knowledge_search to retrieve. SSRF-safe (blocks private IPs)."
+            "Then knowledge_search to retrieve. SSRF-safe (blocks private IPs); http(s) only."
         ),
         category="knowledge",
     )
@@ -111,41 +145,41 @@ def register_knowledge_tools(registry: Any) -> None:
         name: str = "",
     ) -> str:
         try:
-            from kazma_core.stores.knowledge import get_knowledge_store
+            refused = await asyncio.to_thread(_refusal)
+            if refused:
+                return refused
+            from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
             from kazma_core.stores.knowledge_ingest import ingest_url
 
-            store = get_knowledge_store()
-            lib_id = (library_id or "").strip()
+            lib_id = slugify_library_id((library_id or "").strip()) if (library_id or "").strip() else ""
             page = (url or "").strip()
             if not lib_id or not page:
                 return "Error: library_id and url are required."
-            if not store.get_library(lib_id):
-                display = (name or "").strip() or lib_id.replace("_", " ")
-                store.create_library(
-                    lib_id, display, description="auto-created by knowledge_ingest_url", seed_url=page
-                )
+            display = (name or "").strip() or lib_id.replace("_", " ")
             result = await ingest_url(
-                lib_id, page, document_title=(document_title or "").strip()
+                lib_id, page, document_title=(document_title or "").strip(), name=display
             )
-            lib = store.get_library(lib_id) or {}
-            if result.pages_failed and not result.chunks_new:
+            if result.pages_failed or not result.pages_fetched:
                 err = "; ".join(result.errors[:3]) if result.errors else "fetch failed"
                 return f"Error: ingest failed for {page!r} — {err}"
+            store = await asyncio.to_thread(get_knowledge_store)
+            lib = await asyncio.to_thread(store.get_library, lib_id) or {}
             return (
                 f"Ingested page into library '{lib_id}': "
-                f"fetched={result.pages_fetched} failed={result.pages_failed} "
-                f"chunks_new={result.chunks_new} chunks_skipped={result.chunks_skipped}. "
+                f"fetched={result.pages_fetched} "
+                f"chunks_new={result.chunks_new} chunks_unchanged={result.chunks_skipped}. "
                 f"Library total chunks={lib.get('chunk_count', '?')}. "
                 f"Search with knowledge_search(query, library={lib_id!r})."
             )
         except Exception as exc:
             return f"Error: knowledge_ingest_url failed — {exc}"
+
     @registry.register(
         description=(
             "Ingest a small documentation site tree into a Knowledge Library "
             "(sitemap/BFS discover + fetch + chunk + index). Caps max_pages "
             "(default 5, hard max 15) so agent turns stay bounded. "
-            "Creates the library if missing. Prefer knowledge_ingest_url for one page."
+            "Creates the library once the crawl was admitted. Prefer knowledge_ingest_url for one page."
         ),
         category="knowledge",
     )
@@ -157,39 +191,52 @@ def register_knowledge_tools(registry: Any) -> None:
         resume_job_id: str = "",
     ) -> str:
         try:
-            from kazma_core.stores.knowledge import get_knowledge_store
-            from kazma_core.stores.knowledge_ingest import ingest_site
+            refused = await asyncio.to_thread(_refusal)
+            if refused:
+                return refused
+            from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
+            from kazma_core.stores.knowledge_ingest import _prepare_ingest_site, ingest_site
+            from kazma_core.web_acquire.crawl_jobs import call
 
-            store = get_knowledge_store()
-            lib_id = (library_id or "").strip()
+            lib_id = slugify_library_id((library_id or "").strip()) if (library_id or "").strip() else ""
             seed = (seed_url or "").strip()
             if not lib_id or not seed:
                 return "Error: library_id and seed_url are required."
-            cap = max(1, min(int(max_pages or 5), 15))
-            if not store.get_library(lib_id):
-                display = (name or "").strip() or lib_id.replace("_", " ")
-                store.create_library(
-                    lib_id,
-                    display,
-                    description="auto-created by knowledge_ingest_site",
-                    seed_url=seed,
-                )
+            try:
+                cap = max(1, min(int(max_pages or 5), 15))
+            except (TypeError, ValueError):
+                return "Error: max_pages must be a whole number."
+            # Admit the crawl first; the library exists once it was admitted.
+            prepared = await _prepare_ingest_site(
+                lib_id, seed, max_pages=cap, job_id=resume_job_id or None, resume=bool(resume_job_id)
+            )
+            store = await asyncio.to_thread(get_knowledge_store)
+
+            def _ensure_library() -> None:
+                if store.get_library(lib_id) is None:
+                    store.create_library(lib_id, (name or "").strip() or lib_id.replace("_", " "),
+                                         description="created by knowledge_ingest_site", seed_url=seed)
+
+            try:
+                await asyncio.to_thread(_ensure_library)
+            except Exception:
+                await call(prepared[0].finish, "interrupted")
+                raise
             final_msg = ""
             last = None
-            async for upd in ingest_site(lib_id, seed, max_pages=cap, job_id=resume_job_id or None, resume=bool(resume_job_id)):
+            async for upd in ingest_site(lib_id, seed, max_pages=cap, job_id=prepared[0].job_id,
+                                         resume=bool(resume_job_id), _prepared=prepared):
                 last = upd
                 final_msg = getattr(upd, "message", "") or final_msg
             if last is None or last.phase == 'error':
                 return f"Error: knowledge_ingest_site failed — {final_msg or 'No terminal crawl outcome received.'}"
-            lib = store.get_library(lib_id) or {}
-            discovered = getattr(last, "discovered", 0) if last else 0
-            fetched = getattr(last, "fetched", 0) if last else 0
-            failed = getattr(last, "failed", 0) if last else 0
-            chunks_new = getattr(last, "ingested", 0) if last else 0
+            lib = await asyncio.to_thread(store.get_library, lib_id) or {}
+            failed = getattr(last, "failed", 0)
             return (
-                f"Site ingest finished for library '{lib_id}' (max_pages={cap}). "
-                f"discovered={discovered} fetched={fetched} failed={failed} "
-                f"chunks_indexed≈{chunks_new}. "
+                f"Site ingest {'finished with failures' if failed else 'finished'} for library "
+                f"'{lib_id}' (max_pages={cap}). "
+                f"discovered={last.discovered} fetched={last.fetched} failed={failed} "
+                f"chunks_indexed={last.ingested}. "
                 f"Library total chunks={lib.get('chunk_count', '?')}. "
                 f"Last: {final_msg or 'done'}. "
                 f"Crawl job={getattr(last, 'job_id', '')}; inspect with research_readiness(job_id). "
@@ -197,6 +244,7 @@ def register_knowledge_tools(registry: Any) -> None:
             )
         except Exception as exc:
             return f"Error: knowledge_ingest_site failed — {exc}"
+
     @registry.register(
         description=(
             "Search an ingested Knowledge Library (documentation corpus) for "
@@ -204,7 +252,7 @@ def register_knowledge_tools(registry: Any) -> None:
             "configuration, examples. Use this when the user asks about a documented "
             "system (e.g. the WhatsApp Cloud API) and you need authoritative info with "
             "sources. Each hit includes the source URL and section so you can cite it. "
-            "Leave `library` empty to search across all libraries. "
+            "Leave `library` empty to search across all active libraries. top_k is 1-20. "
             "If none exist, create with knowledge_create_library + knowledge_ingest_url."
         ),
         category="knowledge",
@@ -213,24 +261,34 @@ def register_knowledge_tools(registry: Any) -> None:
         # Knowledge Libraries are a managed RAG corpus, decoupled from
         # chat memory.  See `kazma_core/stores/knowledge_index.py`.
         try:
+            refused = await asyncio.to_thread(_refusal)
+            if refused:
+                return refused
             from kazma_core.stores.knowledge import get_knowledge_store
-            from kazma_core.stores.knowledge_index import get_knowledge_index
+            from kazma_core.stores.knowledge_index import MAX_TOP_K, get_knowledge_index
 
-            store = get_knowledge_store()
-            index = get_knowledge_index()
+            query = (query or "").strip()[:2000]
+            if not query:
+                return "Error: query is required."
+            try:
+                limit = max(1, min(MAX_TOP_K, int(top_k or 5)))
+            except (TypeError, ValueError):
+                limit = 5
+            store = await asyncio.to_thread(get_knowledge_store)
+            index = await asyncio.to_thread(get_knowledge_index)
 
             # Pick target library/libraries.
             lib_id = (library or "").strip()
             if lib_id:
-                if not store.get_library(lib_id):
+                if not await asyncio.to_thread(store.get_library, lib_id):
                     return (
                         f"Error: knowledge library '{lib_id}' not found. "
                         "Create it with knowledge_create_library or "
                         "knowledge_ingest_url (auto-creates)."
                     )
-                hits = await index.search(query, lib_id, top_k=top_k)
+                hits = await index.search(query, lib_id, top_k=limit)
             else:
-                libs = store.list_libraries()
+                libs = await asyncio.to_thread(store.list_libraries)
                 if not libs:
                     return (
                         "No knowledge libraries have been ingested yet. "
@@ -238,10 +296,9 @@ def register_knowledge_tools(registry: Any) -> None:
                         "knowledge_ingest_url(id, url). Or use the /knowledge UI / /kb add."
                     )
                 # True cross-library RRF: pool raw per-layer results from
-                # every library into one fused ranking (not flatten+sort,
-                # which would double-count RRF contributions).
+                # every library into one fused ranking.
                 hits = await index.search_all(
-                    query, [l["id"] for l in libs], top_k=top_k,
+                    query, [l["id"] for l in libs], top_k=limit,
                 )
 
             if not hits:
@@ -250,19 +307,24 @@ def register_knowledge_tools(registry: Any) -> None:
 
             from kazma_core.safety.prompt_fence import fence_untrusted
 
-            lines = []
+            # Kazma's scaffolding -- the hit's number, score and where it was
+            # stored -- stays outside the fence; what the page itself wrote
+            # (title, section, text) goes inside it (KB-S01). A header that
+            # tries to close the fence is redacted by the fence.
+            parts = [f"# Knowledge search — {len(hits)} hit(s)"]
             for i, h in enumerate(hits, start=1):
-                cite = f"{h.source_url}"
-                if h.section_header:
-                    cite += f" — {h.section_header}"
-                lines.append(f"\n## [{i}] score={h.score:.4f} — {cite}")
+                parts.append(f"\n## [{i}] score={h.score:.4f} — library {h.library_id}, chunk {h.chunk_index}")
+                page = []
+                if h.source_url:
+                    page.append(f"Source: {h.source_url}")
                 if h.document_title:
-                    lines.append(f"*(page: {h.document_title})*")
-                lines.append(h.content)
+                    page.append(f"Page: {h.document_title}")
+                if h.section_header:
+                    page.append(f"Section: {h.section_header}")
+                page.append(h.content)
+                parts.append(fence_untrusted("\n".join(page).strip(), source="knowledge_search"))
             # Citation directive: the user wants every KB-derived answer
-            # to carry a visible footer naming the source library, so they
-            # can tell where the information came from. Per-item libraries
-            # vary when searching across libraries; collect the unique set.
+            # to carry a visible footer naming the source library.
             cited_libs = sorted({h.library_id for h in hits})
             if len(cited_libs) == 1:
                 lib_footer = f'📚 This data is from Knowledge "{cited_libs[0]}".'
@@ -271,15 +333,11 @@ def register_knowledge_tools(registry: Any) -> None:
                     "📚 This data is from Knowledge libraries: "
                     + ", ".join(f'"{l}"' for l in cited_libs) + "."
                 )
-            # The crawled text is data, never instructions: fenced like a
-            # fetched page (Knowledge KB-S01, fixed with Memory M11). The
-            # citation directive is ours and stays outside the fence.
-            return "\n".join([
-                f"# Knowledge search — {len(hits)} hit(s)",
-                fence_untrusted("\n".join(lines).strip(), source="knowledge_search"),
+            parts.append(
                 "\n---\n" + lib_footer + "\n"
                 "You MUST include this footer verbatim at the end of any answer "
-                "that uses the material above.",
-            ])
+                "that uses the material above."
+            )
+            return "\n".join(parts)
         except Exception as exc:
             return f"Error: knowledge search failed — {exc}"

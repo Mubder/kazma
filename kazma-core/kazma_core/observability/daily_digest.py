@@ -381,6 +381,10 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     for label, attention in sorted({v for v in _CRON_OUTCOMES.values()}):
         if attention:
             problems[label] = app.get(label, 0)
+    # The Knowledge Library's last vector repair pass (KB-E11).
+    from kazma_core.stores.knowledge_index import digest_problems
+
+    problems.update(digest_problems())
     problems = {k: v for k, v in problems.items() if v}
     if problems:
         lines.append("")

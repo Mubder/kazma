@@ -192,6 +192,10 @@ def changes_global_config(text: str) -> bool:
         return sub == "repo" and (arg in ("switch", "clone") or "/" in arg)
     if head == "/swarm":
         return sub == "config" and arg in ("group", "clear")
+    if head == "/kb":
+        # Changing the Knowledge Library every chat injects from (KB-S07):
+        # adding, crawling, refreshing or deleting a library.
+        return sub in ("add", "ingest", "crawl", "refresh", "delete")
     return head == "/_models_select"
 
 

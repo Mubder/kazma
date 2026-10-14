@@ -310,15 +310,32 @@ class DocumentIngestionService:
         except store_errors() as exc:
             logger.warning("[documents.ingestion] index reconcile failed (%s)", type(exc).__name__)
             return
-        if report.get("reindexed") or report.get("failed") or report.get("library_missing"):
+        drift = report.get("extra") or report.get("orphaned")
+        if report.get("reindexed") or report.get("failed") or report.get("library_missing") or drift:
+            # Searchable chunks the documents store does not record (a
+            # restored knowledge store) are a WARNING and an ops alert
+            # (KB-E09): this used to log nothing for them.
             logger.log(
-                logging.WARNING if report.get("failed") else logging.INFO,
+                logging.WARNING if report.get("failed") or drift else logging.INFO,
                 "[documents.ingestion] index reconcile: reindexed=%d failed=%d "
-                "library_missing=%d stale_version=%d unavailable=%d extra=%d orphaned=%d",
+                "library_missing=%d stale_version=%d unavailable=%d extra=%d orphaned=%d pruned=%d",
                 len(report["reindexed"]), len(report["failed"]), len(report["library_missing"]),
                 len(report["stale_version"]), len(report["unavailable"]),
-                len(report["extra"]), len(report["orphaned"]),
+                len(report["extra"]), len(report["orphaned"]), len(report["pruned"]),
             )
+        if drift:
+            try:
+                from kazma_core.observability.ops_alerts import alert
+
+                await asyncio.to_thread(
+                    alert, "documents.index_drift",
+                    "The Knowledge Library held document chunks the documents store does not record",
+                    f"orphaned={len(report['orphaned'])} (deleted ones unindexed: "
+                    f"{len(report['pruned'])}), extra={len(report['extra'])}",
+                    severity="warn",
+                )
+            except Exception:
+                logger.debug("[documents.ingestion] index drift alert not raised", exc_info=True)
 
     @policy_operation
     def reconcile_index(
@@ -343,10 +360,12 @@ class DocumentIngestionService:
         version that is no longer the document's current one
         (``stale_version``) or whose manifest is gone (``unavailable``).
 
-        The other direction is reported and removed only with ``prune``:
-        ``extra`` -- a live document the store records as not indexed in
-        that library -- and ``orphaned`` -- a document this store does not
-        have, or has deleted. Both stay searchable until then.
+        The other direction is reported: ``extra`` -- a live document the
+        store records as not indexed in that library -- and ``orphaned`` --
+        a document this store does not have, or has deleted. A document the
+        store records as DELETED is unindexed at once (``apply``; KB-E09: a
+        tombstone is the store's own word); the rest are removed only with
+        ``prune`` and stay searchable until then.
 
         ``apply=False`` reports what would be done and changes nothing;
         ``tenant_id`` limits both sides to one tenant.
@@ -439,7 +458,14 @@ class DocumentIngestionService:
             )
             kind = "extra" if record is not None and record.deleted_at is None else "orphaned"
             report[kind].append(item)
-            if not (prune and apply):
+            # A document this store records as DELETED is unindexed whatever
+            # ``prune`` says (Knowledge audit KB-E09): the tombstone is the
+            # store's own word, not an inference. A restored older
+            # knowledge store otherwise made deleted documents searchable
+            # again, with no log line. One the store does not know at all
+            # stays a report until ``prune``.
+            deleted = record is not None and record.deleted_at is not None
+            if not (apply and (prune or deleted)):
                 continue
             with adapter.publication_lock(tenant, document):
                 if found is not None and library in self.repository.list_indexed_libraries(
@@ -2857,13 +2883,15 @@ def create_default_ingestion_service(
     cfg = service._policy.initial
     try:
         from kazma_core.stores.knowledge import get_knowledge_store
-        from kazma_core.stores.knowledge_index import KnowledgeIndex
+        from kazma_core.stores.knowledge_index import knowledge_index_for
 
         store = get_knowledge_store()
         adapter = DocumentKnowledgeAdapter(
             repository=service.repository,
             knowledge_store=store,
-            knowledge_index=KnowledgeIndex(store=store),
+            # The store's one index, shared with the Knowledge Library: a
+            # second instance kept dead collection handles (KB-E12).
+            knowledge_index=knowledge_index_for(store),
             config=cfg,
             policy=service._policy,
         )

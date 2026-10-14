@@ -63,7 +63,9 @@ def publish(target,text):
 research_files.create_extract=publish
 asyncio.run(wr.crawl_site({SEED!r},**{OPTIONS!r}))
 '''
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path'}
+    # The child is a process of THIS install (its data dir): the crawl
+    # journal is scoped per install since Knowledge audit KB-E07.
+    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'kazma_data_dir'}
     result = await run_bounded_async([sys.executable, '-I', '-c', program],
         env={key: value for key, value in os.environ.items() if key.lower() in allowed},
         timeout=45, output_bytes=32768, memory_bytes=1024**3, text=True)
@@ -257,8 +259,10 @@ async def test_cancellation_during_terminal_commit_keeps_the_committed_outcome(j
     started, release = threading.Event(), threading.Event()
     original = journal.batch_set
     def terminal(items, **kwargs):
-        rows = next((value for key, value, *_ in items if key == crawl_jobs._KEY), {})
-        if any(row['status'] == 'completed' for row in rows.values()):
+        # Each job is its own row since Knowledge audit KB-E04.
+        rows = [value for key, value, *_ in items
+                if key.startswith(crawl_jobs._JOB_PREFIX) and isinstance(value, dict)]
+        if any(row.get('status') == 'completed' for row in rows):
             started.set()
             assert release.wait(15)
         return original(items, **kwargs)
@@ -289,15 +293,17 @@ async def test_invalid_restored_frontier_fails_closed_before_acquisition(journal
     monkeypatch.setattr(wr, '_central_fetch', stop)
     with pytest.raises(asyncio.CancelledError):
         await wr.crawl_site(SEED, **OPTIONS, save=False)
-    jobs = journal.get_category(crawl_jobs._CATEGORY)[crawl_jobs._KEY]
-    job_id, row = next(iter(jobs.items()))
+    # Each job is its own row since Knowledge audit KB-E04.
+    job_id = crawl_jobs.inspect_jobs()[0]['job_id']
+    key = crawl_jobs._job_key(job_id)
+    row = journal.get_category(crawl_jobs._CATEGORY)[key]
     if corruption == 'depth':
         row['pages'][0]['depth'] = -1
     elif corruption == 'duplicate':
         row['pages'].append(dict(row['pages'][0]))
     else:
         row['pages'][0]['summary'] = {'text': 'hostile unbounded body'}
-    journal.set(crawl_jobs._KEY, jobs, crawl_jobs._CATEGORY)
+    journal.set(key, row, crawl_jobs._CATEGORY)
     calls = []
     async def forbidden(url, **kwargs):
         calls.append(url)

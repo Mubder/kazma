@@ -27,11 +27,20 @@ def snapshot():
     return dict(mode='local_only', providers=[], robots=True, scope='tree', max_pages=3, delay_ms=0)
 
 
+def crawl_jobs_data_dir():
+    """The data dir this test process's install id lives in."""
+    from kazma_core.paths import data_dir
+
+    return data_dir()
+
+
 @pytest.mark.parametrize('wave', range(4))
 def test_first_writers_reserve_installation_capacity_atomically(journal, wave):
+    # Eight LIBRARIES: one library takes one crawl at a time since KB-E14,
+    # so the installation's four-job capacity is measured across libraries.
     def create(i):
         try:
-            return crawl_jobs.start('lib', 'https://docs.example/tree/', snapshot(), job_id=str(i))
+            return crawl_jobs.start(f'lib{i}', 'https://docs.example/tree/', snapshot(), job_id=str(i))
         except AcquisitionError as error:
             return error
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -58,16 +67,25 @@ def test_recovery_survives_real_process_death_without_replaying_unknown_effects(
         'job.begin_page("https://docs.example/tree/a?q=1");job.end_page("https://docs.example/tree/a?q=1",new=2);'
         'job.begin_page("https://docs.example/tree/a?q=2");os._exit(17)')
     allowed = {'systemroot','windir','temp','tmp','path'}
-    result = run_bounded([sys.executable,'-I','-c',program],env={**{k:v for k,v in os.environ.items() if k.lower() in allowed}, 'KAZMA_BROWSER_NETWORK_MODE': 'compatibility'},
+    # The child is a process of THIS install (its data dir): a crawl owned on
+    # this install and host is taken over only when its process is gone
+    # (KB-E07); one owned elsewhere waits for its lease.
+    result = run_bounded([sys.executable,'-I','-c',program],env={**{k:v for k,v in os.environ.items() if k.lower() in allowed}, 'KAZMA_BROWSER_NETWORK_MODE': 'compatibility',
+        'KAZMA_DATA_DIR': str(crawl_jobs_data_dir())},
         timeout=10,output_bytes=32768,memory_bytes=512*1024**2)
     assert result.returncode == 17, result.stderr
+    assert crawl_jobs.inspect_jobs('crash')['status'] == 'running'  # until the next admission
     resumed = crawl_jobs.start('lib','https://docs.example/tree/',snapshot(),job_id='crash',resume=True)
     try:
         row = resumed.read()
-        assert [page['status'] for page in row['pages']] == ['completed','ambiguous','pending']
+        # Re-pointed (KB-E02): a Knowledge page is published in one
+        # transaction, so the page the crash left uncertain is replayed on an
+        # EXPLICIT resume; the settled page is not. Research crawls keep
+        # refusing the replay (tests/test_research_crawl_recovery.py).
+        assert [page['status'] for page in row['pages']] == ['completed','pending','pending']
         assert row['fetched'] == 1 and row['ingested'] == 2
         assert not resumed.begin_page(row['pages'][0]['url'])
-        assert not resumed.begin_page(row['pages'][1]['url'])
+        assert resumed.begin_page(row['pages'][1]['url'])
         assert resumed.begin_page(row['pages'][2]['url'])
     finally:
         resumed.finish('interrupted')
@@ -112,9 +130,12 @@ def test_registry_retention_and_byte_limits_are_real_refusals(journal, monkeypat
     assert len(crawl_jobs.inspect_jobs()) == 24 and crawl_jobs.inspect_jobs('0') is None
     job = crawl_jobs.start('lib','https://docs.example/tree/',snapshot(),job_id='bounded')
     try:
+        # Re-pointed (KB-E04): each job has its own byte budget, checked when
+        # its frontier is persisted -- before anything is fetched -- and on
+        # every write; the registry-wide value it used to rewrite is gone.
         with monkeypatch.context() as bounded:
-            bounded.setattr(crawl_jobs,'_MAX_BYTES',len(json.dumps(journal.get_category(crawl_jobs._CATEGORY)[crawl_jobs._KEY],ensure_ascii=True))+10)
-            with pytest.raises(AcquisitionError,match='8MiB'):
+            bounded.setattr(crawl_jobs,'_MAX_JOB_BYTES',len(json.dumps(job.read(),ensure_ascii=True))+70*1024)
+            with pytest.raises(AcquisitionError,match='job budget'):
                 job.frontier(['https://docs.example/'+'x'*7000])
             assert not job.read()['discovered']
     finally:
@@ -150,10 +171,15 @@ async def test_public_crawl_resume_skips_completed_and_ambiguous_pages_and_reset
     monkeypatch.setattr(ki,'kb_discover_pages',discover)
     monkeypatch.setattr(ki,'_extract_page',extract)
     monkeypatch.setattr(ki,'_kb_delay_ms',lambda:0)
-    monkeypatch.setattr(ki,'get_knowledge_store',lambda:object())
+
+    class _Library:  # the Knowledge store: the library exists and has room
+        def library_exists(self, library_id): return True
+        def ensure_capacity(self): return None
+        def count_chunks(self, library_id): return 0
+        def set_chunk_count(self, library_id, count): return None
+    monkeypatch.setattr(ki,'get_knowledge_store',_Library)
     monkeypatch.setattr(ki,'get_knowledge_index',lambda:object())
     monkeypatch.setattr(ki,'_store_page',lambda *args: (stored.append(args[2]) or 1,0,1))
-    monkeypatch.setattr(ki,'_prune_gone_urls',lambda *args:0)
     monkeypatch.setattr(ki,'_pw_browser_scope',contextlib.nullcontext)
     iterator = ki.ingest_site('lib','https://docs.example/tree/',max_pages=3,job_id='resume')
     async for update in iterator:
@@ -163,11 +189,15 @@ async def test_public_crawl_resume_skips_completed_and_ambiguous_pages_and_reset
             break
     assert fetched == stored == [pages[0]]
     assert crawl_jobs.projection('resume')['resume_available']
+    assert crawl_jobs.projection('resume')['acquisition']['ambiguous'] == 1
     monkeypatch.setattr(ki,'kb_discover_pages',lambda *args,**kwargs: pytest.fail('Resume must reuse the frontier'))
     updates = [update async for update in ki.ingest_site('lib','https://docs.example/tree/',max_pages=3,job_id='resume',resume=True)]
-    assert fetched == stored == [pages[0],pages[2]]
-    assert updates[-1].fetched == 2 and updates[-1].failed == 1
-    assert crawl_jobs.projection('resume')['acquisition']['ambiguous'] == 1
+    # Re-pointed (KB-E02): a Knowledge page is published in one transaction,
+    # so the explicit resume replays the page the close left uncertain and
+    # skips the completed one; nothing is fetched twice that had settled.
+    assert fetched == stored == [pages[0],pages[1],pages[2]]
+    assert updates[-1].fetched == 3 and updates[-1].failed == 0
+    assert crawl_jobs.projection('resume')['acquisition']['ambiguous'] == 0
     assert crawl_jobs.current_crawl.get() is None and policy._job_policy.get() is None
 
 
@@ -177,7 +207,10 @@ def test_separate_processes_share_one_first_writer_capacity_budget(journal, tmp_
     core = str(Path(crawl_jobs.__file__).resolve().parents[2])
     release = tmp_path / 'release'
     allowed = {'systemroot','windir','temp','tmp','path'}
-    env = {k:v for k,v in os.environ.items() if k.lower() in allowed}
+    # Processes of ONE install (its data dir), each crawling its own library
+    # (one crawl per library since KB-E14).
+    env = {**{k:v for k,v in os.environ.items() if k.lower() in allowed},
+           'KAZMA_DATA_DIR': str(crawl_jobs_data_dir())}
     def launch(index):
         marker = tmp_path / f'child-{index}.json'
         program = (f'import sys,json,time;from pathlib import Path;sys.path.insert(0,{core!r});'
@@ -186,7 +219,7 @@ def test_separate_processes_share_one_first_writer_capacity_budget(journal, tmp_
             f'store=config_store.ConfigStore({str(tmp_path / "settings.db")!r});config_store.get_config_store=lambda:store\n'
             'job=None\n'
             'try:\n'
-            f' job=crawl_jobs.start("lib","https://docs.example/tree/",{snapshot()!r},job_id="process-{index}")\n'
+            f' job=crawl_jobs.start("lib{index}","https://docs.example/tree/",{snapshot()!r},job_id="process-{index}")\n'
             ' outcome="admitted"\n'
             'except AcquisitionError as error: outcome=str(error.code)\n'
             f'Path({str(marker)!r}).write_text(json.dumps(outcome))\n'
@@ -344,9 +377,11 @@ async def test_metadata_storage_denial_precedes_fetch_and_corruption_is_visible(
         monkeypatch.setattr(journal, 'batch_set', original)
         crawl_jobs.current_crawl.reset(token)
         job.finish('interrupted')
-    rows = journal.get_category(crawl_jobs._CATEGORY)[crawl_jobs._KEY]
-    rows[job.job_id]['metadata'] = {'https://docs.example/llms.txt': dict(status='completed', result={'pages': 'bad'})}
-    journal.set(crawl_jobs._KEY, rows, category=crawl_jobs._CATEGORY)
+    # Re-pointed (KB-E04): the job is its own settings row now.
+    key = crawl_jobs._job_key(job.job_id)
+    row = journal.get_category(crawl_jobs._CATEGORY)[key]
+    row['metadata'] = {'https://docs.example/llms.txt': dict(status='completed', result={'pages': 'bad'})}
+    journal.set(key, row, category=crawl_jobs._CATEGORY)
     with pytest.raises(AcquisitionError) as error:
         crawl_jobs.inspect_jobs()
     assert error.value.code == FetchErrorCode.STORAGE

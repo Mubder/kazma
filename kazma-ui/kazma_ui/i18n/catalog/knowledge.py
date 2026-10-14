@@ -104,10 +104,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "دون تغيير: {n}",
         "en": "{n} unchanged",
     },
-    "knowledge.crawl_pruned": {
-        "ar": "المُزالة: {n}",
-        "en": "{n} pruned",
-    },
     "knowledge.crawl_started": {
         "ar": "بدأ الزحف — تابع التقدّم بالأسفل.",
         "en": "Crawl started — watch progress below.",
@@ -348,10 +344,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "دون تغيير",
         "en": "unchanged",
     },
-    "knowledge.job_pruned": {
-        "ar": "المحذوفة",
-        "en": "pruned",
-    },
     "knowledge.job_failed": {
         "ar": "الفاشلة",
         "en": "failed",
@@ -418,7 +410,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "knowledge.resume_failed": {"en": 'Could not resume crawl', "ar": 'تعذر استئناف الزحف'},
     "knowledge.status_unavailable": {"en": 'Crawl status unavailable; retrying', "ar": 'حالة الزحف غير متاحة؛ جارٍ إعادة المحاولة'},
     "knowledge.acquisition_pending": {"en": 'Pending pages', "ar": 'الصفحات المعلقة'},
-    "knowledge.acquisition_ambiguous": {"en": 'Uncertain effects; skipped on resume', "ar": 'آثار غير مؤكدة؛ تُتخطى عند الاستئناف'},
+    "knowledge.acquisition_ambiguous": {"en": 'Uncertain pages; fetched again on resume', "ar": 'صفحات غير مؤكدة؛ تُجلب مجددًا عند الاستئناف'},
     "knowledge.acquisition_backend": {"en": 'Acquisition service', "ar": 'خدمة الاستخراج'},
     "knowledge.acquisition_attempts": {"en": 'Attempts', "ar": 'المحاولات'},
     "knowledge.allowance_unit": {"en": 'Request reservations (upper bound); provider charges are separate', "ar": 'حجوزات الطلبات (حد أقصى)؛ رسوم المزوّد منفصلة'},
@@ -431,4 +423,191 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "knowledge.acquisition_unknown": {"en": 'Charges for these requests: unavailable', "ar": 'رسوم هذه الطلبات: غير متاحة'},
     "knowledge.usage_observations": {"en": 'Observed service responses; usage does not establish charges or remaining balance', "ar": 'استجابات الخدمة المرصودة؛ الاستخدام لا يحدد الرسوم أو الرصيد المتبقي'},
     "knowledge.reported_token_usage": {"en": 'Provider-reported token usage', "ar": 'استخدام الرموز المبلّغ عنه من المزوّد'},
+    # Knowledge audit 2026-10-13: the page's states and the routes' refusals,
+    # each worded in the page's language (KB-S05, KB-S15, KB-S04).
+    "knowledge.single_operator": {
+        "en": "The Knowledge Library works on a single-operator install. This install has platform users, and libraries are not separated per user yet, so the Knowledge Library is off here.",
+        "ar": "تعمل مكتبة المعرفة على تثبيت يديره مشغّل واحد. لهذا التثبيت مستخدمون متعددون، ولا تُفصل المكتبات لكل مستخدم بعد، لذا مكتبة المعرفة متوقفة هنا.",
+    },
+    "knowledge.phase_partial": {"en": 'Finished with failures', "ar": 'انتهى مع إخفاقات'},
+    "knowledge.crawl_partial_toast": {
+        "en": "Crawl finished with failures: {fetched}/{pages} · {chunks} · {failed} failed",
+        "ar": "انتهى الزحف مع إخفاقات: {fetched}/{pages} · {chunks} · فشل {failed}",
+    },
+    "knowledge.meaning_rebuilding": {
+        "en": "Meaning search: rebuilding, {v} of {n}",
+        "ar": "البحث بالمعنى: قيد إعادة البناء، {v} من {n}",
+    },
+    "knowledge.meaning_unknown": {
+        "en": "Meaning search: not checked yet",
+        "ar": "البحث بالمعنى: لم يُفحص بعد",
+    },
+    "knowledge.err.kb_single_operator": {
+        "en": "The Knowledge Library is off on an install with platform users.",
+        "ar": "مكتبة المعرفة متوقفة على تثبيت له مستخدمون متعددون.",
+    },
+    "knowledge.err.invalid_request": {
+        "en": "The request was refused: {reason}",
+        "ar": "رُفض الطلب لأن قيمة فيه غير صالحة.",
+    },
+    "knowledge.err.invalid_json": {
+        "en": "The request was not valid JSON.",
+        "ar": "الطلب ليس JSON صالحًا.",
+    },
+    "knowledge.err.request_too_large": {
+        "en": "The request is too large.",
+        "ar": "الطلب أكبر من المسموح.",
+    },
+    "knowledge.err.not_found": {
+        "en": "Not found.",
+        "ar": "غير موجود.",
+    },
+    "knowledge.err.library_exists": {
+        "en": "A library with this id already exists.",
+        "ar": "توجد مكتبة بهذا المعرّف بالفعل.",
+    },
+    "knowledge.err.url_refused": {
+        "en": "Only http and https addresses can be used: {reason}",
+        "ar": "لا يُقبل إلا عنوان يبدأ بـ http أو https.",
+    },
+    "knowledge.err.kb_storage_full": {
+        "en": "The Knowledge Library is at its storage quota. Delete libraries you no longer need to make room.",
+        "ar": "بلغت مكتبة المعرفة حد التخزين. احذف المكتبات التي لم تعد تحتاجها لإفساح المجال.",
+    },
+    "knowledge.err.library_busy": {
+        "en": "A crawl of this library is already running; wait for it to finish.",
+        "ar": "يجري زحف لهذه المكتبة بالفعل؛ انتظر حتى ينتهي.",
+    },
+    "knowledge.err.crawl_owns_library": {
+        "en": "A crawl of this library is running; delete it when the crawl finishes.",
+        "ar": "يجري زحف لهذه المكتبة؛ احذفها بعد انتهاء الزحف.",
+    },
+    "knowledge.err.documents_unavailable": {
+        "en": "This library holds documents, and the Documents platform could not be told it is going. Try again shortly.",
+        "ar": "تحتوي هذه المكتبة على مستندات، وتعذر إبلاغ منصة المستندات بحذفها. أعد المحاولة بعد قليل.",
+    },
+    "knowledge.err.page_not_ingested": {
+        "en": "The page was not stored: {reason}",
+        "ar": "لم تُحفظ الصفحة: تعذر جلبها أو قراءتها أو حفظها.",
+    },
+    "knowledge.err.no_seed": {
+        "en": "This library has no seed URL to refresh from.",
+        "ar": "لا يوجد لهذه المكتبة عنوان بذرة لإعادة الزحف منه.",
+    },
+    "knowledge.err.resume_refused": {
+        "en": "Only an interrupted crawl can resume.",
+        "ar": "لا يُستأنف إلا زحف متوقف.",
+    },
+    "knowledge.err.internal_error": {
+        "en": "Something went wrong on the server: {reason}",
+        "ar": "حدث خطأ في الخادم.",
+    },
+    "knowledge.err.invalid_url": {
+        "en": "The address was refused: {reason}",
+        "ar": "رُفض العنوان لأنه غير صالح أو غير مسموح.",
+    },
+    "knowledge.err.policy_error": {
+        "en": "The crawl was refused by its policy: {reason}",
+        "ar": "رفضت سياسة الجلب هذا الزحف (تغيّر النطاق أو الحدود أو السياسة، أو لا يمكن استئنافه).",
+    },
+    "knowledge.err.proxy_routing_error": {
+        "en": "The configured proxy route is not usable.",
+        "ar": "مسار الوكيل المضبوط غير صالح للاستخدام.",
+    },
+    "knowledge.err.origin_throttled": {
+        "en": "The site asked for fewer requests; retry later.",
+        "ar": "طلب الموقع تقليل الطلبات؛ أعد المحاولة لاحقًا.",
+    },
+    "knowledge.err.robots_disallowed": {
+        "en": "The site's robots rules do not allow this crawl.",
+        "ar": "قواعد robots في الموقع لا تسمح بهذا الزحف.",
+    },
+    "knowledge.err.robots_unavailable": {
+        "en": "The site's robots rules could not be read, so the crawl was refused.",
+        "ar": "تعذرت قراءة قواعد robots في الموقع، لذا رُفض الزحف.",
+    },
+    "knowledge.err.security_blocked": {
+        "en": "The address points to a private or blocked network.",
+        "ar": "يشير العنوان إلى شبكة خاصة أو محظورة.",
+    },
+    "knowledge.err.scope_blocked": {
+        "en": "The address is outside the crawl's scope.",
+        "ar": "العنوان خارج نطاق الزحف.",
+    },
+    "knowledge.err.redirect_error": {
+        "en": "The site redirected somewhere the crawl cannot follow.",
+        "ar": "أعاد الموقع التوجيه إلى مكان لا يمكن للزحف متابعته.",
+    },
+    "knowledge.err.http_error": {
+        "en": "The site answered with an error.",
+        "ar": "ردّ الموقع بخطأ.",
+    },
+    "knowledge.err.connect_error": {
+        "en": "The site could not be reached.",
+        "ar": "تعذر الوصول إلى الموقع.",
+    },
+    "knowledge.err.read_error": {
+        "en": "The connection to the site broke while reading.",
+        "ar": "انقطع الاتصال بالموقع أثناء القراءة.",
+    },
+    "knowledge.err.timeout": {
+        "en": "The site took too long to answer.",
+        "ar": "استغرق الموقع وقتًا طويلًا للرد.",
+    },
+    "knowledge.err.acquisition_deadline": {
+        "en": "The page could not be fetched within its time limit.",
+        "ar": "تعذر جلب الصفحة ضمن المهلة المحددة.",
+    },
+    "knowledge.err.decoding_error": {
+        "en": "The page's content could not be decoded.",
+        "ar": "تعذر فك ترميز محتوى الصفحة.",
+    },
+    "knowledge.err.backend_unavailable": {
+        "en": "The page reader is unavailable.",
+        "ar": "قارئ الصفحات غير متاح.",
+    },
+    "knowledge.err.empty_extract": {
+        "en": "The page had no readable content.",
+        "ar": "لا تحتوي الصفحة على محتوى قابل للقراءة.",
+    },
+    "knowledge.err.challenge_page": {
+        "en": "The site answered with a bot challenge instead of the page.",
+        "ar": "ردّ الموقع بصفحة تحقق من الروبوتات بدلًا من الصفحة.",
+    },
+    "knowledge.err.login_required": {
+        "en": "The page needs a sign-in.",
+        "ar": "تتطلب الصفحة تسجيل الدخول.",
+    },
+    "knowledge.err.invalid_provider_response": {
+        "en": "The page service answered with something it should not have.",
+        "ar": "ردّت خدمة الصفحات بشيء غير متوقع.",
+    },
+    "knowledge.err.unsupported_content": {
+        "en": "This kind of content cannot be read into a library.",
+        "ar": "لا يمكن قراءة هذا النوع من المحتوى في مكتبة.",
+    },
+    "knowledge.err.resource_limit": {
+        "en": "A limit was reached: {reason}",
+        "ar": "تم بلوغ حد (عدد الزحف النشط أو سعة سجل الزحف أو ميزانية الطلبات)؛ أعد المحاولة بعد انتهاء زحف.",
+    },
+    "knowledge.err.storage_error": {
+        "en": "The crawl journal is unavailable; check the database. Retry shortly.",
+        "ar": "سجل الزحف غير متاح؛ تحقق من قاعدة البيانات وأعد المحاولة بعد قليل.",
+    },
+    "knowledge.err.workspace_path_error": {
+        "en": "The output folder is not usable.",
+        "ar": "مجلد المخرجات غير صالح للاستخدام.",
+    },
+    "knowledge.err.file_exists": {
+        "en": "This crawl job already exists; resume it instead.",
+        "ar": "مهمة الزحف هذه موجودة بالفعل؛ استأنفها بدلًا من ذلك.",
+    },
+    "knowledge.err.acquisition_error": {
+        "en": "The page could not be fetched.",
+        "ar": "تعذر جلب الصفحة.",
+    },
+    "knowledge.err.cancelled": {
+        "en": "The crawl was cancelled.",
+        "ar": "أُلغي الزحف.",
+    },
 }

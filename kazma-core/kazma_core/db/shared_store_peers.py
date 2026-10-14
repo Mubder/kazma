@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -60,6 +61,7 @@ _KEY_PREFIX = CATEGORY + "."
 _ID_FILE = "install_id"
 _DAY = 86400.0
 _process_fallback_id: str | None = None
+_ID_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -106,6 +108,17 @@ def install_id(data_dir: Path | str | None = None, *, create: bool = True) -> st
 
         data_dir = _data_dir()
     path = Path(data_dir) / _ID_FILE
+    # One minting at a time in this process (Knowledge audit KB-E07, found on
+    # real Postgres 2026-10-14): the exclusive create makes an EMPTY file
+    # before its id is written, and a second first caller that read it in
+    # that moment took it for a broken file and replaced it with its own id
+    # -- one process, two ids, and the crawl journal read the other id's
+    # running jobs as another install's.
+    with _ID_LOCK:
+        return _install_id(path, create)
+
+
+def _install_id(path: Path, create: bool) -> str | None:
     try:
         current = path.read_text(encoding="utf-8").strip()
         exists = True
@@ -128,9 +141,18 @@ def install_id(data_dir: Path | str | None = None, *, create: bool = True) -> st
                     fh.write(new + "\n")
                 return new
             except FileExistsError:
+                current = ""
+        if not current:
+            # An empty file: another process may have created it and not
+            # written its id yet. Wait for it (up to a second) before taking
+            # the file for a broken one.
+            for _attempt in range(50):
                 theirs = path.read_text(encoding="utf-8").strip()
                 if _is_id(theirs):
                     return theirs
+                if theirs:
+                    break  # something else is in it: a broken file
+                time.sleep(0.02)
         # Present but not an id (truncated, hand-edited): replace atomically.
         tmp = path.with_name(f".{_ID_FILE}.{new}.tmp")
         tmp.write_text(new + "\n", encoding="utf-8")

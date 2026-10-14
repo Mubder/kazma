@@ -10,7 +10,7 @@ from typing import Any
 
 from kazma_core.safety.prompt_fence import format_untrusted_block
 from kazma_core.stores.knowledge import KnowledgeStore
-from kazma_core.stores.knowledge_index import KnowledgeHit, KnowledgeIndex
+from kazma_core.stores.knowledge_index import KnowledgeHit, KnowledgeIndex, knowledge_index_for
 
 from .config import DocumentConfig
 from .indexer import chunk_document_ir
@@ -99,7 +99,8 @@ class DocumentKnowledgeAdapter:
     ) -> None:
         self.repository = repository
         self.store = knowledge_store
-        self.index = knowledge_index or KnowledgeIndex(store=knowledge_store)
+        # The store's one index, shared with the Knowledge Library (KB-E12).
+        self.index = knowledge_index or knowledge_index_for(knowledge_store)
         self._policy = policy or DocumentPolicy(config)
 
     @property

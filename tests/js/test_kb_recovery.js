@@ -155,3 +155,77 @@ test('incomplete discovery with successful pages never emits a success toast', a
   assert.match(toasts[0][0], /incomplete discovery/);
   page.destroy();
 });
+
+// Knowledge audit 2026-10-13, KB-S15: a crawl that ended with failed pages
+// read "Done" with a check mark.
+test('a partial crawl is never shown as Done, in either language', () => {
+  const { page } = setup(async () => ({ json: async () => ({ ok: true }) }));
+  page.activeJob = { phase: 'done', fetched: 5, failed: 2, acquisition: { status: 'partial' } };
+  assert.equal(page.jobTitle(), 'Finished with failures');
+  assert.equal(page.jobIcon(), 'alert');
+  page.activeJob = { phase: 'done', fetched: 5, failed: 0, acquisition: { status: 'completed' } };
+  assert.equal(page.jobTitle(), 'Done');
+  assert.equal(page.jobIcon(), 'check-circle');
+  // Negative control: the old title read the phase alone.
+  const oldTitle = job => (job.phase === 'done' ? 'Done' : 'Crawling…');
+  assert.equal(oldTitle({ phase: 'done', failed: 2, acquisition: { status: 'partial' } }), 'Done');
+});
+
+test('a partial crawl reads in Arabic too', () => {
+  const { page } = setup(async () => ({ json: async () => ({ ok: true }) }));
+  page.activeJob = { phase: 'done', failed: 1, acquisition: { status: 'partial' } };
+  const arabic = { 'knowledge.phase_partial': 'انتهى مع إخفاقات' };
+  const window = { kazmaT: (key, fallback) => arabic[key] || fallback };
+  const ctx = { window, console, AbortController, fetch: async () => ({ json: async () => ({}) }),
+    setInterval: () => 1, clearInterval: () => {}, setTimeout: () => 1, clearTimeout: () => {},
+    document: { getElementById: () => null, querySelector: () => null } };
+  window.__KB_STRINGS = {};
+  window.kazmaCount = (key, n) => String(n);
+  window.KazmaFormat = { number: String };
+  vm.runInNewContext(source, ctx);
+  const arPage = window.knowledgePage();
+  arPage.activeJob = page.activeJob;
+  assert.equal(arPage.jobTitle(), 'انتهى مع إخفاقات');
+});
+
+// KB-S09: a stored URL becomes a link only when it is http(s).
+test('only an http(s) address becomes a link', () => {
+  const { page } = setup(async () => ({ json: async () => ({ ok: true }) }));
+  assert.equal(page.safeHref('https://docs.example.test/a?b=1'), 'https://docs.example.test/a?b=1');
+  assert.equal(page.safeHref('HTTP://docs.example.test/'), 'HTTP://docs.example.test/');
+  for (const bad of ['javascript:alert(1)', 'JaVaScRiPt:alert(1)', ' javascript:alert(1)',
+    '\tjavascript:alert(1)', 'data:text/html,<b>x</b>', 'vbscript:msgbox(1)',
+    'https://ok.example.test/\njavascript:alert(1)', '', null, undefined, '/relative']) {
+    assert.equal(page.safeHref(bad), null, String(bad));
+  }
+  // Negative control: the old binding passed the stored value through.
+  const oldHref = url => url;
+  assert.equal(oldHref('javascript:alert(1)'), 'javascript:alert(1)');
+});
+
+// KB-S05: a refusal is worded from its stable code.
+test('a refusal is worded from its code in the page language', async () => {
+  const arabic = { 'knowledge.err.robots_disallowed': 'يمنع ملف robots.txt هذا الموقع.' };
+  const toasts = [];
+  const window = { __KB_STRINGS: {}, kazmaT: (key, fallback) => arabic[key] || fallback,
+    kazmaCount: (key, n) => String(n), KazmaFormat: { number: String },
+    showToast: (...args) => toasts.push(args) };
+  const ctx = { window, console, AbortController, setInterval: () => 1, clearInterval: () => {},
+    setTimeout: () => 1, clearTimeout: () => {},
+    fetch: async () => ({ json: async () => ({ ok: false, code: 'robots_disallowed', transient: false,
+      error: 'robots.txt disallows this crawl' }) }),
+    document: { getElementById: () => null, querySelector: () => null } };
+  vm.runInNewContext(source, ctx);
+  const page = window.knowledgePage();
+  page.load = async () => {};
+  page.form = { id: 'docs', name: 'Docs', seed_url: 'https://docs.example.test/' };
+  await page.ingest('site');
+  assert(toasts.some(([text]) => text === 'يمنع ملف robots.txt هذا الموقع.'), JSON.stringify(toasts));
+});
+
+test('no dead counter: the page shows no pruned pages', () => {
+  const template = fs.readFileSync(path.join(__dirname,
+    '../../kazma-ui/kazma_ui/templates/knowledge_base.html'), 'utf8');
+  assert.doesNotMatch(source, /prun/i);
+  assert.doesNotMatch(template, /prun/i);
+});

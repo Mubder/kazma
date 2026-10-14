@@ -371,3 +371,12 @@ decision that removes a feature the owner may want (D6, D8) is asked first.
   owner: D6 (SW-E13 handoff), D8 (SW-E10 semantic routing, SW-E15 Refiner),
   D9 (SQ03 Temporal download), D3 (SQ01 soak); still open: SW-S03's dashboard
   link, SQ04. Not committed.
+- 2026-10-14: Memory and Swarm committed (ad9057e3). Shared pieces committed
+  (c575d4e4): one single-operator rule (`kazma_core.security.single_operator`)
+  and the per-area cross-module loop-stall gate (`_CROSS_MODULE_AREAS`). Then
+  Scheduled (S2), Time Travel (S5) and Knowledge (S4) ran as one agent each
+  in their own worktree from c575d4e4 and were merged one at a time:
+  Scheduled 110b106c, Time Travel 205a5f77, Knowledge next. Each merge ran
+  its area's tests and the global gates on the merged tree; one full suite
+  and the Postgres job follow the last merge. Open: the soaks (D3), the
+  owner decisions (D6, D8, D9), and an independent review per area.

@@ -247,6 +247,19 @@ def check_schedulers() -> dict[str, Any]:
     return out
 
 
+def _check_knowledge_vectors() -> dict[str, Any]:
+    """Knowledge Library meaning search, from the last repair pass (Knowledge
+    audit KB-E11): a vector store down for two months once showed nowhere.
+    Reads no store; never critical (a library still answers by keyword)."""
+    try:
+        from kazma_core.stores.knowledge_index import vector_readiness
+
+        return vector_readiness()
+    except Exception:
+        logger.warning("Knowledge vectors health check failed", exc_info=True)
+        return {"status": "failed", "component": "knowledge_vectors", "error": "check failed"}
+
+
 def check_llm_provider() -> dict[str, Any]:
     """Is an LLM provider configured with usable credentials?
 
@@ -515,6 +528,7 @@ async def _readiness(*, runtime: Any = None, required: Any = None):
         ("cron", check_cron, 3.0),
         ("schedulers", check_schedulers, 3.0),
         ("llm_provider", check_llm_provider, 5.0),
+        ("knowledge_vectors", _check_knowledge_vectors, 3.0),
     )
     if runtime is not None:
         plan += (("chat_runtime", lambda: _check_chat_runtime(runtime), 3.0),)

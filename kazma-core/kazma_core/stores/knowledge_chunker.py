@@ -313,8 +313,10 @@ def chunk_markdown_doc(
     return chunks
 
 
-def make_chunk_id(library_id: str, source_url: str, content_hash: str) -> str:
-    """Stable primary key that is unique **per page**, not just per content.
+def make_chunk_id(
+    library_id: str, source_url: str, content_hash: str, chunk_index: int | None = None
+) -> str:
+    """Stable primary key that is unique **per position on a page**.
 
     Older IDs used ``{library_id}:{content_hash[:16]}``.  Meta (and most doc
     sites) repeat the same nav/footer chrome on every page, so identical
@@ -325,12 +327,21 @@ def make_chunk_id(library_id: str, source_url: str, content_hash: str) -> str:
 
     Including a short digest of ``source_url`` keeps IDs stable under
     re-ingest of the same page while allowing shared chrome across pages.
+
+    The chunk's position is part of the id too (Knowledge audit KB-E05):
+    API pages repeat a response body or a code sample, and two identical
+    sections of one page shared a key -- the second deleted the first, the
+    page reported a chunk it did not hold, and it never read as unchanged.
+    ``chunk_index`` is required for every id a page publication makes; the
+    position-free form is kept only to read ids an older build stored.
     """
     import hashlib
 
     url_digest = hashlib.sha256((source_url or "").encode("utf-8")).hexdigest()[:10]
     body = (content_hash or "")[:16]
-    return f"{library_id}:{url_digest}:{body}"
+    if chunk_index is None:
+        return f"{library_id}:{url_digest}:{body}"
+    return f"{library_id}:{url_digest}:{int(chunk_index)}:{body}"
 
 
 # Convenience: marshal a chunk to the dict shape KnowledgeStore expects.
@@ -346,5 +357,6 @@ def chunk_to_dict(chunk: KnowledgeChunk) -> dict[str, Any]:
         "content_hash": chunk.content_hash,
         "has_code": chunk.has_code,
         "char_count": len(chunk.content),
-        "id": make_chunk_id(chunk.library_id, chunk.source_url, chunk.content_hash),
+        "id": make_chunk_id(chunk.library_id, chunk.source_url, chunk.content_hash,
+                            chunk.chunk_index),
     }

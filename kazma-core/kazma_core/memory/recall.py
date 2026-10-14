@@ -2488,7 +2488,10 @@ def build_memory_explain_payload(
     episodes = [_hit(h) for h in (result.episodes if result else [])[:max_items]]
     weekly = [_hit(h) for h in (result.summaries if result else [])[:max_items]]
     knowledge: list[dict[str, Any]] = []
-    for h in (kb_hits or [])[: max(3, max_items - 2)]:
+    # Every injected Knowledge chunk, never a shortened list: the record says
+    # exactly what the turn injected (Knowledge audit KB-S02); the inject is
+    # bounded by its own top-k (at most 10).
+    for h in (kb_hits or []):
         if not isinstance(h, dict):
             continue
         knowledge.append(

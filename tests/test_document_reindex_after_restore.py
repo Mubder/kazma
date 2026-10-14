@@ -14,7 +14,9 @@ document's owner, through the normal publication path. Each one is re-checked
 under the document's publication lock, so an unindex that ran meanwhile is
 never undone. A missing library, a superseded version and a missing manifest
 are reported, never invented; chunks the store does not record (``extra``,
-``orphaned``) are reported and removed only on request.
+``orphaned``) are reported (a WARNING and an ops alert) and removed only on
+request -- except a document the store records as deleted, which is
+unindexed at once (Knowledge audit KB-E09).
 
 Negative controls: the restored install without the reconcile finds nothing,
 and the reconcile without its re-check under the lock undoes an unindex.
@@ -281,6 +283,11 @@ def test_a_superseded_version_is_reported_not_republished(tmp_path, backend):
 
 
 def test_extra_and_orphaned_chunks_are_pruned_only_on_request(tmp_path, backend):
+    # Re-pointed for Knowledge audit KB-E09 (2026-10-14): this holds for a
+    # document the store does NOT record as deleted -- one it never heard of,
+    # or a live one it records as unindexed. A document it records as
+    # DELETED is unindexed by the reconcile itself, without ``prune``:
+    # test_a_deleted_document_a_restore_brought_back_is_unindexed below.
     tenant = backend.tenant
     store = _library_store(tmp_path / "settings.db", tenant)
     svc = _service(tmp_path / "content", backend.name, store)
@@ -316,6 +323,75 @@ def test_extra_and_orphaned_chunks_are_pruned_only_on_request(tmp_path, backend)
         assert len(pruned["pruned"]) == 2
         assert _hits(svc, tenant, doc.document_id) == []
         assert store.document_index_entries() == set()
+    finally:
+        svc.close()
+
+
+def _restored_after_delete(tmp_path, backend):
+    """Index a document, back the knowledge store up, delete the document,
+    then put the backup back (a rollback of the knowledge store): the
+    deleted document's chunks are searchable again."""
+    import shutil
+
+    tenant = backend.tenant
+    path = tmp_path / "knowledge.db"
+    store = _library_store(path, tenant)
+    svc = _service(tmp_path / "content", backend.name, store)
+    doc = _ready(svc, tenant)
+    svc.index_document(tenant_id=tenant, actor_id="alice", document_id=doc.document_id, library_id="docs")
+    assert _hits(svc, tenant, doc.document_id)
+    store.close()
+    shutil.copyfile(path, tmp_path / "backup.db")
+    store = KnowledgeStore(str(path))
+    svc.knowledge_adapter.store = store
+    svc.knowledge_adapter.index._store = store
+    svc.delete_document(tenant_id=tenant, actor_id="alice", document_id=doc.document_id)
+    assert _hits(svc, tenant, doc.document_id) == []
+    svc.close()
+    store.close()
+    shutil.copyfile(tmp_path / "backup.db", path)
+    restored = _service(tmp_path / "content", backend.name, KnowledgeStore(str(path)))
+    assert _hits(restored, tenant, doc.document_id)  # the rollback brought it back
+    return restored, tenant, doc
+
+
+def test_a_deleted_document_a_restore_brought_back_is_unindexed(tmp_path, backend, monkeypatch, caplog):
+    """Knowledge audit KB-E09: a rollback of the knowledge store made a
+    deleted document searchable again, through every Knowledge path, and the
+    reconcile logged nothing. The documents store's tombstone is its own
+    word: the reconcile run at worker start unindexes it, with a WARNING and
+    an ops alert."""
+    import logging
+
+    from kazma_core.observability import ops_alerts
+
+    alerts: list[str] = []
+    monkeypatch.setattr(ops_alerts, "alert", lambda key, *a, **k: alerts.append(key))
+    svc, tenant, doc = _restored_after_delete(tmp_path, backend)
+    try:
+        with caplog.at_level(logging.WARNING, logger="kazma_core.documents.ingestion"):
+            asyncio.run(svc._reconcile_index_once())
+        assert _hits(svc, tenant, doc.document_id) == []
+        index = svc.knowledge_adapter.index
+        assert not [h for h in index.search_sync(_WORD, "docs") if h.document_id == str(doc.document_id)]
+        assert not [h for h in index.search_all_sync(_WORD, ["docs"])
+                    if h.document_id == str(doc.document_id)]
+        assert [r for r in caplog.records if "index reconcile" in r.getMessage()
+                and r.levelno == logging.WARNING]
+        assert alerts == ["documents.index_drift"]
+    finally:
+        svc.close()
+
+
+def test_a_report_alone_left_the_deleted_document_searchable(tmp_path, backend):
+    """Negative control: the reconcile's report without acting on the
+    tombstone -- the old rule for every deleted document -- leaves it
+    searchable."""
+    svc, tenant, doc = _restored_after_delete(tmp_path, backend)
+    try:
+        report = svc.reconcile_index(tenant_id=tenant, apply=False)
+        assert [o["document_id"] for o in report["orphaned"]] == [str(doc.document_id)]
+        assert _hits(svc, tenant, doc.document_id)
     finally:
         svc.close()
 

@@ -56,7 +56,11 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
         "acquisition.outputs", "acquisition.outputs_revision",
         "acquisition.monitor", "acquisition.monitor_revision"),
     "kazma-core/kazma_core/web_acquire/accounting.py::_mutate": ("acquisition.allowances", "acquisition.allowances_revision"),
-    "kazma-core/kazma_core/web_acquire/crawl_jobs.py::_mutate": ("acquisition.crawls", "acquisition.crawls_revision"),
+    # One row and revision per job (Knowledge KB-E04), admission under the
+    # registry revision; the old single value is moved in, then removed.
+    "kazma-core/kazma_core/web_acquire/crawl_jobs.py::_mutate": ("acquisition.crawl.", "acquisition.crawls_revision"),
+    "kazma-core/kazma_core/web_acquire/crawl_jobs.py::_migrate_legacy": (
+        "acquisition.crawl.", "acquisition.crawls", "acquisition.crawls_revision"),
     "kazma-core/kazma_core/x_api/ai_budget.py::reserve_daily": ("connectors.x.ai_usage", "connectors.x.read_usage"),
     "kazma-core/kazma_core/x_api/account_binding.py::record_account": ("connectors.x.",),
     "kazma-core/kazma_core/x_api/qualification.py::install_report": ("connectors.x.reply.qualification",),

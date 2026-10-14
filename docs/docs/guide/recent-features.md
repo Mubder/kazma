@@ -516,15 +516,20 @@ Config is live (no restart). Password vault-encrypts.
 
 ## 3. Knowledge Library hardening
 
-### Smart re-index
+### Re-index
 
 | Situation | Behavior |
 |-----------|----------|
-| Page **unchanged** (same ordered content hashes) | Skip purge + embed |
-| Page **changed** or **shrank** | Purge URL (SQLite + FTS + Chroma), rewrite |
-| URL **gone** from discovery (in seed scope) | Pruned on site crawl/refresh |
+| Page **unchanged** (same chunks in the same order) | Skipped: nothing written |
+| Page **changed** or **shrank** | Replaced in one transaction: a search sees the old page or the new one, never a mix |
+| URL **missing** from a later discovery | Kept: a sparse or failed discovery never deletes indexed pages |
+| Page **fails** | Counted as failed; the crawl ends **Finished with failures**, never "Done" |
 
-Job UI / toasts show **skipped · unchanged · pruned · failed**.
+Job UI / toasts show **skipped · unchanged · failed**. Since 2026-10-14
+(Knowledge audit) the library has its own `knowledge.db`, one injection per
+turn, a crawl journal with one row per job, admin-only `/kb` changes and a
+meaning-search outage that warns and alerts: see
+[Knowledge Library](./knowledge-library).
 
 ### Recall + inject (one hybrid stack)
 

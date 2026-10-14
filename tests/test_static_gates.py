@@ -1043,6 +1043,19 @@ _LOOP_STALL_HELPERS = frozenset({
     "forget_turn_snapshots", "process_recorder", "create_recorder",
     "time_travel_reply", "write_audit_row", "_recent_audit_rows",
     "live_maintenance_config",
+    # The Knowledge Library (Knowledge audit KB-S06, 2026-10-14): its store
+    # is SQLite under one process-wide lock an ingest holds, the index adds
+    # the vector store and the embedder, the journal and the single-operator
+    # rule are settings reads. The agent's tools and the gateway's /kb
+    # helpers called them on the loop.
+    "get_knowledge_store", "get_knowledge_index", "knowledge_index_for",
+    "list_auto_inject_libraries", "list_archived_libraries", "archive_library",
+    "library_exists", "library_document_ids", "publish_page", "upsert_chunk",
+    "fts_search", "fts_coverage", "rebuild_fts", "get_chunks_by_ids",
+    "active_chunk_sizes", "list_source_content_hashes", "storage_status",
+    "ensure_capacity", "set_vector_status", "vector_status", "search_sync",
+    "search_all_sync", "build_knowledge_inject", "run_repair_sweep", "kb_refusal",
+    "active_for_library", "purge_terminal", "copy_legacy_knowledge",
 })
 
 
@@ -1222,6 +1235,13 @@ _CROSS_MODULE_AREAS: dict[str, tuple[str, ...]] = {
     "time_travel": ("kazma-core/kazma_core/time_travel.py", "kazma-core/kazma_core/time_travel_audit.py",
                     "kazma-ui/kazma_ui/thread_rewind.py", "kazma-ui/kazma_ui/thread_locks.py",
                     "kazma-ui/kazma_ui/replay_routes.py", "kazma-ui/kazma_ui/sse_chat/_time_travel.py"),
+    "knowledge": ("kazma-core/kazma_core/stores/knowledge.py",
+                  "kazma-core/kazma_core/stores/knowledge_index.py",
+                  "kazma-core/kazma_core/stores/knowledge_ingest.py",
+                  "kazma-core/kazma_core/stores/knowledge_lifecycle.py",
+                  "kazma-core/kazma_core/agent/tool_builtins/knowledge.py",
+                  "kazma-core/kazma_core/web_acquire/crawl_jobs.py",
+                  "kazma-ui/kazma_ui/kb_api.py"),
 }
 
 

@@ -123,7 +123,8 @@ def test_the_gate_sees_a_surface_asking_itself() -> None:
 
 
 @pytest.mark.parametrize("module", ["kazma_core.documents.principal", "kazma_core.swarm.single_operator",
-                                    "kazma_core.cron.single_operator"])
+                                    "kazma_core.cron.single_operator",
+                                    "kazma_core.stores.knowledge_lifecycle"])
 def test_each_surface_imports_the_shared_rule(module: str) -> None:
     import importlib
     import inspect

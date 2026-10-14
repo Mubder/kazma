@@ -389,12 +389,17 @@ def register_misc_routes(self: Any) -> None:
         )
     @self.app.get("/knowledge", response_class=HTMLResponse)
     def knowledge_page(request: Request) -> HTMLResponse:
+        # A single-operator surface (Knowledge KB-S04, decision D1): the page
+        # says so in its own language; every /api/kb route refuses.
+        from kazma_core.stores.knowledge_lifecycle import kb_refusal
+
         return self.templates.TemplateResponse(
             request,
             "knowledge_base.html",
             {
                 "config": self.agent.config,
                 "active_page": "knowledge",
+                "kb_single_operator": bool(kb_refusal()),
             },
         )
     @self.app.get("/documents", response_class=HTMLResponse)

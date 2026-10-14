@@ -44,11 +44,17 @@ def register_settings_routes(self: Any) -> None:
         }
     @self.app.put("/api/settings/memory/merge-kb")
     async def _settings_memory_merge_kb_put(request: Request):
+        # A refusal answers a non-2xx status (Knowledge audit KB-S10): a 200
+        # {"ok": false} made the Settings toggles say "saved" over it.
+        from fastapi.responses import JSONResponse
+
         body = {}
         try:
             body = await request.json()
         except Exception:
-            return {"ok": False, "error": "invalid JSON"}
+            return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=422)
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "error": "a JSON object is required"}, status_code=422)
         try:
             from kazma_core.config_store import get_config_store
 
@@ -89,7 +95,7 @@ def register_settings_routes(self: Any) -> None:
             await asyncio.to_thread(_save)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": safe_error(exc)}
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
     # The memory-backend routes below that never await are plain ``def``s:
     # they read config, open databases and probe remote servers, and FastAPI
     # runs a ``def`` in its threadpool instead of on the loop that serves
