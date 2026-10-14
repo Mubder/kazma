@@ -38,8 +38,8 @@ async def memory_context(worker_name: str, task: str) -> str:
         from kazma_core.safety.prompt_fence import format_untrusted_block
 
         # resolve_tenant_id needs a platform; swarm work has none ("system",
-        # as self_improvement does).
-        tenant = resolve_tenant_id("system", prefer_context=True)
+        # as self_improvement does). It reads settings: off the loop too.
+        tenant = await _aio.to_thread(resolve_tenant_id, "system", prefer_context=True)
         strategies_hits = await _aio.to_thread(search, task, limit=3, tenant_id=tenant)
         evo_hits = await _aio.to_thread(
             search, f"{worker_name} evolution learning", limit=2, tenant_id=tenant

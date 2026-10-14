@@ -41,19 +41,14 @@ MULTI_USER_REFUSAL = (
 
 
 def _single_operator() -> bool:
-    """True unless the install has platform users (or ``KAZMA_MULTI_USER``).
+    """True unless the install has platform users (or ``KAZMA_MULTI_USER``):
+    the one rule every single-operator surface asks
+    (``security.single_operator``, decision D1). A check that cannot answer
+    means False, so chat and the agent refuse rather than act for everyone.
+    Blocking: async callers use ``asyncio.to_thread``."""
+    from kazma_core.security.single_operator import is_single_operator
 
-    Blocking (a settings read): async callers use ``asyncio.to_thread``. A
-    store that cannot answer means False, so chat and the agent refuse rather
-    than act for everyone.
-    """
-    from kazma_core.security.platform_rbac import multi_user_enabled
-
-    try:
-        return not multi_user_enabled()
-    except store_errors():
-        logger.warning("[documents.principal] multi-user check failed; refusing", exc_info=True)
-        return False
+    return is_single_operator()
 
 
 def operator_for(service: Any, tenant_id: str) -> str | None:

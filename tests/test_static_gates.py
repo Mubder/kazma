@@ -26,6 +26,7 @@ by a failing test.
 from __future__ import annotations
 
 import ast
+import functools
 import re
 from pathlib import Path
 
@@ -1195,7 +1196,20 @@ def _bound_stall_names(mod: str, tree: ast.AST, stalls: set[str]) -> frozenset[s
     return frozenset(names)
 
 
-def test_the_memory_path_reaches_no_helper_through_another_module():
+#: Each area held to the cross-module rule: its async code reaches no
+#: loop-stall helper through another module's function, public or imported.
+#: An area joins when its audit's loop-stall row closes -- one line each
+#: (Memory M34; Swarm SW-E07; Scheduled SCH-E10, Knowledge KB-S06 and Time
+#: Travel TT-07 add theirs).
+_CROSS_MODULE_AREAS: dict[str, tuple[str, ...]] = {
+    "memory": _MEMORY_PATH,
+    "swarm": ("kazma-core/kazma_core/swarm/", "kazma-ui/kazma_ui/swarm_panel/",
+              "kazma-ui/kazma_ui/swarm_sse.py"),
+}
+
+
+@functools.lru_cache(maxsize=1)
+def _product_trees() -> tuple[dict[str, ast.AST], dict[str, Path], frozenset[str]]:
     trees: dict[str, ast.AST] = {}
     paths: dict[str, Path] = {}
     for path in _product_files():
@@ -1205,16 +1219,21 @@ def test_the_memory_path_reaches_no_helper_through_another_module():
             continue
         trees[_module_of(path)] = tree
         paths[_module_of(path)] = path
-    stalls = _qualified_stall_helpers(trees)
+    return trees, paths, frozenset(_qualified_stall_helpers(trees))
+
+
+@pytest.mark.parametrize("area", sorted(_CROSS_MODULE_AREAS))
+def test_an_area_reaches_no_helper_through_another_module(area: str):
+    trees, paths, stalls = _product_trees()
     offenders: list[str] = []
     for mod, tree in trees.items():
         rel = _rel(paths[mod])
-        if not any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in _MEMORY_PATH):
+        if not any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in _CROSS_MODULE_AREAS[area]):
             continue
-        extra = _bound_stall_names(mod, tree, stalls)
+        extra = _bound_stall_names(mod, tree, set(stalls))
         offenders += [f"{rel}:{line} {name}()" for line, name in _loop_stall_helper_calls(tree, extra)]
     assert not offenders, (
-        "Async memory code reaches a loop-stall helper through another module's function.\n"
+        f"Async {area} code reaches a loop-stall helper through another module's function.\n"
         "Fix: `await asyncio.to_thread(...)`.\n  " + "\n  ".join(offenders))
 
 

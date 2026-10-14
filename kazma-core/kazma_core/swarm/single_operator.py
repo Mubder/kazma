@@ -13,11 +13,7 @@ refuses too: the swarm never acts for everyone by accident.
 
 from __future__ import annotations
 
-import logging
-
 __all__ = ["MULTI_USER_REFUSAL", "swarm_refusal"]
-
-logger = logging.getLogger(__name__)
 
 MULTI_USER_REFUSAL = (
     "The swarm works on a single-operator install. This install has platform "
@@ -27,14 +23,10 @@ MULTI_USER_REFUSAL = (
 
 
 def swarm_refusal() -> str | None:
-    """:data:`MULTI_USER_REFUSAL` when the swarm must refuse, else None.
+    """:data:`MULTI_USER_REFUSAL` when the swarm must refuse, else None --
+    the one rule every single-operator surface asks
+    (``security.single_operator``). Blocking: async callers use
+    ``asyncio.to_thread``."""
+    from kazma_core.security.single_operator import single_operator_refusal
 
-    Blocking (a settings read): async callers use ``asyncio.to_thread``.
-    """
-    from kazma_core.security.platform_rbac import multi_user_enabled
-
-    try:
-        return MULTI_USER_REFUSAL if multi_user_enabled() else None
-    except Exception:
-        logger.warning("[swarm] multi-user check failed; refusing", exc_info=True)
-        return MULTI_USER_REFUSAL
+    return single_operator_refusal(MULTI_USER_REFUSAL)
