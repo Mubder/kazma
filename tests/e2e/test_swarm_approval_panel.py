@@ -37,6 +37,30 @@ def _open_request(tool: str, args: str) -> str:
     return rid
 
 
+def test_a_request_not_on_record_is_asked_once() -> None:
+    """Live 2026-10-14: the panel polled an unknown id every 5 s for as long
+    as the page stayed open. A request not on record never appears later."""
+    from playwright.sync_api import sync_playwright
+
+    from kazma_ui.i18n import TRANSLATIONS
+
+    with unified_turn_server() as h, sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            asked: list[str] = []
+            page.on("request", lambda r: asked.append(r.url) if "/api/swarm/approvals/" in r.url else None)
+            page.goto(h.base + "/swarm?approval=no-such-request", wait_until="domcontentloaded")
+            page.wait_for_function(
+                "(want) => (document.getElementById('swarm-approval-body') || {}).textContent === want",
+                arg=TRANSLATIONS["swarm.approval.not_found"]["en"], timeout=15000)
+            page.wait_for_timeout(11000)  # two poll periods
+            assert len(asked) == 1, asked
+            assert page.is_hidden("#swarm-approval-actions")
+        finally:
+            browser.close()
+
+
 @pytest.mark.parametrize("language", ["en", "ar"])
 def test_the_panel_shows_the_whole_call_and_takes_the_answer(language: str) -> None:
     from playwright.sync_api import sync_playwright
