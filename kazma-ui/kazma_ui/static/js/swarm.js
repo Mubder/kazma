@@ -187,8 +187,10 @@
     var actions = $('swarm-approval-actions');
     if (!body) return;
     if (!view) {
+      // Not on record: it will not appear later, so it is not asked again.
       body.textContent = t('swarm.approval.not_found');
       if (actions) actions.style.display = 'none';
+      if (approvalPoll) { clearInterval(approvalPoll); approvalPoll = null; }
       return;
     }
     var html = '<div><strong>' + esc(t('swarm.approval.tool')) + ':</strong> <bdi translate="no" dir="ltr">'
