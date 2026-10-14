@@ -376,7 +376,11 @@ decision that removes a feature the owner may want (D6, D8) is asked first.
   and the per-area cross-module loop-stall gate (`_CROSS_MODULE_AREAS`). Then
   Scheduled (S2), Time Travel (S5) and Knowledge (S4) ran as one agent each
   in their own worktree from c575d4e4 and were merged one at a time:
-  Scheduled 110b106c, Time Travel 205a5f77, Knowledge next. Each merge ran
-  its area's tests and the global gates on the merged tree; one full suite
-  and the Postgres job follow the last merge. Open: the soaks (D3), the
+  Scheduled 110b106c, Time Travel 205a5f77, Knowledge 718389b5. Each merge
+  ran its area's tests and the global gates on the merged tree. After the
+  last merge: the full suite (16,108 passed; the one failure, a 50 ms
+  deadline in `test_research_runtime.py` that load could spend before the
+  code under test ran, was made deterministic), the Postgres job on a
+  disposable postgres:16 (502 passed, pg_dump/pg_restore included), the
+  bandit gates, and 23 browser and turn-lifecycle files (all green). Open: the soaks (D3), the
   owner decisions (D6, D8, D9), and an independent review per area.

@@ -1,6 +1,6 @@
 # Knowledge Library industrial hardening
 
-Status: OPEN -- 2026-10-13; implementation landed 2026-10-14 (worktree branch `worktree-agent-a6474388be97231f4`): see each row. KB-Q01 and KQ01 stay open; KB-S05 and KB-S15 are partial.
+Status: OPEN -- 2026-10-13; implementation merged to `main` 2026-10-14 (718389b5): see each row. KB-Q01 and KQ01 stay open; KB-S05 and KB-S15 are partial.
 
 ## Objective
 
@@ -178,3 +178,9 @@ Each ID keeps the audit's original identifier, so the witness for a row is the o
   migration round trip, `tests/test_acquisition_postgres.py`, and
   `tests/test_document_reindex_after_restore.py` (23 passed). Not run: the
   full suite, the 48-72 h soak, a live drill, the real embedding model.
+- 2026-10-14: merged to `main` (718389b5) by the coordinator; debt ratchet
+  locked on the merged tree (`blind_except` 3,435, `silent_except` 411,
+  `module_local_public_symbols` 542, `async_tools_never_await` 2). The
+  Postgres migration round trip now skips like the other dump tests when
+  pg_dump/pg_restore cannot be reached (it failed instead); with the tools
+  reachable it passed in the full Postgres job.

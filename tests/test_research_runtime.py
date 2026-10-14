@@ -196,8 +196,19 @@ def test_same_topic_in_the_same_second_gets_distinct_report_directories(controll
 async def test_pipeline_deadline_joins_async_cleanup_and_releases_admission(controlled, monkeypatch):
     from kazma_core.web_acquire import research_runtime
     cleanup = asyncio.Event()
+    # The deadline expires once planning has started, never on a clock: a
+    # 50 ms deadline could expire during the preflight on a loaded machine,
+    # before the cleanup this test is about existed (a full-suite failure,
+    # 2026-10-14).
+    deadlines: list[asyncio.Timeout] = []
+
+    def deadline_at_planning(delay):
+        deadlines.append(asyncio.timeout(None))
+        return deadlines[-1]
+
     async def plan(*args, **kwargs):
         try:
+            deadlines[-1].reschedule(asyncio.get_running_loop().time())
             await asyncio.Event().wait()
         finally:
             cleanup.set()
@@ -205,7 +216,7 @@ async def test_pipeline_deadline_joins_async_cleanup_and_releases_admission(cont
     async def already_qualified_inventory(*args):
         return {}
     monkeypatch.setattr(artifact_storage._OWNERS, 'call', already_qualified_inventory)
-    monkeypatch.setattr(research_runtime, '_DEADLINE_SECONDS', .05)
+    monkeypatch.setattr(research_runtime, 'asyncio', SimpleNamespace(timeout=deadline_at_planning))
     monkeypatch.setattr('kazma_core.tools.research_planner.plan_research_queries', plan)
     report = await pipeline.run_research_pipeline('deadline')
     assert report.startswith('Error:') and 'deadline expired' in report and cleanup.is_set()

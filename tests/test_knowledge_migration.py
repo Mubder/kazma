@@ -234,6 +234,16 @@ def test_a_migration_from_a_postgres_install_carries_the_library(tmp_path):
     dsn = os.environ.get("KAZMA_DATABASE_URL", "")
     if not dsn.startswith("postgres") or os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") != "1":
         pytest.skip("needs a disposable Postgres (KAZMA_TEST_ALLOW_REAL_DB=1, KAZMA_DATABASE_URL)")
+    # The export degrades to a bundle without the dump when pg_dump cannot be
+    # reached; that is the exporter's documented behaviour, not this test's
+    # subject, so it skips like the other dump tests.
+    from kazma_core.migration.pg_bridge import PgToolNotFound, resolve_pg_dump, resolve_pg_restore
+
+    try:
+        resolve_pg_dump()
+        resolve_pg_restore()
+    except PgToolNotFound as exc:
+        pytest.skip(f"pg_dump/pg_restore not reachable: {exc}")
     # The document catalog stays SQLite here: this round trip is about the
     # Knowledge Library beside Postgres settings, not the document store.
     pg = {"KAZMA_DB_BACKEND": "postgres", "KAZMA_DATABASE_URL": dsn, "KAZMA_TEST_ALLOW_REAL_DB": "1",
