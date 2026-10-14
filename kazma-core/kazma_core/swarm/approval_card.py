@@ -9,16 +9,22 @@ arguments, so what is approved can be checked against what runs (the gate
 registry keeps the whole call, ``GateRow.args_json``). A call whose argument
 names cannot all be shown is refused from chat cards (``complete`` False):
 the operator cannot read what they would approve.
+
+Every card also links to the request on the Web dashboard (:func:`web_link`,
+the Swarm page's approval panel), where the whole call is shown with the same
+hash and the request can be answered too.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote, urlsplit
 
-__all__ = ["CardArguments", "render_arguments"]
+__all__ = ["CardArguments", "arguments_digest", "render_arguments", "web_link"]
 
 #: The whole argument block. With the card's header (worker, a 300-character
 #: task line), its request id and its footer it stays inside the smallest
@@ -54,10 +60,28 @@ def _lines(pairs: list[tuple[str, str]], budget: int) -> list[str]:
     return out
 
 
+def arguments_digest(tool_args: str | None) -> str:
+    """The hash a card shows of the call's arguments; the Web panel shows the
+    same one beside the whole call, so the two can be matched."""
+    return hashlib.sha256((tool_args or "").encode("utf-8")).hexdigest()[:16]
+
+
+def web_link(approval_id: str) -> str:
+    """Where the Web dashboard shows this request: the install's public
+    address (``KAZMA_PUBLIC_URL``) when it has an http(s) one, else the
+    page's path to open in Kazma's web UI."""
+    path = f"/swarm?approval={quote(approval_id, safe='')}"
+    public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
+    parts = urlsplit(public)
+    if parts.scheme in ("http", "https") and parts.netloc:
+        return f"{public}{path}"
+    return path
+
+
 def render_arguments(tool_args: str | None) -> CardArguments:
     """The card's argument block for *tool_args* (the call's JSON)."""
     raw = tool_args or ""
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    digest = arguments_digest(raw)
     try:
         parsed = json.loads(raw) if raw else {}
     except ValueError:

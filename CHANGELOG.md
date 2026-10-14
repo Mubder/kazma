@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Swarm approvals on the web; Knowledge outcomes checked in a browser (2026-10-14)
+
+- Every swarm approval card (Telegram, Discord, Slack) links to the request on
+  the Web dashboard: the Swarm page's approval panel shows the tool, its state
+  and the whole call (the card shows a bounded view), with the same arguments
+  hash, and has Approve and Deny while the request waits. It is the same shared
+  decision as the chat buttons, recorded as the web with the signed-in user; the
+  first human answer anywhere decides it. Answering is the operator's.
+- Two identical swarm calls asking at once are two requests: the gate registry
+  took them for one pause and recorded the second's outcome on the first.
+- The Knowledge page's refusals and partial crawls are now checked in a real
+  browser, in English and Arabic: a refused crawl is said in the page's
+  language and leaves no library; a crawl with failed pages is "Finished with
+  failures", never "Done".
+
 ## Deploy follow-ups (2026-10-14)
 
 - A forget no longer waits forever on a remote vector index that cannot hold

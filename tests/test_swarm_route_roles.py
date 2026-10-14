@@ -93,7 +93,8 @@ def forbidden_client(monkeypatch):
 
 
 def _url(path: str) -> str:
-    return path.replace("{task_id}", "task-x").replace("{name}", "probe")
+    return (path.replace("{task_id}", "task-x").replace("{name}", "probe")
+            .replace("{approval_id}", "request-x"))
 
 
 @pytest.mark.parametrize("method,path", sorted(k for k, v in SWARM_ROUTE_ROLES.items() if v == ADMIN))

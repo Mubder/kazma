@@ -470,7 +470,7 @@ class SafetyMiddleware:
         import asyncio as _aio
 
         from kazma_core.swarm import shared_approvals
-        from kazma_core.swarm.approval_card import render_arguments
+        from kazma_core.swarm.approval_card import render_arguments, web_link
 
         card = render_arguments(tool_args)
         if not card.complete:
@@ -520,6 +520,8 @@ class SafetyMiddleware:
                 proposed_output=f"{card.text}\nrequest: {approval_id}",
                 task_id=approval_id,
                 timeout=timeout,
+                # The whole call and the same decision on the Web dashboard.
+                web_link=web_link(approval_id),
             )
         finally:
             # Read the outcome, record it, then close the request -- also when

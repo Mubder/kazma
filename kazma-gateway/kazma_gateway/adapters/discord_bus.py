@@ -231,6 +231,10 @@ class DiscordBusAdapter(BusAdapter):
             f"**Worker:** {approval.worker_name}\n"
             f"**Task:** {approval.task_description[:300]}\n"
         )
+        if approval.web_link:
+            # Before the arguments block: the 2,000-character cut never reaches it.
+            link = approval.web_link
+            text += f"**Full call:** <{link}>\n" if link.startswith("http") else f"**Full call:** `{link}`\n"
         if approval.proposed_output:
             text += f"```\n{approval.proposed_output}\n```\n"
         text += f"\n_(times out in {int(timeout)}s; the tool does not run unless approved)_"

@@ -100,6 +100,98 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مفتاح API",
         "en": "API Key",
     },
+    "swarm.approval.title": {
+        "ar": "طلب موافقة",
+        "en": "Approval request",
+    },
+    "swarm.approval.loading": {
+        "ar": "جارٍ تحميل الطلب…",
+        "en": "Loading the request…",
+    },
+    "swarm.approval.not_found": {
+        "ar": "هذا الطلب غير مسجّل: لم يُقدَّم هنا، أو انتهى ولم يُحفظ سجله.",
+        "en": "This request is not on record: it was not made here, or it ended without a record.",
+    },
+    "swarm.approval.tool": {
+        "ar": "الأداة",
+        "en": "Tool",
+    },
+    "swarm.approval.state": {
+        "ar": "الحالة",
+        "en": "State",
+    },
+    "swarm.approval.arguments": {
+        "ar": "الاستدعاء كاملاً",
+        "en": "The whole call",
+    },
+    "swarm.approval.no_arguments": {
+        "ar": "لا يُحفظ الاستدعاء كاملاً إلا عند تشغيل سجل الموافقات.",
+        "en": "The whole call is kept only while the approval registry is on.",
+    },
+    "swarm.approval.digest": {
+        "ar": "بصمة المعاملات (هي نفسها في بطاقة المحادثة):",
+        "en": "Arguments hash (the same as on the chat card):",
+    },
+    "swarm.approval.decided": {
+        "ar": "صاحب القرار:",
+        "en": "Decided by:",
+    },
+    "swarm.approval.deadline": {
+        "ar": "أجب قبل {time}؛ لا تعمل الأداة إلا بالموافقة.",
+        "en": "Answer by {time}; the tool does not run unless approved.",
+    },
+    "swarm.approval.approve": {
+        "ar": "موافقة",
+        "en": "Approve",
+    },
+    "swarm.approval.deny": {
+        "ar": "رفض",
+        "en": "Deny",
+    },
+    "swarm.approval.done_approved": {
+        "ar": "تمت الموافقة: تعمل الأداة.",
+        "en": "Approved: the tool runs.",
+    },
+    "swarm.approval.done_denied": {
+        "ar": "رُفض الطلب: لا تعمل الأداة.",
+        "en": "Denied: the tool does not run.",
+    },
+    "swarm.approval.not_pending": {
+        "ar": "تمت الإجابة عن هذا الطلب أو انتهى.",
+        "en": "This request was already answered or has ended.",
+    },
+    "swarm.approval.forbidden": {
+        "ar": "يستطيع المشغّل وحده الإجابة عن الطلب.",
+        "en": "Only the operator can answer a request.",
+    },
+    "swarm.approval.failed": {
+        "ar": "تعذّر تسجيل الإجابة. حاول مرة أخرى.",
+        "en": "The answer could not be recorded. Try again.",
+    },
+    "swarm.approval.st_pending": {
+        "ar": "بانتظار إجابة",
+        "en": "Waiting for an answer",
+    },
+    "swarm.approval.st_approved": {
+        "ar": "تمت الموافقة",
+        "en": "Approved",
+    },
+    "swarm.approval.st_denied": {
+        "ar": "مرفوض",
+        "en": "Denied",
+    },
+    "swarm.approval.st_timeout": {
+        "ar": "انتهت المهلة: لم يُجب أحد، ولم تعمل الأداة",
+        "en": "Timed out: nobody answered, the tool did not run",
+    },
+    "swarm.approval.st_cancelled": {
+        "ar": "أُلغي: انتهى الطلب قبل الإجابة، ولم تعمل الأداة",
+        "en": "Cancelled: the request ended before an answer, the tool did not run",
+    },
+    "swarm.approval.st_ended": {
+        "ar": "انتهى دون إجابة مسجّلة",
+        "en": "Ended without a recorded answer",
+    },
     "swarm.approval_failed": {
         "ar": "فشلت الموافقة: {msg}",
         "en": "Approval failed: {msg}",

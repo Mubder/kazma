@@ -482,6 +482,13 @@ def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None
                 return existing
     if not (gate.thread_id and gate.tool):
         return None
+    if gate.mechanism == "swarm_bus":
+        # Each bus request is minted fresh (``SafetyMiddleware._ask_the_bus``),
+        # never a second registration of one pause: two identical calls asking
+        # at once are two requests. Matched as twins, the second request's id
+        # became the first row's alias, and its outcome was recorded on the
+        # first request's row (2026-10-14).
+        return None
     cur = conn.execute(
         "SELECT * FROM hitl_gates WHERE thread_id = ? AND tool = ? "
         "AND state IN ('pending','claimed','resuming') ORDER BY created_at ASC",
@@ -578,6 +585,8 @@ def _supersede_pending_twins(claimed: GateRow) -> None:
     """Drop the hash-id ghost of a pause we just claimed under the native id."""
     if not claimed.thread_id or not claimed.tool:
         return
+    if claimed.mechanism == "swarm_bus":
+        return  # each bus request is its own, never a ghost (_lookup_live_gate)
     conn = _connect()
     try:
         cur = conn.execute(

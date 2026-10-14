@@ -294,6 +294,20 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   and a decision that cannot be recorded is a WARNING with the actor
   (`kazma_swarm_failures_total{site="approval_resolve"}`). The gate row records
   the human who pressed. Gate: `tests/test_swarm_bus_approvals.py`.
+- **The Web dashboard answers the same request** (SW-S03, 2026-10-14). Every
+  card carries `approval_card.web_link(id)` (`ApprovalRequest.web_link`, shown
+  before the code block): `/swarm?approval=<id>` on `KAZMA_PUBLIC_URL`. The
+  Swarm page's panel (`swarm_panel/routes_approvals.py`: GET for any signed-in
+  user, `POST .../decide` admin) shows `shared_approvals.describe(id)` -- the
+  whole call from the gate record, the card's hash, the state -- and decides
+  with `resolve(..., platform="web")`. `describe` answers only a `swarm_bus`
+  gate: a chat approval is not that page's to show. The id comes from the
+  template (`data-approval-id`), never `location.search` (a soft navigation runs
+  the script first). A `swarm_bus` gate is never a "twin" of another
+  (`hitl_gates._lookup_live_gate`, `_supersede_pending_twins`): two identical
+  calls asking at once are two requests; matched as twins, the second's outcome
+  was recorded on the first's row. Gates: `tests/test_swarm_approval_page.py`,
+  `tests/e2e/test_swarm_approval_panel.py` (EN/AR, reached by soft navigation).
 
 **C. Pipeline checkpoints — swarm PIPELINE tasks** (separate from A and B)
 - `engine.py:_handle_pipeline_checkpoint` + `approve_checkpoint`

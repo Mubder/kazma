@@ -72,6 +72,9 @@ class ApprovalRequest:
     task_description: str
     proposed_output: str  # truncated for display
     task_id: str = ""
+    #: The request on the Web dashboard (``approval_card.web_link``): each
+    #: card shows it outside its code block, so it can be opened.
+    web_link: str = ""
 
 
 # ── Platform adapter (ABC) ────────────────────────────────────────────────
@@ -332,6 +335,7 @@ class SwarmMessageBus:
         proposed_output: str,
         task_id: str = "",
         timeout: float | None = None,
+        web_link: str = "",
     ) -> bool:
         """Request HITL approval. Returns True if approved, False if rejected or timed out."""
         import asyncio
@@ -359,6 +363,7 @@ class SwarmMessageBus:
             # already, every name shown (SW-S03): never cut again here.
             proposed_output=proposed_output,
             task_id=task_id,
+            web_link=web_link,
         )
         # The request's own deadline ends the wait (shared_approvals). This
         # bound is a backstop for an adapter that hangs past it -- a card

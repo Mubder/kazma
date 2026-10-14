@@ -330,6 +330,16 @@ class TelegramBusAdapter(BusAdapter):
             f"*Worker:* {safe_name}\n"
             f"*Task:* {safe_task}\n"
         )
+        if approval.web_link:
+            # A MarkdownV2 link: inside its (...) only ")" and "\" are escaped,
+            # inside `...` only "`" and "\" (the same two as the block below).
+            link = approval.web_link.replace("\\", "\\\\")
+            if link.startswith("http"):
+                target = link.replace(")", "\\)")
+                text += f"*Full call:* [open in Kazma]({target})\n"
+            else:
+                shown = link.replace("`", "\\`")
+                text += f"*Full call:* `{shown}`\n"
         if safe_output:
             text += f"```\n{safe_output}\n```\n"
         text += "━━━━━━━━━━━━━━━━━━━━━\n"

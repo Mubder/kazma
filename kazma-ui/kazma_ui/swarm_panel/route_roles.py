@@ -47,6 +47,10 @@ SWARM_ROUTE_ROLES: dict[tuple[str, str], str] = {
     ("GET", "/api/swarm/workers/{name}/circuit-breaker"): USER,
     ("GET", "/api/swarm/workers/{name}/logs"): USER,
     ("GET", "/api/swarm/workers/{name}/metrics"): USER,
+    # A bus approval request on the Web dashboard (SW-S03): its whole call is
+    # read like the rest of the page; answering it is the operator's.
+    ("GET", "/api/swarm/approvals/{approval_id}"): USER,
+    ("POST", "/api/swarm/approvals/{approval_id}/decide"): ADMIN,
     ("POST", "/api/swarm/dispatch"): ADMIN,
     ("POST", "/api/swarm/start"): ADMIN,
     ("POST", "/api/swarm/stop"): ADMIN,

@@ -50,6 +50,17 @@ Outbound swarm progress + danger-tool approvals go through `SwarmMessageBus`
 - A decision that cannot be recorded (the settings store is down) is a WARNING
   naming the actor, and counts `kazma_swarm_failures_total{site="approval_resolve"}`;
   the request then stays pending until its deadline.
+- **Every card links to the request on the Web dashboard** (`Full call:`, before
+  the arguments block, so no platform's cut reaches it): the Swarm page's
+  approval panel, `/swarm?approval=<id>`, on the install's `KAZMA_PUBLIC_URL`
+  (the page's path when none is set). The panel shows the tool, its state and
+  the whole call the gate record keeps, with the card's hash, and while the
+  request waits it has **Approve** and **Deny**: one more place to give the same
+  decision, recorded as `web` with the signed-in user (an operator's action;
+  reading is open to any signed-in user). A swarm request is never on the
+  dashboard's pending list, which admits a gate by the chat session it belongs
+  to. Two identical calls asking at once are two requests, each with its own
+  gate record.
 
 **Which work asks at all** (`safety/call_authority.py`). The graph's interrupt()
 decides the danger calls of a chat turn; for those calls the bus must not ask

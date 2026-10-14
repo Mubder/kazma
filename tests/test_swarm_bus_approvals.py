@@ -394,6 +394,51 @@ def test_every_danger_tools_arguments_reach_every_platforms_card(monkeypatch: py
     assert asyncio.run(go()) == []
 
 
+@pytest.mark.parametrize("platform", PLATFORMS)
+def test_every_card_links_to_the_request_on_the_web(platform: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SW-S03's last part: the card links to the whole call on the Web
+    dashboard, outside the code block (a link inside it cannot be opened)
+    and before it (no platform cut reaches it)."""
+    monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://kazma.example/")
+    card = _Card(platform, monkeypatch)
+    mw = _middleware(monkeypatch, card.adapter, timeout=0.3)
+    assert asyncio.run(mw.check("file_write", '{"path": "a.txt"}')) is False
+    posted = card.posts[0]
+    link = f"https://kazma.example/swarm?approval={_id_of(card.approve_button())}"
+    assert link in posted, posted
+    assert posted.index(link) < posted.index("```")
+
+
+def test_the_widest_discord_card_keeps_its_link_and_its_hash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the link added, the widest argument block still fits Discord's
+    2,000 characters: nothing of the card is cut."""
+    from kazma_core.swarm.approval_card import render_arguments
+
+    monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://kazma.example/a-long-public-path-of-an-install")
+    card = _Card("discord", monkeypatch)
+    mw = _middleware(monkeypatch, card.adapter, timeout=0.3)
+    widest = json.dumps({f"argument_{i:02d}": "v" * 900 for i in range(14)})
+    assert asyncio.run(mw.check(f"mcp__{'s' * 60}__write_file", widest)) is False
+    posted = card.posts[0]
+    assert len(posted) < 2000, len(posted)
+    assert f"swarm?approval={_id_of(card.approve_button())}>" in posted
+    assert f"arguments sha256: {render_arguments(widest).digest}" in posted
+
+
+def test_without_a_public_address_the_card_names_the_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An address that is not http(s) is no link: the card names the page."""
+    from kazma_core.swarm.approval_card import web_link
+
+    monkeypatch.delenv("KAZMA_PUBLIC_URL", raising=False)
+    assert web_link("g-1") == "/swarm?approval=g-1"
+    monkeypatch.setenv("KAZMA_PUBLIC_URL", "kazma.example")
+    assert web_link("g 1/x") == "/swarm?approval=g%201%2Fx"
+    card = _Card("slack", monkeypatch)
+    mw = _middleware(monkeypatch, card.adapter, timeout=0.3)
+    asyncio.run(mw.check("file_write", '{"path": "a.txt"}'))
+    assert f"`/swarm?approval={_id_of(card.approve_button())}`" in card.posts[0]
+
+
 # ── SW-S04: one deadline; timeout and cancellation are shown ───────────────
 
 
