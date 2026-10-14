@@ -24,6 +24,8 @@ from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus
 
 __all__ = ["CheckpointManager"]
 
+from kazma_core.metrics import record_swarm_failure
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,7 +55,10 @@ def _gate_register_pipeline(task_id: str, step: int, worker: str, preview: str) 
             ttl_seconds=0,  # pipeline timeouts are owned by the auto-reject arm
         )
     except Exception:
-        logger.debug("[CheckpointManager] gate register skipped", exc_info=True)
+        # The approvals list will not show this pause (SW-E14: was DEBUG).
+        logger.warning("[CheckpointManager] could not register the gate row of paused task %s step %s",
+                       task_id, step, exc_info=True)
+        record_swarm_failure("gate_register")
 
 
 def _gate_settle_pipeline(task_id: str, decision: str) -> None:
@@ -81,7 +86,10 @@ def _gate_settle_pipeline(task_id: str, decision: str) -> None:
             except TransitionConflict:
                 pass
     except Exception:
-        logger.debug("[CheckpointManager] gate settle skipped", exc_info=True)
+        # The approvals list keeps showing a decided pause (SW-E14: was DEBUG).
+        logger.warning("[CheckpointManager] could not settle the gate rows of task %s (%s)",
+                       task_id, decision, exc_info=True)
+        record_swarm_failure("gate_settle")
 
 
 class CheckpointManager:
@@ -108,6 +116,7 @@ class CheckpointManager:
     ) -> None:
         self._checkpoint_handler = checkpoint_handler
         self._task_store = task_store
+        self._persist: Any = None
         self._task_history = task_history if task_history is not None else {}
         self._max_history = max_history
         # Checkpoint auto-reject timeouts that couldn't be armed at restore
@@ -202,8 +211,11 @@ class CheckpointManager:
                 for old_key in list(self._task_history.keys())[:excess]:
                     self._task_history.pop(old_key, None)
 
-        # Persist paused state to SQLite so it survives restart.
-        if self._task_store is not None:
+        # Persist paused state so it survives restart -- through the engine
+        # when it is wired (its writes run off the loop, in order: SW-E07).
+        if self._persist is not None:
+            self._persist(task)
+        elif self._task_store is not None:
             try:
                 self._task_store.persist_task(task)
             except Exception:
@@ -267,6 +279,10 @@ class CheckpointManager:
         """Register the engine's reject_checkpoint as the timeout callback."""
         self._reject_callback = callback
 
+    def set_persist_callback(self, persist: Any) -> None:
+        """The engine's ordered, off-loop task write (``SwarmEngine._persist``)."""
+        self._persist = persist
+
     def set_sse_emit_callback(self, callback: Any) -> None:
         """Register the engine's ``_emit_sse`` so pauses notify SSE listeners."""
         self._sse_emit = callback
@@ -317,7 +333,9 @@ class CheckpointManager:
                 self._checkpoint_handler.set_timeout_task(task_id, timeout_task)
                 armed += 1
             except Exception:
-                logger.debug(
+                # The pause has no auto-reject now: it waits for a human (SW-E14).
+                record_swarm_failure("checkpoint_timeout_arm")
+                logger.warning(
                     "[CheckpointManager] failed to arm deferred timeout for %s",
                     task_id,
                     exc_info=True,

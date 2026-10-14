@@ -27,21 +27,25 @@ def _store(root: Path) -> Path:
         """
         CREATE TABLE documents (
             id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'tenant',
             title TEXT,
             deleted_at TEXT
         );
         CREATE TABLE document_blobs (
             id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'tenant',
             sha256 TEXT,
             storage_kind TEXT
         );
         CREATE TABLE document_versions (
             id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'tenant',
             document_id TEXT,
             source_blob_id TEXT
         );
         CREATE TABLE document_artifacts (
             id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'tenant',
             document_id TEXT,
             blob_id TEXT
         );
@@ -107,7 +111,7 @@ def test_export_ignores_a_missing_deleted_blob_and_rejects_a_missing_live_one(
 
     monkeypatch.setattr(
         "kazma_core.documents.config.get_document_config",
-        lambda: _Cfg(),
+        lambda **kwargs: _Cfg(),
     )
     staging = tmp_path / "staging"
     staging.mkdir()

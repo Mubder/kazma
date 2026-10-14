@@ -77,7 +77,6 @@ Includes isolation, KB toggles, backends, Neo4j Test/Sync, **and embedder** (no 
 | Setting | Effect |
 |---------|--------|
 | `merge_knowledge_into_chat` | Inject labeled KB into supervisor next to V2 memory |
-| `promote_kb_to_episodes` | Soft-copy top KB hits into episodic rows (tagged) |
 | `memory.backends.*` | Vector / state / graph adapters + failover |
 | Graph provider `neo4j` | Dual-write triples; topology **paint** stays SQLite |
 | `tenant_mode` | shared / per_platform / per_user |

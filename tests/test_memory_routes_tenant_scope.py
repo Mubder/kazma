@@ -529,7 +529,14 @@ def _problems(ctx, route: tuple[str, str]) -> list[str]:
         label = f"{method} {path}"
         if ctx.on_loop:
             problems.append(f"{label}: ran SQL on the event loop: {ctx.on_loop[:3]}")
-        if resp.status_code in (404, 405, 422):
+        try:
+            answered = resp.json()
+        except ValueError:
+            answered = None
+        # A handler's own refusal carries "ok" (404/409/422 since Memory audit
+        # M35); a router's 404/405 or a validation 422 does not.
+        handled = isinstance(answered, dict) and "ok" in answered
+        if resp.status_code in (404, 405, 422) and not handled:
             # The request never reached the handler: the gate would pass for
             # a route it did not exercise.
             problems.append(f"{label}: HTTP {resp.status_code} -- never reached the route")
@@ -607,6 +614,67 @@ def test_an_install_wide_memory_route_runs_off_the_loop(memory_client, route):
     resp = memory_client.client.request(route[0], path, json=body)
     assert resp.status_code < 500, resp.text[:300]
     assert memory_client.on_loop == [], f"{route[0]} {path} ran SQL on the event loop"
+
+
+_WRITE = ("INSERT", "UPDATE", "DELETE", "REPLACE")
+
+
+def _get_route_writes(ctx, route: tuple[str, str], monkeypatch) -> list[str]:
+    """The write statements a GET of *route* runs on the memory databases,
+    once their schema is ready (as at any request after boot)."""
+    from kazma_core.memory.schema_v2 import ensure_ops_schema
+    from kazma_core.paths import memory_ops_db
+    from kazma_ui.routes_direct._shared import open_memory_db
+
+    writes: list[str] = []
+    for path, body in REQUESTS[route]:
+        root = _fresh(ctx, uuid.uuid4().hex[:10])
+        if "{beta_undo}" in path:
+            path = path.replace("{beta_undo}", _register_beta_undo(root))
+        open_memory_db().close()  # the schema, made ready once (boot does it)
+        ops = sqlite3.connect(memory_ops_db())
+        ensure_ops_schema(ops)
+        ops.close()
+        traced = sqlite3.connect
+
+        def _connect(*args, **kwargs):
+            conn = traced(*args, **kwargs)
+            conn.set_trace_callback(
+                lambda sql: writes.append(f"{path}: {' '.join(sql.split())[:90]}")
+                if sql.lstrip().upper().startswith(_WRITE) else None)
+            return conn
+
+        with monkeypatch.context() as m:
+            m.setattr(sqlite3, "connect", _connect)
+            ctx.client.request(route[0], path, json=body)
+    return writes
+
+
+@pytest.mark.parametrize("route", sorted(r for r in REQUESTS if r[0] == "GET"), ids=lambda r: f"{r[0]} {r[1]}")
+def test_a_memory_get_route_writes_nothing(memory_client, route, monkeypatch):
+    """Memory audit M34: GET /vocab, /entities and /admin/summary took the
+    write lock and wrote (the schema step, run on every request)."""
+    assert _get_route_writes(memory_client, route, monkeypatch) == []
+
+
+def test_the_write_trace_sees_a_writing_get(memory_client, monkeypatch):
+    """Negative control: the old opener, schema step on every request, under a
+    stale entity count (the S10 witness)."""
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_ui import memory_api
+
+    def old_conn():
+        from kazma_core.paths import primary_memory_db
+
+        c = sqlite3.connect(primary_memory_db(), check_same_thread=False, timeout=30)
+        c.row_factory = sqlite3.Row
+        c.execute("UPDATE entities SET belief_count = -1")  # stale, as after a merge
+        c.commit()
+        ensure_primary_schema(c)
+        return c
+
+    monkeypatch.setattr(memory_api, "_conn", old_conn)
+    assert _get_route_writes(memory_client, ("GET", "/api/memory/v2/vocab"), monkeypatch)
 
 
 def test_the_gate_sees_sql_on_the_loop(memory_client):

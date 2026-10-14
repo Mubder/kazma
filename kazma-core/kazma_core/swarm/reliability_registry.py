@@ -82,6 +82,16 @@ class ReliabilityRegistry:
             self._circuit_breakers[worker_name].refresh_from_shared(worker_name)
         return self._circuit_breakers[worker_name]
 
+    def breaker_for_dispatch(self, worker_name: str) -> CircuitBreaker:
+        """The worker's breaker with no store I/O: a dispatch refreshes it
+        from the shared copy in a thread, in ``check_or_raise`` (Swarm audit
+        SW-E07: ``get_circuit_breaker`` read the settings store on the event
+        loop on every dispatch)."""
+        breaker = self._circuit_breakers.get(worker_name)
+        if breaker is None:
+            breaker = self._circuit_breakers.setdefault(worker_name, CircuitBreaker())
+        return breaker
+
     def note_breaker_outcome(self, worker_name: str) -> None:
         """Persist breaker state after success/failure (multi-replica)."""
         b = self._circuit_breakers.get(worker_name)
@@ -227,6 +237,41 @@ class ReliabilityRegistry:
             if len(self._concurrency_cache) >= self._MAX_CONCURRENCY_CACHE_SIZE:
                 oldest_key = next(iter(self._concurrency_cache))
                 self._concurrency_cache.pop(oldest_key, None)
-            cached = BoundedConcurrency(max_concurrent=limit)
+            cached = _UnderGlobalCap(limit, self._global_parallel())
             self._concurrency_cache[limit] = cached
         return cached
+
+    def _global_parallel(self) -> BoundedConcurrency:
+        """One cap over every fan-out, consult and broadcast's workers
+        (Swarm audit SW-E15: each limit had its own semaphore, so tasks with
+        different limits added up without a bound)."""
+        cap = getattr(self, "_global_cap", None)
+        if cap is None:
+            from kazma_core.swarm.limits import MAX_PARALLEL_WORKERS
+
+            cap = BoundedConcurrency(max_concurrent=MAX_PARALLEL_WORKERS)
+            self._global_cap = cap
+        return cap
+
+
+class _UnderGlobalCap(BoundedConcurrency):
+    """A task's limit, taken inside the engine-wide one."""
+
+    def __init__(self, max_concurrent: int, global_cap: BoundedConcurrency) -> None:
+        super().__init__(max_concurrent=max_concurrent)
+        self._global = global_cap
+
+    async def __aenter__(self) -> "_UnderGlobalCap":
+        await self._global.__aenter__()
+        try:
+            await super().__aenter__()
+        except BaseException:
+            await self._global.__aexit__(None, None, None)
+            raise
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        try:
+            await super().__aexit__(exc_type, exc_val, exc_tb)
+        finally:
+            await self._global.__aexit__(exc_type, exc_val, exc_tb)

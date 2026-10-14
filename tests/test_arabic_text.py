@@ -358,13 +358,10 @@ class TestRemoteParsePolicy:
         from kazma_core.documents import extract_salvage
 
         seen: list[tuple[str, int]] = []
-        extract_salvage.set_salvage_audit_hook(
-            lambda provider, path, size: seen.append((provider, size))
-        )
-        try:
+        with extract_salvage.salvage_audit_scope(
+            lambda provider, path, size, phase: seen.append((provider, size))
+        ):
             extract_salvage._record_egress("llamaparse", tmp_path / "x.pdf", 4096)
-        finally:
-            extract_salvage.set_salvage_audit_hook(None)
         assert seen == [("llamaparse", 4096)]
 
 

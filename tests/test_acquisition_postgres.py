@@ -31,7 +31,9 @@ def database(tmp_path, monkeypatch):
     namespace = 'acquisition-fixture-' + uuid.uuid4().hex
     keys = []
     for module in (accounting, crawl_jobs):
-        for attr in ('_KEY', '_REV', '_REVISION'):
+        # _JOB_PREFIX: the crawl journal keeps one row per job since the
+        # Knowledge audit (KB-E04); its rows are namespaced too.
+        for attr in ('_KEY', '_REV', '_REVISION', '_JOB_PREFIX'):
             if hasattr(module, attr):
                 key = namespace + '.' + attr + '.' + module.__name__.rsplit('.', 1)[-1]
                 monkeypatch.setattr(module, attr, key)
@@ -40,7 +42,7 @@ def database(tmp_path, monkeypatch):
     monkeypatch.setenv('KAZMA_ACQUISITION_MODE', 'local_first_with_remote_fallback')
     monkeypatch.setenv('KAZMA_ACQUISITION_REMOTE_PROVIDERS', 'proxy')
     yield store
-    for key in keys:
+    for key in keys + list(store.get_category(namespace) or {}):
         store.delete(key)
     for instance in stores:
         instance.close()
@@ -64,9 +66,12 @@ def test_real_postgres_first_writers_share_finite_remote_allowance(database, mon
 
 def test_real_postgres_crawl_first_writers_and_recovery(database):
     policy = dict(mode='local_only', providers=[], robots=True, scope='tree', max_pages=3, max_depth=2, delay_ms=0)
+    # Re-pointed for Knowledge audit KB-E14 (2026-10-14): one crawl per
+    # library, so the twelve first writers crawl twelve libraries; four win
+    # the active slots as before.
     def start(i):
         try:
-            return crawl_jobs.start('library', 'https://docs.example/tree/', policy, job_id=str(i))
+            return crawl_jobs.start('library-' + str(i), 'https://docs.example/tree/', policy, job_id=str(i))
         except AcquisitionError as error:
             assert error.code == 'resource_limit'
             return None
@@ -78,9 +83,12 @@ def test_real_postgres_crawl_first_writers_and_recovery(database):
         job.frontier(['https://docs.example/tree/a', 'https://docs.example/tree/b'])
         job.begin_page('https://docs.example/tree/a')
         job.finish('interrupted')
-        restored = crawl_jobs.start('library', 'https://docs.example/tree/', policy, job_id=job.job_id, resume=True)
+        restored = crawl_jobs.start('library-' + job.job_id, 'https://docs.example/tree/', policy,
+                                    job_id=job.job_id, resume=True)
         jobs[0] = restored
-        assert [page['status'] for page in restored.read()['pages']] == ['ambiguous', 'pending']
+        # A Knowledge crawl's page is one transaction (KB-E02), so an explicit
+        # resume fetches the uncertain page again.
+        assert [page['status'] for page in restored.read()['pages']] == ['pending', 'pending']
     finally:
         for job in jobs:
             job.finish('interrupted')

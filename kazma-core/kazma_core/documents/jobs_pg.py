@@ -30,9 +30,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .jobs import (
+    _ACTIVE_STATE_VALUES,
+    fair_claim_order,
+    _QUEUEABLE_STATE_VALUES,
+    _TERMINAL_STATE_VALUES,
     ALLOWED_TRANSITIONS,
     TERMINAL_STATES,
     DocumentJobRecord,
+    IntakeFencedError,
     InvalidJobTransitionError,
     JobConflictError,
     JobLeaseConflictError,
@@ -40,9 +45,6 @@ from .jobs import (
     QueueStats,
     StaleJobUpdateError,
     TenantLoad,
-    _ACTIVE_STATE_VALUES,
-    _QUEUEABLE_STATE_VALUES,
-    _TERMINAL_STATE_VALUES,
 )
 from .models import DocumentId, DocumentJobState, JobId, VersionId, new_job_id
 
@@ -68,6 +70,9 @@ CREATE TABLE IF NOT EXISTS document_jobs (
     state TEXT NOT NULL,
     stage TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
+    actor_id TEXT NOT NULL DEFAULT '',
+    request_digest TEXT NOT NULL DEFAULT '',
+    force_ocr BOOLEAN NOT NULL DEFAULT FALSE,
     attempt INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER NOT NULL,
     retry_at TIMESTAMPTZ,
@@ -106,6 +111,10 @@ CREATE INDEX IF NOT EXISTS idx_pg_document_jobs_tenant
     ON document_jobs(tenant_id, document_id, version_id);
 CREATE INDEX IF NOT EXISTS idx_pg_document_job_events
     ON document_job_events(tenant_id, job_id, id);
+
+ALTER TABLE document_jobs ADD COLUMN IF NOT EXISTS actor_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE document_jobs ADD COLUMN IF NOT EXISTS request_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE document_jobs ADD COLUMN IF NOT EXISTS force_ocr BOOLEAN NOT NULL DEFAULT FALSE;
 """
 
 _CLAIMABLE = ("ready_to_parse", "ocr_required")
@@ -133,6 +142,9 @@ def _row_to_record(row: dict[str, Any]) -> DocumentJobRecord:
         workspace_id=row["workspace_id"],
         document_id=DocumentId(row["document_id"]),
         version_id=VersionId(row["version_id"]),
+        actor_id=row.get("actor_id", ""),
+        request_digest=row.get("request_digest", ""),
+        force_ocr=bool(row.get("force_ocr", False)),
         state=DocumentJobState(row["state"]),
         stage=row["stage"],
         idempotency_key=row["idempotency_key"],
@@ -179,9 +191,11 @@ class PostgresDocumentJobRepository:
             self._ensure_schema()
 
     def _ensure_schema(self) -> None:
+        from kazma_core.db.pg_schema import ensure_schema
+
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(_PG_SCHEMA)
+                ensure_schema(cur, _PG_SCHEMA)
             conn.commit()
 
     # ── Enqueue ──────────────────────────────────────────────────────────
@@ -196,7 +210,13 @@ class PostgresDocumentJobRepository:
         idempotency_key: str,
         max_attempts: int = 3,
         job_id: JobId | None = None,
+        actor_id: str = "",
+        request_digest: str = "",
+        force_ocr: bool = False,
+        intake_fence: tuple[str, str] | None = None,
     ) -> DocumentJobRecord:
+        """See ``DocumentJobRepository.enqueue``. The fence takes the admission
+        mutex first, as a takeover does, so the two are serialized."""
         tenant = _required(tenant_id, "tenant_id")
         workspace = _required(workspace_id, "workspace_id")
         key = _required(idempotency_key, "idempotency_key")
@@ -220,26 +240,37 @@ class PostgresDocumentJobRepository:
                             existing["document_id"],
                             existing["version_id"],
                             int(existing["max_attempts"]),
+                            existing["actor_id"], existing["request_digest"], bool(existing["force_ocr"]),
                         )
-                        requested = (workspace, doc_id, ver_id, int(max_attempts))
+                        requested = (workspace, doc_id, ver_id, int(max_attempts), actor_id, request_digest, bool(force_ocr))
                         if replay != requested:
                             raise JobConflictError(
                                 "idempotency key is already bound to a different request"
                             )
                         conn.commit()
                         return _row_to_record(existing)
+                    if intake_fence is not None:
+                        cur.execute("SELECT id FROM document_intake_mutex WHERE id = 1 FOR UPDATE")
+                        cur.execute(
+                            "SELECT 1 AS held FROM document_intake_reservations "
+                            "WHERE token = %s AND active = 1 AND owner = %s",
+                            tuple(intake_fence),
+                        )
+                        if cur.fetchone() is None:
+                            raise IntakeFencedError("the intake's reservation was taken over")
                     cur.execute(
                         """
                         INSERT INTO document_jobs (
                             id, tenant_id, workspace_id, document_id, version_id,
                             state, stage, idempotency_key, max_attempts,
-                            created_at, updated_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            created_at, updated_at, actor_id, request_digest, force_ocr
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
                         """,
                         (
                             identifier, tenant, workspace, doc_id, ver_id,
                             "received", "received", key, int(max_attempts), now, now,
+                            actor_id, request_digest, bool(force_ocr),
                         ),
                     )
                     if cur.rowcount != 1:
@@ -263,8 +294,9 @@ class PostgresDocumentJobRepository:
                             existing["document_id"],
                             existing["version_id"],
                             int(existing["max_attempts"]),
+                            existing["actor_id"], existing["request_digest"], bool(existing["force_ocr"]),
                         )
-                        requested = (workspace, doc_id, ver_id, int(max_attempts))
+                        requested = (workspace, doc_id, ver_id, int(max_attempts), actor_id, request_digest, bool(force_ocr))
                         if replay != requested:
                             raise JobConflictError(
                                 "idempotency key is already bound to a different request"
@@ -295,6 +327,19 @@ class PostgresDocumentJobRepository:
                 cur.execute(
                     "SELECT * FROM document_jobs WHERE tenant_id = %s AND id = %s",
                     (tenant, str(JobId(job_id))),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return _row_to_record(row) if row is not None else None
+
+    def get_by_idempotency_key(self, *, tenant_id: str, idempotency_key: str) -> DocumentJobRecord | None:
+        tenant = _required(tenant_id, "tenant_id")
+        key = _required(idempotency_key, "idempotency_key")
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM document_jobs WHERE tenant_id = %s AND idempotency_key = %s",
+                    (tenant, key),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -349,21 +394,23 @@ class PostgresDocumentJobRepository:
             try:
                 with conn.cursor() as cur:
                     self._recover_expired(cur, now, tenant_id=tenant)
-                    tenant_clause = " AND tenant_id = %s" if tenant is not None else ""
+                    tenant_clause = " AND j.tenant_id = %s" if tenant is not None else ""
                     params: list[Any] = [now]
                     if tenant is not None:
                         params.append(tenant)
+                    running, order = fair_claim_order()
                     cur.execute(
-                        f"""
-                        SELECT * FROM document_jobs
+                        f"""{running}
+                        SELECT j.* FROM document_jobs j
+                        LEFT JOIN running r ON r.tenant_id = j.tenant_id
                         WHERE (
-                            state IN ('ready_to_parse', 'ocr_required')
-                            OR (state = 'retry_wait' AND retry_at IS NOT NULL AND retry_at <= %s)
+                            j.state IN ('ready_to_parse', 'ocr_required')
+                            OR (j.state = 'retry_wait' AND j.retry_at IS NOT NULL AND j.retry_at <= %s)
                         )
-                        AND cancel_requested = FALSE
+                        AND j.cancel_requested = FALSE
                         {tenant_clause}
-                        ORDER BY created_at, id
-                        FOR UPDATE SKIP LOCKED
+                        {order}
+                        FOR UPDATE OF j SKIP LOCKED
                         LIMIT 1
                         """,
                         params,

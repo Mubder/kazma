@@ -36,6 +36,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kazma_core.memory.entity_resolution import slug as _slug
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_backfill", "backfill_status", "main"]
@@ -59,15 +61,6 @@ def _stable_id(source_table: str, source_id: str) -> str:
     """
     h = hashlib.sha256(f"{source_table}|{source_id}".encode()).hexdigest()
     return h[:24]
-
-
-def _slug(text: str) -> str:
-    import re
-
-    raw = (text or "").strip().lower()
-    s = re.sub(r"[^a-z0-9_]+", "_", raw)
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s[:80] or "entity"
 
 
 # Functional predicates (single-valued) — used to classify backfilled edges.
@@ -324,7 +317,9 @@ def _llm_extract_beliefs_from_memories(
                     primary, subj, pred, obj,
                     ops_conn=ops, predicate_type=ptype,
                     confidence=conf, importance=4,
-                    extraction_method="user_explicit",
+                    # The model's reading of a stored note, not the user's
+                    # words (memory.provenance, Memory audit M03).
+                    extraction_method="llm_inferred",
                     cfg=None,
                 )
                 if action["action"] != "noop":
@@ -619,8 +614,12 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                 subject = node_lookup.get(raw_subj, (raw_subj, "concept"))[0]
                 obj = node_lookup.get(raw_obj, (raw_obj, "concept"))[0]
                 # Slugify the resolved labels for belief subject/object
-                subject = _slug(subject) if not raw_subj.startswith("s_") else subject
-                obj = _slug(obj) if not raw_obj.startswith("o_") else obj
+                try:
+                    subject = _slug(subject) if not raw_subj.startswith("s_") else subject
+                    obj = _slug(obj) if not raw_obj.startswith("o_") else obj
+                except ValueError:  # an empty label names nothing
+                    stats["skipped"] += 1
+                    continue
                 ptype = _classify_predicate(pred)
                 tenant = e["tenant_id"] if "tenant_id" in e.keys() and e["tenant_id"] else "default"
                 created = float(e["created_at"]) if "created_at" in e.keys() and e["created_at"] else now

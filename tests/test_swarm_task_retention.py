@@ -141,8 +141,10 @@ def test_the_maintenance_cadence_carries_the_retention_sweep():
     labels = [label for label, _ in wb._MAINTENANCE_SWEEPS]
     assert labels == [
         "commitment GC cycle", "artifact GC", "gate TTL sweep", "ended YOLO windows",
-        "task queue purge", "swarm task retention", "checkpoint retention", "supervisor watch",
-        "memory vector repair", "memory recovery", "memory turn reconcile",
+        "task queue purge", "swarm task retention", "swarm approval rows", "checkpoint retention",
+        "supervisor watch",
+        "forget convergence", "memory vector repair", "memory recovery", "retired knowledge promotions",
+        "memory turn reconcile",
         "memory mirror sync", "memory topic summaries", "entity count repair",
         "knowledge vector repair",
     ], "a sweep left this list stops running; one added must be added here too"

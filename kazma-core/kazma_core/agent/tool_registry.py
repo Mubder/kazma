@@ -50,13 +50,15 @@ import queue
 import threading
 import time
 from collections.abc import Callable
-from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
 __all__ = [
+    "CallAuthority",
     "LocalTool",
     "LocalToolRegistry",
+    "call_authority",
+    "claim_call_authority",
     "get_tool_registry",
     "reset_permission_manager_cache",
     "tool",
@@ -71,6 +73,10 @@ __all__ = [
     "_is_under_agent_skill_dir",
     "_python_type_to_json_schema",
     "_workspace_scope_error",
+    # The per-call HITL authority (safety/call_authority.py), imported from
+    # here by the tool worker, the MCP gate and their tests.
+    "_graph_hitl_gate_ctx",
+    "_hitl_approved_ctx",
 ]
 
 logger = logging.getLogger(__name__)
@@ -84,20 +90,16 @@ from kazma_core.agent.tool_schema import (
 )
 from kazma_core.agent.tool_scope import _is_under_agent_skill_dir, _workspace_scope_error
 
-#: ContextVar set by the graph's interrupt() gate after HITL approval.
-#: This is the ONLY trusted source for the "already approved" flag —
-#: the ``_hitl_approved`` key in LLM-supplied tool arguments is always
-#: stripped and never honored (prevents prompt-injection bypass).
-_hitl_approved_ctx: ContextVar[bool] = ContextVar("_hitl_approved", default=False)
-
-#: ContextVar set by the supervisor graph's tool_worker_node whenever the
-#: graph is compiled WITH a HITL config (i.e. the graph's interrupt() gate
-#: is the authority for single-agent chat). When True, ``execute()`` skips
-#: the SwarmMessageBus ``safety.check()`` (mechanism B) so a graph-gated
-#: danger tool is not prompted twice — once by the graph interrupt and
-#: again by the bus. The bus gate remains the authority for /swarm dispatch
-#: and IDE paths (which do not set this ContextVar).
-_graph_hitl_gate_ctx: ContextVar[bool] = ContextVar("_graph_hitl_gate", default=False)
+# The per-call HITL authority lives in ``safety/call_authority.py`` (the
+# detached-work starters need it without importing this module); these names
+# stay importable from here, where every caller and test found them.
+from kazma_core.safety.call_authority import (  # noqa: E402
+    CallAuthority,
+    _graph_hitl_gate_ctx,
+    _hitl_approved_ctx,
+    call_authority,
+    claim_call_authority,
+)
 
 
 # ── YAML permission allowlist (opt-in) ───────────────────────────────
@@ -232,6 +234,10 @@ def _procedural_worker() -> None:
                     conn = sqlite3.connect(
                         path, check_same_thread=False, isolation_level=None
                     )
+                    # ``record_procedural_outcome`` reads columns by name;
+                    # tuples raised there and a procedure's counts never
+                    # moved past its first call (found 2026-10-13).
+                    conn.row_factory = sqlite3.Row
                     # Once per database, not once per tool call.
                     ensure_primary_schema(conn)
                     conn_path = path
@@ -242,7 +248,10 @@ def _procedural_worker() -> None:
                     name=tool_name,
                     description=f"Tool: {tool_name}",
                     preconditions={"tool": tool_name, "args_keys": sorted(arguments.keys())},
-                    dag_steps=[{"tool": tool_name, "args": arguments}],
+                    # Argument NAMES only: values are what the user and the
+                    # model typed, nothing reads them back, and Forget could
+                    # not find them here (Memory audit M01, 2026-10-13).
+                    dag_steps=[{"tool": tool_name, "args_keys": sorted(arguments.keys())}],
                     postconditions={"succeeded": success},
                     success=success,
                     cfg=cfg,
@@ -505,7 +514,10 @@ class LocalToolRegistry:
         # trust this flag from the arguments dict (prompt-injection risk);
         # only the ContextVar set by graph_builder is honored.
         arguments.pop("_hitl_approved", None)
-        _hitl_already_approved = _hitl_approved_ctx.get()
+        # This call's authority only (SW-S01): an approval or the graph's
+        # gate covers the call it names, never the work that call starts.
+        _hitl_already_approved = claim_call_authority(_hitl_approved_ctx, tool_name)
+        _graph_is_authority = claim_call_authority(_graph_hitl_gate_ctx, tool_name)
         tool = self._tools.get(tool_name)
         if tool is None:
             return {
@@ -684,7 +696,7 @@ class LocalToolRegistry:
         # the graph's interrupt() is the only gate and a second bus prompt
         # would deadlock the turn (the bus waits for an approval the user
         # already gave to the graph).
-        if not _hitl_already_approved and not _graph_hitl_gate_ctx.get():
+        if not _hitl_already_approved and not _graph_is_authority:
             try:
                 import json as _json
 
@@ -693,13 +705,15 @@ class LocalToolRegistry:
                 safety = get_safety()
                 # Pre-filter: non-danger tools skip the bus entirely.
                 if safety.enabled and safety.is_danger_tool(tool_name):
-                    task_id = str(arguments.get("task_id", "")) if isinstance(arguments, dict) else ""
-                    worker_name = str(arguments.get("worker_name", "")) if isinstance(arguments, dict) else ""
+                    # Nothing about the request comes from the call's own
+                    # arguments: the approval id is minted by check() (Swarm
+                    # audit SW-S02: an argument named task_id approved every
+                    # later call carrying it), and the card shows every
+                    # argument, bounded by the card itself (SW-S03).
                     approved = await safety.check(
                         tool_name=tool_name,
-                        tool_args=_json.dumps(arguments, default=str)[:200],
-                        task_id=task_id,
-                        worker_name=worker_name,
+                        tool_args=_json.dumps(arguments, default=str),
+                        worker_name="swarm or IDE",
                     )
                     if not approved:
                         return {

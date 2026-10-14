@@ -45,6 +45,13 @@ from kazma_gateway.stores.sqlite import SQLiteSessionStore
 
 @pytest.mark.asyncio
 async def test_cron_timing_case_insensitive(tmp_path):
+    """Re-pointed 2026-10-14 (Scheduled audit SCH-E04): recovery no longer
+    decides recurrence -- an interrupted fire goes back to pending at the same
+    occurrence and runs again -- and the next occurrence comes from
+    ``cron.timing.parse_recurrence`` inside the fire's finish. The lock is the
+    same: odd case and spacing still read as a daily job."""
+    from datetime import UTC, datetime
+
     db_path = str(tmp_path / "cron.db")
     store = SQLiteCronStore(db_path)
     await store.init()
@@ -57,23 +64,36 @@ async def test_cron_timing_case_insensitive(tmp_path):
         platform="telegram",
         thread_id="t1",
         status=JobStatus.RUNNING,
+        next_run="2026-10-14T09:00:00+00:00",
     )
     await store.insert(job)
 
-    # Stale recovery: should detect daily timing case-insensitively and reschedule
-    await scheduler._recover_stale_running()
+    # Stale recovery: a dead runtime's fire runs again, at the same occurrence.
+    await scheduler._recover(boot=True)
     refreshed = (await store.list_active())[0]
     assert refreshed.status == JobStatus.PENDING
     assert refreshed.next_run is not None
+    # And the series reads the odd spelling as daily at 09:00.
+    nxt = scheduler._advancer(UTC)("  DaILy at 9am  ", datetime(2026, 10, 14, 10, tzinfo=UTC), "")
+    assert nxt == datetime(2026, 10, 15, 9, tzinfo=UTC)
     await store.close()
+
+
+class _FailingGraph:
+    async def ainvoke(self, state, config=None):
+        raise RuntimeError("provider down")
 
 
 @pytest.mark.asyncio
 async def test_cron_failure_budget_and_alerts(tmp_path):
+    """Re-pointed 2026-10-14 (Scheduled audit SCH-E01/E04): ``_finalize`` is
+    gone; a fire ends in one transaction (``finish_fire``) driven by
+    ``_execute``. The budget is the same: three failed fires of a recurring
+    job, an alert on the first and when the budget runs out."""
     db_path = str(tmp_path / "cron.db")
     store = SQLiteCronStore(db_path)
     await store.init()
-    scheduler = CronScheduler(store=store)
+    scheduler = CronScheduler(store=store, graph_builder=lambda: _FailingGraph())
 
     job = ScheduledJob(
         job_id="failing_job",
@@ -81,16 +101,14 @@ async def test_cron_failure_budget_and_alerts(tmp_path):
         prompt="fail me",
         platform="telegram",
         thread_id="t1",
-        status=JobStatus.RUNNING,
+        status=JobStatus.PENDING,
+        kind="task",
     )
     await store.insert(job)
-    job_id = job.job_id
 
-    # Mock ops alert
     with patch("kazma_core.observability.ops_alerts.alert") as mock_alert:
         # First failure
-        fresh_job = (await store.list_active())[0]
-        await scheduler._finalize(fresh_job, failed=True)
+        await scheduler._execute(await store.get("failing_job"))
         jobs = await store.list_active()
         assert len(jobs) == 1
         assert jobs[0].failure_count == 1
@@ -99,15 +117,13 @@ async def test_cron_failure_budget_and_alerts(tmp_path):
         assert "cron.job_failure" in mock_alert.call_args[0]
 
         # Second failure
-        fresh_job = (await store.list_active())[0]
-        await scheduler._finalize(fresh_job, failed=True)
+        await scheduler._execute(await store.get("failing_job"))
         jobs = await store.list_active()
         assert jobs[0].failure_count == 2
         assert jobs[0].status == JobStatus.PENDING
 
         # Third failure - failure budget exceeded
-        fresh_job = (await store.list_active())[0]
-        await scheduler._finalize(fresh_job, failed=True)
+        await scheduler._execute(await store.get("failing_job"))
         # Should now be marked FAILED (no longer in list_active)
         active_jobs = await store.list_active()
         assert len(active_jobs) == 0
@@ -116,24 +132,25 @@ async def test_cron_failure_budget_and_alerts(tmp_path):
         assert all_jobs[0].failure_count == 3
         assert all_jobs[0].status == JobStatus.FAILED
 
-    # Test success resets failure count
+    # Test success resets failure count (a reminder's fire succeeds without a
+    # model; its delivery is the outbox's business, not the fire's).
     job2 = ScheduledJob(
         job_id="flaky_job",
         timing="daily at 9am",
         prompt="recover me",
         platform="telegram",
         thread_id="t1",
-        status=JobStatus.RUNNING,
+        status=JobStatus.PENDING,
+        kind="reminder",
+        failure_count=1,
     )
     await store.insert(job2)
-    await store.bump_failure(job2.job_id)
-    jobs = await store.list_active()
-    job2_active = [j for j in jobs if j.job_id == job2.job_id][0]
+    job2_active = await store.get(job2.job_id)
     assert job2_active.failure_count == 1
 
-    await scheduler._finalize(job2_active, failed=False)
-    all_jobs = await store.list_all()
-    job2_final = [j for j in all_jobs if j.job_id == job2.job_id][0]
+    with patch("kazma_core.observability.ops_alerts.alert"):
+        await scheduler._execute(job2_active)
+    job2_final = await store.get(job2.job_id)
     assert job2_final.failure_count == 0
     await store.close()
 

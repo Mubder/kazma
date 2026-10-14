@@ -94,6 +94,20 @@ class _Store:
         self.seen("store.count_chunks")
         return 2
 
+    def library_exists(self, lib_id):
+        self.seen("store.library_exists")
+        return lib_id in self.libs
+
+    def library_document_ids(self, lib_id):
+        self.seen("store.library_document_ids")
+        return []
+
+    def ensure_capacity(self):
+        self.seen("store.ensure_capacity")
+
+    def set_chunk_count(self, lib_id, count):
+        self.seen("store.set_chunk_count")
+
 
 class _Index:
     def __init__(self, store: _Store) -> None:
@@ -101,7 +115,8 @@ class _Index:
 
     def health(self, lib_id):
         self.store.seen("index.health")
-        return {"library_id": lib_id, "vector_available": True, "sqlite_chunks": 2, "vector_chunks": 1}
+        return {"library_id": lib_id, "vector_available": True, "state": "rebuilding",
+                "sqlite_chunks": 2, "vector_chunks": 1}
 
     def delete_library(self, lib_id):
         self.store.seen("index.delete_library")
@@ -120,55 +135,52 @@ class _Index:
 
 
 @pytest.fixture
-def kb(monkeypatch: pytest.MonkeyPatch):
-    import kazma_core.stores.kb_jobs as kb_jobs
+def kb(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    # Re-pointed for the Knowledge audit (2026-10-13): crawl state has one
+    # source, the crawl journal (KB-E14: the kb.ingest_jobs registry and the
+    # API's in-memory copy are gone), so the walk runs on a private settings
+    # store and reads progress from the journal.
+    from kazma_core import config_store
     import kazma_core.stores.knowledge as knowledge
     import kazma_core.stores.knowledge_index as knowledge_index
     import kazma_core.stores.knowledge_ingest as knowledge_ingest
     import kazma_ui.kb_api as kb_api
 
+    journal = config_store.ConfigStore(str(tmp_path / "settings.db"))
+    monkeypatch.setattr(config_store, "get_config_store", lambda: journal)
     seen = _Recorder()
     store = _Store(seen)
     index = _Index(store)
-    jobs: dict[str, dict[str, Any]] = {}
 
-    def upsert_job(job_id, **fields):
-        seen("kb_jobs.upsert_job")
-        jobs.setdefault(job_id, {}).update(fields)
-        return jobs[job_id]
-
-    def get_job(job_id):
-        seen("kb_jobs.get_job")
-        return jobs.get(job_id)
-
-    async def ingest_url(lib_id, url):
-        return SimpleNamespace(pages_fetched=1, chunks_new=1, chunks_skipped=0, errors=[])
+    async def ingest_url(lib_id, url, *, document_title="", name=""):
+        store.libs.setdefault(lib_id, {"id": lib_id, "name": name or lib_id, "seed_url": url})
+        return SimpleNamespace(pages_fetched=1, pages_failed=0, chunks_new=1, chunks_skipped=0,
+                               pages_unchanged=0, library_created=True, errors=[])
 
     async def ingest_site(lib_id, url, max_pages=None, **kwargs):
         for phase in ("crawling", "done"):
             yield knowledge_ingest.ProgressUpdate(
                 phase=phase, discovered=1, fetched=1, ingested=1, skipped=0, failed=0,
-                pages_unchanged=0, pruned_urls=0, current_url=url, message="", errors=[],
+                pages_unchanged=0, current_url=url, message="", errors=[],
             )
 
     monkeypatch.setattr(knowledge, "get_knowledge_store", lambda: store)
+    monkeypatch.setattr(knowledge_ingest, "get_knowledge_store", lambda: store)
     monkeypatch.setattr(knowledge_index, "get_knowledge_index", lambda: index)
     monkeypatch.setattr(knowledge_ingest, "ingest_url", ingest_url)
     monkeypatch.setattr(knowledge_ingest, "_ingest_site_impl", ingest_site)
-    monkeypatch.setattr(kb_jobs, "upsert_job", upsert_job)
-    monkeypatch.setattr(kb_jobs, "get_job", get_job)
-    monkeypatch.setattr(kb_api, "_kb_jobs_bootstrapped", True)
-    monkeypatch.setattr(kb_api, "_kb_api_jobs", type(kb_api._kb_api_jobs)())
 
     app = FastAPI()
     router = kb_api.create_kb_router()
     app.include_router(router)
     with TestClient(app) as client:
-        yield SimpleNamespace(client=client, store=store, seen=seen, jobs=jobs, router=router)
+        yield SimpleNamespace(client=client, store=store, seen=seen, router=router)
+    journal.close()
 
 
 def _wait_for_job(client: TestClient, job_id: str) -> dict[str, Any]:
     deadline = time.monotonic() + 5
+    job: dict[str, Any] = {}
     while time.monotonic() < deadline:
         job = client.get(f"/api/kb/jobs/{job_id}").json().get("job") or {}
         if job.get("finished_at"):
@@ -183,12 +195,13 @@ def test_library_lifecycle(kb):
     (lib_id,) = kb.store.libs
     [listed] = c.get("/api/kb/libraries").json()["libraries"]
     assert listed["id"] == lib_id
-    # How much meaning search reaches is on the page (it was off for two
-    # months and nothing said so).
-    assert listed["meaning_search"] == {"available": True, "vectors": 1, "chunks": 2}
+    # How much meaning search reaches is on the page, as the repair sweep
+    # last recorded it (KB-E03: "rebuilding" while fewer than all chunks
+    # carry a vector of the model in use).
+    assert listed["meaning_search"] == {"available": True, "state": "rebuilding", "vectors": 1, "chunks": 2}
     assert c.get(f"/api/kb/libraries/{lib_id}").json()["library"]["name"] == "Docs"
-    duplicate = c.post("/api/kb/libraries", json={"id": "Docs Lib"}).json()
-    assert duplicate["ok"] is False and "already exists" in duplicate["error"]
+    duplicate = c.post("/api/kb/libraries", json={"id": "Docs Lib"})
+    assert duplicate.status_code == 409 and duplicate.json()["code"] == "library_exists"
     assert c.patch(f"/api/kb/libraries/{lib_id}", json={"auto_inject": "true"}).json()["ok"]
     assert kb.store.libs[lib_id]["auto_inject"] is True
     assert c.post(f"/api/kb/libraries/{lib_id}/archive").json()["ok"]
@@ -199,34 +212,40 @@ def test_library_lifecycle(kb):
     chunks = c.get(f"/api/kb/libraries/{lib_id}/chunks").json()
     assert chunks["ok"] and chunks["total"] == 2 and chunks["chunks"][0]["preview"] == "x"
     assert c.delete(f"/api/kb/libraries/{lib_id}").json()["ok"]
-    assert c.get(f"/api/kb/libraries/{lib_id}").json() == {"ok": False, "error": "Not found"}
+    gone = c.get(f"/api/kb/libraries/{lib_id}")
+    assert gone.status_code == 404 and gone.json()["code"] == "not_found"
     assert kb.seen.on_loop == []
 
 
 def test_unknown_library_is_not_found_everywhere(kb):
+    # Re-pointed (KB-S05): a refusal answers a non-2xx status with a stable
+    # code the page words in its own language.
     c = kb.client
-    assert c.get("/api/kb/libraries/nope").json() == {"ok": False, "error": "Not found"}
-    assert c.post("/api/kb/libraries/nope/archive").json() == {"ok": False, "error": "Not found"}
-    assert c.patch("/api/kb/libraries/nope", json={"name": "x"}).json() == {"ok": False, "error": "Not found"}
-    assert c.delete("/api/kb/libraries/nope").json() == {"ok": False, "error": "Not found"}
-    assert c.post("/api/kb/libraries/nope/refresh").json() == {"ok": False, "error": "Not found"}
-    assert c.get("/api/kb/jobs/nope").json()["ok"] is False
+    for response in (c.get("/api/kb/libraries/nope"), c.post("/api/kb/libraries/nope/archive"),
+                     c.patch("/api/kb/libraries/nope", json={"name": "x"}),
+                     c.delete("/api/kb/libraries/nope"), c.post("/api/kb/libraries/nope/refresh"),
+                     c.get("/api/kb/libraries/nope/chunks"), c.get("/api/kb/jobs/nope"),
+                     c.post("/api/kb/search", json={"query": "q", "library_id": "nope"})):
+        assert response.status_code == 404, response.text
+        assert response.json()["ok"] is False and response.json()["code"] == "not_found"
 
 
 def test_search_returns_hits(kb):
+    kb.store.create_library("docs", name="Docs")
     body = kb.client.post("/api/kb/search", json={"query": "rlimits", "library_id": "docs"}).json()
     assert body["ok"] and body["hits"][0]["content"] == "hit for rlimits"
 
 
 def test_site_ingest_records_progress_off_the_loop(kb):
-    """One ConfigStore write per progress update used to run on the loop."""
+    """Progress lives in the crawl journal, written off the loop."""
     body = kb.client.post(
         "/api/kb/ingest", json={"library_id": "Site Lib", "url": "https://example.com/", "mode": "site"}
     ).json()
     assert body["ok"] and body["mode"] == "site"
     job = _wait_for_job(kb.client, body["job_id"])
     assert job["phase"] == "done" and job["library_id"] == "site_lib"
-    assert kb.jobs[body["job_id"]]["finished_at"]  # the durable copy saw every update
+    assert job["acquisition"]["status"] == "completed"
+    assert "site_lib" in kb.store.libs  # created once the crawl was admitted (KB-S09)
     assert kb.seen.on_loop == []
 
 
@@ -253,14 +272,15 @@ def test_no_route_touches_a_store_on_the_event_loop(kb):
     kb.store.create_library("lib1", name="L", seed_url="https://example.com/")
     calls = sorted(
         ((method, route.path) for route in kb.router.routes for method in route.methods),
-        key=lambda call: call[0] == "DELETE",  # deletes last: they remove lib1
+        key=lambda call: (call[0] == "DELETE", "refresh" in call[1]),  # deletes last: they remove lib1
     )
-    assert len(calls) >= 13, calls
+    assert len(calls) >= 16, calls
     started_jobs = []
     for method, path in calls:
         url = path.replace("{library_id}", "lib1").replace("{job_id}", "lib1:none")
         resp = kb.client.request(method, url, json=_BODIES.get((method, path)))
-        assert resp.status_code == 200, (method, path, resp.text)
+        # Every route answers; an unknown job is a 404, never a 500.
+        assert resp.status_code < 500, (method, path, resp.text)
         if resp.json().get("job_id"):
             started_jobs.append(resp.json()["job_id"])
     for job_id in started_jobs:  # background crawls record progress too

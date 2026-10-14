@@ -12,7 +12,6 @@ import asyncio
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -36,17 +35,11 @@ def _write(path: Path, document: Any) -> None:
 
 
 def _copy_database(source: Path, destination: Path) -> None:
-    """Read-only online snapshot, including committed WAL contents."""
-    reader = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
-    try:
-        writer = sqlite3.connect(destination)
-        try:
-            reader.backup(writer, pages=100, sleep=.01)
-            writer.commit()
-        finally:
-            writer.close()
-    finally:
-        reader.close()
+    """Read-only online snapshot, including committed WAL contents (one step:
+    ``kazma_core.db.sqlite_snapshot``)."""
+    from kazma_core.db.sqlite_snapshot import snapshot_copy
+
+    snapshot_copy(source, destination, timeout_s=5, read_only=True)
 
 
 def _snapshot(destination: Path) -> dict[str, Any]:

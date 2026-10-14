@@ -36,6 +36,13 @@ class _Bus:
         assert len(rows) == 1
         assert rows[0].mechanism == "swarm_bus"
         assert rows[0].tool == "shell_exec"
+        # A human's click on the card decides the request's shared row
+        # (Swarm audit stage 1: the bus's return value is not the decision).
+        import asyncio
+
+        from kazma_core.swarm import shared_approvals
+
+        await asyncio.to_thread(shared_approvals.resolve, kw["task_id"], self._answer, actor="telegram:1")
         return self._answer
 
 
@@ -89,6 +96,11 @@ async def test_swarm_gate_failure_never_blocks_the_bus(monkeypatch):
         adapter = object()
 
         async def request_approval(self, **kw):
+            import asyncio
+
+            from kazma_core.swarm import shared_approvals
+
+            await asyncio.to_thread(shared_approvals.resolve, kw["task_id"], True, actor="telegram:1")
             return True
 
     sm = SafetyMiddleware(enabled=True)

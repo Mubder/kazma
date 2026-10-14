@@ -109,13 +109,14 @@ class TestHITLGateB_SwarmMessageBus:
         """
         import inspect
 
-        # Telegram: _handle_callback_query delegates swarm callbacks to the
-        # bus via get_message_bus() + TelegramBusAdapter.handle_callback.
+        # Telegram: _handle_callback_query decides the shared request the
+        # button names (shared_approvals.decide_from_button, with the user who
+        # pressed it). No bus adapter instance: a sender rebuilt since the card
+        # was posted cannot drop the click (Swarm audit SW-S02, SW-S05).
         from kazma_gateway.adapters.telegram import TelegramAdapter
         src = inspect.getsource(TelegramAdapter._handle_callback_query)
         assert "parse_callback_data" in src
-        assert "get_message_bus" in src
-        assert "handle_callback" in src
+        assert "decide_from_button" in src
 
         # Discord: _handle_interaction routes swarm callbacks via the
         # extracted discord_callbacks.route_swarm_bus helper (the literal

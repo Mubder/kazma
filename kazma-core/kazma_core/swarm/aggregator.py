@@ -156,10 +156,16 @@ class ResultAggregator:
         prompt_sections = [f"Task:\n{task.prompt}"]
         if task.context.strip():
             prompt_sections.append(f"Context:\n{task.context.strip()}")
+        # The workers' text reaches the synthesis model as data, never as its
+        # instructions (Swarm audit SW-S10).
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
         prompt_sections.append(
             "Worker responses:\n"
             + "\n\n".join(
-                f"{result.worker}:\n{result.output}" for result in successful_results
+                f"{result.worker}:\n"
+                + fence_untrusted(result.output or "", source=f"swarm_worker:{result.worker}")
+                for result in successful_results
             )
         )
         prompt_sections.append(

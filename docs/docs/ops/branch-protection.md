@@ -26,6 +26,7 @@ checks for `.github/workflows/ci.yml`:
 |---|---|
 | `Tests` | the full suite (`scripts/fast_test.py --chunks 4`) |
 | `Tests (Postgres backend)` | every `@pytest.mark.postgres` test on a real Postgres |
+| `Document worker container profile (real Docker)` | the worker and broker images build, the container policy attests from inside the image, the container-profile qualification suite passes with no skips, and the compose-shaped broker topology leaves no container behind |
 | `Unified turn lifecycle (GATE)` | the chat turn in real browsers: approvals, reloads, watchers, chunked delivery |
 | `Playwright smoke` | health, composer, HITL view model, every page loads clean |
 | `Windows selector-loop subset` | the Windows event-loop rules (§23) |

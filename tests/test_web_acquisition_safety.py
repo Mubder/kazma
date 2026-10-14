@@ -180,7 +180,9 @@ async def test_refresh_never_equates_absent_discovery_with_deletion(stored_crawl
         monkeypatch.setattr(ki, "_extract_page", AsyncMock(return_value=(None, "error", "rate_limited")))
     updates = [u async for u in ki.ingest_site("audit", "https://docs.example/tree/", max_pages=1 if scenario == "capped" else 20)]
     assert set(store.list_source_urls("audit")) == set(pages)
-    assert updates[-1].pruned_urls == 0
+    # Re-pointed (Knowledge KB-S15): a crawl never prunes, so the always-zero
+    # "pruned" counter was removed from the progress record and the page.
+    assert not hasattr(updates[-1], "pruned_urls") and "pruned" not in updates[-1].message
 
 
 @pytest.mark.asyncio

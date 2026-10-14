@@ -191,37 +191,37 @@ def test_telegram_callback_store_and_decoding():
 
 @pytest.mark.asyncio
 async def test_bus_dual_racing_and_pending_result():
-    from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
+    """A click in this process answers the waiting card at once, not at the
+    next durable poll. Re-pointed (Swarm audit 2026-10-13, stage 1): the
+    decision is the shared row now, and a same-process click wakes its
+    waiters directly (``shared_approvals._wake``)."""
+    import time as _time
+    import uuid as _uuid
+
+    from kazma_core.swarm import shared_approvals
     from kazma_core.swarm.bus import ApprovalRequest
+    from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
 
     tb = TelegramBusAdapter(bot_token="fake", chat_id="123")
+    approval_id = "task-" + _uuid.uuid4().hex[:10]
+    shared_approvals.open_request(approval_id, tool="file_write", args="{}", deadline=_time.time() + 30)
     approval = ApprovalRequest(
-        task_id="task-999",
+        task_id=approval_id,
         worker_name="coder",
         task_description="write file",
         proposed_output="foo.py",
     )
-
-    # Mock _post to succeed
     tb._post = AsyncMock(return_value={"ok": True, "result": {"message_id": 456}})
     tb._edit_message = AsyncMock(return_value=None)
 
-    # If local click happens concurrently
     async def simulate_local_click():
         await asyncio.sleep(0.01)
-        tb.approve("task-999")
-
-    async def slow_shared(*args, **kwargs):
-        await asyncio.sleep(5)
-        return False
+        tb.approve(approval_id, actor="telegram:1")
 
     asyncio.create_task(simulate_local_click())
-
-    with patch("kazma_core.swarm.shared_approvals.create_pending"):
-        with patch("kazma_core.swarm.shared_approvals.wait_for_resolution", side_effect=slow_shared):
-            result = await tb.request_approval(approval, timeout=1.0)
-            # Local click set pending_results, so result must be True even if shared wait was slow!
-            assert result is True
+    started = _time.monotonic()
+    assert await tb.request_approval(approval, timeout=30) is True
+    assert _time.monotonic() - started < shared_approvals._POLL_S, "woken by the click, not the poll"
 
 
 # ---------------------------------------------------------------------------
@@ -258,14 +258,23 @@ async def test_discord_interaction_component_removal(monkeypatch):
         "user": {"id": "user_1"},
     }
 
-    with patch("kazma_gateway.adapters.discord_callbacks.route_swarm_bus", return_value="task_123"):
+    routed = []
+
+    def _route(custom_id, *, actor=""):
+        routed.append((custom_id, actor))
+        return "task_123"
+
+    with patch("kazma_gateway.adapters.discord_callbacks.route_swarm_bus", side_effect=_route):
         await adapter._handle_interaction(interaction_data)
 
+    assert routed == [("swarm_approve_task_123", "discord:user_1")]
     assert len(ack_payloads) == 1
-    # Must use type 7 and empty components to deactivate buttons
-    assert ack_payloads[0]["type"] == 7
-    assert ack_payloads[0]["data"]["components"] == []
-    assert "✅ Approved" in ack_payloads[0]["data"]["content"]
+    # Re-pointed (Swarm audit SW-S05): the click is acknowledged without
+    # rewriting the card. The request's owner edits every platform's card to
+    # the one final outcome and removes its buttons (the adapter's own edit,
+    # tests/test_swarm_bus_approvals.py); writing "Approved" here from the
+    # button pressed was wrong whenever another platform's answer won.
+    assert ack_payloads[0] == {"type": 6}
 
 
 # ---------------------------------------------------------------------------

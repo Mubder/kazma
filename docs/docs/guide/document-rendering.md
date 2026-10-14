@@ -33,14 +33,28 @@ payload ──► _build_model_and_profile ──► (ContentModel, DocProfile) 
 
 The single source of truth for a document's **direction + design + chrome**.
 
-- `direction` (`ltr`/`rtl`), auto-detected from content via `is_arabic_dominant`
-  (full Unicode Arabic blocks), honouring explicit `lang`/`rtl` overrides.
+- `direction` (`ltr`/`rtl`) — the *document* base direction (margins, section,
+  chrome). Resolution order: an explicit `rtl` wins, then `lang` (an Arabic,
+  Persian, Urdu, Hebrew… code pins RTL; any other code pins LTR), then the
+  content: `arabic.direction_of` decides by Unicode **bidi class** (`R`/`AL`),
+  first strong character checked against the RTL share of the text — never by a
+  codepoint-block regex. All text-direction policy lives in
+  `kazma_core/documents/arabic.py`.
+- `shape_arabic` — the content holds *any* right-to-left character, so a visual
+  engine must shape it. A different question from `direction`: a mostly-English
+  document quoting Arabic is LTR **and** needs shaping.
+- `block_direction(text)` — the direction of one block. A document need not be
+  one language; every engine resolves each block on its own, and a block with no
+  strong character (a rule, a bare number, a date) inherits the document
+  direction.
 - `theme` — colours, fonts, sizes, page size (A4), shared from `style_theme.THEME`.
   Brand colours (royal `#3b82f6`, navy ink `#16223a`). Latin and Arabic both
   use IBM Plex Sans Arabic (`font_latin` / `font_arabic`); body is 11pt in
   both directions (`theme_cs_size` is 1:1 by default), leading 1.65 both,
-  ~1.8 cm margins. Amiri is
-  a naskh fallback when Plex is absent. PPTX/XLSX do not hard-code Calibri.
+  1.8 cm margins in DOCX, 56 pt (about 2 cm) in the reportlab PDF path. IBM Plex
+  Sans Arabic and Amiri ship in `kazma_core/documents/assets/fonts/`
+  (`KAZMA_DOCUMENT_FONT_DIR` overrides); Amiri is a naskh fallback when Plex
+  is absent. PPTX/XLSX do not hard-code Calibri.
 - `chrome` — localized labels (`المحتويات` / `Contents`, brand string) via `localized_chrome`.
 - **alignment policy** — the critical piece. `docx_jc(intent)` / `pdf_align(intent)` /
   `html_text_align(intent)` map an *intent* (`start` / `justify` / `end`) to each
@@ -66,9 +80,9 @@ mechanics, reading direction/theme/alignment from the profile:
 
 | Engine | RTL mechanism |
 |---|---|
-| `docx.py` | `w:bidi` + `w:jc` from `profile.docx_jc`; complex-script `w:szCs`/`w:bCs`; `w:rtl` on Arabic runs only; `w:outlineLvl` for the TOC field. |
-| `pdf.py` | reportlab (LTR) for English; **Arabic routes DOCX→LibreOffice→PDF** (reportlab can't shape mixed Arabic+Latin+Markdown). |
-| `html.py` | `dir` attribute + CSS `unicode-bidi`; `<bdi dir="ltr">` isolators for embedded Latin. |
+| `docx.py` | `w:bidi` per paragraph from `profile.block_direction` (an LTR paragraph is stamped `w:bidi val="0"`) + `w:jc` from `profile.docx_jc`; complex-script `w:szCs`/`w:bCs`; `w:rtl` on Arabic runs only; `w:bidiVisual` on RTL tables; `w:keepNext` on headings; `w:outlineLvl` for the TOC field. |
+| `pdf.py` | Any document that needs shaping (`profile.shape_arabic`) routes **DOCX→LibreOffice→PDF**; everything else, and the fallback when LibreOffice is absent or fails, is reportlab with per-block alignment and RTL table columns reversed. |
+| `html.py` | `dir` attribute + CSS `unicode-bidi`; a `dir` wrapper on the blocks whose direction differs from the document's; `<bdi dir="ltr">` isolators for embedded Latin; the pinned font inlined for Arabic exports (`documents.render.embed_html_fonts`). |
 | `xlsx.py` | `sheet_view.rightToLeft` + complex-script `readingOrder`. |
 | `pptx.py` | `<a:pPr rtl="1">` **and** `algn="r"` (rtl alone does not right-align; the DrawingML attr is `algn`, not `al`). |
 
@@ -89,8 +103,24 @@ These are the non-obvious facts each engine encodes once:
   to opt into a complex-script bump.
 - **PDF (Arabic)** — reportlab is a visual LTR engine and cannot correctly shape
   mixed Arabic+Latin+inline-Markdown (tokens jam, Latin splits across lines).
-  `PdfEngine` routes RTL content through the DOCX engine (correct bidi) then
-  LibreOffice headless → PDF. LTR stays on reportlab directly.
+  `PdfEngine` routes every document containing right-to-left script
+  (`profile.shape_arabic`, not only RTL-dominant ones) through the DOCX engine
+  (correct bidi) then LibreOffice headless → PDF, in a bounded call that kills
+  the process tree on timeout. Without LibreOffice, or when it fails, the
+  reportlab path is used with a warning; it shapes each paragraph once
+  (`arabic.shape_spans`) and refuses to render (`arabic_font_unavailable`)
+  rather than emit a blank Arabic PDF when no font covers the Arabic
+  presentation forms. Documents without RTL script stay on reportlab directly.
+- **Per block, not per document** — a bilingual document keeps each language's
+  blocks aligned to their own reading start in every engine: `w:bidi` per
+  paragraph (DOCX), per-block styles (PDF), a `dir` wrapper (HTML).
+- **Tables** read right-to-left in RTL documents in every format:
+  `w:bidiVisual` (DOCX), CSS `direction: rtl` on tables (HTML), reversed
+  columns (reportlab PDF).
+- **One type scale** — `theme_cs_size()` sizes complex script in DOCX
+  (`w:szCs`), HTML and the PDF engine alike, so the same document paginates the
+  same way in each. `tests/test_document_layout.py` measures this on rendered
+  PDFs.
 - **PPTX** — paragraph RTL needs `rtl="1"` **and** an explicit `algn`
   alignment; `rtl` alone leaves text left-aligned (inherits the layout).
 - **HTML** — bidi is native (`dir` + the browser algorithm); explicit `<bdi>` is
@@ -108,6 +138,16 @@ applies to every output at once.
 LibreOffice Office→PDF and `mutation_worker` redaction preserve the source's
 formatting by design — re-theming an uploaded file would be a regression.
 
+**Where it runs.** Rendering happens in the isolated renderer worker
+(`renderer_worker.py`) — a host subprocess in the `process` profile, a fresh
+container of the worker image in the `container` profile — never in the Kazma
+process. Rendering never fetches: only `data:` URIs in the source and the
+assets copied into the job (checked against their checksums) are read. An HTML
+or Markdown source that names an external URL or any other local file is
+refused (`external_resource_denied`); an image block naming an asset the job
+does not hold is left out. Every PDF the worker produces passes the PDF
+active-content policy (`pdf_policy.py`) before it leaves the worker.
+
 ## 5. Adding a new format engine
 
 1. Create `kazma_core/documents/engines/<format>.py` with a class that takes a
@@ -119,6 +159,10 @@ formatting by design — re-theming an uploaded file would be a regression.
    `DocProfile.for_content` for native-shape payloads) and calls the engine.
 3. Add the operation to the renderer registry
    (`kazma_core/documents/renderers/__init__.py`) and `_MIME`/`_EXTENSIONS`.
+   If it needs a Python package or system binary, add it to the worker image
+   too (`deploy/document-worker/requirements.in` /
+   `deploy/document-worker/Dockerfile`): in the `container` profile the engines
+   that exist are the ones the image reports.
 4. Add a test to `tests/test_unified_document_layer.py` asserting the engine
    consumes the profile (direction + a theme token), and extend
    `scripts/verify_documents.py`.
@@ -141,6 +185,13 @@ python scripts/verify_documents.py
 The regression tests (`tests/test_unified_document_layer.py`,
 `tests/test_docx_rtl_visual.py`) lock the bidi `jc=start` mapping, the
 complex-script `szCs/bCs`, the PPTX `algn`, and the cross-format theme tokens.
+`tests/test_document_layout.py` measures rendered PDFs with PyMuPDF: the
+complex-script type scale, RTL table column order, per-block direction and
+alignment, headings kept with their text, and shaped lines inside their
+column. `tests/test_docx_rtl_visual.py` skips without LibreOffice or PyMuPDF.
+The fidelity corpus (`kazma_core/documents/fidelity.py`) also renders English,
+Arabic and bilingual DOCX, HTML and PDF with these engines and parses them
+back, so a rendering change that breaks extraction shows there.
 
 ---
 
@@ -157,9 +208,14 @@ rich-content capabilities:
 | **Real PDF TOC** | PDF engine | Structural table-of-contents generated from heading outline (not just an outline field). |
 | **Clickable HTML TOC** | HTML engine | The HTML table-of-contents is hyperlinked — entries jump to their sections. |
 
-> **Approved assets only.** Image embedding resolves assets that have passed
-> intake approval; arbitrary inline image bytes are not rendered. This keeps the
-> generate/convert path consistent with the Document Intelligence security model
+> **Approved assets only.** An image reference resolves only to an asset the
+> caller approved for this job, copied into the job with its checksum (the
+> worker refuses one that changed); a `data:` URI in the source is read as
+> embedded data. Nothing is fetched from a URL or another local path: an HTML
+> or Markdown source that names one is refused (`external_resource_denied`),
+> and an image block whose asset is missing is skipped, never embedded. This
+> keeps the generate/convert path consistent
+> with the Document Intelligence security model
 > (see [Document security](../security/document-security)).
 
 Verification extends to these features — re-run `scripts/verify_documents.py`

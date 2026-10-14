@@ -99,7 +99,9 @@ def _product_files() -> list[str]:
         ["git", "ls-files", "kazma-*/*.py", "kazma-*/**/*.py"],
         cwd=ROOT, capture_output=True, text=True, check=True,
     ).stdout.split()
-    return sorted({p for p in out if "/tests/" not in p and "_tests/" not in p})
+    # A file deleted in the working tree is still listed until it is staged.
+    return sorted({p for p in out if "/tests/" not in p and "_tests/" not in p
+                   and (ROOT / p).exists()})
 
 
 def test_every_send_answer_is_read() -> None:
@@ -247,6 +249,13 @@ def _job(target: str) -> Any:
 async def test_a_reminder_says_whether_it_was_delivered(
     answer: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """One send attempt reports what the platform said.
+
+    A refused attempt is a WARNING since the delivery outbox (Scheduled audit
+    SCH-E02): it is retried, and CRITICAL is the final ``undeliverable``
+    (tests/test_cron_delivery_outbox.py). This pinned ``_deliver``, whose
+    CRITICAL was the only trace of a reminder that was then recorded DONE.
+    """
     from unittest.mock import MagicMock
 
     from kazma_core.cron.scheduler import CronScheduler
@@ -256,14 +265,16 @@ async def test_a_reminder_says_whether_it_was_delivered(
 
     monkeypatch.setitem(sm._message_backends, "telegram", backend)
     sched = CronScheduler(store=MagicMock(), graph_builder=lambda: None)
+    job = _job("telegram:1")
     with caplog.at_level(logging.INFO, logger="kazma_core.cron.scheduler"):
-        await sched._deliver(_job("telegram:1"), "Done.")
-    failed = [r for r in caplog.records if r.levelname == "CRITICAL" and "delivery FAILED" in r.getMessage()]
+        ok, _err = await sched._send({"job_id": job.job_id, "target": job.delivery_target,
+                                      "body": "Done.", "attempts": 1})
+    failed = [r for r in caplog.records if r.levelname == "WARNING" and "delivery FAILED" in r.getMessage()]
     delivered = [r for r in caplog.records if "delivered job-1" in r.getMessage()]
     if answer.startswith("Error"):
-        assert failed and not delivered
+        assert failed and not delivered and ok is False
     else:
-        assert delivered and not failed
+        assert delivered and not failed and ok is True
 
 
 def _post(target: str) -> Any:

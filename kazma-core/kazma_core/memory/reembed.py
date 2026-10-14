@@ -1,14 +1,15 @@
 """Embedding rebuild + version-accounting helpers (in-process, UI-driven).
 
 The Web UI Embedder settings page offers a one-click "Rebuild embeddings"
-action. This module is the in-process counterpart of ``scripts/reembed.py``
-with two important differences:
+action, and ``scripts/reembed.py`` runs the same :func:`rebuild_embeddings`
+from a shell (it was a second copy until 2026-10-14, and kept deleting the
+Knowledge Library's vector store after this one had stopped).
 
 * **Incremental**: only rows whose ``embedding_model_version`` differs from
   the currently configured model are re-encoded (after a fresh model switch
   that is every row; after a small drift it is only the stray rows — e.g.
   episodes written while a stale server was running).
-* **Status-driven**: progress is persisted to ConfigStore key
+* **Status-driven** (the page): progress is persisted to ConfigStore key
   ``embedding.rebuild_status`` so the UI can poll it. The rebuild runs on a
   background thread via ``asyncio.to_thread`` — never block the event loop.
 
@@ -19,6 +20,7 @@ UI shows in the "vector-space composition" card.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sqlite3
@@ -153,16 +155,19 @@ def _upsert_remote_vector(
     tenant_id: str,
     meta: dict[str, Any],
 ) -> None:
-    """Best-effort pgvector/Qdrant upsert so rebuild fills the scale index."""
+    """Best-effort pgvector/Qdrant upsert so rebuild fills the scale index
+    (the remote index only: the local row is the rebuild's own write)."""
+    del conn
     try:
+        from kazma_core.memory.backends import get_remote_vector_backend
+
+        remote = get_remote_vector_backend()
+        if remote is None or not getattr(remote, "available", False):
+            return
         vec = emb.encode(text)
         if not vec:
             return
-        from kazma_core.memory.backends import get_vector_backend
-
-        get_vector_backend(conn).upsert(
-            item_id, list(vec), tenant_id=tenant_id, meta=meta
-        )
+        remote.upsert(item_id, list(vec), tenant_id=tenant_id, meta=meta)
     except Exception:
         logger.debug(
             "[reembed] remote vector upsert failed for %s", item_id, exc_info=True
@@ -170,21 +175,22 @@ def _upsert_remote_vector(
 
 
 def _backup(db_path: str) -> None:
-    """Native sqlite backup to ``<db>.pre_reembed`` (once per run)."""
+    """The copy kept before a rebuild, ``<db>.pre_reembed``: taken again at
+    every rebuild and replacing the last (Memory audit M28 -- it was written
+    once and kept forever, outside backup retention, with text forgotten since;
+    the erasure horizon says "until the next rebuild")."""
+    from kazma_core.db.sqlite_snapshot import snapshot_copy
+
     backup_path = db_path + ".pre_reembed"
-    if os.path.exists(backup_path):
-        return
+    tmp = backup_path + ".tmp"
     try:
-        sconn = sqlite3.connect(db_path)
-        dconn = sqlite3.connect(backup_path)
-        try:
-            sconn.backup(dconn)
-        finally:
-            dconn.close()
-            sconn.close()
-        logger.info("[reembed] backup → %s", backup_path)
-    except Exception:
-        logger.warning("[reembed] backup failed (continuing)", exc_info=True)
+        snapshot_copy(db_path, tmp)
+        os.replace(tmp, backup_path)
+        logger.info("[reembed] pre-rebuild copy -> %s", backup_path)
+    except (sqlite3.Error, OSError):
+        logger.warning("[reembed] pre-rebuild copy failed (continuing)", exc_info=True)
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
 
 
 def rebuild_embeddings(
@@ -207,10 +213,23 @@ def rebuild_embeddings(
     if not db_path or not os.path.isfile(db_path):
         raise FileNotFoundError(f"memory_state.db not found at {db_path}")
 
+    # The model first: a rebuild that cannot encode changes nothing (Memory
+    # audit M28 -- every old vector was dropped and committed before the model
+    # loaded, so a failed load left memory with no meaning search at all).
+    logger.info("[reembed] loading embedder (model=%s) ...", target_model)
+    t0 = time.monotonic()
+    emb = get_embedder()
+    if emb is None:
+        raise RuntimeError("Embedder failed to initialize — check server logs.")
+    logger.info("[reembed] embedder ready in %.1fs", time.monotonic() - t0)
     _backup(db_path)
 
     started = datetime.now(UTC).isoformat()
     summary: dict[str, Any] = {"episodes": 0, "beliefs": 0, "skipped_rows": 0}
+    # Rows NOT already in the target vector space (NULL version: legacy or
+    # unknown), re-encoded IN PLACE: a row's old vector stays until its new
+    # one is written, as in the repair pass.
+    stale = "embedding IS NULL OR embedding_model_version IS NULL OR embedding_model_version != ?"
 
     conn = sqlite3.connect(db_path, timeout=15)
     conn.row_factory = sqlite3.Row
@@ -218,31 +237,10 @@ def rebuild_embeddings(
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=15000")
 
-        # Only invalidate rows that are NOT already in the target vector
-        # space. NULL-version rows are treated as stale (legacy/unknown).
-        conn.execute(
-            "UPDATE episodes SET embedding = NULL "
-            "WHERE embedding_model_version IS NULL OR embedding_model_version != ?",
-            (target_model,),
-        )
-        conn.execute(
-            "UPDATE beliefs SET embedding = NULL "
-            "WHERE embedding_model_version IS NULL OR embedding_model_version != ?",
-            (target_model,),
-        )
-        conn.commit()
-
-        logger.info("[reembed] loading embedder (model=%s) …", target_model)
-        t0 = time.monotonic()
-        emb = get_embedder()
-        if emb is None:
-            raise RuntimeError("Embedder failed to initialize — check server logs.")
-        logger.info("[reembed] embedder ready in %.1fs", time.monotonic() - t0)
-
         # ── Episodes ────────────────────────────────────────────────────
         rows = conn.execute(
             "SELECT id, tenant_id, summary_text, user_text, assistant_text, tier "
-            "FROM episodes WHERE embedding IS NULL"
+            f"FROM episodes WHERE {stale}", (target_model,),
         ).fetchall()
         total = len(rows)
         for i, row in enumerate(rows, 1):
@@ -254,6 +252,8 @@ def rebuild_embeddings(
                         "UPDATE episodes SET embedding = ?, embedding_model_version = ? WHERE id = ?",
                         (blob, target_model, row["id"]),
                     )
+                else:
+                    summary["skipped_rows"] += 1
                 _upsert_remote_vector(
                     conn,
                     emb,
@@ -273,7 +273,7 @@ def rebuild_embeddings(
 
         # ── Beliefs ─────────────────────────────────────────────────────
         rows = conn.execute(
-            "SELECT id, tenant_id, subject, predicate, object FROM beliefs WHERE embedding IS NULL"
+            f"SELECT id, tenant_id, subject, predicate, object FROM beliefs WHERE {stale}", (target_model,),
         ).fetchall()
         total = len(rows)
         for i, row in enumerate(rows, 1):
@@ -284,6 +284,8 @@ def rebuild_embeddings(
                     "UPDATE beliefs SET embedding = ?, embedding_model_version = ? WHERE id = ?",
                     (blob, target_model, row["id"]),
                 )
+            else:
+                summary["skipped_rows"] += 1
             _upsert_remote_vector(
                 conn,
                 emb,
@@ -523,8 +525,15 @@ def run_vector_repair_pass(*, time_budget_s: float = 20.0) -> dict[str, int]:
     conn = sqlite3.connect(db, timeout=15)
     try:
         apply_sqlite_pragmas(conn, busy_timeout=15000)
-        return repair_unsearchable_vectors(conn, time_budget_s=time_budget_s)
-    except sqlite3.OperationalError:  # the schema is not there yet
+        out = repair_unsearchable_vectors(conn, time_budget_s=time_budget_s)
+        if out.get("remaining", 0) != -1:  # an embedder is there
+            from kazma_core.memory.entity_resolution import repair_entity_name_vectors
+
+            out["entities"] = repair_entity_name_vectors(conn)
+        return out
+    except sqlite3.OperationalError as exc:
+        if "no such" not in str(exc).lower():
+            raise  # locked or busy: the maintenance runner counts and reports it (M20)
         logger.debug("[reembed] memory database not ready for repair", exc_info=True)
         return zero
     finally:
@@ -532,15 +541,13 @@ def run_vector_repair_pass(*, time_budget_s: float = 20.0) -> dict[str, int]:
 
 
 def _remote_index(conn: sqlite3.Connection) -> Any:
-    """The configured remote vector index, or None for the local-only setup."""
-    from kazma_core.memory.backends import LocalSqliteVectorBackend, get_vector_backend
+    """The configured remote vector index, or None for the local-only setup
+    (never a hybrid backend's local half: the repair writes the row itself)."""
+    from kazma_core.memory.backends import get_remote_vector_backend
 
-    try:
-        backend = get_vector_backend(conn)
-    except RuntimeError:  # remote down with failover=raise: the local repair still runs
-        logger.debug("[reembed] vector backend unavailable for repair", exc_info=True)
-        return None
-    return None if isinstance(backend, LocalSqliteVectorBackend) else backend
+    del conn
+    remote = get_remote_vector_backend()
+    return remote if remote is not None and getattr(remote, "available", False) else None
 
 
 def _upsert_remote(

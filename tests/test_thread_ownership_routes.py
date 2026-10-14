@@ -70,6 +70,11 @@ def store(monkeypatch: pytest.MonkeyPatch) -> _TenantStore:
 
 
 # ── Replay ──────────────────────────────────────────────────────────────────
+#
+# Re-pointed 2026-10-14 (Time Travel TT-12): the recorder is the real
+# ``SnapshotRecorder`` (its reads checked off the loop) and the graph the real
+# graph of ``tests/_tt_graph.py``; a step is addressed by its snapshot id
+# (TT-01). The fakes this used could not see what a restore wrote.
 
 
 def _off_the_loop() -> None:
@@ -83,75 +88,68 @@ def _off_the_loop() -> None:
     raise AssertionError("snapshot I/O ran on the event loop")
 
 
-class _Snap:
-    def __init__(self, thread_id: str) -> None:
-        self.iteration, self.timestamp, self.model_used, self.id = 0, 0.0, "m", f"{thread_id}:0"
-        self._thread = thread_id
+def _recorder_class():
+    from kazma_core.time_travel import SnapshotRecorder
 
-    def get_state(self) -> dict[str, Any]:
-        return {"messages": [{"role": "user", "content": f"private text of {self._thread}"}]}
+    class _Recorder(SnapshotRecorder):
+        """The real recorder, its every read and write checked off the loop."""
 
+        def __init__(self, *a: Any, **k: Any) -> None:
+            super().__init__(*a, **k)
+            self.cleared: list[str] = []
 
-class _Recorder:
-    def __init__(self) -> None:
-        self.cleared: list[str] = []
+        def list_distinct_threads(self, **k: Any) -> list[str]:
+            _off_the_loop()
+            return super().list_distinct_threads(**k)
 
-    def list_distinct_threads(self) -> list[str]:
-        _off_the_loop()
-        return [MINE, OTHER]
+        def list_snapshots(self, thread_id: str, **k: Any) -> list[Any]:
+            _off_the_loop()
+            return super().list_snapshots(thread_id, **k)
 
-    def list_snapshots(self, thread_id: str) -> list[_Snap]:
-        _off_the_loop()
-        return [_Snap(thread_id)]
+        def get(self, snapshot_id: str, **k: Any) -> Any:
+            _off_the_loop()
+            return super().get(snapshot_id, **k)
 
-    def clear_snapshots(self, thread_id: str) -> int:
-        _off_the_loop()
-        self.cleared.append(thread_id)
-        return 1
+        def forget_threads(self, thread_ids: list[str], **k: Any) -> int:
+            _off_the_loop()
+            self.cleared += list(thread_ids)
+            return super().forget_threads(thread_ids, **k)
 
-
-class _Engine:
-    def replay_from(self, thread_id: str, iteration: int) -> dict[str, Any]:
-        _off_the_loop()
-        return _Snap(thread_id).get_state()
-
-    @staticmethod
-    def compare_replays(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
-        _off_the_loop()
-        return {"a": a, "b": b}
+    return _Recorder
 
 
-class _ReplayGraph:
-    async def aget_state(self, config: dict[str, Any]) -> Any:
-        return None
+def _replay_client(tmp_path) -> tuple[TestClient, Any, Any, dict[str, str]]:
+    from langgraph.checkpoint.memory import InMemorySaver
 
-    async def aupdate_state(self, config: dict[str, Any], values: dict[str, Any], **_: Any) -> None:
-        return None
-
-
-def _replay_client() -> tuple[TestClient, Any, _Recorder]:
     from kazma_ui.replay_routes import create_replay_router
+    from tests import _tt_graph as tt
 
-    recorder = _Recorder()
-    router = create_replay_router(recorder=recorder, engine=_Engine(), graph=_ReplayGraph())
+    recorder = _recorder_class()(db_path=str(tmp_path / "snapshots.db"))
+    ids = {}
+    for thread in (MINE, OTHER):
+        record = recorder.capture({"thread_id": thread, "iteration": 1, "created_at": thread,
+                                   "messages": [{"role": "user", "content": f"private text of {thread}"}]})
+        ids[thread] = record.id
+    router = create_replay_router(recorder=recorder, graph=tt.build_graph(recorder, [], InMemorySaver()))
     app = FastAPI()
     app.include_router(router)
-    return TestClient(app), router, recorder
+    return TestClient(app), router, recorder, ids
 
 
-def _requests_for(router: Any, thread_id: str):
+def _requests_for(router: Any, thread_id: str, ids: dict[str, str]):
     """One request per route in the router, aimed at *thread_id*."""
+    sid = ids[thread_id]
     for route in router.routes:
         for method in sorted(route.methods or ()):
-            path = route.path.replace("{thread_id}", thread_id).replace("{iteration}", "0")
-            body = {"thread_id": thread_id, "iteration": 0, "a": 0, "b": 0}
+            path = route.path.replace("{thread_id}", thread_id).replace("{snapshot_id}", sid)
+            body = {"thread_id": thread_id, "snapshot_id": sid, "a": sid, "b": sid}
             yield method, route.path, path, (body if method in {"POST", "PUT", "PATCH"} else None)
 
 
-def test_every_replay_route_refuses_another_tenants_thread(store):
-    client, router, recorder = _replay_client()
+def test_every_replay_route_refuses_another_tenants_thread(store, tmp_path):
+    client, router, recorder, ids = _replay_client(tmp_path)
     checked = 0
-    for method, template, path, body in _requests_for(router, OTHER):
+    for method, template, path, body in _requests_for(router, OTHER, ids):
         resp = client.request(method, path, json=body)
         checked += 1
         if template == "/api/replay/threads":
@@ -165,37 +163,39 @@ def test_every_replay_route_refuses_another_tenants_thread(store):
     assert checked >= 7, "route enumeration went blind"
 
 
-def test_every_replay_route_fails_closed_when_ownership_is_unknown(store):
+def test_every_replay_route_fails_closed_when_ownership_is_unknown(store, tmp_path):
     store.broken = True
-    client, router, recorder = _replay_client()
-    for method, template, path, body in _requests_for(router, MINE):
+    client, router, recorder, ids = _replay_client(tmp_path)
+    for method, template, path, body in _requests_for(router, MINE, ids):
         resp = client.request(method, path, json=body)
         assert resp.status_code == 403, (method, template, resp.status_code, resp.text)
         assert "private text" not in resp.text
     assert recorder.cleared == []
 
 
-def test_every_replay_route_serves_the_owner_without_blocking_the_loop(store):
+def test_every_replay_route_serves_the_owner_without_blocking_the_loop(store, tmp_path):
     """Walks the route table on the caller's own thread.
 
-    The fakes raise if touched on the event loop, so a route that reads
+    The recorder raises if touched on the event loop, so a route that reads
     snapshots synchronously answers 500 here (audit 2026-09-22: every replay
-    route did, sharing a lock with the capture thread).
+    route did, sharing a lock with the capture thread). The DELETE runs last:
+    it removes the step the others read.
     """
-    client, router, _ = _replay_client()
-    for method, template, path, body in _requests_for(router, MINE):
+    client, router, _, ids = _replay_client(tmp_path)
+    requests = sorted(_requests_for(router, MINE, ids), key=lambda r: r[0] == "DELETE")
+    for method, template, path, body in requests:
         resp = client.request(method, path, json=body)
         assert resp.status_code == 200, (method, template, resp.status_code, resp.text)
 
 
-def test_replay_still_serves_the_owner(store):
+def test_replay_still_serves_the_owner(store, tmp_path):
     """Negative control: the guard must not refuse the caller's own thread."""
-    client, _, recorder = _replay_client()
-    resp = client.get(f"/api/replay/snapshots/{MINE}/0")
+    client, _, recorder, ids = _replay_client(tmp_path)
+    resp = client.get(f"/api/replay/snapshots/{MINE}/{ids[MINE]}")
     assert resp.status_code == 200
     assert f"private text of {MINE}" in resp.text
     assert client.delete(f"/api/replay/threads/{MINE}").status_code == 200
-    assert recorder.cleared == [MINE]
+    assert MINE in recorder.cleared and recorder.list_snapshots(MINE) == []
 
 
 # ── Chat controls ───────────────────────────────────────────────────────────

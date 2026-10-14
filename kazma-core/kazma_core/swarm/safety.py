@@ -17,6 +17,7 @@ escape is enabled.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -176,30 +177,22 @@ class SafetyMiddleware:
         logger.info("[Safety] Removed danger-tier tool: %s", tool_name)
 
     def is_danger_tool(self, tool_name: str) -> bool:
-        """Whether the swarm bus must gate this tool.
-
-        Settings ``require_approval_for`` ADDS to the floor; it cannot un-gate
-        a ``danger``/``unsafe`` TOOL_TIERS classification (audit H-9 / §26B).
-        YOLO/grants are applied in :meth:`check`, not here — this is
-        classification, not a skip.
+        """Whether the swarm bus must gate this tool: the graph's own floor
+        (``hitl.approval_floor``: an unclassified tool is gated, Settings'
+        ``require_approval_for`` only adds -- audit H-9, §26B, Swarm audit
+        SW-S11), plus this middleware's materialized danger list. YOLO and
+        grants are applied in :meth:`check`, not here: this is classification,
+        not a skip. A classification that cannot be read gates (fail closed).
         """
+        if tool_name in self._danger_tools:
+            return True
         try:
-            from kazma_core.safety.hitl import (
-                ALWAYS_HITL_TOOLS,
-                get_hitl_config,
-                get_tool_tier,
-            )
+            from kazma_core.safety.hitl import approval_floor, get_hitl_config
 
-            if tool_name in ALWAYS_HITL_TOOLS:
-                return True
-            hitl_cfg = get_hitl_config({})
-            listed = set(hitl_cfg.get("require_approval_for") or ())
-            listed |= set(self._danger_tools)
-            if tool_name in listed:
-                return True
-            return get_tool_tier(tool_name) in ("danger", "unsafe")
+            return approval_floor(tool_name, get_hitl_config({}))
         except Exception:
-            return tool_name in self._danger_tools
+            logger.warning("[Safety] cannot classify %s: gating it", tool_name, exc_info=True)
+            return True
 
     def is_sensitive_read(self, tool_name: str) -> bool:
         """Check if a tool is a sensitive read (allowed but logged)."""
@@ -242,6 +235,121 @@ class SafetyMiddleware:
 
         from kazma_core.safety.hitl import get_current_thread_id
         tid = get_current_thread_id()
+        # The classification, the thread's YOLO window and its grants read
+        # the settings store and SQLite, and the deadline reads settings: off
+        # the event loop (Swarm audit SW-S12).
+        allowed, timeout = await asyncio.to_thread(
+            self._precheck, tool_name, tool_args, task_id, tid, force_danger,
+        )
+        if allowed:
+            return True
+
+        # ── Danger tool — request approval ─────────────────
+        logger.warning("[Safety] Danger tool blocked pending approval: %s", tool_name)
+        self._blocked_count += 1
+
+        from kazma_core.swarm.bus import NullBusAdapter, get_message_bus
+
+        bus = get_message_bus()
+        # Fail-closed when no real adapter is wired (mirror check_sync).
+        # NullBusAdapter.request_approval() returns False (fail-closed); the
+        # explicit isinstance check short-circuits before relying on it, so a
+        # future change can't reintroduce silent auto-approve for headless
+        # danger tools. (Comment corrected — it claimed True/auto-approve.)
+        if isinstance(bus.adapter, NullBusAdapter):
+            if self.allow_headless_danger:
+                self._approved_count += 1
+                logger.info(
+                    "[Safety] Danger tool APPROVED (headless; allow_headless_danger=True): "
+                    "%s (task=%s)", tool_name, task_id,
+                )
+                return True
+            # No bus does not have to mean no human. The gate registry is a
+            # cross-process table and the running instance's dashboard renders
+            # every pending row in it, so a process spawned outside the server
+            # (`kazma mcp`) can still put a card in front of the operator and
+            # wait for the answer. Only engages when a live instance has
+            # recently heartbeat into the same database; otherwise it declines
+            # and we fall through to the denial below, unchanged.
+            try:
+                from kazma_core.safety.bus_bridge import (
+                    live_watcher,
+                    request_approval_via_registry,
+                )
+
+                if live_watcher() is not None:
+                    bridged = await request_approval_via_registry(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        thread_id=tid or task_id or "",
+                        timeout=timeout,
+                        origin="bus_bridge",
+                    )
+                    if bridged:
+                        self._approved_count += 1
+                        logger.info(
+                            "[Safety] Danger tool APPROVED via gate registry "
+                            "(no bus): %s (task=%s)", tool_name, task_id,
+                        )
+                        return True
+                    self._rejected_count += 1
+                    logger.warning(
+                        "[Safety] Danger tool REJECTED via gate registry "
+                        "(no bus): %s (task=%s)", tool_name, task_id,
+                    )
+                    await _notify_cron_denial(tool_name, "denied or timed out")
+                    return False
+            except Exception:
+                # The bridge is an extra path to a human, never a new way to
+                # fail open. Anything unexpected falls through to the denial --
+                # and the operator never saw the question (SW-E14: was DEBUG).
+                logger.warning("[Safety] approval bridge unavailable; %s is denied unasked",
+                               tool_name, exc_info=True)
+
+            self._rejected_count += 1
+            logger.warning(
+                "[Safety] Danger tool '%s' BLOCKED (no approval bus; "
+                "allow_headless_danger=False) (task=%s)", tool_name, task_id,
+            )
+            await _notify_cron_denial(tool_name, "blocked (no approval bus)")
+            return False
+
+        approved = await self._ask_the_bus(bus, tool_name, tool_args, tid, task_id, worker_name, timeout)
+
+        if approved:
+            self._approved_count += 1
+            logger.info("[Safety] Danger tool APPROVED: %s (task=%s)", tool_name, task_id)
+        else:
+            self._rejected_count += 1
+            logger.warning("[Safety] Danger tool REJECTED: %s (task=%s)", tool_name, task_id)
+            # Cron turns have no live conversation — the user would never
+            # hear about the denial (the 0/8 silent-failure class). Tell the
+            # scheduling conversation directly (2026-08-27 fix).
+            await _notify_cron_denial(tool_name, "denied or timed out")
+
+        return approved
+
+    def _precheck(
+        self,
+        tool_name: str,
+        tool_args: str | None,
+        task_id: str,
+        tid: str | None,
+        force_danger: bool,
+    ) -> tuple[bool, float]:
+        """(allowed without asking, the approval deadline) -- blocking: the
+        caller runs it in a thread."""
+        allowed = self._allowed_without_asking(tool_name, tool_args, task_id, tid, force_danger)
+        return allowed, (0.0 if allowed else float(self.approval_timeout))
+
+    def _allowed_without_asking(
+        self,
+        tool_name: str,
+        tool_args: str | None,
+        task_id: str,
+        tid: str | None,
+        force_danger: bool,
+    ) -> bool:
 
         # Classification BEFORE the YOLO shortcut (audit fix — HIGH): YOLO used
         # to short-circuit ahead of danger/ALWAYS evaluation, so
@@ -318,7 +426,8 @@ class SafetyMiddleware:
                         )
                         return True
                 except Exception:
-                    logger.debug("[Safety] %s check failed", _label, exc_info=True)
+                    # Falls through to asking: the operator is asked again.
+                    logger.warning("[Safety] %s check failed", _label, exc_info=True)
 
         if tool_name in _always_set:
             logger.warning(
@@ -328,81 +437,52 @@ class SafetyMiddleware:
                 task_id,
             )
 
-        # ── Danger tool — request approval ─────────────────
-        logger.warning("[Safety] Danger tool blocked pending approval: %s", tool_name)
-        self._blocked_count += 1
+        return False
 
-        from kazma_core.swarm.bus import NullBusAdapter, get_message_bus
+    async def _ask_the_bus(
+        self,
+        bus: Any,
+        tool_name: str,
+        tool_args: str | None,
+        tid: str | None,
+        task_id: str,
+        worker_name: str,
+        timeout: float,
+    ) -> bool:
+        """Ask the operator on every configured platform; True only for an
+        Approve given to THIS request (Swarm audit stage 1).
 
-        bus = get_message_bus()
-        # Fail-closed when no real adapter is wired (mirror check_sync).
-        # NullBusAdapter.request_approval() returns False (fail-closed); the
-        # explicit isinstance check short-circuits before relying on it, so a
-        # future change can't reintroduce silent auto-approve for headless
-        # danger tools. (Comment corrected — it claimed True/auto-approve.)
-        if isinstance(bus.adapter, NullBusAdapter):
-            if self.allow_headless_danger:
-                self._approved_count += 1
-                logger.info(
-                    "[Safety] Danger tool APPROVED (headless; allow_headless_danger=True): "
-                    "%s (task=%s)", tool_name, task_id,
-                )
-                return True
-            # No bus does not have to mean no human. The gate registry is a
-            # cross-process table and the running instance's dashboard renders
-            # every pending row in it, so a process spawned outside the server
-            # (`kazma mcp`) can still put a card in front of the operator and
-            # wait for the answer. Only engages when a live instance has
-            # recently heartbeat into the same database; otherwise it declines
-            # and we fall through to the denial below, unchanged.
-            try:
-                from kazma_core.safety.bus_bridge import (
-                    live_watcher,
-                    request_approval_via_registry,
-                )
+        * The approval id is minted here for this one request -- the gate
+          registry's id, else a random one -- never taken from the caller or
+          the tool's arguments (SW-S02: a tool with a ``task_id`` argument,
+          approved once, approved every later call carrying that id, another
+          tool's included, after a restart too). ``task_id`` is context for
+          the log only.
+        * The decision lives in one shared row (``shared_approvals``), bound to
+          the tool and an arguments hash, decided once, deleted once read. Its
+          deadline is the only deadline (SW-S04); every platform's card shows
+          the one outcome (SW-S05); timeout and cancellation are outcomes of
+          their own, recorded as such in the gate registry with the human
+          actor of a decision (SW-S15).
+        * The card shows every argument name (SW-S03); a call whose arguments
+          cannot be shown on a chat card is refused.
+        """
+        import asyncio as _aio
 
-                if live_watcher() is not None:
-                    bridged = await request_approval_via_registry(
-                        tool_name=tool_name,
-                        tool_args=tool_args,
-                        thread_id=tid or task_id or "",
-                        timeout=self.approval_timeout,
-                        origin="bus_bridge",
-                    )
-                    if bridged:
-                        self._approved_count += 1
-                        logger.info(
-                            "[Safety] Danger tool APPROVED via gate registry "
-                            "(no bus): %s (task=%s)", tool_name, task_id,
-                        )
-                        return True
-                    self._rejected_count += 1
-                    logger.warning(
-                        "[Safety] Danger tool REJECTED via gate registry "
-                        "(no bus): %s (task=%s)", tool_name, task_id,
-                    )
-                    await _notify_cron_denial(tool_name, "denied or timed out")
-                    return False
-            except Exception:
-                # The bridge is an extra path to a human, never a new way to
-                # fail open. Anything unexpected falls through to the denial.
-                logger.debug("[Safety] bus bridge unavailable", exc_info=True)
+        from kazma_core.swarm import shared_approvals
+        from kazma_core.swarm.approval_card import render_arguments
 
-            self._rejected_count += 1
+        card = render_arguments(tool_args)
+        if not card.complete:
             logger.warning(
-                "[Safety] Danger tool '%s' BLOCKED (no approval bus; "
-                "allow_headless_danger=False) (task=%s)", tool_name, task_id,
+                "[Safety] %s refused: its arguments cannot be shown on a chat card (%s)",
+                tool_name, card.text,
             )
-            await _notify_cron_denial(tool_name, "blocked (no approval bus)")
             return False
 
-        approved = False
-        _gate_id = ""
-        # Gate registry (P4): a swarm-bus approval is a gate row too — the
-        # dashboard / status readers see it next to graph gates. Best-effort.
+        thread = tid or task_id or "swarm"
+        gate_id = ""
         try:
-            import asyncio as _aio
-
             from kazma_core.safety.hitl_gates import (
                 GateRow,
                 gate_registry_enabled,
@@ -411,102 +491,86 @@ class SafetyMiddleware:
             )
 
             if gate_registry_enabled():
-                _gate_id = make_gate_id(
-                    tid or task_id or "swarm", tool_name, tool_args,
-                    seq=int(time.time() * 1000) % 1_000_000,
-                )
+                gate_id = make_gate_id(
+                    thread, tool_name, tool_args, seq=int(time.time() * 1000) % 1_000_000,
+                ) + "-" + uuid.uuid4().hex[:8]
                 await _aio.to_thread(
                     register_gate,
-                    GateRow(
-                        gate_id=_gate_id,
-                        thread_id=tid or task_id or "swarm",
-                        tool=tool_name,
-                        mechanism="swarm_bus",
-                        message=(tool_args or "")[:500],
-                    ),
-                    ttl_seconds=self.approval_timeout,
+                    # The whole call is kept on the decision record; the card
+                    # shows a bounded view of it and its hash (SW-S03).
+                    GateRow(gate_id=gate_id, thread_id=thread, tool=tool_name,
+                            mechanism="swarm_bus", args_json=tool_args or "",
+                            message=(tool_args or "")[:500]),
+                    ttl_seconds=timeout,
                 )
         except Exception:
-            logger.debug("[Safety] gate register skipped", exc_info=True)
-
-        # An approval card nobody can answer is worse than no card at all.
-        #
-        # `task_id` is read from the TOOL'S OWN ARGUMENTS by every caller
-        # (`arguments.get("task_id", "")`). A filesystem call carries
-        # {"path": ...}; a shell call carries {"command": ...}. None of them
-        # carry a task_id, so it is empty for essentially every real tool.
-        #
-        # Empty is not merely unhelpful, it is fatal. `wait_for_resolution`
-        # opens with `if not task_id: return False`, so the adapter posts the
-        # card, gets an instant False, and edits it to REJECTED -- while the
-        # card itself says "auto-reject in 300s". The buttons encode
-        # `swarm_approve_` with no id, so pressing them resolves nothing.
-        #
-        # Measured on the operator's install 2026-09-14 16:41 UTC: posted at
-        # :28.767, REJECTED at :30.825. Two seconds. Nobody could have
-        # approved it on any surface, and the log said `(task=)`.
-        #
-        # Mint an id when the caller has none. Unique per REQUEST, not per
-        # tool: two parallel calls to the same tool are two questions.
-        approval_id = task_id
-        if not approval_id:
-            approval_id = _gate_id or (
-                "swarm-" + uuid.uuid4().hex[:16]
-            )
-            logger.debug(
-                "[Safety] minted approval id %s for %s (caller passed none)",
-                approval_id, tool_name,
-            )
-
-        approved = await bus.request_approval(
-            worker_name=worker_name,
-            task_description=f"Tool: {tool_name}" + (f" — {tool_args[:100]}" if tool_args else ""),
-            proposed_output=f"Danger-tier tool '{tool_name}' requires approval before execution.",
-            task_id=approval_id,
-            timeout=self.approval_timeout,
+            logger.warning("[Safety] gate register failed for %s", tool_name, exc_info=True)
+            gate_id = ""
+        approval_id = gate_id or ("swarm-" + uuid.uuid4().hex)
+        platforms = len(getattr(bus.adapter, "adapters", None) or [bus.adapter])
+        await _aio.to_thread(
+            shared_approvals.open_request, approval_id, tool=tool_name, args=tool_args,
+            deadline=time.time() + timeout, platforms=platforms,
         )
+        row: dict[str, Any] = {"status": "cancelled"}
+        try:
+            await bus.request_approval(
+                worker_name=worker_name,
+                task_description=f"Tool: {tool_name}",
+                proposed_output=f"{card.text}\nrequest: {approval_id}",
+                task_id=approval_id,
+                timeout=timeout,
+            )
+        finally:
+            # Read the outcome, record it, then close the request -- also when
+            # this wait was cancelled (the task stopped while asking).
+            async def _finish() -> dict[str, Any]:
+                current = await _aio.to_thread(shared_approvals.get, approval_id) or {}
+                if current.get("status") == "pending":  # no card was posted anywhere
+                    await _aio.to_thread(shared_approvals.settle, approval_id, "cancelled")
+                    current = await _aio.to_thread(shared_approvals.get, approval_id) or current
+                await _aio.to_thread(self._record_gate, gate_id, current)
+                await _aio.to_thread(shared_approvals.close, approval_id)
+                return current
 
-        # Gate registry (P4): settle the row with the bus outcome.
-        if _gate_id:
-            try:
-                import asyncio as _aio
+            row = await _aio.shield(_finish())
+        bound = (row.get("tool") == tool_name
+                 and row.get("args_hash") == shared_approvals.args_hash(tool_name, tool_args))
+        if row.get("status") == "approved" and not bound:
+            logger.error("[Safety] approval %s does not match %s's arguments: refused", approval_id, tool_name)
+            return False
+        logger.info("[Safety] %s: %s (approval %s, task=%s)", tool_name, row.get("status"), approval_id, task_id)
+        return row.get("status") == "approved"
 
-                from kazma_core.safety.hitl_gates import (
-                    TransitionConflict,
-                    claim_gate,
-                    settle_gate,
-                )
+    @staticmethod
+    def _record_gate(gate_id: str, row: dict[str, Any]) -> None:
+        """The request's outcome in the gate registry, the decision record,
+        with the human who decided. Never raises: a failure is a WARNING."""
+        if not gate_id:
+            return
+        try:
+            from kazma_core.safety.hitl_gates import (
+                TransitionConflict,
+                claim_gate,
+                settle_gate,
+                timeout_gate,
+            )
 
-                def _settle() -> None:
-                    try:
-                        claim_gate(
-                            _gate_id,
-                            "approve" if approved else "deny",
-                            "swarm_bus",
-                        )
-                    except TransitionConflict:
-                        pass
-                    try:
-                        settle_gate(_gate_id)
-                    except TransitionConflict:
-                        pass
-
-                await _aio.to_thread(_settle)
-            except Exception:
-                logger.debug("[Safety] gate settle skipped", exc_info=True)
-
-        if approved:
-            self._approved_count += 1
-            logger.info("[Safety] Danger tool APPROVED: %s (task=%s)", tool_name, task_id)
-        else:
-            self._rejected_count += 1
-            logger.warning("[Safety] Danger tool REJECTED: %s (task=%s)", tool_name, task_id)
-            # Cron turns have no live conversation — the user would never
-            # hear about the denial (the 0/8 silent-failure class). Tell the
-            # scheduling conversation directly (2026-08-27 fix).
-            await _notify_cron_denial(tool_name, "denied or timed out")
-
-        return approved
+            status = row.get("status")
+            if status in ("approved", "denied"):
+                actor = str(row.get("actor") or "") or f"{row.get('platform') or 'chat'} user"
+                try:
+                    claim_gate(gate_id, "approve" if status == "approved" else "deny", actor,
+                               allow_reclaim=False)
+                except TransitionConflict:
+                    pass
+                settle_gate(gate_id)
+            elif status == "timeout":
+                timeout_gate(gate_id)
+            else:
+                settle_gate(gate_id, outcome="cancelled")
+        except Exception:
+            logger.warning("[Safety] could not record approval outcome for gate %s", gate_id, exc_info=True)
 
     def check_sync(self, tool_name: str, *, force_danger: bool = False) -> bool:
         """Synchronous check — fail-closed gate for danger tools.

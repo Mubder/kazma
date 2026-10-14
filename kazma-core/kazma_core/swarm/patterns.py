@@ -9,9 +9,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kazma_core.agent.dispatch_effects import DispatchEffects, track_effects
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore
-from kazma_core.swarm.dispatch_helpers import pattern_dispatch_context, wait_timeout
+from kazma_core.swarm.dispatch_helpers import pattern_dispatch_context, step_timeout_result, wait_timeout
 from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
@@ -109,10 +110,13 @@ async def _synthesize_refined_output(
     total_ms: float,
 ) -> str:
     """Synthesize pipeline outputs via LLM Refiner."""
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
     all_outputs = [r.output for r in worker_results if r.status == "success" and r.output]
     combined = "\n---\n".join(o.strip() for o in all_outputs if o.strip()) or "No output"
+    combined = fence_untrusted(combined[:4000], source="swarm_workers")  # SW-S10
 
-    user_prompt = f"Task: {task[:300]}\nStatus: {overall_status}\nDuration: {total_ms:.0f}ms\n\nRaw worker outputs:\n{combined[:4000]}"
+    user_prompt = f"Task: {task[:300]}\nStatus: {overall_status}\nDuration: {total_ms:.0f}ms\n\nRaw worker outputs:\n{combined}"
 
     try:
         from kazma_core.model_registry import get_model_registry
@@ -263,20 +267,29 @@ async def _build_pipeline_context_text(
     if previous_result is None:
         return task.context
 
+    # The previous worker's text and the blackboard are what workers read
+    # and wrote: data for the next worker, never its instructions (Swarm
+    # audit SW-S10: handed on raw).
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
     sections = [section for section in [task.context.strip()] if section]
     sections.append(
-        f"Previous worker ({previous_result.worker}) output:\n{previous_result.output}"
+        f"Previous worker ({previous_result.worker}) output:\n"
+        + fence_untrusted(previous_result.output or "", source=f"swarm_worker:{previous_result.worker}")
     )
 
     blackboard_snapshot = await blackboard.snapshot()
     if blackboard_snapshot:
         sections.append(
             "Shared blackboard snapshot:\n"
-            + json.dumps(
-                blackboard_snapshot,
-                ensure_ascii=False,
-                sort_keys=True,
-                default=str,
+            + fence_untrusted(
+                json.dumps(
+                    blackboard_snapshot,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ),
+                source="swarm_blackboard",
             )
         )
 
@@ -322,29 +335,25 @@ async def execute_pipeline(
             context_text=context_text,
         )
 
+        step_effects = DispatchEffects()
         try:
-            worker_result = await asyncio.wait_for(
-                dispatch_worker_by_name(
-                    worker_name,
-                    task.prompt,
-                    dispatch_context,
-                    fallback_chain=task.fallback_chain or None,
-                ),
-                timeout=wait_timeout(task.timeout),
-            )
+            with track_effects(step_effects):
+                worker_result = await asyncio.wait_for(
+                    dispatch_worker_by_name(
+                        worker_name,
+                        task.prompt,
+                        dispatch_context,
+                        fallback_chain=task.fallback_chain or None,
+                    ),
+                    timeout=wait_timeout(task.timeout),
+                )
         except TimeoutError:
             logger.warning(
                 "[SwarmPatterns] pipeline worker '%s' timed out after %.2fs",
                 worker_name,
                 task.timeout,
             )
-            worker_result = WorkerResult(
-                worker=worker_name,
-                task_id=task.id,
-                status="timeout",
-                output="",
-                error=f"Worker '{worker_name}' timed out after {task.timeout:g}s.",
-            )
+            worker_result = step_timeout_result(task, worker_name, step_effects, label="Worker")
 
         if not worker_result.task_id:
             worker_result.task_id = task.id
@@ -419,8 +428,13 @@ async def resume_pipeline(
     worker_results: list[WorkerResult],
     blackboard_data: dict[str, Any],
     dispatch_worker_by_name: DispatchWorkerByName,
+    on_step: Callable[[SwarmTask, int, str], Awaitable[None]] | None = None,
 ) -> PatternExecution:
     """Resume a paused pipeline from *starting_step* (1-based inclusive).
+
+    *on_step* is awaited with ``"begun"`` before each step's worker runs and
+    ``"committed"`` once its result is in (Swarm audit SW-E01: the engine
+    journals them, so a run that dies mid-step is never resumed again).
 
     Rebuilds the blackboard from *blackboard_data* and continues executing
     remaining workers.  Returns the final ``PatternExecution``.
@@ -450,33 +464,33 @@ async def resume_pipeline(
             context_text=context_text,
         )
 
+        if on_step is not None:
+            await on_step(task, step_index, "begun")
+        step_effects = DispatchEffects()
         try:
-            worker_result = await asyncio.wait_for(
-                dispatch_worker_by_name(
-                    worker_name,
-                    task.prompt,
-                    dispatch_context,
-                    fallback_chain=task.fallback_chain or None,
-                ),
-                timeout=wait_timeout(task.timeout),
-            )
+            with track_effects(step_effects):
+                worker_result = await asyncio.wait_for(
+                    dispatch_worker_by_name(
+                        worker_name,
+                        task.prompt,
+                        dispatch_context,
+                        fallback_chain=task.fallback_chain or None,
+                    ),
+                    timeout=wait_timeout(task.timeout),
+                )
         except TimeoutError:
             logger.warning(
                 "[SwarmPatterns] resumed pipeline worker '%s' timed out after %.2fs",
                 worker_name,
                 task.timeout,
             )
-            worker_result = WorkerResult(
-                worker=worker_name,
-                task_id=task.id,
-                status="timeout",
-                output="",
-                error=f"Worker '{worker_name}' timed out after {task.timeout:g}s.",
-            )
+            worker_result = step_timeout_result(task, worker_name, step_effects, label="Worker")
 
         if not worker_result.task_id:
             worker_result.task_id = task.id
         worker_results.append(worker_result)
+        if on_step is not None:
+            await on_step(task, step_index, "committed")
 
         if worker_result.status != "success":
             return await _finalize_pipeline(
@@ -579,29 +593,25 @@ async def execute_conditional(
     worker_results: list[WorkerResult] = []
 
     # Step 1: Execute the router worker.
+    step_effects = DispatchEffects()
     try:
-        router_result = await asyncio.wait_for(
-            dispatch_worker_by_name(
-                router_name,
-                task.prompt,
-                pattern_dispatch_context(task, extra={"worker_name": router_name}),
-                fallback_chain=task.fallback_chain or None,
-            ),
-            timeout=wait_timeout(task.timeout),
-        )
+        with track_effects(step_effects):
+            router_result = await asyncio.wait_for(
+                dispatch_worker_by_name(
+                    router_name,
+                    task.prompt,
+                    pattern_dispatch_context(task, extra={"worker_name": router_name}),
+                    fallback_chain=task.fallback_chain or None,
+                ),
+                timeout=wait_timeout(task.timeout),
+            )
     except TimeoutError:
         logger.warning(
             "[SwarmPatterns] conditional router '%s' timed out after %.2fs",
             router_name,
             task.timeout,
         )
-        router_result = WorkerResult(
-            worker=router_name,
-            task_id=task.id,
-            status="timeout",
-            output="",
-            error=f"Router worker '{router_name}' timed out after {task.timeout:g}s.",
-        )
+        router_result = step_timeout_result(task, router_name, step_effects, label="Router worker")
 
     if not router_result.task_id:
         router_result.task_id = task.id
@@ -644,28 +654,24 @@ async def execute_conditional(
             )
 
     # Step 5: Dispatch to the target worker.
+    step_effects = DispatchEffects()
     try:
-        target_result = await asyncio.wait_for(
-            dispatch_worker_by_name(
-                target_worker,
-                task.prompt,
-                pattern_dispatch_context(task, extra={"worker_name": target_worker}),
-            ),
-            timeout=wait_timeout(task.timeout),
-        )
+        with track_effects(step_effects):
+            target_result = await asyncio.wait_for(
+                dispatch_worker_by_name(
+                    target_worker,
+                    task.prompt,
+                    pattern_dispatch_context(task, extra={"worker_name": target_worker}),
+                ),
+                timeout=wait_timeout(task.timeout),
+            )
     except TimeoutError:
         logger.warning(
             "[SwarmPatterns] conditional target '%s' timed out after %.2fs",
             target_worker,
             task.timeout,
         )
-        target_result = WorkerResult(
-            worker=target_worker,
-            task_id=task.id,
-            status="timeout",
-            output="",
-            error=f"Worker '{target_worker}' timed out after {task.timeout:g}s.",
-        )
+        target_result = step_timeout_result(task, target_worker, step_effects, label="Worker")
 
     if not target_result.task_id:
         target_result.task_id = task.id
@@ -723,30 +729,26 @@ async def execute_fan_out(
             },
         )
 
+        step_effects = DispatchEffects()
         try:
             async with concurrency:
-                worker_result = await asyncio.wait_for(
-                    dispatch_worker_by_name(
-                        worker_name,
-                        task.prompt,
-                        dispatch_context,
-                        fallback_chain=task.fallback_chain or None,
-                    ),
-                    timeout=wait_timeout(task.timeout),
-                )
+                with track_effects(step_effects):
+                    worker_result = await asyncio.wait_for(
+                        dispatch_worker_by_name(
+                            worker_name,
+                            task.prompt,
+                            dispatch_context,
+                            fallback_chain=task.fallback_chain or None,
+                        ),
+                        timeout=wait_timeout(task.timeout),
+                    )
         except TimeoutError:
             logger.warning(
                 "[SwarmPatterns] fan-out worker '%s' timed out after %.2fs",
                 worker_name,
                 task.timeout,
             )
-            worker_result = WorkerResult(
-                worker=worker_name,
-                task_id=task.id,
-                status="timeout",
-                output="",
-                error=f"Worker '{worker_name}' timed out after {task.timeout:g}s.",
-            )
+            worker_result = step_timeout_result(task, worker_name, step_effects, label="Worker")
         except Exception as exc:
             logger.exception(
                 "[SwarmPatterns] fan-out worker '%s' raised unexpectedly",

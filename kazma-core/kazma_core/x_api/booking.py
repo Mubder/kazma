@@ -51,11 +51,19 @@ def _parse_when(when: str) -> float:
 
     Recurring work that genuinely needs to repeat belongs on the cron path,
     which reschedules itself correctly after every fire.
+
+    Everything else is the one time model cron uses
+    (:func:`kazma_core.cron.timing.resolve_timing`, Scheduled audit SCH-E09):
+    the same string is the same instant on both paths -- RFC 3339 with ``Z``
+    or an offset, a time without one read in the operator's zone, future and
+    finite, a local time the clock skips or repeats refused with the zone
+    named. Blocking (a settings read for the zone).
     """
-    from kazma_core.cron.scheduler import parse_timing
+    from kazma_core.cron.scheduler import resolve_cron_zone
+    from kazma_core.cron.timing import TimingError, looks_recurring, resolve_timing
 
     raw = (when or "").strip()
-    if _RECURRING_TIMING.match(raw):
+    if _RECURRING_TIMING.match(raw) or looks_recurring(raw):
         raise ValueError(
             f"'{raw}' is a recurring time, and scheduled X posts fire once. "
             "Give a one-off time instead ('2h', '2026-09-01T09:00', or an ISO "
@@ -63,28 +71,12 @@ def _parse_when(when: str) -> float:
             "task rather than a post -- X rejects identical tweets, so the "
             "same text cannot be republished on a schedule anyway."
         )
-
-    # Validate local civil time before the shared parser attaches the zone.
-    # A fold requires an explicit UTC offset; a gap has no corresponding instant.
-    from datetime import UTC, datetime
-
-    from kazma_core.cron.scheduler import get_cron_timezone
-
+    zone, zone_name = resolve_cron_zone()
     try:
-        civil = datetime.fromisoformat(raw)
-    except ValueError:
-        civil = None
-    if civil is not None and civil.tzinfo is None:
-        zone = get_cron_timezone()
-        possibilities = {civil.replace(tzinfo=zone, fold=fold).timestamp()
-                         for fold in (0, 1)
-                         if civil.replace(tzinfo=zone, fold=fold).astimezone(UTC).astimezone(zone).replace(tzinfo=None) == civil}
-        if not possibilities:
-            raise ValueError("This local time does not exist because the clock changes. Choose another time.")
-        if len(possibilities) > 1:
-            raise ValueError("This local time occurs twice. Include an explicit UTC offset to choose the intended instant.")
-    dt = parse_timing(raw)
-    epoch = dt.timestamp()
+        resolved = resolve_timing(raw, zone=zone, zone_name=zone_name)
+    except TimingError as exc:
+        raise ValueError(str(exc)) from None
+    epoch = resolved.first.timestamp()
     if epoch <= time.time():
         raise ValueError("The requested time is in the past. Pick a future time.")
     return epoch
@@ -106,7 +98,7 @@ def book_x_post(
     ``payload`` is a JSON-ready dict: on success it carries ``scheduled``,
     ``id``, ``text``, ``fire_at``, ``tz``; on failure a single ``error``.
     """
-    from kazma_core.cron.scheduler import get_cron_timezone
+    from kazma_core.cron.scheduler import resolve_cron_zone
     from kazma_core.x_api.ownership import x_tenant_id
     from kazma_core.x_api.publication_service import schedule
     from kazma_core.x_api.schedule import x_schedule_enabled
@@ -119,9 +111,10 @@ def book_x_post(
         fire_at = _parse_when(when)
     except ValueError as exc:
         return False, {"error": str(exc)}
+    _zone, zone_name = resolve_cron_zone()
     return schedule(text=text, fire_at=fire_at, reply_to_id=reply_to_id or "", idempotency_key=idempotency_key,
                     metadata={"thread_id": thread_id, "delivery_target": delivery_target,
-                              "tz": str(get_cron_timezone()), "proposal_id": proposal_id})
+                              "tz": zone_name, "proposal_id": proposal_id})
 
 
 async def publish_x_post(

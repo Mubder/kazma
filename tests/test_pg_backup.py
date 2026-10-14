@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from kazma_core.db import pg_backup
 
 # Verified against a real Postgres; the CI Postgres job runs every test
@@ -106,6 +105,8 @@ def test_kazma_pg_tables_cover_all_shared_state() -> None:
         "kazma_web_sessions",
         "document_jobs",
         "document_job_events",
+        "document_intake_reservations",
+        "document_intake_mutex",
         "documents",
         "document_blobs",
         "document_versions",
@@ -114,6 +115,9 @@ def test_kazma_pg_tables_cover_all_shared_state() -> None:
         "document_tombstones",
         "document_chunks",
         "document_audit_events",
+        # The memory state mirror (Memory audit M06).
+        "kazma_episodes",
+        "kazma_beliefs",
     }
     assert set(pg_backup.KAZMA_PG_TABLES) == expected
     # No duplicates — a dup would produce redundant pg_dump -t flags.
@@ -121,13 +125,13 @@ def test_kazma_pg_tables_cover_all_shared_state() -> None:
 
 
 def test_kazma_pg_tables_covers_document_ddl() -> None:
-    """H-13: every CREATE TABLE in repository_pg / jobs_pg is backed up."""
+    """H-13: every document PG table, including intake ownership, is backed up."""
     import re
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1] / "kazma-core" / "kazma_core" / "documents"
     names: set[str] = set()
-    for fname in ("repository_pg.py", "jobs_pg.py"):
+    for fname in ("repository_pg.py", "jobs_pg.py", "admission.py"):
         src = (root / fname).read_text(encoding="utf-8")
         names.update(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", src))
     missing = names - set(pg_backup.KAZMA_PG_TABLES)
@@ -304,7 +308,28 @@ def test_verify_required_pg_tables_reports_missing() -> None:
     assert "checkpoints" not in missing
     assert "kazma_chat_sessions" in missing
     assert "document_jobs" in missing
-    assert len(missing) == len(pg_backup.KAZMA_PG_TABLES) - len(present)
+    assert len(missing) == len(pg_backup._required_pg_tables()) - len(present)
+
+
+def _state_backend(monkeypatch, name: str) -> None:
+    cfg = {"state": {"provider": name, "url": "postgresql://x/y" if name == "postgres" else ""}}
+    monkeypatch.setattr("kazma_core.memory.state_backend._cfg", lambda: cfg)
+
+
+def test_the_memory_mirror_is_required_when_memory_mirrors_to_postgres(monkeypatch) -> None:
+    """Memory audit M06: with memory's state backend on Postgres the mirror's
+    tables are recall's store -- boot names them when they are gone."""
+    _state_backend(monkeypatch, "postgres")
+    present = [t for t in pg_backup.KAZMA_PG_TABLES if t not in ("kazma_episodes", "kazma_beliefs")]
+    assert pg_backup.verify_required_pg_tables(_FakePool(present)) == ["kazma_episodes", "kazma_beliefs"]
+
+
+def test_the_memory_mirror_is_not_required_without_it(monkeypatch) -> None:
+    """Negative control: an install whose memory stays local has no mirror
+    tables, and boot must not call them missing."""
+    _state_backend(monkeypatch, "sqlite")
+    present = [t for t in pg_backup.KAZMA_PG_TABLES if t not in ("kazma_episodes", "kazma_beliefs")]
+    assert pg_backup.verify_required_pg_tables(_FakePool(present)) == []
 
 
 def test_verify_required_pg_tables_all_present() -> None:

@@ -192,6 +192,17 @@ def memory_ops_db() -> str:
     return str(data_dir() / "memory_ops.db")
 
 
+def memory_forget_journal_db() -> str:
+    """The forget journal: every forget, keep-out and summary forget, in
+    order, append-only (``memory/forget_journal.py``, Memory audits M08/M10).
+
+    Outside :func:`primary_memory_db` on purpose: restoring an older copy of
+    the memory database must not undo the forgets made since, so the journal
+    is replayed over whatever copy is in place.
+    """
+    return str(data_dir() / "memory_forget_journal.db")
+
+
 def knowledge_graph_db() -> str:
     """L2 property-graph database path.
 
@@ -220,7 +231,11 @@ def backups_dir() -> Path:
     """Backups directory."""
     env = os.environ.get("KAZMA_BACKUPS_DIR")
     if env:
-        return Path(env).expanduser().resolve()
+        # Made like the default one: a folder named here and not there yet
+        # failed every native memory backup ("unable to open database file").
+        d = Path(env).expanduser().resolve()
+        d.mkdir(parents=True, exist_ok=True)
+        return d
     d = data_dir() / "backups"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -262,6 +277,13 @@ def chat_spool_db(sessions_db: str | Path) -> Path:
 def settings_db() -> str:
     """ConfigStore database."""
     return str(data_dir() / "settings.db")
+
+
+def knowledge_db() -> str:
+    """The Knowledge Library's database: libraries, chunks and their keyword
+    index (Knowledge audit KB-E10; it shared ``settings.db`` until
+    2026-10-14)."""
+    return str(data_dir() / "knowledge.db")
 
 
 def snapshots_db() -> str:

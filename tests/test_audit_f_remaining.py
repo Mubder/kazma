@@ -40,7 +40,10 @@ def test_tui_documents_and_dashboard_are_mouths():
     assert "get_ingestion_service" not in docs
     assert "/api/documents" in docs
     assert "/api/swarm/status" in dash
-    assert "maybe_notify_dispatch" in tasks
+    # The separate swarm notifier was a fourth notifier (Swarm audit SW-S15):
+    # results take the output target, nothing else.
+    assert "maybe_notify_dispatch" not in tasks
+    assert "swarm_notify" not in tasks
 
 
 def test_tutorial_does_not_claim_tui_email_voice_tabs():

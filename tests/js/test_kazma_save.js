@@ -71,6 +71,20 @@ async function main() {
   err = await rejects(window.kazmaSave("/api/settings/single", { method: "PUT" }));
   assert.strictEqual(err.message, "protected key");
 
+  // 200 carrying {"ok": false} is a refusal too (Knowledge audit KB-S10,
+  // program W1.5): Settings -> Memory's Knowledge toggle said "saved" over it.
+  respond(200, { ok: false, error: "merge refused: settings store is read-only" });
+  err = await rejects(window.kazmaSave("/api/settings/memory/merge-kb", { method: "PUT" }));
+  assert.strictEqual(err.message, "merge refused: settings store is read-only");
+  assert.strictEqual(err.status, 200);
+  // Negative control: the old check (status and `status: "error"` only)
+  // took that body for a success.
+  const oldRefused = (res, body) => !res.ok || (body && body.status === "error");
+  assert.strictEqual(oldRefused({ ok: true }, { ok: false, error: "x" }), false);
+  // An ok:true body (or none) still resolves.
+  respond(200, { ok: true });
+  assert.deepStrictEqual(await window.kazmaSave("/api/x", { method: "PUT" }), { ok: true });
+
   // FastAPI validation errors carry a list in `detail`.
   respond(422, { detail: [{ loc: ["body", "value"], msg: "field required" }] });
   err = await rejects(window.kazmaSave("/api/settings", { method: "PUT" }));

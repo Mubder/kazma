@@ -140,3 +140,41 @@ async def test_document_status_overview_includes_imported_doc(
     finally:
         await wired_service.stop_workers()
         reset_current_tenant_id(token)
+
+
+@pytest.mark.asyncio
+async def test_document_import_says_when_it_is_still_processing(wired_service, tmp_path, monkeypatch):
+    # DOC-A5 (2026-10-13): the tool said it returned the final state; it
+    # waits 30 s. A job not finished by then is reported as still processing.
+    from kazma_skills.native.document_platform import tools
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "slow.txt").write_text("Not processed before the wait ends.\n", encoding="utf-8")
+    monkeypatch.setattr("kazma_core.workspace.binding.resolve_active_root", lambda: ws)
+
+    async def no_workers():
+        return wired_service
+
+    monkeypatch.setattr(tools, "_ensure_service", no_workers)
+    monkeypatch.setattr(tools, "_INGEST_WAIT_SECONDS", 0.5)
+    out = await tools.document_import("slow.txt")
+    assert "Still processing" in out and "document_status" in out
+    assert "state: ready\n" not in out + "\n"  # a state short of ready (e.g. ready_to_parse)
+
+
+@pytest.mark.asyncio
+async def test_a_finished_import_carries_no_still_processing_note(wired_service, tmp_path, monkeypatch):
+    # Contrast: with workers running the job finishes within the wait.
+    from kazma_skills.native.document_platform import tools
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "quick.txt").write_text("Processed within the wait.\n", encoding="utf-8")
+    monkeypatch.setattr("kazma_core.workspace.binding.resolve_active_root", lambda: ws)
+    await wired_service.start_workers()
+    try:
+        out = await tools.document_import("quick.txt")
+        assert "state: ready" in out and "Still processing" not in out
+    finally:
+        await wired_service.stop_workers()

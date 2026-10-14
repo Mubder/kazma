@@ -84,7 +84,7 @@ The Web operator surface for posting. Alpine page `xStudioPage()` (`static/js/x_
 
 **Planner (X-only)**
 
-- Upcoming X posts with a datetime-local field + **Reschedule** (`PUT /api/scheduled/x/{id}`) and **Cancel**.
+- Upcoming X posts from `GET /api/x/queue`, with a date-time field + **Reschedule** and **Cancel** (`POST /api/x/queue/{operation_id}/reschedule` and `.../cancel`). Each carries the revision it read: a booking that changed meanwhile answers **409**, so a stale page never moves a post it did not show. The Scheduled page uses the same two routes.
 - **Posted** rows: open on X, **Reply** (loads the id into the composer), **Delete** (`POST /api/x/delete` — confirm first). Chat `x_delete_post` is still always-HITL.
 - **Drafts** from `GET /api/x/drafts` (artifact store `list_proposals`). The agent reads the same drafts with the `list_proposals` tool (read-tier, no approval), which also shows which drafts went out and how.
 - **Audit** from `GET /api/x/audit` (`x_audit.db`).
@@ -119,7 +119,7 @@ Media, polls, quote posts and analytics remain disabled pending individual capab
 | `x_status` | no | Configured?, handle, remaining caps. Never returns secrets. |
 | `x_post` | **always** | `text`, optional `reply_to_id` for a thread hop. Chat path requires a resolvable `proposal_id` (stored draft wins). |
 | `x_delete_post` | **always** | `tweet_id` from a previous post. |
-| `x_schedule_post` | **always** | `text` + `when` ('5m', '1h', 'daily at 9am', ISO) + optional `reply_to_id`. Approve once at booking. |
+| `x_schedule_post` | **always** | `text` + `when` (`5m`, `1h`, or an ISO time such as `2026-12-01T09:00` in the cron time zone) + optional `reply_to_id`. One post, one time: a recurring time is refused. Approve once at booking. The reply gives the stored time and state, and says `ok` only when the post is scheduled. |
 | `x_list_scheduled` | no | List scheduled X posts and their status. |
 | `x_cancel_scheduled_post` | **always** | Cancel a scheduled post before it fires (releases reserved quota). |
 
@@ -131,7 +131,8 @@ X has **no native scheduled-post API** — the `/2/broadcasts/scheduled` endpoin
 
 - **Approve once at booking.** `x_schedule_post` is always-HITL; you approve the exact draft + time when you book it. The fire is deterministic (no LLM re-reading the post).
 - **Caps + dedupe are reserved at booking.** Pending scheduled posts count toward the daily/monthly caps and the 30-day duplicate rule, so the schedule cannot be used to exceed them.
-- **Double-post guard.** A failed fire is never auto-retried on an ambiguous error (we can't know whether it reached X). A 429 is deferred by the Retry-After window (bounded); anything else is marked failed and you're notified.
+- **Double-post guard.** A failed fire is never auto-retried on an ambiguous error (we can't know whether it reached X). A 429 is deferred by the Retry-After window (bounded). A provably unsent post (the request never left, `not_sent`) is tried again a minute later, three tries in all, inside the five-minute window; anything else is marked failed and you're notified. One row that fails does not stop the rows due after it: it is held, with a notice.
+- **Rebooking.** Booking the same draft again after it was cancelled, failed or expired is a new booking at the new time. While it is still booked at another time the answer is a conflict, never "scheduled". Finished bookings are kept 90 days, then pruned.
 - **Kill-switch.** `KAZMA_X_SCHEDULE=0` disables scheduling (and `KAZMA_X_POST=0` disables posting entirely).
 
 **Timing limitation:** a scheduled post fires only while the Kazma server is

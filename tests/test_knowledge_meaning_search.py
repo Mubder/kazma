@@ -514,24 +514,42 @@ def test_with_the_real_chromadb(tmp_path, monkeypatch):
 
 
 def test_a_vector_records_its_model_and_another_models_are_embedded_again(kb, monkeypatch):
-    from kazma_core.stores import knowledge_index
+    """Re-pointed for Knowledge audit KB-E03: the tag names the embedder
+    INSTANCE that made the vector (``embedder_identity``), not the configured
+    model name -- a config change waiting for a restart, or a remote model
+    that fell back to the local one, tagged vectors with a model that had not
+    made them. A vector with no tag is re-made too (it used to count as "the
+    model of the day's", which is exactly the case nobody can verify)."""
+
+    class Other(_Embedder):
+        def encode(self, text):
+            return list(reversed(super().encode(text)))
+
+        def encode_batch(self, texts):
+            return [self.encode(t) for t in texts]
 
     _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool"])
-    monkeypatch.setattr(knowledge_index, "_embedding_model", lambda: "model-one")
     assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 2
     rows = kb.index._vector_store_for("api")._collection.rows
-    assert {meta["model"] for _v, _d, meta in rows.values()} == {"model-one"}
+    assert {meta["model"] for _v, _d, meta in rows.values()} == {
+        vsg.embedder_identity(vsg.get_encoder())}
 
-    monkeypatch.setattr(knowledge_index, "_embedding_model", lambda: "model-two")
-    assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 2
-    assert {meta["model"] for _v, _d, meta in rows.values()} == {"model-two"}
+    # A changed configuration with the same embedder running re-makes nothing.
+    monkeypatch.setenv("KAZMA_EMBED_MODEL", "some-other-model")
     assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 0
 
-    # A vector written before vectors recorded their model is the model of
-    # the day's: it is not embedded again (Chroma's $ne would have said so).
+    # Another embedder (a restart): every vector is made again by it.
+    other = Other()
+    monkeypatch.setattr(vsg, "get_encoder", lambda model_name=None: other)
+    fresh = kb.index.__class__(kb.store)
+    assert fresh.backfill_vectors(time_budget_s=30)["embedded"] == 2
+    rows = fresh._vector_store_for("api")._collection.rows
+    assert {meta["model"] for _v, _d, meta in rows.values()} == {vsg.embedder_identity(other)}
+    assert fresh.backfill_vectors(time_budget_s=30)["embedded"] == 0
+
     for _v, _d, meta in rows.values():
         meta.pop("model")
-    assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 0
+    assert fresh.backfill_vectors(time_budget_s=30)["embedded"] == 2
 
 
 def test_a_collection_of_another_size_is_rebuilt(kb, monkeypatch):
@@ -558,7 +576,6 @@ def test_a_collection_of_another_size_is_rebuilt(kb, monkeypatch):
 
     monkeypatch.setattr(vsg, "get_encoder", lambda model_name=None: Narrow())
     fresh = kb.index.__class__(kb.store)  # a new process: nothing cached
-    monkeypatch.setattr("kazma_core.stores.knowledge_index._embedding_model", lambda: "narrow")
     assert fresh.backfill_vectors(time_budget_s=30)["embedded"] == 2
     rebuilt = fresh._vector_store_for("api")._collection
     assert rebuilt is not before and {len(v) for v, _d, _m in rebuilt.rows.values()} == {16}

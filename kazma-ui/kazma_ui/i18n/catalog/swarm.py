@@ -112,6 +112,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "موافقة ومتابعة",
         "en": "Approve & Continue",
     },
+    "swarm.checkpoint_not_pending": {
+        "ar": "لم تعد نقطة التحقق هذه بانتظار قرار.",
+        "en": "This checkpoint is no longer waiting for a decision.",
+    },
     "swarm.approve_failed": {
         "ar": "فشلت الموافقة: {msg}",
         "en": "Approve failed: {msg}",
@@ -943,6 +947,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.results_appear_hint": {
         "ar": "ستظهر النتائج هنا بعد إرسال مهمة",
         "en": "Results will appear here after dispatching a task",
+    },
+    "swarm.single_operator": {
+        "ar": "يعمل السرب على تثبيت بمشغّل واحد. لهذا التثبيت مستخدمون، ومهام السرب لا تُفصل لكل مستخدم بعد، لذلك السرب متوقف هنا.",
+        "en": "The swarm works on a single-operator install. This install has platform users, and swarm tasks are not separated per user yet, so the swarm is off here.",
+    },
+    "swarm.at_capacity": {
+        "ar": "السرب ممتلئ (الحد الأقصى: {n}). انتظر حتى تنتهي مهمة قيد التشغيل ثم أعد المحاولة.",
+        "en": "The swarm is full (limit: {n}). Wait for a running task to finish, then try again.",
+    },
+    "swarm.retry_unknown_title": {
+        "ar": "قد تكون المهمة غيّرت أشياء بالفعل",
+        "en": "This task may already have changed things",
+    },
+    "swarm.retry_unknown_body": {
+        "ar": "توقفت المهمة الأصلية بعد أن شغّلت أدوات تغيّر أشياء ({tools}). إعادة المحاولة قد تكرر ذلك. هل تريد إعادة المحاولة؟",
+        "en": "The original task stopped after running tools that change things ({tools}). Retrying may do it again. Retry anyway?",
     },
     "swarm.retry_failed": {
         "ar": "فشلت إعادة المحاولة",

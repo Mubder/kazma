@@ -44,15 +44,38 @@ def test_weighted_limit_and_invalid_unicode():
     assert not validate_text("\ud800").valid
 
 
-@pytest.mark.parametrize("when", ["2030-03-10T02:30:00", "2030-11-03T01:30:00"])
-def test_dst_gap_and_fold_require_unambiguous_time(monkeypatch, when):
+def _us_dst_days() -> tuple[str, str]:
+    """Next year's US spring-forward and fall-back days (2nd Sunday of March,
+    1st Sunday of November).
+
+    Re-pointed 2026-10-14 (Scheduled audit SCH-E03): a booking is refused past
+    ``cron.timing.MAX_HORIZON`` (two years), so the fixed 2030 dates this test
+    used now fail on the horizon before the DST check is reached.
+    """
+    from datetime import date, timedelta
+
+    year = date.today().year + 1
+    march = date(year, 3, 1)
+    second_sunday = march + timedelta(days=(6 - march.weekday()) % 7 + 7)
+    nov = date(year, 11, 1)
+    first_sunday = nov + timedelta(days=(6 - nov.weekday()) % 7)
+    return second_sunday.isoformat(), first_sunday.isoformat()
+
+
+@pytest.mark.parametrize("kind", ["gap", "fold"])
+def test_dst_gap_and_fold_require_unambiguous_time(monkeypatch, kind):
     from kazma_core.cron import scheduler
     from kazma_core.x_api.booking import _parse_when
 
-    monkeypatch.setattr(scheduler, "get_cron_timezone", lambda: ZoneInfo("America/New_York"))
+    spring, fall = _us_dst_days()
+    when = f"{spring}T02:30:00" if kind == "gap" else f"{fall}T01:30:00"
+    # The booking reads the zone and its name in one settings read
+    # (``resolve_cron_zone``, SCH-E10), so that is what the test pins.
+    monkeypatch.setattr(scheduler, "resolve_cron_zone",
+                        lambda: (ZoneInfo("America/New_York"), "America/New_York"))
     with pytest.raises(ValueError, match="does not exist|occurs twice"):
         _parse_when(when)
-    assert _parse_when("2030-11-03T01:30:00-04:00") < _parse_when("2030-11-03T01:30:00-05:00")
+    assert _parse_when(f"{fall}T01:30:00-04:00") < _parse_when(f"{fall}T01:30:00-05:00")
 
 
 def test_restore_pause_never_releases_old_queue(monkeypatch):

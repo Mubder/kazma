@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -153,12 +152,13 @@ class FanOutBusAdapter(BusAdapter):
 
     Previously only one of Telegram/Discord/Slack was wired (priority order).
     With this adapter, every configured platform receives stream/report/alert
-    traffic, and ``request_approval`` returns True if **any** platform
-    approves (first yes wins; remaining waiters are cancelled).
-
-    First-yes here is the gather loop. H-12 (a Discord timeout-as-False
-    denying a later Telegram Approve) is fixed in ``shared_approvals``
-    tri-state, not by changing web ``claim_gate``.
+    traffic. ``request_approval`` posts a card on each platform; all of them
+    wait on the request's one shared outcome, which the first human
+    decision on any platform sets (an Approve, or a final Deny, owner
+    decision D7). H-12 (a Discord timeout counted as a "no" that denied a
+    later Telegram Approve) cannot recur: a platform's wait is not a vote,
+    the request's deadline is the only one (Swarm audit SW-S04, SW-S05).
+    This is the swarm bus, not web ``claim_gate``.
     """
 
     def __init__(self, adapters: list[BusAdapter]) -> None:
@@ -184,55 +184,26 @@ class FanOutBusAdapter(BusAdapter):
         )
 
     async def request_approval(self, approval: ApprovalRequest, timeout: float = 60.0) -> bool:
-        # H-12: stamp expected voter count BEFORE adapters call
-        # create_pending(expected=1). Shared-approvals tri-state lives
-        # there (True settles; False is a vote). This is the swarm bus
-        # only — web claim_gate stays first-claim 200 / second 409.
-        n = len(self._adapters)
-        if approval.task_id and n:
-            try:
-                from kazma_core.swarm import shared_approvals
-
-                shared_approvals.create_pending(
-                    approval.task_id,
-                    expected_voters=n,
-                    deadline=time.time() + max(0.5, float(timeout)),
-                    meta={"fanout": True, "platforms": n},
-                )
-            except Exception as exc:
-                logger.debug("[FanOutBus] stamp expected_voters failed: %s", exc)
+        """Every platform posts its card and waits on the request's one
+        shared outcome (``shared_approvals``): the first human decision on
+        any platform decides it -- an Approve, or a Deny, which is final
+        (owner decision D7) -- and every card then shows that outcome
+        (Swarm audit SW-S05: the platform where Reject was pressed said
+        REJECTED while another platform's Approve ran the tool). Nothing
+        here times out or votes: the request's deadline is the only one
+        (SW-S04)."""
 
         async def _one(adapter: BusAdapter) -> bool:
             try:
                 return bool(await adapter.request_approval(approval, timeout=timeout))
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
-                logger.debug(
-                    "[FanOutBus] approval on %s failed: %s",
-                    type(adapter).__name__,
-                    exc,
-                )
+                logger.warning("[FanOutBus] approval card on %s failed: %s", type(adapter).__name__, exc)
                 return False
 
-        tasks = [asyncio.create_task(_one(a)) for a in self._adapters]
-        pending: set[asyncio.Task[bool]] = set(tasks)
-        try:
-            while pending:
-                done, pending = await asyncio.wait(
-                    pending, return_when=asyncio.FIRST_COMPLETED
-                )
-                for d in done:
-                    try:
-                        if d.result():
-                            for p in pending:
-                                p.cancel()
-                            return True
-                    except Exception:
-                        continue
-            return False
-        finally:
-            for t in tasks:
-                if not t.done():
-                    t.cancel()
+        results = await asyncio.gather(*(_one(a) for a in self._adapters))
+        return any(results)
 
     async def send_alert(
         self,
@@ -253,6 +224,10 @@ class FanOutBusAdapter(BusAdapter):
 
 
 # ── Message Bus ────────────────────────────────────────────────────────────
+
+
+#: How long past a request's deadline the bus waits for an adapter that hangs.
+_APPROVAL_BACKSTOP_S = 30.0
 
 
 class SwarmMessageBus:
@@ -301,7 +276,8 @@ class SwarmMessageBus:
                 if asyncio.iscoroutine(result):
                     await result
             except Exception:
-                logger.debug("[SwarmMessageBus] subscriber callback failed", exc_info=True)
+                # A panel or stream that missed an event (SW-E14: was DEBUG).
+                logger.warning("[SwarmMessageBus] subscriber callback failed", exc_info=True)
 
     async def stream(
         self, worker_name: str, worker_role: str, content: str, level: str = "info"
@@ -371,21 +347,29 @@ class SwarmMessageBus:
                     timeout = _DEFAULT_APPROVAL_TIMEOUT
             except Exception:
                 timeout = _DEFAULT_APPROVAL_TIMEOUT
-        timeout = max(10.0, min(600.0, float(timeout)))
+            timeout = max(10.0, min(600.0, float(timeout)))
+        # An explicit timeout is the request owner's deadline (SafetyMiddleware
+        # bounds it): the card says what the row enforces, never a second value.
+        timeout = float(timeout)
 
         approval = ApprovalRequest(
             worker_name=worker_name,
             task_description=task_description,
-            proposed_output=proposed_output[:300],
+            # The card's argument block (swarm/approval_card.py) is bounded
+            # already, every name shown (SW-S03): never cut again here.
+            proposed_output=proposed_output,
             task_id=task_id,
         )
+        # The request's own deadline ends the wait (shared_approvals). This
+        # bound is a backstop for an adapter that hangs past it -- a card
+        # post or edit that never returns -- not a second deadline (SW-S04).
         try:
             return await asyncio.wait_for(
                 self._adapter.request_approval(approval, timeout=timeout),
-                timeout=timeout,
+                timeout=timeout + _APPROVAL_BACKSTOP_S,
             )
         except TimeoutError:
-            logger.warning("HITL approval timed out after %.1fs for %s", timeout, worker_name)
+            logger.warning("HITL approval adapter hung past its deadline for %s", worker_name)
             return False
 
     async def send_alert(

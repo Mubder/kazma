@@ -2361,9 +2361,10 @@ class UnifiedToolExecutor:
                         return _denied
                 except Exception:
                     logger.debug("[Unified] pre-tool hook failed", exc_info=True)
-                from kazma_core.agent.tool_registry import _hitl_approved_ctx
+                from kazma_core.agent.tool_registry import _hitl_approved_ctx, claim_call_authority
 
-                _hitl_already_approved = _hitl_approved_ctx.get()
+                # This call's approval only (SW-S01): never the work it starts.
+                _hitl_already_approved = claim_call_authority(_hitl_approved_ctx, tool_name)
                 if not _hitl_already_approved:
                     try:
                         from kazma_core.safety.hitl import get_current_thread_id
@@ -2416,8 +2417,10 @@ class UnifiedToolExecutor:
                                 # _EXTENDED_DANGER set (file_write, shell_exec).
                                 approved = await safety.check(
                                     tool_name=tool_name,
-                                    tool_args=_json.dumps(arguments, default=str)[:200],
-                                    task_id=str(arguments.get("task_id", "")),
+                                    # The id is minted by check(), never read
+                                    # from the arguments (Swarm audit SW-S02);
+                                    # the card bounds the arguments (SW-S03).
+                                    tool_args=_json.dumps(arguments, default=str),
                                     worker_name=f"mcp:{server_name}",
                                     force_danger=True,
                                 )

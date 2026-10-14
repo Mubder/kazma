@@ -71,8 +71,6 @@ def test_golden_facts_are_stored_the_way_extraction_stores_them(no_embedder, mon
     shared: list[str] = []
     monkeypatch.setattr("kazma_core.memory.state_backend.remirror_belief_by_id",
                         lambda *_a, **_k: shared.append("mirror"))
-    monkeypatch.setattr("kazma_core.memory.unified_index.upsert_unified",
-                        lambda *_a, **_k: shared.append("unified"))
     eval_golden._seed_belief(
         conn, {"subject": "Platform Team", "predicate": "owns", "object": "Kazma Gateway"}, now=1.0
     )

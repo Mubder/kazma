@@ -265,7 +265,6 @@ kazma/
 | `stores/sqlite.py` | Gateway session SQLite store |
 | `mcp_server.py` | IDE MCP server bridge |
 | `slash_commands.py` / `suggestions.py` | Command catalog / UX |
-| `swarm_notify.py` | Opt-in Telegram notify (`maybe_notify_dispatch` when `SWARM_BOT_TOKEN` is set) |
 | `telegram_format.py` / `typing_keepalive.py` / `rate_feedback.py` | Platform UX helpers |
 
 ### 2.5 Packages: CLI, TUI, skills
@@ -494,7 +493,7 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | `KAZMA_ENV` | unset | `production` for error redaction | Error detail policy |
 | `KAZMA_AUTO_MIGRATE` | `0` | No | Docker entrypoint migrate |
 | `KAZMA_SMOKE_BASE` | localhost:9090 | No | Smoke script base URL |
-| `SWARM_BOT_TOKEN` / `SWARM_CHAT_ID` | unset | Optional | Swarm notify bot |
+| `SWARM_CHAT_ID` | unset | Optional | Swarm group chat (`swarm.group_chat_id`) |
 
 ---
 

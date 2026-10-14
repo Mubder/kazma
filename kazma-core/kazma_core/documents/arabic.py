@@ -66,6 +66,8 @@ __all__ = [
     "shape_text",
     "shaping_available",
     "to_arabic_numerals",
+    "visual_order",
+    "number_in_logical_order",
     "PRESENTATION_FORMS_RE",
 ]
 
@@ -324,6 +326,61 @@ def _reorder_l2(segments: list[ShapedSegment]) -> list[ShapedSegment]:
                 ordered[start:index] = reversed(ordered[start:index])
                 start = None
     return ordered
+
+
+_NUMBER_PART = "[0-9\u0660-\u0669\u06f0-\u06f9]+(?:[.,:/\u066b\u066c][0-9\u0660-\u0669\u06f0-\u06f9]+)*"
+_SEPARATED_NUMBER_RE = re.compile(rf"^{_NUMBER_PART}(?:[-+]{_NUMBER_PART})+$")
+
+
+def number_in_logical_order(drawn: str, preceding: str) -> str:
+    """A number token read left to right off a line (an OCR word), in
+    logical order, given the text that comes before it in its paragraph.
+
+    After Arabic letters the bidi algorithm reads digits as Arabic numbers
+    (rule W2) and does not join them across "-" or "+" (W4): "2026-09-30"
+    is drawn "30-09-2026", and a reader that reads the token left to right
+    returns its parts reversed. Those are put back; a number after Latin
+    letters, or at the start (joined, drawn as written), a number whose parts
+    are joined by "/ , . :" (joined either way) and anything that is not a
+    separated number are returned unchanged.
+    """
+    start = 0
+    while start < len(drawn) and unicodedata.bidirectional(drawn[start]) not in {"EN", "AN"}:
+        start += 1
+    end = len(drawn)
+    while end > start and unicodedata.bidirectional(drawn[end - 1]) not in {"EN", "AN"}:
+        end -= 1
+    core = drawn[start:end]
+    if not core or not _SEPARATED_NUMBER_RE.match(core):
+        return drawn
+    context = next(
+        (kind for kind in (unicodedata.bidirectional(c) for c in reversed(preceding))
+         if kind in {"L", "R", "AL"}),
+        None,
+    )
+    if context != "AL":
+        return drawn
+    parts = re.split(r"([-+])", core)
+    numbers, separators = parts[0::2], parts[1::2]
+    rebuilt = [numbers[-1]]
+    for number, separator in zip(reversed(numbers[:-1]), reversed(separators), strict=True):
+        rebuilt.extend((separator, number))
+    return drawn[:start] + "".join(rebuilt) + drawn[end:]
+
+
+def visual_order(text: str, base_dir: str) -> str | None:
+    """The order the Unicode bidi algorithm draws *text* in, left to right,
+    under paragraph direction *base_dir* ("R"/"L"); ``None`` when the
+    algorithm is unavailable. Characters, not shapes: no reshaping.
+
+    The PDF reader (``parsers/pdf_rtl``) asks it which logical reading of a
+    drawn line a conforming renderer would have drawn that way.
+    """
+    try:
+        from bidi.algorithm import get_display
+    except ImportError:
+        return None
+    return str(get_display(text, base_dir="R" if base_dir == "R" else "L"))
 
 
 def shaping_available() -> bool:

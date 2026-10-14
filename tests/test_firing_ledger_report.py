@@ -103,7 +103,12 @@ def test_what_needs_a_look_comes_first(week):
     _write(app, guard, [_app_line("[universal-backup] complete: 26 DBs")] * 28
            + [_app_line("[neo4j-backup] exported 12 nodes, 3 relationships")] * 28
            + [_app_line("[restore-drill] PASS: 36/36 checks passed")] * 7
-           + [_app_line("[digest] daily digest dispatched (400 chars)")] * 7)
+           + [_app_line("[digest] daily digest dispatched (400 chars)")] * 7
+           # Re-pointed 2026-10-14 (Time Travel TT-11): the daily snapshot
+           # prune is a scheduled job the report now watches, so a week on
+           # schedule includes its seven runs.
+           + [_app_line("[TimeTravel] maintenance: deleted=0 remaining_old=0 before=10 after=10 "
+                        "vacuumed=False")] * 7)
     quiet_title, quiet_body = fl.render(fl.build_report(hours=168))
     assert "need a look" not in quiet_title
     assert not quiet_body.startswith("Needs a look")

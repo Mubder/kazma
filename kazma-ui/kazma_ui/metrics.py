@@ -172,6 +172,33 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
         except Exception as exc:
             logger.debug("Failed to append intent engine metrics: %s", exc)
 
+        # ── Memory page operator actions (Memory audit M35) ─────────────
+        from kazma_ui.memory_actions import action_counts
+
+        memory_actions = action_counts()
+        if memory_actions:
+            lines.append("# HELP kazma_memory_operator_actions_total Memory changes requested through "
+                         "/api/memory in this process, by route, whatever their outcome")
+            lines.append("# TYPE kazma_memory_operator_actions_total counter")
+            for action, count in sorted(memory_actions.items()):
+                label = action.replace("\\", "\\\\").replace('"', '\\"')
+                lines.append(f'kazma_memory_operator_actions_total{{action="{label}"}} {count}')
+
+        # ── Scheduled reminders and tasks (Scheduled audit SCH-E11) ──────
+        try:
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            sched = get_cron_scheduler()
+            if sched is not None and hasattr(sched, "metrics"):
+                lines.extend(await sched.metrics())
+        except Exception as exc:  # noqa: BLE001 — a metric must not break the page
+            logger.debug("Failed to append cron metrics: %s", exc)
+
+        # ── Knowledge Library vector repair (Knowledge audit KB-E11) ─────
+        from kazma_core.stores.knowledge_index import repair_metric_lines
+
+        lines.extend(repair_metric_lines())
+
         # ── In-process prometheus_client registry (kazma-core Counters) ──
         # Exposes counters that aren't DB-derivable — notably
         # kazma_commitment_terminal_total (PR3 loop-prevention signal) and the

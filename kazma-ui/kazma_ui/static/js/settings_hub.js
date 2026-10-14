@@ -530,6 +530,10 @@
                 const results = await Promise.all(puts);
                 const bad = results.find(x => !x.ok);
                 if (bad) throw new Error('HTTP ' + bad.status);
+                // A 200 that says {"ok": false} is a refusal too (KB-S10).
+                const bodies = await Promise.all(results.map(x => x.json().catch(() => null)));
+                const refused = bodies.find(b => b && (b.ok === false || b.status === 'error'));
+                if (refused) throw new Error(refused.error || refused.detail || 'HTTP 200');
                 showToast(_k('settings.hub.saved', 'Saved.'), 'success');
                 this.adapterRoutingSnapshot = JSON.stringify(curr);
 

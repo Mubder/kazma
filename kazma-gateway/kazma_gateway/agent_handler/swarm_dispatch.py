@@ -452,7 +452,16 @@ async def _dispatch_swarm_from_chat(
     pattern: str,
 ) -> bool:
     """Dispatch a swarm task from a chat message and send the result back."""
+    import asyncio as _asyncio
+
+    from kazma_core.swarm.single_operator import swarm_refusal
     from kazma_core.swarm.task import SwarmTask, TaskType
+
+    # A single-operator surface (SW-S16, decision D1).
+    refusal = await _asyncio.to_thread(swarm_refusal)
+    if refusal:
+        await _send_swarm_reply(msg, store, manager, thread_id, f"⚠️ {refusal}")
+        return True
 
     # Map pattern names to TaskType
     type_map = {
@@ -466,6 +475,19 @@ async def _dispatch_swarm_from_chat(
 
     # ── Phase 5: parse inline "-> @group" / "-> telegram:<id>" suffix ──
     task, target_override = _parse_output_target_suffix(task)
+    if target_override is not None:
+        # Sending a result to another chat is the /swarm config rule's
+        # (admin-only, AGENTS §46): a one-off was open to any allowlisted
+        # user (Swarm audit SW-S16).
+        from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
+
+        if not _sender_is_gateway_admin(msg):
+            await _send_swarm_reply(
+                msg, store, manager, thread_id,
+                "⛔ Sending a swarm result to another chat is admin-only, like "
+                "`/swarm config`. Dispatch without the `-> platform:chat` suffix.",
+            )
+            return True
 
     # Tag with source platform metadata
     ctx = msg.context_metadata
@@ -560,13 +582,14 @@ async def _dispatch_swarm_from_chat(
     except asyncio.TimeoutError:
         logger.error("[agent-handler] Swarm dispatch timed out after %.0fs for thread %s",
                      wait_budget, thread_id)
-        # Honest status (audit M-S3): the engine finalizes a cancelled task
-        # as CANCELLED — its workers' partial work is discarded, nothing runs
-        # in the background. The old "may still be running" message lied.
+        # The engine stops the work when this wait ends and records the
+        # ending with what had run (Swarm audit SW-E04). Nothing is undone:
+        # a tool that changed something before the stop did change it.
         error_reply = (
-            f"⚠️ Swarm task cancelled after {count_noun(round(wait_budget / 60), 'minute')} "
-            "(gateway wait budget). Partial work was discarded — re-dispatch "
-            "with a narrower prompt or fewer steps."
+            f"⚠️ Swarm task stopped after "
+            f"{count_noun(round(wait_budget), 'second') if wait_budget < 120 else count_noun(round(wait_budget / 60), 'minute')} "
+            "(gateway wait budget). Anything its workers had already done stays done: "
+            "check the task in the Swarm page's Task History before running it again."
         )
         await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
         await _maybe_send_to_output_target(

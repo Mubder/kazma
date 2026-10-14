@@ -190,6 +190,11 @@
                 if (!resp.ok) {
                     throw new Error('HTTP ' + resp.status);
                 }
+                // A 200 that says {"ok": false} is a refusal too (KB-S10).
+                const saved = await resp.json().catch(() => ({}));
+                if (saved && (saved.ok === false || saved.status === 'error')) {
+                    throw new Error(saved.error || saved.detail || 'HTTP ' + resp.status);
+                }
                 showToast(_k('settings.int.voice_settings_saved', 'Voice settings saved'), 'success');
             } catch (e) {
                 showToast(_k('settings.int.failed_to_save_voice_settings', 'Failed to save voice settings: ') + e.message, 'error');

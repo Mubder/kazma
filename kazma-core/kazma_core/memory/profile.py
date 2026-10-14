@@ -22,7 +22,7 @@ import threading
 import time
 from typing import Any
 
-__all__ = ["ABOUT_MAX_CHARS", "ABOUT_MARKER", "about_block", "get_about", "set_about"]
+__all__ = ["ABOUT_MAX_CHARS", "ABOUT_MARKER", "about_block", "about_for_turn", "get_about", "set_about"]
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +69,31 @@ def get_about(tenant_id: str, *, conn: sqlite3.Connection | None = None) -> dict
             conn.close()
 
 
+def about_for_turn(tenant_id: str) -> dict[str, Any]:
+    """What a turn of *tenant_id* is shown (Memory audit M07).
+
+    Its own text. With tenants not enforced, a turn of a per-platform or
+    per-user tenant ("web", "web:sess-1") shows the install's own About me
+    when it has none -- the Memory page saves it there, and the turns never
+    read it (the page still said "Kazma reads this at the start of every
+    reply"). Under enforcement a tenant sees only its own."""
+    from kazma_core.memory.config import memory_tenant_enforced
+
+    tid = tenant_id or "default"
+    out = get_about(tid)
+    if not out["about"] and tid != "default" and not memory_tenant_enforced():
+        return get_about("default")
+    return out
+
+
 def set_about(tenant_id: str, text: str, *, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
     """Save the tenant's text (trimmed; empty removes it). Longer than
     :data:`ABOUT_MAX_CHARS` is refused, never cut: the user wrote all of it."""
     about = str(text or "").strip()
     if len(about) > ABOUT_MAX_CHARS:
-        return {"ok": False, "error": f"About me is {len(about)} characters; the limit is {ABOUT_MAX_CHARS}."}
+        # A code the page words in its own language (Memory audit M32).
+        return {"ok": False, "error": "about_too_long", "code": "about_too_long",
+                "length": len(about), "max": ABOUT_MAX_CHARS}
     own = conn is None
     conn = conn or _open()
     try:

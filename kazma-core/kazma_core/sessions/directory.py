@@ -123,23 +123,32 @@ def _open_takeover_enabled() -> bool:
     )
 
 
-def record_thread_owner(thread_id: str, sender_id: str) -> None:
+def record_thread_owner(thread_id: str, sender_id: str) -> bool:
     """Record the owning sender of a thread — FIRST writer wins.
 
     Setdefault semantics: never overwritten, so a later ``/session``
     take-over cannot transfer ownership to the taking-over sender. Called
-    at thread-creation sites (named seasons, forks, first bind).
+    at thread-creation sites (named seasons, forks, first bind). Blocking (a
+    settings write): call it off the event loop.
+
+    Returns False when the record could not be written, logged at WARNING:
+    a chat nobody owns refuses every approval on the chat apps, and the
+    failure was swallowed at DEBUG (Time Travel audit TT-07: a fork made
+    that way could never be approved on).
     """
     if not thread_id or not sender_id:
-        return
+        return False
     try:
         from kazma_core.config_store import get_config_store
 
         key = f"{_OWNER_KEY_PREFIX}{thread_id}"
         store = get_config_store()
         store.set_if_absent(key, sender_id, category="session")
+        return True
     except Exception:
-        logger.debug("[sessions] owner record failed", exc_info=True)
+        logger.warning("[sessions] owner of %s NOT recorded: approvals on it will be refused",
+                       thread_id, exc_info=True)
+        return False
 
 
 def thread_owner(thread_id: str, *, strict: bool = False) -> str:
@@ -566,11 +575,12 @@ async def bind_sender_to_thread(
     """
     if not sender_id or not thread_id:
         return None
-    remember_sender_thread(sender_id, thread_id)
+    # Settings writes: off the event loop (AGENTS §35).
+    await asyncio.to_thread(remember_sender_thread, sender_id, thread_id)
     # First binder becomes the owner of previously-unowned threads (web /
     # legacy); setdefault semantics — an existing owner is never replaced,
     # so a take-over cannot transfer ownership (audit H-3).
-    record_thread_owner(thread_id, sender_id)
+    await asyncio.to_thread(record_thread_owner, thread_id, sender_id)
 
     if session_store is not None and delivery_ctx is not None:
         try:

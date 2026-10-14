@@ -151,6 +151,15 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "kazma-core/kazma_core/documents/parser_worker.py": "sandboxed: parses untrusted documents with a scrubbed environment",
     "kazma-core/kazma_core/documents/renderer_worker.py": "sandboxed: renders documents with a scrubbed environment",
     "kazma-core/kazma_core/documents/mutation_worker.py": "sandboxed: mutates documents with a scrubbed environment",
+    "kazma-core/kazma_core/documents/worker_entry.py": (
+        "runs inside the document job container on untrusted input: no "
+        "network, no mounts, and no Kazma secret may exist there"
+    ),
+    "kazma-core/kazma_core/documents/worker_broker.py": (
+        "the only holder of the Docker engine socket for document jobs: its "
+        "configuration is its command line and token file, and loading an "
+        "install's .env would hand Kazma's secrets to the socket holder"
+    ),
     "kazma-gateway/kazma_gateway/mcp_server.py": (
         "stdio IDE server that runs shell commands for an external client; it "
         "never imported kazma_core at load, so it never had the secrets"
@@ -166,6 +175,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "scripts/verify_docx_rtl.py": "renders built-in RTL samples",
     "scripts/smoke_topic_shift_p0.py": "pure intent-policy smoke; no server, no settings",
     "scripts/memory_bench.py": "builds and scores the retrieval benchmark on a temp database",
+    "scripts/memory_soak.py": (
+        "soaks the memory lifecycle on private temporary stores; an install's "
+        ".env would point thousands of writes at its databases"
+    ),
     "scripts/shipped_defaults.py": "compares kazma.yaml with its committed snapshot; reads no install",
 }
 

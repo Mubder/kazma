@@ -171,6 +171,50 @@ jobs:
         # website gets a fresh copy daily from sync-metrics.yml.
         run: python scripts/generate_metrics.py --check-readme
 
+  document-worker-container:
+    name: Document worker container profile (real Docker)
+    runs-on: ubuntu-latest
+    # KAZMA_DOCUMENT_WORKER_ISOLATION=container: untrusted documents run in
+    # broker-owned, attested containers (no network, no mounts). Its
+    # qualification needs a real Docker engine and the real worker image,
+    # so it skips everywhere else; here a skip fails the job, because a
+    # skipped qualification proves nothing. First qualified 2026-10-13 on
+    # Docker Desktop; this job is the Linux Docker Engine run.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install deps
+        run: pip install -e ".[test]"
+      - name: Build the worker and broker images
+        run: |
+          docker version --format 'engine {{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'
+          docker build -f deploy/document-worker/Dockerfile -t kazma-document-worker:ci .
+          docker build -f deploy/document-broker/Dockerfile -t kazma-document-broker:ci .
+      - name: Attest the container policy from inside the image
+        run: |
+          python -c "import secrets; print(secrets.token_urlsafe(48))" > "$RUNNER_TEMP/broker-token"
+          python -I kazma-core/kazma_core/documents/worker_broker.py --image kazma-document-worker:ci \
+            --token-file "$RUNNER_TEMP/broker-token" --name ciattest --attest-only > "$RUNNER_TEMP/attest.json"
+          python -c "import json,sys; r=json.load(open(sys.argv[1])); print(r['verified'], r['problems'], r['image_id'])" "$RUNNER_TEMP/attest.json"
+      - name: Qualification suite (GATE, no skips)
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_document_worker_container_docker.py tests/test_document_worker_container.py \
+            tests/test_weasyprint_renderer.py -v -rs --timeout=300 -p no:cacheprovider | tee "$RUNNER_TEMP/qualification.log"
+          if grep -Eq "[0-9]+ skipped" "$RUNNER_TEMP/qualification.log"; then
+            echo "::error::a container-profile qualification test was skipped"; exit 1
+          fi
+        env:
+          KAZMA_TEST_DOCUMENT_WORKER_IMAGE: kazma-document-worker:ci
+      - name: Compose-shaped topology (broker container + socket-less client)
+        run: python scripts/document_broker_topology.py kazma-document-worker:ci kazma-document-broker:ci
+      - name: No job container is left behind
+        if: always()
+        run: test -z "$(docker ps -aq --filter label=io.kazma.document-worker)"
+
   postgres:
     name: Tests (Postgres backend)
     runs-on: ubuntu-latest
@@ -510,6 +554,36 @@ jobs:
         run: python -m pytest tests/e2e/test_text_follows_its_language.py -q --timeout=900
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Research completion reaches the bell and its saved result (2026-10-12)
+        # A finished research session becomes a durable bell alert in both
+        # UIs; its link opens the SAVED result (still there after a reload,
+        # not a toast), and Settings reads the monitor's settings. It ran in
+        # no job from the day it was written (found 2026-10-13).
+        run: python -m pytest tests/e2e/test_acquisition_alerts.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Swarm page through a proxy that cuts long answers (2026-10-14)
+        # Swarm audit SW-S08/SW-S09: approve answers 202, the page reads every
+        # answer and follows the task on a resumable stream, in English and
+        # Arabic, through a proxy that cuts a request held open (the
+        # Cloudflare Tunnel shape the live page sits behind).
+        run: python -m pytest tests/e2e/test_swarm_through_a_cutting_proxy.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Scheduled page reads every status in Arabic (2026-10-14)
+        # Scheduled audit SCH-S04/SCH-S08: every cron and X status the page
+        # projects, a booked and a held X post, and the clarify card of a
+        # real paused cancel turn, rendered in Arabic.
+        run: python -m pytest tests/e2e/test_scheduled_reads_in_arabic.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Time travel page restores and reads in Arabic (2026-10-14)
+        # Time Travel audit TT-Q1: reached by the sidebar, a restore that
+        # rewinds the chat, the restored chat, Arabic with no English, and
+        # the error state.
+        run: python -m pytest tests/e2e/test_time_travel_page.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,
@@ -530,7 +604,10 @@ jobs:
             tests/e2e/test_instant_reply_closes.py \
             tests/e2e/test_dashboard_session_table.py \
             tests/e2e/test_settings_restore_browser.py \
-            tests/e2e/test_soft_nav_into_chat.py
+            tests/e2e/test_soft_nav_into_chat.py \
+            tests/e2e/test_about_me_limit_arabic.py \
+            tests/e2e/test_memory_forget_older.py \
+            tests/e2e/test_memory_hostile_type.py
         env:
           KAZMA_DB_BACKEND: sqlite
 

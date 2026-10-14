@@ -200,7 +200,10 @@ class _PublicationStore:
             if existing:
                 if existing["payload_hash"] != digest:
                     raise PublicationConflictError("The publication key is already bound to different text or target.")
-                return dict(existing)
+                # A replay: the caller must judge it (a key already cancelled,
+                # failed or booked at another time is not a new booking --
+                # Scheduled audit SCH-E08).
+                return {**dict(existing), "_replayed": True}
             if kind == "post":
                 duplicate = conn.execute(
                     "SELECT id, state FROM x_operations WHERE tenant_id = ? AND account_id = ? AND text_hash = ? "
@@ -481,6 +484,30 @@ class _PublicationStore:
             row = conn.execute("SELECT * FROM x_operations WHERE id = ?", (ident,)).fetchone()
             self._event(conn, row, {"action": "legacy_booking_held"})
             return dict(row)
+
+    def prune_terminal(self, *, older_than_days: int = 90, now: float | None = None) -> dict[str, int]:
+        """Retention by age (Scheduled audit SCH-E13): operations that ended
+        without publishing (cancelled, failed, expired) and their events,
+        delivered notices and finished projections, older than the window.
+
+        Published operations stay: the rolling caps and the duplicate rule
+        read them, and the history import would bring them back.
+        """
+        cutoff = (time.time() if now is None else now) - max(1, older_than_days) * 86400
+        with self._connection(transaction=True) as conn:
+            ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM x_operations WHERE state IN ('cancelled', 'failed_permanent', 'expired') "
+                "AND updated_at < ?", (cutoff,))]
+            for ident in ids:
+                conn.execute("DELETE FROM x_operation_events WHERE operation_id = ?", (ident,))
+                conn.execute("DELETE FROM x_projection_outbox WHERE operation_id = ?", (ident,))
+                conn.execute("DELETE FROM x_operations WHERE id = ?", (ident,))
+            notices = conn.execute(
+                "DELETE FROM x_notification_outbox WHERE delivered_at IS NOT NULL AND delivered_at < ?",
+                (cutoff,)).rowcount
+            projections = conn.execute(
+                "DELETE FROM x_projection_outbox WHERE done_at IS NOT NULL AND done_at < ?", (cutoff,)).rowcount
+        return {"operations": len(ids), "notices": int(notices or 0), "projections": int(projections or 0)}
 
     def hold(self, ident: str, *, tenant_id: str, reason: str) -> bool:
         """A live account/policy change holds unsent work instead of rerouting it."""

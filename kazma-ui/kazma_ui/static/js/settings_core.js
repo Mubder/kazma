@@ -87,6 +87,7 @@
             intake_max_bytes: 52428800,
             intake_max_files: 10,
             ocr_enabled: true,
+            ocr_tables: true,
             worker_timeout_seconds: 300,
             worker_memory_mb: 1024,
             capacity_storage_free_floor_bytes: 536870912,
@@ -117,7 +118,6 @@
         memoryBackendsStateCap: { detail: '' },
         memoryBackendsGraphCap: { detail: '' },
         memoryMergeKb: true,
-        memoryPromoteKb: true,
         memorySmartSearch: false,
         memoryExplainRecall: true,
         // "About me" (plan C1): the user's own words, shown to the model on
@@ -592,7 +592,6 @@
                     const cfg = await self._fetch('/api/settings/memory/merge-kb');
                     if (cfg) {
                         if (cfg.merge_knowledge_into_chat != null) self.memoryMergeKb = !!cfg.merge_knowledge_into_chat;
-                        if (cfg.promote_kb_to_episodes != null) self.memoryPromoteKb = !!cfg.promote_kb_to_episodes;
                         if (cfg.smart_search != null) self.memorySmartSearch = !!cfg.smart_search;
                         if (cfg.explain_recall != null) self.memoryExplainRecall = !!cfg.explain_recall;
                     }

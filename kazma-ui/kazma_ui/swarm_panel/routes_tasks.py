@@ -273,47 +273,70 @@ def register_tasks_routes(
     ) -> Any:
         """Execute dispatch/broadcast and automatically route the result on completion."""
         try:
-            if is_broadcast:
-                result = await engine.broadcast(swarm_task)
-            else:
-                result = await engine.dispatch(swarm_task)
-            await _route_task_result(result)
-            try:
-                from kazma_gateway.swarm_notify import maybe_notify_dispatch
-
-                await maybe_notify_dispatch(
-                    task_id=str(getattr(swarm_task, "id", "") or ""),
-                    prompt=str(getattr(swarm_task, "prompt", "") or ""),
-                    status=str(getattr(result, "status", None) or "done"),
-                    summary=str(
-                        getattr(result, "aggregated_output", None)
-                        or getattr(result, "synthesized_output", None)
-                        or ""
-                    ),
-                )
-            except Exception:
-                logger.debug("[Swarm] notify hook skipped", exc_info=True)
+            # One path for every task type, broadcasts included: dispatch()
+            # admits, records RUNNING, tenant-stamps and finalizes (Swarm
+            # audit SW-S06: the broadcast route called engine.broadcast and
+            # skipped all four). ``is_broadcast`` is the task's own type.
+            result = await engine.dispatch(swarm_task)
+            # The result goes to the output target -- the one route swarm
+            # results take. The separate swarm-bot notifier (a fourth
+            # notifier beside AGENTS §33's three, reporting a send Telegram
+            # refused as sent) was removed (Swarm audit SW-S15).
+            if not await _route_task_result(result):
+                logger.info("[Swarm] task '%s': no output target took the result",
+                            getattr(swarm_task, "id", ""))
             return result
         except Exception as exc:
             logger.exception("[Swarm] Task execution failed under auto-routing wrapper")
-            error_msg = f"⚠️ Swarm task failed: {exc}"
-            await _maybe_send_to_output_target_fallback(error_msg)
-            try:
-                from kazma_gateway.swarm_notify import maybe_notify_dispatch
+            # The chat gets a safe message; the exception's text (paths,
+            # hosts, internals) stays in the log (SW-S15).
+            from kazma_core.exceptions import sanitize_error
 
-                await maybe_notify_dispatch(
-                    task_id=str(getattr(swarm_task, "id", "") or ""),
-                    prompt=str(getattr(swarm_task, "prompt", "") or ""),
-                    status="failed",
-                    summary=str(exc)[:400],
-                )
-            except Exception:
-                logger.debug("[Swarm] notify hook skipped", exc_info=True)
+            error_msg = f"Swarm task '{getattr(swarm_task, 'id', '')}' failed. {sanitize_error(exc)}"
+            await _maybe_send_to_output_target_fallback(error_msg)
             raise exc
+
+    def _settle_handle(svc: Any, task_id: str, handle: asyncio.Task) -> None:
+        """A background dispatch ended: drop its handle and retrieve its
+        outcome (Swarm audit SW-S15: the wrapper re-raises, and nothing read
+        the exception -- "Task exception was never retrieved" at exit). The
+        failure itself was logged by the wrapper; the task row holds it."""
+        svc.unregister_task_handle(task_id)
+        if handle.cancelled():
+            return
+        exc = handle.exception()
+        if exc is not None:
+            logger.info("[Swarm] background task '%s' ended with %s", task_id, type(exc).__name__)
+
+    def _capacity_refusal(cap: int, message: str | None = None) -> JSONResponse:
+        """The swarm is full: HTTP 429 with the engine's own message."""
+        return JSONResponse(
+            {
+                "status": "error",
+                "code": "swarm_at_capacity",
+                "message": message or (
+                    f"Swarm at capacity ({cap} concurrent tasks). Wait for a running "
+                    "task to finish, or raise swarm.max_concurrent_tasks."
+                ),
+                "max_concurrent_tasks": cap,
+            },
+            status_code=429,
+            headers={"Retry-After": "30"},
+        )
 
     @router.post("/api/swarm/dispatch", dependencies=[Depends(rate_limit("swarm_dispatch", 20))])
     async def swarm_dispatch(payload: dict[str, Any]) -> JSONResponse:
         """Dispatch a task to one or more workers."""
+        from kazma_core.swarm.limits import payload_problem
+
+        # Bounded inputs (Swarm audit SW-S14): 0, negative, NaN and huge
+        # timeouts, oversize text and too many workers or checkpoints.
+        problem = payload_problem(payload)
+        if problem is not None:
+            return JSONResponse(
+                {"status": "error", "code": problem[0], "message": problem[1]},
+                status_code=422,
+            )
         worker_names = payload.get("workers", [])
         task = str(payload.get("task", "")).strip()
         context = str(payload.get("context", ""))
@@ -467,6 +490,15 @@ def register_tasks_routes(
                 }
             )
 
+        # A full swarm answers 429 with its message before anything is
+        # queued, in the foreground and the background alike (SW-S06): the
+        # background dispatch used to answer "running" for a task the engine
+        # then refused.
+        capacity = getattr(engine, "at_capacity", None)
+        cap = capacity() if callable(capacity) else None
+        if isinstance(cap, int) and not isinstance(cap, bool):
+            return _capacity_refusal(cap)
+
         swarm_task = SwarmTask(
             prompt=task,
             context=context,
@@ -481,9 +513,9 @@ def register_tasks_routes(
             if background:
                 _handle = asyncio.create_task(_run_and_route_task(engine, swarm_task, is_broadcast=True))
                 svc.register_task_handle(swarm_task.id, _handle)
-                # Clean up handle on completion to prevent memory leak
+                # Clean up handle on completion, and retrieve its outcome.
                 _handle.add_done_callback(
-                    lambda h, tid=swarm_task.id: svc.unregister_task_handle(tid)
+                    lambda h, tid=swarm_task.id: _settle_handle(svc, tid, h)
                 )
                 return JSONResponse({
                     "status": "ok",
@@ -497,9 +529,9 @@ def register_tasks_routes(
             if background:
                 _handle = asyncio.create_task(_run_and_route_task(engine, swarm_task, is_broadcast=False))
                 svc.register_task_handle(swarm_task.id, _handle)
-                # Clean up handle on completion to prevent memory leak
+                # Clean up handle on completion, and retrieve its outcome.
                 _handle.add_done_callback(
-                    lambda h, tid=swarm_task.id: svc.unregister_task_handle(tid)
+                    lambda h, tid=swarm_task.id: _settle_handle(svc, tid, h)
                 )
                 return JSONResponse({
                     "status": "ok",
@@ -509,6 +541,11 @@ def register_tasks_routes(
                     "dispatched": dispatched,
                 })
             task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=False)
+        if task_result is not None and (task_result.metadata or {}).get("admission_denied"):
+            return _capacity_refusal(
+                int((task_result.metadata or {}).get("max_concurrent_tasks") or 0),
+                task_result.error,
+            )
         results = [item.to_dict() for item in task_result.worker_results]
 
         # Include checkpoint info for HITL paused pipelines.
@@ -581,20 +618,19 @@ def register_tasks_routes(
         store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
         if store is not None:
             if q:
-                all_tasks, _ = store.list_tasks(
-                    page=1,
-                    page_size=10000,
+                # In SQL, paged (Swarm audit SW-S14): the search read a page
+                # of at most 100 tasks and filtered it in Python, so an older
+                # match was never found.
+                tasks, total = store.list_tasks(
+                    page=page,
+                    page_size=page_size,
                     status=status,
                     task_type=task_type,
                     worker=worker,
                     metadata_filter=metadata_filter,
-                    include_count=False,
+                    include_count=True,
+                    query=q[:200],
                 )
-                q_lower = q.lower()
-                filtered = [t for t in all_tasks if q_lower in (t.prompt or "").lower()]
-                total = len(filtered)
-                start_idx = (page - 1) * page_size
-                tasks = filtered[start_idx:start_idx + page_size]
             else:
                 tasks, total = store.list_tasks(
                     page=page,
@@ -739,22 +775,38 @@ def register_tasks_routes(
                 status_code=409,
             )
 
-        result = await engine.approve_checkpoint(task_id)
+        # Claim the checkpoint and start the resumed run, then answer at once
+        # (Swarm audit SW-S08): the run is recorded RUNNING before anything
+        # resumes, and its progress and ending reach the page on the task
+        # stream. The route held the request until the whole remaining
+        # pipeline finished, and a proxy cut it with the work still running.
+        result = await engine.approve_checkpoint(task_id, wait=False)
         if result is None:
             return JSONResponse(
-                {"status": "error", "message": f"Failed to approve checkpoint for task '{task_id}'"},
-                status_code=500,
+                {"status": "error", "code": "not_pending", "task_id": task_id,
+                 "message": f"Checkpoint for task '{task_id}' is no longer pending"},
+                status_code=409,
             )
-
-        return JSONResponse({
-            "status": result.status,
-            "message": "Checkpoint approved, pipeline resumed",
-            "task_id": result.task_id,
-            "worker_results": [item.to_dict() for item in result.worker_results],
-            "aggregated_output": result.aggregated_output,
-            "error": result.error,
-            "metadata": result.metadata,
-        })
+        if (result.metadata or {}).get("admission_denied"):
+            return JSONResponse(
+                {"status": "error", "code": "swarm_at_capacity", "task_id": task_id,
+                 "task_status": "paused", "message": result.error,
+                 "max_concurrent_tasks": (result.metadata or {}).get("max_concurrent_tasks")},
+                status_code=429,
+                headers={"Retry-After": "30"},
+            )
+        if result.status != "running":
+            # Already ended (a stale card): nothing was resumed.
+            return JSONResponse(
+                {"status": "error", "code": "not_pending", "task_id": task_id,
+                 "task_status": result.status, "message": result.error or "The task already ended"},
+                status_code=409,
+            )
+        return JSONResponse(
+            {"status": "ok", "task_status": "running", "task_id": task_id,
+             "message": "Checkpoint approved, pipeline resumed"},
+            status_code=202,
+        )
 
     @router.post("/api/swarm/tasks/{task_id}/reject")
     async def swarm_reject_checkpoint(task_id: str, request: Request) -> JSONResponse:
@@ -792,12 +844,16 @@ def register_tasks_routes(
         result = await engine.reject_checkpoint(task_id)
         if result is None:
             return JSONResponse(
-                {"status": "error", "message": f"Failed to reject checkpoint for task '{task_id}'"},
-                status_code=500,
+                {"status": "error", "code": "not_pending", "task_id": task_id,
+                 "message": f"Checkpoint for task '{task_id}' is no longer pending"},
+                status_code=409,
             )
 
         return JSONResponse({
-            "status": result.status,
+            # ok|error, and the task's own status beside it (SW-S08: the
+            # result status "failed" read as an error to the page).
+            "status": "ok",
+            "task_status": result.status,
             "message": "Checkpoint rejected, pipeline aborted",
             "task_id": result.task_id,
             "worker_results": [item.to_dict() for item in result.worker_results],
@@ -818,8 +874,8 @@ def register_tasks_routes(
                 {"status": "error", "message": "Swarm engine not available"},
                 status_code=503,
             )
-        # A task in flight, or a pipeline paused before a restart: that one is
-        # restored into history only, and the panel offers Cancel on it too.
+        # A task in flight, or a pipeline paused before a restart (restored
+        # as a paused in-flight task, SW-E09): the panel offers Cancel on both.
         active = engine.get_active_task(task_id) if hasattr(engine, "get_active_task") else getattr(engine, "_active_tasks", {}).get(task_id)
         if active is None:
             task_obj = engine.get_task(task_id)
@@ -850,7 +906,23 @@ def register_tasks_routes(
                 {"status": "error", "message": "Swarm engine not available"},
                 status_code=503,
             )
-        new_task = await engine.retry_task(task_id)
+        from kazma_core.swarm.task_control import RetryNeedsAcknowledgement
+
+        acknowledge = request.query_params.get("acknowledge_unknown") in ("1", "true")
+        try:
+            new_task = await engine.retry_task(task_id, acknowledge_unknown=acknowledge)
+        except RetryNeedsAcknowledgement as exc:
+            # The original may already have changed things: the page asks the
+            # operator, then retries with acknowledge_unknown=1 (SW-E08).
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "code": "retry_outcome_unknown",
+                    "message": str(exc),
+                    "tools": exc.tools,
+                },
+                status_code=409,
+            )
         if new_task is None:
             return JSONResponse(
                 {"status": "error", "message": f"Task '{task_id}' not found"},
@@ -861,7 +933,7 @@ def register_tasks_routes(
         svc = get_swarm_service()
         svc.register_task_handle(new_task.id, handle)
         handle.add_done_callback(
-            lambda h, tid=new_task.id: svc.unregister_task_handle(tid)
+            lambda h, tid=new_task.id: _settle_handle(svc, tid, h)
         )
         return JSONResponse(
             {

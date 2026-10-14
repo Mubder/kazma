@@ -58,19 +58,23 @@ tools:
       at booking — the operator approves the exact draft and time once. Kazma
       stores it and publishes it at the appointed time (X has no native post
       scheduling). Daily/monthly caps and the 30-day duplicate rule are
-      enforced at booking. Args: text (required), when (required — '5m',
-      '1h', 'daily at 9am', or ISO timestamp), proposal_id (required — the
-      saved proposal item id), reply_to_id (optional). The post fires only
-      while the Kazma server is running.
+      enforced at booking. Args: text (required), when (required, once —
+      '30m', '2h', or a date and time read in the operator's zone; an X post
+      does not repeat), proposal_id (required — the saved proposal item id),
+      reply_to_id (optional). Rebooking a draft already booked at another
+      time is a conflict. The post fires only while the Kazma server is
+      running.
     category: social
     prompt_chain:
       - "جدول تغريدة لتنشر لاحقًا بعد موافقتي"
   x_list_scheduled:
     arabic_name: "عرض التغريدات المجدولة"
     description: >
-      List scheduled X posts with their status (pending, fired, cancelled,
-      failed), text and fire time. Read-only. Saved drafts that were never
-      posted or booked are read with list_proposals.
+      List scheduled X posts with their status (managed -- booked and waiting
+      to publish --, held for review, sending, outcome_unknown, fired,
+      cancelled, failed, expired), text and fire time, plus each booking's
+      publication operation and its state. Read-only. Saved drafts that were
+      never posted or booked are read with list_proposals.
     category: social
     prompt_chain:
       - "اعرض التغريدات المجدولة"

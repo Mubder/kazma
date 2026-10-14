@@ -1112,7 +1112,7 @@
                     body: JSON.stringify({ retention: n }),
                 });
                 const data = await resp.json();
-                if (data.status === 'error') {
+                if (!resp.ok || data.status === 'error' || data.ok === false) {
                     showToast(data.error || _t('settings.save_failed', 'Save failed'), 'error');
                 } else {
                     showToast(window.kazmaCount('settings.retention_saved', n), 'success');

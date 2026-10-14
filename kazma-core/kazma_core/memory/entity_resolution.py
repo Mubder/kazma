@@ -38,14 +38,40 @@ __all__ = [
 _HIGH_STAKES_TYPES = frozenset({"person", "project"})
 
 
-def slug(text: str) -> str:
-    """Canonical slug for an entity label."""
-    import re
+#: Unicode general categories an id keeps: letters, marks (an Arabic hamza
+#: seat, a Devanagari vowel sign) and digits, of every script.
+_ID_CATEGORIES = ("L", "M", "N")
+_ID_MAX = 80
 
-    raw = (text or "").strip().lower()
-    s = re.sub(r"[^a-z0-9_]+", "_", raw)
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s[:80] or "entity"
+
+def slug(text: str) -> str:
+    """The id of an entity label, in any script -- the one id rule (Memory
+    audit M02, 2026-10-13).
+
+    NFKC, casefolded; the letters, marks and digits of every script kept,
+    every other run one ``_``, at most 80 characters. ASCII labels get the
+    id they always had. The rule kept ``a-z0-9`` only, with ``"entity"`` for
+    whatever was left empty: every all-Arabic, Persian or Chinese name became
+    ``entity``, so "شركة الخليج located_in الكويت" was superseded by "مطعم
+    البحر located_in دبي", and "أحمد Smith" became ``smith``. Spellings that
+    differ only by vowel marks or letter forms are matched through
+    ``documents.arabic.fold_for_search`` (the alias hash), never folded into
+    the id. A label with no letter or digit (an emoji) gets an id from its own
+    text. An empty label has no id: :class:`ValueError`.
+    """
+    import re
+    import unicodedata
+
+    norm = unicodedata.normalize("NFKC", text or "").casefold().strip()
+    if not norm:
+        raise ValueError("an entity label is required")
+    kept = "".join(
+        ch if ch == "_" or unicodedata.category(ch)[0] in _ID_CATEGORIES else "_" for ch in norm
+    )
+    s = re.sub(r"_+", "_", kept).strip("_")[:_ID_MAX].strip("_")
+    if not s:
+        return "x_" + hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+    return s
 
 
 def canonical_entity_id(conn, eid: str, *, _max_chain: int = 8) -> str:
@@ -107,8 +133,15 @@ def entity_vocabulary(conn, *, tenant_id: str, limit: int = 60) -> list[str]:
 
 
 def alias_hash(text: str) -> str:
-    """Stable hash of a normalized alias for exact-match tier 1."""
-    norm = " ".join((text or "").strip().lower().split())
+    """Stable hash of a normalized alias for exact-match tier 1.
+
+    Normalized with the search fold (``documents.arabic.fold_for_search``):
+    "أحمد" and "أحمدُ", or "إسلام" and "اسلام", are one name. For ASCII it is
+    the lower-cased, space-collapsed text it always was, so stored hashes
+    still match."""
+    from kazma_core.documents.arabic import fold_for_search
+
+    norm = fold_for_search(text or "")
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
 
 
@@ -148,26 +181,19 @@ def resolve_entity(
         ).fetchone()
         if existing:
             eid = existing["id"] if isinstance(existing, sqlite3.Row) else existing[0]
+            _store_name_vector(conn, eid, tenant_id, query_vector)
             return {"canonical_id": eid, "action": "exact_match"}
     except Exception:
         logger.debug("[entity_resolve] tier-1 lookup failed", exc_info=True)
 
-    # ── Tier 2: vector similarity (if vectors provided) ──
+    # ── Tier 2: vector similarity ──
+    # The nearest stored name vector (Memory audit M18): every extraction
+    # embedded every entity name of the tenant to compare against.
     v2 = (cfg or {}).get("v2") or {}
     threshold = float(v2.get("entity_vector_merge_threshold", 0.12))
-    if query_vector and candidate_vectors:
+    if query_vector:
         try:
-            import numpy as np
-
-            q = np.frombuffer(query_vector, dtype=np.float32)
-            best_id = None
-            best_dist = float("inf")
-            for eid, evec in candidate_vectors.items():
-                v = np.frombuffer(evec, dtype=np.float32)
-                dist = float(np.linalg.norm(q - v))
-                if dist < best_dist:
-                    best_dist = dist
-                    best_id = eid
+            best_id, best_dist = _nearest_entity(conn, tenant_id, query_vector, candidate_vectors)
             if best_id is not None and best_dist < threshold:
                 # High-stakes → tier-3 LLM when enabled, else quarantine
                 if is_high_stakes:
@@ -195,7 +221,7 @@ def resolve_entity(
                         # it, and entity_merges enforces that foreign key.
                         _create_entity(
                             conn, canonical, norm_name, ahash, entity_type, tenant_id,
-                            is_high_stakes,
+                            is_high_stakes, vector=query_vector,
                         )
                         _quarantine_merge(
                             conn,
@@ -217,8 +243,75 @@ def resolve_entity(
             logger.warning("[entity_resolve] tier-2 vector match failed", exc_info=True)
 
     # ── No match: create a new canonical entity ──
-    _create_entity(conn, canonical, norm_name, ahash, entity_type, tenant_id, is_high_stakes)
+    _create_entity(conn, canonical, norm_name, ahash, entity_type, tenant_id, is_high_stakes,
+                   vector=query_vector)
     return {"canonical_id": canonical, "action": "create"}
+
+
+def _nearest_entity(
+    conn: sqlite3.Connection, tenant_id: str, query_vector: bytes,
+    candidate_vectors: dict[str, bytes] | None,
+) -> tuple[str | None, float]:
+    """``(id, distance)`` of the nearest entity name, the L2 distance of unit
+    vectors (the threshold's unit). *candidate_vectors*, when a caller has
+    them, are scanned; otherwise the stored name vectors are queried."""
+    import math
+    import struct
+
+    if candidate_vectors:
+        import numpy as np
+
+        q = np.frombuffer(query_vector, dtype=np.float32)
+        best: tuple[str | None, float] = (None, float("inf"))
+        for eid, evec in candidate_vectors.items():
+            dist = float(np.linalg.norm(q - np.frombuffer(evec, dtype=np.float32)))
+            if dist < best[1]:
+                best = (eid, dist)
+        return best
+    from kazma_core.memory.vector_engine import VectorEngine
+
+    q = list(struct.unpack(f"{len(query_vector) // 4}f", query_vector))
+    hits = VectorEngine(conn).nearest_entities(q, tenant_id=tenant_id, limit=1)
+    if not hits:
+        return None, float("inf")
+    eid, sim = hits[0]
+    return eid, math.sqrt(max(0.0, 2.0 - 2.0 * float(sim)))
+
+
+def _store_name_vector(conn: sqlite3.Connection, eid: str, tenant_id: str, vector: bytes | None) -> None:
+    """Store an entity's name vector once (no vector yet, the caller's
+    tenant's row); commits only a transaction it began."""
+    if not vector or not eid:
+        return
+    from kazma_core.memory.embedder import get_embedding_model_name
+
+    began = not conn.in_transaction
+    conn.execute(
+        "UPDATE entities SET embedding = ?, embedding_model_version = ? "
+        "WHERE id = ? AND tenant_id = ? AND embedding IS NULL",
+        (vector, get_embedding_model_name() or "", eid, tenant_id or "default"),
+    )
+    if began and conn.in_transaction:
+        conn.commit()
+
+
+def repair_entity_name_vectors(conn: sqlite3.Connection, *, limit: int = 200) -> int:
+    """Store the name vector of up to *limit* entities that have none (made
+    before vectors were stored, or while the embedder was down), newest
+    first. Returns how many were stored; part of the vector repair pass."""
+    from kazma_core.memory.embedder import encode_text_to_blob
+
+    rows = conn.execute(
+        "SELECT id, tenant_id, name FROM entities WHERE embedding IS NULL AND COALESCE(name, '') != '' "
+        "ORDER BY rowid DESC LIMIT ?", (int(limit),)).fetchall()
+    stored = 0
+    for eid, tenant, name in rows:
+        vec = encode_text_to_blob(str(name).replace("_", " "))
+        if vec is None:
+            break  # the embedder is down: the next pass tries again
+        _store_name_vector(conn, str(eid), str(tenant or "default"), vec)
+        stored += 1
+    return stored
 
 
 def _tier3_llm_disambiguate(
@@ -303,6 +396,8 @@ def _create_entity(
     entity_type: str,
     tenant_id: str,
     is_high_stakes: int,
+    *,
+    vector: bytes | None = None,
 ) -> None:
     aliases = [name]
     cur = conn.execute(
@@ -324,8 +419,15 @@ def _create_entity(
         # clobbered any prior aliases with [name, ahash] whenever ahash was
         # absent (audit finding).
         row = conn.execute(
-            "SELECT aliases_json FROM entities WHERE id=?", (canonical,)
+            "SELECT aliases_json, tenant_id FROM entities WHERE id=?", (canonical,)
         ).fetchone()
+        if row is not None and str(row["tenant_id"] or "default") != (tenant_id or "default"):
+            # Entity ids are global, rows are not: another tenant holds this
+            # id, and nothing of this tenant's is written into its row (Memory
+            # audit M21 -- the alias hash used to be appended to it). This
+            # tenant's facts keep the id; its graph shows the node from them.
+            conn.commit()
+            return
         try:
             existing = json.loads((row["aliases_json"] if row else None) or "[]")
         except Exception:
@@ -338,6 +440,14 @@ def _create_entity(
                 "UPDATE entities SET aliases_json=? WHERE id=?",
                 (json.dumps(existing), canonical),
             )
+    if vector:
+        from kazma_core.memory.embedder import get_embedding_model_name
+
+        conn.execute(
+            "UPDATE entities SET embedding = ?, embedding_model_version = ? "
+            "WHERE id = ? AND tenant_id = ? AND embedding IS NULL",
+            (vector, get_embedding_model_name() or "", canonical, tenant_id or "default"),
+        )
     conn.commit()
 
 

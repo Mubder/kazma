@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
+from kazma_core.documents.config import DocumentConfig
 from kazma_core.documents.extract_salvage import (
     SALVAGE_SCORE,
     ir_from_markdown,
     maybe_salvage_extract,
 )
+from kazma_core.documents.indexer import chunk_document_ir
 from kazma_core.documents.models import (
     BlockType,
     DocumentBlock,
@@ -20,6 +21,7 @@ from kazma_core.documents.models import (
     Provenance,
     VersionId,
 )
+from kazma_core.documents.service import DocumentService
 
 
 def _ir(text: str, score: float) -> DocumentIR:
@@ -74,3 +76,21 @@ def test_remote_off_does_not_call(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 def test_salvage_threshold() -> None:
     assert SALVAGE_SCORE < 0.8
+
+
+@pytest.mark.parametrize('text', ['Recovered source text.', 'نص المصدر المستخرج.'])
+def test_salvage_segments_never_claim_physical_pdf_pages(tmp_path, text):
+    from dataclasses import replace
+    original = replace(_ir('', 0), metadata={'source_sha256': 'a' * 64})
+    cfg = DocumentConfig(storage_root=tmp_path / 'store')
+    recovered = ir_from_markdown(tmp_path / 'source.pdf', original,
+        '\n\n'.join(f'{text} {i}' for i in range(81)), extractor='inert-fixture', config=cfg)
+    assert len(recovered.pages) == 3  # synthetic grouping of forty blocks
+    assert recovered.metadata['physical_page_mapping'] is False
+    assert all(page.metadata['kind'] == 'segment' for page in recovered.pages)
+    read = DocumentService(config=cfg).read_ir(recovered, fence=False)
+    assert 'source page unknown' in read.text and '--- Page ' not in read.text
+    chunks = chunk_document_ir(recovered, cfg)
+    assert chunks and all(' page:' not in c.citation_label for c in chunks)
+    assert all(' segment:' in c.citation_label for c in chunks)
+    assert all(c.to_knowledge_dict(library_id='fixture')['metadata']['physical_page_mapping'] is False for c in chunks)

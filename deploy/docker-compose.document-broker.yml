@@ -1,0 +1,70 @@
+# Isolated document workers for the Docker deployment profile.
+#
+#   docker build -f deploy/document-worker/Dockerfile -t kazma-document-worker:local .
+#   mkdir -p secrets && python -c "import secrets; print(secrets.token_urlsafe(48))" > secrets/document_broker_token
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.document-broker.yml up -d
+#
+# Every untrusted parse, mutation and render then runs in a fresh container
+# with no network and no mounts (KAZMA_DOCUMENT_WORKER_ISOLATION=container).
+# Only `document-broker` holds the Docker socket -- the engine API is
+# host-root authority, so it is NEVER mounted into `kazma`. Kazma reaches the
+# broker through a unix socket on a volume the two services share, and every
+# request carries the shared token. The broker refuses to serve until it has
+# attested its container policy from inside the worker image, and Kazma's
+# document readiness reports the attestation (`worker_isolation`).
+#
+# Paths are relative to the FIRST compose file (the repository root).
+# The worker image is pinned when the broker starts (its image id): rebuild
+# it, then restart `document-broker`.
+services:
+  document-broker:
+    build:
+      context: .
+      dockerfile: deploy/document-broker/Dockerfile
+    image: kazma-document-broker:local
+    command:
+      - --image
+      - kazma-document-worker:local
+      - --token-file
+      - /run/secrets/document_broker_token
+      - --listen
+      - unix:/run/kazma-broker/broker.sock
+      - --socket-gid
+      - "10001"
+    # Root in its own container to use the engine socket; no capabilities,
+    # no network, read-only root. group 10001 (Kazma's container group) lets
+    # it hand the unix socket to Kazma without CAP_CHOWN.
+    user: "0:0"
+    group_add: ["10001"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - kazma_document_broker:/run/kazma-broker
+    secrets:
+      - document_broker_token
+    restart: unless-stopped
+
+  kazma:
+    environment:
+      KAZMA_DOCUMENT_WORKER_ISOLATION: container
+      KAZMA_DOCUMENT_BROKER_URL: unix:///run/kazma-broker/broker.sock
+      KAZMA_DOCUMENT_BROKER_TOKEN_FILE: /run/secrets/document_broker_token
+    volumes:
+      - kazma_document_broker:/run/kazma-broker
+    secrets:
+      - document_broker_token
+    depends_on:
+      - document-broker
+
+secrets:
+  document_broker_token:
+    file: ./secrets/document_broker_token
+
+volumes:
+  kazma_document_broker:
+    driver: local

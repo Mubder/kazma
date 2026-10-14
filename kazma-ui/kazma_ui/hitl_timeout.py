@@ -53,9 +53,9 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
 
     # Phase 3: check if the pending interrupt is semantic (clarify/confirm) —
     # those need {tcid: "cancel"}, not {approved: false}.
-    from kazma_core.safety.commitment.resume import build_resume_command, read_pending_interrupt
+    from kazma_core.safety.commitment.resume import build_resume_command, pending_interrupt
 
-    _intr_payload = await read_pending_interrupt(graph, config)
+    _intr_payload, _intr_id = await pending_interrupt(graph, config)
     _resume_cmd = build_resume_command(
         _intr_payload, approved=False, scope="once",
         reason=(
@@ -69,6 +69,8 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
             "you were about to do and what you need approved."
         ),
         extra={"timed_out": True} if not (_intr_payload and _intr_payload.get("kind") in ("semantic_clarify", "semantic_confirm")) else None,
+        # The interrupt that expired, and no other (TT-02).
+        interrupt_id=_intr_id,
     )
     if _resume_cmd is None:
         # Nothing pending (already resolved) — nothing to auto-deny.

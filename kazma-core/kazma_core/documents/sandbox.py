@@ -90,6 +90,8 @@ class SandboxRequest:
     env: Mapping[str, str] | None = None
     memory_limit_bytes: int | None = None
     cpu_limit_seconds: int | None = None
+    cpu_cores: int | None = None
+    process_limit: int | None = None
 
     @classmethod
     def python_module(
@@ -145,6 +147,18 @@ def _validate_request(request: SandboxRequest) -> Path:
         raise ValueError("memory_limit_bytes must be positive")
     if request.cpu_limit_seconds is not None and request.cpu_limit_seconds <= 0:
         raise ValueError("cpu_limit_seconds must be positive")
+    if request.cpu_cores is not None and (
+        isinstance(request.cpu_cores, bool)
+        or not isinstance(request.cpu_cores, int)
+        or request.cpu_cores < 1
+    ):
+        raise ValueError("cpu_cores must be a positive integer")
+    if request.process_limit is not None and (
+        isinstance(request.process_limit, bool)
+        or not isinstance(request.process_limit, int)
+        or request.process_limit < 1
+    ):
+        raise ValueError("process_limit must be a positive integer")
     return work_dir
 
 
@@ -192,26 +206,32 @@ def _resource_setup(
         request.memory_limit_bytes is not None or request.cpu_limit_seconds is not None
     )
     if not requested or os.name == "nt":
+        if os.name == "nt":
+            return command, False, None
+        if request.process_limit is not None:
+            return command, False, "POSIX process-count limit is not enforced by this launcher"
         return command, False, None
     from kazma_core.security.rlimits import limited_command
 
-    return (
-        limited_command(
-            command,
-            memory_bytes=request.memory_limit_bytes,
-            cpu_seconds=request.cpu_limit_seconds,
-            strict=True,
-        ),
-        True,
-        None,
+    launch = limited_command(
+        command,
+        memory_bytes=request.memory_limit_bytes,
+        cpu_seconds=request.cpu_limit_seconds,
+        strict=True,
     )
+    if request.process_limit is not None:
+        return launch, False, "POSIX process-count limit is not enforced by this launcher"
+    return launch, True, None
 
 
 def _assign_windows_job(
     process: subprocess.Popen[bytes],
-    memory_limit_bytes: int,
+    memory_limit_bytes: int | None,
+    *,
+    cpu_cores: int | None = None,
+    process_limit: int | None = None,
 ) -> tuple[_WindowsJobHandle | None, str | None]:
-    """Assign a process to a kill-on-close, memory-bounded Job Object."""
+    """Assign a child to a memory/CPU/process bounded, kill-on-close Job."""
 
     try:
         import ctypes
@@ -273,10 +293,14 @@ def _assign_windows_job(
         limits = _ExtendedLimits()
         JOB_OBJECT_LIMIT_JOB_MEMORY = 0x200
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-        limits.BasicLimitInformation.LimitFlags = (
-            JOB_OBJECT_LIMIT_JOB_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        )
-        limits.JobMemoryLimit = int(memory_limit_bytes)
+        flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if memory_limit_bytes is not None:
+            flags |= JOB_OBJECT_LIMIT_JOB_MEMORY
+            limits.JobMemoryLimit = int(memory_limit_bytes)
+        if process_limit is not None:
+            flags |= 0x00000008  # JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            limits.BasicLimitInformation.ActiveProcessLimit = int(process_limit)
+        limits.BasicLimitInformation.LimitFlags = flags
         if not kernel32.SetInformationJobObject(
             raw_job,
             9,
@@ -284,7 +308,23 @@ def _assign_windows_job(
             ctypes.sizeof(limits),
         ):
             owned.close()
-            return None, "Windows Job Object memory-limit configuration failed"
+            return None, "Windows Job Object memory/process-limit configuration failed"
+        if cpu_cores is not None:
+            class _CpuRateControl(ctypes.Structure):
+                _fields_ = [("ControlFlags", wintypes.DWORD), ("CpuRate", wintypes.DWORD)]
+
+            cpu_limit = _CpuRateControl()
+            # JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | HARD_CAP. CpuRate is a
+            # share of the whole machine, so it is sized from the CPU count.
+            from kazma_core.security.process_budget import job_cpu_rate
+
+            cpu_limit.ControlFlags = 0x1 | 0x4
+            cpu_limit.CpuRate = job_cpu_rate(int(cpu_cores))
+            if not kernel32.SetInformationJobObject(
+                raw_job, 15, ctypes.byref(cpu_limit), ctypes.sizeof(cpu_limit)
+            ):
+                owned.close()
+                return None, "Windows Job Object CPU-rate limit configuration failed"
         raw_process = getattr(process, "_handle", None)
         if raw_process is None or not kernel32.AssignProcessToJobObject(
             raw_job, wintypes.HANDLE(int(raw_process))
@@ -309,11 +349,16 @@ def _windows_limit_status(
     reasons: list[str] = []
     if request.memory_limit_bytes is not None and not job_assigned:
         reasons.append(job_error or "Windows Job Object memory limit was not enforced")
-    if request.cpu_limit_seconds is not None:
+    if request.cpu_cores is not None and not job_assigned:
+        reasons.append("Windows Job Object CPU-rate limit was not enforced")
+    if request.process_limit is not None and not job_assigned:
+        reasons.append("Windows Job Object process-count limit was not enforced")
+    if request.cpu_limit_seconds is not None and request.cpu_cores is None:
         reasons.append("Windows Job Objects do not enforce the requested CPU-time quota")
-    requested = (
-        request.memory_limit_bytes is not None or request.cpu_limit_seconds is not None
-    )
+    requested = any(value is not None for value in (
+        request.memory_limit_bytes, request.cpu_limit_seconds,
+        request.cpu_cores, request.process_limit,
+    ))
     return requested and not reasons, "; ".join(reasons) or None
 
 
@@ -335,6 +380,30 @@ def _drain_bounded(
                 limit_hit.set()
     finally:
         pipe.close()
+
+
+#: The worker starts suspended on Windows and runs only once its Job Object
+#: holds it (DOC-A12, 2026-10-13). A venv's ``python.exe`` is a launcher that
+#: starts the real interpreter at once, so a job assigned a moment late held
+#: only the launcher: the interpreter and the parser ran outside it, with no
+#: memory, CPU or process cap, while the result said "enforced". The first
+#: run in a process (slower to assign) escaped every time.
+_CREATE_SUSPENDED = 0x4
+
+
+def _resume_process(process: subprocess.Popen[bytes]) -> bool:
+    """Resume a worker started suspended; False when it could not be."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtResumeProcess.argtypes = (wintypes.HANDLE,)
+        ntdll.NtResumeProcess.restype = wintypes.LONG
+        return ntdll.NtResumeProcess(wintypes.HANDLE(int(process._handle))) >= 0  # type: ignore[attr-defined]
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.warning("[documents.sandbox] could not resume the contained worker: %s", exc)
+        return False
 
 
 def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
@@ -382,14 +451,33 @@ def run_isolated_subprocess(request: SandboxRequest) -> SandboxResult:
     environment = _sanitized_environment(request.env)
     launch_command, limits_enforced, degraded_reason = _resource_setup(request)
     creationflags = 0
+    windows_gate = os.name == "nt" and any(value is not None for value in (
+        request.memory_limit_bytes, request.cpu_cores, request.process_limit,
+    ))
     if os.name == "nt":
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
+        if windows_gate:
+            creationflags |= _CREATE_SUSPENDED
+            # The suspended worker is a tiny trusted trampoline. It waits for
+            # one byte before execing the parser, so no untrusted input is
+            # opened until the Job Object has been configured and assigned.
+            trampoline = (
+                "import subprocess,sys;"
+                "gate=sys.stdin.buffer.read(1);"
+                "sys.exit(125) if gate != b'1' else None;"
+                # Windows does not support the POSIX exec replacement
+                # semantics reliably. Keep the assigned launcher alive and
+                # wait for the parser child; Windows Job Objects propagate to
+                # children unless they explicitly request breakaway.
+                "sys.exit(subprocess.call(sys.argv[1:]))"
+            )
+            launch_command = [sys.executable, "-I", "-c", trampoline, *launch_command]
     started = time.monotonic()
     process = subprocess.Popen(
         launch_command,
         cwd=str(work_dir),
         env=environment,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE if windows_gate else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=os.name != "nt",
@@ -399,13 +487,44 @@ def run_isolated_subprocess(request: SandboxRequest) -> SandboxResult:
     try:
         if os.name == "nt":
             job_error = None
-            if request.memory_limit_bytes is not None:
+            if any(value is not None for value in (
+                request.memory_limit_bytes, request.cpu_cores, request.process_limit,
+            )):
                 job, job_error = _assign_windows_job(
-                    process, int(request.memory_limit_bytes)
+                    process,
+                    request.memory_limit_bytes,
+                    cpu_cores=request.cpu_cores,
+                    process_limit=request.process_limit,
                 )
             limits_enforced, degraded_reason = _windows_limit_status(
                 request, job is not None, job_error
             )
+            if windows_gate and limits_enforced and not _resume_process(process):
+                limits_enforced = False
+                degraded_reason = "the contained worker could not be resumed"
+            if windows_gate and not limits_enforced:
+                _terminate_process_tree(process)
+                process.wait(timeout=2.0)
+                if process.stdin is not None:
+                    process.stdin.close()
+                return SandboxResult(
+                    command=request.command,
+                    returncode=125,
+                    stdout=b"",
+                    stderr=(degraded_reason or "Windows Job Object limits unavailable").encode(),
+                    duration_seconds=time.monotonic() - started,
+                    timed_out=False,
+                    output_limit_exceeded=False,
+                    resource_limits_enforced=False,
+                    resource_limit_degraded_reason=degraded_reason,
+                )
+            if windows_gate:
+                if process.stdin is None:
+                    _terminate_process_tree(process)
+                    raise RuntimeError("failed to establish Windows sandbox start gate")
+                process.stdin.write(b"1")
+                process.stdin.flush()
+                process.stdin.close()
 
         if process.stdout is None or process.stderr is None:
             _terminate_process_tree(process)

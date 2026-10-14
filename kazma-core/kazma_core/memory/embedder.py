@@ -189,6 +189,58 @@ _SHORT_TEXT_CHARS = 256
 _SHORT_TEXT_CACHE = 4096
 
 
+class _EmbedderBreaker:
+    """A circuit breaker for one embedder (Memory audit M16).
+
+    After a failed call the breaker opens: callers get ``[]`` at once, with
+    no model call and no log line, until the period ends (30 s, doubling to
+    ten minutes while the failures continue). One call then tries again. A
+    broken local install retried a multi-GB model load on every call and
+    logged it four times a recall; a hanging remote endpoint cost each caller
+    two 60-second attempts.
+    """
+
+    def __init__(self, *, base_s: float = 30.0, cap_s: float = 600.0) -> None:
+        self._lock = threading.Lock()
+        self._base_s = base_s
+        self._cap_s = cap_s
+        self.failures = 0
+        self.open_until = 0.0
+        self.last_error = ""
+        self.last_failure_at: float | None = None
+
+    def allow(self) -> bool:
+        """Whether a call may be made now."""
+        with self._lock:
+            return time.monotonic() >= self.open_until
+
+    def success(self) -> None:
+        with self._lock:
+            self.failures = 0
+            self.open_until = 0.0
+
+    def failure(self, error: str) -> float:
+        """Record a failure; returns the seconds the breaker stays open."""
+        with self._lock:
+            self.failures += 1
+            period = min(self._cap_s, self._base_s * 2 ** (self.failures - 1))
+            self.open_until = time.monotonic() + period
+            self.last_error = str(error)[:300]
+            self.last_failure_at = time.time()
+            return period
+
+    def state(self) -> dict[str, Any]:
+        with self._lock:
+            left = max(0.0, self.open_until - time.monotonic())
+            return {
+                "state": "open" if left > 0 else "closed",
+                "failures": self.failures,
+                "retry_in_s": round(left, 1),
+                "last_error": self.last_error or None,
+                "last_failure_at": self.last_failure_at,
+            }
+
+
 class LocalSentenceTransformerEmbedder:
     """Local in-process embedder backed by ``sentence-transformers``.
 
@@ -221,6 +273,7 @@ class LocalSentenceTransformerEmbedder:
         # A vector of a text never changes under one model; kept as float32.
         self._short: OrderedDict[str, array] = OrderedDict()
         self._short_lock = threading.Lock()
+        self.breaker = _EmbedderBreaker()
 
     def _ensure_model(self) -> Any:
         if self._model is not None:
@@ -232,12 +285,13 @@ class LocalSentenceTransformerEmbedder:
             if self._model is not None:
                 return self._model
             if not self._allow_download and not _model_in_hf_cache(self._model_name):
+                period = self.breaker.failure("model not in the local cache, downloads disabled")
                 logger.warning(
                     "[Embedder:local] %s is not in the local HF cache and "
                     "downloads are disabled for fallback embedders (set "
                     "KAZMA_EMBED_ALLOW_DOWNLOAD=1 to permit) — degrading to "
-                    "no local embeddings",
-                    self._model_name,
+                    "no local embeddings; next try in %.0f s",
+                    self._model_name, period,
                 )
                 return None
             try:
@@ -246,9 +300,12 @@ class LocalSentenceTransformerEmbedder:
                 self._model = SentenceTransformer(self._model_name)
                 logger.info("[Embedder:local] Loaded %s", self._model_name)
             except ImportError:
-                logger.warning("[Embedder:local] sentence-transformers not installed")
+                period = self.breaker.failure("sentence-transformers not installed")
+                logger.warning("[Embedder:local] sentence-transformers not installed; next try in %.0f s",
+                               period)
             except Exception as exc:
-                logger.warning("[Embedder:local] load failed: %s", exc)
+                period = self.breaker.failure(f"load failed: {exc}")
+                logger.warning("[Embedder:local] load failed: %s; next try in %.0f s", exc, period)
             return self._model
 
     @property
@@ -263,10 +320,18 @@ class LocalSentenceTransformerEmbedder:
                 if hit is not None:
                     self._short.move_to_end(text)
                     return hit.tolist()
+        if not self.breaker.allow():
+            return []  # failed recently: no model call, no log (_EmbedderBreaker)
         model = self._ensure_model()
         if model is None:
             return []
-        emb = model.encode(text, convert_to_numpy=False)
+        try:
+            emb = model.encode(text, convert_to_numpy=False)
+        except (RuntimeError, ValueError, OSError, MemoryError) as exc:
+            period = self.breaker.failure(f"encode failed: {exc}")
+            logger.warning("[Embedder:local] encode failed: %s; next try in %.0f s", exc, period)
+            return []
+        self.breaker.success()
         if isinstance(emb, list):
             vec = emb
         elif hasattr(emb, "tolist"):
@@ -323,6 +388,7 @@ class OpenAICompatibleEmbedder:
         self._dim = dim
         self._timeout = timeout
         self._client: Any = None
+        self.breaker = _EmbedderBreaker()
         # Simple LRU-ish cache (dict + size cap; good enough for query dedup).
         self._cache: dict[str, list[float]] = {}
         self._cache_size = cache_size
@@ -361,6 +427,8 @@ class OpenAICompatibleEmbedder:
             cached = self._cache.get(text)
         if cached is not None:
             return cached
+        if not self.breaker.allow():
+            return []  # failed recently: no request, no log (_EmbedderBreaker)
         client = self._ensure_client()
         emb: list[float] = []  # initialized to prevent UnboundLocalError
         # Retry once on failure (NIM endpoints can be slow / rate-limited).
@@ -378,8 +446,11 @@ class OpenAICompatibleEmbedder:
                 if attempt == 0:
                     logger.debug("[Embedder:openai-compatible] retrying after: %s", exc)
                 else:
-                    logger.warning("[Embedder:openai-compatible] encode failed: %s", exc)
+                    period = self.breaker.failure(f"encode failed: {exc}")
+                    logger.warning("[Embedder:openai-compatible] encode failed: %s; next try in %.0f s",
+                                   exc, period)
                     return []
+        self.breaker.success()
         # Cache store — only successful (non-empty) results, so a transient
         # empty/malformed response doesn't poison the cache permanently. The
         # httpx call above runs WITHOUT the lock (don't serialize encodes);
@@ -546,6 +617,15 @@ def get_embedder_status() -> dict[str, Any]:
 _embedder: Embedder | None = None
 
 
+def embedder_health() -> dict[str, Any]:
+    """The live embedder's breaker (``_EmbedderBreaker.state``), for memory
+    health; ``not_loaded`` before the embedder is built. Builds nothing."""
+    breaker = getattr(_embedder, "breaker", None)
+    if breaker is None:
+        return {"state": "not_loaded" if _embedder is None else "unknown"}
+    return breaker.state()
+
+
 def _model_in_hf_cache(model_name: str) -> bool:
     """Whether *model_name* resolves from the local HF cache (no network).
 
@@ -562,8 +642,23 @@ def _model_in_hf_cache(model_name: str) -> bool:
         return False
 
 
+_embedder_lock = threading.Lock()
+
+
 def get_embedder() -> Embedder | None:
-    """Return the shared Embedder singleton.
+    """Return the shared Embedder singleton, built once under a lock (Memory
+    audit M26: concurrent first calls each built one, and a local model is
+    gigabytes). See :func:`_create_embedder`."""
+    if _embedder is not None:
+        return _embedder
+    with _embedder_lock:
+        if _embedder is not None:
+            return _embedder
+        return _create_embedder()
+
+
+def _create_embedder() -> Embedder | None:
+    """Build the shared Embedder singleton (callers hold ``_embedder_lock``).
 
     Reads config once, instantiates the right provider, caches it. All
     vector backends MUST use this function so the model/endpoint is never

@@ -84,7 +84,9 @@ SUBSCRIBER_QUEUE_MAX = 1000
 #: ``user_message`` tells the thread's other tabs that a turn started; a
 #: reconnecting or reloading client already has that row from the store, and
 #: replaying it would add the question a second time.
-REPLAY_SKIP_TYPES = frozenset({"capacity", "steer", "error", "user_message"})
+#: ``thread_rewound`` (a Time Travel restore) makes open tabs reload the chat;
+#: a client that attaches later loads the restored chat from the store.
+REPLAY_SKIP_TYPES = frozenset({"capacity", "steer", "error", "user_message", "thread_rewound"})
 
 
 def _with_turn_id(thread_id: str, frame: dict[str, Any]) -> dict[str, Any]:

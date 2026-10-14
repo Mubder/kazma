@@ -120,6 +120,11 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
     if ((path.rstrip("/") in ("/api/x/reply", "/api/x/reply/qualification") and m == "PUT")
             or path.rstrip("/") in ("/api/x/credentials", "/api/x/disconnect", "/api/x/resume")):
         return False
+    # "About me" is shown to the model on every call, for every user of the
+    # tenant: changing it is guidance for all of them, like the personality,
+    # so only an administrator may (Memory audit M11).
+    if path.rstrip("/") == "/api/memory/v2/profile" and m in ("PUT", "POST", "PATCH", "DELETE"):
+        return False
     # Admin-only surfaces
     for p in _ADMIN_PREFIXES:
         if path == p or path.startswith(p + "/"):

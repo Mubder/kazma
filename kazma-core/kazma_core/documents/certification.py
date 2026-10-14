@@ -6,7 +6,9 @@ import asyncio
 import gc
 import json
 import os
+import platform
 import shutil
+import sys
 import threading
 import time
 import tracemalloc
@@ -30,6 +32,59 @@ __all__ = [
 ]
 
 _CHECK_STATUSES = frozenset({"PASS", "CONDITIONAL", "NOT RUN", "FAIL"})
+
+
+class _ProcessTreeSampler:
+    """Sample native RSS in the parent and its workers; never claim a hard peak."""
+
+    def __init__(self) -> None:
+        self.stop = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.metrics: dict[str, int | float | str | bool | None] = {
+            "tree_rss_sampled_peak_bytes": None, "worker_rss_sampled_peak_bytes": None,
+            "resource_sample_count": 0, "worker_processes_observed": 0,
+            "resource_sampling_interval_seconds": 0.01,
+        }
+
+    def start(self) -> None:
+        try:
+            import psutil
+        except ImportError:
+            self.metrics["resource_sampling_status"] = "unavailable"
+            return
+        root = psutil.Process()
+        seen: set[tuple[int, float]] = set()
+
+        def sample() -> None:
+            while not self.stop.is_set():
+                try:
+                    children = root.children(recursive=True)
+                    rss = root.memory_info().rss
+                    worker_rss = 0
+                    for child in children:
+                        try:
+                            worker_rss += child.memory_info().rss
+                            seen.add((child.pid, child.create_time()))
+                        except psutil.Error:
+                            continue  # A worker can exit between enumeration and inspection.
+                    self.metrics["tree_rss_sampled_peak_bytes"] = max(
+                        int(self.metrics["tree_rss_sampled_peak_bytes"] or 0), rss + worker_rss)
+                    self.metrics["worker_rss_sampled_peak_bytes"] = max(
+                        int(self.metrics["worker_rss_sampled_peak_bytes"] or 0), worker_rss)
+                    self.metrics["resource_sample_count"] += 1
+                    self.metrics["worker_processes_observed"] = len(seen)
+                    self.metrics["resource_sampling_status"] = "sampled"
+                except psutil.Error:
+                    self.metrics["resource_sampling_status"] = "incomplete"
+                self.stop.wait(0.01)
+
+        self.thread = threading.Thread(target=sample, name="document-cert-resources", daemon=True)
+        self.thread.start()
+
+    def finish(self) -> None:
+        self.stop.set()
+        if self.thread is not None:
+            self.thread.join(timeout=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +174,8 @@ async def run_performance_smoke(
 
     threads_before = threading.active_count()
     resources_before = _process_resource_count()
+    resource_sampler = _ProcessTreeSampler()
+    resource_sampler.start()
     tracemalloc.start()
     started = time.monotonic()
     beat = asyncio.create_task(heartbeat(), name="document-cert-heartbeat")
@@ -130,6 +187,7 @@ async def run_performance_smoke(
     finally:
         stop_heartbeat.set()
         await beat
+        resource_sampler.finish()
     duration = time.monotonic() - started
     _current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
@@ -156,10 +214,12 @@ async def run_performance_smoke(
         "documents_per_second": round(iterations / max(duration, 0.000001), 3),
         "max_event_loop_stall_seconds": round(max_stall, 6),
         "tracemalloc_peak_bytes": int(peak),
+        "tracemalloc_scope": "parent_python_allocations_only",
         "thread_delta": threads_after - threads_before,
         "resource_kind": resource_name,
         "resource_delta": resource_delta,
         "residual_parser_run_directories": residual_runs,
+        **resource_sampler.metrics,
     }
     failures: list[str] = []
     if error:
@@ -310,24 +370,14 @@ def certify_hostile_corpus(root: str | Path) -> CertificationCheck:
                 failures.append(f"{case_id}: unknown certification stage {stage}")
                 continue
         except DocumentParseError as exc:
-            # "document_parser_failed" is the catch-all sandbox umbrella
-            # — always accept it for any reject case, and also for fence
-            # cases in degraded sandbox environments (Windows).
             if disposition == "reject":
                 if expected_codes and exc.code not in expected_codes:
-                    if exc.code != "document_parser_failed":
-                        failures.append(
-                            f"{case_id}: rejection code {exc.code} not in "
-                            f"{sorted(expected_codes)}"
-                        )
-                    else:
-                        rejected += 1
+                    failures.append(
+                        f"{case_id}: rejection code {exc.code} not in "
+                        f"{sorted(expected_codes)}"
+                    )
                 else:
                     rejected += 1
-            elif exc.code == "document_parser_failed":
-                # Degraded sandbox: fence case rejected by umbrella sandbox error.
-                # Count it as fenced (content was safe, parser just couldn't isolate).
-                fenced += 1
             else:
                 failures.append(f"{case_id}: unexpectedly rejected with {exc.code}")
             continue
@@ -435,6 +485,140 @@ def _rollout_check() -> CertificationCheck:
     )
 
 
+def _configured_backend(kind: str) -> str:
+    try:
+        from .jobs_pg import document_jobs_backend, document_metadata_backend
+
+        return document_metadata_backend() if kind == "metadata" else document_jobs_backend()
+    except (ImportError, RuntimeError, OSError):
+        return "unknown"
+
+
+def _isolation_check() -> tuple[CertificationCheck, dict[str, object]]:
+    """The hostile-document execution profile actually configured now."""
+    from .worker_container import isolation_report
+
+    report = dict(isolation_report())
+    profile = str(report.get("mode") or "process")
+    facts: dict[str, int | float | str | bool | None] = {
+        "profile": profile,
+        "ready": bool(report.get("ready")),
+        "image_code_matches": report.get("image_code_matches"),
+        "hostile_document_profile": str(report.get("hostile_document_profile") or ""),
+    }
+    if profile == "container":
+        if report.get("ready") and report.get("image_code_matches") is not False:
+            return CertificationCheck(
+                "worker_isolation", "PASS",
+                "Documents run in the attested per-job container profile (no network, no mounts, "
+                "read-only root, cgroup limits).", facts,
+            ), report
+        return CertificationCheck(
+            "worker_isolation", "FAIL",
+            "The container profile is configured but not ready, or its image runs other document code.",
+            facts,
+        ), report
+    if profile == "process":
+        return CertificationCheck(
+            "worker_isolation", "CONDITIONAL",
+            "The process profile bounds memory/CPU but does not confine filesystem or network: "
+            "it is not a qualified hostile-document profile.", facts,
+        ), report
+    return CertificationCheck(
+        "worker_isolation", "FAIL", f"Unknown isolation profile {profile!r} refuses every run.", facts,
+    ), report
+
+
+def _fidelity_check(root: Path) -> CertificationCheck:
+    """The versioned fidelity corpus, measured against the release targets."""
+    from . import fidelity
+
+    report = fidelity.run_corpus(root / "fidelity")
+    errors = sorted(case for case, entry in report["cases"].items() if "error" in entry)
+    below = sorted(
+        case for case, entry in report["cases"].items()
+        if "error" not in entry and fidelity.meets(entry["metrics"], fidelity.RELEASE_TARGETS)
+    )
+    metrics: dict[str, int | float | str | bool | None] = {
+        "corpus_version": fidelity.CORPUS_VERSION,
+        "cases": len(report["cases"]),
+        "qualified": len(report["cases"]) - len(below) - len(errors),
+        "below_release": ",".join(below) or None,
+        "not_measured": ",".join(errors) or None,
+    }
+    if errors:
+        return CertificationCheck(
+            "extraction_fidelity", "CONDITIONAL",
+            "Some corpus cases could not be measured here (an engine is missing).", metrics,
+        )
+    if below:
+        return CertificationCheck(
+            "extraction_fidelity", "CONDITIONAL",
+            "Cases below the release targets are not qualified: " + ", ".join(below) + ".", metrics,
+        )
+    return CertificationCheck(
+        "extraction_fidelity", "PASS", "Every corpus case meets the release targets.", metrics,
+    )
+
+
+def _backup_restore_check(root: Path) -> CertificationCheck:
+    """A real SQLite backup, verification and restore of one ready document."""
+    import asyncio as _asyncio
+    import io
+
+    from .backup import perform_document_backup, verify_document_backup
+    from .ingestion import SYSTEM_ACTOR, DocumentIngestionService
+
+    started = time.monotonic()
+    config = replace(
+        get_document_config(), storage_root=root / "backup-source",
+        security_malware_scan="off", security_local_salvage=False,
+    )
+    source = DocumentIngestionService(config=config)
+    try:
+        accepted = source.ingest_stream(
+            io.BytesIO(b"Certification backup drill.\n"), filename="drill.txt",
+            tenant_id="certification", workspace_id="w", actor_id="certifier",
+        )
+
+        async def _drain() -> None:
+            from .worker import DocumentWorker
+
+            worker = DocumentWorker(source.jobs, source.stage_handlers())
+            for _ in range(10):
+                claimed = source.jobs.claim_next(owner="certifier", lease_seconds=60)
+                if claimed is None:
+                    return
+                await worker._process_claimed(claimed, "certifier")
+
+        _asyncio.run(_drain())
+        report = perform_document_backup(storage_root=config.storage_root, dest_dir=root / "backups")
+    finally:
+        source.close()
+    if not report.get("ok"):
+        return CertificationCheck("backup_restore_sqlite", "FAIL", "The native backup did not verify.",
+                                  {"error": str(report.get("error") or "")[:200]})
+    restored_root = root / "backup-restored"
+    shutil.copytree(report["path"], restored_root)
+    restored = DocumentIngestionService(config=replace(config, storage_root=restored_root))
+    try:
+        state = (restored.job_status(tenant_id="certification", job_id=accepted.job_id,
+                                     actor_id=SYSTEM_ACTOR) or {}).get("state")
+        text = restored.get_content(tenant_id="certification", document_id=accepted.document_id,
+                                    actor_id="certifier", fence=False)["text"]
+    finally:
+        restored.close()
+    seconds = round(time.monotonic() - started, 3)
+    ok = state == "ready" and "Certification backup drill." in text and verify_document_backup(
+        backup_dir=report["path"])["ok"]
+    return CertificationCheck(
+        "backup_restore_sqlite", "PASS" if ok else "FAIL",
+        "One ready document backed up, verified, restored and read back (SQLite store). "
+        "A Postgres store is qualified by its own drill (tests/test_document_pg_backup_restore.py).",
+        {"restored_state": state, "seconds": seconds},
+    )
+
+
 def run_document_certification(
     work_root: str | Path,
     *,
@@ -463,6 +647,10 @@ def run_document_certification(
         )
         checks.append(_capability_check(root))
         checks.append(_rollout_check())
+        isolation_check, isolation = _isolation_check()
+        checks.append(isolation_check)
+        checks.append(_fidelity_check(root))
+        checks.append(_backup_restore_check(root))
         checks.append(
             CertificationCheck(
                 "postgres_multi_replica",
@@ -476,20 +664,16 @@ def run_document_certification(
         checks.append(
             CertificationCheck(
                 "metadata_multi_replica",
-                "CONDITIONAL",
-                "Document metadata remains SQLite and is certified for one application replica.",
-                {"metadata_backend": "sqlite", "metadata_multi_replica": False},
+                "NOT RUN",
+                "This transient-parser run did not instantiate or qualify a durable metadata backend.",
+                {"metadata_backend": "unmeasured", "metadata_multi_replica": None},
             )
         )
         checks.append(
             CertificationCheck(
                 "multi_day_soak",
-                "PASS" if soak else "NOT RUN",
-                (
-                    f"Opt-in soak completed {soak_iterations} iterations."
-                    if soak
-                    else "Set KAZMA_DOCUMENT_SOAK=1 or pass --soak to run the opt-in soak."
-                ),
+                "NOT RUN",
+                "Repeated parsing is a bounded smoke. No 48–72 hour mixed-load, recovery, or fault soak was performed.",
             )
         )
         checks.append(
@@ -524,7 +708,21 @@ def run_document_certification(
     return {
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
-        "mode": "soak" if soak else "ci-smoke",
+        "mode": "extended-smoke" if soak else "ci-smoke",
+        "execution_profile": {
+            "os": platform.system(), "os_release": platform.release(),
+            "machine": platform.machine(), "python": platform.python_version(),
+            "python_executable": sys.executable,
+            "scope": "local_transient_parser",
+            # What is configured NOW, not what a deployment might use.
+            "worker_isolation": isolation.get("mode"),
+            "worker_image_id": (isolation.get("broker") or {}).get("image_id"),
+            "metadata_backend_configured": _configured_backend("metadata"),
+            "jobs_backend_configured": _configured_backend("jobs"),
+            "filesystem_network_confinement_qualified": bool(
+                isolation_check.status == "PASS"
+            ),
+        },
         "overall_status": overall,
         "canary_ready": canary_ready,
         "default_ready": False,

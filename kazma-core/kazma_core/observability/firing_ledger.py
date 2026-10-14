@@ -143,6 +143,10 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     # off and never confirmed; it keeps the week of the change counted.
     Signature("daily digest", r"\[digest\] daily digest (?:delivered|dispatched)",
               kind=ROUTINE, per_week=7),
+    # time_travel.maintain_snapshots: daily, and 120 s after every boot (the
+    # live install restarts several times a day, so a week shows more).
+    Signature("time travel maintenance", r"\[TimeTravel\] maintenance: deleted=",
+              "the Time Travel steps' retention prune (TT-11)", kind=ROUTINE, per_week=7),
     Signature("install restore", r"\[restore\] (RESTORED|FAILED):"),
     Signature("foreign server detection", r'"event": "child.foreign_server_holds_port"'),
     Signature("pre-spawn port clearance", r'"event": "port.stale_before_spawn"'),

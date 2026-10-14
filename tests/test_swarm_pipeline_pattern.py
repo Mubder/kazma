@@ -187,7 +187,7 @@ async def test_engine_pipeline_enforces_timeout_per_step(empty_config):
     })  # type: ignore[assignment,union-attr]
 
     async def slow_beta(task: str, context: str = "") -> dict[str, str | None]:
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(2.0)
         return {
             "worker": "beta",
             "task_id": "beta-task",
@@ -211,7 +211,10 @@ async def test_engine_pipeline_enforces_timeout_per_step(empty_config):
             prompt="Process the request",
             workers=["alpha", "beta", "gamma"],
             type=TaskType.PIPELINE,
-            timeout=0.01,
+            # Per step: room for a step's thread hops (the breaker's shared
+            # state is read and written off the loop, SW-E07), far below
+            # beta's 2 s.
+            timeout=0.5,
         )
     )
 

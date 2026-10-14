@@ -49,7 +49,9 @@ _ARCHIVE_EPISODE_SQL = (
     "CASE WHEN TRIM(COALESCE(user_text, '')) <> '' "
     "AND TRIM(COALESCE(assistant_text, '')) <> '' THEN ' — ' ELSE '' END || "
     "SUBSTR(COALESCE(assistant_text, ''), 1, 300))) "
-    "WHERE id=?"
+    # Compare-and-set (Memory audit M29): still the tier and the last touch
+    # the sweep read -- a forget or a recall in between keeps the row as it is.
+    "WHERE id=? AND tier=? AND COALESCE(last_accessed, created_at) IS ?"
 )
 
 def _propagate_episode_moves(
@@ -75,22 +77,16 @@ def _propagate_episode_moves(
 
     if not archived:
         return
-    from kazma_core.memory.backends import LocalSqliteVectorBackend, get_vector_backend
+    from kazma_core.memory.backends import get_remote_vector_backend
 
-    try:
-        backend = get_vector_backend(conn)
-    except RuntimeError:  # failover=raise while the remote index is down
-        logger.warning(
-            "[macro_sleep] %d archived episode(s) left in the remote vector index "
-            "(backend unavailable, failover=raise)",
-            len(archived),
-        )
-        return
     # Archived memories stay searchable by meaning. The local index is the row
     # itself, so it keeps the vector with no work; a remote index is re-tagged
     # with the new tier. (Until 2026-09-26 it was told to DELETE archived rows,
     # which made them unreachable by meaning on every remote-index install.)
-    if isinstance(backend, LocalSqliteVectorBackend):
+    # The remote index only: a hybrid backend's local half re-wrote and
+    # committed the row (Memory audit M15).
+    backend = get_remote_vector_backend()
+    if backend is None or not getattr(backend, "available", False):
         return
     import struct
 
@@ -125,6 +121,14 @@ def run_macro_sleep(
     archived_beliefs, scored_episodes}``.
     """
     now = now if now is not None else time.time()
+    # Recalls the database was too busy to count (recall.flush_access_bumps):
+    # counted before the access clock decides what to archive (Memory audit M14).
+    from kazma_core.memory.recall import flush_access_bumps
+
+    try:
+        flush_access_bumps(primary_conn)
+    except sqlite3.Error:
+        logger.warning("[macro_sleep] pending access counts not written yet", exc_info=True)
     v2 = (cfg or {}).get("v2") or {}
     recall_idle = float(v2.get("recall_demote_idle_days", 30)) * 86400
     episodic_ttl = float(v2.get("episodic_ttl_days", 30)) * 86400
@@ -165,9 +169,15 @@ def run_macro_sleep(
         _idle_to_episodic: list[str] = []
         _archive_episodic: list[str] = []
         _revive: list[str] = []
+        #: What the sweep read of each row: every move below is a
+        #: compare-and-set on it (Memory audit M29 -- the UPDATEs had no
+        #: expected tier, so a forget committed during the sweep had its
+        #: "forgotten" overwritten and a memory recalled meanwhile archived).
+        _read: dict[str, tuple[str, Any]] = {}
         for r in rows:
             eid = r["id"]
             tier = r["tier"]
+            _read[eid] = (tier, r["last_touch"])
             importance = int(r["structural_importance"])
             access = int(r["access_count"])
             last_touch = float(r["last_touch"] or now)
@@ -227,20 +237,23 @@ def run_macro_sleep(
                 _archive_episodic.append(eid)
                 stats["demoted_episodic"] += 1
 
-        if _to_episodic or _idle_to_episodic or _revive:
-            primary_conn.executemany(
-                "UPDATE episodes SET tier='episodic' WHERE id=?",
-                [(eid,) for eid in _to_episodic + _idle_to_episodic + _revive],
-            )
-        if _to_recall:
-            primary_conn.executemany(
-                "UPDATE episodes SET tier='recall' WHERE id=?",
-                [(eid,) for eid in _to_recall],
-            )
-        if _archive_recall:
-            primary_conn.executemany(_ARCHIVE_EPISODE_SQL, [(eid,) for eid in _archive_recall])
-        if _archive_episodic:
-            primary_conn.executemany(_ARCHIVE_EPISODE_SQL, [(eid,) for eid in _archive_episodic])
+        def _move(sql: str, ids: list[str]) -> int:
+            if not ids:
+                return 0
+            return int(primary_conn.executemany(
+                sql, [(eid, _read[eid][0], _read[eid][1]) for eid in ids]).rowcount or 0)
+
+        planned = len(_to_episodic + _idle_to_episodic + _revive + _to_recall
+                      + _archive_recall + _archive_episodic)
+        done = _move("UPDATE episodes SET tier='episodic' WHERE id=? AND tier=? "
+                     "AND COALESCE(last_accessed, created_at) IS ?", _to_episodic + _idle_to_episodic + _revive)
+        done += _move("UPDATE episodes SET tier='recall' WHERE id=? AND tier=? "
+                      "AND COALESCE(last_accessed, created_at) IS ?", _to_recall)
+        done += _move(_ARCHIVE_EPISODE_SQL, _archive_recall + _archive_episodic)
+        stats["moves_skipped"] = planned - done
+        if stats["moves_skipped"]:
+            logger.info("[macro_sleep] %d tier move(s) skipped: the memory changed during the sweep",
+                        stats["moves_skipped"])
 
         # ── Archive old superseded beliefs ──
         old_superseded = primary_conn.execute(
@@ -254,6 +267,7 @@ def run_macro_sleep(
                  AND valid_until < ?""",
             (tenant_id, now - archive_after),
         ).fetchall()
+        archived_facts: list[str] = []
         for b in old_superseded:
             bid = b["id"]
             blob = json.dumps(
@@ -266,16 +280,20 @@ def run_macro_sleep(
             )
             primary_conn.execute("DELETE FROM beliefs WHERE id=?", (bid,))
             stats["archived_beliefs"] += 1
-            # Mirror hard-delete (M-04): the row left the SQLite SoT — the
-            # mirror must not keep serving it live.
-            try:
-                from kazma_core.memory.state_backend import unmirror_belief_to_state
+            archived_facts.append(str(bid))
 
+        primary_conn.commit()
+        # Mirror hard-delete (M-04): the rows left the SQLite SoT -- the mirror
+        # must not keep serving them live. After the commit: a Postgres round
+        # trip per fact inside the transaction held memory_state.db's write
+        # lock for each (Memory audit M14).
+        from kazma_core.memory.state_backend import unmirror_belief_to_state
+
+        for bid in archived_facts:
+            try:
                 unmirror_belief_to_state(bid)
             except Exception:
                 logger.debug("[macro_sleep] unmirror skipped for %s", bid, exc_info=True)
-
-        primary_conn.commit()
         _propagate_episode_moves(
             primary_conn,
             tenant_id=tenant_id,

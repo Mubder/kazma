@@ -81,3 +81,69 @@ def test_every_menu_command_is_on_the_reference_page():
     ]
     assert not missing, f"slash-commands.md never names: {', '.join('/' + c for c in missing)}"
 
+
+# ── /kb subcommands (Knowledge audit KB-S07) ──────────────────────────────
+# The reference's /kb table named add, crawl, refresh and delete while those
+# were rewritten into a model turn and never reached the handler. Now the
+# table, the handler and the admin rule must agree, subcommand by subcommand.
+
+_KB_ALIASES = {"", "help", "ingest"}  # bare /kb, its help, and /kb add's other name
+
+
+def kb_handled_subcommands(source: str) -> set[str]:
+    """The subcommands ``_try_kb_command`` branches on."""
+    import ast
+
+    fn = next(node for node in ast.walk(ast.parse(source))
+              if isinstance(node, ast.AsyncFunctionDef) and node.name == "_try_kb_command")
+    found: set[str] = set()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == "sub":
+            for comparator in node.comparators:
+                values = comparator.elts if isinstance(comparator, (ast.Tuple, ast.List, ast.Set)) else [comparator]
+                found |= {v.value for v in values if isinstance(v, ast.Constant) and isinstance(v.value, str)}
+    return found
+
+
+def kb_reference_rows(reference: str) -> dict[str, bool]:
+    """``{subcommand: admin only}`` from the reference's /kb table."""
+    section = reference.split("## `/kb`", 1)[1].split("\n## ", 1)[0]
+    rows = {}
+    for match in re.finditer(r"^\| `/kb ?([a-z]*)[^`]*` \| (yes|no) \|", section, re.M):
+        rows[match.group(1)] = match.group(2) == "yes"
+    return rows
+
+
+def kb_problems(handled: set[str], rows: dict[str, bool], admin) -> list[str]:
+    problems = [f"/kb {s}: handled, not on the reference page"
+                for s in sorted(handled - _KB_ALIASES - set(rows))]
+    problems += [f"/kb {s}: on the reference page, not handled" for s in sorted(set(rows) - handled)]
+    for sub, admin_only in sorted(rows.items()):
+        if admin(f"/kb {sub} x https://docs.example.test/") != admin_only:
+            problems.append(f"/kb {sub}: the page says admin only={admin_only}, the gate disagrees")
+    return problems
+
+
+def test_the_kb_subcommands_agree_with_the_handler_and_the_admin_rule():
+    from kazma_gateway.slash_commands import changes_global_config
+
+    source = (ROOT / "kazma-gateway" / "kazma_gateway" / "agent_handler" / "commands.py").read_text(
+        encoding="utf-8")
+    rows = kb_reference_rows(_reference())
+    assert {"add", "crawl", "refresh", "delete", "search", "status", "list"} <= set(rows)
+    assert kb_problems(kb_handled_subcommands(source), rows, changes_global_config) == []
+
+
+def test_the_kb_check_catches_the_old_drift():
+    """Negative control: the page's old table (add and delete named) against
+    a handler the rewrite never let them reach, and an admin column the gate
+    did not honour."""
+    rows = {"": False, "list": False, "add": False, "delete": False}
+    assert kb_problems({"", "list"}, rows, lambda text: False) == [
+        "/kb add: on the reference page, not handled",
+        "/kb delete: on the reference page, not handled",
+    ]
+    assert kb_problems({"", "list", "delete"}, {"": False, "list": False, "delete": True},
+                       lambda text: False) == [
+        "/kb delete: the page says admin only=True, the gate disagrees"]
+

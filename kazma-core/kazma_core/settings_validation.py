@@ -94,6 +94,51 @@ def _lifecycle_events(value: Any) -> Any:
     return known
 
 
+def _cron_bound(key: str) -> Callable[[Any], Any]:
+    """A whole number in the scheduler setting's range (kazma_core.cron.settings)."""
+    def normalize(value: Any) -> Any:
+        from kazma_core.cron.settings import SETTING_BOUNDS
+
+        _default, low, high = SETTING_BOUNDS[key]
+        try:
+            number = int(str(value).strip())
+        except (TypeError, ValueError):
+            number = None
+        if number is None or not low <= number <= high:
+            raise SettingRejected(f"{key} is a whole number from {low} to {high}.")
+        return number
+
+    return normalize
+
+
+def _strict_bool(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "1", "on", "yes"):
+        return True
+    if text in ("false", "0", "off", "no", ""):
+        return False
+    raise SettingRejected("This setting is on or off (true or false).")
+
+
+def _tenant_mode(value: Any) -> Any:
+    # Under enforcement memory belongs to each principal's tenant whatever the
+    # mode; a per-platform or per-user mode there split one user's memory
+    # between the page and the turns (Memory audit M07). Refused, until one
+    # resolver serves both for those modes.
+    from kazma_core.memory.config import memory_tenant_enforced
+
+    mode = str(value or "").strip().lower()
+    if mode not in ("shared", "per_platform", "per_user"):
+        raise SettingRejected("Memory isolation is one of: shared, per_platform, per_user.")
+    if mode != "shared" and memory_tenant_enforced():
+        raise SettingRejected(
+            "With tenants enforced (production or several users), memory is already kept per "
+            "tenant: only 'shared' is available here.")
+    return mode
+
+
 @functools.cache
 def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     """key -> (normalize, category the key is stored under or None).
@@ -102,11 +147,17 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     and importing those modules here at import time would load the swarm
     package for every settings read."""
     from kazma_core.checkpoint_retention import RETENTION_KEY
+    from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
     from kazma_core.lifecycle_notifier import EVENTS_KEY
+    from kazma_core.memory.config import TENANT_MODE_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
     return {
         "cron.timezone": (_timezone, None),
+        # The scheduler's bounds (Scheduled audit SCH-E06, E14, S05).
+        **{key: (_cron_bound(key), None) for key in SETTING_BOUNDS},
+        FIRE_WITHOUT_HITL_KEY: (_strict_bool, None),
+        TENANT_MODE_KEY: (_tenant_mode, "memory"),
         TASK_RETENTION_KEY: (_task_retention, "swarm"),
         RETENTION_KEY: (_checkpoint_retention, "system"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
@@ -133,6 +184,8 @@ def validate_setting(key: str, value: Any) -> tuple[Any, str | None]:
         if name in ("security", "security.execution") and isinstance(value, dict):
             return {child: validate_setting(name + "." + child, item)[0]
                     for child, item in value.items()}, "security"
+        if name == "memory" and isinstance(value, dict) and "tenant_mode" in value:
+            return {**value, "tenant_mode": _tenant_mode(value["tenant_mode"])}, "memory"
     except ValueError as exc:
         raise SettingRejected(str(exc)) from None
     rule = _rules().get(name)

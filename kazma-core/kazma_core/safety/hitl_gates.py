@@ -72,6 +72,7 @@ __all__ = [
     "recorded_decision_count",
     "gate_outcomes_since",
     "expire_due_gates",
+    "timeout_gate",
     "boot_sweep",
     "boot_sweep_async",
     "register_gate_async",
@@ -815,6 +816,23 @@ def pending_gates(tenant_id: str | None = None, *, limit: int = 200) -> list[Gat
         return [_row_to_gate(r) for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def timeout_gate(gate_id: str) -> GateRow | None:
+    """``pending → timeout`` for one gate whose owner's deadline passed with
+    no answer (a swarm-bus request, SW-S04): a timeout is its own outcome,
+    never a "deny". None when the gate was not pending."""
+    ensure_gate_schema()
+    conn = _connect()
+    try:
+        if not _cas(conn, gate_id, "pending", "timeout", {"settled_at": time.time()}):
+            return None
+        row = _get(conn, gate_id)
+    finally:
+        conn.close()
+    if row is not None:
+        gate_events.publish("gate_settled", row)
+    return row
 
 
 def expire_due_gates(now: float | None = None) -> list[GateRow]:

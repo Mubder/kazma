@@ -311,10 +311,13 @@ def invalidate_belief(
             "belief_id": bid,
         }
     except Exception as exc:
-        logger.debug("[hygiene] invalidate_belief failed", exc_info=True)
+        from kazma_core.errors import safe_error
+
+        # A code and a reference, never the exception's own text: it reached
+        # API clients through unlink (Memory audit M35). safe_error logs it.
         if own_conn and conn is not None:
             try:
                 conn.close()
             except Exception:
                 pass
-        return {"ok": False, "updated": 0, "error": str(exc)[:300]}
+        return {"ok": False, "updated": 0, "error": safe_error(exc)}

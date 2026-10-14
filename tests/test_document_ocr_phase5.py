@@ -196,6 +196,51 @@ def test_tsv_coordinates_confidence_and_mixed_unicode_preserved() -> None:
     assert result.page_number == 3
 
 
+_QUOTED_WORDS_TSV = (
+    "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth"
+    "\theight\tconf\ttext\n"
+    '5\t1\t1\t1\t1\t1\t10\t20\t30\t12\t90\t"Hello\n'
+    "5\t1\t1\t1\t1\t2\t45\t20\t35\t12\t80\tworld\n"
+    "5\t1\t1\t1\t2\t1\t10\t40\t30\t12\t85\tالمغذيات\n"
+    '5\t1\t1\t1\t2\t2\t45\t40\t35\t12\t75\t"الكبرى"\n'
+    "5\t1\t1\t1\t3\t1\t10\t60\t30\t12\t95\t2026\n"
+)
+
+
+def test_a_word_with_a_quote_mark_is_text_not_a_quoted_field() -> None:
+    # 2026-10-13, a real 300 dpi scan: a word OCR read as starting with '"'
+    # opened a CSV quoted field that swallowed the rows after it, and the
+    # page's "text" became other rows' coordinates and confidences.
+    result = _parse_tsv(
+        _QUOTED_WORDS_TSV.encode(), page_number=1, language="ara+eng", engine_version="5.4", dpi=300,
+    )
+    assert [block.text for block in result.blocks] == ['"Hello world', 'المغذيات "الكبرى"', "2026"]
+    assert result.confidence == 0.85
+    assert all("\t" not in block.text and "\n" not in block.text for block in result.blocks)
+
+
+def test_with_csv_quoting_the_rows_after_a_quote_mark_are_swallowed(monkeypatch) -> None:
+    # Negative control: the default quoting the parser used to apply.
+    import csv
+
+    from kazma_core.documents.ocr import tesseract
+
+    real = csv.DictReader
+
+    class _DefaultQuoting(real):  # type: ignore[misc, valid-type]
+        def __init__(self, handle, **kwargs):
+            kwargs.pop("quoting", None)
+            super().__init__(handle, **kwargs)
+
+    monkeypatch.setattr(tesseract.csv, "DictReader", _DefaultQuoting)
+    result = tesseract._parse_tsv(
+        _QUOTED_WORDS_TSV.encode(), page_number=1, language="ara+eng", engine_version="5.4", dpi=300,
+    )
+    texts = [block.text for block in result.blocks]
+    assert len(texts) == 2  # the second line's own row is gone
+    assert any("\t" in text for text in texts)  # other rows' columns read as words
+
+
 def test_image_pixel_and_page_limits(tmp_path: Path, config: DocumentConfig) -> None:
     Image = pytest.importorskip("PIL.Image")
     oversized = tmp_path / "oversized.png"

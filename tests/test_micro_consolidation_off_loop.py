@@ -86,9 +86,11 @@ def test_extract_and_apply_beliefs_is_unchanged_for_its_callers():
     from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
     from kazma_core.paths import memory_ops_db, primary_memory_db
 
-    p = sqlite3.connect(primary_memory_db(), isolation_level=None)
+    # The apply runs in a worker thread (Memory audit M34): the connections
+    # are opened for that, as scripts/scan_old_sessions.py opens them.
+    p = sqlite3.connect(primary_memory_db(), isolation_level=None, check_same_thread=False)
     ensure_primary_schema(p)
-    o = sqlite3.connect(memory_ops_db(), isolation_level=None)
+    o = sqlite3.connect(memory_ops_db(), isolation_level=None, check_same_thread=False)
     ensure_ops_schema(o)
     stats = asyncio.run(
         extract_and_apply_beliefs(p, o, "My name is Alice and I live in Paris", use_llm=False)
@@ -96,3 +98,18 @@ def test_extract_and_apply_beliefs_is_unchanged_for_its_callers():
     assert stats["source"] == "heuristic" and stats["applied"] >= 1
     filler = asyncio.run(extract_and_apply_beliefs(p, o, "okay thanks", use_llm=False))
     assert filler["skipped_filler"] is True
+
+
+def test_a_connection_bound_to_its_thread_is_refused_loudly():
+    """A thread-bound connection used to give ``applied: 0`` with no error:
+    every ``mutate_belief`` turned the cross-thread refusal into a no-op."""
+    from kazma_core.memory.belief_extractor import extract_and_apply_beliefs
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+    p = sqlite3.connect(primary_memory_db(), isolation_level=None)
+    ensure_primary_schema(p)
+    o = sqlite3.connect(memory_ops_db(), isolation_level=None)
+    ensure_ops_schema(o)
+    with pytest.raises(sqlite3.ProgrammingError):
+        asyncio.run(extract_and_apply_beliefs(p, o, "My name is Alice and I live in Paris", use_llm=False))

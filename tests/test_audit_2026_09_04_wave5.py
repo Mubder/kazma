@@ -107,14 +107,23 @@ def test_m15_turn_broker_bounded_emit_locks():
     assert len(broker._emit_locks) <= 512
 
 
-def test_m15_misc_bounded_approve_locks():
-    from kazma_ui.routes_direct.misc import _approve_lock_for, _approve_locks
+def test_m15_misc_bounded_approve_locks(monkeypatch):
+    """Re-pointed 2026-10-14 (Time Travel TT-04): the approve route's lock is
+    the thread's checkpoint-mutation lock, shared by every rewriter
+    (``kazma_ui.thread_locks``); that table is the bounded one now."""
+    from kazma_ui import thread_locks
+    from kazma_ui.routes_direct.misc import _approve_lock_for
 
-    for i in range(550):
-        lock = _approve_lock_for(f"gate_{i}")
-        assert isinstance(lock, asyncio.Lock)
+    monkeypatch.setattr(thread_locks, "MAX_LOCKS", 512)
 
-    assert len(_approve_locks) <= 512
+    async def run():
+        for i in range(550):
+            lock = _approve_lock_for(f"gate_{i}")
+            assert isinstance(lock, asyncio.Lock)
+            assert lock is thread_locks.thread_mutation(f"gate_{i}")
+        return len(thread_locks._by_loop[asyncio.get_running_loop()])
+
+    assert asyncio.run(run()) <= 512
 
 
 # ----------------------------------------------------------------------
@@ -130,7 +139,14 @@ def test_m9_snapshot_recorder_global_cap(tmp_path):
         state = {"thread_id": f"t_{i % 3}", "iteration": i, "messages": []}
         rec.capture(state)
 
-    assert len(rec._memory) <= 5
+    # Re-pointed 2026-10-14 (Time Travel TT-06): the cap held the in-memory
+    # dict only (memory 2, SQLite 6); it is enforced in the database now, and
+    # there is no in-memory copy.
+    import sqlite3
+    from contextlib import closing
+
+    with closing(sqlite3.connect(db_path)) as conn:
+        assert conn.execute("SELECT count(*) FROM snapshots").fetchone()[0] <= 5
 
 
 # ----------------------------------------------------------------------

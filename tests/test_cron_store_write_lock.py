@@ -44,32 +44,69 @@ def _write_lock_free(path: Path) -> bool:
 
 def _job(job_id: str, *, status: JobStatus = JobStatus.PENDING, days_old: int = 0) -> ScheduledJob:
     created = (datetime.now(UTC) - timedelta(days=days_old)).isoformat()
+    # Retention counts from when a job FINISHED (SCH-E07): an old finished
+    # job here finished when it was made.
+    finished = created if status not in (JobStatus.PENDING, JobStatus.RUNNING) else ""
     return ScheduledJob(
         job_id=job_id, timing="5m", prompt="p", platform="telegram", thread_id="t1",
         status=status, created_at=created, delivery_target="telegram:1",
+        next_run=datetime.now(UTC).isoformat(), finished_at=finished,
     )
 
 
+def _never(*_a, **_k):  # a recurrence that has ended
+    return None
+
+
 def _cases(store: SQLiteCronStore) -> list[tuple[str, str, object]]:
-    """(method, what the call exercises, coroutine) in the order they run."""
+    """(method, what the call exercises, coroutine) in the order they run.
+
+    The durable fire record (Scheduled audit SCH-E04, 2026-10-14) added the
+    claim/finish/release methods, the delivery outbox and the event log; each
+    is a group of writes in one BEGIN IMMEDIATE, and each is called here.
+    """
+    from kazma_core.cron.store import FireResult
+
+    now = datetime.now(UTC)
     return [
         ("insert", "a new job", lambda: store.insert(_job("a"))),
         ("insert", "a duplicate id (the INSERT raises)", lambda: store.insert(_job("a"))),
+        ("get", "", lambda: store.get("a")),
         ("list_active", "", lambda: store.list_active()),
         ("list_all", "", lambda: store.list_all()),
+        ("due_jobs", "", lambda: store.due_jobs(now=now)),
+        ("list_running", "", lambda: store.list_running()),
+        ("count_jobs", "", lambda: store.count_jobs(tenant_id="default")),
         ("purge_terminal_jobs", "nothing to purge (the live case)", lambda: store.purge_terminal_jobs()),
-        ("update_status", "", lambda: store.update_status("a", JobStatus.PENDING)),
-        ("claim_job", "the claim wins", lambda: store.claim_job("a")),
-        ("claim_job", "the claim loses", lambda: store.claim_job("a")),
+        ("claim_job", "the claim wins", lambda: store.claim_job("a", owner="o1")),
+        ("claim_job", "the claim loses", lambda: store.claim_job("a", owner="o1")),
+        ("release_fire", "back to pending", lambda: store.release_fire("a", owner="o1")),
+        ("claim_job", "claimed again", lambda: store.claim_job("a", owner="o1")),
+        ("finish_fire", "with a delivery", lambda: store.finish_fire(
+            "a", owner="o1", advance=_never,
+            result=FireResult(success=True, outcome="delivering", body="hi", target="telegram:1"))),
+        ("claim_delivery", "", lambda: store.claim_delivery(owner="o1")),
+        ("finish_delivery", "refused, retried", lambda: store.finish_delivery(1, owner="o1", delivered=False,
+                                                                                error="Error: no")),
+        ("recover_deliveries", "", lambda: store.recover_deliveries(owner="o1")),
+        ("unalerted_failures", "", lambda: store.unalerted_failures()),
+        ("mark_alerted", "", lambda: store.mark_alerted(1)),
+        ("deliveries_for", "", lambda: store.deliveries_for("a")),
+        ("pending_delivery_count", "", lambda: store.pending_delivery_count()),
+        ("outcome_counts", "", lambda: store.outcome_counts(since=0.0)),
+        ("lateness", "", lambda: store.lateness(since=0.0)),
+        ("insert", "a second job", lambda: store.insert(_job("b"))),
+        ("mark_missed", "", lambda: store.mark_missed(
+            "b", expected_next_run="", notice="missed", target="telegram:1", advance=_never)),
         ("update_result", "", lambda: store.update_result("a", "ok")),
-        ("update_next_run", "", lambda: store.update_next_run("a", datetime.now(UTC).isoformat())),
-        ("bump_failure", "", lambda: store.bump_failure("a")),
-        ("reset_failure", "", lambda: store.reset_failure("a")),
         ("update_job", "a field changes", lambda: store.update_job("a", prompt="q")),
         ("update_job", "no field given", lambda: store.update_job("a")),
+        ("restore_job", "", lambda: store.restore_job("a", timing="5m", next_run=now.isoformat())),
         ("job_exists", "", lambda: store.job_exists("a")),
         ("update_delivery_target", "", lambda: store.update_delivery_target("a", "telegram:2")),
         ("sibling_delivery_target", "", lambda: store.sibling_delivery_target("t1")),
+        ("record_event", "", lambda: store.record_event("a", "note")),
+        ("list_events", "", lambda: store.list_events("a")),
         ("cancel", "", lambda: store.cancel("a")),
         ("insert", "an old finished job", lambda: store.insert(_job("old", status=JobStatus.DONE, days_old=30))),
         ("purge_terminal_jobs", "one job to purge", lambda: store.purge_terminal_jobs()),
@@ -111,8 +148,10 @@ def test_every_public_method_has_a_case() -> None:
 
 @pytest.mark.asyncio
 async def test_negative_control_the_old_mode_keeps_the_lock(tmp_path: Path, monkeypatch) -> None:
-    """In Python's default mode the purge that finds nothing to delete leaves
-    a transaction open -- the check above catches it."""
+    """In Python's default mode the purge's old statement -- a DELETE that
+    finds nothing -- leaves a transaction open, and the check above catches
+    it. (The store's own writes are explicit BEGIN IMMEDIATE groups since
+    2026-10-14, so the old statement is issued here by hand.)"""
     real_connect = aiosqlite.connect
 
     def default_mode(database, **kwargs):
@@ -125,7 +164,8 @@ async def test_negative_control_the_old_mode_keeps_the_lock(tmp_path: Path, monk
     await store.init()
     try:
         assert _write_lock_free(path)
-        assert await store.purge_terminal_jobs() == 0
+        await store._db.execute(  # noqa: SLF001 — the purge as it was until 2026-09-27
+            "DELETE FROM cron_jobs WHERE status IN ('done', 'failed', 'cancelled') AND created_at < ?", ("x",))
         assert store._db.in_transaction  # noqa: SLF001
         assert not _write_lock_free(path)
     finally:

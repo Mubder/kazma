@@ -56,14 +56,16 @@ def test_the_answer_names_the_steps_and_links_the_page():
     rec = _Recorder([_snap(1), _snap(2), _snap(7)])
     out = time_travel_reply("/replay list", "web thread/1", rec)
     assert rec.asked == ["web thread/1"]
-    assert "3 saved step(s), iterations 1 to 7" in out
-    assert "2026-09-28 06:05 UTC" in out
+    # Re-pointed 2026-10-14 (TT-10): a plural form in the page's language,
+    # and no iteration range (iterations restart every turn, TT-01).
+    assert "This chat has 3 saved steps, the latest from 2026-09-28 06:05 UTC" in out
     assert "(/replay?thread=web%20thread%2F1)" in out  # the id is one query value
-    assert "`/replay <n>`" in out
+    assert "`/replay <step>`" in out
 
 
 def test_fork_names_its_own_command():
-    assert "`/fork <n>`" in time_travel_reply("/fork 2", "t", _Recorder([_snap(2)]))
+    # A step is named by its id since TT-01 (was "<n>").
+    assert "`/fork <step>`" in time_travel_reply("/fork 2", "t", _Recorder([_snap(2)]))
 
 
 def test_a_chat_without_steps_says_so():
@@ -89,7 +91,7 @@ def test_the_web_chat_answers_without_the_model():
     client, graph = _client(rec)
     resp = client.post("/api/chat/stream", json={"message": "/replay list"})
     assert resp.status_code == 200
-    assert "2 saved step(s), iterations 1 to 4" in resp.text
+    assert "This chat has 2 saved steps" in resp.text  # plural form since TT-10
     assert "event: done" in resp.text
     assert rec.asked, "the chat's own snapshots were not read"
     graph.astream_events.assert_not_called()

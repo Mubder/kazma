@@ -74,7 +74,14 @@ def test_sse_endpoint_coherence_with_active_task():
         with client.stream("GET", "/api/swarm/tasks/task-active/stream") as response:
             assert response.status_code == 200
             assert "text/event-stream" in response.headers["content-type"]
-            # Just read the first chunk/line and break
+            # Read the first frame and break. A frame starts with its id
+            # (Swarm audit SW-S09: resumable with Last-Event-ID), then its
+            # event line.
+            first_frame: list[str] = []
             for line in response.iter_lines():
-                assert "task_started" in line
-                break
+                if not line and first_frame:
+                    break
+                if line:
+                    first_frame.append(line)
+            assert first_frame[0].startswith("id: ")
+            assert any("task_started" in line for line in first_frame), first_frame

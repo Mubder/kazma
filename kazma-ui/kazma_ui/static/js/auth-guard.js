@@ -114,7 +114,10 @@
         var res = await window.fetch(url, opts);
         var body = null;
         try { body = await res.json(); } catch (e) { body = null; }
-        if (!res.ok || (body && body.status === "error")) {
+        // A 200 that says {"ok": false} is a refusal too (Knowledge audit
+        // KB-S10, program W1.5): the Settings Memory/Knowledge toggles
+        // reported "saved" over a refused write.
+        if (!res.ok || (body && (body.status === "error" || body.ok === false))) {
             var err = new Error(_reason(body, res));
             err.status = res.status;
             err.body = body;

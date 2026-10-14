@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
+from kazma_core.db.sqlite_columns import add_missing_columns
+
 from .models import DocumentId, DocumentJobState, JobId, VersionId, new_job_id
 from .repository import DocumentRepository
 
@@ -19,6 +21,7 @@ __all__ = [
     "DocumentJobEvent",
     "DocumentJobRecord",
     "DocumentJobRepository",
+    "IntakeFencedError",
     "InvalidJobTransitionError",
     "JobConflictError",
     "JobLeaseConflictError",
@@ -47,6 +50,31 @@ _ACTIVE_STATE_VALUES = (
     "verifying",
 )
 _TERMINAL_STATE_VALUES = ("rejected", "ready", "cancelled", "dead_letter")
+
+#: How many candidates one SQLite claim reads (it used to read the whole
+#: backlog, under the write lock, on every poll of every worker loop).
+_CLAIM_WINDOW = 64
+
+
+def fair_claim_order() -> tuple[str, str]:
+    """``(WITH clause, ORDER BY)`` shared by both job backends.
+
+    Fair across tenants (2026-10-13, F08): the next job comes from the
+    tenant with the FEWEST jobs running now, then by when it became ready
+    -- a retry by its ``retry_at``, not its original ``created_at``, so a
+    tenant's failing jobs no longer return to the front of the queue. One
+    tenant's backlog of hundreds no longer makes every other tenant wait
+    behind all of it.
+    """
+    active = ",".join(f"'{s}'" for s in _ACTIVE_STATE_VALUES)
+    with_clause = f"""
+        WITH running AS (
+            SELECT tenant_id, COUNT(*) AS n FROM document_jobs
+            WHERE state IN ({active}) AND lease_owner IS NOT NULL
+            GROUP BY tenant_id
+        )"""
+    order = "ORDER BY COALESCE(r.n, 0), COALESCE(j.retry_at, j.created_at), j.id"
+    return with_clause, order
 
 _ACTIVE_STATES = frozenset(
     {
@@ -195,6 +223,9 @@ CREATE TABLE IF NOT EXISTS document_jobs (
     )),
     stage TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
+    actor_id TEXT NOT NULL DEFAULT '',
+    request_digest TEXT NOT NULL DEFAULT '',
+    force_ocr INTEGER NOT NULL DEFAULT 0,
     attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
     max_attempts INTEGER NOT NULL CHECK (max_attempts > 0),
     retry_at TEXT,
@@ -270,6 +301,11 @@ class JobNotFoundError(JobConflictError):
     """Raised when a job is unavailable in the requested tenant."""
 
 
+class IntakeFencedError(JobConflictError):
+    """The intake's reservation is no longer this process's (its lease
+    lapsed and another process took it over): its job is not created."""
+
+
 class InvalidJobTransitionError(JobConflictError):
     """Raised when the canonical lifecycle forbids a transition."""
 
@@ -304,6 +340,9 @@ class DocumentJobRecord:
     version: int
     created_at: str
     updated_at: str
+    actor_id: str = ""
+    request_digest: str = ""
+    force_ocr: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,6 +445,9 @@ def _job(row: sqlite3.Row) -> DocumentJobRecord:
         version=int(row["row_version"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        actor_id=row["actor_id"],
+        request_digest=row["request_digest"],
+        force_ocr=bool(row["force_ocr"]),
     )
 
 
@@ -456,6 +498,11 @@ class DocumentJobRepository:
         self._retry_max_seconds = float(retry_max_seconds)
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            add_missing_columns(self._conn, "document_jobs", [
+                ("actor_id", "TEXT NOT NULL DEFAULT ''"),
+                ("request_digest", "TEXT NOT NULL DEFAULT ''"),
+                ("force_ocr", "INTEGER NOT NULL DEFAULT 0"),
+            ])
 
     def enqueue(
         self,
@@ -467,8 +514,18 @@ class DocumentJobRepository:
         idempotency_key: str,
         max_attempts: int = 3,
         job_id: JobId | None = None,
+        actor_id: str = "",
+        request_digest: str = "",
+        force_ocr: bool = False,
+        intake_fence: tuple[str, str] | None = None,
     ) -> DocumentJobRecord:
-        """Create a received job, returning the existing row on idempotent replay."""
+        """Create a received job, returning the existing row on idempotent replay.
+
+        ``intake_fence`` (reservation token, owner) makes creation conditional
+        on that reservation still being active and owned, in this same
+        transaction: an intake taken over by lease cannot publish
+        (``admission``; raises ``IntakeFencedError``).
+        """
         tenant = _required(tenant_id, "tenant_id")
         workspace = _required(workspace_id, "workspace_id")
         key = _required(idempotency_key, "idempotency_key")
@@ -494,12 +551,14 @@ class DocumentJobRepository:
                         existing["document_id"],
                         existing["version_id"],
                         int(existing["max_attempts"]),
+                        existing["actor_id"], existing["request_digest"], bool(existing["force_ocr"]),
                     )
                     requested_fields = (
                         workspace,
                         str(doc_id),
                         str(ver_id),
                         int(max_attempts),
+                        actor_id, request_digest, bool(force_ocr),
                     )
                     if replay_fields != requested_fields:
                         raise JobConflictError(
@@ -507,13 +566,18 @@ class DocumentJobRepository:
                         )
                     self._conn.execute("COMMIT")
                     return _job(existing)
+                if intake_fence is not None and self._conn.execute(
+                    "SELECT 1 FROM document_intake_reservations WHERE token = ? AND active = 1 AND owner = ?",
+                    tuple(intake_fence),
+                ).fetchone() is None:
+                    raise IntakeFencedError("the intake's reservation was taken over")
                 self._conn.execute(
                     """
                     INSERT INTO document_jobs (
                         id, tenant_id, workspace_id, document_id, version_id,
                         state, stage, idempotency_key, max_attempts,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, updated_at, actor_id, request_digest, force_ocr
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(identifier),
@@ -527,6 +591,7 @@ class DocumentJobRepository:
                         int(max_attempts),
                         now,
                         now,
+                        actor_id, request_digest, int(bool(force_ocr)),
                     ),
                 )
                 self._insert_event_locked(
@@ -557,6 +622,16 @@ class DocumentJobRepository:
         identifier = JobId(job_id)
         with self._lock:
             row = self._select_locked(tenant, identifier)
+        return _job(row) if row is not None else None
+
+    def get_by_idempotency_key(self, *, tenant_id: str, idempotency_key: str) -> DocumentJobRecord | None:
+        tenant = _required(tenant_id, "tenant_id")
+        key = _required(idempotency_key, "idempotency_key")
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM document_jobs WHERE tenant_id = ? AND idempotency_key = ?",
+                (tenant, key),
+            ).fetchone()
         return _job(row) if row is not None else None
 
     def interrupted_intake_jobs(
@@ -755,20 +830,24 @@ class DocumentJobRepository:
             try:
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._recover_expired_locked(now_dt, tenant_id=tenant)
-                tenant_clause = " AND tenant_id = ?" if tenant is not None else ""
+                tenant_clause = " AND j.tenant_id = ?" if tenant is not None else ""
                 params: list[object] = [now]
                 if tenant is not None:
                     params.append(tenant)
+                params.append(_CLAIM_WINDOW)
+                running, order = fair_claim_order()
                 rows = self._conn.execute(
-                    f"""
-                    SELECT * FROM document_jobs
+                    f"""{running}
+                    SELECT j.* FROM document_jobs j
+                    LEFT JOIN running r ON r.tenant_id = j.tenant_id
                     WHERE (
-                        state IN ('ready_to_parse', 'ocr_required')
-                        OR (state = 'retry_wait' AND retry_at IS NOT NULL AND retry_at <= ?)
+                        j.state IN ('ready_to_parse', 'ocr_required')
+                        OR (j.state = 'retry_wait' AND j.retry_at IS NOT NULL AND j.retry_at <= ?)
                     )
-                    AND cancel_requested = 0
+                    AND j.cancel_requested = 0
                     {tenant_clause}
-                    ORDER BY created_at, id
+                    {order}
+                    LIMIT ?
                     """,
                     params,
                 ).fetchall()

@@ -253,6 +253,15 @@ var KazmaStream = (function() {
               window.KazmaReplay.onLiveSnapshot(data);
             }
             break;
+          case 'thread_rewound':
+            // Time Travel: the chat was restored to a step (here or on another
+            // surface) -- reload it from the store (TT-03).
+            try {
+              if (window.KazmaChat && typeof window.KazmaChat.applyThreadRewound === 'function') {
+                window.KazmaChat.applyThreadRewound(data || {});
+              }
+            } catch (e) { /* never break the stream */ }
+            break;
           case 'memory_explain':
             if (callbacks.onMemoryExplain) callbacks.onMemoryExplain(data || {});
             else if (callbacks.onEvent) callbacks.onEvent(type, data);

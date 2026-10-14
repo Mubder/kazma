@@ -374,7 +374,9 @@ def test_every_tenant_and_the_pass_state(mem):
         ("default", "alpha"), ("acme", "beta")}
     state = get_config_store().get(turn_reconcile.STATE_KEY)
     assert state["last"]["turns_written"] == 2
-    assert state["after"] == ["", ""]  # both changed a moment ago: read again next pass
+    # The cursor is in the memory database (2026-10-14), not the settings store.
+    assert "after" not in state
+    assert turn_reconcile.read_state(None)["after"] == ["", ""]  # both changed a moment ago
 
 
 def test_memory_health_says_when_it_is_catching_up():

@@ -17,10 +17,10 @@ That file is the engineering single source of truth for *how packages wire toget
 
 | Package | Role |
 |---------|------|
-| `kazma-core` | Agent brain, swarm, tools, model registry, vault, IDE service, ConfigStore, **document intelligence** (`documents/`) |
-| `kazma-gateway` | Telegram / Discord / Slack adapters + agent handler (`/documents` slash, attachment parse) |
+| `kazma-core` | Agent brain, swarm, tools, model registry, vault, IDE service, ConfigStore, **document intelligence** (`documents/`, including the stdlib-only document worker broker `documents/worker_broker.py`, which runs outside Kazma with its images under `deploy/`) |
+| `kazma-gateway` | Telegram / Discord / Slack adapters + agent handler (`/documents` slash, transient attachment reads) |
 | `kazma-ui` | FastAPI web UI, SSE chat, settings, IDE, swarm panel, **`/documents`** + documents API |
-| `kazma-tui` | Textual dashboard / editor / **Documents tab** |
+| `kazma-tui` | Textual dashboard / editor / **Documents tab** (reads the documents API of the running server) |
 | `kazma-cli` | `kazma` CLI entrypoints (incl. migrate with document store) |
 | `kazma-skills` | Skill manifests + native skills (`document-platform`, `document-generator`, …) |
 
@@ -53,7 +53,7 @@ Two rules follow:
 3. Three HITL gates: graph interrupt, swarm bus, pipeline checkpoints.  
 4. IDE mutations go through `LocalToolRegistry` (shared HITL).  
 5. ConfigStore via `get_config_store()` only.  
-6. Document durable path uses `DocumentIngestionService` only — no gateway/UI imports of parser internals (`AGENTS.md` §19).  
+6. Document durable path uses `DocumentIngestionService` only — no gateway/UI imports of parser internals (`AGENTS.md` §19). Untrusted bytes are parsed, mutated and rendered only in the bounded worker (a local child, or a broker-run container with `KAZMA_DOCUMENT_WORKER_ISOLATION=container`), and no PDF from outside Kazma is opened outside it (`tests/test_pdf_openers_stay_in_workers.py`). Every job read names its actor (`tests/test_document_job_read_matrix.py`).  
 7. **Every registered tool needs a `TOOL_TIERS` entry.** HITL default-denies what it cannot classify, so an untiered tool prompts on every call. CI gate: `test_every_registered_tool_has_a_tier`.  
 8. **No blocking DB call inside `async def`, no bare `asyncio.create_task`.** Both stall or silently drop work on the loop that serves every SSE/WebSocket stream. Use `asyncio.to_thread` (or a sync handler) and `kazma_core.background.spawn_background`. CI-gated.  
 9. **Peer address is not a credential behind a proxy.** `KAZMA_TRUSTED_PROXIES` must be set wherever anything fronts Kazma — see [Hardening](../security/hardening-guide.md#behind-a-reverse-proxy).

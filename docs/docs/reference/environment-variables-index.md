@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**273** variables are read by the product code; **273** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**276** variables are read by the product code; **276** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -54,7 +54,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CRAWL_MAX_DEPTH` | `5` | `kazma_core.tools.web_research` | yes |
 | `KAZMA_CRAWL_MAX_PAGES` | `50` | `kazma_core.tools.web_research` | yes |
 | `KAZMA_CRAWL_RESPECT_ROBOTS` | `"1"` | `kazma_core.web_acquire.research_pipeline_job`, `kazma_core.web_acquire.robots` | yes |
-| `KAZMA_CRON_STALE_HOURS` | (none) | `kazma_core.cron.scheduler` | yes |
+| `KAZMA_CRON_STALE_HOURS` | `""` | `kazma_core.cron.settings` | yes |
 | `KAZMA_CUA_PLANNER` | `"1"` | `kazma_core.tools.computer_use_planners` | yes |
 | `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DATABASE_URL` | (none) | `kazma_core.db.backend`, `kazma_core.memory.backends` | yes |
@@ -71,11 +71,14 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DISCLOSURE_KEY` | `""` | `kazma_core.config_store` | yes |
 | `KAZMA_DIVISION` | (none) | `kazma_core.division_runtime` | yes |
 | `KAZMA_DIVISION_USER` | (none) | `kazma_core.division_runtime` | yes |
-| `KAZMA_DOCKER_BIN` | (none) | `kazma_core.docker_cli` | yes |
-| `KAZMA_DOCLING` | (none) | `kazma_core.documents.extract_salvage` | yes |
+| `KAZMA_DOCKER_BIN` | `""` | `kazma_core.docker_cli`, `kazma_core.documents.worker_broker` | yes |
+| `KAZMA_DOCLING` | `"1"` | `kazma_core.documents.extract_salvage`, `kazma_core.documents.service` | yes |
 | `KAZMA_DOCUMENTS_JOBS_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
 | `KAZMA_DOCUMENTS_METADATA_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
+| `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` | (none) | `kazma_core.documents.worker_container` | yes |
+| `KAZMA_DOCUMENT_BROKER_URL` | (none) | `kazma_core.documents.worker_container` | yes |
 | `KAZMA_DOCUMENT_FONT_DIR` | `""` | `kazma_core.documents.fonts` | yes |
+| `KAZMA_DOCUMENT_WORKER_ISOLATION` | (none) | `kazma_core.documents.worker_container` | yes |
 | `KAZMA_E2B` | (none) | `kazma_core.sandbox.e2b` | yes |
 | `KAZMA_E2B_API_KEY` | (none) | `kazma_core.sandbox.e2b` | yes |
 | `KAZMA_EMBED_ALLOW_DOWNLOAD` | `""` | `kazma_core.memory.embedder` | yes |
@@ -162,7 +165,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_MCP_TOOLS` | (none) | `kazma_core.mcp.server` | yes |
 | `KAZMA_MCP_TRUSTED_IN_PROD` | (none) | `kazma_core.mcp.manager` | yes |
 | `KAZMA_MEMORY_CONFLICT_POLICY` | (none) | `kazma_core.memory.backends` | yes |
-| `KAZMA_MEMORY_ENFORCE_TENANT` | `""` | `kazma_ui.memory_api` | yes |
+| `KAZMA_MEMORY_ENFORCE_TENANT` | `""` | `kazma_core.memory.config` | yes |
 | `KAZMA_MEMORY_OPS_DB` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_MEMORY_STATE_DB` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_MEMORY_STATE_REGION` | (none) | `kazma_core.memory.backends` | yes |

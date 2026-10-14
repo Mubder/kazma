@@ -291,7 +291,15 @@
               <button id="v2-memories-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
             </span>
           </div>
+          <input id="v2-memories-search" type="search" class="form-input" dir="auto" autocomplete="off"
+                 placeholder="{{ t('memory.mc.search_memories') }}" aria-label="{{ t('memory.mc.search_memories') }}"
+                 style="width:100%;font-size:0.72rem;padding:3px 8px;margin-bottom:6px;">
           <div id="v2-memories-list" style="font-size:0.72rem;max-height:220px;overflow-y:auto;color:var(--text-muted);">–</div>
+          <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">
+            <button id="v2-memories-newer" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:1px 8px;" disabled>{{ t('memory.mc.newer') }}</button>
+            <span id="v2-memories-range"></span>
+            <button id="v2-memories-older" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:1px 8px;" disabled>{{ t('memory.mc.older') }}</button>
+          </div>
         </div>
         <!-- What each week's conversations said about each topic, written by
              Kazma a day after the week ends (plan C2,
@@ -305,6 +313,11 @@
             </span>
           </div>
           <div id="v2-summaries-list" style="font-size:0.72rem;max-height:320px;overflow-y:auto;color:var(--text-muted);">–</div>
+          <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">
+            <button id="v2-summaries-newer" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:1px 8px;" disabled>{{ t('memory.mc.newer') }}</button>
+            <span id="v2-summaries-range"></span>
+            <button id="v2-summaries-older" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:1px 8px;" disabled>{{ t('memory.mc.older') }}</button>
+          </div>
         </div>
       </div>
 

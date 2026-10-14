@@ -479,7 +479,7 @@ def test_without_the_hook_a_forgotten_turn_would_live_on_in_its_summary(mem, mon
     from kazma_core.memory.forget import forget_episode
 
     sid = _summarized(mem)
-    monkeypatch.setattr(ts, "on_turns_forgotten", lambda conn, ids: [])
+    monkeypatch.setattr(ts, "on_turns_forgotten", lambda conn, ids, **_kw: [])
     forget_episode("ship2", tenant_id="default")
     assert "phase 2" in _text(mem, sid)
 

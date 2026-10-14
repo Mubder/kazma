@@ -314,12 +314,16 @@
             / <span x-text="ops && ops.tenant_quota ? fmtBytes(ops.tenant_quota.quota_bytes) : '—'"></span>
           </div>
 
+          <p class="cap-pill cap-degraded" role="status"
+             x-show="readiness && readiness.policy && readiness.policy.restart_required" x-cloak>
+            {{ t('documents.policy_restart_required') }}
+          </p>
           {# Multi-replica readiness #}
           <div style="margin-top:.3rem;" x-show="readiness" x-cloak>
             <span class="cap-pill" :class="capStatusClass(readiness ? readiness.status : '')">
               {{ t('documents.storage_status') }} <span x-text="readiness ? tOr('documents.cap_' + readiness.status, readiness.status) : '—'"></span>
             </span>
-            <span class="cap-pill" x-text="t('documents.jobs_backend').replace('{backend}', readiness ? readiness.jobs_backend : '—')"></span>
+            <span class="cap-pill" x-text="t('documents.jobs_backend').replace('{backend}', (readiness && readiness.jobs_backend) ? readiness.jobs_backend : '—')"></span>
             <span class="cap-pill" x-text="(readiness && readiness.jobs_multi_replica && readiness.metadata_multi_replica) ? t('documents.multi_replica') : t('documents.single_node')"></span>
           </div>
         </div>

@@ -4,14 +4,13 @@ Delivers structured Swarm Report cards and interactive HITL approval
 requests to a Slack channel.  Uses Block Kit buttons so operators can
 approve/reject directly.
 
-Mirrors ``telegram_bus.py``: an in-process ``asyncio.Event`` per pending
-approval, resolved by ``handle_callback`` when the Slack adapter
-delivers an interactive action payload (button click).
+An approval's outcome lives in ``kazma_core.swarm.shared_approvals``: one
+row per request, decided once, whichever platform's button is pressed
+first; ``handle_callback`` decides it and every card shows the outcome.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -25,9 +24,32 @@ from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
+
+def _card_body(text: str) -> str:
+    """An approval card without its "APPROVAL REQUIRED" header and its
+    "times out" line: what a decided card keeps under its outcome."""
+    return text.split(chr(10), 1)[-1].rsplit(chr(10), 1)[0]
+
 __all__ = [
     "SlackBusAdapter",
 ]
+
+
+def _mention_safe(payload: dict[str, Any]) -> dict[str, Any]:
+    """*payload* with every text it shows de-pinged (top-level text and
+    every block's text objects)."""
+    from kazma_gateway.adapters.slack_send import sanitize_outbound
+
+    def walk(value: Any, key: str = "") -> Any:
+        if isinstance(value, str):
+            return sanitize_outbound(value) if key == "text" else value
+        if isinstance(value, dict):
+            return {k: walk(v, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v, key) for v in value]
+        return value
+
+    return walk(payload)
 
 _APPROVAL_TIMEOUT = 60.0  # seconds
 _SLACK_API = "https://slack.com/api"
@@ -43,15 +65,13 @@ class SlackBusAdapter(BusAdapter):
     Features:
         - SwarmReport cards with Block Kit formatting
         - Interactive ``actions`` block buttons for HITL approval
-        - Callback routing to resolve ``asyncio.Event``
+        - Callback routing to decide the shared approval
     """
 
     def __init__(self, bot_token: str, channel_id: str) -> None:
         self._bot_token = bot_token
         self._channel_id = channel_id
-        self._pending_approvals: dict[str, asyncio.Event] = {}
-        self._pending_results: dict[str, bool] = {}
-        self._pending_msg_ts: dict[str, str] = {}
+        self._pending_approvals: set[str] = set()
         self._http: Any = None  # lazy httpx client
 
     @property
@@ -75,8 +95,13 @@ class SlackBusAdapter(BusAdapter):
         return self._http
 
     async def _post_message(self, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """POST a message via chat.postMessage. Returns parsed JSON or None."""
-        payload = {**payload, "channel": self._channel_id}
+        """POST a message via chat.postMessage. Returns parsed JSON or None.
+
+        Every post and edit of this sender goes through here or
+        :meth:`_update_message`, which neutralize broadcasts and mentions the
+        way the chat adapter does (Swarm audit SW-S13: a worker's
+        "<!channel>" notified the whole channel)."""
+        payload = {**_mention_safe(payload), "channel": self._channel_id}
         try:
             http = await self._ensure_http()
             resp = await http.post(
@@ -93,14 +118,21 @@ class SlackBusAdapter(BusAdapter):
             logger.warning("[SlackBus] chat.postMessage failed: %s", exc)
             return None
 
-    async def _update_message(self, ts: str, payload: dict[str, Any]) -> None:
-        """Edit an existing message via chat.update."""
-        payload = {**payload, "channel": self._channel_id, "ts": ts}
+    async def _update_message(self, ts: str, payload: dict[str, Any]) -> bool:
+        """Edit an existing message via chat.update. Whether Slack took it: a
+        card left showing its buttons is a WARNING (SW-S15)."""
+        payload = {**_mention_safe(payload), "channel": self._channel_id, "ts": ts}
         try:
             http = await self._ensure_http()
-            await http.post(f"{_SLACK_API}/chat.update", json=payload, headers=self._headers())
+            resp = await http.post(f"{_SLACK_API}/chat.update", json=payload, headers=self._headers())
+            data = resp.json()
+            if not data.get("ok"):
+                logger.warning("[SlackBus] chat.update error: %s", data.get("error"))
+                return False
+            return True
         except Exception as exc:
-            logger.debug("[SlackBus] chat.update failed: %s", exc)
+            logger.warning("[SlackBus] chat.update failed: %s", exc)
+            return False
 
     # ── BusAdapter interface ────────────────────────────────────────
 
@@ -213,22 +245,22 @@ class SlackBusAdapter(BusAdapter):
     async def request_approval(
         self, approval: ApprovalRequest, timeout: float | None = None
     ) -> bool:
-        if timeout is None:
-            timeout = _APPROVAL_TIMEOUT
         """Post an approval card with Block Kit buttons and await the response.
 
         Button values carry ``swarm_approve_{task_id}`` /
         ``swarm_reject_{task_id}``.  The Slack adapter's interactive
         payload handler calls ``handle_callback`` to resolve the event.
         """
+        if timeout is None:
+            timeout = _APPROVAL_TIMEOUT
         text = (
             "⚠️ *APPROVAL REQUIRED*\n"
             f"*Worker:* {approval.worker_name}\n"
             f"*Task:* {approval.task_description[:300]}\n"
         )
         if approval.proposed_output:
-            text += f"```\n{approval.proposed_output[:500]}\n```\n"
-        text += f"\n_(auto-reject in {int(timeout)}s)_"
+            text += f"```\n{approval.proposed_output}\n```\n"
+        text += f"\n_(times out in {int(timeout)}s; the tool does not run unless approved)_"
 
         # Block Kit: a section block + an actions block with two buttons.
         blocks = [
@@ -257,65 +289,41 @@ class SlackBusAdapter(BusAdapter):
 
         result = await self._post_message({"text": text[:2900], "blocks": blocks})
         msg_ts = str(result.get("ts", "")) if result else ""
+        if not msg_ts:
+            logger.warning("[SlackBus] Failed to deliver approval prompt for task %s", approval.task_id)
+            return False
 
+        # The request's one outcome, whatever platform decides it (SW-S04,
+        # SW-S05): shared_approvals waits, and this card shows the outcome.
         from kazma_core.swarm import shared_approvals
 
-        shared_approvals.create_pending(
-            approval.task_id,
-            meta={"platform": "slack", "worker": approval.worker_name},
-        )
-        event = asyncio.Event()
-        self._pending_approvals[approval.task_id] = event
-        if msg_ts:
-            self._pending_msg_ts[approval.task_id] = msg_ts
+        self._pending_approvals.add(approval.task_id)
+
+        async def _edit(row: dict) -> None:
+            final = f"*{shared_approvals.outcome_text(row)}*\n{_card_body(text)}"[:2900]
+            await self._update_message(msg_ts, {
+                "text": final, "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": final}}]})
+
         try:
-            approved = await shared_approvals.wait_for_resolution(
-                approval.task_id, timeout=timeout
-            )
-            if approval.task_id in self._pending_results:
-                approved = self._pending_results[approval.task_id]
-        except TimeoutError:
-            logger.warning("[SlackBus] Approval timed out for task %s", approval.task_id)
-            approved = False
+            return await shared_approvals.await_card(approval.task_id, _edit)
         finally:
-            self._pending_approvals.pop(approval.task_id, None)
-            self._pending_results.pop(approval.task_id, None)
-            self._pending_msg_ts.pop(approval.task_id, None)
-
-        # Edit the original message to show result (remove buttons).
-        if msg_ts:
-            status = "✅ *APPROVED*" if approved else "❌ *REJECTED*"
-            await self._update_message(msg_ts, {"text": status, "blocks": []})
-
-        return approved
+            self._pending_approvals.discard(approval.task_id)
 
     # ── Callback resolution ─────────────────────────────────────────
 
-    def approve(self, task_id: str) -> None:
-        """Signal approval for a pending task (local + durable)."""
-        if task_id in self._pending_approvals:
-            self._pending_results[task_id] = True
-            self._pending_approvals[task_id].set()
-        try:
-            from kazma_core.swarm.shared_approvals import resolve
+    def approve(self, task_id: str, *, actor: str = "") -> None:
+        """A human's Approve: decides the request if it is still pending."""
+        from kazma_core.swarm.shared_approvals import resolve_from_callback
 
-            resolve(task_id, True)
-        except Exception:
-            pass
+        resolve_from_callback(task_id, True, actor=actor, platform="slack")
 
-    def reject(self, task_id: str) -> None:
-        """Signal rejection for a pending task (local + durable)."""
-        if task_id in self._pending_approvals:
-            self._pending_results[task_id] = False
-            self._pending_approvals[task_id].set()
-        try:
-            from kazma_core.swarm.shared_approvals import resolve
+    def reject(self, task_id: str, *, actor: str = "") -> None:
+        """A human's Deny: decides the request if it is still pending (final)."""
+        from kazma_core.swarm.shared_approvals import resolve_from_callback
 
-            resolve(task_id, False)
-        except Exception:
-            pass
+        resolve_from_callback(task_id, False, actor=actor, platform="slack")
 
-    def handle_callback(self, action_value: str) -> str | None:
+    def handle_callback(self, action_value: str, *, actor: str = "") -> str | None:
         """Parse a Slack action value/action_id and resolve the approval.
 
         Returns the task_id if handled, None otherwise.
@@ -324,15 +332,9 @@ class SlackBusAdapter(BusAdapter):
 
             bus_adapter.handle_callback(action["value"])
         """
-        if action_value.startswith("swarm_approve_"):
-            task_id = action_value[len("swarm_approve_"):]
-            self.approve(task_id)
-            return task_id
-        if action_value.startswith("swarm_reject_"):
-            task_id = action_value[len("swarm_reject_"):]
-            self.reject(task_id)
-            return task_id
-        return None
+        from kazma_core.swarm.shared_approvals import decide_from_button
+
+        return decide_from_button(action_value, actor=actor, platform="slack")
 
     @property
     def pending_count(self) -> int:

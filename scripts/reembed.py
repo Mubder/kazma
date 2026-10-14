@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Re-embed all beliefs and episodes after an embedder model change.
+"""Re-embed every memory and fact after an embedding model change.
 
-Run AFTER updating ``memory.embedding`` in ``kazma.yaml`` (model + dim) —
-or after saving a new model in the Web UI Embedder settings page and
-restarting the server. The script:
-  1. Backs up ``memory_state.db`` to ``memory_state.db.pre_reembed``
-  2. NULLs out existing embedding BLOBs whose model version differs
-     (preserves all source text)
-  3. Re-encodes every affected belief and episode with the **new** embedder
-  4. Deletes the ChromaDB ``vector_memory/`` directory (auto-recreates)
-  5. Updates ``embedding_model_version`` on every row
+Run AFTER updating ``memory.embedding`` in ``kazma.yaml`` (model + dim) --
+or after saving a new model on the Settings Embedder page and restarting the
+server. It runs the same rebuild as that page's "Rebuild embeddings" button
+(``kazma_core.memory.reembed.rebuild_embeddings``), so the two cannot drift:
 
-The Web UI "Rebuild embeddings" button runs the same logic in-process
-(incremental — only rows not already in the current vector space).
+  1. Loads the new embedder first -- a rebuild that cannot encode changes
+     nothing.
+  2. Copies ``memory_state.db`` to ``memory_state.db.pre_reembed`` (taken
+     again at every rebuild).
+  3. Re-encodes, in place, every episode and fact whose vector is missing or
+     was made by another model; a row keeps its old vector until its new
+     one is written.
+
+It never touches the Knowledge Library's vectors (``vector_memory/``, or
+``KAZMA_VECTOR_PATH``): that folder is the Knowledge Library's live store,
+and the "knowledge vector repair" maintenance pass re-embeds another model's
+vectors there itself (``KnowledgeIndex.backfill_vectors``). This script used
+to end by deleting that folder, a step kept from when it held the retired V1
+chat index -- every library lost its meaning search until the repair pass
+had embedded it again.
 
 Usage::
 
@@ -25,8 +33,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
-import sqlite3
 import sys
 import time
 
@@ -45,153 +51,37 @@ _root = os.path.dirname(_here)
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-BATCH_SIZE = 256  # commit every N rows
-
-
-def _backup(src: str, dst: str) -> None:
-    """sqlite3 native backup (safe, online, file-level copy)."""
-    logger.info("Backing up %s → %s", os.path.basename(src), os.path.basename(dst))
-    sconn = sqlite3.connect(src)
-    dconn = sqlite3.connect(dst)
-    try:
-        sconn.backup(dconn)
-    finally:
-        dconn.close()
-        sconn.close()
-
-
-def _embed_text(emb, text: str) -> bytes | None:
-    """Encode *text* → float32 BLOB, or None."""
-    text = (text or "").strip()
-    if not text:
-        return None
-    try:
-        vec = emb.encode(text)
-        if not vec:
-            return None
-        import struct
-
-        return struct.pack(f"<{len(vec)}f", *vec)
-    except Exception:
-        logger.debug("Embed failed for text[:80]=%r", text[:80], exc_info=True)
-        return None
-
 
 def main() -> int:
-    from kazma_core.memory.embedder import get_embedder
-    from kazma_core.paths import data_dir, primary_memory_db
+    from kazma_core.memory.reembed import rebuild_embeddings
 
-    db_path = primary_memory_db()
-    if not db_path or not os.path.isfile(db_path):
-        logger.error("memory_state.db not found at %s", db_path)
+    started = time.monotonic()
+    last = [0.0]
+
+    def _progress(done: int, total: int) -> None:
+        now = time.monotonic()
+        if done == total or now - last[0] >= 5:
+            last[0] = now
+            logger.info("  %d/%d", done, total)
+
+    try:
+        summary = rebuild_embeddings(_progress)
+    except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        return 1
+    except RuntimeError as exc:
+        logger.error("Nothing was changed: %s", exc)
         return 1
 
-    # 1. Backup -----------------------------------------------------------------
-    backup_path = db_path + ".pre_reembed"
-    if os.path.exists(backup_path):
-        logger.warning(
-            "Backup %s already exists — skipping backup (delete it to force a fresh backup)",
-            backup_path,
-        )
-    else:
-        _backup(db_path, backup_path)
-
-    # 2. Open DB ----------------------------------------------------------------
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-
-    # 3. NULL out embeddings that are NOT already in the target vector
-    #    space (NULL-version rows are treated as stale) -------------------
-    from kazma_core.memory.embedder import get_embedding_model_name
-
-    model_name = get_embedding_model_name()
-    logger.info("NULLing embeddings not stamped '%s' (preserving source text) …", model_name)
-    conn.execute(
-        "UPDATE episodes SET embedding = NULL "
-        "WHERE embedding_model_version IS NULL OR embedding_model_version != ?",
-        (model_name,),
+    logger.info(
+        "Re-embed complete in %.1fs: %d memories, %d facts (model %s, %d skipped).",
+        time.monotonic() - started,
+        summary["episodes"],
+        summary["beliefs"],
+        summary["model"],
+        summary["skipped_rows"],
     )
-    conn.execute(
-        "UPDATE beliefs SET embedding = NULL "
-        "WHERE embedding_model_version IS NULL OR embedding_model_version != ?",
-        (model_name,),
-    )
-    conn.commit()
-
-    # 4. Load the NEW embedder -------------------------------------------------
-    logger.info("Loading embedder (this may download the model on first run) …")
-    t0 = time.monotonic()
-    emb = get_embedder()
-    logger.info("Embedder ready in %.1fs", time.monotonic() - t0)
-
-    dim = len(emb.encode("dimension probe"))
-    logger.info("Embedder model=%s  dim=%d", model_name, dim)
-
-    # 5. Re-embed EPISODES ------------------------------------------------------
-    logger.info("Re-embedding episodes …")
-    rows = conn.execute(
-        "SELECT id, user_text, assistant_text, summary_text "
-        "FROM episodes WHERE embedding IS NULL"
-    ).fetchall()
-    total = len(rows)
-    done = 0
-    for i, row in enumerate(rows):
-        # pick the best text to embed: summary > user > assistant
-        text = (row["summary_text"] or row["user_text"] or row["assistant_text"] or "").strip()
-        if text:
-            blob = _embed_text(emb, text)
-            if blob:
-                conn.execute(
-                    "UPDATE episodes SET embedding = ?, embedding_model_version = ? WHERE id = ?",
-                    (blob, model_name, row["id"]),
-                )
-        if (i + 1) % BATCH_SIZE == 0:
-            conn.commit()
-            delta = i + 1 - done
-            done = i + 1
-            logger.info("  episodes %d/%d", done, total)
-    conn.commit()
-    logger.info("Episodes complete: %d rows", total)
-
-    # 6. Re-embed BELIEFS -------------------------------------------------------
-    logger.info("Re-embedding beliefs …")
-    rows = conn.execute(
-        "SELECT id, subject, predicate, object "
-        "FROM beliefs WHERE embedding IS NULL"
-    ).fetchall()
-    total = len(rows)
-    done = 0
-    for i, row in enumerate(rows):
-        text = f"{row['subject']} {row['predicate']} {row['object']}"
-        blob = _embed_text(emb, text)
-        if blob:
-            conn.execute(
-                "UPDATE beliefs SET embedding = ?, embedding_model_version = ? WHERE id = ?",
-                (blob, model_name, row["id"]),
-            )
-        if (i + 1) % BATCH_SIZE == 0:
-            conn.commit()
-            delta = i + 1 - done
-            done = i + 1
-            logger.info("  beliefs %d/%d", done, total)
-    conn.commit()
-    logger.info("Beliefs complete: %d rows", total)
-
-    conn.close()
-
-    # 7. Clear ChromaDB vector store (derived indexes, auto-recreate) -----------
-    vec_dir = os.path.join(data_dir(), "vector_memory")
-    if os.path.isdir(vec_dir):
-        logger.info("Removing ChromaDB vector store: %s", vec_dir)
-        shutil.rmtree(vec_dir)
-        logger.info("  (will auto-recreate on next Kazma start)")
-
-    # Done ----------------------------------------------------------------------
-    elapsed = time.monotonic() - t0
-    logger.info("Re-embed complete in %.1fs. Restart Kazma now.", elapsed)
-    logger.info("If anything is broken, restore from: %s", backup_path)
+    logger.info("Restart Kazma now. The copy taken before the rebuild is memory_state.db.pre_reembed.")
     return 0
 
 

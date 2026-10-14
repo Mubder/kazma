@@ -15,7 +15,7 @@ from kazma_core.swarm.dispatch_helpers import (
 )
 from datetime import UTC, datetime
 
-from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus, WorkerResult
+from kazma_core.swarm.task import SwarmTask, TaskResult, WorkerResult
 
 __all__ = ["broadcast_task"]
 
@@ -32,9 +32,10 @@ def _utc_now_iso() -> str:
 async def broadcast_task(engine: "SwarmEngine", task: SwarmTask) -> TaskResult:
     """Dispatch a task to all registered workers or the targeted subset."""
     started = perf_counter()
+    # Runs only inside dispatch()'s owned run, which admitted the task RUNNING
+    # and tracks it (Swarm audit SW-E06): nothing to start here.
     task.started_at = task.started_at or _utc_now_iso()
-    task.status = TaskStatus.RUNNING
-    engine._active_tasks[task.id] = task
+    engine._active_tasks.setdefault(task.id, task)
 
     task_span = engine._tracing_emitter.start_task_span(
         task_id=task.id,

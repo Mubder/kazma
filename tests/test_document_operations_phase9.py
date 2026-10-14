@@ -437,7 +437,7 @@ class _FakeCursor:
     @staticmethod
     def _translate(sql: str) -> str:
         sql = sql.replace("%s", "?")
-        sql = re.sub(r"\bFOR UPDATE SKIP LOCKED\b", "", sql)
+        sql = re.sub(r"\bFOR UPDATE (OF \w+ )?SKIP LOCKED\b", "", sql)
         sql = re.sub(r"\bFOR UPDATE\b", "", sql)
         sql = sql.replace("BIGSERIAL PRIMARY KEY", "INTEGER PRIMARY KEY AUTOINCREMENT")
         sql = sql.replace("TIMESTAMPTZ", "TEXT")
@@ -465,7 +465,44 @@ class _FakeCursor:
 
     def execute(self, sql, params=None):
         self._log.append(sql)
+        self._answer = None
+        # The catalog reads of db.pg_schema.ensure_schema, answered from
+        # SQLite's own catalog (the advisory lock is a no-op: one connection).
+        if "pg_advisory_xact_lock" in sql:
+            self._answer = [{"locked": None}]
+            return self
+        if "pg_attribute" in sql:
+            table, column = params
+            names = [row["name"] for row in self._cur.connection.execute(f"PRAGMA table_info({table})")]
+            self._answer = [{"present": 1}] if column in names else []
+            return self
+        if "to_regclass(" in sql:
+            found = self._cur.connection.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (params[0],)).fetchone()
+            self._answer = [{"exists": found is not None}]
+            return self
         translated = self._translate(sql)
+        if params is None and "ADD COLUMN IF NOT EXISTS" in translated:
+            # Emulate idempotent PostgreSQL schema evolution through the same
+            # SQLite column helper; this adapter is not live-PG qualification.
+            from kazma_core.db.sqlite_columns import add_missing_columns
+
+            for statement in translated.split(";"):
+                statement = statement.strip()
+                if not statement:
+                    continue
+                migration = re.fullmatch(r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+) (.+)", statement)
+                if migration:
+                    table, name, definition = migration.groups()
+                    connection = self._cur.connection
+                    factory = connection.row_factory
+                    connection.row_factory = sqlite3.Row
+                    try:
+                        add_missing_columns(connection, table, [(name, definition)])
+                    finally:
+                        connection.row_factory = factory
+                else:
+                    self._cur.execute(statement)
+            return self
         if params is None:
             self._cur.executescript(translated) if ";" in translated and "INSERT" not in translated.upper() else self._cur.execute(translated)
         else:
@@ -473,9 +510,14 @@ class _FakeCursor:
         return self
 
     def fetchone(self):
+        if getattr(self, "_answer", None) is not None:
+            return self._answer.pop(0) if self._answer else None
         return self._cur.fetchone()
 
     def fetchall(self):
+        if getattr(self, "_answer", None) is not None:
+            rows, self._answer = self._answer, []
+            return rows
         return self._cur.fetchall()
 
     @property
@@ -568,7 +610,7 @@ def test_pg_claim_uses_skip_locked_and_cas_lifecycle():
     assert claimed.lease_owner == "worker-a" and claimed.attempt == 1
 
     # The claim query MUST use FOR UPDATE SKIP LOCKED (multi-replica primitive).
-    assert any("FOR UPDATE SKIP LOCKED" in s for s in pool.sql_log)
+    assert any(re.search(r"FOR UPDATE (OF \w+ )?SKIP LOCKED", s) for s in pool.sql_log)
 
     # CAS staleness: an out-of-date expected_version is rejected.
     from kazma_core.documents.jobs import StaleJobUpdateError
@@ -731,10 +773,20 @@ def test_backup_fails_when_referenced_blob_is_missing(tmp_path):
     assert report["verification"]["missing"]
 
 
+def _sqlite_document_store(monkeypatch) -> None:
+    # The store these tests build is SQLite (catalog and queue). Without a
+    # running service the migration tools read the CONFIGURED backends
+    # (DOC-A7, 2026-10-13), and the Postgres job configures Postgres.
+    monkeypatch.setenv("KAZMA_DOCUMENTS_METADATA_BACKEND", "sqlite")
+    monkeypatch.setenv("KAZMA_DOCUMENTS_JOBS_BACKEND", "sqlite")
+
+
 def test_migration_document_store_roundtrip(tmp_path, monkeypatch):
     from kazma_core.migration import exporter as exp
     from kazma_core.migration import importer as imp
     from kazma_core.migration.bundle import Manifest
+
+    _sqlite_document_store(monkeypatch)
 
     # Source store in dir A.
     root_a = tmp_path / "A" / "document-store"
@@ -749,7 +801,7 @@ def test_migration_document_store_roundtrip(tmp_path, monkeypatch):
     (staging / "data").mkdir(parents=True)
     manifest = Manifest()
 
-    monkeypatch.setattr("kazma_core.documents.config.get_document_config", lambda: cfg_a)
+    monkeypatch.setattr("kazma_core.documents.config.get_document_config", lambda **kwargs: cfg_a)
     exp._export_document_store(staging, manifest, lambda *_: None)
     assert (staging / "data" / "documents.db").exists()
     assert manifest.table_counts.get("_document_store", {}).get("blobs", 0) >= 1
@@ -757,7 +809,7 @@ def test_migration_document_store_roundtrip(tmp_path, monkeypatch):
     # Import into dir B.
     root_b = tmp_path / "B" / "document-store"
     cfg_b = replace(get_document_config(), storage_root=root_b)
-    monkeypatch.setattr("kazma_core.documents.config.get_document_config", lambda: cfg_b)
+    monkeypatch.setattr("kazma_core.documents.config.get_document_config", lambda **kwargs: cfg_b)
 
     class _Report:
         backup_path = str(tmp_path / "B" / "backup")
@@ -785,6 +837,8 @@ def test_migration_export_refuses_missing_referenced_blob(tmp_path, monkeypatch)
     from kazma_core.migration import exporter as exp
     from kazma_core.migration.bundle import Manifest
 
+    _sqlite_document_store(monkeypatch)
+
     root = tmp_path / "document-store"
     cfg = replace(get_document_config(), storage_root=root)
     repo = DocumentRepository(
@@ -798,7 +852,7 @@ def test_migration_export_refuses_missing_referenced_blob(tmp_path, monkeypatch)
     staging = tmp_path / "staging-missing"
     (staging / "data").mkdir(parents=True)
     monkeypatch.setattr(
-        "kazma_core.documents.config.get_document_config", lambda: cfg
+        "kazma_core.documents.config.get_document_config", lambda **kwargs: cfg
     )
 
     with pytest.raises(RuntimeError, match="referenced blob"):
@@ -814,6 +868,7 @@ def storage_b_has(root: Path, kind: str, sha: str) -> bool:
 
 class _Cfg:
     intake_max_bytes = 1_000_000
+    capacity_max_concurrent_uploads = 4
     retention_rejected_days = 7
     retention_dead_letter_days = 14
     retention_tombstone_days = 30
@@ -834,6 +889,17 @@ class _FakeService:
     def __init__(self, *, capacity_exc=None):
         self.config = _Cfg()
         self._capacity_exc = capacity_exc
+
+    def precheck_upload(self, **kwargs):
+        # The capacity answer now comes before the body is read (F08).
+        if self._capacity_exc is not None:
+            raise self._capacity_exc
+
+    def upload_spool_dir(self):
+        import tempfile
+        from pathlib import Path
+
+        return Path(tempfile.mkdtemp(prefix="fake-spool-"))
 
     def ingest_stream(self, *args, **kwargs):
         if self._capacity_exc is not None:

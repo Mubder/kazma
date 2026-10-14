@@ -32,7 +32,9 @@ class TestMcpForceDangerParity:
         from kazma_core.swarm.safety import SafetyMiddleware
         s = SafetyMiddleware(enabled=True, allow_headless_danger=False)
         for name in ("write_file", "run_command", "execute_code", "delete_file"):
-            assert s.is_danger_tool(name) is False
+            # No tier: gated by classification too since the Swarm audit
+            # (SW-S11, hitl.approval_floor), and still forceable.
+            assert s.is_danger_tool(name) is True
             assert s.check_sync(name, force_danger=True) is False
 
     def test_builtin_names_still_danger(self):
@@ -237,37 +239,35 @@ class TestHitlConfig:
 class TestBusAdapterCallbacks:
     """All three platform bus adapters resolve approve/reject callbacks."""
 
-    @pytest.mark.asyncio
-    async def test_discord_adapter_approve(self):
+    def test_discord_adapter_approve(self):
+        # The button decides the request's shared row (Swarm audit stage 1),
+        # not an event of the adapter that posted the card.
+        from kazma_core.swarm import shared_approvals
         from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
 
         adapter = DiscordBusAdapter(bot_token="fake", channel_id="123")
-        task_id = "task-abc"
+        task_id = "task-abc-" + __import__("uuid").uuid4().hex[:8]
+        shared_approvals.open_request(task_id, tool="shell_exec", args="{}",
+                                      deadline=__import__("time").time() + 60)
 
-        # Simulate a pending approval
-        event = asyncio.Event()
-        adapter._pending_approvals[task_id] = event
-
-        # Resolve via handle_callback (as the Discord interaction handler would)
         resolved = adapter.handle_callback(f"swarm_approve_{task_id}")
         assert resolved == task_id
-        assert event.is_set()
-        assert adapter._pending_results[task_id] is True
+        assert shared_approvals.get(task_id)["status"] == "approved"
 
-    @pytest.mark.asyncio
-    async def test_discord_adapter_reject(self):
+    def test_discord_adapter_reject(self):
+        # The button decides the request's shared row (Swarm audit stage 1),
+        # not an event of the adapter that posted the card.
+        from kazma_core.swarm import shared_approvals
         from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
 
         adapter = DiscordBusAdapter(bot_token="fake", channel_id="123")
-        task_id = "task-xyz"
-
-        event = asyncio.Event()
-        adapter._pending_approvals[task_id] = event
+        task_id = "task-xyz-" + __import__("uuid").uuid4().hex[:8]
+        shared_approvals.open_request(task_id, tool="shell_exec", args="{}",
+                                      deadline=__import__("time").time() + 60)
 
         resolved = adapter.handle_callback(f"swarm_reject_{task_id}")
         assert resolved == task_id
-        assert event.is_set()
-        assert adapter._pending_results[task_id] is False
+        assert shared_approvals.get(task_id)["status"] == "denied"
 
     @pytest.mark.asyncio
     async def test_discord_adapter_unknown_callback(self):
@@ -276,49 +276,50 @@ class TestBusAdapterCallbacks:
         adapter = DiscordBusAdapter(bot_token="fake", channel_id="123")
         assert adapter.handle_callback("something_else") is None
 
-    @pytest.mark.asyncio
-    async def test_slack_adapter_approve(self):
+    def test_slack_adapter_approve(self):
+        # The button decides the request's shared row (Swarm audit stage 1),
+        # not an event of the adapter that posted the card.
+        from kazma_core.swarm import shared_approvals
         from kazma_gateway.adapters.slack_bus import SlackBusAdapter
 
         adapter = SlackBusAdapter(bot_token="fake", channel_id="C123")
-        task_id = "slack-task"
-
-        event = asyncio.Event()
-        adapter._pending_approvals[task_id] = event
+        task_id = "slack-task-" + __import__("uuid").uuid4().hex[:8]
+        shared_approvals.open_request(task_id, tool="shell_exec", args="{}",
+                                      deadline=__import__("time").time() + 60)
 
         resolved = adapter.handle_callback(f"swarm_approve_{task_id}")
         assert resolved == task_id
-        assert event.is_set()
-        assert adapter._pending_results[task_id] is True
+        assert shared_approvals.get(task_id)["status"] == "approved"
 
-    @pytest.mark.asyncio
-    async def test_slack_adapter_reject(self):
+    def test_slack_adapter_reject(self):
+        # The button decides the request's shared row (Swarm audit stage 1),
+        # not an event of the adapter that posted the card.
+        from kazma_core.swarm import shared_approvals
         from kazma_gateway.adapters.slack_bus import SlackBusAdapter
 
         adapter = SlackBusAdapter(bot_token="fake", channel_id="C123")
-        task_id = "slack-deny"
-
-        event = asyncio.Event()
-        adapter._pending_approvals[task_id] = event
+        task_id = "slack-deny-" + __import__("uuid").uuid4().hex[:8]
+        shared_approvals.open_request(task_id, tool="shell_exec", args="{}",
+                                      deadline=__import__("time").time() + 60)
 
         resolved = adapter.handle_callback(f"swarm_reject_{task_id}")
         assert resolved == task_id
-        assert adapter._pending_results[task_id] is False
+        assert shared_approvals.get(task_id)["status"] == "denied"
 
-    @pytest.mark.asyncio
-    async def test_telegram_adapter_approve(self):
+    def test_telegram_adapter_approve(self):
+        # The button decides the request's shared row (Swarm audit stage 1),
+        # not an event of the adapter that posted the card.
+        from kazma_core.swarm import shared_approvals
         from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
 
         adapter = TelegramBusAdapter(bot_token="fake", chat_id="123")
-        task_id = "tg-task"
-
-        event = asyncio.Event()
-        adapter._pending_approvals[task_id] = event
+        task_id = "tg-task-" + __import__("uuid").uuid4().hex[:8]
+        shared_approvals.open_request(task_id, tool="shell_exec", args="{}",
+                                      deadline=__import__("time").time() + 60)
 
         resolved = adapter.handle_callback(f"swarm_approve_{task_id}")
         assert resolved == task_id
-        assert event.is_set()
-        assert adapter._pending_results[task_id] is True
+        assert shared_approvals.get(task_id)["status"] == "approved"
 
     @pytest.mark.asyncio
     async def test_approval_timeout_returns_false_discord(self, monkeypatch):
@@ -411,7 +412,7 @@ class TestToolRegistryHitlFlag:
         The _hitl_approved key in LLM args is always stripped and never
         honored — only the ContextVar set by graph_builder is trusted.
         """
-        from kazma_core.agent.tool_registry import LocalToolRegistry, _hitl_approved_ctx
+        from kazma_core.agent.tool_registry import CallAuthority, LocalToolRegistry, _hitl_approved_ctx
         import tempfile
         from pathlib import Path
 
@@ -420,8 +421,9 @@ class TestToolRegistryHitlFlag:
             path = f.name
 
         try:
-            # Set the ContextVar (as graph_builder does after interrupt() approval)
-            token = _hitl_approved_ctx.set(True)
+            # Set the ContextVar (as the tool worker does after interrupt()
+            # approval): an authority for this one call (SW-S01).
+            token = _hitl_approved_ctx.set(CallAuthority("file_write"))
             try:
                 # _hitl_approved in args should be stripped, not honored
                 result = await registry.execute(

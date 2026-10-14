@@ -117,21 +117,9 @@ def _public_audit_entry(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-async def _verify_same_origin(request: Request) -> None:
-    xrw = request.headers.get("x-requested-with", "").lower()
-    if xrw != "xmlhttprequest":
-        raise HTTPException(status_code=403, detail="missing custom request header")
-    origin = request.headers.get("origin") or request.headers.get("referer") or ""
-    if origin:
-        own_host = request.headers.get("host") or ""
-        try:
-            from urllib.parse import urlparse
-
-            origin_host = urlparse(origin).netloc
-        except Exception:
-            origin_host = ""
-        if own_host and origin_host and origin_host != own_host:
-            raise HTTPException(status_code=403, detail="cross-origin request denied")
+# The one same-origin rule (kazma_ui.same_origin, Scheduled audit SCH-S12):
+# this copy compared the Origin with the Host header only.
+from kazma_ui.same_origin import verify_same_origin as _verify_same_origin  # noqa: E402
 
 
 def _tenant_id() -> str:

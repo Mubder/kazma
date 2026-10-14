@@ -236,6 +236,14 @@ class KazmaAppBuilder:
                 "for later, different requests (audit AUD-001). The variable does nothing; "
                 "remove it from .env."
             )
+        if (os.environ.get("SWARM_BOT_TOKEN") or "").strip():
+            logger.warning(
+                "[startup] SWARM_BOT_TOKEN is set, but the separate swarm notifier it "
+                "fed was removed on 2026-10-14 (Swarm audit SW-S15): it was a fourth "
+                "notifier beside the ops-alert routes and reported refused sends as "
+                "sent. Swarm results go to the swarm output target (Settings -> Swarm, "
+                "or /swarm config); the variable does nothing, remove it from .env."
+            )
 
     def _bootstrap_services(self) -> None:
         """Logging, config store, agent, registry, secret, workspace, FastAPI app.
@@ -1217,16 +1225,19 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.cron.scheduler import CronScheduler, SQLiteCronStore, set_cron_scheduler
 
-                # Graph builder for scheduled-job execution. Uses the agent's
+                # Graph builder for a fired agent task. Uses the agent's
                 # one-shot child graph (checkpointer=None) — correct for a
-                # fire-and-deliver cron job. Mirrors the _sub_graph_builder
-                # closure above. Without this, _execute() raises
-                # "No graph builder configured" the moment a job fires.
-                def _cron_graph_builder(**_kwargs: Any) -> Any:
+                # fire-and-deliver cron job — offered exactly the tools the
+                # job declared at booking (Scheduled audit SCH-S05: it got the
+                # whole agent). Without this, a task fire fails with
+                # "No graph builder configured". Called in a thread.
+                def _cron_graph_builder(**kwargs: Any) -> Any:
+                    from kazma_core.cron.capabilities import cron_fire_graph
+
                     agent = self.agent
-                    if agent is not None and hasattr(agent, "build_child_graph"):
-                        return agent.build_child_graph()
-                    return agent.get_streaming_graph()
+                    if agent is None or not hasattr(agent, "build_child_graph"):
+                        raise RuntimeError("No agent to run a scheduled task")
+                    return cron_fire_graph(agent, capabilities=str(kwargs.get("capabilities") or "read"))
 
                 self.cron_store = SQLiteCronStore()
                 self.cron_scheduler = CronScheduler(
@@ -1894,11 +1905,17 @@ class KazmaAppBuilder:
             if _recorder is None:
                 try:
                     from kazma_core.time_travel import create_recorder
-                    _recorder = create_recorder(config=self.config.raw)
+                    _recorder = await asyncio.to_thread(create_recorder, config=self.config.raw)
                     self.agent._snapshot_recorder = _recorder
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[Replay] snapshot recorder creation failed: %s", exc, exc_info=True)
             self._snapshot_recorder = _recorder
+            # One recorder for the process: the page, the chat apps' /replay
+            # and /fork, and the slash resolver all read this one (TT-01).
+            if _recorder is not None:
+                from kazma_core.time_travel import set_process_recorder
+
+                set_process_recorder(_recorder)
 
             def _recompile_holder_graph() -> None:
                 # Re-read HITL config LIVE on every recompile: the boot-time
@@ -2250,6 +2267,25 @@ class KazmaAppBuilder:
         except Exception as e:  # noqa: BLE001 — teardown must not fail here
             logger.debug("[app] background loop stop failed: %s", e)
 
+        # 1) Stop cron FIRST, while the agent, the chat apps and the stores it
+        # delivers through are all still up: no new fire starts, and a fire in
+        # flight finishes within its bound (CronScheduler.stop drains with
+        # asyncio.wait; one that does not end in time runs again at the next
+        # start). It ran after the document and memory drains (up to 75 s),
+        # and left fires running under an agent that was then closed
+        # (Scheduled audit SCH-E04).
+        try:
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            cron_sched = get_cron_scheduler()
+            if cron_sched is not None and hasattr(cron_sched, "stop"):
+                maybe = cron_sched.stop()
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+                logger.info("[app] Cron scheduler stopped")
+        except Exception as e:  # noqa: BLE001 — teardown must not fail here
+            logger.warning("[app] cron stop failed: %s", e)
+
         # Join the watchdog's local statements before any stores close.
         from kazma_core.web_acquire.monitor import stop as stop_acquisition_monitor
 
@@ -2346,20 +2382,8 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Documents] ingestion coordinator stop failed: %s", e)
 
-        # 1) Stop cron first so no new jobs fire (audit C3)
-        try:
-            from kazma_core.cron.scheduler import get_cron_scheduler
-
-            cron_sched = get_cron_scheduler()
-            if cron_sched is not None and hasattr(cron_sched, "stop"):
-                maybe = cron_sched.stop()
-                if asyncio.iscoroutine(maybe):
-                    await maybe
-                logger.info("[app] Cron scheduler stopped")
-        except Exception as e:
-            logger.warning("[app] cron stop failed: %s", e)
-
-        # Stop the scheduled-X fire loop so no scheduled post fires mid-shutdown.
+        # (Cron was stopped first, above.) Stop the scheduled-X fire loop so no
+        # scheduled post fires mid-shutdown.
         try:
             from kazma_core.x_api.scheduled_fire import stop_scheduled_x_loop
 
@@ -2382,6 +2406,14 @@ class KazmaAppBuilder:
                     engine.stop_maintenance_loop()
                 except Exception:
                     pass
+                # Stop every running task through the engine, which records
+                # each ending as a shutdown with what the work had run (Swarm
+                # audit SW-E04), then cancel any other handle left.
+                stop_runs = getattr(engine, "stop_all_runs", None)
+                if callable(stop_runs):
+                    stopped = await stop_runs()
+                    if stopped:
+                        logger.info("[app] stopped %d running swarm task(s) for shutdown", stopped)
                 handles = getattr(engine, "_task_handles", None) or {}
                 for _tid, handle in list(handles.items()):
                     if handle is not None and hasattr(handle, "done") and not handle.done():

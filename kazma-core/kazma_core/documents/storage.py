@@ -21,8 +21,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "BlobChecksumError",
     "BlobTooLargeError",
+    "BlobLengthError",
     "ContentAddressedStorage",
     "StoredBlob",
+    "bounded_stream_digest",
     "StorageQuotaExceeded",
     "StorageQuotaExceededError",
 ]
@@ -38,6 +40,10 @@ class BlobTooLargeError(ValueError):
 
 class BlobChecksumError(IOError):
     """Raised when supplied or persisted bytes do not match their checksum."""
+
+
+class BlobLengthError(ValueError):
+    """A declared stream length must match before immutable publication."""
 
 
 class StorageQuotaExceededError(ValueError):
@@ -96,6 +102,20 @@ def _chunks(source: BinaryIO | Iterable[bytes]) -> Iterator[bytes]:
             yield chunk
 
 
+def bounded_stream_digest(
+    source: BinaryIO | Iterable[bytes], *, max_bytes: int
+) -> tuple[str, int]:
+    """Hash a replay without publishing bytes or trusting a declared length."""
+    digest = hashlib.sha256()
+    size = 0
+    for chunk in _chunks(source):
+        size += len(chunk)
+        if size > max_bytes:
+            raise BlobTooLargeError("Document exceeds the configured intake size limit")
+        digest.update(chunk)
+    return digest.hexdigest(), size
+
+
 def _file_digest(path: Path) -> tuple[str, int]:
     digest = hashlib.sha256()
     size = 0
@@ -143,12 +163,18 @@ class ContentAddressedStorage:
         tenant_id: str | None = None,
         repository: _QuotaRepository | None = None,
         tenant_quota_bytes: int | None = None,
+        expected_byte_size: int | None = None,
     ) -> StoredBlob:
         """Stream, limit, hash, verify, and atomically promote immutable content."""
         normalized_kind = _validate_kind(kind)
         if isinstance(max_bytes, bool) or int(max_bytes) <= 0:
             raise ValueError("max_bytes must be a positive integer")
         byte_limit = int(max_bytes)
+        if expected_byte_size is not None and (
+            isinstance(expected_byte_size, bool) or not isinstance(expected_byte_size, int)
+            or not 0 <= expected_byte_size <= byte_limit
+        ):
+            raise ValueError("expected_byte_size must be within the intake limit")
         expected = _validate_sha256(expected_sha256) if expected_sha256 is not None else None
         quota_enabled = repository is not None or tenant_id is not None or tenant_quota_bytes is not None
         if quota_enabled and (
@@ -179,10 +205,15 @@ class ContentAddressedStorage:
                         raise BlobTooLargeError(
                             f"document stream exceeds the {byte_limit}-byte intake limit"
                         )
+                    if expected_byte_size is not None and total > expected_byte_size:
+                        raise BlobLengthError("Document length does not match the declared length")
                     handle.write(chunk)
                     digest.update(chunk)
                 handle.flush()
                 os.fsync(handle.fileno())
+
+            if expected_byte_size is not None and total != expected_byte_size:
+                raise BlobLengthError("Document length does not match the declared length")
 
             computed = digest.hexdigest()
             if expected is not None and computed != expected:

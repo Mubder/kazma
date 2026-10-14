@@ -1018,6 +1018,16 @@ function registerAgentStore() {
           break;
         }
 
+        case 'thread_rewound': {
+          // Time Travel restore (any surface): the same painter as the stream.
+          try {
+            if (window.KazmaChat && typeof window.KazmaChat.applyThreadRewound === 'function') {
+              window.KazmaChat.applyThreadRewound(data || frame || {});
+            }
+          } catch (e) { /* never break the socket */ }
+          break;
+        }
+
         default:
           console.debug('[AgentStore] Unhandled telemetry event type:', type, frame);
       }

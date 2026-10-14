@@ -1,14 +1,56 @@
 /* Scheduled Tasks page — aggregates cron jobs + scheduled X posts.
  *
- * Backed by /api/scheduled/*. Mutating calls send the same-origin CSRF pair
- * (X-Requested-With) the server requires. Dialogs use the unified
- * window.kazmaConfirm / window.showToast helpers (see AGENTS.md UI rules).
+ * Backed by /api/scheduled/* (and, for X rows, X Studio's revision-bound
+ * queue actions /api/x/queue/{op}/reschedule|cancel). Mutating calls send
+ * the same-origin CSRF pair (X-Requested-With) the server requires. Dialogs
+ * use the unified window.kazmaConfirm / window.kazmaPrompt / window.showToast
+ * helpers (see AGENTS.md UI rules).
+ *
+ * Scheduled audit 2026-10-13:
+ *  - every status maps to a class (STATUS_CLASS); an unknown one needs
+ *    attention, never "Completed" (SCH-S04);
+ *  - the controls shown are the ones the server's state machine allows
+ *    (task.actions), never guessed from the status (SCH-S07);
+ *  - the edit dialog reads the whole prompt from the server and sends it back
+ *    only when it was edited, with the version it was read at (SCH-S02);
+ *  - dates go through window.KazmaFormat, with the zone named (SCH-S12).
  */
+
+/* The page's status classes. kazma_ui/scheduled_api.py SCHEDULED_STATUS_CLASS
+ * is the same map (tests/test_scheduled_presentation.py holds them equal). */
+const STATUS_CLASS = {
+    // cron jobs
+    pending: 'upcoming',
+    running: 'upcoming',
+    delivering: 'upcoming',
+    done: 'done',
+    failed: 'failed',
+    cancelled: 'cancelled',
+    undeliverable: 'failed',
+    missed: 'attention',
+    delivery_unknown: 'attention',
+    // X publication operations
+    scheduled: 'upcoming',
+    deferred: 'upcoming',
+    sending: 'attention',
+    awaiting_approval: 'attention',
+    outcome_unknown: 'attention',
+    published: 'done',
+    failed_permanent: 'failed',
+    expired: 'failed',
+};
+
+function statusClass(task) {
+    if (task && task.class) return task.class;
+    const st = (task && task.status) || '';
+    return Object.prototype.hasOwnProperty.call(STATUS_CLASS, st) ? STATUS_CLASS[st] : 'attention';
+}
 
 function scheduledPage() {
     return {
         tasks: [],
         loading: false,
+        timezone: '',
 
         t(key) { return (window.t && window.t(key)) || key; },
 
@@ -22,27 +64,20 @@ function scheduledPage() {
         // at the bottom of thirty-four rows.
         sortDir: 'desc',
 
-        // X activity — the audit log, moved here from Settings. It answers
-        // "what did Kazma actually post", which is an operational question,
-        // not a configuration one: it belongs beside the schedule that
-        // produced it rather than inside the connector setup form.
+        // X activity — the audit log, moved here from Settings.
         audit: { entries: [], loading: false, open: null, loaded: false },
 
         // Times on this page render in the VIEWER's zone; recurring jobs
-        // ("daily at 9am") are interpreted in the SCHEDULER's zone. When
-        // those differ, "9am" means neither what the row shows nor what the
-        // operator assumed, and nothing on the page said so.
+        // ("daily at 9am") are interpreted in the SCHEDULER's zone.
         cronTz: '',
 
         get counts() {
-            const c = { upcoming: 0, failed: 0, done: 0, overdue: 0 };
+            const c = { upcoming: 0, attention: 0, failed: 0, done: 0, cancelled: 0, overdue: 0 };
             for (const task of this.tasks) {
-                const st = task.status || '';
-                if (st === 'pending' || st === 'running') {
-                    c.upcoming++;
-                    if (this.isOverdue(task)) c.overdue++;
-                } else if (st === 'failed') c.failed++;
-                else c.done++;
+                const cls = statusClass(task);
+                if (Object.prototype.hasOwnProperty.call(c, cls)) c[cls]++;
+                else c.attention++;
+                if (cls === 'upcoming' && this.isOverdue(task)) c.overdue++;
             }
             return c;
         },
@@ -52,13 +87,10 @@ function scheduledPage() {
             if (this.filter === 'all') {
                 rows = this.tasks.slice();
             } else if (this.filter === 'history') {
-                rows = this.tasks.filter(task => !['pending', 'running'].includes(task.status || ''));
+                rows = this.tasks.filter(task => ['done', 'failed', 'cancelled'].includes(statusClass(task)));
             } else {
-                rows = this.tasks.filter(task => ['pending', 'running'].includes(task.status || ''));
+                rows = this.tasks.filter(task => ['upcoming', 'attention'].includes(statusClass(task)));
             }
-            // Sort on a copy: the API's own order is the fallback for rows
-            // with no usable timestamp, and mutating this.tasks would make
-            // the sort compound every time the getter re-ran.
             const dir = this.sortDir === 'asc' ? 1 : -1;
             return rows.slice().sort((a, b) => {
                 const ta = this._ms(a), tb = this._ms(b);
@@ -78,10 +110,6 @@ function scheduledPage() {
             this.sortDir = this.sortDir === 'desc' ? 'asc' : 'desc';
         },
 
-        _locale() {
-            return document.documentElement.lang || 'en';
-        },
-
         _date(task) {
             const raw = task && task.when;
             if (!raw) return null;
@@ -89,56 +117,38 @@ function scheduledPage() {
             return isNaN(d.getTime()) ? null : d;
         },
 
-        /* Absolute time in the VIEWER's timezone.
-         *
-         * The API returns UTC ISO strings and the page printed them raw:
-         * "2026-08-30T09:00:00+00:00". Unreadable, and silently three hours
-         * wrong for an operator in +03:00 -- the kind of error you only
-         * notice when a task fires when you did not expect it. */
+        /* Absolute time in the VIEWER's zone, with the zone named
+         * ("14 Oct 2026, 09:00 GMT+3"), through window.KazmaFormat: Latin
+         * digits in Arabic, the page's language either way. */
         fmtAbs(task) {
             const d = this._date(task);
             if (!d) return '—';
-            try {
-                return new Intl.DateTimeFormat(this._locale(), {
-                    dateStyle: 'medium', timeStyle: 'short',
-                }).format(d);
-            } catch (e) {
-                return d.toLocaleString();
-            }
+            const fmt = window.KazmaFormat;
+            if (!fmt) return d.toISOString();
+            return fmt.dateTime(d, {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+            }) || d.toISOString();
         },
 
         /* "in 3 days" / "2 weeks ago" -- the part you actually read. */
         fmtRel(task) {
             const d = this._date(task);
             if (!d) return '';
-            const secs = (d.getTime() - Date.now()) / 1000;
-            const steps = [
-                ['year', 31536000], ['month', 2592000], ['week', 604800],
-                ['day', 86400], ['hour', 3600], ['minute', 60],
-            ];
-            try {
-                const rtf = new Intl.RelativeTimeFormat(this._locale(), { numeric: 'auto' });
-                for (const [unit, size] of steps) {
-                    if (Math.abs(secs) >= size) return rtf.format(Math.round(secs / size), unit);
-                }
-                return rtf.format(Math.round(secs), 'second');
-            } catch (e) {
-                return '';
-            }
+            const fmt = window.KazmaFormat;
+            return fmt ? fmt.relative(d) : '';
         },
 
         /* A pending task whose time has passed is the one row that needs
          * attention, and it used to look identical to every other row. */
         isOverdue(task) {
-            if (!['pending', 'running'].includes(task.status || '')) return false;
+            if (statusClass(task) !== 'upcoming') return false;
             const d = this._date(task);
-            return !!d && d.getTime() < Date.now();
+            return !!d && d.getTime() < Date.now() - 60000;
         },
 
-        /* Prompts are stored with the indentation they were written with,
-         * and the cell rendered it verbatim -- pages of leading whitespace
-         * inside a table. Batch-job wrappers also bury the tweet in English
-         * instructions; show the body the operator can actually read. */
+        /* Prompts are stored with the indentation they were written with;
+         * batch-job wrappers also bury the tweet in English instructions. */
         cleanSummary(task) {
             const raw = String((task && task.summary) || '').replace(/\s+/g, ' ').trim();
             if (!raw) return '—';
@@ -148,8 +158,6 @@ function scheduledPage() {
         },
 
         summaryKicker(task) {
-            // The server decides the kicker for its own rows, an empty one
-            // included; only text without one is worked out here.
             if (task && typeof task.kicker === 'string') return task.kicker;
             const bidi = window.KazmaBidi;
             if (bidi && bidi.displayKicker) {
@@ -163,7 +171,7 @@ function scheduledPage() {
             const bidi = window.KazmaBidi;
             if (bidi && bidi.textDir) return bidi.textDir(this.cleanSummary(task));
             const s = this.cleanSummary(task);
-            if (/[\u0600-\u06FF]/.test(s)) return 'rtl';
+            if (/[؀-ۿ]/.test(s)) return 'rtl';
             if (!s || s === '—') {
                 return (document.documentElement.getAttribute('dir') || 'ltr').toLowerCase();
             }
@@ -189,12 +197,13 @@ function scheduledPage() {
             }
         },
 
-        /* Real failures only. last_result is the agent's wrap-up essay and
-         * used to paint the whole cell red even on a successful post. */
+        /* Real failures only: a delivery the platform refused, a failed run.
+         * last_result is the agent's wrap-up and used to paint the whole
+         * cell red even on a successful post. */
         errorText(task) {
-            const err = String((task && task.error) || '').replace(/\s+/g, ' ').trim();
+            const err = String((task && (task.error || task.delivery_error)) || '').replace(/\s+/g, ' ').trim();
             if (err) return err;
-            if ((task && task.status) === 'failed') {
+            if (statusClass(task) === 'failed') {
                 const last = String((task.last_result || '')).replace(/\s+/g, ' ').trim();
                 return last.slice(0, 160);
             }
@@ -216,22 +225,53 @@ function scheduledPage() {
             return this.errorText(task);
         },
 
+        /* The status in the page's language; a status the catalog does not
+         * know reads as "Needs attention", never as its raw id (SCH-S04). */
         statusLabel(task) {
             const st = (task && task.status) || 'pending';
             const key = 'scheduled.st_' + st;
-            const label = window.t ? window.t(key) : st;
-            return (label && label !== key) ? label : st;
+            const label = window.t ? window.t(key) : '';
+            if (label && label !== key) return label;
+            const fallback = window.t ? window.t('scheduled.st_attention') : '';
+            return (fallback && fallback !== 'scheduled.st_attention') ? fallback : st;
         },
 
-        // Cron task form
+        statusBadge(task) {
+            return 'st-' + statusClass(task);
+        },
+
+        /* What the job does when it fires, and how often (SCH-S07). */
+        kindLabel(task) {
+            if (!task || task.source === 'x') return this.t('scheduled.kind_x');
+            return task.kind === 'reminder' ? this.t('scheduled.kind_reminder') : this.t('scheduled.kind_task');
+        },
+
+        detailLine(task) {
+            if (!task || task.source !== 'cron') return '';
+            const bits = [];
+            if (task.recurring && task.timing) bits.push(this.t('scheduled.repeats') + ': ' + task.timing);
+            if (task.destination) bits.push(this.t('scheduled.destination') + ': ' + task.destination);
+            if (task.failure_count) bits.push(this.t('scheduled.failures') + ': ' + task.failure_count);
+            if (task.delivery_state) {
+                const key = 'scheduled.delivery_' + task.delivery_state;
+                const word = this.t(key);
+                bits.push(this.t('scheduled.last_delivery') + ': ' + (word !== key ? word : task.delivery_state));
+            }
+            if (task.edit_pending) bits.push(this.t('scheduled.edit_pending'));
+            if (task.cancel_pending) bits.push(this.t('scheduled.cancel_pending'));
+            return bits.join(' · ');
+        },
+
+        // Cron task form. `original` is the prompt as read from the server:
+        // a prompt is sent back only when the operator changed it (SCH-S02).
         showCronModal: false,
         cronSaving: false,
-        cronForm: { job_id: '', timing: '', prompt: '' },
+        cronForm: { job_id: '', timing: '', prompt: '', original: null, version: null, kind: 'task', capabilities: 'read' },
 
         // X post form
         showXModal: false,
         xSaving: false,
-        xForm: { id: null, text: '', when: '' },
+        xForm: { id: null, text: '', when: '', version: null },
 
         async init() {
             await this.load();
@@ -294,8 +334,6 @@ function scheduledPage() {
             }
         },
 
-        /* Audit rows carry a local timestamp already; format it the same
-         * way as everything else rather than slicing the ISO string. */
         fmtAuditWhen(entry) {
             return this.fmtAbs({ when: entry && entry.ts });
         },
@@ -364,6 +402,7 @@ function scheduledPage() {
                 const data = await resp.json().catch(() => ({}));
                 if (resp.ok && data.ok) {
                     this.tasks = data.tasks || [];
+                    this.timezone = String(data.timezone || '');
                 } else {
                     window.showToast(data.error || window.kazmaT('scheduled.ui.load_failed', 'Failed to load scheduled tasks'), 'error');
                 }
@@ -374,32 +413,48 @@ function scheduledPage() {
             }
         },
 
-        canEdit(task) {
-            if (task.source === 'x') return task.status === 'pending';
-            return task.status === 'pending' || task.status === 'running';
-        },
-
-        canDelete(task) {
-            return task.status === 'pending' || task.status === 'running';
-        },
+        // The controls are the server's: task.actions is what the state
+        // machine allows for this row (never guessed from its status).
+        canEdit(task) { return !!(task && Array.isArray(task.actions) && task.actions.includes('edit')); },
+        canDelete(task) { return !!(task && Array.isArray(task.actions) && task.actions.includes('cancel')); },
+        canRestore(task) { return !!(task && Array.isArray(task.actions) && task.actions.includes('restore')); },
 
         openCreateCron() {
-            this.cronForm = { job_id: '', timing: '', prompt: '' };
+            this.cronForm = { job_id: '', timing: '', prompt: '', original: null, version: null,
+                              kind: 'task', capabilities: 'read' };
             this.showCronModal = true;
         },
 
         openCreateX() {
-            this.xForm = { id: null, text: '', when: '' };
+            this.xForm = { id: null, text: '', when: '', version: null };
             this.showXModal = true;
         },
 
-        openEdit(task) {
+        /* The edit dialog reads the WHOLE prompt from the server: the list
+         * carries a display summary, and saving that back cut a 667-character
+         * instruction to 200 and dropped a batch job's wrapper (SCH-S02). */
+        async openEdit(task) {
             if (task.source === 'x') {
-                this.xForm = { id: task.id, text: task.summary, when: '' };
+                this.xForm = { id: task.operation_id || task.id, text: task.summary, when: '', version: task.version };
                 this.showXModal = true;
-            } else {
-                this.cronForm = { job_id: task.id, timing: task.timing || '', prompt: task.summary || '' };
+                return;
+            }
+            try {
+                const resp = await fetch('/api/scheduled/cron/' + encodeURIComponent(task.id), { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.job) {
+                    window.showToast(data.error || window.kazmaT('scheduled.ui.load_failed', 'Failed to load scheduled tasks'), 'error');
+                    return;
+                }
+                const job = data.job;
+                this.cronForm = {
+                    job_id: job.job_id, timing: job.timing || '', prompt: job.prompt || '',
+                    original: job.prompt || '', originalTiming: job.timing || '', version: job.version,
+                    kind: job.kind || 'task', capabilities: job.capabilities || 'read',
+                };
                 this.showCronModal = true;
+            } catch (e) {
+                window.showToast(window.kazmaT('scheduled.ui.load_failed_error', 'Failed to load scheduled tasks: {error}', { error: e.message }), 'error');
             }
         },
 
@@ -415,6 +470,17 @@ function scheduledPage() {
             });
         },
 
+        /* The body an edit sends: only what changed, and the version it was
+         * read at. A timing-only edit sends no prompt. */
+        editBody(form) {
+            const body = { expected_version: form.version };
+            const timing = String(form.timing || '').trim();
+            if (timing && timing !== String(form.originalTiming || '').trim()) body.timing = timing;
+            const prompt = String(form.prompt || '');
+            if (form.original !== null && prompt.trim() && prompt !== form.original) body.prompt = prompt.trim();
+            return body;
+        },
+
         async saveCron() {
             const isEdit = !!this.cronForm.job_id;
             if (!this.cronForm.prompt.trim()) {
@@ -425,28 +491,51 @@ function scheduledPage() {
                 window.showToast(window.t('scheduled.timing_required'), 'error');
                 return;
             }
+            let body;
+            if (isEdit) {
+                body = this.editBody(this.cronForm);
+                if (body.timing === undefined && body.prompt === undefined) {
+                    this.showCronModal = false;
+                    return;
+                }
+            } else {
+                body = {
+                    timing: this.cronForm.timing.trim(), prompt: this.cronForm.prompt.trim(),
+                    kind: this.cronForm.kind, capabilities: this.cronForm.capabilities,
+                };
+            }
             this.cronSaving = true;
             try {
                 const url = isEdit
                     ? '/api/scheduled/cron/' + encodeURIComponent(this.cronForm.job_id)
                     : '/api/scheduled/cron';
-                const resp = await this._mutating(isEdit ? 'PUT' : 'POST', url, {
-                    timing: this.cronForm.timing.trim(),
-                    prompt: this.cronForm.prompt.trim(),
-                });
+                const resp = await this._mutating(isEdit ? 'PUT' : 'POST', url, body);
                 const data = await resp.json().catch(() => ({}));
-                if (resp.ok && data.ok !== false && (data.ok || data.status === 'rescheduled' || data.status === 'scheduled')) {
-                    window.showToast(isEdit ? window.t('scheduled.updated') : window.t('scheduled.created'), 'success');
+                if (resp.ok && data.ok) {
+                    const msg = resp.status === 202 ? window.t('scheduled.edit_pending')
+                        : (isEdit ? window.t('scheduled.updated') : window.t('scheduled.created'));
+                    window.showToast(msg, 'success');
                     this.showCronModal = false;
                     await this.load();
                 } else {
-                    window.showToast(data.error || window.kazmaT('scheduled.ui.save_failed', 'Save failed'), 'error');
+                    window.showToast(this.errorFor(data), 'error');
                 }
             } catch (e) {
                 window.showToast(window.kazmaT('scheduled.ui.save_failed_error', 'Save failed: {error}', { error: e.message }), 'error');
             } finally {
                 this.cronSaving = false;
             }
+        },
+
+        /* A refusal in the page's language when the server names its code. */
+        errorFor(data) {
+            const code = data && data.code;
+            if (code) {
+                const key = 'scheduled.err_' + code;
+                const word = window.t ? window.t(key) : '';
+                if (word && word !== key) return word;
+            }
+            return (data && data.error) || window.kazmaT('scheduled.ui.save_failed', 'Save failed');
         },
 
         async saveX() {
@@ -463,8 +552,9 @@ function scheduledPage() {
             try {
                 let resp;
                 if (isEdit) {
-                    resp = await this._mutating('PUT', '/api/scheduled/x/' + this.xForm.id, {
-                        when: this.xForm.when.trim(),
+                    // X Studio's revision-bound queue action (SCH-S04).
+                    resp = await this._mutating('POST', '/api/x/queue/' + encodeURIComponent(this.xForm.id) + '/reschedule', {
+                        when: this.xForm.when.trim(), expected_version: this.xForm.version,
                     });
                 } else {
                     resp = await this._mutating('POST', '/api/scheduled/x', {
@@ -473,12 +563,12 @@ function scheduledPage() {
                     });
                 }
                 const data = await resp.json().catch(() => ({}));
-                if (resp.ok && data.ok !== false) {
+                if (resp.ok && data.ok) {
                     window.showToast(isEdit ? window.t('scheduled.updated') : window.t('scheduled.x_booked'), 'success');
                     this.showXModal = false;
                     await this.load();
                 } else {
-                    window.showToast(data.error || window.kazmaT('scheduled.ui.save_failed', 'Save failed'), 'error');
+                    window.showToast(this.errorFor(data), 'error');
                 }
             } catch (e) {
                 window.showToast(window.kazmaT('scheduled.ui.save_failed_error', 'Save failed: {error}', { error: e.message }), 'error');
@@ -497,22 +587,51 @@ function scheduledPage() {
             });
             if (!ok) return;
             try {
-                const url = task.source === 'x'
-                    ? '/api/scheduled/x/' + task.id
-                    : '/api/scheduled/cron/' + encodeURIComponent(task.id);
-                const resp = await this._mutating('DELETE', url);
+                let resp;
+                if (task.source === 'x') {
+                    resp = await this._mutating('POST', '/api/x/queue/' + encodeURIComponent(task.operation_id || task.id) + '/cancel',
+                        { expected_version: task.version });
+                } else {
+                    resp = await this._mutating('DELETE', '/api/scheduled/cron/' + encodeURIComponent(task.id)
+                        + '?expected_version=' + encodeURIComponent(task.version));
+                }
                 const data = await resp.json().catch(() => ({}));
                 if (resp.ok && data.ok) {
-                    window.showToast(window.t('scheduled.deleted'), 'success');
+                    window.showToast(resp.status === 202 ? window.t('scheduled.cancel_pending') : window.t('scheduled.deleted'), 'success');
                     await this.load();
                 } else {
-                    window.showToast(data.error || window.kazmaT('scheduled.ui.delete_failed', 'Delete failed'), 'error');
+                    window.showToast(this.errorFor(data) || window.kazmaT('scheduled.ui.delete_failed', 'Delete failed'), 'error');
                 }
             } catch (e) {
                 window.showToast(window.kazmaT('scheduled.ui.delete_failed_error', 'Delete failed: {error}', { error: e.message }), 'error');
+            }
+        },
+
+        /* "Run again": a finished job comes back only by asking (SCH-S07). */
+        async restore(task) {
+            const timing = await window.kazmaPrompt({
+                title: window.t('scheduled.restore'),
+                message: window.t('scheduled.restore_when'),
+                defaultValue: task.timing || '',
+                confirmText: window.t('scheduled.restore'),
+            });
+            if (timing === null || timing === undefined || !String(timing).trim()) return;
+            try {
+                const resp = await this._mutating('POST', '/api/scheduled/cron/' + encodeURIComponent(task.id) + '/restore',
+                    { timing: String(timing).trim(), expected_version: task.version });
+                const data = await resp.json().catch(() => ({}));
+                if (resp.ok && data.ok) {
+                    window.showToast(window.t('scheduled.restored'), 'success');
+                    await this.load();
+                } else {
+                    window.showToast(this.errorFor(data), 'error');
+                }
+            } catch (e) {
+                window.showToast(window.kazmaT('scheduled.ui.save_failed_error', 'Save failed: {error}', { error: e.message }), 'error');
             }
         },
     };
 }
 
 window.scheduledPage = scheduledPage;
+window.SCHEDULED_STATUS_CLASS = STATUS_CLASS;

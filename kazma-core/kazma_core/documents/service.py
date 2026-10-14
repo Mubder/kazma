@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import shutil
 import sys
 import uuid
@@ -15,7 +16,7 @@ from typing import Any
 
 from kazma_core.safety.prompt_fence import format_untrusted_block
 
-from .config import DocumentConfig, get_document_config
+from .config import DocumentConfig
 from .errors import (
     DocumentFormatError,
     DocumentOcrError,
@@ -29,12 +30,21 @@ from .mutation import get_mutation_registry
 from .ocr import OcrHealth, get_ocr_health
 from .operations import DocumentOperations, OperationScope
 from .parsers.common import sha256_path
+from .policy import DocumentPolicy, policy_operation
 from .registry import ParserRegistry, get_parser_registry
 from .renderers import RendererRegistry, get_renderer_registry
 from .repository import DocumentAccessError, DocumentRepository
 from .sandbox import SandboxRequest, run_isolated_subprocess
-from .sniff import sniff_document
+from .sniff import SniffResult
 from .storage import ContentAddressedStorage
+from .worker_container import (
+    CONTAINER,
+    isolation_report,
+    parser_container_request,
+    process_profile_refusal,
+    run_container_worker,
+    worker_isolation_mode,
+)
 
 __all__ = ["DocumentReadResult", "DocumentService"]
 
@@ -117,15 +127,17 @@ class DocumentService:
         mutation_registry: RendererRegistry | None = None,
         storage: ContentAddressedStorage | None = None,
         repository: DocumentRepository | None = None,
+        policy: DocumentPolicy | None = None,
     ) -> None:
-        self.config = config or get_document_config()
+        self._policy = policy or DocumentPolicy(config)
         self.registry = registry or get_parser_registry()
         self.knowledge_adapter = knowledge_adapter
         self.renderer_registry = renderer_registry or get_renderer_registry()
         self.mutation_registry = mutation_registry or get_mutation_registry()
         self.repository = repository
         self.operations = DocumentOperations(
-            config=self.config,
+            config=self._policy.initial,
+            policy=self._policy,
             validator=self._parse_isolated,
             storage=storage,
             repository=repository,
@@ -133,6 +145,11 @@ class DocumentService:
             mutation_registry=self.mutation_registry,
         )
 
+    @property
+    def config(self) -> DocumentConfig:
+        return self._policy.current
+
+    @policy_operation
     async def generate(
         self,
         target_format: str,
@@ -173,6 +190,7 @@ class DocumentService:
             template_version=template_version,
         )
 
+    @policy_operation
     async def convert(
         self,
         path: str | Path,
@@ -193,7 +211,7 @@ class DocumentService:
 
         try:
             source = self._validate_approved_path(path, approved_path)
-            sniffed = sniff_document(source, self.config)
+            sniffed = await asyncio.to_thread(self.inspect_path, source)
             self.registry.resolve(
                 mime_type=sniffed.mime_type,
                 extension=sniffed.extension,
@@ -258,6 +276,7 @@ class DocumentService:
                 f"Document conversion failed safely ({type(exc).__name__})",
             )
 
+    @policy_operation
     async def pdf_merge(
         self,
         paths: tuple[str | Path, ...],
@@ -274,7 +293,7 @@ class DocumentService:
     ) -> DocumentResult[Any]:
         """Merge bounded, approved PDFs in an isolated mutation worker."""
 
-        prepared = self._prepare_pdf_request(
+        prepared = await asyncio.to_thread(self._prepare_pdf_request,
             paths,
             approved_paths,
             tenant_id,
@@ -296,6 +315,7 @@ class DocumentService:
             export_dir=export_dir,
         )
 
+    @policy_operation
     async def pdf_split(
         self,
         path: str | Path,
@@ -312,7 +332,7 @@ class DocumentService:
         version_id: Any = None,
         job_id: Any = None,
     ) -> DocumentResult[Any]:
-        prepared = self._prepare_pdf_request(
+        prepared = await asyncio.to_thread(self._prepare_pdf_request,
             (path,),
             (approved_path,),
             tenant_id,
@@ -335,6 +355,7 @@ class DocumentService:
             parameters={"start_page": start_page, "end_page": end_page},
         )
 
+    @policy_operation
     async def pdf_info(
         self,
         path: str | Path,
@@ -344,7 +365,7 @@ class DocumentService:
         workspace_id: str,
         actor_id: str,
     ) -> DocumentResult[Any]:
-        prepared = self._prepare_pdf_request(
+        prepared = await asyncio.to_thread(self._prepare_pdf_request,
             (path,), (approved_path,), tenant_id, workspace_id, actor_id
         )
         if isinstance(prepared, DocumentResult):
@@ -353,6 +374,7 @@ class DocumentService:
         source = sources[0]
         return await asyncio.to_thread(self.operations.pdf_info, source, scope=scope)
 
+    @policy_operation
     async def pdf_fill_form(
         self,
         path: str | Path,
@@ -368,7 +390,7 @@ class DocumentService:
         version_id: Any = None,
         job_id: Any = None,
     ) -> DocumentResult[Any]:
-        prepared = self._prepare_pdf_request(
+        prepared = await asyncio.to_thread(self._prepare_pdf_request,
             (path,),
             (approved_path,),
             tenant_id,
@@ -391,6 +413,7 @@ class DocumentService:
             parameters={"fields": fields},
         )
 
+    @policy_operation
     async def redact(
         self,
         path: str | Path,
@@ -408,7 +431,7 @@ class DocumentService:
     ) -> DocumentResult[Any]:
         """Physically redact and independently verify a flattened PDF, or refuse."""
 
-        prepared = self._prepare_pdf_request(
+        prepared = await asyncio.to_thread(self._prepare_pdf_request,
             (path,),
             (approved_path,),
             tenant_id,
@@ -431,6 +454,7 @@ class DocumentService:
             parameters={"terms": terms},
         )
 
+    @policy_operation
     async def parse_path(
         self,
         path: str | Path,
@@ -455,6 +479,7 @@ class DocumentService:
             ocr_pages=ocr_pages,
         )
 
+    @policy_operation
     async def ocr_path(
         self,
         path: str | Path,
@@ -477,6 +502,7 @@ class DocumentService:
             ocr_pages=pages,
         )
 
+    @policy_operation
     async def read_path(
         self,
         path: str | Path,
@@ -509,6 +535,7 @@ class DocumentService:
             fence=fence,
         )
 
+    @policy_operation
     async def parse_transient(
         self,
         path: str | Path,
@@ -529,6 +556,7 @@ class DocumentService:
             ocr_pages=ocr_pages,
         )
 
+    @policy_operation
     async def ocr_transient(
         self,
         path: str | Path,
@@ -547,6 +575,7 @@ class DocumentService:
             ocr_pages=pages,
         )
 
+    @policy_operation
     def parse_ingested_blob(
         self,
         source: str | Path,
@@ -570,11 +599,13 @@ class DocumentService:
             ocr_pages=ocr_pages,
         )
 
+    @policy_operation
     def ocr_health(self) -> OcrHealth:
         """Return live engine/language/rasterizer/image readiness."""
 
         return get_ocr_health(self.config.ocr_languages)
 
+    @policy_operation
     def health(self) -> dict[str, object]:
         """Data contract for a later ``/api/documents/health`` endpoint."""
 
@@ -591,6 +622,8 @@ class DocumentService:
                 }
                 for item in self.registry.capabilities()
             ],
+            "policy": self._policy.status(),
+            "worker_isolation": isolation_report(),
             "ocr": self.ocr_health().to_dict(),
             "renderers": [
                 {
@@ -620,6 +653,7 @@ class DocumentService:
             ],
         }
 
+    @policy_operation
     def index_document_ir(
         self,
         document: DocumentIR,
@@ -829,6 +863,7 @@ class DocumentService:
             )
         return self.knowledge_adapter
 
+    @policy_operation
     async def read_transient(
         self,
         path: str | Path,
@@ -854,6 +889,7 @@ class DocumentService:
             fence=fence,
         )
 
+    @policy_operation
     def read_transient_sync(
         self,
         path: str | Path,
@@ -945,7 +981,11 @@ class DocumentService:
             label = {
                 "sheet": f"Sheet {item.metadata.get('sheet_name', item.page_number)}",
                 "slide": f"Slide {item.page_number}",
+                "logical_document": f"Section {item.page_number}",
+                "segment": f"Segment {item.page_number} (source page unknown)",
             }.get(kind, f"Page {item.page_number}")
+            if document.metadata.get("salvaged"):
+                label = f"Segment {item.page_number} (source page unknown)"
             rendered.append(f"--- {label} ---")
             rendered.extend(candidate.text for candidate in blocks if candidate.text)
         full_text = "\n".join(rendered)
@@ -998,7 +1038,7 @@ class DocumentService:
         if aggregate > self.config.intake_max_bytes:
             raise DocumentFormatError("PDF inputs exceed the aggregate size limit")
         for source in sources:
-            sniffed = sniff_document(source, self.config)
+            sniffed = self.inspect_path(source)
             if sniffed.mime_type != "application/pdf" or sniffed.extension != ".pdf":
                 raise DocumentFormatError("PDF operation input is not a valid PDF")
             self.registry.resolve(
@@ -1040,6 +1080,7 @@ class DocumentService:
     def _operation_error(code: str, message: str) -> DocumentResult[Any]:
         return DocumentResult(ok=False, code=code, message=message)
 
+    @policy_operation
     def _parse_isolated(
         self,
         source: Path,
@@ -1048,11 +1089,40 @@ class DocumentService:
         ocr_language: str | None = None,
         ocr_pages: tuple[int, ...] | None = None,
     ) -> DocumentIR:
-        sniffed = sniff_document(source, self.config)
-        self.registry.resolve(
-            mime_type=sniffed.mime_type,
-            extension=sniffed.extension,
+        response, source_sha = self._run_parser_worker(
+            source, operation="parse", force_ocr=force_ocr,
+            ocr_language=ocr_language, ocr_pages=ocr_pages,
         )
+        document = self._validate_response(response, source_sha)
+        from .extract_salvage import maybe_salvage_extract
+
+        return maybe_salvage_extract(source, document, config=self.config, allow_local=False)
+
+    @policy_operation
+    def inspect_path(self, path: str | Path) -> SniffResult:
+        """Validate untrusted structure only inside the bounded parser worker."""
+        source = self._validate_path(path)
+        response, source_sha = self._run_parser_worker(source, operation="inspect")
+        self._validate_response_status(response)
+        if set(response) != {"protocol_version", "ok", "code", "message", "source_sha256", "sniff"}:
+            raise DocumentSandboxError("Document inspection response schema mismatch")
+        if response["source_sha256"] != source_sha:
+            raise DocumentSandboxError("Document inspection source checksum mismatch")
+        sniff = response["sniff"]
+        if not isinstance(sniff, dict) or set(sniff) != {"mime_type", "extension", "container"}:
+            raise DocumentSandboxError("Document inspection result is invalid")
+        if not isinstance(sniff["mime_type"], str) or sniff["extension"] != source.suffix.lower():
+            raise DocumentSandboxError("Document inspection type is invalid")
+        if sniff["container"] not in {None, "ooxml", "ole"}:
+            raise DocumentSandboxError("Document inspection container is invalid")
+        result = SniffResult(**sniff)
+        self.registry.resolve(mime_type=result.mime_type, extension=result.extension)
+        return result
+
+    def _run_parser_worker(
+        self, source: Path, *, operation: str, force_ocr: bool = False,
+        ocr_language: str | None = None, ocr_pages: tuple[int, ...] | None = None,
+    ) -> tuple[Any, str]:
         source_sha = sha256_path(source)
         root = self.config.storage_root / "parser-runs"
         root.mkdir(parents=True, exist_ok=True)
@@ -1069,8 +1139,7 @@ class DocumentService:
             "protocol_version": _PROTOCOL_VERSION,
             "source_path": str(source_abs),
             "source_sha256": source_sha,
-            "mime_type": sniffed.mime_type,
-            "extension": sniffed.extension,
+            "operation": operation,
             "config": {
                 key: str(value) if isinstance(value, Path) else value
                 for key, value in asdict(self.config).items()
@@ -1109,6 +1178,8 @@ class DocumentService:
             stderr_limit_bytes=65_536,
             memory_limit_bytes=self.config.worker_memory_mb * 1024 * 1024,
             cpu_limit_seconds=self.config.worker_timeout_seconds,
+                cpu_cores=1 if os.name == "nt" else None,
+                process_limit=32 if os.name == "nt" else None,
             env={
                 # OpenBLAS (numpy / scipy) and OpenMP allocate per-thread
                 # buffers at import time.  With the default thread count on
@@ -1117,10 +1188,27 @@ class DocumentService:
                 # the parser worker, causing an uncatchable exit(1).
                 "OPENBLAS_NUM_THREADS": "1",
                 "OMP_NUM_THREADS": "1",
+                "KAZMA_DOCLING": os.getenv("KAZMA_DOCLING", "1"),
             },
         )
         try:
-            result = run_isolated_subprocess(sandbox_request)
+            if worker_isolation_mode() == CONTAINER:
+                # Every untrusted parse in this profile runs in an attested
+                # container behind the broker: no network, no shared storage.
+                container_request, staged = parser_container_request(request, source_abs)
+                result = run_container_worker(
+                    worker="parser",
+                    request=container_request,
+                    inputs=staged,
+                    run_dir=run_dir,
+                    timeout_seconds=self.config.worker_timeout_seconds,
+                    max_output_bytes=self.config.worker_result_max_bytes + 1024 * 1024,
+                )
+            else:
+                refusal = process_profile_refusal()
+                if refusal is not None:
+                    raise refusal
+                result = run_isolated_subprocess(sandbox_request)
             if result.resource_limit_degraded_reason:
                 logger.warning(
                     "[documents.service] Parser resource limits were partially "
@@ -1152,34 +1240,23 @@ class DocumentService:
                     _debug_stdout,
                     run_dir,
                 )
-                raise DocumentSandboxError("Document parser produced no result")
+                raise DocumentSandboxError(
+                    "Document parser produced no result", code="parser_result_missing"
+                )
             if result_path.stat().st_size > self.config.worker_result_max_bytes:
                 raise DocumentSandboxError(
                     "Document parser result exceeds the configured limit",
                     code="parser_output_limit",
                 )
             response = json.loads(result_path.read_text(encoding="utf-8"))
-            document = self._validate_response(response, source_sha)
-            try:
-                from kazma_core.documents.extract_salvage import maybe_salvage_extract
-
-                # Pass the live config so the salvage tiers read this
-                # service's policy rather than re-resolving a global one.
-                document = maybe_salvage_extract(
-                    source_abs, document, config=self.config
-                )
-            except Exception:
-                logger.debug(
-                    "[documents.service] extract salvage skipped", exc_info=True
-                )
-            return document
+            return response, source_sha
         except json.JSONDecodeError as exc:
             raise DocumentSandboxError("Document parser returned invalid JSON") from exc
         finally:
             shutil.rmtree(run_dir, ignore_errors=True)
 
     @staticmethod
-    def _validate_response(response: Any, source_sha: str) -> DocumentIR:
+    def _validate_response_status(response: Any) -> None:
         if not isinstance(response, dict):
             raise DocumentSandboxError("Document parser response is not an object")
         if response.get("protocol_version") != _PROTOCOL_VERSION:
@@ -1196,6 +1273,10 @@ class DocumentService:
             if code.startswith("ocr_") or code == "ocr_failed":
                 raise DocumentOcrError(message, code=code)
             raise DocumentParseError(message, code=code)
+
+    @staticmethod
+    def _validate_response(response: Any, source_sha: str) -> DocumentIR:
+        DocumentService._validate_response_status(response)
         if set(response) != _WORKER_RESPONSE_KEYS:
             raise DocumentSandboxError("Document parser response schema mismatch")
         if response.get("source_sha256") != source_sha:

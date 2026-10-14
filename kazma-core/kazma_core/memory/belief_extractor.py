@@ -18,6 +18,7 @@ emits typed beliefs that flow through the bi-temporal mutation engine.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -146,6 +147,7 @@ _DURABLE_CUES = [
     re.compile(r"\bi (?:live|work) (?:in|at)\b", re.I),
     re.compile(r"\bi (?:prefer|like|love|use|need|hate)\b", re.I),
     re.compile(r"\bmy (?:favorite|favourite)\b", re.I),
+    re.compile(r"\bi(?:'m| am) allergic\b", re.I),
     re.compile(r"\bremember (?:that )?\b", re.I),
     re.compile(r"\bfor (?:future|later) reference\b", re.I),
     re.compile(r"\bi (?:moved|switched|changed) (?:to|from)\b", re.I),
@@ -173,6 +175,12 @@ def is_filler_turn(user_text: str) -> bool:
     for pat in _DURABLE_CUES:
         if pat.search(text):
             return False
+    # An Arabic statement about the user is a cue too: "ساكن في دبي" is
+    # eleven characters, and short turns are filler.
+    from kazma_core.memory.arabic_facts import extract_arabic_facts
+
+    if extract_arabic_facts(text):
+        return False
     # Otherwise check filler patterns
     for pat in _FILLER_PATTERNS:
         if pat.search(text):
@@ -202,13 +210,28 @@ async def extract_beliefs_with_llm(
     back to heuristic). Each dict has: subject, predicate,
     predicate_type, object, confidence, importance.
     """
-    try:
-        from kazma_core.model_registry import get_model_registry
+    beliefs, _unavailable = await _llm_extract(user_text, assistant_text, vocabulary=vocabulary,
+                                               entities=entities)
+    return beliefs
 
+
+async def _llm_extract(
+    user_text: str,
+    assistant_text: str = "",
+    *,
+    vocabulary: list[str] | None = None,
+    entities: list[str] | None = None,
+) -> tuple[list[dict[str, Any]] | None, bool]:
+    """``(beliefs, model_unavailable)``: None with True when the model could
+    not be asked or did not answer (no client, the call raised -- retry
+    later); None with False when it answered with nothing usable (Memory audit
+    M12: the two were one None, and an outage counted as "nothing to learn")."""
+    from kazma_core.model_registry import get_model_registry
+
+    try:
         client = get_model_registry().get_client()
         if client is None:
-            logger.warning("[belief_extract] No active LLM client returned by model registry")
-            return None
+            raise LookupError("no active LLM client returned by the model registry")
         blob = f"User: {user_text[:1500]}\nAssistant: {(assistant_text or '')[:800]}"
         if vocabulary:
             blob += "\n\nPredicates already in use: " + ", ".join(vocabulary[:60])
@@ -219,6 +242,10 @@ async def extract_beliefs_with_llm(
             {"role": "user", "content": blob},
         ]
         raw = await client.chat(messages)
+    except Exception as exc:  # noqa: BLE001 - no client, or no answer: retry later
+        logger.warning("[belief_extract] LLM extraction call failed: %s", exc)
+        return None, True
+    try:
         if hasattr(raw, "content"):
             raw = raw.content
         if not isinstance(raw, str):
@@ -230,14 +257,14 @@ async def extract_beliefs_with_llm(
             raw = re.sub(r"\s*```$", "", raw)
         data = json.loads(raw)
         if not isinstance(data, dict):
-            return None
+            return None, False
         beliefs = data.get("beliefs") or []
         if not isinstance(beliefs, list):
-            return None
-        return beliefs
-    except Exception as exc:
-        logger.warning("[belief_extract] LLM extraction call failed: %s", exc)
-        return None
+            return None, False
+        return beliefs, False
+    except (ValueError, TypeError, AttributeError) as exc:  # an unusable answer: nothing to learn
+        logger.warning("[belief_extract] LLM extraction answer unusable: %s", exc)
+        return None, False
 
 
 def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
@@ -298,9 +325,11 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
 def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
     """Cheap offline belief extraction (no LLM call).
 
-    Catches the most common durable patterns: name, location,
-    preference, favorite. Returns beliefs typed as 'functional' for
-    name/location, 'set' for preferences.
+    Catches the most common durable patterns: name, location, employer,
+    preference, favorite, allergy -- in English here, in Arabic and in Arabic
+    mixed with English through ``arabic_facts`` (2026-10-14: an Arabic turn
+    kept nothing). Returns beliefs typed as 'functional' for
+    name/location/employer/favorite, 'set' for preferences and allergies.
     """
     text = (user_text or "").strip()
     if not text:
@@ -312,13 +341,16 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
         # (e.g. "Alice and" / "London now" would be absorbed). Triggers use
         # explicit [Mm]/[Ii] alternation for case tolerance.
         (re.compile(r"\b(?:[Mm]y name is|[Ii](?:'m| am) (?:called|named)|[Cc]all me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})"), "name"),
-        (re.compile(r"\b[Ii] live (?:in|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|$)"), "location"),
+        # A Latin name ends where Arabic script starts ("I work at Zain الحين").
+        (re.compile(r"\b[Ii] live (?:in|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|\s+(?=[\u0621-\u064a])|$)"), "location"),
         # "I work at X" is where the user works, not where they live: it was
         # one pattern with "I live in" and stored the employer as lives_in.
         # "I work in X" names a place or a field -- too ambiguous to store.
-        (re.compile(r"\b[Ii] work (?:at|for)\s+([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|$)"), "employer"),
+        (re.compile(r"\b[Ii] work (?:at|for)\s+([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|\s+(?=[\u0621-\u064a])|$)"), "employer"),
         (re.compile(r"\b[Mm]y (?:favorite|favourite)\s+(\w+)\s+is\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "favorite"),
-        (re.compile(r"\b[Ii] (?:prefer|like|love|use|need)\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "prefers"),
+        (re.compile(r"\b[Ii] (?:prefer|like|love|use|need)\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2}"
+                    r"|[\u0621-\u064a\u0671-\u06d3]+(?:\s+[\u0621-\u064a\u0671-\u06d3]+){0,2})", re.IGNORECASE), "prefers"),
+        (re.compile(r"\b[Ii](?:'m| am) allergic to\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "allergy"),
     ]
     for pat, kind in patterns:
         m = pat.search(text)
@@ -344,6 +376,14 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
             val = m.group(1).strip().rstrip(".,!")
             beliefs.append({"subject": "user", "predicate": "prefers", "predicate_type": "set",
                             "object": val, "confidence": 0.7, "importance": 3})
+        elif kind == "allergy":
+            val = m.group(1).strip().rstrip(".,!")
+            beliefs.append({"subject": "user", "predicate": "allergic_to", "predicate_type": "set",
+                            "object": val, "confidence": 0.85, "importance": 5})
+    from kazma_core.memory.arabic_facts import extract_arabic_facts
+
+    taken = {b["predicate"] for b in beliefs}
+    beliefs.extend(f for f in extract_arabic_facts(text) if f["predicate"] not in taken)
     # Rotating entitlement / next-reset facts (functional supersede)
     try:
         from kazma_core.memory.current_facts import parse_current_facts
@@ -390,11 +430,12 @@ async def extract_and_apply_beliefs(
     This is the function the post-turn hook calls to populate the V2
     belief graph from live conversation.
 
-    The apply step is synchronous SQLite work on the caller's connections, so
-    it runs where this is awaited. A caller on the server loop that owns
-    thread-safe connections should use :func:`extract_beliefs_for_turn` and
-    run :func:`_apply_beliefs_to_v2` in a thread (the micro-consolidation
-    handler does).
+    The apply step is synchronous SQLite work and embeddings, so it runs in a
+    worker thread (Memory audit M34): the caller's connections must be usable
+    from another thread (opened with ``check_same_thread=False``, as
+    ``scripts/scan_old_sessions.py`` does). A connection bound to the caller's
+    thread raises ``sqlite3.ProgrammingError`` here -- ``mutate_belief`` would
+    otherwise turn that into a quiet "nothing applied".
     """
     raw_beliefs, stats = await extract_beliefs_for_turn(
         user_text, assistant_text, use_llm=use_llm, ignore_filler=ignore_filler
@@ -402,8 +443,10 @@ async def extract_and_apply_beliefs(
     if not raw_beliefs:
         return stats
 
-    # Apply via the shared sync helper (entity resolution + mutate)
-    return _apply_beliefs_to_v2(
+    # Apply via the shared sync helper (entity resolution + mutate), off the
+    # loop (Memory audit M34): it is SQLite work and embeddings.
+    return await asyncio.to_thread(
+        _apply_on_shareable_connections,
         raw_beliefs,
         primary_conn,
         ops_conn,
@@ -414,6 +457,17 @@ async def extract_and_apply_beliefs(
         cfg=cfg,
         extraction_method=extraction_method,
     )
+
+
+def _apply_on_shareable_connections(raw_beliefs: list[dict[str, Any]], primary_conn: Any, ops_conn: Any,
+                                    **kw: Any) -> dict[str, Any]:
+    """:func:`_apply_beliefs_to_v2` in the worker thread, after both
+    connections have answered here: a connection bound to another thread
+    raises ``sqlite3.ProgrammingError`` now, never a run of quiet no-ops."""
+    for conn in (primary_conn, ops_conn):
+        if conn is not None:
+            conn.execute("SELECT 1").fetchone()
+    return _apply_beliefs_to_v2(raw_beliefs, primary_conn, ops_conn, **kw)
 
 
 async def extract_beliefs_for_turn(
@@ -452,9 +506,11 @@ async def extract_beliefs_for_turn(
             # demo mode still allows heuristic extraction below
             pass
         else:
-            raw_beliefs = await extract_beliefs_with_llm(
+            raw_beliefs, unavailable = await _llm_extract(
                 user_text, assistant_text, vocabulary=vocabulary, entities=entities
             )
+            if unavailable:
+                stats["model_unavailable"] = True
             if raw_beliefs:
                 stats["source"] = "llm"
 
@@ -462,6 +518,16 @@ async def extract_beliefs_for_turn(
         raw_beliefs = extract_beliefs_heuristic(user_text)
         stats["source"] = "heuristic" if raw_beliefs else "none"
     return (raw_beliefs or None), stats
+
+
+def _default_method(stats: dict[str, Any] | None) -> str:
+    """A fact's source when the caller names none (``memory.provenance``):
+    the heuristic pass reads the user's own message (``user_stated``), the
+    model pass infers (``llm_inferred``). Both were ``llm_inferred``, so the
+    user's literal words could not correct a fact the agent had stored."""
+    from kazma_core.memory.provenance import LLM_INFERRED, USER_STATED
+
+    return USER_STATED if (stats or {}).get("source") == "heuristic" else LLM_INFERRED
 
 
 def _apply_beliefs_to_v2(
@@ -503,22 +569,10 @@ def _apply_beliefs_to_v2(
         except Exception:
             return None
 
-    # Gather candidate entity embeddings for Tier-2 vector matching.
-    def _gather_candidates(tenant: str) -> dict[str, bytes]:
-        try:
-            rows = primary_conn.execute(
-                "SELECT id, name FROM entities WHERE tenant_id=?", (tenant,)
-            ).fetchall()
-        except Exception:
-            return {}
-        vecs: dict[str, bytes] = {}
-        for r in rows:
-            v = _embed(r["name"])
-            if v:
-                vecs[r["id"]] = v
-        return vecs
-
-    candidate_vecs = _gather_candidates(tenant_id)
+    # Tier-2 resolution queries the stored name vectors (resolve_entity): it
+    # used to embed every entity name of the tenant here, on every extraction
+    # (Memory audit M18 -- 93 names, seconds of CPU a turn on live).
+    candidate_vecs = None
 
     for b in raw_beliefs:
         clean = _sanitize_belief(b)
@@ -530,7 +584,7 @@ def _apply_beliefs_to_v2(
         # the belief graph with noise (incl. dates the assistant invented in
         # dialogue). User_explicit stores are NEVER throttled; the functional-
         # supersede-of-user-fact case is the mutate_belief source-trust gate.
-        _method = extraction_method or "llm_inferred"
+        _method = extraction_method or _default_method(stats)
         if _method != "user_explicit":
             _mode = get_auto_store_mode(cfg)
             if _mode == "off":
@@ -606,7 +660,7 @@ def _apply_beliefs_to_v2(
             predicate_type=clean["predicate_type"],
             confidence=clean["confidence"],
             importance=clean["importance"],
-            extraction_method=extraction_method or "llm_inferred",
+            extraction_method=extraction_method or _default_method(stats),
             tenant_id=tenant_id,
             source_session=session_id,
             source_turn=turn,
@@ -624,8 +678,8 @@ def _apply_beliefs_to_v2(
             from kazma_core.memory.ego_anchor import anchor_leaf_subject
 
             if clean["subject"] and clean["subject"] != "user":
-                from kazma_core.memory.belief_mutation import _slug as _belief_slug
                 from kazma_core.memory.entity_resolution import canonical_entity_id
+                from kazma_core.memory.entity_resolution import slug as _belief_slug
 
                 # The subject as mutate_belief stored it (slug, then the
                 # merge redirect), so the anchor names the same node.

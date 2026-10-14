@@ -500,48 +500,48 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Workspace",
     },
     "replay.about_browse": {
-        "ar": "<strong>تصفّح</strong> الجدول الزمني لكل نقطة قرار في المحادثة.",
-        "en": "<strong>Browse</strong> the timeline of every decision point in a conversation.",
+        "ar": "<strong>تصفّح</strong> الخطوات المحفوظة لمحادثة، دورًا بدور.",
+        "en": "<strong>Browse</strong> a conversation's saved steps, turn by turn.",
     },
     "replay.about_compare": {
-        "ar": "<strong>مقارنة</strong> لقطتين لرؤية كيف اختلفت الرسائل والتكلفة والنموذج والمسار.",
-        "en": "<strong>Compare</strong> two snapshots to see how messages, cost, model, and routing diverged.",
+        "ar": "<strong>مقارنة</strong> خطوتين لرؤية كيف اختلفت الرسائل والتكلفة والنموذج والمسار.",
+        "en": "<strong>Compare</strong> two steps to see how messages, cost, model, and routing diverged.",
     },
     "replay.about_desc": {
         "ar": "يلتقط Kazma لقطة من حالة الوكيل بعد كل تكرار للإشراف. يمكنك من:",
         "en": "Kazma captures a snapshot of the agent's state after every supervisor iteration. This lets you:",
     },
     "replay.about_fork": {
-        "ar": "<strong>تفريع</strong> من أي لقطة إلى محادثة جديدة تماماً، مع بقاء الأصل سليماً. استكشف فروع «ماذا لو» دون فقدان السجل.",
-        "en": "<strong>Fork</strong> from any snapshot into a brand-new thread, keeping the original intact. Explore \"what if\" branches without losing history.",
+        "ar": "<strong>تفريع</strong> من أي خطوة إلى محادثة جديدة تمامًا، مع بقاء الأصل سليمًا. تعرض المحادثة الجديدة الأسئلة والأجوبة حتى تلك الخطوة.",
+        "en": "<strong>Fork</strong> from any step into a brand-new chat, keeping the original intact. The new chat shows the questions and answers up to that step.",
     },
     "replay.about_note": {
-        "ar": "تُحفظ اللقطات في <code>kazma-data/snapshots.db</code> (قابلة للضبط عبر <code>time_travel</code> في kazma.yaml). المخزن في الذاكرة هو مصدر الحقيقة للجلسة الحالية؛ وSQLite يضمن البقاء عبر إعادة التشغيل.",
-        "en": "Snapshots are stored in <code>kazma-data/snapshots.db</code> (configurable via <code>time_travel</code> in kazma.yaml). The in-memory store is the source of truth for the current session; SQLite provides durability across restarts.",
+        "ar": "تُحفظ الخطوات في <code>snapshots.db</code> في مجلد البيانات وتُقرأ منه مباشرة. تُحفظ خطوة بعد كل تكرار للمشرف (وفي الدور الطويل أول عشرين خطوة، ثم كل عاشرة، والأخيرة)؛ وتحتفظ كل محادثة بأحدث 50، ويحذف التنظيف اليومي الخطوات الأقدم من مدة الاحتفاظ. لا تُنسخ الخطوات احتياطيًا ولا تنتقل مع الترحيل؛ وحذف المحادثة أو نسيانها يحذف خطواتها.",
+        "en": "Steps are stored in <code>snapshots.db</code> in the data folder and read straight from it. A step is saved after each supervisor iteration (in a long turn, the first twenty, then every tenth, and the last); each chat keeps its newest 50, and the daily clean-up deletes steps older than the retention period. Steps are not backed up and do not travel in a migration; deleting or forgetting a chat deletes its steps.",
     },
     "replay.about_restore": {
-        "ar": "<strong>استعادة</strong> (إرجاع) المحادثة الحية إلى أي لقطة — تستمر المحادثة من تلك النقطة وكأن الأدوار اللاحقة لم تحدث.",
-        "en": "<strong>Restore</strong> (rewind) the live thread to any snapshot — the conversation continues from that point as if the later turns never happened.",
+        "ar": "<strong>استعادة</strong> المحادثة إلى أي خطوة: تُسترجع الأدوار اللاحقة من المحادثة ومما تذكّره كاظمه منها ومن خطواتها المحفوظة، وتتابع الرسالة التالية من تلك الخطوة. تُرفض الاستعادة ما دام دور يجري أو طلب موافقة ينتظر.",
+        "en": "<strong>Restore</strong> the chat to any step: the later turns are taken back from the chat, from what Kazma remembered of them, and from its saved steps, and the next message continues from that step. A restore is refused while a turn runs or an approval is waiting.",
     },
     "replay.about_title": {
         "ar": "السفر عبر الزمن",
         "en": "Time Travel Replay",
     },
     "replay.diff_desc": {
-        "ar": "قارن لقطتين من نفس المحادثة لرؤية كيف تباعدت المحادثة.",
-        "en": "Compare two snapshots from the same thread to see how the conversation diverged.",
+        "ar": "قارن خطوتين من نفس المحادثة لرؤية كيف تباعدت.",
+        "en": "Compare two steps of the same conversation to see how it diverged.",
     },
     "replay.fork": {
         "ar": "تفريع",
         "en": "Fork",
     },
     "replay.iteration_a": {
-        "ar": "التكرار أ",
-        "en": "Iteration A",
+        "ar": "الخطوة أ",
+        "en": "Step A",
     },
     "replay.iteration_b": {
-        "ar": "التكرار ب",
-        "en": "Iteration B",
+        "ar": "الخطوة ب",
+        "en": "Step B",
     },
     "replay.restore": {
         "ar": "استعادة هنا",
@@ -1104,16 +1104,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Select a thread above to see its snapshot timeline.",
     },
     "replay.snapshot_count": {
-        "ar": "اللقطات: {n}",
-        "en": "Snapshots: {n}",
+        "ar": "الخطوات المحفوظة: {n}",
+        "en": "Saved steps: {n}",
     },
     "replay.iteration_n": {
         "ar": "التكرار {n}",
         "en": "Iteration {n}",
     },
     "replay.no_snapshots": {
-        "ar": "لا توجد لقطات لهذه المحادثة بعد. تُلتقط اللقطات بعد كل دور للوكيل.",
-        "en": "No snapshots for this thread yet. Snapshots are captured after each agent turn.",
+        "ar": "لم تُحفظ أي خطوة من هذه المحادثة بعد. تُحفظ خطوة بعد كل تكرار للمشرف.",
+        "en": "No steps of this chat have been saved yet. A step is saved after each supervisor iteration.",
     },
     "replay.messages_n": {
         "ar": "الرسائل: {n}",
@@ -1156,40 +1156,40 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "system",
     },
     "replay.pick_snapshot": {
-        "ar": "اختر لقطة أولًا",
-        "en": "Select a snapshot first",
+        "ar": "اختر خطوة أولًا",
+        "en": "Select a step first",
     },
     "replay.confirm_restore": {
-        "ar": "إرجاع هذه المحادثة إلى التكرار {n}؟ ستضيع الأدوار اللاحقة (استخدم التفريع للاحتفاظ بها).",
-        "en": "Rewind this thread to iteration {n}? Later turns will be lost (use Fork to preserve them).",
+        "ar": "استعادة هذه المحادثة إلى الدور {turn}، الخطوة {step}؟ تُسترجع الأدوار اللاحقة: من المحادثة، ومما تذكّره كاظمه منها، ومن خطواتها المحفوظة. لا يُتراجع عن الملفات المكتوبة ولا الأوامر المنفذة ولا الرسائل المرسلة. استخدم التفريع للاحتفاظ بالأدوار اللاحقة.",
+        "en": "Restore this chat to turn {turn}, step {step}? The later turns are taken back: from the chat, from what Kazma remembered of them, and from its saved steps. Files written, commands run and messages sent are not undone. Use Fork to keep the later turns.",
     },
     "replay.restore_failed": {
         "ar": "فشلت الاستعادة: {error}",
         "en": "Restore failed: {error}",
     },
     "replay.restored.zero": {
-        "ar": "استُعيد التكرار {iteration} (بلا رسائل)",
-        "en": "Restored iteration {iteration} ({n} messages)",
+        "ar": "استُعيدت المحادثة إلى الدور {turn}، الخطوة {step} (بلا رسائل)",
+        "en": "Restored to turn {turn}, step {step} ({n} messages)",
     },
     "replay.restored.one": {
-        "ar": "استُعيد التكرار {iteration} (رسالة واحدة)",
-        "en": "Restored iteration {iteration} (1 message)",
+        "ar": "استُعيدت المحادثة إلى الدور {turn}، الخطوة {step} (رسالة واحدة)",
+        "en": "Restored to turn {turn}, step {step} (1 message)",
     },
     "replay.restored.two": {
-        "ar": "استُعيد التكرار {iteration} (رسالتان)",
-        "en": "Restored iteration {iteration} ({n} messages)",
+        "ar": "استُعيدت المحادثة إلى الدور {turn}، الخطوة {step} (رسالتان)",
+        "en": "Restored to turn {turn}, step {step} ({n} messages)",
     },
     "replay.restored.few": {
-        "ar": "استُعيد التكرار {iteration} ({n} رسائل)",
-        "en": "Restored iteration {iteration} ({n} messages)",
+        "ar": "استُعيدت المحادثة إلى الدور {turn}، الخطوة {step} ({n} رسائل)",
+        "en": "Restored to turn {turn}, step {step} ({n} messages)",
     },
     "replay.restored.many": {
-        "ar": "استُعيد التكرار {iteration} ({n} رسالة)",
-        "en": "Restored iteration {iteration} ({n} messages)",
+        "ar": "استُعيدت المحادثة إلى الدور {turn}، الخطوة {step} ({n} رسالة)",
+        "en": "Restored to turn {turn}, step {step} ({n} messages)",
     },
     "replay.restored.other": {
-        "ar": "استُعيد التكرار {iteration} ({n} رسالة)",
-        "en": "Restored iteration {iteration} ({n} messages)",
+        "ar": "استُعيدت المحادثة إلى الدور {turn}، الخطوة {step} ({n} رسالة)",
+        "en": "Restored to turn {turn}, step {step} ({n} messages)",
     },
     "replay.restore_request_failed": {
         "ar": "فشل طلب الاستعادة",
@@ -1200,8 +1200,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Fork failed: {error}",
     },
     "replay.forked": {
-        "ar": "فُرّعت إلى {thread}",
-        "en": "Forked into {thread}",
+        "ar": "فُرّعت إلى محادثة جديدة: {title}",
+        "en": "Forked into a new chat: {title}",
     },
     "replay.fork_request_failed": {
         "ar": "فشل طلب التفريع",
@@ -1212,8 +1212,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Select a thread first",
     },
     "replay.pick_two": {
-        "ar": "اختر تكرارين",
-        "en": "Pick two iterations",
+        "ar": "اختر خطوتين",
+        "en": "Pick two steps",
     },
     "replay.comparing": {
         "ar": "جارٍ المقارنة…",
@@ -2172,5 +2172,137 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mcp.cat_general": {
         "ar": "عام",
         "en": "General",
+    },
+    "replay.chat_unavailable": {
+        "ar": "السفر عبر الزمن غير متاح على هذا التثبيت: لم يبدأ مسجّل اللقطات (سجل الخادم يذكر السبب).",
+        "en": "Time travel is unavailable on this install: the snapshot recorder did not start (the server log says why).",
+    },
+    "replay.chat_no_steps": {
+        "ar": "لم تُحفظ أي خطوة من هذه المحادثة بعد: تُحفظ خطوة كلما عمل الوكيل على خطوة.",
+        "en": "No steps of this chat have been saved yet: a step is saved each time the agent works through one.",
+    },
+    "replay.chat_page_note": {
+        "ar": "هنا تستعيد صفحة السفر عبر الزمن الخطوات وتفرّع منها وتقارن بينها؛ أما `/{command} <step>` كأمر محادثة فيعمل في تيليجرام وديسكورد وسلاك.",
+        "en": "Here, the Time Travel page restores, branches and compares steps; `/{command} <step>` as a chat command works on Telegram, Discord and Slack.",
+    },
+    "replay.chat_open_link": {
+        "ar": "[افتح هذه المحادثة في السفر عبر الزمن]({link}) لقراءة أي خطوة، ثم استعادة المحادثة إليها أو تفريع محادثة جديدة منها.",
+        "en": "[Open this chat in Time Travel]({link}) to read any step, then restore the chat to it or branch a new chat from it.",
+    },
+    "replay.chat_store_unreadable": {
+        "ar": "تعذّرت قراءة الخطوات المحفوظة لهذه المحادثة: مخزن اللقطات غير مقروء (سجل الخادم يذكر السبب).",
+        "en": "Could not read this chat's saved steps: the snapshot store is unreadable (the server log says why).",
+    },
+    "replay.chat_steps.zero": {
+        "ar": "ليس لهذه المحادثة خطوات محفوظة.",
+        "en": "This chat has no saved steps.",
+    },
+    "replay.chat_steps.one": {
+        "ar": "لهذه المحادثة خطوة محفوظة واحدة، من {when}.",
+        "en": "This chat has 1 saved step, from {when}.",
+    },
+    "replay.chat_steps.two": {
+        "ar": "لهذه المحادثة خطوتان محفوظتان، آخرهما من {when}.",
+        "en": "This chat has {n} saved steps, the latest from {when}.",
+    },
+    "replay.chat_steps.few": {
+        "ar": "لهذه المحادثة {n} خطوات محفوظة، آخرها من {when}.",
+        "en": "This chat has {n} saved steps, the latest from {when}.",
+    },
+    "replay.chat_steps.many": {
+        "ar": "لهذه المحادثة {n} خطوة محفوظة، آخرها من {when}.",
+        "en": "This chat has {n} saved steps, the latest from {when}.",
+    },
+    "replay.chat_steps.other": {
+        "ar": "لهذه المحادثة {n} خطوة محفوظة، آخرها من {when}.",
+        "en": "This chat has {n} saved steps, the latest from {when}.",
+    },
+    "replay.chat_cleared.zero": {
+        "ar": "لم تكن لهذه المحادثة خطوات محفوظة لحذفها.",
+        "en": "This chat had no saved steps to delete.",
+    },
+    "replay.chat_cleared.one": {
+        "ar": "حُذفت خطوة محفوظة واحدة من هذه المحادثة.",
+        "en": "Deleted 1 saved step of this chat.",
+    },
+    "replay.chat_cleared.two": {
+        "ar": "حُذفت خطوتان محفوظتان من هذه المحادثة.",
+        "en": "Deleted {n} saved steps of this chat.",
+    },
+    "replay.chat_cleared.few": {
+        "ar": "حُذفت {n} خطوات محفوظة من هذه المحادثة.",
+        "en": "Deleted {n} saved steps of this chat.",
+    },
+    "replay.chat_cleared.many": {
+        "ar": "حُذفت {n} خطوة محفوظة من هذه المحادثة.",
+        "en": "Deleted {n} saved steps of this chat.",
+    },
+    "replay.chat_cleared.other": {
+        "ar": "حُذفت {n} خطوة محفوظة من هذه المحادثة.",
+        "en": "Deleted {n} saved steps of this chat.",
+    },
+    "replay.turn_after_restore": {
+        "ar": "استُعيدت هذه المحادثة أثناء تجهيز رسالتك، فلم تُرسل إلى الوكيل. أرسلها مرة أخرى.",
+        "en": "This chat was restored while your message was being prepared, so it was not sent to the agent. Send it again.",
+    },
+    "replay.fork_title": {
+        "ar": "تفريع من {title} (الدور {turn})",
+        "en": "Fork of {title} (turn {turn})",
+    },
+    "replay.fork_untitled": {
+        "ar": "هذه المحادثة",
+        "en": "this chat",
+    },
+    "replay.turn_n": {
+        "ar": "الدور {turn}",
+        "en": "Turn {turn}",
+    },
+    "replay.turn_earlier": {
+        "ar": "خطوات سابقة",
+        "en": "Earlier steps",
+    },
+    "replay.step_n": {
+        "ar": "الخطوة {step}",
+        "en": "Step {step}",
+    },
+    "replay.step_label": {
+        "ar": "الدور {turn}، الخطوة {step}",
+        "en": "Turn {turn}, step {step}",
+    },
+    "replay.step_truncated": {
+        "ar": "أكبر من أن تُستعاد",
+        "en": "Too large to restore",
+    },
+    "replay.store_unavailable": {
+        "ar": "تعذّرت قراءة الخطوات المحفوظة. سجل الخادم يذكر السبب.",
+        "en": "The saved steps could not be read. The server log says why.",
+    },
+    "replay.load_error": {
+        "ar": "تعذّر تحميل الخطوات (HTTP {status}).",
+        "en": "Could not load the steps (HTTP {status}).",
+    },
+    "replay.refused_turn_running": {
+        "ar": "يجري دور في هذه المحادثة. استعدها حين ينتهي.",
+        "en": "A turn is running in this chat. Restore it when the turn ends.",
+    },
+    "replay.refused_approval_pending": {
+        "ar": "طلب موافقة ينتظر في هذه المحادثة ({tools}). وافق عليه أو ارفضه أولًا.",
+        "en": "An approval is waiting in this chat ({tools}). Approve or deny it first.",
+    },
+    "replay.refused_not_found": {
+        "ar": "لم تعد هذه الخطوة موجودة. أعد تحميل القائمة.",
+        "en": "This step no longer exists. Reload the list.",
+    },
+    "replay.refused_truncated": {
+        "ar": "كانت هذه الخطوة أكبر من أن تُحفظ كاملة: يمكن قراءتها، لا استعادتها ولا التفريع منها.",
+        "en": "This step was too large to keep whole: it can be read, not restored or forked.",
+    },
+    "replay.fork_open": {
+        "ar": "افتح المحادثة الجديدة",
+        "en": "Open the new chat",
+    },
+    "replay.about_not_undone": {
+        "ar": "لا تتراجع الاستعادة عن العالم: تبقى الملفات التي كتبها الوكيل والأوامر التي نفّذها والرسائل والمنشورات التي أرسلها كما هي.",
+        "en": "A restore does not undo the world: files the agent wrote, commands it ran, and messages and posts it sent stay done.",
     },
 }

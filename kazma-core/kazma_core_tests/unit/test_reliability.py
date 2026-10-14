@@ -79,11 +79,12 @@ class TestCircuitBreaker:
         # Next check should enter HALF_OPEN
         assert cb.state == CircuitState.HALF_OPEN
         
-        # allow_probe should allow one probe
-        assert cb.allow_probe() is True
-        
-        # Record success - should close
-        cb.record_success()
+        # admit() lets one probe through; the probe's own outcome -- named
+        # by its admission (Swarm audit SW-E11) -- closes the breaker.
+        probe = cb.admit()
+        assert probe is not None and probe.probe
+
+        cb.record_success(probe)
         assert cb.state == CircuitState.CLOSED
 
     @pytest.mark.asyncio
@@ -96,14 +97,20 @@ class TestCircuitBreaker:
         await asyncio.sleep(0.15)  # Wait for cooldown
         
         # First probe allowed
-        assert cb.allow_probe() is True
+        probe = cb.admit()
+        assert probe is not None
         assert cb._probe_in_flight is True
-        
+
         # Second probe should be rejected
         assert cb.allow_probe() is False
-        
-        # Complete first probe successfully
+
+        # An outcome that is not the probe's (an admission-less caller) does
+        # not resolve it (SW-E11)
         cb.record_success()
+        assert cb.state == CircuitState.HALF_OPEN and cb._probe_in_flight is True
+
+        # Complete first probe successfully
+        cb.record_success(probe)
         assert cb.state == CircuitState.CLOSED
         assert cb._probe_in_flight is False
 
@@ -117,9 +124,9 @@ class TestCircuitBreaker:
         await asyncio.sleep(0.15)
         
         # Probe fails
-        cb.allow_probe()
-        cb.record_failure()
-        
+        probe = cb.admit()
+        cb.record_failure(probe)
+
         assert cb.state == CircuitState.OPEN
 
     @pytest.mark.asyncio
@@ -213,8 +220,10 @@ class TestRetryPolicy:
         
         # Check that patterns work - "401" should be non-retryable
         assert _is_retryable_exception(Exception("401 unauthorized")) is False
-        assert _is_retryable_exception(Exception("rate limit exceeded")) is False
         assert _is_retryable_exception(Exception("quota exceeded")) is False
+        # A 429 / rate limit is transient: one taxonomy with LLMError
+        # (Swarm audit SW-E08; it was listed permanent here).
+        assert _is_retryable_exception(Exception("rate limit exceeded")) is True
         
         # Generic Exception is retryable (no matching pattern)
         assert _is_retryable_exception(Exception("network error")) is True

@@ -124,17 +124,20 @@ class TestMultiPlatformSwarmDispatch:
         
         mock_store = AsyncMock()
         mock_store.get.return_value = msg.context_metadata
-        
-        await _dispatch_swarm_from_chat(
-            msg=msg,
-            store=mock_store,
-            manager=mock_gateway_manager,
-            thread_id="gw-telegram-12345",
-            engine=mock_swarm_engine,
-            workers=["coder-agent"],
-            task="test task -> telegram:-100999888777",
-            pattern="dispatch",
-        )
+
+        # Routing a result to another chat is the /swarm config rule's
+        # (admin-only, Swarm audit SW-S16): this sender is an admin.
+        with patch("kazma_gateway.agent_handler.graph._sender_is_gateway_admin", return_value=True):
+            await _dispatch_swarm_from_chat(
+                msg=msg,
+                store=mock_store,
+                manager=mock_gateway_manager,
+                thread_id="gw-telegram-12345",
+                engine=mock_swarm_engine,
+                workers=["coder-agent"],
+                task="test task -> telegram:-100999888777",
+                pattern="dispatch",
+            )
         
         # Verify output was also sent to override target
         assert mock_gateway_manager.send.call_count >= 2  # Original + override
@@ -187,7 +190,9 @@ class TestMultiPlatformSwarmDispatch:
         mock_gateway_manager.send.assert_called()
         call_args = mock_gateway_manager.send.call_args[0][0]
         text = call_args.text.lower()
-        assert any(w in text for w in ("timed out", "timeout", "cancelled", "canceled")), text
+        # "stopped ... (gateway wait budget)" since the timeout branch became
+        # reachable and stopped claiming the work was discarded (SW-E04).
+        assert any(w in text for w in ("timed out", "timeout", "cancelled", "canceled", "stopped")), text
         assert "swarm" in text, text
 
     async def test_telegram_mirror_receives_rich_html_report(

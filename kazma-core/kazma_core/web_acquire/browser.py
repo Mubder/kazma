@@ -324,7 +324,10 @@ async def _render_in_job(owner, url, *, challenge, profile):
                 await _close_render_resources(owner, broker, owned_page)
     except asyncio.CancelledError:
         raise
-    except Exception as exc:
+    except Exception as raised:
+        # The failure to report: the broker's or the driver's when they hold
+        # the real cause (the handler's own name is not rebound: ruff F841).
+        exc = raised
         if broker is not None and broker.failure is not None:
             exc = broker.failure
         exc = _driver_failure(owner) or exc

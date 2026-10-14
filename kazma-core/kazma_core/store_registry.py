@@ -57,6 +57,7 @@ __all__ = [
     "DATA_DIR_ENTRIES",
     "DYNAMIC_NAME_SITES",
     "MIGRATION_DISPOSITIONS",
+    "NOT_BACKED_UP",
     "STORES",
     "STORE_FAMILIES",
     "TOOL_WRITES",
@@ -111,9 +112,21 @@ STORES: dict[str, Store] = {
         "long-term memory: beliefs, entities and episodes", "bundle"),
     "memory_ops.db": Store(
         "the memory task queue and the memory audit log", "bundle"),
+    "memory_forget_journal.db": Store(
+        "every forget, keep-out and summary forget, in order: ids and hashes, never text", "bundle"),
     "knowledge_graph.db": Store("the swarm memory property graph", "bundle"),
     "checkpoints.db": Store("conversation state checkpoints", "bundle"),
-    "snapshots.db": Store("time-travel snapshots of the agent's state", "bundle"),
+    # Time Travel audit TT-05 (2026-10-14): not carried, not backed up
+    # (NOT_BACKED_UP below). It was a bundle store and two thirds of a
+    # universal backup by volume.
+    "snapshots.db": Store(
+        "time-travel snapshots of the agent's state", "machine",
+        reason="a 30-day view of this machine's chats, each step a full plaintext copy of the "
+               "agent's state (tool results and secrets included); a copy elsewhere would bring "
+               "back chats deleted or forgotten since. The chats and checkpoints travel"),
+    "time_travel_audit.db": Store(
+        "the Time Travel audit trail: who restored, forked or cleared which chat (ids, no text)",
+        "bundle"),
     # ── conversations and sessions ─────────────────────────────────────
     "chat_sessions.db": Store("chat transcripts", "bundle"),
     "chat_sessions_spool.db": Store(
@@ -139,9 +152,12 @@ STORES: dict[str, Store] = {
         "approval decisions (the gate registry)", "bundle"),
     "vault.db": Store("encrypted secrets", "bundle"),
     "settings.db": Store(
-        "settings, knowledge libraries, workspaces and bookmarks", "settings",
-        reason="exported as config.yaml plus its knowledge and workspace tables",
+        "settings, workspaces and bookmarks", "settings",
+        reason="exported as config.yaml plus its workspace table",
         ambiguous_name=True),
+    "knowledge.db": Store(
+        "the Knowledge Library: libraries, chunks and their keyword index "
+        "(in settings.db until 2026-10-14, Knowledge audit KB-E10)", "bundle"),
     "rbac.db": Store("roles and permissions", "bundle"),
     "audit.db": Store("the audit log", "bundle", ambiguous_name=True),
     "security_audit.db": Store(
@@ -215,6 +231,17 @@ STORES: dict[str, Store] = {
         reason="test mode only; a real install never writes it"),
 }
 
+#: Databases the universal backup leaves out, and why
+#: (``backup.universal.selectable_databases``). Their disposition above says
+#: they do not travel either.
+NOT_BACKED_UP: dict[str, str] = {
+    "snapshots.db": (
+        "Time Travel steps are a 30-day view of the chats; a backup would bring back the "
+        "steps of a chat deleted or forgotten since (TT-05), and they were two thirds of a "
+        "backup by volume"
+    ),
+}
+
 #: Stores whose file names are built at runtime, by glob pattern (relative to
 #: the data dir). Matched by :func:`store_name_for` like a declared name.
 STORE_FAMILIES: dict[str, Store] = {
@@ -282,6 +309,9 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "vector_memory": DataDirEntry(
         "the Knowledge Library's vectors", "rebuilt",
         reason="the knowledge vector repair sweep re-embeds every chunk"),
+    "knowledge_provenance": DataDirEntry(
+        "each Knowledge Library page's fetched text, by library: removed with its library",
+        "bundle"),
     "code-index": DataDirEntry(
         "codebase search indexes", "rebuilt", reason="re-indexed from the workspace"),
     "vuln_cache.json": DataDirEntry(
@@ -385,11 +415,11 @@ TOOL_WRITES: dict[str, Write] = {
     "memory_merge_entities": Write(("memory_state.db",), _MEMORY_READERS),
     "memory_purge_empty_entities": Write(("memory_state.db",), _MEMORY_READERS),
     "knowledge_create_library": Write(
-        ("settings.db",), ("knowledge_list_libraries", "knowledge_search")),
+        ("knowledge.db",), ("knowledge_list_libraries", "knowledge_search")),
     "knowledge_ingest_url": Write(
-        ("settings.db",), ("knowledge_list_libraries", "knowledge_search")),
+        ("knowledge.db",), ("knowledge_list_libraries", "knowledge_search")),
     "knowledge_ingest_site": Write(
-        ("settings.db",), ("knowledge_list_libraries", "knowledge_search", "research_readiness")),
+        ("knowledge.db",), ("knowledge_list_libraries", "knowledge_search", "research_readiness")),
     "config_save": Write(("settings.db",), ("config_read",)),
     "request_path_access": Write(("settings.db",), ("config_read",)),
     "vault_store": Write(("vault.db",), ("vault_list",)),
@@ -581,9 +611,9 @@ def distinctive_store_names() -> frozenset[str]:
         from kazma_core import paths as _paths
 
         for helper in (
-            "vault_db_path", "checkpoints_db", "settings_db", "snapshots_db",
+            "vault_db_path", "checkpoints_db", "settings_db", "knowledge_db", "snapshots_db",
             "swarm_tasks_db", "audit_db", "rbac_db", "hub_registry_db",
-            "primary_memory_db", "memory_ops_db", "knowledge_graph_db",
+            "primary_memory_db", "memory_ops_db", "memory_forget_journal_db", "knowledge_graph_db",
         ):
             fn = getattr(_paths, helper, None)
             if fn is None:

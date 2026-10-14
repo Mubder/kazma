@@ -79,10 +79,11 @@ def _make_components(snapshots=None, state=None):
 
 
 def _reset_cache(monkeypatch):
-    """Reset the lazy-import cache for this test; monkeypatch restores it after."""
-    monkeypatch.setattr(sc, "_replay_recorder", None)
-    monkeypatch.setattr(sc, "_replay_engine", None)
-    monkeypatch.setattr(sc, "_replay_import_attempted", False)
+    """Nothing to reset since 2026-10-14 (Time Travel TT-05): the resolver
+    kept a recorder of its own (cached here), whose clear left the agent's
+    copy serving the cleared steps. It reads the process's one recorder
+    (``time_travel.process_recorder``); the tests patch
+    ``_get_replay_components``."""
 
 
 # ── Tests ────────────────────────────────────────────────────────────
@@ -101,8 +102,9 @@ class TestReplayCommand:
             result = sc.resolve_slash_command("/replay list", {"thread_id": "t1"})
 
         assert result is not None
-        assert "Iteration `1`" in result
-        assert "Iteration `2`" in result
+        # Each step once, by its id, inside its turn (TT-01; was "Iteration `1`").
+        assert f"`{snaps[0].id[:8]}` step 1" in result
+        assert f"`{snaps[1].id[:8]}` step 2" in result
         assert "gpt-4o-mini" in result
         recorder.list_snapshots.assert_called_once_with("t1")
 
@@ -128,16 +130,22 @@ class TestReplayCommand:
         assert result is None
 
     def test_replay_invalid_subcommand(self, monkeypatch):
-        """Test 4: /replay <non-numeric> shows error for unknown sub-command."""
+        """Test 4: a malformed /replay shows its usage.
+
+        Re-pointed 2026-10-14 (TT-01): one word after /replay names a step
+        (its id), so ``/replay frobnicate`` falls through to the graph
+        handler, which answers that no such step exists. Two words are a
+        malformed command and get the usage here.
+        """
         _reset_cache(monkeypatch)
         recorder, engine = _make_components()
 
         with patch.object(sc, "_get_replay_components", return_value=(recorder, engine)):
-            result = sc.resolve_slash_command("/replay frobnicate", {"thread_id": "t1"})
+            assert sc.resolve_slash_command("/replay frobnicate", {"thread_id": "t1"}) is None
+            result = sc.resolve_slash_command("/replay frob nicate", {"thread_id": "t1"})
 
         assert result is not None
-        assert "Unknown" in result or "unknown" in result
-        assert "frobnicate" in result
+        assert "Usage" in result and "/replay <step>" in result
 
     def test_replay_compare(self, monkeypatch):
         """Test 5: /replay compare <a> <b> diffs two snapshots via real API."""
@@ -145,14 +153,16 @@ class TestReplayCommand:
         state_a = _make_state(1, model="gpt-4o-mini", cost=0.001)
         state_b = _make_state(3, model="groq/compound-mini", cost=0.002)
         recorder, engine = _make_components(state=state_a)
+        # Steps are named by id since TT-01: each reference resolves to one.
+        recorder.resolve_ref.side_effect = ["aaaa1111-step-a", "cccc3333-step-b"]
         # replay_from is called twice — return a then b
         engine.replay_from.side_effect = [state_a, state_b]
 
         with patch.object(sc, "_get_replay_components", return_value=(recorder, engine)):
-            result = sc.resolve_slash_command("/replay compare 1 3", {"thread_id": "t1"})
+            result = sc.resolve_slash_command("/replay compare aaaa1111 cccc3333", {"thread_id": "t1"})
 
         assert result is not None
-        assert "Comparison: iteration 1 vs 3" in result
+        assert "Comparison: step aaaa1111 vs cccc3333" in result
         assert "Messages" in result
         assert "Model" in result
         # replay_from called for both iterations
@@ -162,11 +172,13 @@ class TestReplayCommand:
         """Test 6: /replay clear clears snapshots for current thread."""
         _reset_cache(monkeypatch)
         recorder, engine = _make_components()
-        recorder.clear_snapshots.return_value = 5
+        recorder.forget_threads.return_value = 5
 
         with patch.object(sc, "_get_replay_components", return_value=(recorder, engine)):
             result = sc.resolve_slash_command("/replay clear", {"thread_id": "t1"})
 
         assert result is not None
-        assert "Cleared 5 snapshot(s)" in result
-        recorder.clear_snapshots.assert_called_once_with("t1")
+        # Every key of the chat, through the one delete (TT-05); a plural
+        # noun (was "snapshot(s)").
+        assert "Deleted 5 saved steps of this chat" in result
+        assert "t1" in recorder.forget_threads.call_args.args[0]

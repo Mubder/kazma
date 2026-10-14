@@ -16,6 +16,22 @@ function memoryPage() {
   }
   const num = (n) => (window.KazmaFormat ? window.KazmaFormat.number(n) : Number(n).toLocaleString());
 
+  // A server error code, worded in the page's language (Memory audit M32:
+  // "not_found" and "protected entity: x" reached the Arabic page in English);
+  // any other text as the server sent it, else the fallback.
+  const ERR = {
+    not_found: ["memory.err.not_found", "Not found: it may have been changed or removed meanwhile"],
+    protected: ["memory.err.protected", "This entity is protected"],
+    hygiene_partial: ["memory.page.hygiene_partial", "Some hygiene actions failed"],
+  };
+  function errText(key, fallback, d) {
+    const code = d && (d.code || d.error);
+    const known = code && ERR[code];
+    if (!known && d && d.error) return d.error;
+    const [k, english] = known ? ERR[code] : [key, fallback];
+    return window.kazmaT ? window.kazmaT(k, english) : english;
+  }
+
   function toast(msg, type) {
     if (window.showToast) window.showToast(msg, type || "info");
     else console.warn(`[memory ${type || "info"}] ${msg}`);  // fallback only (toast system not loaded)
@@ -480,7 +496,7 @@ function memoryPage() {
         await this.loadBeliefs();
         await this.loadSummary();
         await refreshGraph();
-      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
+      } else toast(errText("memory.console.failed", "Failed", d), "error");
     },
 
     async invalidateSelected() {
@@ -507,7 +523,7 @@ function memoryPage() {
         await this.loadBeliefs();
         await this.loadSummary();
         await refreshGraph();
-      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
+      } else toast(errText("memory.console.failed", "Failed", d), "error");
     },
 
     async editBelief(b) {
@@ -591,7 +607,7 @@ function memoryPage() {
           { id: b.id, subject, predicate, object },
           { quiet: true }
         );
-      } else toast(d.error || tx("memory.console.edit_failed", "Edit failed"), "error");
+      } else toast(errText("memory.console.edit_failed", "Edit failed", d), "error");
     },
 
     pickEntity(id) {
@@ -618,7 +634,7 @@ function memoryPage() {
         await this.loadSummary();
         await this.loadHygiene();
         await refreshGraph();
-      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
+      } else toast(errText("memory.console.failed", "Failed", d), "error");
     },
 
     /* Protect an entity from delete and merge, or lift that. The page
@@ -639,7 +655,7 @@ function memoryPage() {
           "success",
         );
         await this.loadEntities();
-      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
+      } else toast(errText("memory.console.failed", "Failed", d), "error");
     },
 
     async renameEntity(e) {
@@ -688,7 +704,7 @@ function memoryPage() {
             name: name,
           });
         }
-      } else toast(d.error || tx("memory.console.rename_failed", "Rename failed"), "error");
+      } else toast(errText("memory.console.rename_failed", "Rename failed", d), "error");
     },
 
     async doMerge() {
@@ -746,7 +762,7 @@ function memoryPage() {
         if (typeof window._v2gSelectEntity === "function") {
           window._v2gSelectEntity(tgt, { notify: false });
         }
-      } else toast(d.error || tx("memory.console.merge_failed", "Merge failed"), "error");
+      } else toast(errText("memory.console.merge_failed", "Merge failed", d), "error");
     },
 
     async doLink() {
@@ -786,7 +802,7 @@ function memoryPage() {
         if (typeof window._v2gSelectEntity === "function") {
           window._v2gSelectEntity(tgt, { notify: false });
         }
-      } else toast(d.error || tx("memory.console.link_failed", "Link failed"), "error");
+      } else toast(errText("memory.console.link_failed", "Link failed", d), "error");
     },
 
     async decideMerge(id, approve) {
@@ -799,7 +815,7 @@ function memoryPage() {
         await this.loadMerges();
         await this.loadEntities();
         await refreshGraph();
-      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
+      } else toast(errText("memory.console.failed", "Failed", d), "error");
     },
 
     async runHygiene() {
@@ -815,10 +831,14 @@ function memoryPage() {
           body: JSON.stringify(this.hygiene),
         });
         if (d.ok) {
-          toast(tx("memory.page.hygiene_complete", "Hygiene complete"), "success");
+          const archived = (d.actions || {}).archive_invalidated || {};
+          // The archive takes at most its cap a run: said, never silent.
+          toast(archived.remaining
+            ? tx("memory.page.hygiene_more_left", "Hygiene complete; more ended facts are left for the next run")
+            : tx("memory.page.hygiene_complete", "Hygiene complete"), "success");
           await this.loadAll();
           await refreshGraph();
-        } else toast(d.error || tx("memory.page.hygiene_failed", "Hygiene failed"), "error");
+        } else toast(errText("memory.page.hygiene_failed", "Hygiene failed", d), "error");
       } finally {
         this.hygieneRunning = false;
       }

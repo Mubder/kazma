@@ -43,6 +43,9 @@ import threading
 import time
 from typing import Any
 
+# The one id rule (Memory audit M02): a copy here kept a-z0-9 only.
+from kazma_core.memory.entity_resolution import slug as _slug
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -142,15 +145,6 @@ def derive_memory_class(
 # ── helpers ───────────────────────────────────────────────────────────────
 
 
-def _slug(text: str) -> str:
-    import re
-
-    raw = (text or "").strip().lower()
-    s = re.sub(r"[^a-z0-9_]+", "_", raw)
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s[:80] or "entity"
-
-
 def _belief_id(tenant_id: str, subject: str, predicate: str, valid_from: float) -> str:
     """Belief PK. Includes a uuid suffix so two mutations at the same
     timestamp (e.g. rapid programmatic updates) don't collide on PK and
@@ -195,11 +189,16 @@ def _classify_predicate(predicate: str, explicit: str | None) -> str:
 
 
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
+    """The ladder of ``memory.provenance``, as a weight."""
     v2 = (cfg or {}).get("v2") or {}
     if extraction_method == "user_explicit":
         return float(v2.get("trust_weight_user", 1.0))
+    if extraction_method == "user_stated":
+        return float(v2.get("trust_weight_user_stated", 0.9))
     if extraction_method == "system_tool":
         return float(v2.get("trust_weight_tool", 0.85))
+    if extraction_method == "agent_asserted":
+        return float(v2.get("trust_weight_agent", 0.65))
     return float(v2.get("trust_weight_llm", 0.60))
 
 
@@ -289,8 +288,8 @@ def mutate_belief(
     in. ``ingested_at`` / ``invalidated_at`` are when this write happened.
 
     *private*: *primary_conn* is a private database (the retrieval
-    benchmark's), and nothing may leave it -- no state mirror, graph backend,
-    unified index or remote vector index write. Those are process-wide, so
+    benchmark's), and nothing may leave it -- no state mirror, graph backend
+    or remote vector index write. Those are process-wide, so
     without this a private write landed in the install's shared stores (the
     golden eval's class, AGENTS.md section 15F item I).
 
@@ -302,6 +301,13 @@ def mutate_belief(
 
     Never raises — logs on failure and returns ``{"action": "noop", ...}``.
     """
+    # One set of limits for every writer (memory/limits.py, Memory audit
+    # M36): refused, never cut -- a cut value is a different fact.
+    from kazma_core.memory.limits import too_long
+
+    field = too_long(subject=str(subject_id or subject or ""), predicate=str(predicate or ""), obj=str(obj or ""))
+    if field:
+        return {"action": "noop", "belief_id": "", "superseded_id": None, "rejected": f"{field}_too_long"}
     # Hygiene: reject version/stack-name subjects (e.g. kazma_v2_4_0)
     try:
         from kazma_core.memory.hygiene import is_blocked_belief_triple
@@ -327,6 +333,10 @@ def mutate_belief(
     # different entity and detach the edge from the node the operator
     # clicked. When subject_id is provided, use it verbatim; otherwise
     # slugify the free-text subject (the historical behavior).
+    if not subject_id and not (subject or "").strip():
+        # An empty subject names nothing; it used to become the id "entity".
+        return {"action": "noop", "belief_id": "", "superseded_id": None,
+                "rejected": "empty_subject"}
     sub = subject_id if subject_id else _slug(subject)
     # Follow merged_into so beliefs land on the canonical entity, not a
     # retired id. This is the write-side fix for the mubder→user re-orphan
@@ -429,9 +439,23 @@ def mutate_belief(
                 pass
         # Best-effort dual-write to shared state / graph backends (P2-2/P2-3).
         # A history row (W1) and the neighbours it re-bounded reach the state
-        # mirror with their validity; the graph and the unified index hold
-        # current facts only, so a history row goes to neither.
+        # mirror with their validity; the graph holds current facts only, so
+        # a history row does not go there. (The "unified index" copy of every
+        # fact is gone: it had no delete path, so a forgotten value stayed
+        # searchable -- memory_stores.py, 2026-10-13.)
         history = result.get("action") == "history"
+        if not private and result.get("superseded_id"):
+            # The superseded fact's edge leaves the graph, and its death flags
+            # reach the mirror -- after the commit (Memory audit M14).
+            try:
+                from kazma_core.memory.graph_backend import delete_belief_edge
+
+                delete_belief_edge(
+                    belief_id=str(result["superseded_id"]), subject=sub, predicate=pred,
+                    obj=str(result.get("superseded_object") or ""), tenant_id=tenant_id,
+                )
+            except Exception:
+                logger.debug("[belief_mutate] neo4j delete on supersede skipped", exc_info=True)
         if not private and result.get("action") not in ("noop", None) and result.get("belief_id"):
             try:
                 from kazma_core.memory.graph_backend import upsert_belief_edge
@@ -443,7 +467,8 @@ def mutate_belief(
                 # a hand-built "definitely alive" dict. (2026-08-26 audit: was
                 # `conn`, an undefined name — the NameError was swallowed and
                 # the new-belief mirror/graph dual-write never ran.)
-                for mirrored in [bid, *(result.get("touched") or [])]:
+                for mirrored in [bid, *(result.get("touched") or []),
+                                 *([result["superseded_id"]] if result.get("superseded_id") else [])]:
                     remirror_belief_by_id(primary_conn, str(mirrored))
                 if not history:
                     upsert_belief_edge(
@@ -456,20 +481,6 @@ def mutate_belief(
                     )
             except Exception:
                 logger.debug("[belief_mutate] dual-write backends failed", exc_info=True)
-        if (not private and not history and result.get("action") not in ("noop", None)
-                and result.get("belief_id")):
-            try:
-                from kazma_core.memory.unified_index import upsert_unified
-
-                upsert_unified(
-                    item_id=str(result["belief_id"]),
-                    kind="belief",
-                    text=f"{sub} {pred} {obj}".strip(),
-                    tenant_id=tenant_id,
-                )
-            except Exception:
-                logger.debug("[belief_mutate] unified index skipped", exc_info=True)
-
         # Phase 3: keep the materialized entity belief_count / graph_degree
         # columns in sync. Recompute the affected subject + object so the
         # operator /memory page reads precomputed values instead of running
@@ -503,11 +514,42 @@ def mutate_belief(
                     primary_conn.commit()
             except sqlite3.Error:
                 logger.warning("[belief_mutate] empty-entity cleanup failed", exc_info=True)
+        if result.get("action") not in ("noop", None) and result.get("belief_id"):
+            _store_belief_vector(primary_conn, str(result["belief_id"]), sub, pred, obj,
+                                 tenant_id=tenant_id, mem_class=mem_class, private=private)
 
         return result
     except Exception:
         logger.debug("[belief_mutate] mutation failed", exc_info=True)
         return {"action": "noop", "belief_id": "", "superseded_id": None}
+
+
+def _store_belief_vector(
+    conn: sqlite3.Connection, bid: str, sub: str, pred: str, obj: str, *,
+    tenant_id: str, mem_class: str, private: bool,
+) -> None:
+    """The fact's vector (its subject, predicate and object), embedded once
+    with no transaction open and outside the mutation lock, written only while
+    the row still holds *obj* (a forget empties it). The remote index is
+    skipped for a private database (Memory audits M14, M15)."""
+    from kazma_core.memory.vector_write import encode_vector, index_remotely, write_local_vector
+
+    vec = encode_vector(f"{sub} {pred} {obj}")
+    if not vec:
+        return
+    try:
+        write_local_vector(conn, "beliefs", bid, vec, still_sql="object = ?", still_params=(obj,))
+    except sqlite3.Error:
+        logger.warning("[belief_mutate] could not store the vector of %s (vector repair retries)", bid,
+                       exc_info=True)
+    if private:
+        return
+
+    def _still_held() -> bool:
+        return conn.execute("SELECT 1 FROM beliefs WHERE id = ? AND object = ?", (bid, obj)).fetchone() is not None
+
+    index_remotely(bid, vec, tenant_id=tenant_id, meta={"kind": "belief", "tier": mem_class or "semantic"},
+                   still_held=_still_held)
 
 
 def _insert_belief(
@@ -569,43 +611,11 @@ def _insert_belief(
             raise sqlite3.IntegrityError(
                 f"belief insert ignored (id collision, retry failed) subject={sub} pred={pred}"
             )
-    # Compute + store the belief embedding so dense (semantic) recall can
-    # match beliefs whose literal tokens don't overlap the query (e.g. the
-    # query "where do I live" should semantically match "user lives_in Paris"
-    # even before the episode bridge fires). Embeds the canonical SPO text.
-    # Best-effort: a missing/broken embedder leaves embedding NULL (belief
-    # recall still works via the FTS token + bridge paths above).
-    try:
-        from kazma_core.memory.embedder import encode_text_to_blob
-
-        emb = encode_text_to_blob(f"{sub} {pred} {obj}")
-        if emb is not None:
-            conn.execute(
-                "UPDATE beliefs SET embedding=? WHERE id=? AND embedding IS NULL",
-                (emb, bid),
-            )
-        try:
-            from kazma_core.memory.backends import get_vector_backend
-            from kazma_core.memory.embedder import get_embedder
-
-            # The vector index may be process-wide: a private database skips it.
-            enc = None if private else get_embedder()
-            qvec = enc.encode(f"{sub} {pred} {obj}") if enc is not None else None
-            if qvec:
-                get_vector_backend(conn).upsert(
-                    bid,
-                    qvec,
-                    tenant_id=tenant_id,
-                    meta={"kind": "belief", "tier": mem_class or "semantic"},
-                )
-        except Exception:
-            logger.debug(
-                "[belief_mutation] vector backend upsert failed for %s",
-                bid,
-                exc_info=True,
-            )
-    except Exception:
-        logger.debug("[belief_mutation] belief embedding failed for %s", bid, exc_info=True)
+    # The fact's vector is written by mutate_belief AFTER the transaction and
+    # outside the mutation lock (_store_belief_vector, Memory audit M14): an
+    # embedding here ran under BEGIN IMMEDIATE and the process-wide lock, and
+    # the local upsert committed the caller's transaction (M15).
+    del private
     return {
         "id": bid,
         "subject": sub, "predicate": pred, "predicate_type": ptype,
@@ -694,14 +704,36 @@ def _mutate_functional_locked(
     tenant_id = kw["tenant_id"]
     now = kw["now"]
     audit_event_type = kw.get("audit_event_type", "supersede")
-    # Find the currently-active belief for this (subject, predicate)
-    existing = conn.execute(
-        """SELECT id, object, extraction_method, valid_from FROM beliefs
+    # The currently-active belief for this (subject, predicate): the newest,
+    # and only one (Memory audit M26 -- ``LIMIT 1`` with no order read any of
+    # several). Extra current rows (a crash between two writes) are closed at
+    # the newest's start, so a single-valued fact has one value again.
+    current = conn.execute(
+        """SELECT id, object, extraction_method, valid_from, source_session, source_turn FROM beliefs
            WHERE subject=? AND predicate=? AND tenant_id=?
              AND valid_until IS NULL AND invalidated_at IS NULL
-           LIMIT 1""",
+           ORDER BY valid_from DESC, ingested_at DESC""",
         (sub, pred, tenant_id),
-    ).fetchone()
+    ).fetchall()
+    existing = current[0] if current else None
+    if len(current) > 1:
+        from kazma_core.memory.hygiene import beliefs_write
+
+        newest_from = float(_col(existing, "valid_from", 3) or now)
+        extra = [str(_col(r, "id", 0)) for r in current[1:]]
+        logger.warning("[belief_mutate] %d current values of %s %s: keeping the newest, closing %s",
+                       len(current), sub, pred, extra)
+        for bid in extra:
+            beliefs_write(conn, "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
+                          (newest_from, kw.get("recorded") or now, bid))
+        if began:
+            # Kept whatever this call decides next (a no-op rolls back).
+            conn.commit()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+            except sqlite3.Error:
+                conn.rollback()  # nothing is open; the caller's finally needs no transaction
+                raise
     if existing is not None and now < float(_col(existing, "valid_from", 3) or 0.0):
         # Said before the current fact was: history, never a replacement.
         return _record_earlier_statement(conn, ops_conn, sub, pred, obj, began=began, **kw)
@@ -728,27 +760,33 @@ def _mutate_functional_locked(
                     pass
             return {"action": "noop", "belief_id": superseded_id, "superseded_id": None}
         # Commitment Layer Phase 1 — source-trust gate (plan §3.6 rule 2):
-        # a user_explicit (gold-standard) functional belief may NOT be
-        # superseded by a lower-trust source (llm_inferred / system_tool).
-        # This is the memory-corruption half of the CoPilot incident — the
-        # post-turn extractor (llm_inferred) invented a date and overwrote a
-        # user-asserted copilot_next_reset. Fail-closed: drop the inferred
+        # a fact the user stated may NOT be superseded by a lower-trust
+        # source (``memory.provenance.may_overrule``: an agent tool call, the
+        # model pass, a migration). This is the memory-corruption half of
+        # the CoPilot incident — the post-turn extractor invented a date and
+        # overwrote a user-asserted copilot_next_reset. Fail-closed: drop the
         # overwrite; the user fact stands. Kill-switch:
         # cfg.v2.functional_supersede_requires_user_assert (default True).
+        from kazma_core.memory.provenance import may_overrule
+
         gate_cfg = ((kw.get("cfg") or {}).get("v2") or {})
+        same_turn = (
+            kw.get("source_session") is not None
+            and _col(existing, "source_session", 4) == kw.get("source_session")
+            and _col(existing, "source_turn", 5) == kw.get("source_turn")
+        )
         if (bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
-                and existing_method == "user_explicit"
-                and kw["extraction_method"] != "user_explicit"):
+                and not may_overrule(existing_method, kw["extraction_method"], same_turn=same_turn)):
             logger.info(
                 "[belief_mutate] blocked_supersede predicate=%s subject=%s "
-                "existing_source=user_explicit incoming_source=%s — user fact stands",
-                pred, sub, kw["extraction_method"],
+                "existing_source=%s incoming_source=%s — user fact stands",
+                pred, sub, existing_method, kw["extraction_method"],
             )
             _write_audit(
                 ops_conn, tenant_id=tenant_id, event_type="blocked_supersede",
                 target_id=superseded_id, actor="source_trust_gate",
                 reason=(f"lower-trust ({kw['extraction_method']}) cannot "
-                        f"supersede user_explicit {pred}"),
+                        f"supersede {existing_method} {pred}"),
                 state_before={"id": superseded_id, "object": old_obj},
                 state_after={"id": superseded_id, "object": old_obj, "blocked": True},
             )
@@ -767,28 +805,9 @@ def _mutate_functional_locked(
             "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
             (now, kw.get("recorded") or now, superseded_id),
         )
-        if not kw.get("private"):
-            # Dual-write cleanup: drop superseded edge from Neo4j
-            try:
-                from kazma_core.memory.graph_backend import delete_belief_edge
-
-                delete_belief_edge(
-                    belief_id=str(superseded_id),
-                    subject=sub,
-                    predicate=pred,
-                    obj=str(old_obj or ""),
-                    tenant_id=tenant_id,
-                )
-            except Exception:
-                logger.debug("[belief_mutate] neo4j delete on supersede skipped", exc_info=True)
-            # Mirror tombstone: push the superseded row's death flags to shared
-            # state (M-04 — the mirror previously stayed live forever).
-            try:
-                from kazma_core.memory.state_backend import remirror_belief_by_id
-
-                remirror_belief_by_id(conn, str(superseded_id))
-            except Exception:
-                logger.debug("[belief_mutate] mirror tombstone skipped", exc_info=True)
+        # The superseded row's graph edge and mirror tombstone (M-04) go
+        # after the commit, in mutate_belief: a Neo4j or Postgres round trip
+        # here held memory_state.db's write lock (Memory audit M14).
     bid = _belief_id(tenant_id, sub, pred, now)
     try:
         state_after = _insert_belief(
@@ -819,7 +838,8 @@ def _mutate_functional_locked(
         reason=f"functional {sub} {pred} -> {obj}",
         state_before=state_before, state_after=state_after,
     )
-    return {"action": "supersede", "belief_id": bid, "superseded_id": superseded_id}
+    return {"action": "supersede", "belief_id": bid, "superseded_id": superseded_id,
+            "superseded_object": str(state_before["object"] or "") if state_before else None}
 
 
 def _col(row: Any, name: str, index: int) -> Any:
@@ -855,7 +875,8 @@ def _record_earlier_statement(
         return {"action": "noop", "belief_id": "", "superseded_id": None, **(extra or {})}
 
     rows = conn.execute(
-        """SELECT id, object, extraction_method, valid_from, valid_until FROM beliefs
+        """SELECT id, object, extraction_method, valid_from, valid_until, source_session, source_turn
+           FROM beliefs
            WHERE subject=? AND predicate=? AND tenant_id=?
            ORDER BY valid_from, ingested_at""",
         (sub, pred, tenant_id),
@@ -868,14 +889,22 @@ def _record_earlier_statement(
         return _nothing({"belief_id": _col(prev, "id", 0), "already": "recorded"})
     if _col(nxt, "object", 1) == obj:
         return _nothing({"belief_id": _col(nxt, "id", 0), "already": "stated_later"})
+    from kazma_core.memory.provenance import may_overrule
+
     gate_cfg = ((kw.get("cfg") or {}).get("v2") or {})
+    same_turn = prev is not None and (
+        kw.get("source_session") is not None
+        and _col(prev, "source_session", 5) == kw.get("source_session")
+        and _col(prev, "source_turn", 6) == kw.get("source_turn")
+    )
     if (prev is not None
             and bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
-            and _col(prev, "extraction_method", 2) == "user_explicit"
-            and kw["extraction_method"] != "user_explicit"):
+            and not may_overrule(_col(prev, "extraction_method", 2), kw["extraction_method"],
+                                 same_turn=same_turn)):
         logger.info(
             "[belief_mutate] blocked_history predicate=%s subject=%s -- a %s statement "
-            "cannot cut short a user_explicit one", pred, sub, kw["extraction_method"],
+            "cannot cut short a %s one", pred, sub, kw["extraction_method"],
+            _col(prev, "extraction_method", 2),
         )
         return _nothing({"blocked": "lower_trust_source"})
     from kazma_core.memory.hygiene import beliefs_write

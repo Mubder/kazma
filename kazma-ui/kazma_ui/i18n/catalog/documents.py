@@ -7,6 +7,10 @@ into ``TRANSLATIONS``.
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "documents.policy_restart_required": {
+        "en": "Some saved settings need a service restart.",
+        "ar": "تحتاج بعض الإعدادات المحفوظة إلى إعادة تشغيل الخدمة.",
+    },
     "documents.choose_file": {"en": "Choose file", "ar": "اختيار ملف"},
     "documents.library_pick": {
         "ar": "اختر مكتبة…",

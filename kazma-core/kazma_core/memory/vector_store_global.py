@@ -14,6 +14,7 @@ model is never loaded twice.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import threading
@@ -23,7 +24,7 @@ from typing import Any
 
 from kazma_core.memory.embedder import get_embedder
 
-__all__ = ["VectorStore", "get_encoder"]
+__all__ = ["VectorStore", "embedder_identity", "get_encoder"]
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,36 @@ def _shared_client(persist_dir: str | None) -> Any:
         return client
 
 
+def embedder_identity(model: Any) -> str:
+    """Which embedder made a vector, read off the embedder INSTANCE.
+
+    Class, model name, size and a digest of the endpoint (``local`` for an
+    in-process model). The Knowledge Library tagged its vectors with the
+    CONFIGURED model name (Knowledge audit KB-E03): a model changed in
+    Settings while the process still ran the old one, or a remote model that
+    fell back to the local one, tagged vectors with a model that had not
+    made them, and the repair never re-made them. Empty when there is no
+    embedder.
+    """
+    if model is None:
+        return ""
+    name = next(
+        (v for v in (getattr(model, "_model_name", None), getattr(model, "model_name", None),
+                     getattr(model, "_model", None)) if isinstance(v, str) and v),
+        "",
+    )
+    dim = getattr(model, "dim", None)
+    base = getattr(model, "_base_url", "") or ""
+    where = hashlib.sha256(str(base).encode("utf-8")).hexdigest()[:12] if base else "local"
+    return f"{type(model).__name__}|{name or '-'}|{dim if isinstance(dim, int) else '-'}|{where}"
+
+
+def _collection_missing(exc: BaseException) -> bool:
+    """A collection another handle dropped (Chroma's ``NotFoundError``)."""
+    return (type(exc).__name__ in ("NotFoundError", "InvalidCollectionException")
+            or "does not exist" in str(exc).lower())
+
+
 def get_encoder(model_name: str | None = None) -> Any | None:
     """Return the shared encoder (delegates to the pluggable embedder).
 
@@ -151,6 +182,7 @@ class VectorStore:
         self._failed_at: float | None = None
         self._space: str = _SPACE
         self._dim: int | None = None  # the size this collection's vectors are
+        self._mismatch_noted: int | None = None
 
     # ── Initialisation ─────────────────────────────────────────────────
 
@@ -202,6 +234,31 @@ class VectorStore:
         """Whether the vector store is ready for queries."""
         return self._ensure_client() and self._model is not None
 
+    @property
+    def identity(self) -> str:
+        """:func:`embedder_identity` of the embedder this store writes and
+        queries with ("" while it is unavailable)."""
+        return embedder_identity(self._model) if self.available else ""
+
+    def _reopen_if_missing(self, exc: BaseException) -> bool:
+        """Re-open the collection by name when another handle dropped it
+        (Knowledge audit KB-E12): a second index instance kept the dead
+        handle and failed with ``NotFoundError`` until the next restart.
+        True when the caller may retry once."""
+        if not _collection_missing(exc):
+            return False
+        logger.info("[VectorStore] %s was dropped elsewhere; re-opening it", self._collection_name)
+        self._ready = False
+        self._collection = None
+        self._dim = None
+        self._failed_at = None
+        return self._ensure_client()
+
+    def _held_dim(self) -> int | None:
+        """The size of the vectors the collection holds (None: empty)."""
+        held = self._collection.get(limit=1, include=["embeddings"]).get("embeddings")
+        return len(held[0]) if held is not None and len(held) else None
+
     # ── CRUD ───────────────────────────────────────────────────────────
 
     def _encode(self, text: str) -> list[float] | None:
@@ -232,22 +289,26 @@ class VectorStore:
         if not embedding:
             logger.warning("[VectorStore] Index skipped — empty embedding for %s", doc_id)
             return False
-        self._fit(len(embedding))
-        try:
-            # ChromaDB rejects empty metadata dicts — always pass at least one key.
-            meta = dict(metadata or {})
-            if not meta:
-                meta = {"source": "memory"}
-            self._collection.upsert(
-                ids=[doc_id],
-                embeddings=[embedding],
-                documents=[text[:2000]],
-                metadatas=[meta],
-            )
-            return True
-        except Exception as exc:
-            logger.warning("[VectorStore] Index failed: %s", exc)
-            return False
+        # ChromaDB rejects empty metadata dicts — always pass at least one key.
+        meta = dict(metadata or {})
+        if not meta:
+            meta = {"source": "memory"}
+        for attempt in (0, 1):
+            try:
+                self._fit(len(embedding))
+                self._collection.upsert(
+                    ids=[doc_id],
+                    embeddings=[embedding],
+                    documents=[text[:2000]],
+                    metadatas=[meta],
+                )
+                return True
+            except Exception as exc:
+                if attempt == 0 and self._reopen_if_missing(exc):
+                    continue
+                logger.warning("[VectorStore] Index failed: %s", exc)
+                return False
+        return False
 
     def query(
         self,
@@ -275,39 +336,61 @@ class VectorStore:
             filters.update(where)
         if tenant_id:
             filters["tenant_id"] = tenant_id
-        try:
-            count = self._collection.count() if hasattr(self._collection, "count") else limit
-            if count <= 0:
+        for attempt in (0, 1):
+            try:
+                count = self._collection.count() if hasattr(self._collection, "count") else limit
+                if count <= 0:
+                    return []
+                # A collection of another size cannot be searched with this
+                # model's vectors: refuse quietly until the repair sweep has
+                # re-made them (KB-E03), instead of a failed query -- and a
+                # WARNING -- on every search.
+                if self._dim is None:
+                    self._dim = self._held_dim()
+                if self._dim is not None and self._dim != len(embedding):
+                    if self._mismatch_noted != self._dim:
+                        self._mismatch_noted = self._dim
+                        logger.info(
+                            "[VectorStore] %s holds %d-dimension vectors and the model makes %d: "
+                            "meaning search waits for the repair sweep", self._collection_name,
+                            self._dim, len(embedding))
+                    return []
+                results = self._collection.query(
+                    query_embeddings=[embedding],
+                    n_results=min(limit, count),
+                    where=filters or None,
+                )
+                if not results or not results.get("ids") or not results["ids"][0]:
+                    return []
+                scored: list[tuple[str, float]] = []
+                ids_list = results["ids"][0]
+                distances = results.get("distances", [[0.0] * len(ids_list)])[0]
+                for i, doc_id in enumerate(ids_list):
+                    dist = distances[i] if i < len(distances) else 0.0
+                    scored.append((doc_id, _similarity(float(dist), self._space)))
+                scored.sort(key=lambda x: x[1], reverse=True)
+                return scored
+            except Exception as exc:
+                if attempt == 0 and self._reopen_if_missing(exc):
+                    continue
+                logger.warning("[VectorStore] Query failed: %s", exc)
                 return []
-            results = self._collection.query(
-                query_embeddings=[embedding],
-                n_results=min(limit, count),
-                where=filters or None,
-            )
-            if not results or not results.get("ids") or not results["ids"][0]:
-                return []
-            scored: list[tuple[str, float]] = []
-            ids_list = results["ids"][0]
-            distances = results.get("distances", [[0.0] * len(ids_list)])[0]
-            for i, doc_id in enumerate(ids_list):
-                dist = distances[i] if i < len(distances) else 0.0
-                scored.append((doc_id, _similarity(float(dist), self._space)))
-            scored.sort(key=lambda x: x[1], reverse=True)
-            return scored
-        except Exception as exc:
-            logger.warning("[VectorStore] Query failed: %s", exc)
-            return []
+        return []
 
     def delete(self, doc_id: str) -> bool:
         """Remove a document from the collection."""
         if not self._ensure_client():
             return False
-        try:
-            self._collection.delete(ids=[doc_id])
-            return True
-        except Exception as exc:
-            logger.warning("[VectorStore] Delete failed: %s", exc)
-            return False
+        for attempt in (0, 1):
+            try:
+                self._collection.delete(ids=[doc_id])
+                return True
+            except Exception as exc:
+                if attempt == 0 and self._reopen_if_missing(exc):
+                    continue
+                logger.warning("[VectorStore] Delete failed: %s", exc)
+                return False
+        return False
 
     def ids(self) -> set[str]:
         """Every document id the collection holds (empty when unavailable).
@@ -325,6 +408,14 @@ class VectorStore:
         """
         if not self._ensure_client():
             return {}
+        try:
+            return self._models_once()
+        except Exception as exc:
+            if self._reopen_if_missing(exc):
+                return self._models_once()
+            raise
+
+    def _models_once(self) -> dict[str, str | None]:
         found: dict[str, str | None] = {}
         offset = 0
         while True:
@@ -345,7 +436,12 @@ class VectorStore:
         if not doc_ids or not self._ensure_client():
             return 0
         for start in range(0, len(doc_ids), 500):
-            self._collection.delete(ids=doc_ids[start:start + 500])
+            try:
+                self._collection.delete(ids=doc_ids[start:start + 500])
+            except Exception as exc:
+                if not self._reopen_if_missing(exc):
+                    raise
+                self._collection.delete(ids=doc_ids[start:start + 500])
         return len(doc_ids)
 
     def _fit(self, dim: int) -> None:
@@ -359,8 +455,7 @@ class VectorStore:
         """
         if self._dim == dim:
             return
-        held = self._collection.get(limit=1, include=["embeddings"]).get("embeddings")
-        stored = len(held[0]) if held is not None and len(held) else None
+        stored = self._held_dim()
         if stored is not None and stored != dim:
             logger.warning(
                 "[VectorStore] %s holds %d-dimension vectors and the model now makes %d: "
@@ -371,6 +466,7 @@ class VectorStore:
             if not self._ensure_client():
                 raise RuntimeError(f"could not recreate {self._collection_name}")
         self._dim = dim
+        self._mismatch_noted = None
 
     def drop(self) -> bool:
         """Delete the whole collection (its Knowledge Library is being deleted).
@@ -401,14 +497,21 @@ class VectorStore:
         keep = [(d, u) for d, u in ((d, _unit(v)) for d, v in zip(docs, vectors)) if u]
         if not keep:
             return 0
-        self._fit(len(keep[0][1]))
-        self._collection.upsert(
-            ids=[d[0] for d, _v in keep],
-            embeddings=[v for _d, v in keep],
-            documents=[d[1][:2000] for d, _v in keep],
-            metadatas=[dict(d[2]) or {"source": "memory"} for d, _v in keep],
-        )
-        return len(keep)
+        for attempt in (0, 1):
+            try:
+                self._fit(len(keep[0][1]))
+                self._collection.upsert(
+                    ids=[d[0] for d, _v in keep],
+                    embeddings=[v for _d, v in keep],
+                    documents=[d[1][:2000] for d, _v in keep],
+                    metadatas=[dict(d[2]) or {"source": "memory"} for d, _v in keep],
+                )
+                return len(keep)
+            except Exception as exc:
+                if attempt == 0 and self._reopen_if_missing(exc):
+                    continue
+                raise
+        return 0
 
     def count(self) -> int:
         """Return the number of documents in the collection."""

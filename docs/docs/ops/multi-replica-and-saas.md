@@ -35,12 +35,17 @@ as elevated.
 
 | Layer | Multi-replica status |
 |-------|----------------------|
-| Job claim/lease | **Yes** on Postgres (`documents/jobs_pg.py`) when `KAZMA_DATABASE_URL` is set |
-| Metadata CRUD | **Yes** when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres` or `auto` with PG (`repository_pg.py`) |
+| Job claim/lease | **Yes** on Postgres (`documents/jobs_pg.py`) on a Postgres install (`KAZMA_DB_BACKEND=postgres` or a `postgresql://` `KAZMA_DATABASE_URL`), unless `KAZMA_DOCUMENTS_JOBS_BACKEND=sqlite` |
+| Intake admission | **Yes** with the Postgres job queue: durable reservations, an intake lease and a takeover fence, so a stalled replica's intake is taken over and can never publish (`documents/admission.py`) |
+| Metadata CRUD | **Yes** when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres`, or `auto`/unset on a Postgres install (`repository_pg.py`); the tenant storage quota is enforced in the publishing transaction |
 | Content blobs | Shared filesystem/volume on `documents.storage_root` required |
+| Upload spool slots | Per process (`documents.capacity.max_concurrent_uploads`) |
 | GC | Backend-agnostic — `retention._mark` dispatches to `repository.gc_mark` on both SQLite and Postgres |
 
-Always check `GET /api/documents/ops/readiness`. See [Document processing ops](./document-processing) and [Document Intelligence](../guide/document-intelligence#multi-replica).
+These are capabilities of the document backends, not a qualified deployment:
+`scripts/certify_documents.py` reports `postgres_multi_replica` and
+`metadata_multi_replica` as **NOT RUN**, and the runtime as a whole keeps one
+active owner (below). Always check `GET /api/documents/ops/readiness`. See [Document processing ops](./document-processing) and [Document Intelligence](../guide/document-intelligence#multi-replica).
 
 ## Multi-tenant isolation
 
@@ -69,8 +74,8 @@ Env: `KAZMA_MULTI_USER=1`, `KAZMA_PRODUCTION=1`, `KAZMA_DATABASE_URL`,
 | MCP servers (user-added) | Global ConfigStore | **Tenant-scoped** key `tenant.<id>.mcp.servers` |
 | Cron job list | Global | **tenant_id** column; UI list filtered |
 | `_active_tasks` | Process memory | Still process-local; persist via TaskStore for history |
-| KB crawl jobs | Process + ConfigStore | Durable ConfigStore (`stores/kb_jobs.py`) |
-| Knowledge libraries | Global | **tenant_id** column + list/get filter when multi-user/prod |
+| KB crawl jobs | Process + ConfigStore | The crawl journal (`web_acquire/crawl_jobs.py`): one row per job, owners scoped to this install |
+| Knowledge libraries | Global | Own `knowledge.db`; refused on an install with platform users (single-operator) |
 | Swarm bus adapters | Process singleton | Fan-out multi-platform; still one process |
 | Browser affinity | None | Cookie ``kazma-replica`` (`KAZMA_REPLICA_ID`, LB sticky) |
 

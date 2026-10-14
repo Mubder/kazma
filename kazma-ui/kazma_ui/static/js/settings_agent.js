@@ -127,6 +127,13 @@
                     this.saving = false;
                     return;
                 }
+                // A 200 that says {"ok": false} is a refusal too (KB-S10).
+                const saved = await resp.json().catch(function() { return {}; });
+                if (saved && (saved.ok === false || saved.status === 'error')) {
+                    showToast(_k('settings.agentjs.save_failed', 'Save failed: ') + (saved.error || saved.detail || resp.status), 'error');
+                    this.saving = false;
+                    return;
+                }
                 showToast(_k('settings.agentjs.non_stop_settings_saved_applies', 'Non-stop settings saved — applies live'), 'success');
             } catch (e) {
                 showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
@@ -168,11 +175,21 @@
                     method: 'PUT',
                     body: { about: this.aboutMe || '' },
                 });
+                if (r && r.code === 'about_too_long') {
+                    // Worded here, in the page's language (Memory audit M32).
+                    throw new Error(_k('settings.about_me_too_long', 'About me is longer than the limit ({n} / {max}).',
+                        { n: r.length, max: r.max }));
+                }
                 if (!r || !r.ok) throw new Error((r && r.error) || _k('settings.agentjs.save_failed_2', 'Save failed'));
                 this.aboutMe = this.aboutMeSaved = r.about || '';
                 showToast(this.t ? this.t('settings.about_me_saved') : 'Saved', 'success');
             } catch (e) {
-                this.aboutMeError = (e && e.message) || 'Save failed';
+                // A 422 carries the code in its body (Memory audits M32, M35).
+                const body = e && e.body;
+                this.aboutMeError = body && body.code === 'about_too_long'
+                    ? _k('settings.about_me_too_long', 'About me is longer than the limit ({n} / {max}).',
+                        { n: body.length, max: body.max })
+                    : ((e && e.message) || _k('settings.agentjs.save_failed_2', 'Save failed'));
             } finally {
                 this.aboutMeSaving = false;
             }
@@ -185,7 +202,6 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
                         merge_knowledge_into_chat: !!this.memoryMergeKb,
-                        promote_kb_to_episodes: !!this.memoryPromoteKb,
                         smart_search: !!this.memorySmartSearch,
                         explain_recall: !!this.memoryExplainRecall,
                     }),
@@ -466,6 +482,7 @@
                     intake_max_bytes: Number(this.documents.intake_max_bytes),
                     intake_max_files: Number(this.documents.intake_max_files),
                     ocr_enabled: !!this.documents.ocr_enabled,
+                    ocr_tables: !!this.documents.ocr_tables,
                     worker_timeout_seconds: Number(this.documents.worker_timeout_seconds),
                     worker_memory_mb: Number(this.documents.worker_memory_mb),
                     capacity_storage_free_floor_bytes: Number(this.documents.capacity_storage_free_floor_bytes),
@@ -480,6 +497,9 @@
                     body: JSON.stringify(body),
                 });
                 if (!resp.ok) throw new Error('save failed');
+                // A 200 that says {"ok": false} is a refusal too (KB-S10).
+                const saved = await resp.json().catch(function() { return {}; });
+                if (saved && (saved.ok === false || saved.status === 'error')) throw new Error(saved.error || 'save failed');
                 const refreshed = await this._fetch('/api/settings/documents');
                 if (refreshed && !refreshed.error) Object.assign(this.documents, refreshed);
                 this.documentsStatus = _k('settings.agentjs.st_saved', 'Saved');
@@ -584,7 +604,7 @@
                     body: JSON.stringify(this.embedder),
                 });
                 const data = await resp.json();
-                if (data.status === 'error') {
+                if (!resp.ok || data.status === 'error' || data.ok === false) {
                     showToast(data.error || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
                 } else {
                     showToast(_k('settings.agentjs.embedder_settings_saved_restart_the', 'Embedder settings saved. Restart the server to apply.'), 'success');
@@ -708,7 +728,7 @@
                     }),
                 });
                 const data = await resp.json();
-                if (data.status === 'error') {
+                if (!resp.ok || data.status === 'error' || data.ok === false) {
                     showToast(data.error || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
                 } else {
                     try {
@@ -760,7 +780,7 @@
                     body: JSON.stringify({ max_snapshots: n, retention_days: rd, auto_maintain: !!this.timeTravel.auto_maintain }),
                 });
                 const data = await resp.json();
-                if (data.status === 'error') {
+                if (!resp.ok || data.status === 'error' || data.ok === false) {
                     showToast(data.error || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
                 } else {
                     showToast(_k('settings.agentjs.time_travel_settings_saved_restart', 'Time travel settings saved. Restart the server to apply.'), 'success');
@@ -847,6 +867,14 @@
                         detail = err.detail || detail;
                     } catch (e0) { /* non-JSON body */ }
                     showToast(detail, 'error');
+                    this.cronTzSaving = false;
+                    return;
+                }
+                // A 200 that says {"ok": false} is a refusal too (KB-S10).
+                const saved = await resp.json().catch(function() { return {}; });
+                if (saved && (saved.ok === false || saved.status === 'error')) {
+                    showToast(saved.error || saved.detail || window.t('settings.cron_tz_save_failed'), 'error');
+                    this.cronTzSaving = false;
                     return;
                 }
                 await this.loadCronTimezone();

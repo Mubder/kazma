@@ -52,10 +52,9 @@ def _start_driver():
     env = {key: value for key, value in os.environ.items() if key.lower() in allowed}
     env.update(PW_LANG_NAME='python', PW_LANG_NAME_VERSION=f'{sys.version_info.major}.{sys.version_info.minor}')
     if os.name == 'nt':
-        from kazma_core.security.process_budget import _start_process
+        from kazma_core.security.process_budget import _start_process, job_cpu_rate
 
-        return _start_process(command, env=env, memory_bytes=_MEMORY,
-                              cpu_rate=max(1, min(10000, 20000 // (os.cpu_count() or 1))))
+        return _start_process(command, env=env, memory_bytes=_MEMORY, cpu_rate=job_cpu_rate(2))
     if sys.platform.startswith('linux'):
         from kazma_core.web_acquire.browser_cgroup import start_linux_driver
 

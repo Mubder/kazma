@@ -1,0 +1,653 @@
+{
+ "version": 1,
+ "turns": [
+  {
+   "id": "e01",
+   "lang": "en",
+   "user": "My name is Layla and I live in Lisbon now.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "name",
+       "name_is"
+      ],
+      "object": "Layla"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in",
+       "location",
+       "city"
+      ],
+      "object": "Lisbon"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e02",
+   "lang": "en",
+   "user": "I work at Northwind Labs as a data analyst.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "works_at",
+       "employer",
+       "company"
+      ],
+      "object": "Northwind Labs"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "job_title",
+       "role",
+       "occupation",
+       "job"
+      ],
+      "object": "data analyst"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e03",
+   "lang": "en",
+   "user": "I prefer tea over coffee in the mornings.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "prefers",
+       "drink_preference",
+       "beverage_preference",
+       "morning_drink"
+      ],
+      "object": "tea"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e04",
+   "lang": "en",
+   "user": "My favourite city is Kyoto.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "favorite_city",
+       "favourite_city"
+      ],
+      "object": "Kyoto"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e05",
+   "lang": "en",
+   "user": "I'm allergic to penicillin, please remember that.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "allergic_to",
+       "allergy",
+       "allergies"
+      ],
+      "object": "penicillin"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e06",
+   "lang": "en",
+   "user": "We moved to Rotterdam last month.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in",
+       "location",
+       "city",
+       "moved_to"
+      ],
+      "object": "Rotterdam"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e07",
+   "lang": "en",
+   "user": "My sister Hana is a pilot with KLM.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "sister",
+       "has_sister",
+       "sibling"
+      ],
+      "object": "Hana"
+     },
+     {
+      "subject": "hana",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "sister"
+     }
+    ],
+    [
+     {
+      "subject": "hana",
+      "predicates": [
+       "job",
+       "job_title",
+       "occupation",
+       "role",
+       "profession"
+      ],
+      "object": "pilot"
+     },
+     {
+      "subject": "hana",
+      "predicates": [
+       "works_at",
+       "employer"
+      ],
+      "object": "KLM"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e08",
+   "lang": "en",
+   "user": "Can you explain how a heat pump works?",
+   "facts": []
+  },
+  {
+   "id": "e09",
+   "lang": "en",
+   "user": "Thanks, that's really helpful!",
+   "facts": []
+  },
+  {
+   "id": "e10",
+   "lang": "en",
+   "user": "I love hiking and I use a Garmin watch.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "prefers",
+       "likes",
+       "hobby",
+       "hobbies",
+       "enjoys"
+      ],
+      "object": "hiking"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "uses",
+       "owns",
+       "device",
+       "watch"
+      ],
+      "object": "Garmin"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e11",
+   "lang": "en",
+   "user": "The project deadline is the 3rd of May.",
+   "facts": [
+    [
+     {
+      "subject": "project",
+      "predicates": [
+       "deadline",
+       "due_date"
+      ],
+      "object": "3rd of May"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "project_deadline",
+       "deadline"
+      ],
+      "object": "3rd of May"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "e12",
+   "lang": "en",
+   "user": "What's the weather like in Porto in April?",
+   "facts": []
+  },
+  {
+   "id": "a01",
+   "lang": "ar",
+   "user": "اسمي ليلى وساكنة في دبي.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "name",
+       "name_is"
+      ],
+      "object": "ليلى"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in",
+       "location",
+       "city"
+      ],
+      "object": "دبي"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "a02",
+   "lang": "ar",
+   "user": "أشتغل في شركة أرامكو مهندسة.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "works_at",
+       "employer",
+       "company"
+      ],
+      "object": "أرامكو"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "job_title",
+       "job",
+       "occupation",
+       "role",
+       "profession"
+      ],
+      "object": "مهندسة"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "a03",
+   "lang": "ar",
+   "user": "أحب الشاي بالنعناع.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "prefers",
+       "likes",
+       "drink_preference",
+       "beverage_preference"
+      ],
+      "object": "الشاي بالنعناع"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "a04",
+   "lang": "ar",
+   "user": "عندي حساسية من الفول السوداني.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "allergic_to",
+       "allergy",
+       "allergies"
+      ],
+      "object": "الفول السوداني"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "a05",
+   "lang": "ar",
+   "user": "انتقلنا إلى الرياض الشهر الماضي.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in",
+       "location",
+       "city",
+       "moved_to"
+      ],
+      "object": "الرياض"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "a06",
+   "lang": "ar",
+   "user": "أختي نورة طبيبة أسنان.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "sister",
+       "has_sister",
+       "sibling"
+      ],
+      "object": "نورة"
+     },
+     {
+      "subject": "نورة",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "أخت"
+     }
+    ],
+    [
+     {
+      "subject": "نورة",
+      "predicates": [
+       "job",
+       "job_title",
+       "occupation",
+       "profession",
+       "role"
+      ],
+      "object": "طبيبة أسنان"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "a07",
+   "lang": "ar",
+   "user": "شكراً، وايد مفيد",
+   "facts": []
+  },
+  {
+   "id": "a08",
+   "lang": "ar",
+   "user": "كيف أسوي كيكة بدون بيض؟",
+   "facts": []
+  },
+  {
+   "id": "a09",
+   "lang": "ar",
+   "user": "جوازي ينتهي في ٢٠٢٩",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "passport_expires",
+       "passport_expiry",
+       "passport_expiration"
+      ],
+      "object": "٢٠٢٩"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "a10",
+   "lang": "ar",
+   "user": "رياضتي المفضلة السباحة",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "favorite_sport",
+       "favourite_sport",
+       "sport",
+       "hobby"
+      ],
+      "object": "السباحة"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "m01",
+   "lang": "mixed",
+   "user": "My name is Omar وساكن في Kuwait City.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "name",
+       "name_is"
+      ],
+      "object": "Omar"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in",
+       "location",
+       "city"
+      ],
+      "object": "Kuwait City"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "m02",
+   "lang": "mixed",
+   "user": "أشتغل at Gulf Bank as a teller.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "works_at",
+       "employer",
+       "company"
+      ],
+      "object": "Gulf Bank"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "job_title",
+       "job",
+       "occupation",
+       "role"
+      ],
+      "object": "teller"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "m03",
+   "lang": "mixed",
+   "user": "I prefer القهوة العربية with cardamom.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "prefers",
+       "likes",
+       "coffee_preference",
+       "drink_preference"
+      ],
+      "object": "القهوة العربية"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "m04",
+   "lang": "mixed",
+   "user": "عندي meeting مع Sarah كل Sunday الساعة 9.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "meeting",
+       "recurring_meeting",
+       "meets_with",
+       "schedule"
+      ],
+      "object": "Sarah"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "meeting",
+       "recurring_meeting",
+       "schedule"
+      ],
+      "object": "Sunday"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "m05",
+   "lang": "mixed",
+   "user": "My daughter Lulwa تدرس في Bayan School.",
+   "facts": [
+    [
+     {
+      "subject": "lulwa",
+      "predicates": [
+       "school",
+       "studies_at",
+       "attends"
+      ],
+      "object": "Bayan School"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "daughter_school"
+      ],
+      "object": "Bayan School"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "daughter",
+       "has_daughter",
+       "child"
+      ],
+      "object": "Lulwa"
+     },
+     {
+      "subject": "lulwa",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "daughter"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "m06",
+   "lang": "mixed",
+   "user": "ok تمام",
+   "facts": []
+  },
+  {
+   "id": "m07",
+   "lang": "mixed",
+   "user": "I work at Zain الحين, moved from Ooredoo.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "works_at",
+       "employer",
+       "company"
+      ],
+      "object": "Zain"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "m08",
+   "lang": "mixed",
+   "user": "Call me Abu Faisal يا Kazma.",
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "name",
+       "name_is",
+       "nickname",
+       "preferred_name"
+      ],
+      "object": "Abu Faisal"
+     }
+    ]
+   ]
+  }
+ ]
+}

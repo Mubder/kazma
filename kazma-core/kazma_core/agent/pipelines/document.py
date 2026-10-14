@@ -610,48 +610,24 @@ def _resolve_platform_chat_id(platform: str) -> str:
 
 
 def _read_pdf(path: Path) -> str:
-    """Read PDF text content with proper Arabic handling.
+    """Read PDF text through the documents service, and only through it.
 
-    The documents service is primary: it handles tables and reading order
-    and repairs legacy visual-order PDFs. The fitz fallback returns what the
-    PDF holds — logical order for a Unicode PDF, presentation forms for a
-    legacy one — and ``arabic.to_logical`` folds the latter back.
+    The service parses in the bounded document worker under the PDF
+    active-content policy, handles tables and reading order, and repairs
+    legacy visual-order Arabic. There is no in-process fallback: a fitz
+    fallback here ran exactly when the worker had refused the file (active
+    content, a broken structure), which turned every refusal into a parse in
+    the server process.
     """
-    # Primary: the documents service (proper Arabic + table handling)
     try:
         from kazma_core.documents.service import DocumentService
 
         result = DocumentService().read_transient_sync(
             path, approved_path=path, max_chars=50000, fence=False
         )
-        text = result.as_tool_output()
-        if text and len(text) > 50:
-            return text
-    except Exception as exc:
-        logger.debug("[document_pipeline] documents service failed: %s", exc)
-
-    # Fallback: fitz, repaired to logical text by the one Arabic home.
-    #
-    # This ran python-bidi's get_display(base_dir="R") on every page, on the
-    # theory that fitz returns Arabic reversed. A Unicode PDF comes back in
-    # LOGICAL order, so that reversed its Arabic into visual order before the
-    # model read it — and pushed an English page's trailing punctuation to
-    # the front. arabic.to_logical() is what the primary parser applies:
-    # presentation forms fold back to base letters, logical text is untouched
-    # (AGENTS §19H).
-    try:
-        import fitz
-
-        from kazma_core.documents.arabic import to_logical
-
-        doc = fitz.open(str(path))
-        text_parts = []
-        for page in doc:
-            text_parts.append(to_logical(page.get_text()))
-        doc.close()
-        return "\n\n".join(text_parts)
-    except Exception as exc:
-        logger.warning("[document_pipeline] PDF read failed: %s", exc)
+        return result.as_tool_output()
+    except Exception as exc:  # noqa: BLE001 - a refused or failed read is "no text"
+        logger.warning("[document_pipeline] PDF read failed: %s", type(exc).__name__)
         return ""
 
 

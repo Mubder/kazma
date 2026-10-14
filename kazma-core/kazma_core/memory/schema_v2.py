@@ -42,6 +42,7 @@ from kazma_core.db.sqlite_columns import add_missing_columns
 __all__ = [
     "PRIMARY_DDL",
     "OPS_DDL",
+    "RECONCILE_STATE_DDL",
     "ensure_ops_schema",
     "ensure_primary_schema",
 ]
@@ -55,6 +56,20 @@ _DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
 
 
 # ── Primary cognitive-state DDL (memory_state.db) ─────────────────────────
+
+#: Where turn reconcile has read the chat store up to (memory/turn_reconcile.py,
+#: 2026-10-14). In this file for the forget marks' reason: a restored older
+#: copy carries the cursor of its own moment, so the chats changed since are
+#: read again and their newer turns become memories again -- in the settings
+#: store the cursor had already passed them. Its own statement, because the
+#: reconcile pass makes sure of it on a database an older build left.
+RECONCILE_STATE_DDL = """
+CREATE TABLE IF NOT EXISTS memory_reconcile_state (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  state_json  TEXT NOT NULL,
+  updated_at  REAL NOT NULL
+);
+"""
 
 PRIMARY_DDL = """
 -- Bi-temporal belief graph.
@@ -87,7 +102,7 @@ CREATE TABLE IF NOT EXISTS beliefs (
   supersedes_id           TEXT,                              -- replaced belief pointer
   source_session          TEXT,                              -- nullable (resolution #3)
   source_turn             INTEGER,                           -- nullable (resolution #3)
-  extraction_method       TEXT NOT NULL DEFAULT 'llm_inferred',  -- user_explicit|system_tool|llm_inferred
+  extraction_method       TEXT NOT NULL DEFAULT 'llm_inferred',  -- memory.provenance: user_explicit|user_stated|system_tool|agent_asserted|llm_inferred
   embedding_model_version TEXT DEFAULT '%s',
   metadata_json           TEXT DEFAULT '{}',
 
@@ -215,6 +230,15 @@ CREATE TABLE IF NOT EXISTS memory_forgotten (
   episode_id    TEXT,
   forgotten_at  REAL NOT NULL,
   PRIMARY KEY (tenant_id, session_key, turn_number, question_sha)
+);
+
+-- Which entries of the forget journal (memory_forget_journal.db, outside
+-- this file) this database has applied (memory/forget_journal.py, Memory
+-- audits M08/M10). It lives HERE on purpose: a restored older copy of this
+-- file lacks the marks of the forgets made since, and they are applied again.
+CREATE TABLE IF NOT EXISTS memory_forget_applied (
+  seq         INTEGER PRIMARY KEY,
+  applied_at  REAL NOT NULL
 );
 
 -- "About me" (plan C1, memory/profile.py): what the user wants Kazma to know
@@ -358,7 +382,9 @@ CREATE TABLE IF NOT EXISTS memory_task_queue (
   error_log     TEXT,
   -- Lease heartbeat (durability fix): per-claim token; a reclaim rotates it
   -- so a stale handler's late ack is rejected. NULL when not processing.
-  lease_token   TEXT
+  lease_token   TEXT,
+  -- When a failed task may run again (backoff, Memory audit M12). NULL = now.
+  next_attempt_at REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_pending
@@ -402,6 +428,7 @@ def ensure_primary_schema(conn: Any) -> None:
 
     apply_sqlite_pragmas(conn)
     conn.executescript(PRIMARY_DDL)
+    conn.executescript(RECONCILE_STATE_DDL)
     # ── Idempotent column additions for embeddings ───────────────────
     # The VectorEngine reads episode embeddings from a dedicated BLOB
     # column (NOT metadata_json — bytes are not JSON-serializable and
@@ -422,6 +449,10 @@ def ensure_primary_schema(conn: Any) -> None:
         conn,
         "entities",
         (
+            # The name's vector, stored once (Memory audit M18): tier-2
+            # resolution queries the nearest instead of embedding every name.
+            ("embedding", "BLOB"),
+            ("embedding_model_version", "TEXT"),
             # Phase 3: materialized belief_count / graph_degree on entities so the
             # operator /memory page avoids per-row correlated subqueries. Sentinel
             # -1 = "not computed yet" (distinct from a genuine 0). Backfilled
@@ -440,14 +471,68 @@ def ensure_primary_schema(conn: Any) -> None:
     )
     # Phase B: real FTS5 indexes (MATCH + bm25) with LIKE fallback in recall.
     _ensure_fts5(conn)
+    _ensure_mirror_outbox(conn)
     # Phase 3: one-shot backfill of stale entity counts on first boot after
     # the columns are added (rows default to -1). Idempotent — only touches
     # rows still at the sentinel. Safe to re-run; cheap when nothing's stale.
     _backfill_entity_counts(conn)
+    # 2026-10-13 (Memory audit M01): procedures recorded before then kept a
+    # tool call's argument values; keep their names only.
+    from kazma_core.memory.procedural import strip_argument_values
+
+    strip_argument_values(conn)
     # FK enforcement must be set per-connection in SQLite.
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     logger.debug("[schema_v2] primary schema ensured")
+
+
+#: What the Postgres mirror holds of an episode and of a fact: a change to one
+#: of these columns queues the row for the next mirror pass. Access counters,
+#: vectors and the entity links are left out -- the mirror holds none of them.
+_MIRRORED_EPISODE_COLUMNS = "tier, user_text, assistant_text, summary_text, metadata_json, structural_importance"
+_MIRRORED_BELIEF_COLUMNS = ("subject, predicate, predicate_type, object, confidence, structural_importance, "
+                            "source_trust_weight, valid_from, valid_until, invalidated_at, metadata_json")
+
+
+def _ensure_mirror_outbox(conn: Any) -> None:
+    """The change outbox the mirror sync drains (Memory audit M31).
+
+    Every 15 minutes the sync read every local memory's full text and every
+    mirror digest, and pushed each row on a connection of its own. Triggers
+    now name each episode or fact written, or changed in a column the mirror
+    holds, in ``memory_mirror_outbox`` -- in the same transaction as the
+    change, so no write is missed -- and the sync pushes those; a full
+    comparison runs once in ``memory.v2.mirror_verify_hours``. A deleted fact
+    is queued too (the mirror's copy is removed, as ``remirror_belief_by_id``
+    does); a deleted episode is not (the mirror keeps it, as before). The
+    sync empties the outbox on an install with no mirror.
+    """
+    conn.executescript(f"""
+        CREATE TABLE IF NOT EXISTS memory_mirror_outbox (
+          seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind      TEXT NOT NULL,
+          row_id    TEXT NOT NULL,
+          attempts  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TRIGGER IF NOT EXISTS episodes_mirror_ai AFTER INSERT ON episodes BEGIN
+          INSERT INTO memory_mirror_outbox(kind, row_id) VALUES ('episode', new.id);
+        END;
+        CREATE TRIGGER IF NOT EXISTS episodes_mirror_au
+          AFTER UPDATE OF {_MIRRORED_EPISODE_COLUMNS} ON episodes BEGIN
+          INSERT INTO memory_mirror_outbox(kind, row_id) VALUES ('episode', new.id);
+        END;
+        CREATE TRIGGER IF NOT EXISTS beliefs_mirror_ai AFTER INSERT ON beliefs BEGIN
+          INSERT INTO memory_mirror_outbox(kind, row_id) VALUES ('belief', new.id);
+        END;
+        CREATE TRIGGER IF NOT EXISTS beliefs_mirror_au
+          AFTER UPDATE OF {_MIRRORED_BELIEF_COLUMNS} ON beliefs BEGIN
+          INSERT INTO memory_mirror_outbox(kind, row_id) VALUES ('belief', new.id);
+        END;
+        CREATE TRIGGER IF NOT EXISTS beliefs_mirror_ad AFTER DELETE ON beliefs BEGIN
+          INSERT INTO memory_mirror_outbox(kind, row_id) VALUES ('belief', old.id);
+        END;
+    """)
 
 
 def _backfill_entity_counts(conn: Any) -> None:
@@ -664,7 +749,12 @@ def ensure_ops_schema(conn: Any) -> None:
 
     apply_sqlite_pragmas(conn)
     conn.executescript(OPS_DDL)
-    add_missing_columns(conn, "memory_task_queue", (("lease_token", "TEXT"),))
+    # Retired 2026-10-13 (Memory audit M01): ``unified_items`` copied every
+    # fact and Knowledge chunk, had no delete path, and federated search
+    # served it -- a forgotten fact or a deleted library stayed findable.
+    # Recall and the Knowledge index already search their own sources.
+    conn.execute("DROP TABLE IF EXISTS unified_items")
+    add_missing_columns(conn, "memory_task_queue", (("lease_token", "TEXT"), ("next_attempt_at", "REAL")))
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     logger.debug("[schema_v2] ops schema ensured")

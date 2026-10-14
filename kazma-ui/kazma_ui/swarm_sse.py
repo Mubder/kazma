@@ -13,6 +13,14 @@ Event contract:
   event: handoff         data: {"from": "...", "to": "..."}
   event: task_completed  data: {"task_id": "...", "result": {...}}
 
+Every event carries an ``id:`` -- the task's own sequence number -- and a
+reconnect with ``Last-Event-ID`` (or ``?last_event_id=``) gets only what it
+missed; a quiet stream sends a ``: keepalive`` comment at least every 15 s;
+a stream lives at most 30 minutes (the client reconnects from its last id);
+and open streams are capped per client and in total (Swarm audit SW-S09:
+every reconnect replayed the whole history, nothing kept a quiet stream
+alive through a proxy, and nothing bounded them).
+
 A finished task's stream always ENDS with ``task_completed`` (2026-10-02).
 The page's client reconnects whenever a stream closes, and the bus's history
 is in memory: after a restart, or once the bus has cleaned up a finished
@@ -30,7 +38,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from kazma_core.swarm.engine import get_swarm_engine
 from kazma_core.swarm.task import TaskResult, is_terminal
@@ -51,6 +59,15 @@ from kazma_ui.sse_utils import sse_frame as _sse_frame
 # SSE Event Bus — per-task event pub/sub with history
 # ══════════════════════════════════════════════════════════════════════════
 
+#: A quiet stream sends a keepalive comment this often (proxies cut idle ones).
+HEARTBEAT_S = 15.0
+#: A stream ends after this long; the client reconnects from its last id.
+MAX_STREAM_S = 1800.0
+#: Open streams per client (proxy-aware address) and in total.
+MAX_STREAMS_PER_CLIENT = 16
+MAX_STREAMS_TOTAL = 128
+_open_streams: dict[str, int] = {}
+
 #: The events that end a task's stream.
 _TERMINAL_EVENTS = frozenset({"task_completed", "task_failed"})
 
@@ -69,6 +86,8 @@ class SSEEventBus:
         self._max_history_per_task = max_history_per_task
         self._last_cleanup_time = 0.0
         self._last_update_time: dict[str, float] = {}
+        #: Per-task sequence numbers: an event's ``id:`` (never reused).
+        self._seq: dict[str, int] = {}
         # No lock needed: all methods are sync and run in asyncio's
         # single-threaded event loop, so there are no interleaving points.
 
@@ -78,7 +97,9 @@ class SSEEventBus:
         Stores the event in history and delivers it to all active
         subscribers for the given task_id.
         """
-        entry: dict[str, Any] = {"event": event, "data": data}
+        seq = self._seq.get(task_id, 0) + 1
+        self._seq[task_id] = seq
+        entry: dict[str, Any] = {"event": event, "data": data, "id": seq}
         self._last_update_time[task_id] = time.time()
 
         # Store in history with bounded size to avoid memory growth.
@@ -140,6 +161,7 @@ class SSEEventBus:
         for task_id in tasks_to_remove:
             self._history.pop(task_id, None)
             self._last_update_time.pop(task_id, None)
+            self._seq.pop(task_id, None)
 
     def subscribe(self, task_id: str) -> asyncio.Queue[dict[str, Any]]:
         """Subscribe to live events for a task.
@@ -182,10 +204,12 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
         APIRouter with GET /api/swarm/tasks/{id}/stream registered.
     """
     bus = event_bus or SSEEventBus()
-    router = APIRouter(tags=["swarm-sse"])
+    from kazma_ui.swarm_panel.route_roles import RoleCheckedRoute
+
+    router = APIRouter(tags=["swarm-sse"], route_class=RoleCheckedRoute)
 
     @router.get("/api/swarm/tasks/{task_id}/stream")
-    async def stream_task_events(task_id: str) -> StreamingResponse:
+    async def stream_task_events(task_id: str, request: Request) -> StreamingResponse:
         """Stream SSE events for a swarm task.
 
         For terminal tasks (completed/failed/timeout), replays the full
@@ -210,8 +234,36 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
                 status_code=404,
             )  # type: ignore[return-value]
 
+        from fastapi.responses import JSONResponse
+
+        from kazma_ui.auth import client_address
+
+        client = client_address(request)
+        if (_open_streams.get(client, 0) >= MAX_STREAMS_PER_CLIENT
+                or sum(_open_streams.values()) >= MAX_STREAMS_TOTAL):
+            return JSONResponse(  # type: ignore[return-value]
+                {"status": "error", "code": "too_many_streams",
+                 "message": "Too many open task streams; close a Swarm tab and try again."},
+                status_code=429,
+                headers={"Retry-After": "15"},
+            )
+        raw_last = request.headers.get("last-event-id") or request.query_params.get("last_event_id") or ""
+        last_event_id = int(raw_last) if raw_last.strip().isdigit() else None
+
+        async def _counted() -> AsyncGenerator[str, None]:
+            _open_streams[client] = _open_streams.get(client, 0) + 1
+            try:
+                async for frame in _stream_events(task_id, bus, task, last_event_id=last_event_id):
+                    yield frame
+            finally:
+                left = _open_streams.get(client, 1) - 1
+                if left > 0:
+                    _open_streams[client] = left
+                else:
+                    _open_streams.pop(client, None)
+
         return StreamingResponse(
-            _stream_events(task_id, bus, task),
+            _counted(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -260,14 +312,26 @@ async def _stream_events(
     task_id: str,
     bus: SSEEventBus,
     task: Any,
+    *,
+    last_event_id: int | None = None,
+    heartbeat_s: float = HEARTBEAT_S,
+    max_stream_s: float = MAX_STREAM_S,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE frames for a task.
 
-    Replays historical events for catch-up, then streams live events
-    for active tasks until a terminal event arrives. A stream never ends
-    for a finished task without its terminal event (module docstring).
+    Replays the history after *last_event_id* (all of it on a first
+    connect), then streams live events for an active task until its
+    terminal event. A quiet stream sends ``: keepalive`` every
+    *heartbeat_s*; a stream ends after *max_stream_s* (the client resumes
+    from its last id). A stream never ends for a finished task without its
+    terminal event (module docstring).
     """
     sent_terminal = False
+    started = time.monotonic()
+    last_sent = started
+
+    def _frame(entry: dict[str, Any]) -> str:
+        return _sse_frame(entry["event"], entry["data"], id=entry.get("id"))
 
     def _closing(finished: Any) -> list[str]:
         final = None if sent_terminal else _final_event(task_id, finished)
@@ -277,18 +341,24 @@ async def _stream_events(
     # and live subscription.
     queue = bus.subscribe(task_id)
     try:
-        # Replay historical events (catch-up for reconnecting clients).
+        # Replay what the client has not seen (catch-up for reconnects).
         for entry in bus.get_history(task_id):
+            if last_event_id is not None and int(entry.get("id") or 0) <= last_event_id:
+                sent_terminal = sent_terminal or entry["event"] in _TERMINAL_EVENTS
+                continue
             sent_terminal = sent_terminal or entry["event"] in _TERMINAL_EVENTS
-            yield _sse_frame(entry["event"], entry["data"])
+            yield _frame(entry)
+            last_sent = time.monotonic()
 
         if is_terminal(getattr(task, "status", None)):
             for frame in _closing(task):
                 yield frame
             return
 
-        # Stream live events until task_completed or disconnect.
+        # Stream live events until task_completed, disconnect or lifetime.
         while True:
+            if time.monotonic() - started >= max_stream_s:
+                return  # the client reconnects with its last id
             try:
                 entry = await asyncio.wait_for(queue.get(), timeout=1.0)
             except TimeoutError:
@@ -302,15 +372,21 @@ async def _stream_events(
                     while not queue.empty():
                         remaining = queue.get_nowait()
                         sent_terminal = sent_terminal or remaining["event"] in _TERMINAL_EVENTS
-                        yield _sse_frame(remaining["event"], remaining["data"])
+                        yield _frame(remaining)
                     for frame in _closing(current):
                         yield frame
                     return
+                if time.monotonic() - last_sent >= heartbeat_s:
+                    yield ": keepalive\n\n"
+                    last_sent = time.monotonic()
                 continue
             except asyncio.CancelledError:
                 return
 
-            yield _sse_frame(entry["event"], entry["data"])
+            if last_event_id is not None and int(entry.get("id") or 0) <= last_event_id:
+                continue  # already delivered before the reconnect
+            yield _frame(entry)
+            last_sent = time.monotonic()
 
             # Close the stream after any terminal event.
             if entry["event"] in _TERMINAL_EVENTS:

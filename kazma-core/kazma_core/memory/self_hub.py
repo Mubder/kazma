@@ -168,12 +168,20 @@ def ensure_user_hub(
     extra_aliases: list[str] | None = None,
     tenant_id: str = "default",
 ) -> dict[str, Any]:
-    """Upsert ``entities.id=user`` with display name + aliases. Does not commit."""
+    """Upsert ``entities.id=user`` with display name + aliases. Does not commit.
+
+    The hub row belongs to one tenant: a tenant other than the install's own
+    (``"default"``) never writes another tenant's hub (Memory audit M21 --
+    renaming one's own "You" rewrote the global ``user`` row, whoever owned
+    it); the result says ``skipped``."""
     name = (display_name or "").strip() or "You"
     aliases: list[str] = []
     row = conn.execute(
-        "SELECT name, aliases_json FROM entities WHERE id=?", (HUB_ID,)
+        "SELECT name, aliases_json, tenant_id FROM entities WHERE id=?", (HUB_ID,)
     ).fetchone()
+    caller = tenant_id or "default"
+    if row and caller != "default" and str(row["tenant_id"] or "default") != caller:
+        return {"id": HUB_ID, "name": name, "aliases": [], "skipped": "another tenant's hub"}
     if row:
         aliases = parse_aliases(row["aliases_json"])
         old = str(row["name"] or "")

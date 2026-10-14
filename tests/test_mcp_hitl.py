@@ -140,9 +140,11 @@ class TestUnifiedExecutorHitlGate:
         set_safety(real_safety)
 
         try:
-            # Static allowlist alone would treat write_file as safe
-            assert real_safety.is_danger_tool("write_file") is False
-            assert real_safety.check_sync("write_file") is True
+            # An untiered name is gated by classification alone since the
+            # Swarm audit (SW-S11: the graph's floor, hitl.approval_floor),
+            # and force_danger still gates it.
+            assert real_safety.is_danger_tool("write_file") is True
+            assert real_safety.check_sync("write_file") is False
             assert real_safety.check_sync("write_file", force_danger=True) is False
 
             mcp_mgr = _MockMCPManager({"write_file": "filesystem", "run_command": "shell"})
@@ -185,7 +187,7 @@ class TestUnifiedExecutorHitlGate:
         The _hitl_approved key in LLM args is always stripped and never
         honored — only the ContextVar set by graph_builder is trusted.
         """
-        from kazma_core.agent.tool_registry import _hitl_approved_ctx
+        from kazma_core.agent.tool_registry import CallAuthority, _hitl_approved_ctx
         from kazma_core.swarm.safety import SafetyMiddleware, set_safety
 
         # Safety that would deny — but should never be called
@@ -198,8 +200,9 @@ class TestUnifiedExecutorHitlGate:
             mcp_mgr = _MockMCPManager({"write_file": "filesystem"})
             executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
 
-            # Set the ContextVar (as graph_builder does after interrupt() approval)
-            token = _hitl_approved_ctx.set(True)
+            # Set the ContextVar (as the tool worker does after interrupt()
+            # approval): an authority for this one call (SW-S01).
+            token = _hitl_approved_ctx.set(CallAuthority("write_file"))
             try:
                 # Also pass _hitl_approved in args to verify it gets stripped
                 result = await executor.execute(
@@ -322,7 +325,7 @@ class TestSafeLookingMcpNamesDoNotRun:
         production: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+        from kazma_core.agent.tool_registry import CallAuthority, _graph_hitl_gate_ctx
         from kazma_core.swarm.safety import SafetyMiddleware, set_safety
 
         if production:
@@ -330,7 +333,8 @@ class TestSafeLookingMcpNamesDoNotRun:
         denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
         denying.check = AsyncMock(return_value=False)  # type: ignore
         set_safety(denying)
-        token = _graph_hitl_gate_ctx.set(graph_flag)
+        # The graph's authority for this very call: still not an approval.
+        token = _graph_hitl_gate_ctx.set(CallAuthority(name) if graph_flag else None)
         try:
             mcp_mgr = _MockMCPManager({name: "evil"})
             executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
@@ -347,14 +351,14 @@ class TestSafeLookingMcpNamesDoNotRun:
     async def test_allowlist_runs_once_without_a_bus_prompt(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+        from kazma_core.agent.tool_registry import CallAuthority, _graph_hitl_gate_ctx
         from kazma_core.swarm.safety import SafetyMiddleware, set_safety
 
         monkeypatch.setenv("KAZMA_MCP_SAFE_ALLOWLIST", "get_ssh_key")
         denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
         denying.check = AsyncMock(return_value=False)  # type: ignore
         set_safety(denying)
-        token = _graph_hitl_gate_ctx.set(True)
+        token = _graph_hitl_gate_ctx.set(CallAuthority("mcp__evil__get_ssh_key"))
         try:
             name = "mcp__evil__get_ssh_key"
             mcp_mgr = _MockMCPManager({name: "evil"})
@@ -371,6 +375,7 @@ class TestSafeLookingMcpNamesDoNotRun:
     @pytest.mark.asyncio
     async def test_an_approved_call_runs_once_and_is_not_asked_again(self) -> None:
         from kazma_core.agent.tool_registry import (
+            CallAuthority,
             _graph_hitl_gate_ctx,
             _hitl_approved_ctx,
         )
@@ -379,8 +384,8 @@ class TestSafeLookingMcpNamesDoNotRun:
         denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
         denying.check = AsyncMock(return_value=False)  # type: ignore
         set_safety(denying)
-        gate = _graph_hitl_gate_ctx.set(True)
-        approved = _hitl_approved_ctx.set(True)
+        gate = _graph_hitl_gate_ctx.set(CallAuthority("mcp__evil__read_env"))
+        approved = _hitl_approved_ctx.set(CallAuthority("mcp__evil__read_env"))
         try:
             name = "mcp__evil__read_env"
             mcp_mgr = _MockMCPManager({name: "evil"})

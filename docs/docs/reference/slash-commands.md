@@ -19,19 +19,29 @@ Surfaces the shared **Document Intelligence** platform (`DocumentIngestionServic
 via `/documents` (alias `/docs`) across Telegram, Discord, Slack, and other
 gateway chats. Reads use opaque IDs; no raw server paths from the user.
 
+Every chat acts as the install's operator (one operator per install), as the
+agent's document tools and the Web **Documents** page do: the commands list
+and read every document of the install, whichever surface ingested it (since
+2026-10-13). With platform users (multi-user mode) they refuse. An id another
+tenant holds answers exactly like an unknown one (`status` says "Not
+found"). None of the subcommands needs a gateway admin.
+
 | Subcommand | Usage | Description |
 |---|---|---|
-| *(help)* | `/documents` | Help + recent documents |
+| *(help)* | `/documents` | Help + up to 8 documents |
 | `list` | `/documents list` | List id, title, state |
-| `status` | `/documents status <id>` | Job/document durable state |
-| `read` | `/documents read <id>` | Paged fenced content when ready |
-| `convert` | `/documents convert <id> <format>` | Convert to pdf/html/docx/markdown |
-| `pdf-info` | `/documents pdf-info <id>` | Structural PDF report |
-| `redact` | `/documents redact <id> <term[,term…]>` | Physical redact → new artifact |
-| `search` | `/documents search <library> <query>` | Search an indexed library |
-| `health` | `/documents health` | Capability + worker readiness |
+| `status` | `/documents status <id>` | A job's state, stage and attempts; for a document id, its newest job |
+| `read` | `/documents read <id>` | The first 3,000 characters of a ready document, fenced as untrusted data (no paging from chat) |
+| `convert` | `/documents convert <id> <format>` | Convert to another format (e.g. pdf/html/docx/markdown) → a new artifact; the reply gives its id, format and size |
+| `pdf-info` | `/documents pdf-info <id>` | Page count and encryption of a PDF (alias `pdfinfo`) |
+| `redact` | `/documents redact <id> <term[,term…]>` | Physical redact → new artifact; the original is unchanged. No confirmation in chat |
+| `search` | `/documents search <library> <query>` | Top 5 hits from an indexed library, fenced |
+| `health` | `/documents health` | Worker running/stopped, parsers ready, OCR readiness |
 
-Alias: `/docs …` accepts the same subcommands.
+Alias: `/docs …` accepts the same subcommands. There is no upload subcommand:
+a file sent in a chat is read transiently, not stored in the platform, and a document these
+commands can see enters through the agent's `document_import`. With durable
+writes switched off, convert and redact answer that writes are disabled.
 
 Guide: [Document Intelligence](../guide/document-intelligence) ·
 API: [API routes — Documents](./api-routes.md#documents--document-intelligence).
@@ -104,7 +114,7 @@ checkpoints) is deleted and the Web UI's copy of the season is emptied.
 **Side effects:**
 - What Kazma learned is not forgotten: memory keeps it (`/memory off` keeps
   a chat out of memory and forgets what it left).
-- Snapshot history is kept (`/replay clear` purges it).
+- The chat's saved Time Travel steps are kept (`/replay clear` deletes them).
 
 **Required permissions:** None.
 
@@ -143,7 +153,7 @@ been given.
 
 **Response (success):**
 ```
-✅ Removed last assistant response. You can continue the conversation.
+✅ Removed last assistant response, and what Kazma remembered from it. You can continue the conversation.
 ```
 
 **Response (nothing to undo):**
@@ -154,6 +164,8 @@ been given.
 **Side effects:**
 - The reply already sent stays in the chat app; only the conversation Kazma
   keeps changes.
+- What Kazma remembered from that turn -- the memory of it and the facts it
+  learned -- is forgotten too.
 
 **Required permissions:** None.
 
@@ -171,7 +183,7 @@ text, so the next turns build on it.
 
 **Response (success):**
 ```
-✅ Replaced last response. You can continue the conversation.
+✅ Replaced last response, and forgot what Kazma remembered from the old one. You can continue the conversation.
 ```
 
 **Response (missing text):**
@@ -195,49 +207,56 @@ Replaces the last assistant message in conversation history.
 
 ### `/replay`
 
-Time-travel debugging: list snapshots, restore from a specific iteration, compare two runs, or clear snapshot history. Snapshots are captured after every supervisor iteration automatically.
+Time travel: list this chat's saved steps, restore the chat to one, compare two, or delete them. A step is saved after each supervisor iteration (see [Time travel](../guide/time-travel-and-replay.md)). A step is named by its id: the first eight characters `/replay list` shows are enough. An iteration number is not an address, because it restarts every turn.
 
 Sub-commands:
 
 | Command | Description |
 |:---|:---|
-| `/replay list` | Show all snapshots for the current thread |
-| `/replay <N>` | **Restore** — rewind the live thread to iteration N (later turns are lost; use `/fork` to preserve them) |
-| `/replay compare <A> <B>` | Diff two snapshots (messages, cost, model, routing) |
-| `/replay clear` | Purge all snapshots for this thread |
+| `/replay list` | This chat's saved steps, turn by turn, with their ids |
+| `/replay <step>` | **Restore**: the later turns are taken back from the chat, from what Kazma remembered of them, and from its saved steps. Refused while a turn runs or an approval is waiting |
+| `/replay compare <a> <b>` | Diff two steps (messages, cost, model, routing) |
+| `/replay clear` | Delete this chat's saved steps |
 
 ### `/fork`
 
-Branch from a snapshot into a **new thread** — the original stays intact.
+Branch a saved step into a **new chat**; the original stays intact.
 
 | Command | Description |
 |:---|:---|
-| `/fork <N>` | Fork from iteration N into a new thread (seeded with the snapshot state + session context; appears in the Web UI sidebar) |
+| `/fork <step>` | Branch that step into a new chat, owned by you, with the questions and answers up to it (it appears in the Web UI sidebar) |
 
 **Usage:**
 ```
 /replay list
-/replay 3
-/replay compare 1 3
+/replay 3f2a91bc
+/replay compare 3f2a91bc 8c41d0e7
 /replay clear
+/fork 3f2a91bc
 ```
 
 **Response (`/replay list`):**
 ```
-🕰️ *Available snapshots:*
+🕰️ *Saved steps* (restore with `/replay <id>`, branch with `/fork <id>`):
 
-• Iteration `1` — 2026-06-26T14:30:00 — file_write: app.py
-• Iteration `2` — 2026-06-26T14:31:15 — git_commit
+*turn 1*
+• `3f2a91bc` step 1 — 2026-10-14 09:30 — deepseek-chat
+• `8c41d0e7` step 2 — 2026-10-14 09:31 — deepseek-chat
 ```
 
-**Response (no snapshots):**
+**Response (no steps):**
 ```
-📭 No snapshots available for this thread.
+📭 No steps of this chat have been saved.
 ```
 
 **Response (`/replay clear`):**
 ```
-🗑️ Cleared 5 snapshot(s) for this thread.
+🗑️ Deleted 5 saved steps of this chat.
+```
+
+**Response (a restore while an approval waits):**
+```
+⏸️ An approval is waiting in this chat (shell_exec). Approve or deny it first, then restore.
 ```
 
 **Dependency:** The `SnapshotRecorder` is wired into all graph-build sites by default (enabled via `time_travel.enabled: true` in `kazma.yaml`). If disabled:
@@ -543,11 +562,11 @@ Lists all available commands grouped by category.
 • `/compact` — Manually trigger context window compaction
 • `/undo` — Remove the last reply from the conversation
 • `/edit <text>` — Replace the last reply with your corrected text
-• `/replay list` — Show available snapshots
-• `/replay <iteration>` — Restore from iteration (rewinds in-place)
-• `/replay compare <a> <b>` — Compare two snapshots
-• `/replay clear` — Clear snapshots for this thread
-• `/fork <iteration>` — Fork from iteration into a new thread
+• `/replay list` — This chat's saved steps, turn by turn, with their ids
+• `/replay <step>` — Restore this chat to that step (later turns are taken back)
+• `/replay compare <a> <b>` — Compare two steps
+• `/replay clear` — Delete this chat's saved steps
+• `/fork <step>` — Branch that step into a new chat
 
 🧭 *Running task*
 • `/steer <text>` — Add context to the running task (applies next step)
@@ -799,18 +818,23 @@ dispatches still go through the [swarm bus HITL gate](../guide/security-and-safe
 ## `/kb` — Knowledge Library (chat)
 
 **Where handled:** `kazma_gateway/agent_handler/commands.py:_try_kb_command`.
-Ingest documentation sites into searchable RAG corpora from any chat platform.
+Ingest documentation sites into searchable libraries from any chat app. The
+gateway answers every `/kb` command itself, with no model call. Commands that
+change a library are for the gateway's admins only
+(`slash_commands.changes_global_config`): the libraries are the install's,
+and every chat can inject from them. On an install with platform users every
+`/kb` command is refused, because libraries are not separated per user yet.
 
-| Command | Description |
-|---------|-------------|
-| `/kb` | Show help + library list |
-| `/kb list` | List libraries (id, chunks, seed) |
-| `/kb add <id> <url>` | Create-or-use a library, ingest **one** page (sync) |
-| `/kb crawl <id> <url> [N]` | Ingest the **whole** doc tree (background job) |
-| `/kb refresh <id>` | Re-crawl a library from its seed URL (background) |
-| `/kb search <id> <query>` | Direct search (useful without an LLM call) |
-| `/kb status <id>` | Live progress of a running crawl/refresh |
-| `/kb delete <id>` | Delete a library + all its chunks |
+| Command | Admin only | Description |
+|---------|------------|-------------|
+| `/kb` | no | Show help and the library list |
+| `/kb list` | no | List libraries (id, chunks, seed) |
+| `/kb add <id> <url>` | yes | Ingest **one** page now; the library is created once the page was fetched. The reply says whether the page was stored, unchanged or refused. `/kb ingest` is the same command |
+| `/kb crawl <id> <url> [N]` | yes | Crawl the doc tree in the background; the reply when it ends is the crawl journal's outcome (finished, finished with failures, or did not finish) |
+| `/kb refresh <id>` | yes | Crawl the library again from its seed URL, in the background |
+| `/kb search <id> <query>` | no | Direct search (no model call) |
+| `/kb status <id>` | no | The library's latest crawl, from the crawl journal |
+| `/kb delete <id>` | yes | Delete a library with its chunks, vectors and fetched pages; refused while a crawl of it runs |
 
 ### Example
 ```
@@ -850,7 +874,7 @@ A chat-app message that starts with `/` reaches the gateway's handler
 1. The commands that act on the chat's saved conversation or on a running
    turn: `/model`, `/hitl`, the session commands, `/reset`, `/compact`,
    `/long` / `/mission` / `/yolo` / `/unrestricted`, `/plan`, `/undo`,
-   `/edit`, `/replay <n>`, `/fork`, `/steer`, `/abort`.
+   `/edit`, `/replay <step>`, `/fork`, `/steer`, `/abort`.
 2. The resolver. `_build_slash_ctx()` (`agent_handler/commands.py`) reads
    what the command reports from where it lives, and `resolve_slash_command()`
    (`kazma_gateway/slash_commands.py`) answers `/help`, `/status`, `/memory`,

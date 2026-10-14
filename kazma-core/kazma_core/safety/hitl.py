@@ -33,6 +33,7 @@ __all__ = [
     "approval_deadline_from",
     "get_hitl_config",
     "get_tool_tier",
+    "approval_floor",
     "requires_approval",
     "set_current_thread_id",
     "reset_current_thread_id",
@@ -632,6 +633,23 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
 
     if not hitl_config.get("enabled", True):
         return False
+
+    return approval_floor(tool_name, hitl_config)
+
+
+def approval_floor(tool_name: str, hitl_config: dict[str, Any]) -> bool:
+    """Whether *tool_name* is gated by classification alone: the always-asked
+    tools, an MCP tool not on the operator's allowlist, the configured
+    ``require_approval_for`` list (which only ADDS), and every tool whose tier
+    is not auto-approved -- an unclassified tool included (audit F-04).
+
+    The graph (:func:`requires_approval`, after the thread's YOLO window and
+    grants) and the swarm bus (``SafetyMiddleware.is_danger_tool``; its
+    ``check`` applies YOLO and grants) both ask this one rule (Swarm audit
+    SW-S11: the bus gated only tiers danger/unsafe, so a tool with no tier
+    the graph would gate ran from a swarm worker unasked)."""
+    if tool_name in ALWAYS_HITL_TOOLS:
+        return True
 
     if tool_name.startswith("mcp__"):
         # The server chooses the name. ``classify_mcp_tool`` still labels

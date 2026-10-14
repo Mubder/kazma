@@ -64,9 +64,20 @@ def execute(request_path: Path, result_path: Path) -> int:
                 code="document_changed",
             )
         sniffed = sniff_document(source, config)
+        if request.get("operation", "parse") == "inspect":
+            _write_response(result_path, {
+                "protocol_version": _PROTOCOL_VERSION, "ok": True,
+                "code": "ok", "message": "Document inspected",
+                "source_sha256": actual_sha,
+                "sniff": {"mime_type": sniffed.mime_type, "extension": sniffed.extension,
+                          "container": sniffed.container},
+            })
+            return 0
+        if request.get("operation", "parse") != "parse":
+            raise ValueError("invalid parser worker operation")
         if (
-            sniffed.mime_type != request.get("mime_type")
-            or sniffed.extension != request.get("extension")
+            ("mime_type" in request and sniffed.mime_type != request["mime_type"])
+            or ("extension" in request and sniffed.extension != request["extension"])
         ):
             raise DocumentParseError(
                 "Document type changed before isolated parsing began",
@@ -117,6 +128,12 @@ def execute(request_path: Path, result_path: Path) -> int:
                 pages=ocr_pages,
                 work_dir=result_path.parent,
             )
+        # Local third-party parser code shares the same process-tree resource
+        # and wall-clock boundary. The credentialed remote broker stays in the
+        # parent, where the immutable durable audit scope exists.
+        from .extract_salvage import maybe_salvage_extract
+
+        ir = maybe_salvage_extract(source, ir, config=config, allow_remote=False)
         if sha256_path(source) != actual_sha:
             raise DocumentParseError(
                 "Document changed during isolated parsing",

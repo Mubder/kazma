@@ -91,7 +91,12 @@ def _parse_tsv(
         text = payload.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise DocumentOcrError("Tesseract returned invalid UTF-8 TSV output") from exc
-    reader = csv.DictReader(io.StringIO(text), delimiter="\t")
+    # Tesseract's TSV quotes nothing: a recognised word that starts with '"'
+    # is text. With the csv module's default quoting it opened a quoted field
+    # that swallowed every row up to the next '"' -- words lost, and other
+    # rows' coordinates and confidences read as the page's text (2026-10-13,
+    # a real scan: one "line" of 14,386 characters).
+    reader = csv.DictReader(io.StringIO(text), delimiter="\t", quoting=csv.QUOTE_NONE)
     required = {
         "level", "block_num", "par_num", "line_num", "left", "top",
         "width", "height", "conf", "text",
@@ -116,10 +121,21 @@ def _parse_tsv(
             raise DocumentOcrError("Tesseract returned invalid TSV coordinates") from exc
         lines[key].append((word, left, top, width, height, min(confidence, 1.0)))
 
+    from ..arabic import number_in_logical_order
+
     blocks: list[DocumentBlock] = []
     all_confidences: list[float] = []
+    # Text before each word in its paragraph, in reading order: a number
+    # token after Arabic letters is read in drawn order ("30-09-2026" for
+    # "2026-09-30", rule W2/W4) and goes back to logical order.
+    before: dict[tuple[int, int], str] = defaultdict(str)
     for index, key in enumerate(sorted(lines), start=1):
-        words = lines[key]
+        paragraph = key[:2]
+        words = []
+        for word in lines[key]:
+            text = number_in_logical_order(word[0], before[paragraph])
+            before[paragraph] = (before[paragraph] + " " + text)[-256:]
+            words.append((text, *word[1:]))
         line_text = " ".join(word[0] for word in words)
         x0 = min(word[1] for word in words)
         y0 = min(word[2] for word in words)
@@ -315,6 +331,53 @@ class TesseractProvider:
             raise DocumentOcrUnavailableError(
                 capability.reason or "Tesseract OCR is unavailable"
             )
+        return self._recognize_file(
+            image_path, page_number=page_number, language=language, dpi=dpi,
+            timeout_seconds=timeout_seconds, output_limit_bytes=output_limit_bytes,
+            work_dir=work_dir, engine_version=capability.engine_version, options=(),
+        )
+
+    def recognize_region(
+        self,
+        image_path: Path,
+        *,
+        language: str,
+        dpi: int,
+        psm: int,
+        digits_only: bool,
+        timeout_seconds: float,
+        output_limit_bytes: int,
+        work_dir: Path,
+    ) -> OcrPageResult:
+        """One table cell (``ocr.tables``): a single line (psm 7) or a block
+        (psm 6), optionally Latin digits only."""
+        if psm not in (6, 7):
+            raise DocumentOcrError("Unsupported page segmentation mode for a region")
+        capability = self.probe(tuple(language.split("+")))
+        if not capability.available:
+            raise DocumentOcrUnavailableError(capability.reason or "Tesseract OCR is unavailable")
+        options = ("--psm", str(psm))
+        if digits_only:
+            options += ("-c", "tessedit_char_whitelist=0123456789")
+        return self._recognize_file(
+            image_path, page_number=1, language=language, dpi=dpi,
+            timeout_seconds=timeout_seconds, output_limit_bytes=output_limit_bytes,
+            work_dir=work_dir, engine_version=capability.engine_version, options=options,
+        )
+
+    def _recognize_file(
+        self,
+        image_path: Path,
+        *,
+        page_number: int,
+        language: str,
+        dpi: int,
+        timeout_seconds: float,
+        output_limit_bytes: int,
+        work_dir: Path,
+        engine_version: str | None,
+        options: tuple[str, ...],
+    ) -> OcrPageResult:
         result = self._run(
             (
                 str(image_path),
@@ -323,6 +386,7 @@ class TesseractProvider:
                 language,
                 "--dpi",
                 str(dpi),
+                *options,
                 "tsv",
             ),
             work_dir=work_dir,
@@ -333,6 +397,6 @@ class TesseractProvider:
             result.stdout,
             page_number=page_number,
             language=language,
-            engine_version=capability.engine_version,
+            engine_version=engine_version,
             dpi=dpi,
         )

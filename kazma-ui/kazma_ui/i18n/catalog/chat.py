@@ -124,8 +124,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Delete chat",
     },
     "chat.delete_chat_body": {
-        "ar": "حذف هذه المحادثة؟ لا يمكن التراجع عن ذلك. ما تعلّمه Kazma منها يبقى في ذاكرته إلا إذا اخترت المربع أدناه.",
-        "en": "Delete this chat? This cannot be undone. What Kazma learned from it stays in its memory unless you tick the box below.",
+        "ar": "حذف هذه المحادثة؟ لا يمكن التراجع عن ذلك. تُحذف معها خطواتها المحفوظة في السفر عبر الزمن. ما تعلّمه Kazma منها يبقى في ذاكرته إلا إذا اخترت المربع أدناه.",
+        "en": "Delete this chat? This cannot be undone. Its saved Time Travel steps are deleted with it. What Kazma learned from it stays in its memory unless you tick the box below.",
     },
     "chat.delete_chat_confirm": {
         "ar": "حذف",
@@ -142,6 +142,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.delete_chat_forgot": {
         "ar": "حُذفت المحادثة ونُسي ما تعلّمه Kazma منها",
         "en": "Chat deleted, and what Kazma learned from it forgotten",
+    },
+    "chat.delete_chat_nothing_held": {
+        "ar": "حُذفت المحادثة. لم يكن Kazma يتذكر شيئًا منها.",
+        "en": "Chat deleted. Kazma held no memories of it.",
     },
     "chat.delete_chat_failed": {
         "ar": "تعذّر الحذف",

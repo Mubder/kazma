@@ -272,7 +272,11 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         suffix = p.suffix.lower()
         from kazma_core.documents.registry import get_parser_registry
 
-        capability = get_parser_registry().capability_for_extension(suffix)
+        # Off the loop: readiness probes engine binaries locally, or asks the
+        # document worker broker over a socket in the container profile.
+        capability = await asyncio.to_thread(
+            lambda: get_parser_registry().capability_for_extension(suffix)
+        )
         text_suffixes = {".txt", ".md", ".markdown", ".log"}
         if capability is not None and capability.available and suffix not in text_suffixes:
             try:

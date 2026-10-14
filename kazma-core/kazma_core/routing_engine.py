@@ -118,8 +118,14 @@ class UnifiedRouter:
         if self._semantic_router.available:
             logger.info("[UnifiedRouter] Attempting Semantic routing.")
             try:
-                self._semantic_router.build_profiles(worker_profiles)
-                scored = self._semantic_router.query(task.prompt, top_n=top_n * 2)
+                # Embedding work: in a thread, never on the loop (SW-E07).
+                def _semantic() -> list:
+                    self._semantic_router.build_profiles(worker_profiles)
+                    return self._semantic_router.query(task.prompt, top_n=top_n * 2)
+
+                import asyncio as _asyncio
+
+                scored = await _asyncio.to_thread(_semantic)
                 if scored:
                     logger.info("[UnifiedRouter] Semantic query yielded: %s", scored)
                     scored_names = [name for name, _score in scored]

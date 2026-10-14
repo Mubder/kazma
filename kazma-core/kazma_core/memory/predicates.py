@@ -29,6 +29,8 @@ import logging
 import sqlite3
 from typing import Any
 
+from kazma_core.memory.provenance import USER_SOURCES
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -129,7 +131,7 @@ def merge_same_word_predicates(
         if key:
             groups.setdefault((subject, ptype, key), []).append({
                 "id": bid, "predicate": predicate, "value": (obj or "").strip().lower(),
-                "when": float(valid_from or 0), "user": method == "user_explicit",
+                "when": float(valid_from or 0), "user": method in USER_SOURCES,
             })
 
     retire: list[dict[str, Any]] = []

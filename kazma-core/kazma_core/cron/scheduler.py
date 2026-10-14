@@ -1,8 +1,21 @@
-"""In-process cron scheduler for autonomous agent actions.
+"""In-process scheduler for reminders and scheduled agent tasks.
 
-The agent calls schedule_task(timing, prompt) as a tool.
-The scheduler stores jobs in SQLite and fires them via
-LangGraph invocations at the specified time.
+The agent books a job with ``schedule_task`` (or the Scheduled page does);
+the scheduler stores it in cron.db and fires it at its time:
+
+* a **reminder** delivers its stored message, with no model call, so a
+  provider outage cannot lose it;
+* a **task** runs one agent turn with the tools it declared at booking
+  (:mod:`kazma_core.cron.capabilities`) and delivers the answer. A turn that
+  fails is a failed fire -- counted, alerted, never delivered as if it were
+  the answer (Scheduled audit SCH-E01).
+
+Every fire is a leased record and ends in one transaction; every message goes
+through the delivery outbox and is retried until the platform takes it or it
+is recorded ``undeliverable`` with one alert (:mod:`kazma_core.cron.store`).
+A fire interrupted by a restart runs again within the job's catch-up window;
+one due longer ago than that is ``missed``, and its chat gets one notice
+(SCH-E04, E02, E06). Timing has one model: :mod:`kazma_core.cron.timing`.
 
 Usage:
     store = SQLiteCronStore()
@@ -14,27 +27,38 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import re
+import time
 import uuid
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta, tzinfo
-from enum import StrEnum
+from collections.abc import Callable
+from contextvars import ContextVar as _ContextVar
+from datetime import UTC, datetime, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import aiosqlite
+from kazma_core.cron.store import (
+    FireResult,
+    JobStatus,
+    ScheduledJob,
+    SQLiteCronStore,
+    norm_iso,
+)
 
 __all__ = [
+    "CronLimitError",
     "CronScheduler",
     "JobStatus",
     "SQLiteCronStore",
     "ScheduledJob",
+    "compose_cron_delivery",
     "get_cron_scheduler",
     "parse_timing",
+    "resolve_cron_zone",
+    "scheduled_tenant_filter",
     "set_cron_scheduler",
-    "compose_cron_delivery",
 ]
 
 logger = logging.getLogger(__name__)
@@ -44,8 +68,6 @@ logger = logging.getLogger(__name__)
 # turn can inherit the firing job's delivery identity. The gateway's
 # delivery-target ContextVar is empty on this path (no inbound user
 # message), which is how agent-rescheduled jobs were born targetless.
-from contextvars import ContextVar as _ContextVar
-
 _cron_parent_ctx: _ContextVar[dict[str, str] | None] = _ContextVar(
     "kazma_cron_parent", default=None
 )
@@ -62,11 +84,12 @@ def get_cron_parent() -> dict[str, str] | None:
         return val
     return None
 
+
 # Module-level singleton
 _cron_scheduler: CronScheduler | None = None
 
 
-def set_cron_scheduler(scheduler: CronScheduler) -> None:
+def set_cron_scheduler(scheduler: CronScheduler | None) -> None:
     global _cron_scheduler
     _cron_scheduler = scheduler
 
@@ -75,55 +98,16 @@ def get_cron_scheduler() -> CronScheduler | None:
     return _cron_scheduler
 
 
-class JobStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+class CronLimitError(ValueError):
+    """A booking refused by a bound (prompt size, the job caps). ``code`` names it."""
 
-
-@dataclass
-class ScheduledJob:
-    job_id: str
-    timing: str
-    prompt: str
-    platform: str
-    thread_id: str
-    status: JobStatus = JobStatus.PENDING
-    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
-    next_run: str | None = None
-    last_result: str | None = None
-    tenant_id: str = "default"
-    # Platform-prefixed delivery target (e.g. "telegram:<chat_id>") captured at
-    # schedule time so `_deliver` can route the result back to the originating
-    # chat long after the SessionStore row has been TTL-evicted (5-min default).
-    # Empty for legacy rows scheduled before this field existed; `_deliver`
-    # falls back to the thread_id in that case.
-    delivery_target: str = ""
-    failure_count: int = 0
-
-    def to_dict(self) -> dict[str, Any]:
-        out = {
-            "job_id": self.job_id,
-            "timing": self.timing,
-            "prompt": self.prompt[:200],
-            "platform": self.platform,
-            "thread_id": self.thread_id,
-            "status": self.status.value,
-            "created_at": self.created_at,
-            "next_run": self.next_run,
-            "last_result": self.last_result[:200] if self.last_result else None,
-            "tenant_id": self.tenant_id,
-            "delivery_target": self.delivery_target,
-            "failure_count": self.failure_count,
-        }
-        out.update(annotate_fire_times(self.next_run))
-        return out
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Timing parser
+# The operator's time zone
 # ══════════════════════════════════════════════════════════════════════════
 
 # Warn once per process about an unresolvable timezone name.
@@ -138,15 +122,15 @@ def resolve_cron_timezone_name() -> tuple[str, str]:
     :func:`get_cron_timezone` (which falls back to UTC on unresolvable
     names) or an explicit ``ZoneInfo(name)`` probe at the validation site
     (e.g. the Settings API rejects typos with a 400 instead of silently
-    running UTC).
+    running UTC). A settings read: async callers use ``asyncio.to_thread``.
     """
     name = ""
     try:
         from kazma_core.config_store import get_config_store
 
         name = str(get_config_store().get("cron.timezone") or "").strip()
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 — an unreadable store falls through to the env
+        logger.debug("[CronScheduler] cron.timezone unreadable", exc_info=True)
     if name:
         return name, "config"
     name = os.environ.get("KAZMA_TZ", "").strip()
@@ -168,18 +152,21 @@ def get_cron_timezone() -> tzinfo:
     change takes effect on the next schedule/reschedule without a restart.
     An unresolvable name falls back to UTC with a warn-once log (never
     raises). Requires the stdlib ``zoneinfo`` database (the ``tzdata`` pip
-    package on Windows).
+    package on Windows). A settings read: async callers use ``to_thread``.
     """
+    name, _source = resolve_cron_timezone_name()
+    return _zone_for(name)
+
+
+def _zone_for(name: str) -> tzinfo:
+    """The zone a configured *name* means: UTC when it is unresolvable."""
     global _tz_warned
 
-    name, _source = resolve_cron_timezone_name()
     if name == "UTC":
-        # Both the default AND an operator explicitly asking for UTC land
-        # here; nothing to warn about either way.
         return UTC
     try:
         return ZoneInfo(name)
-    except Exception:
+    except Exception:  # noqa: BLE001
         if not _tz_warned:
             logger.warning(
                 "[CronScheduler] invalid cron.timezone %r — falling back to UTC "
@@ -190,12 +177,24 @@ def get_cron_timezone() -> tzinfo:
         return UTC
 
 
-def annotate_fire_times(next_run: datetime | str | None) -> dict[str, str]:
+def resolve_cron_zone() -> tuple[tzinfo, str]:
+    """``(zone, name)`` from ONE settings read -- the boundary's (SCH-E10).
+
+    Blocking: async callers use ``asyncio.to_thread``.
+    """
+    name, _src = resolve_cron_timezone_name()
+    zone = _zone_for(name)
+    return zone, ("UTC" if zone is UTC else name)
+
+
+def annotate_fire_times(next_run: datetime | str | None, *, zone: tzinfo | None = None,
+                        zone_name: str | None = None) -> dict[str, str]:
     """UTC + operator-local strings so the model does not report only UTC.
 
     ``cron.timezone`` (e.g. Asia/Kuwait) already anchors ``daily at 9am``.
     Compact ``5m``/ISO results were still returned as UTC ISO only, so the
     agent said "fires at 01:15:19 UTC" even when the operator zone was Kuwait.
+    Pass *zone*/*zone_name* resolved once; without them this reads settings.
     """
     if next_run is None or next_run == "":
         return {}
@@ -205,18 +204,40 @@ def annotate_fire_times(next_run: datetime | str | None) -> dict[str, str]:
         return {}
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
-    name, _src = resolve_cron_timezone_name()
-    tz = get_cron_timezone()
+    if zone is None or zone_name is None:
+        zone, zone_name = resolve_cron_zone()
     utc = dt.astimezone(UTC)
-    local = dt.astimezone(tz)
-    utc_s = utc.strftime("%Y-%m-%d %H:%M:%S UTC")
-    local_s = local.strftime("%Y-%m-%d %H:%M:%S") + f" {name}"
+    local = dt.astimezone(zone)
     return {
-        "next_run_utc": utc_s,
-        "next_run_local": local_s,
-        "timezone": name,
+        "next_run_utc": utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "next_run_local": local.strftime("%Y-%m-%d %H:%M:%S") + f" {zone_name}",
+        "timezone": zone_name,
     }
 
+
+def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
+    """The next run *timing* names, read in the operator's zone.
+
+    A parser, kept for its callers: it does not refuse a past instant (a
+    booking does, through :func:`kazma_core.cron.timing.resolve_timing`).
+    Supported: ``5m``/``2h``/``3d``, recurring forms (``daily at 9:30am``,
+    ``weekdays at 08:00``, ``every mon,wed at 21:00``, an RRULE subset),
+    and RFC 3339 / ISO timestamps (naive → operator zone; ``Z`` and offsets
+    honored). Raises ``ValueError`` ("Unparseable timing ...").
+    """
+    from kazma_core.cron.timing import TimingError, resolve_timing
+
+    zone, name = resolve_cron_zone()
+    try:
+        return resolve_timing(timing, zone=zone, zone_name=name, now=from_time or datetime.now(UTC),
+                              allow_past=True).first
+    except TimingError as exc:
+        raise ValueError(f"Unparseable timing: {exc}") from None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# What a fire delivers
+# ══════════════════════════════════════════════════════════════════════════
 
 _QUOTED_RE = re.compile(r'["“”](.+?)["“”]', re.DOTALL)
 
@@ -238,7 +259,7 @@ def _reminder_from_prompt(prompt: str | None) -> str:
 
 
 def compose_cron_delivery(summary: str | None, prompt: str | None) -> str:
-    """User-facing text for ``_deliver``.
+    """User-facing text for an agent task's answer.
 
     Cron child graphs ``auto_deny`` outbound tools (``send_message`` /
     ``dispatch_notification``). The fire-time agent then dumps a `````plan``
@@ -257,11 +278,30 @@ def compose_cron_delivery(summary: str | None, prompt: str | None) -> str:
     return (leftover or "Scheduled task fired.")[:4000]
 
 
+def _reminder_body(prompt: str) -> str:
+    """A reminder's message: the stored text, as booked (no model call)."""
+    text = str(prompt or "").strip()
+    return f"⏰ Reminder\n\n{text}"[:4000] if text else "⏰ Reminder"
+
+
+def _late_note(due: datetime | None, now: datetime, zone: tzinfo, zone_name: str) -> str:
+    """"(due 09:00 Asia/Kuwait, 25 min late)" for a fire well past its time."""
+    if due is None:
+        return ""
+    late = (now - due).total_seconds()
+    if late < 120:
+        return ""
+    local = due.astimezone(zone)
+    minutes = int(late // 60)
+    span = f"{minutes} min" if minutes < 120 else f"{minutes // 60} h {minutes % 60} min"
+    return f"(due {local.strftime('%Y-%m-%d %H:%M')} {zone_name}, {span} late)"
+
+
 def _web_session_for_thread(thread_id: str) -> Any:
     """The web chat session bound to *thread_id*, or None.
 
     A chat-store read (a Postgres round trip when the session is not cached);
-    ``_deliver`` runs it in a thread.
+    the target resolution runs it in a thread.
     """
     from kazma_ui.session_manager import get_session_manager
 
@@ -269,432 +309,26 @@ def _web_session_for_thread(thread_id: str) -> Any:
     return mgr.get_by_thread_id(thread_id) if mgr else None
 
 
-def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
-    """Parse human-readable timing into next run time.
+def _valid_target(t: str) -> bool:
+    return bool(t) and ":" in t and not t.endswith(":")
 
-    Supported formats:
-        - "5m", "30m", "1h", "2h" (relative)
-        - "daily at 9am", "daily at 3pm" (recurring — anchored in the
-          operator timezone, see :func:`get_cron_timezone`)
-        - ISO timestamp: "2026-06-25T09:00:00" (naive → operator timezone;
-          explicit-offset strings honored as-is)
 
-    Args:
-        timing:     Timing string.
-        from_time:  Base time for relative calculations (default: now).
-
-    Returns:
-        Absolute datetime for next run.
-
-    Raises:
-        ValueError: If timing cannot be parsed.
-    """
-    now = from_time or datetime.now(UTC)
-    timing = timing.strip().lower()
-    tz = get_cron_timezone()
-
-    # Relative: "5m", "30m", "1h", "2h"
-    match = re.match(r"^(\d+)(m|h)$", timing)
-    if match:
-        value, unit = int(match.group(1)), match.group(2)
-        delta = timedelta(minutes=value) if unit == "m" else timedelta(hours=value)
-        return now + delta
-
-    # Recurring: "daily at 9am", "daily at 3pm"
-    match = re.match(r"^daily at (\d{1,2})(am|pm)$", timing)
-    if match:
-        hour = int(match.group(1))
-        # The regex admits 1-99; "13pm" → hour 25 → now.replace(hour=25)
-        # raises an opaque ValueError. Validate the 1-12 am/pm range up front
-        # so the user gets the intended "Unparseable timing" error (audit).
-        if not (1 <= hour <= 12):
-            raise ValueError(f"Unparseable timing: '{timing}'. Hour must be 1-12 with am/pm.")
-        if match.group(2) == "pm" and hour != 12:
-            hour += 12
-        if match.group(2) == "am" and hour == 12:
-            hour = 0
-        # Anchor in the operator zone via astimezone, not replace(tzinfo=)
-        # (audit M-12): replace() on a UTC instant west of UTC can skip a
-        # local calendar day ("daily at 10pm" at 01:00Z → 22:00 same UTC day
-        # instead of yesterday evening).
-        local_now = now.astimezone(tz)
-        next_run = local_now.replace(hour=hour, minute=0, second=0, microsecond=0)
-        if next_run <= local_now:
-            next_run += timedelta(days=1)
-        return next_run
-
-    # ISO timestamp
+def _accepts(builder: Callable[..., Any], name: str) -> bool:
     try:
-        dt = datetime.fromisoformat(timing)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=tz)
-        return dt
-    except ValueError:
-        pass
-
-    raise ValueError(f"Unparseable timing: '{timing}'. Use '5m', '1h', 'daily at 9am', or ISO timestamp.")
+        params = inspect.signature(builder).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# SQLite Cron Store
-# ══════════════════════════════════════════════════════════════════════════
-
-_CREATE_TABLE = """
-CREATE TABLE IF NOT EXISTS cron_jobs (
-    job_id TEXT PRIMARY KEY,
-    timing TEXT NOT NULL,
-    prompt TEXT NOT NULL,
-    platform TEXT NOT NULL,
-    thread_id TEXT NOT NULL,
-    status TEXT DEFAULT 'pending',
-    created_at TEXT,
-    next_run TEXT,
-    last_result TEXT,
-    failure_count INTEGER DEFAULT 0
+_STORED_INSTRUCTION_NOTE = (
+    "You are running a scheduled task. The next user message is a STORED "
+    "instruction the operator booked earlier (job {job_id}, booked {created}); it "
+    "is not a live message, and nobody is watching while it runs. You may use only "
+    "the tools you are offered ({capabilities}). Do NOT call send_message or "
+    "dispatch_notification: the scheduler delivers your final answer to the "
+    "operator's chat. Write that answer as plain text. Do not emit a ```plan fence."
 )
-"""
-
-
-class SQLiteCronStore:
-    """Persist scheduled jobs in SQLite to survive restarts.
-
-    Args:
-        db_path: Path to the SQLite database.
-    """
-
-    def __init__(self, db_path: str | None = None) -> None:
-        # Default resolves via paths.data_dir() (walks up to the
-        # pyproject.toml root) instead of a bare CWD-relative literal, so a
-        # server started from a subdirectory opens the SAME cron.db instead
-        # of silently minting an empty one (deep-audit 2026-08-19, #14).
-        if db_path is None:
-            from kazma_core.paths import data_dir
-
-            db_path = str(data_dir() / "cron.db")
-        self._db_path = db_path
-        self._db: aiosqlite.Connection | None = None
-
-    async def init(self) -> None:
-        """Initialize the database and create the table."""
-        from pathlib import Path
-
-        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        # Autocommit: every statement is its own transaction, so no path --
-        # a write that changed nothing, or one that raised -- returns with
-        # the write lock held. In Python's default mode a DELETE opens a
-        # transaction even when it matches nothing, and the purge committed
-        # only when it had deleted something: from each boot until the next
-        # reminder fired, the server held cron.db's write lock, and every
-        # other writer (a second instance, a maintenance script) waited out
-        # its timeout and failed (live 2026-09-27). Every method here is one
-        # write statement, so none needs a transaction of its own.
-        self._db = await aiosqlite.connect(self._db_path, isolation_level=None)
-        from kazma_core.config_store import apply_sqlite_pragmas_async
-
-        await apply_sqlite_pragmas_async(self._db)
-        await self._db.execute(_CREATE_TABLE)
-        # Columns added after the table first shipped: tenant_id (multi-tenant
-        # UI filtering), delivery_target (the chat a reminder was scheduled
-        # from; empty for legacy rows), failure_count (retry budget, audit H3).
-        from kazma_core.db.sqlite_columns import add_missing_columns_async
-
-        await add_missing_columns_async(
-            self._db,
-            "cron_jobs",
-            (
-                ("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),
-                ("delivery_target", "TEXT NOT NULL DEFAULT ''"),
-                ("failure_count", "INTEGER NOT NULL DEFAULT 0"),
-            ),
-        )
-        logger.info("[CronStore] Initialized at %s", self._db_path)
-
-    async def insert(self, job: ScheduledJob) -> None:
-        """Insert a new scheduled job."""
-        if self._db is None:
-            raise RuntimeError("CronDB not initialized")
-        await self._db.execute(
-            "INSERT INTO cron_jobs (job_id, timing, prompt, platform, thread_id, "
-            "status, created_at, next_run, tenant_id, delivery_target, failure_count) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (job.job_id, job.timing, job.prompt, job.platform, job.thread_id,
-             job.status.value, job.created_at, job.next_run, job.tenant_id,
-             job.delivery_target, getattr(job, "failure_count", 0)),
-        )
-
-    def _row_to_job(self, row: Any) -> ScheduledJob:
-        tenant = "default"
-        if len(row) > 9 and row[9] is not None:
-            tenant = str(row[9])
-        delivery_target = ""
-        if len(row) > 10 and row[10] is not None:
-            delivery_target = str(row[10])
-        failure_count = 0
-        if len(row) > 11 and row[11] is not None:
-            try:
-                failure_count = int(row[11])
-            except (ValueError, TypeError):
-                failure_count = 0
-        return ScheduledJob(
-            job_id=row[0],
-            timing=row[1],
-            prompt=row[2],
-            platform=row[3],
-            thread_id=row[4],
-            status=JobStatus(row[5]),
-            created_at=row[6],
-            next_run=row[7],
-            last_result=row[8],
-            tenant_id=tenant,
-            delivery_target=delivery_target,
-            failure_count=failure_count,
-        )
-
-    async def list_active(self) -> list[ScheduledJob]:
-        """List all pending/running jobs (all tenants — executor path)."""
-        if self._db is None:
-            raise RuntimeError("CronDB not initialized")
-        async with self._db.execute(
-            "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-            "next_run, last_result, tenant_id, delivery_target, failure_count "
-            "FROM cron_jobs WHERE status IN ('pending', 'running')"
-        ) as cursor:
-            jobs = []
-            async for row in cursor:
-                jobs.append(self._row_to_job(row))
-            return jobs
-
-    async def list_all(
-        self,
-        *,
-        tenant_id: str | None = None,
-        limit: int | None = 500,
-    ) -> list[ScheduledJob]:
-        """List jobs; optionally filter by tenant for multi-user UI."""
-        if self._db is None:
-            raise RuntimeError("CronDB not initialized")
-        limit_clause = f" LIMIT {int(limit)}" if limit is not None else ""
-        if tenant_id:
-            sql = (
-                "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-                "next_run, last_result, tenant_id, delivery_target, failure_count "
-                f"FROM cron_jobs WHERE tenant_id = ? ORDER BY created_at DESC{limit_clause}"
-            )
-            args: tuple[Any, ...] = (tenant_id,)
-        else:
-            sql = (
-                "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-                "next_run, last_result, tenant_id, delivery_target, failure_count "
-                f"FROM cron_jobs ORDER BY created_at DESC{limit_clause}"
-            )
-            args = ()
-        async with self._db.execute(sql, args) as cursor:
-            jobs = []
-            async for row in cursor:
-                jobs.append(self._row_to_job(row))
-            return jobs
-
-    async def purge_terminal_jobs(
-        self,
-        *,
-        older_than_days: int = 14,
-        keep_last: int = 500,
-    ) -> int:
-        """Purge terminal jobs (completed/failed/cancelled) older than retention window.
-
-        Also enforces a global ceiling by keeping at most `keep_last` terminal rows.
-        Returns the number of deleted rows.
-        """
-        if self._db is None:
-            return 0
-        from datetime import datetime, timedelta, timezone
-
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
-        deleted = 0
-        try:
-            # 1. Purge terminal jobs older than cutoff date
-            cursor = await self._db.execute(
-                "DELETE FROM cron_jobs WHERE status IN ('done', 'completed', 'failed', 'cancelled') "
-                "AND created_at < ?",
-                (cutoff,),
-            )
-            deleted += cursor.rowcount or 0
-
-            # 2. If terminal rows still exceed keep_last, delete excess oldest
-            cursor2 = await self._db.execute(
-                "DELETE FROM cron_jobs WHERE job_id IN ("
-                "  SELECT job_id FROM cron_jobs "
-                "  WHERE status IN ('done', 'completed', 'failed', 'cancelled') "
-                "  ORDER BY created_at DESC LIMIT -1 OFFSET ?"
-                ")",
-                (keep_last,),
-            )
-            deleted += cursor2.rowcount or 0
-            if deleted > 0:
-                logger.info("[CronStore] Purged %d old terminal job rows", deleted)
-        except Exception:
-            logger.warning("[CronStore] purge_terminal_jobs failed", exc_info=True)
-        return deleted
-
-    async def update_status(self, job_id: str, status: JobStatus) -> None:
-        """Update a job's status."""
-        if self._db is None:
-            raise RuntimeError("CronDB not initialized")
-        await self._db.execute(
-            "UPDATE cron_jobs SET status = ? WHERE job_id = ?",
-            (status.value, job_id),
-        )
-
-    async def claim_job(self, job_id: str) -> bool:
-        """Atomically claim a due job: pending→running. False if lost the race.
-
-        Cross-process safety (audit M-P5): two app instances sharing cron.db
-        both used to execute the same due job (duplicate reminders). The
-        conditional UPDATE is a compare-and-set — only one rowcount wins.
-        """
-        if self._db is None:
-            raise RuntimeError("CronDB not initialized")
-        cursor = await self._db.execute(
-            "UPDATE cron_jobs SET status = 'running' WHERE job_id = ? AND status = 'pending'",
-            (job_id,),
-        )
-        return bool(cursor.rowcount)
-
-    async def update_result(self, job_id: str, result: str) -> None:
-        """Update a job's last result."""
-        if self._db is None:
-            raise RuntimeError("CronStore DB not initialized")
-        await self._db.execute(
-            "UPDATE cron_jobs SET last_result = ? WHERE job_id = ?",
-            (result[:5000], job_id),
-        )
-
-    async def update_next_run(self, job_id: str, next_run: str) -> None:
-        """Update the next run time for a job."""
-        if self._db is None:
-            raise RuntimeError("CronStore DB not initialized")
-        await self._db.execute(
-            "UPDATE cron_jobs SET next_run = ?, status = 'pending' WHERE job_id = ?",
-            (next_run, job_id),
-        )
-
-    async def bump_failure(self, job_id: str) -> int:
-        """Increment failure_count for a job and return the updated count."""
-        if self._db is None:
-            raise RuntimeError("CronStore DB not initialized")
-        await self._db.execute(
-            "UPDATE cron_jobs SET failure_count = failure_count + 1 WHERE job_id = ?",
-            (job_id,),
-        )
-        async with self._db.execute(
-            "SELECT failure_count FROM cron_jobs WHERE job_id = ?", (job_id,)
-        ) as cur:
-            row = await cur.fetchone()
-            return int(row[0]) if row and row[0] is not None else 1
-
-    async def reset_failure(self, job_id: str) -> None:
-        """Reset failure_count to 0 on success."""
-        if self._db is None:
-            raise RuntimeError("CronStore DB not initialized")
-        await self._db.execute(
-            "UPDATE cron_jobs SET failure_count = 0 WHERE job_id = ?",
-            (job_id,),
-        )
-
-    async def update_job(
-        self,
-        job_id: str,
-        *,
-        timing: str | None = None,
-        prompt: str | None = None,
-        next_run: str | None = None,
-    ) -> bool:
-        """Edit a job's timing/prompt/next_run in place (only supplied fields).
-
-        Returns True when the job existed and was updated. Used by the
-        reschedule path (chat ``edit_scheduled`` + the /scheduled page) so a
-        job can be modified without recreating it.
-        """
-        if self._db is None:
-            raise RuntimeError("CronStore DB not initialized")
-        sets: list[str] = []
-        params: list[Any] = []
-        if timing is not None:
-            sets.append("timing = ?")
-            params.append(timing)
-        if prompt is not None:
-            sets.append("prompt = ?")
-            params.append(prompt)
-        if next_run is not None:
-            sets.append("next_run = ?")
-            params.append(next_run)
-            sets.append("status = 'pending'")
-        if not sets:
-            return False
-        params.append(job_id)
-        cursor = await self._db.execute(
-            f"UPDATE cron_jobs SET {', '.join(sets)} WHERE job_id = ?",
-            tuple(params),
-        )
-        return cursor.rowcount > 0
-
-    async def job_exists(self, job_id: str) -> bool:
-        """True when a job row exists (any status)."""
-        if self._db is None:
-            raise RuntimeError("CronStore DB not initialized")
-        async with self._db.execute(
-            "SELECT 1 FROM cron_jobs WHERE job_id = ?", (job_id,)
-        ) as cursor:
-            return await cursor.fetchone() is not None
-
-    async def update_delivery_target(self, job_id: str, delivery_target: str) -> None:
-        """Repair a job's delivery_target (self-heal from a sibling job)."""
-        if self._db is None:
-            raise RuntimeError("CronStore DB not initialized")
-        await self._db.execute(
-            "UPDATE cron_jobs SET delivery_target = ? WHERE job_id = ?",
-            (str(delivery_target or "").strip(), job_id),
-        )
-
-    async def sibling_delivery_target(self, thread_id: str) -> str:
-        """A VALID delivery_target from any other job on the same thread.
-
-        Used by _deliver's repair chain: rescheduled/legacy rows born with
-        an empty or malformed target adopt a sibling's routing — the whole
-        batch shares one conversation (2026-08-27 incident).
-        """
-        if self._db is None or not str(thread_id or "").strip():
-            return ""
-        try:
-            rows = await self._db.execute_fetchall(
-                "SELECT delivery_target FROM cron_jobs "
-                "WHERE thread_id = ? AND delivery_target LIKE '%:%' "
-                "ORDER BY created_at DESC LIMIT 1",
-                (str(thread_id),),
-            )
-            for row in rows or []:
-                cand = str(row[0] or "").strip()
-                if ":" in cand:
-                    return cand
-        except Exception:
-            pass
-        return ""
-
-    async def cancel(self, job_id: str) -> bool:
-        """Cancel a pending job. Returns True if found."""
-        if self._db is None:
-            raise RuntimeError("CronStore DB not initialized")
-        cursor = await self._db.execute(
-            "UPDATE cron_jobs SET status = 'cancelled' WHERE job_id = ? AND status = 'pending'",
-            (job_id,),
-        )
-        return cursor.rowcount > 0
-
-    async def close(self) -> None:
-        """Close the database connection."""
-        if self._db:
-            await self._db.close()
-            self._db = None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -703,13 +337,16 @@ class SQLiteCronStore:
 
 
 class CronScheduler:
-    """Polls for due jobs and executes them via LangGraph.
+    """Polls for due jobs, fires them, and drains the delivery outbox.
 
     Args:
-        store:         SQLiteCronStore for persistence.
-        graph_builder: Callable that builds a compiled graph.
-        checkpointer:  Optional checkpointer for graph state.
-        poll_interval: Seconds between polls (default 30).
+        store:          SQLiteCronStore for persistence.
+        graph_builder:  Callable that builds a compiled graph for a task's fire
+                        (called with ``capabilities=`` when it accepts it).
+        checkpointer:   Unused; kept for callers that pass it.
+        poll_interval:  Seconds between polls (default 30).
+        max_concurrent: Fires at once (default 4).
+        drain_seconds:  How long ``stop()`` waits for fires in flight.
     """
 
     def __init__(
@@ -719,38 +356,48 @@ class CronScheduler:
         checkpointer: Any = None,
         poll_interval: float = 30.0,
         max_concurrent: int = 4,
+        *,
+        drain_seconds: float = 20.0,
     ) -> None:
         self._store = store
         self._graph_builder = graph_builder
         self._checkpointer = checkpointer
         self._poll_interval = poll_interval
         self._max_concurrent = max(1, int(max_concurrent))
+        self._drain_seconds = max(0.0, float(drain_seconds))
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._in_flight: set[str] = set()
-        # Strong refs to exec tasks — the loop holds only weak refs, and a
-        # GC'd task left its job id stuck in _in_flight (job shown RUNNING
-        # until restart, where recovery marks it FAILED).
+        # Strong refs to exec tasks -- the loop holds only weak refs, and a
+        # GC'd task left its job id stuck in _in_flight.
         self._exec_tasks: set[asyncio.Task] = set()
         self._sem: asyncio.Semaphore | None = None
         self._poll_count: int = 0
+        #: Who holds a fire's lease: one id per scheduler instance. A row
+        #: leased by another id at start belongs to a process that is gone
+        #: (the runtime-ownership fence admits one runtime per data dir).
+        self._owner = f"cron-{uuid.uuid4().hex[:12]}"
+        #: The poll loop's heartbeat (SCH-E11): wall time of the last pass.
+        self.last_poll_at: float | None = None
+        self.started_at: float | None = None
+
+    # ── lifecycle ────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start the scheduler polling loop."""
+        """Recover what a previous process left, then start the polling loop."""
         if self._running:
             return
         self._running = True
+        self.started_at = time.time()
         self._sem = asyncio.Semaphore(self._max_concurrent)
-        # Purge stale terminal jobs to bound table size
         try:
             await self._store.purge_terminal_jobs()
-        except Exception:
-            logger.debug("[CronScheduler] startup purge skipped", exc_info=True)
-        # Audit H10: recover jobs left RUNNING after crash
+        except Exception:  # noqa: BLE001 — the purge must never stop the scheduler
+            logger.warning("[CronScheduler] startup purge failed", exc_info=True)
         try:
-            await self._recover_stale_running()
-        except Exception:
-            logger.exception("[CronScheduler] stale RUNNING recovery failed")
+            await self._recover(boot=True)
+        except Exception:  # noqa: BLE001
+            logger.exception("[CronScheduler] recovery at start failed")
         self._task = asyncio.create_task(self._loop(), name="cron-scheduler")
         logger.info(
             "[CronScheduler] Started (poll_interval=%.0fs max_concurrent=%d)",
@@ -758,52 +405,14 @@ class CronScheduler:
             self._max_concurrent,
         )
 
-    async def _recover_stale_running(self) -> None:
-        """Mark leftover RUNNING jobs as FAILED so they do not storm on restart."""
-        try:
-            jobs = await self._store.list_all()
-        except Exception:
-            jobs = await self._store.list_active()
-        for job in jobs:
-            status = getattr(job, "status", None)
-            if status == JobStatus.RUNNING or getattr(status, "value", None) == "running":
-                # A recurring job (e.g. "daily at 09:00") interrupted mid-fire
-                # must NOT be stranded as FAILED — list_active() filters it out
-                # and the user stops receiving the reminder forever (audit
-                # finding). Reschedule it to its next run instead.
-                timing = getattr(job, "timing", "") or ""
-                if timing.strip().lower().startswith("daily"):
-                    try:
-                        nr = parse_timing(timing)
-                        await self._store.update_next_run(job.job_id, nr.isoformat())
-                        logger.warning(
-                            "[CronScheduler] recovered stale RUNNING daily job %s → rescheduled to %s",
-                            job.job_id, nr.isoformat(),
-                        )
-                        continue
-                    except Exception:
-                        logger.warning(
-                            "[CronScheduler] could not reschedule daily job %s; marking FAILED",
-                            job.job_id, exc_info=True,
-                        )
-                await self._store.update_status(job.job_id, JobStatus.FAILED)
-                try:
-                    await self._store.update_result(
-                        job.job_id,
-                        "Marked failed on scheduler restart (stale RUNNING)",
-                    )
-                except Exception:
-                    logger.warning(
-                        "[CronScheduler] could not record why job %s failed",
-                        job.job_id, exc_info=True,
-                    )
-                logger.warning(
-                    "[CronScheduler] recovered stale RUNNING job %s → FAILED",
-                    job.job_id,
-                )
-
     async def stop(self) -> None:
-        """Stop the scheduler."""
+        """Stop polling, then let fires in flight finish -- within a bound.
+
+        ``asyncio.wait`` with a timeout, never ``wait_for``: a fire that does
+        not end in time is cancelled and left ``running``, and the next start
+        fires it again within its catch-up window (SCH-E04: stop() used to
+        leave fires running under an agent that was then closed).
+        """
         self._running = False
         if self._task:
             self._task.cancel()
@@ -811,7 +420,79 @@ class CronScheduler:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        pending = [t for t in self._exec_tasks if not t.done()]
+        if pending:
+            _done, still = await asyncio.wait(pending, timeout=self._drain_seconds)
+            if still:
+                logger.warning(
+                    "[CronScheduler] %d fire(s) still running after %.0fs; stopping them -- "
+                    "each runs again at the next start", len(still), self._drain_seconds)
+                for t in still:
+                    t.cancel()
+                await asyncio.wait(still, timeout=5.0)
         logger.info("[CronScheduler] Stopped")
+
+    def active_fire_count(self) -> int:
+        """Fires in flight now (``/health/activity`` and ``--when-idle``)."""
+        return len([t for t in self._exec_tasks if not t.done()])
+
+    async def metrics(self) -> list[str]:
+        """Prometheus lines for the last 24 hours (SCH-E11): fires by outcome,
+        deliveries by state, missed jobs, lateness p50/p95, the outbox, and
+        the poll loop's heartbeat age."""
+        since = time.time() - 86400
+        counts = await self._store.outcome_counts(since=since)
+        late = sorted(await self._store.lateness(since=since))
+        out = ["# HELP kazma_cron_fires_24h Scheduled fires in the last 24 hours, by outcome",
+               "# TYPE kazma_cron_fires_24h gauge"]
+        out += [f'kazma_cron_fires_24h{{outcome="{k[5:]}"}} {v}' for k, v in sorted(counts.items())
+                if k.startswith("fire_")]
+        out += ["# HELP kazma_cron_deliveries_24h Scheduled messages in the last 24 hours, by state",
+                "# TYPE kazma_cron_deliveries_24h gauge"]
+        out += [f'kazma_cron_deliveries_24h{{state="{k[9:]}"}} {v}' for k, v in sorted(counts.items())
+                if k.startswith("delivery_")]
+        out += ["# HELP kazma_cron_missed_24h Scheduled jobs missed while Kazma was down, last 24 hours",
+                "# TYPE kazma_cron_missed_24h gauge", f"kazma_cron_missed_24h {counts.get('missed', 0)}"]
+        out += ["# HELP kazma_cron_fire_lateness_seconds How late fires started, last 24 hours",
+                "# TYPE kazma_cron_fire_lateness_seconds gauge"]
+        for q in (0.5, 0.95):
+            value = late[min(len(late) - 1, int(q * len(late)))] if late else 0.0
+            out.append(f'kazma_cron_fire_lateness_seconds{{quantile="{q}"}} {value}')
+        out += ["# HELP kazma_cron_outbox_pending Scheduled messages waiting to be sent",
+                "# TYPE kazma_cron_outbox_pending gauge",
+                f"kazma_cron_outbox_pending {await self._store.pending_delivery_count()}"]
+        age = self.liveness().get("last_poll_age_s")
+        out += ["# HELP kazma_cron_poll_age_seconds Seconds since the scheduler's last poll",
+                "# TYPE kazma_cron_poll_age_seconds gauge", f"kazma_cron_poll_age_seconds {age if age is not None else -1}"]
+        return out
+
+    def liveness(self) -> dict[str, Any]:
+        """The poll loop's heartbeat, for readiness (SCH-E11)."""
+        now = time.time()
+        task_alive = self._task is not None and not self._task.done()
+        last = self.last_poll_at
+        age = None if last is None else round(now - last, 1)
+        stale_after = 2 * self._poll_interval + 30.0
+        if not self._running:
+            state = "stopped"
+        elif not task_alive:
+            state = "dead"
+        elif age is None:
+            started = self.started_at or now
+            state = "starting" if now - started < stale_after else "stale"
+        elif age > stale_after:
+            state = "stale"
+        else:
+            state = "ok"
+        return {"state": state, "last_poll_age_s": age, "stale_after_s": stale_after,
+                "fires_in_flight": self.active_fire_count(), "poll_interval_s": self._poll_interval}
+
+    # ── booking and the operator's actions ───────────────────────────────
+
+    async def _zone(self, zone: tzinfo | None, zone_name: str | None) -> tuple[tzinfo, str]:
+        if zone is not None and zone_name is not None:
+            return zone, zone_name
+        return await asyncio.to_thread(resolve_cron_zone)
 
     async def schedule(
         self,
@@ -820,78 +501,134 @@ class CronScheduler:
         platform: str = "telegram",
         thread_id: str = "",
         delivery_target: str = "",
+        *,
+        kind: str = "task",
+        capabilities: str = "read",
+        catchup_minutes: int | None = None,
+        tenant_id: str | None = None,
+        actor: str = "",
+        source: str = "",
+        zone: tzinfo | None = None,
+        zone_name: str | None = None,
+        now: datetime | None = None,
     ) -> dict[str, Any]:
-        """Schedule a new task.
+        """Book a job. Raises ``ValueError`` (a :class:`TimingError` or
+        :class:`CronLimitError`) with the reason when it cannot be booked.
 
-        Args:
-            timing:   When to run: "5m", "1h", "daily at 9am", ISO timestamp.
-            prompt:   Self-contained task description.
-            platform: Delivery platform (default "telegram").
-            thread_id: Parent thread for context.
-            delivery_target: Platform-prefixed target (e.g. "telegram:12345")
-                captured at schedule time so the result reaches the chat that
-                asked for the reminder. Survives the long gap between schedule
-                and fire, which the SessionStore row does not (5-min TTL).
-                Empty → ``_deliver`` falls back to ``thread_id``.
-
-        Returns:
-            Dict with job_id, timing, next_run.
+        *timing* is read by the one time model (future, finite, the operator's
+        zone, a typed recurrence). *kind*: ``reminder`` (deliver *prompt* as
+        written, no model) or ``task`` (run the agent with *capabilities*).
         """
-        next_run = parse_timing(timing)
-        try:
+        from kazma_core.cron.capabilities import normalize_capabilities, normalize_kind
+        from kazma_core.cron.settings import PROMPT_MAX_CHARS, cron_settings
+        from kazma_core.cron.timing import resolve_timing
+
+        kind = normalize_kind(kind, default="task")
+        capabilities = normalize_capabilities(capabilities)
+        text = str(prompt or "").strip()
+        if not text:
+            raise CronLimitError("A prompt is required.", code="prompt_required")
+        if len(text) > PROMPT_MAX_CHARS:
+            raise CronLimitError(f"A prompt is at most {PROMPT_MAX_CHARS} characters.", code="prompt_too_long")
+        zone, zone_name = await self._zone(zone, zone_name)
+        now = now or datetime.now(UTC)
+        resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=now)
+        if tenant_id is None:
             from kazma_core.tenant_isolation import require_tenant_id
 
-            tid = require_tenant_id()
-        except Exception:
-            tid = "default"
+            tenant_id = require_tenant_id()
+        settings = await asyncio.to_thread(cron_settings)
+        if await self._store.count_jobs(tenant_id=tenant_id) >= settings.max_jobs_per_tenant:
+            raise CronLimitError(
+                f"This install already holds {settings.max_jobs_per_tenant} scheduled jobs; cancel some "
+                "first, or raise cron.max_jobs_per_tenant in Settings.", code="tenant_job_limit")
+        if thread_id and await self._store.count_jobs(thread_id=thread_id) >= settings.max_jobs_per_thread:
+            raise CronLimitError(
+                f"This conversation already holds {settings.max_jobs_per_thread} scheduled jobs.",
+                code="thread_job_limit")
+        catchup = 0
+        if catchup_minutes:
+            catchup = max(1, min(7 * 24 * 60, int(catchup_minutes))) * 60
         job = ScheduledJob(
-            job_id=f"cron-{uuid.uuid4().hex[:8]}",
-            timing=timing,
-            prompt=prompt,
+            job_id=f"cron-{uuid.uuid4().hex[:12]}",
+            timing=" ".join(str(timing).split()),
+            prompt=text,
             platform=platform,
             thread_id=thread_id,
-            next_run=next_run.isoformat(),
-            tenant_id=tid,
+            next_run=norm_iso(resolved.first),
+            tenant_id=tenant_id or "default",
             delivery_target=delivery_target,
+            kind=kind,
+            capabilities=capabilities,
+            catchup_seconds=catchup,
+            series_start=norm_iso(resolved.first) if resolved.recurring else "",
+            created_by=actor,
+            updated_by=actor,
+            source=source,
         )
         await self._store.insert(job)
         logger.info(
-            "[CronScheduler] Scheduled %s for %s tenant=%s target=%s",
-            job.job_id,
-            job.next_run,
-            tid,
-            delivery_target or "(none)",
+            "[CronScheduler] Scheduled %s (%s) for %s tenant=%s source=%s",
+            job.job_id, kind, job.next_run, job.tenant_id, source or "-",
         )
+        from kazma_core.cron.capabilities import describe_capabilities
+        from kazma_core.cron.store import destination_label
+
         out = {
             "job_id": job.job_id,
-            "timing": timing,
+            "timing": job.timing,
             "next_run": job.next_run,
             "status": "scheduled",
-            "tenant_id": tid,
-            "delivery_target": delivery_target,
+            "kind": kind,
+            "capabilities": capabilities,
+            "what_it_does": describe_capabilities(kind, capabilities),
+            "recurring": resolved.recurring,
+            "tenant_id": job.tenant_id,
+            "destination": destination_label(delivery_target, platform),
+            "version": job.version,
         }
-        out.update(annotate_fire_times(next_run))
+        out.update(annotate_fire_times(resolved.first, zone=zone, zone_name=zone_name))
         return out
 
-    async def list_jobs(self) -> list[dict[str, Any]]:
-        """List scheduled jobs (scoped to current tenant when multi-user/prod)."""
-        tenant_filter: str | None = None
-        try:
-            from kazma_core.tenant_isolation import multi_user_or_production, require_tenant_id
+    async def list_jobs(self, *, tenant_id: str | None = None, scoped: bool | None = None,
+                        zone: tzinfo | None = None, zone_name: str | None = None) -> list[dict[str, Any]]:
+        """Jobs as dicts, the caller's tenant's in multi-user/production.
 
-            if multi_user_or_production():
-                tenant_filter = require_tenant_id()
-        except Exception:
-            pass
-        jobs = await self._store.list_all(tenant_id=tenant_filter)
-        return [j.to_dict() for j in jobs]
+        *scoped*: pass the boundary's answer to "is this install tenant-scoped"
+        (resolved off the loop); None asks here, in a thread.
+        """
+        if scoped is None:
+            scoped, tenant_id = await asyncio.to_thread(_tenant_scope)
+        jobs = await self._store.list_all(tenant_id=tenant_id if scoped else None)
+        zone, zone_name = await self._zone(zone, zone_name)
+        out = []
+        for job in jobs:
+            d = job.to_dict()
+            d.update(annotate_fire_times(job.next_run, zone=zone, zone_name=zone_name))
+            out.append(d)
+        return out
 
-    async def cancel(self, job_id: str) -> dict[str, Any]:
-        """Cancel a pending job."""
-        cancelled = await self._store.cancel(job_id)
-        if cancelled:
-            return {"status": "cancelled", "job_id": job_id}
-        return {"status": "not_found", "job_id": job_id}
+    async def get_job(self, job_id: str, *, tenant_id: str | None = None) -> dict[str, Any] | None:
+        """One job with its whole prompt and recent history, or None
+        (another tenant's id reads as unknown)."""
+        job = await self._store.get(job_id, tenant_id=tenant_id)
+        if job is None:
+            return None
+        out = job.to_dict()
+        out["history"] = await self._store.list_events(job_id, limit=20)
+        out["deliveries"] = await self._store.deliveries_for(job_id, limit=10)
+        return out
+
+    async def cancel(self, job_id: str, *, tenant_id: str | None = None, expected_version: int | None = None,
+                     actor: str = "", source: str = "") -> dict[str, Any]:
+        """Cancel a job. ``status`` is ``cancelled``, ``cancel_pending`` (it is
+        firing: applied when the fire ends), ``not_found``, ``conflict`` or
+        ``not_cancellable``."""
+        status = await self._store.cancel(job_id, tenant_id=tenant_id, expected_version=expected_version,
+                                          actor=actor, source=source)
+        logger.info("[CronScheduler] cancel %s -> %s actor=%s source=%s", job_id, status, actor or "-",
+                    source or "-")
+        return {"status": status, "job_id": job_id}
 
     async def reschedule(
         self,
@@ -899,43 +636,70 @@ class CronScheduler:
         *,
         timing: str | None = None,
         prompt: str | None = None,
+        tenant_id: str | None = None,
+        expected_version: int | None = None,
+        actor: str = "",
+        source: str = "",
+        zone: tzinfo | None = None,
+        zone_name: str | None = None,
     ) -> dict[str, Any]:
-        """Edit a scheduled job in place (its timing and/or prompt).
+        """Edit a job's timing and/or prompt.
 
-        Re-parses ``timing`` (when supplied) into a fresh ``next_run`` and
-        resets the job to ``pending`` so the poll loop picks it up. Returns
-        ``not_found`` when the job does not exist. Mirrors the chat
-        ``edit_scheduled`` tool and backs the /scheduled page edit action.
+        ``status``: ``rescheduled``; ``edit_pending`` (it is firing: applied
+        when the fire ends); ``not_found``; ``conflict``; ``not_editable`` (it
+        ended -- use :meth:`restore`); ``error`` (a bad timing or prompt).
         """
-        if not await self._store.job_exists(job_id):
-            return {"status": "not_found", "job_id": job_id}
+        from kazma_core.cron.settings import PROMPT_MAX_CHARS
+        from kazma_core.cron.timing import TimingError, resolve_timing
 
-        next_run: str | None = None
+        next_run = series_start = None
+        if prompt is not None:
+            prompt = prompt.strip()
+            if not prompt:
+                prompt = None
+            elif len(prompt) > PROMPT_MAX_CHARS:
+                return {"status": "error", "job_id": job_id,
+                        "error": f"A prompt is at most {PROMPT_MAX_CHARS} characters."}
         if timing:
+            zone, zone_name = await self._zone(zone, zone_name)
             try:
-                next_run = parse_timing(timing).isoformat()
-            except ValueError as exc:
+                resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=datetime.now(UTC))
+            except TimingError as exc:
                 return {"status": "error", "job_id": job_id, "error": str(exc)}
+            next_run = norm_iso(resolved.first)
+            series_start = next_run if resolved.recurring else ""
+            timing = " ".join(timing.split())
+        else:
+            timing = None
+        status = await self._store.update_job(
+            job_id, timing=timing, prompt=prompt, next_run=next_run, series_start=series_start,
+            tenant_id=tenant_id, expected_version=expected_version, actor=actor, source=source)
+        logger.info("[CronScheduler] edit %s -> %s (timing=%r prompt_edited=%s) actor=%s source=%s",
+                    job_id, status, timing or "(unchanged)", prompt is not None, actor or "-", source or "-")
+        return {"status": status, "job_id": job_id, "timing": timing or "", "next_run": next_run or ""}
 
-        await self._store.update_job(
-            job_id,
-            timing=timing or None,
-            prompt=prompt or None,
-            next_run=next_run,
-        )
-        logger.info(
-            "[CronScheduler] Rescheduled %s (timing=%r prompt_edited=%s next_run=%s)",
-            job_id, timing or "(unchanged)", bool(prompt), next_run or "(unchanged)",
-        )
-        return {
-            "status": "rescheduled",
-            "job_id": job_id,
-            "timing": timing or "",
-            "next_run": next_run or "",
-        }
+    async def restore(self, job_id: str, *, timing: str, tenant_id: str | None = None,
+                      expected_version: int | None = None, actor: str = "", source: str = "",
+                      zone: tzinfo | None = None, zone_name: str | None = None) -> dict[str, Any]:
+        """Run a finished job again, at *timing* (the explicit "Run again")."""
+        from kazma_core.cron.timing import TimingError, resolve_timing
+
+        zone, zone_name = await self._zone(zone, zone_name)
+        try:
+            resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=datetime.now(UTC))
+        except TimingError as exc:
+            return {"status": "error", "job_id": job_id, "error": str(exc)}
+        next_run = norm_iso(resolved.first)
+        status = await self._store.restore_job(
+            job_id, timing=" ".join(timing.split()), next_run=next_run,
+            series_start=next_run if resolved.recurring else "", tenant_id=tenant_id,
+            expected_version=expected_version, actor=actor, source=source)
+        return {"status": status, "job_id": job_id, "next_run": next_run if status == "restored" else ""}
+
+    # ── the poll loop ────────────────────────────────────────────────────
 
     async def _loop(self) -> None:
-        """Check every N seconds for due jobs."""
+        """Check every N seconds for due jobs, recover, and drain the outbox."""
         while self._running:
             try:
                 from kazma_core.shutdown import is_shutting_down
@@ -944,68 +708,62 @@ class CronScheduler:
                     logger.info("[CronScheduler] shutdown signal — exiting poll loop")
                     self._running = False
                     break
-            except Exception:
+            except ImportError:
                 pass
-
+            self.last_poll_at = time.time()
             try:
-                jobs = await self._store.list_active()
-                now = datetime.now(UTC)
-                sem = self._sem or asyncio.Semaphore(self._max_concurrent)
-
-                for job in jobs:
-                    if not self._running:
-                        break
-                    if job.job_id in self._in_flight:
-                        continue
-                    if len(self._in_flight) >= self._max_concurrent:
-                        break
-                    if job.next_run and self._is_due(job.next_run, now):
-                        # Stale one-shot cutoff (audit M-P5): a job that came
-                        # due during long downtime used to fire immediately on
-                        # the next poll — a reminder from three days ago
-                        # arriving unannounced. Skip (mark done, honest note)
-                        # instead of delivering arbitrarily old pings.
-                        if self._is_stale_one_shot(job, now):
-                            try:
-                                await self._store.update_result(
-                                    job.job_id,
-                                    "Skipped: job came due more than "
-                                    f"{self._stale_hours()}h ago (downtime).",
-                                )
-                                await self._store.update_status(job.job_id, JobStatus.DONE)
-                                logger.info(
-                                    "[CronScheduler] skipped stale one-shot %s (due %s)",
-                                    job.job_id, job.next_run,
-                                )
-                            except Exception:
-                                logger.debug("[CronScheduler] stale skip failed", exc_info=True)
-                            continue
-                        self._in_flight.add(job.job_id)
-                        exec_task = asyncio.create_task(
-                            self._execute_bounded(job, sem),
-                            name=f"cron-exec-{job.job_id}",
-                        )
-                        self._exec_tasks.add(exec_task)
-
-                        def _exec_done(t: asyncio.Task, _jid: str = job.job_id) -> None:
-                            self._exec_tasks.discard(t)
-                            # Clear _in_flight even if _execute exited
-                            # without its own discard (line above).
-                            self._in_flight.discard(_jid)
-
-                        exec_task.add_done_callback(_exec_done)
-            except Exception:
+                await self._poll_once()
+            except Exception:  # noqa: BLE001 — one bad pass must not end the loop
                 logger.exception("[CronScheduler] Poll error")
-
             self._poll_count += 1
             if self._poll_count % 120 == 0:
                 try:
                     await self._store.purge_terminal_jobs()
-                except Exception:
+                except Exception:  # noqa: BLE001
                     # A purge that fails every pass lets cron.db grow forever.
                     logger.warning("[CronScheduler] purge of finished jobs failed", exc_info=True)
-
             await asyncio.sleep(self._poll_interval)
+
+    async def _poll_once(self) -> None:
+        await self._recover(boot=False)
+        now = datetime.now(UTC)
+        sem = self._sem or asyncio.Semaphore(self._max_concurrent)
+        settings = None
+        for job in await self._store.due_jobs(now=now, limit=max(50, self._max_concurrent * 10)):
+            if not self._running:
+                break
+            if job.job_id in self._in_flight:
+                continue
+            if settings is None:
+                from kazma_core.cron.settings import cron_settings
+
+                settings = await asyncio.to_thread(cron_settings)
+            if self._is_missed(job, now, settings.catchup_seconds):
+                await self._record_missed(job, now)
+                continue
+            # Every due job of the pass is started; the semaphore holds all
+            # but max_concurrent until a slot frees (the claim, and so the
+            # lease, comes after it). Starting only max_concurrent a pass left
+            # the rest for later passes: 50 reminders due at once took 13
+            # passes -- six minutes at the default interval (SCH-E14).
+            self._in_flight.add(job.job_id)
+            exec_task = asyncio.create_task(self._execute_bounded(job, sem), name=f"cron-exec-{job.job_id}")
+            self._exec_tasks.add(exec_task)
+            exec_task.add_done_callback(self._exec_done(job.job_id))
+        await self._drain_deliveries()
+        await self._alert_failed_deliveries()
+
+    def _exec_done(self, job_id: str) -> Callable[[asyncio.Task], None]:
+        def done(t: asyncio.Task) -> None:
+            self._exec_tasks.discard(t)
+            self._in_flight.discard(job_id)
+            # Retrieve the exception, or it is lost ("Task exception was
+            # never retrieved") and the job sits RUNNING with nobody saying
+            # why (SCH-E04). The next pass recovers the fire.
+            if not t.cancelled() and t.exception() is not None:
+                logger.error("[CronScheduler] fire of %s ended with an error; it will be recovered",
+                             job_id, exc_info=t.exception())
+        return done
 
     async def _execute_bounded(self, job: ScheduledJob, sem: asyncio.Semaphore) -> None:
         """Run job under the global concurrency semaphore."""
@@ -1024,50 +782,72 @@ class CronScheduler:
             return False
 
     @staticmethod
-    def _stale_hours() -> float:
-        """Grace window for late one-shot delivery (env-tunable)."""
-        import os as _os
-
-        try:
-            return max(1.0, float(_os.environ.get("KAZMA_CRON_STALE_HOURS") or 24.0))
-        except ValueError:
-            return 24.0
-
-    def _is_stale_one_shot(self, job: ScheduledJob, now: datetime) -> bool:
-        """True for a NON-recurring job due more than the grace window ago.
-
-        Recurring (daily) jobs always run — the cadence self-corrects.
-        """
-        timing = (job.timing or "").strip().lower()
-        if timing.startswith("daily"):
-            return False
+    def _is_missed(job: ScheduledJob, now: datetime, default_catchup_s: int) -> bool:
+        """Due longer ago than the job's catch-up window (a day, a reload...)."""
         try:
             due = datetime.fromisoformat(str(job.next_run))
-            if due.tzinfo is None:
-                due = due.replace(tzinfo=UTC)
-            age = (now - due).total_seconds()
-            return age > self._stale_hours() * 3600.0
-        except (ValueError, TypeError):
+        except (TypeError, ValueError):
             return False
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=UTC)
+        window = job.catchup_seconds or default_catchup_s
+        return (now - due).total_seconds() > window
+
+    # ── recovery ─────────────────────────────────────────────────────────
+
+    async def _recover(self, *, boot: bool) -> None:
+        """Decide, per phase, what an interrupted fire and send left (SCH-E04).
+
+        A running job whose fire nobody holds produced nothing (a fire's
+        result and its delivery commit together), so it goes back to pending
+        at the same occurrence and fires again -- or is recorded missed by the
+        catch-up rule if that took too long. It used to be marked FAILED,
+        delivered or not. A send whose sender died ends ``unknown`` with an
+        alert: it may have arrived, and it is never sent twice.
+        """
+        now_ts = time.time()
+        for job in await self._store.list_running():
+            if boot:
+                # One runtime per data dir: at start, every lease is a dead one's.
+                orphaned = job.fire_owner != self._owner
+            elif job.fire_owner == self._owner:
+                # Ours, but its task is gone (it raised): recover now.
+                orphaned = job.job_id not in self._in_flight
+            else:
+                orphaned = job.lease_until < now_ts
+            if not orphaned:
+                continue
+            if await self._store.release_fire(job.job_id, owner=job.fire_owner,
+                                              reason="interrupted" if boot else "lease expired"):
+                logger.warning("[CronScheduler] fire of %s was interrupted (owner %s); it runs again",
+                               job.job_id, job.fire_owner or "-")
+        recovered = await self._store.recover_deliveries(owner=self._owner)
+        for row in recovered:
+            logger.warning("[CronScheduler] delivery %s of %s was interrupted mid-send; outcome unknown",
+                           row["id"], row["job_id"])
+        if recovered:
+            await self._alert_failed_deliveries()
+
+    # ── the fire ─────────────────────────────────────────────────────────
 
     async def _execute(self, job: ScheduledJob) -> None:
-        """Execute a scheduled job via LangGraph."""
-        # Cross-process CAS claim (audit M-P5): two app instances sharing
-        # cron.db used to both pass the in-process _in_flight check and
-        # execute the same due job (duplicate delivery). The claim flips
-        # pending→running atomically; losing the race skips the job.
-        claimed = await self._store.claim_job(job.job_id)
+        """Fire one job: claim, produce, finish in one transaction, deliver."""
+        lease = 600.0
+        # In flight BEFORE the claim commits: recovery treats our own running
+        # row that is not in flight as a dead fire.
+        self._in_flight.add(job.job_id)
+        claimed = await self._store.claim_job(job.job_id, owner=self._owner, lease_seconds=lease,
+                                              expected_version=job.version)
         if not claimed:
-            logger.debug("[CronScheduler] %s claimed by another instance — skipping", job.job_id)
+            self._in_flight.discard(job.job_id)
+            logger.debug("[CronScheduler] %s claimed by another instance or changed — skipping", job.job_id)
             return
-        logger.info("[CronScheduler] Executing %s: %.80s", job.job_id, job.prompt)
+        logger.info("[CronScheduler] Executing %s (%s): %.80s", job.job_id, job.kind, job.prompt)
 
         # Bind the cron-parent context for the whole execution: jobs the
         # agent RESCHEDULES from inside this turn inherit this job's
         # delivery_target/platform instead of being born targetless (the
-        # 2026-08-27 incident — "Rescheduled batch job N/8" rows carried an
-        # empty delivery_target, so _deliver fell back to the bare thread
-        # UUID and the gateway rejected every result message).
+        # 2026-08-27 incident).
         parent_token = _cron_parent_ctx.set(
             {
                 "job_id": job.job_id,
@@ -1076,24 +856,11 @@ class CronScheduler:
                 "thread_id": job.thread_id or "",
             }
         )
-        # Install the job's tenant for the whole execution.
-        #
-        # The job has carried `tenant_id` since the multi-tenant migration and
-        # nothing ever installed it, so every cron turn ran context-less. The
-        # vault resolves a secret by trying the current tenant and then the
-        # global (NULL) scope -- and with no tenant there is no first step, so
-        # a tenant-scoped secret is simply invisible.
-        #
-        # Live consequence (2026-09-12 09:00): both daily reminder jobs failed
-        # with "no usable API key for https://api.deepseek.com/v1" and paged
-        # the operator twice, while the identical model worked fine in chat
-        # minutes earlier. The key was present the whole time, stored under
-        # tenant 'default'; chat sets the tenant from the request and cron did
-        # not. Every other tenant-scoped read in a cron turn had the same hole.
-        #
-        # Fixed here rather than by loosening the vault's fallback: letting a
-        # context-less caller read tenant-scoped secrets would hand any
-        # background task another tenant's credentials.
+        # Install the job's tenant for the whole execution: a cron turn ran
+        # context-less, and the vault resolves a tenant-scoped secret only
+        # for its tenant (live 2026-09-12: both daily reminders failed with
+        # "no usable API key" while the key was there). Fixed here rather than
+        # by loosening the vault's fallback.
         from kazma_core.tenant_context import (
             reset_current_tenant_id,
             set_current_tenant_id,
@@ -1101,193 +868,280 @@ class CronScheduler:
 
         tenant_token = set_current_tenant_id(job.tenant_id or "default")
         try:
-            if self._graph_builder is None:
-                raise RuntimeError("No graph builder configured")
+            from kazma_core.cron.settings import cron_settings
 
-            graph = self._graph_builder()
-            config = {"configurable": {"thread_id": f"cron-{job.job_id}"}}
-            state: dict[str, Any] = {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are running a scheduled task. "
-                            "Do NOT call send_message or dispatch_notification — "
-                            "the scheduler delivers your final answer to the user's "
-                            "chat. Write the user-facing reminder or result as plain "
-                            "text. Do not emit a ```plan fence unless you will also "
-                            "call tools this graph can run (read/search). Outbound "
-                            "send tools are auto-denied on this child graph."
-                        ),
-                    },
-                    {"role": "user", "content": job.prompt},
-                ],
-            }
-
-            from kazma_core.agent.turn import run_agent_turn
-
-            _turn = await asyncio.wait_for(
-                run_agent_turn(
-                    graph=graph,
-                    thread_id=str(config["configurable"]["thread_id"]),
-                    state=state,
-                    config=config,
-                    persist=False,
-                ),
-                timeout=120.0,
-            )
-            summary = (_turn.text or "")[:2000]
-
-            await self._store.update_result(job.job_id, summary)
-
-            # Deliver BEFORE finalizing (audit M-P5): the old order
-            # (result → finalize → deliver) lost the reminder when the
-            # process died between finalize and deliver — the job was
-            # terminal with no retry. With delivery first, a crash leaves
-            # the job RUNNING and boot recovery terminates it; worst case
-            # is a duplicate on a very narrow recovery window, never a
-            # silent loss.
-            await self._deliver(job, summary)
-            await self._finalize(job, failed=False)
-            logger.info("[CronScheduler] %s completed", job.job_id)
-
-        except TimeoutError:
-            logger.warning("[CronScheduler] %s timed out", job.job_id)
-            await self._store.update_result(job.job_id, "Timed out after 120s")
-            await self._finalize(job, failed=True)
-
-        except Exception as exc:
-            logger.exception("[CronScheduler] %s failed", job.job_id)
-            await self._store.update_result(job.job_id, f"Error: {str(exc)[:500]}")
-            await self._finalize(job, failed=True)
+            settings = await asyncio.to_thread(cron_settings)
+            zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
+            current = await self._store.get(job.job_id) or job
+            now = datetime.now(UTC)
+            due = _parse_dt(current.fire_due or current.next_run)
+            result = await self._produce(current, settings, zone, zone_name, due=due, now=now)
+            result.target = await self._resolve_target(current)
+            result.lateness_s = max(0.0, (now - due).total_seconds()) if due else 0.0
+            advance = self._advancer(zone)
+            done = await self._store.finish_fire(job.job_id, owner=self._owner, result=result, advance=advance)
+            if done is None:
+                logger.warning("[CronScheduler] %s: this fire lost its lease; its outcome was not recorded",
+                               job.job_id)
+                return
+            logger.info("[cron] outcome job=%s outcome=%s status=%s", job.job_id, result.outcome, done["status"])
+            await self._alert_on_failure(current, result, done)
+            if done.get("delivery_id"):
+                await self._drain_deliveries(only_id=done["delivery_id"])
         finally:
             reset_current_tenant_id(tenant_token)
             _cron_parent_ctx.reset(parent_token)
             self._in_flight.discard(job.job_id)
 
-    async def _finalize(self, job: ScheduledJob, failed: bool = False) -> None:
-        """Handle job state transition and retry budgeting for recurring jobs."""
-        timing = (job.timing or "").strip().lower()
-        if timing.startswith("daily"):
-            if not failed:
-                await self._store.update_status(job.job_id, JobStatus.DONE)
-                await self._store.reset_failure(job.job_id)
-                next_run = parse_timing(job.timing)
-                await self._store.update_next_run(job.job_id, next_run.isoformat())
-                logger.info("[CronScheduler] Recurring job %s rescheduled for %s", job.job_id, next_run)
-                return
+    async def _produce(self, job: ScheduledJob, settings: Any, zone: tzinfo, zone_name: str, *,
+                       due: datetime | None, now: datetime) -> FireResult:
+        """What this fire delivers, or why it failed. Never raises (but cancellation)."""
+        late = _late_note(due, now, zone, zone_name)
+        if job.kind == "reminder":
+            body = _reminder_body(job.prompt)
+            if late:
+                body = body.replace("⏰ Reminder", f"⏰ Reminder {late}", 1)
+            return FireResult(success=True, outcome="delivering", result_text="Reminder sent as booked.",
+                              body=body)
+        from kazma_core.cron.settings import hitl_enabled
 
-            # Failed execution path
-            new_failures = await self._store.bump_failure(job.job_id)
-            if new_failures == 1:
-                try:
-                    from kazma_core.observability.ops_alerts import alert
-                    alert(
-                        "cron.job_failure",
-                        f"Recurring cron job {job.job_id} failed on first attempt",
-                        detail=f"Prompt: {job.prompt[:100]} | Timing: {job.timing}",
-                        severity="warn",
-                    )
-                except Exception:
-                    logger.warning("[CronScheduler] Ops alert failed for job %s", job.job_id, exc_info=True)
+        if not settings.fire_without_hitl and not await asyncio.to_thread(hitl_enabled):
+            reason = ("Approvals are switched off, so scheduled agent tasks do not run unattended. "
+                      "Turn approvals on, or allow it in Settings (safety.cron_fire_without_hitl).")
+            return FireResult(success=False, outcome="hitl_off", result_text=reason)
+        if self._graph_builder is None:
+            return FireResult(success=False, outcome="error", result_text="Error: No graph builder configured")
+        try:
+            graph = await asyncio.to_thread(self._build_graph, job.capabilities)
+            from kazma_core.cron.capabilities import describe_capabilities
 
-            if new_failures >= 3:
-                await self._store.update_status(job.job_id, JobStatus.FAILED)
-                logger.error(
-                    "[CronScheduler] Recurring job %s exceeded failure budget (%d/3) → marked FAILED",
-                    job.job_id, new_failures,
-                )
-            else:
-                next_run = parse_timing(job.timing)
-                await self._store.update_next_run(job.job_id, next_run.isoformat())
-                logger.warning(
-                    "[CronScheduler] Recurring job %s failed (attempt %d/3) → rescheduled for %s",
-                    job.job_id, new_failures, next_run,
-                )
-        else:
-            await self._store.update_status(job.job_id, JobStatus.FAILED if failed else JobStatus.DONE)
+            config = {"configurable": {"thread_id": f"cron-{job.job_id}"}}
+            state: dict[str, Any] = {
+                "messages": [
+                    {"role": "system", "content": _STORED_INSTRUCTION_NOTE.format(
+                        job_id=job.job_id, created=job.created_at,
+                        capabilities=describe_capabilities(job.kind, job.capabilities))},
+                    {"role": "user", "content": job.prompt},
+                ],
+            }
+            from kazma_core.agent.turn import run_agent_turn
 
-    async def _deliver(self, job: ScheduledJob, text: str) -> None:
-        """Send result to the user via the original platform — with repair.
+            turn = await asyncio.wait_for(
+                run_agent_turn(graph=graph, thread_id=str(config["configurable"]["thread_id"]),
+                               state=state, config=config, persist=False),
+                timeout=settings.task_budget_seconds,
+            )
+        except TimeoutError:
+            logger.warning("[CronScheduler] %s timed out", job.job_id)
+            return FireResult(success=False, outcome="timed_out",
+                              result_text=f"Timed out after {int(settings.task_budget_seconds)}s")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a fire that cannot run is a failed fire
+            logger.exception("[CronScheduler] %s failed", job.job_id)
+            return FireResult(success=False, outcome="error", result_text=f"Error: {str(exc)[:500]}")
+        error = getattr(turn, "error", None)
+        failed = bool(getattr(turn, "turn_failed", False))
+        interrupted = bool(getattr(turn, "interrupted", False))
+        if error or failed or interrupted:
+            reason = str(error or ("The turn stopped at an approval nobody can answer."
+                                   if interrupted else "The turn failed."))
+            logger.warning("[CronScheduler] %s: the agent turn failed: %s", job.job_id, reason[:200])
+            return FireResult(success=False, outcome="turn_failed", result_text=f"Turn failed: {reason[:500]}")
+        summary = (getattr(turn, "text", "") or "")[:2000]
+        body = compose_cron_delivery(summary, job.prompt)
+        if late:
+            body = f"{body}\n\n{late}"
+        return FireResult(success=True, outcome="delivering", result_text=summary, body=body)
 
-        Target resolution chain (2026-08-27 'target_id must be platform:id
-        format' incident — agent-rescheduled jobs were born with an empty
-        delivery_target and every result message died):
+    def _build_graph(self, capabilities: str) -> Any:
+        builder = self._graph_builder
+        if _accepts(builder, "capabilities"):
+            return builder(capabilities=capabilities)
+        return builder()
 
-            1. ``job.delivery_target`` when well-formed (``platform:id``).
-            2. A sibling job's valid delivery_target on the same thread —
-               adopted AND persisted back so the broken row self-heals.
-            3. The session store lookup for the thread (best-effort; the
-               5-minute TTL makes this a bonus, not a strategy).
-            4. Nothing works → one CRITICAL log naming the job — never a
-               silent warning, never a bare-UUID send that the gateway
-               rejects.
+    def _advancer(self, zone: tzinfo) -> Callable[[str, datetime, str], datetime | None]:
+        """The pure next-occurrence function :meth:`SQLiteCronStore.finish_fire` applies."""
+        from kazma_core.cron.timing import TimingError, next_occurrence, parse_recurrence
+
+        def advance(timing: str, after: datetime, series_start: str) -> datetime | None:
+            try:
+                rec = parse_recurrence(timing)
+            except TimingError:
+                return None
+            if rec is None:
+                return None
+            start = _parse_dt(series_start)
+            return next_occurrence(rec, zone=zone, after=after, series_start=start)
+
+        return advance
+
+    async def _resolve_target(self, job: ScheduledJob) -> str:
+        """The job's delivery address, with the repair chain.
+
+        1. ``job.delivery_target`` when well-formed (``platform:id``).
+        2. A sibling job's valid target on the same thread -- adopted AND
+           persisted so the broken row self-heals (2026-08-27).
+        3. The session store for the thread (best effort; 5-minute TTL).
+        ``""`` when nothing works: the outbox records it undeliverable, with
+        an alert naming the job -- never a guessed address.
         """
         target_id = str(job.delivery_target or "").strip()
-
-        def _valid(t: str) -> bool:
-            return bool(t) and ":" in t and not t.endswith(":")
-
-        if not _valid(target_id):
-            healed = ""
-            try:
-                healed = await self._store.sibling_delivery_target(job.thread_id)
-            except Exception:
-                healed = ""
-            if _valid(healed):
-                logger.warning(
-                    "[CronScheduler] %s had malformed/empty delivery_target %r — "
-                    "adopted sibling target %r (persisted)",
-                    job.job_id, target_id or job.thread_id, healed,
-                )
-                target_id = healed
-                try:
-                    await self._store.update_delivery_target(job.job_id, healed)
-                except Exception:
-                    logger.debug("[CronScheduler] target repair persist failed", exc_info=True)
-            else:
-                # Session-store fallback (best effort — TTL is 5 min; the
-                # web SessionManager knows platform/chat_id per thread).
-                try:
-                    # A chat-store read (Postgres when the session is not
-                    # cached, and the store itself may be built here): off
-                    # the loop.
-                    sess = await asyncio.to_thread(_web_session_for_thread, job.thread_id)
-                    if sess is not None:
-                        plat = str(getattr(sess, "platform", "") or job.platform or "")
-                        chat = str(getattr(sess, "chat_id", "") or "")
-                        if plat and chat and _valid(f"{plat}:{chat}"):
-                            target_id = f"{plat}:{chat}"
-                except Exception:
-                    pass
-        if not _valid(target_id):
-            logger.critical(
-                "[CronScheduler] UNDELIVERABLE job %s ('%.60s'): no valid "
-                "delivery_target (stored=%r thread=%r platform=%r). Result "
-                "NOT sent — fix the job's delivery target or re-create it "
-                "from a live conversation.",
-                job.job_id, job.prompt, job.delivery_target, job.thread_id, job.platform,
-            )
-            return
+        if _valid_target(target_id):
+            return target_id
+        healed = ""
         try:
-            from kazma_core.tools.send_message import send_failed, send_message
+            healed = await self._store.sibling_delivery_target(job.thread_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("[CronScheduler] sibling target lookup failed for %s", job.job_id, exc_info=True)
+        if _valid_target(healed):
+            logger.warning("[CronScheduler] %s had malformed/empty delivery_target %r — adopted sibling "
+                           "target (persisted)", job.job_id, target_id or job.thread_id)
+            try:
+                await self._store.update_delivery_target(job.job_id, healed)
+            except Exception:  # noqa: BLE001
+                logger.warning("[CronScheduler] target repair persist failed", exc_info=True)
+            return healed
+        try:
+            sess = await asyncio.to_thread(_web_session_for_thread, job.thread_id)
+            if sess is not None:
+                plat = str(getattr(sess, "platform", "") or job.platform or "")
+                chat = str(getattr(sess, "chat_id", "") or "")
+                if plat and chat and _valid_target(f"{plat}:{chat}"):
+                    return f"{plat}:{chat}"
+        except Exception:  # noqa: BLE001 — best effort
+            logger.debug("[CronScheduler] session lookup failed for %s", job.job_id, exc_info=True)
+        return ""
 
-            platform = target_id.split(":", 1)[0]
-            body = compose_cron_delivery(text, job.prompt)
-            logger.info("[CronScheduler] delivering %s -> %s", job.job_id, target_id)
-            result = await send_message(target_id, body, backend=platform)
-        except Exception as exc:
-            logger.critical(
-                "[CronScheduler] delivery FAILED for %s -> %s: %s",
-                job.job_id, target_id, exc,
-            )
+    async def _alert_on_failure(self, job: ScheduledJob, result: FireResult, done: dict[str, Any]) -> None:
+        if result.success:
             return
-        if send_failed(result):
-            # The platform refused it or no chat app is connected for it.
-            # Logged as delivered until 2026-10-02.
-            logger.critical(
-                "[CronScheduler] delivery FAILED for %s -> %s: %s",
-                job.job_id, target_id, result,
-            )
+        from kazma_core.observability.ops_alerts import alert
+
+        # alert() reads its routing settings: off the loop (SCH-E10).
+        if done.get("budget_exhausted"):
+            await asyncio.to_thread(
+                alert, "cron.job_failed",
+                f"Scheduled job {job.job_id} failed {done.get('failures')} times in a row and stopped",
+                detail=f"{result.outcome}: {result.result_text[:200]} | Timing: {job.timing}", severity="error")
+            logger.error("[CronScheduler] Recurring job %s exceeded failure budget → marked FAILED", job.job_id)
+        elif done.get("failures") == 1 or done.get("status") == "failed":
+            await asyncio.to_thread(
+                alert, "cron.job_failure", f"Scheduled job {job.job_id} failed ({result.outcome})",
+                detail=f"{result.result_text[:200]} | Timing: {job.timing}", severity="warn")
+
+    async def _record_missed(self, job: ScheduledJob, now: datetime) -> None:
+        zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
+        due = _parse_dt(job.next_run)
+        when = due.astimezone(zone).strftime("%Y-%m-%d %H:%M") + f" {zone_name}" if due else "earlier"
+        if job.kind == "reminder":
+            notice = f"⏰ Missed while Kazma was offline (due {when}):\n\n{job.prompt.strip()}"
+        else:
+            notice = (f"⏰ A scheduled task did not run: it was due {when}, while Kazma was offline.\n\n"
+                      f"Task: {job.prompt.strip()[:500]}")
+        target = await self._resolve_target(job)
+        res = await self._store.mark_missed(job.job_id, expected_next_run=str(job.next_run), notice=notice,
+                                            target=target, advance=self._advancer(zone), now=now)
+        if res is None:
             return
-        logger.info("[CronScheduler] delivered %s -> %s", job.job_id, target_id)
+        logger.warning("[cron] outcome job=%s outcome=missed status=%s (due %s)", job.job_id, res["status"], when)
+        if res.get("delivery_id"):
+            await self._drain_deliveries(only_id=res["delivery_id"])
+
+    # ── the delivery outbox ──────────────────────────────────────────────
+
+    async def _drain_deliveries(self, *, only_id: int | None = None, limit: int = 20) -> int:
+        """Send due deliveries; acknowledge only what a platform took."""
+        delivered = 0
+        for _ in range(1 if only_id is not None else limit):
+            row = await self._store.claim_delivery(owner=self._owner, delivery_id=only_id)
+            if row is None:
+                break
+            ok, error = await self._send(row)
+            res = await self._store.finish_delivery(row["id"], owner=self._owner, delivered=ok, error=error)
+            if res is None:
+                continue
+            delivered += int(ok)
+            if res["state"] == "undeliverable":
+                logger.critical(
+                    "[CronScheduler] UNDELIVERABLE job %s ('%.60s'): %s. Result NOT sent — fix the "
+                    "job's delivery target or re-create it from a live conversation.",
+                    row["job_id"], row["body"], error or "no valid delivery target")
+            logger.info("[cron] outcome job=%s outcome=delivery_%s status=-", row["job_id"], res["state"])
+        if only_id is not None:
+            await self._alert_failed_deliveries()
+        return delivered
+
+    async def _send(self, row: dict[str, Any]) -> tuple[bool, str]:
+        """One send attempt. ``(True, "")`` only on ``sent:``."""
+        target = str(row.get("target") or "")
+        job_id = row.get("job_id")
+        if not _valid_target(target):
+            return False, "no valid delivery target"
+        from kazma_core.tools.send_message import send_failed, send_message
+
+        try:
+            logger.info("[CronScheduler] delivering %s -> %s (attempt %d)", job_id, target, int(row["attempts"]))
+            result = await send_message(target, str(row["body"]), backend=target.split(":", 1)[0])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a send that raises is a refused send
+            logger.warning("[CronScheduler] delivery FAILED for %s -> %s: %s", job_id, target, exc)
+            return False, f"{type(exc).__name__}: {str(exc)[:300]}"
+        if send_failed(result) or not str(result).startswith("sent:"):
+            logger.warning("[CronScheduler] delivery FAILED for %s -> %s: %s", job_id, target, result)
+            return False, str(result)[:500]
+        logger.info("[CronScheduler] delivered %s -> %s", job_id, target)
+        return True, ""
+
+    async def _alert_failed_deliveries(self) -> None:
+        """One alert per delivery that ended undeliverable or unknown."""
+        from kazma_core.observability.ops_alerts import alert
+
+        for row in await self._store.unalerted_failures():
+            if not await self._store.mark_alerted(int(row["id"])):
+                continue
+            if row["state"] == "unknown":
+                await asyncio.to_thread(
+                    alert, "cron.delivery_unknown",
+                    f"A scheduled message for job {row['job_id']} may not have arrived",
+                    detail="Kazma stopped while sending it; check the chat. It is not resent.", severity="warn")
+            else:
+                await asyncio.to_thread(
+                    alert, "cron.delivery_failed", f"A scheduled message for job {row['job_id']} was not delivered",
+                    detail=f"{row['purpose']}: {str(row['last_error'] or 'no delivery target')[:200]}",
+                    severity="error")
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def _tenant_scope() -> tuple[bool, str | None]:
+    """``(scoped, tenant)`` -- the one tenant rule of every Scheduled surface:
+    reads and changes alike are the caller's tenant's in multi-user or
+    production mode (SCH-S03: reads were scoped, changes were not).
+
+    Blocking (an RBAC read): async callers use ``asyncio.to_thread``.
+    """
+    from kazma_core.tenant_isolation import multi_user_or_production, require_tenant_id
+
+    try:
+        scoped = multi_user_or_production()
+    except Exception:  # noqa: BLE001 — fail closed: scope to the caller
+        scoped = True
+    return scoped, (require_tenant_id() if scoped else None)
+
+
+def scheduled_tenant_filter() -> str | None:
+    """The tenant every Scheduled read and change is limited to, or None
+    (single-operator, not production: the install's whole schedule).
+    Blocking: async callers use ``asyncio.to_thread``."""
+    scoped, tenant = _tenant_scope()
+    return tenant if scoped else None

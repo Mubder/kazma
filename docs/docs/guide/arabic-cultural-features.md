@@ -13,7 +13,7 @@ description: Kazma Arabic & Cultural Features — code-audited reference (unifie
 | Component | Package | Role |
 |---|---|---|
 | **Dialect detection + tokenizers** | `kazma-core` (`dialect_detector.py`, `tokenizer.py`) | Tell Kuwaiti from MSA and tokenize each, for the dialect router. |
-| **Arabic in search** | `kazma-core` (`documents/arabic.py`) | One normal form for indexing and searching Arabic. |
+| **Arabic in search and documents** | `kazma-core` (`documents/arabic.py`) | One normal form for indexing and searching Arabic; the one home of Arabic text policy for reading and writing documents. |
 | **i18n + RTL UI** | `kazma-ui` | UI string translation, per-request `dir`/`lang`, font policy. |
 | **Majlis Protocol** | `kazma-core` | Gulf greetings and farewells on the chat-app path. |
 
@@ -35,6 +35,22 @@ It does **not** fold taa marbuta (`ة`) or alef maqsura (`ى`): that loses gramm
 ### 2.1 Arabic in search
 
 The Knowledge Library indexes and searches Arabic in one normal form, `fold_for_search` (`kazma_core/documents/arabic.py`), applied to the stored text and to the query alike: harakat, tatweel and bidi controls dropped; the alef-hamza forms, taa marbuta, alef maqsura, the hamza carriers and the Farsi/Urdu letter variants folded; Arabic-Indic digits turned ASCII; whitespace collapsed. Memory recall folds a question's words and a memory's the same way (`memory/query_terms.py`), drops English and Gulf/MSA stop words (`شنو`, `وش`, `شلون`, `وين`, `ليش`, `بس` …) and handles the article and one-letter prefixes ([Memory & RAG → `recall()`](memory-and-rag#recall)). There is no Arabic stemmer ([Troubleshooting → Arabic text in search](troubleshooting-and-workarounds#7-arabic-text-in-search)).
+
+### 2.2 Arabic in documents
+
+`documents/arabic.py` also decides direction (by Unicode bidi class) and
+shapes Arabic for the engines that need it. **Reading:** PyMuPDF reverses each
+right-to-left line of a PDF, so Kazma reads those lines again glyph by glyph
+(`documents/parsers/pdf_rtl.py`): numbers, ligatures and table cells come back
+in reading order, and a date written after Arabic words reads as written. OCR
+uses Tesseract's `ara` and `eng` models, and ruled tables on a scanned page
+are read cell by cell. Arabic OCR is not qualified: Tesseract does not read
+Arabic-Indic digits, and its layout analysis can drop lines of an Arabic page.
+**Writing:** each block of a generated document takes its own direction, so a
+bilingual document aligns both languages correctly. Full-quality Arabic PDFs
+go through LibreOffice; without it Kazma uses a limited fallback and says so.
+Measured on a versioned English/Arabic/bilingual corpus
+([Document Intelligence](document-intelligence)).
 
 ---
 

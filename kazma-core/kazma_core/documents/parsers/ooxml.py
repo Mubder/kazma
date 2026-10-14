@@ -19,21 +19,25 @@ __all__ = ["DocxParser", "LegacyOfficeParser", "PptxParser", "XlsxParser"]
 class DocxParser:
     def parse(self, path: Path, context: ParseContext) -> DocumentIR:
         from docx import Document
+        from docx.text.paragraph import Paragraph
 
         document = Document(str(path))
         builder = IRBuilder(path, context)
         builder.count_images(len(document.inline_shapes))
         blocks: list[tuple[BlockType, str, dict[str, object] | None]] = []
-        for paragraph in document.paragraphs:
-            text = paragraph.text.strip()
-            if not text:
+        table_index = 0
+        for item in document.iter_inner_content():
+            if isinstance(item, Paragraph):
+                text = item.text.strip()
+                if not text:
+                    continue
+                style = (item.style.name or "").lower()
+                block_type = BlockType.HEADING if "heading" in style else BlockType.PARAGRAPH
+                blocks.append((block_type, text, {"style": item.style.name or ""}))
                 continue
-            style = (paragraph.style.name or "").lower()
-            block_type = BlockType.HEADING if "heading" in style else BlockType.PARAGRAPH
-            blocks.append((block_type, text, {"style": paragraph.style.name or ""}))
-        for table_index, table in enumerate(document.tables, start=1):
+            table_index += 1
             rows: list[str] = []
-            for row_index, row in enumerate(table.rows, start=1):
+            for row_index, row in enumerate(item.rows, start=1):
                 if row_index > context.config.max_rows_per_sheet:
                     builder.warnings.append(
                         f"Table {table_index} rows truncated at the configured limit"

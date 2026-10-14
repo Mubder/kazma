@@ -118,6 +118,53 @@
     return s;
   }
 
+  /** A clarify card's question for the person, from the kind the server
+   *  names ("remind_when", "cancel_which"); the server's text is the model's
+   *  diagnostic and stays the fallback (Scheduled audit SCH-S08). */
+  function semanticQuestion(item) {
+    var kind = item && item.question_kind;
+    if (kind === 'remind_when') return ti('clarify_remind_when', item.question || '');
+    if (kind === 'cancel_which') return ti('clarify_cancel_which', item.question || '');
+    return (item && item.question) || '';
+  }
+
+  /** A clarify option in the page's language, with the full date, time and
+   *  zone of the instant it books (it showed only the date). */
+  function semanticOptionLabel(opt) {
+    if (!opt) return '';
+    var fmt = window.KazmaFormat;
+    if (opt.kind === 'remind_at') {
+      var when = opt.at || '';
+      if (fmt && opt.at) {
+        var shown = fmt.dateTime(opt.at, {
+          year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+          timeZone: opt.zone || undefined, timeZoneName: 'short',
+        });
+        when = shown || opt.at;
+      }
+      var key = opt.anchor === 'memory' ? 'clarify_opt_memory_anchor' : 'clarify_opt_from_now';
+      return tiFmt(key, opt.label || opt.id, { when: when });
+    }
+    if (opt.kind === 'cancel_job') {
+      // The job's next time names it apart from another with the same text.
+      if (fmt && opt.at) {
+        var next = fmt.dateTime(opt.at, {
+          year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+          timeZone: opt.zone || undefined, timeZoneName: 'short',
+        });
+        if (next) {
+          return tiFmt('clarify_opt_cancel_job_at', opt.label || opt.id,
+                       { job: opt.job_id || '', what: opt.summary || '', when: next });
+        }
+      }
+      return tiFmt('clarify_opt_cancel_job', opt.label || opt.id, { job: opt.job_id || '', what: opt.summary || '' });
+    }
+    if (opt.kind === 'cancel') return ti('clarify_opt_cancel', opt.label || opt.id);
+    if (opt.kind === 'keep') return ti('clarify_opt_keep', opt.label || opt.id);
+    return opt.label || opt.id || '';
+  }
+  window.KazmaSemanticCard = { question: semanticQuestion, optionLabel: semanticOptionLabel };
+
   /** CLDR plural category: the same rule as i18n.get_arabic_plural_form /
    *  t_plural (six forms for Arabic, one/other for everything else). */
   function _pluralCategory(n) {
@@ -5668,7 +5715,10 @@
     // the commitment gate's resolver.
     if (data.kind && data.kind.indexOf('semantic_') === 0) {
       var _semItem = (data.items && data.items[0]) || {};
-      var _semQ = _semItem.question || data.message || 'Needs clarification';
+      // The question and the options are worded here, in the page's language,
+      // from what the server names (Scheduled audit SCH-S08): the labels were
+      // English diagnostics with a date and no time.
+      var _semQ = semanticQuestion(_semItem) || data.message || ti('clarification_needed', 'Clarification Needed');
       var _semOpts = _semItem.options || [];
       var _semTcid = _semItem.tool_call_id || '';
       var _semCard = document.createElement('div');
@@ -5690,7 +5740,7 @@
           _semOpts.map(function(opt) {
             var cls = opt.id === 'cancel' ? 'btn-danger' : 'btn-primary';
             return '<button class="btn btn-sm ' + cls + ' hitl-sem-opt" data-opt="' +
-                   escapeHtml(opt.id) + '">' + escapeHtml(opt.label || opt.id) + '</button>';
+                   escapeHtml(opt.id) + '">' + escapeHtml(semanticOptionLabel(opt)) + '</button>';
           }).join('') +
         '</div>';
       // Attach only — TurnView's next pass moves it to its declared slot.
@@ -7050,22 +7100,27 @@
   async function deleteSession(sessionId) {
     var choice = await window.kazmaConfirm({
       title: ti('delete_chat_title', 'Delete chat'),
-      message: ti('delete_chat_body', 'Delete this chat? This cannot be undone. What Kazma learned from it stays in its memory unless you tick the box below.'),
+      message: ti('delete_chat_body', 'Delete this chat? This cannot be undone. Its saved Time Travel steps are deleted with it. What Kazma learned from it stays in its memory unless you tick the box below.'),
       confirmText: ti('delete_chat_confirm', 'Delete'),
       danger: true,
       checkbox: ti('delete_chat_forget', 'Also forget what Kazma learned from this chat'),
     });
     if (!choice || !choice.ok) return;
     try {
+      var nothingHeld = false;
       if (choice.checked) {
         var forgot = await window.kazmaSave(
           '/api/memory/v2/chats/' + encodeURIComponent(sessionId) + '/memory',
           { method: 'PUT', body: { remember: false, forget_past: true } });
         if (!forgot || !forgot.ok) throw new Error((forgot && forgot.error) || ti('forget_failed', 'Forget failed'));
+        // Nothing found is not "forgotten" (Memory audit M07).
+        var f = (forgot && forgot.forgot) || {};
+        nothingHeld = !(f.forgotten || f.facts_forgotten);
       }
       await window.kazmaSave('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
-      KS.toast(choice.checked ? ti('delete_chat_forgot', 'Chat deleted, and what Kazma learned from it forgotten')
-                              : ti('delete_chat_done', 'Chat deleted'), 'success', 2500);
+      KS.toast(!choice.checked ? ti('delete_chat_done', 'Chat deleted')
+               : nothingHeld ? ti('delete_chat_nothing_held', 'Chat deleted. Kazma held no memories of it.')
+               : ti('delete_chat_forgot', 'Chat deleted, and what Kazma learned from it forgotten'), 'success', 2500);
       loadSessions();
       if (sessionId === chatSessionId) newSession();
     } catch (e) {
@@ -8593,6 +8648,18 @@
     },
 
     refreshCapacity: refreshCapacity,
+    /**
+     * Time Travel (TT-03): this chat was restored to a saved step, on this
+     * page or another surface. The transcript in the store was cut to that
+     * step; reload it so no tab keeps showing the rewound turns.
+     */
+    applyThreadRewound: function(data) {
+      if (!chatSessionId || !data) return;
+      var tid = String(data.thread_id || '');
+      if (tid !== currentThreadId() && String(data.session_id || '') !== chatSessionId) return;
+      _loadInFlightFor = null;
+      loadSession(chatSessionId);
+    },
     /**
      * Context-integrity S3-1: a compact "earlier context compacted" chip in
      * the transcript. The user should never have to ask why the agent

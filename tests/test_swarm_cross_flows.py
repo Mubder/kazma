@@ -67,6 +67,21 @@ def _build_client(tmp_path: Path | None = None) -> tuple[TestClient, SwarmEngine
     return client, engine
 
 
+def _wait_for_status(client, task_id: str, status: str, timeout: float = 10.0) -> dict:
+    """Poll the task's detail until it reads *status* (to a deadline)."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    detail: dict = {}
+    while time.monotonic() < deadline:
+        detail = client.get(f"/api/swarm/tasks/{task_id}").json().get("task") or {}
+        if detail.get("status") == status:
+            break
+        time.sleep(0.05)
+    assert detail.get("status") == status, detail
+    return detail
+
+
 def _add_workers(client: TestClient, *names: str, role: str = "backend") -> None:
     """Add workers by name with default config via the API."""
     for name in names:
@@ -214,17 +229,18 @@ class TestCrossFlowPipelineHITLEndToEnd:
         found_paused = any(t["id"] == task_id and t["status"] == "paused" for t in tasks)
         assert found_paused, f"Paused task {task_id} not found in history"
 
-        # Step 3: Approve checkpoint
-        approve_resp = client.post(f"/api/swarm/tasks/{task_id}/approve")
-        assert approve_resp.status_code == 200
-        approve_data = approve_resp.json()
-        assert approve_data["status"] == "success"
+        # Step 3: Approve checkpoint -- answered at once (202); the resumed
+        # run goes on in the background (Swarm audit SW-S08), so the client
+        # keeps its event loop open (``with client``) and waits for the end.
+        with client:
+            approve_resp = client.post(f"/api/swarm/tasks/{task_id}/approve")
+            assert approve_resp.status_code == 202
+            approve_data = approve_resp.json()
+            assert approve_data["status"] == "ok" and approve_data["task_status"] == "running"
+            task_detail = _wait_for_status(client, task_id, "success")
         assert call_log == ["alpha", "beta", "gamma"]  # gamma now called
 
         # Step 4: Verify final result persisted
-        detail_resp = client.get(f"/api/swarm/tasks/{task_id}")
-        assert detail_resp.status_code == 200
-        task_detail = detail_resp.json()["task"]
         assert task_detail["status"] == "success"
         assert task_detail["aggregated_output"] is not None
         assert len(task_detail["worker_results"]) == 3
@@ -269,7 +285,9 @@ class TestCrossFlowPipelineHITLEndToEnd:
         # Reject the checkpoint
         reject_resp = client.post(f"/api/swarm/tasks/{task_id}/reject")
         assert reject_resp.status_code == 200
-        assert reject_resp.json()["status"] == "failed"
+        # ok|error, and the task's own status beside it (SW-S08).
+        assert reject_resp.json()["status"] == "ok"
+        assert reject_resp.json()["task_status"] == "failed"
 
         # Verify task is persisted as failed
         detail_resp = client.get(f"/api/swarm/tasks/{task_id}")

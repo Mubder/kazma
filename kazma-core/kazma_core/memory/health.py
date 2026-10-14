@@ -456,19 +456,18 @@ def build_memory_health() -> dict[str, Any]:
 
         _v2cfg = (_rmc().get("v2") or {}) if isinstance(_rmc(), dict) else {}
         kb_merge = bool(_v2cfg.get("merge_knowledge_into_chat", True))
-        kb_promote = bool(_v2cfg.get("promote_kb_to_episodes", True))
         components.append(_comp(
             "kb_merge",
             "KB → chat inject",
             ok=kb_merge,
             status="ok" if kb_merge else "off",
             detail=(
-                f"Labeled Knowledge Library hits inject into supervisor "
-                f"(promote_kb_to_episodes={kb_promote}). Stores stay separate."
+                "Labeled Knowledge Library hits inject into supervisor, "
+                "never into chat memory. Stores stay separate."
                 if kb_merge
                 else "merge_knowledge_into_chat=false — KB not auto-injected into chat."
             ),
-            meta={"merge": kb_merge, "promote": kb_promote},
+            meta={"merge": kb_merge},
         ))
     except Exception:
         components.append(_comp(

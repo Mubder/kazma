@@ -101,11 +101,18 @@ class TestTheCopySurvivesAConcurrentWriter:
         import inspect
 
         from kazma_core.backup.universal import _backup_one_db
+        from kazma_core.db.sqlite_snapshot import snapshot_copy
 
+        # The copy goes through the one snapshot helper (Memory audit M19),
+        # with the busy timeout passed on.
+        caller = ast.parse(inspect.getsource(_backup_one_db).lstrip())
+        helper_calls = [n for n in ast.walk(caller) if isinstance(n, ast.Call)
+                        and getattr(n.func, "id", "") == "snapshot_copy"]
+        assert helper_calls and all(any(k.arg == "timeout_s" for k in c.keywords) for c in helper_calls)
         # Parsed, not grepped. A first version matched `pages=` inside the
         # docstring that EXPLAINS why batching is wrong — the same mistake the
         # provider conformance suite made with the word "raise".
-        tree = ast.parse(inspect.getsource(_backup_one_db).lstrip())
+        tree = ast.parse(inspect.getsource(snapshot_copy).lstrip())
         calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
 
         backups = [

@@ -394,6 +394,7 @@ for name in ("kazma_core", "kazma_gateway", "kazma_ui"):
 - Swarm TaskStore → `kazma-data/swarm_tasks.db`
 - Gateway sessions → `kazma-data/sessions.db`
 - LangGraph checkpoints → `kazma-data/checkpoints.db`
+- Document store → `kazma-data/document-store/` (`documents.db` with the catalog, jobs, intake reservations and audit, plus the content-addressed files); on a Postgres install the jobs and, by default, the catalog are Postgres tables and only the files stay here. Readiness: `GET /api/documents/ops/readiness`
 - Console tracing → `KazmaTracer` (`backend="console"`) writes to stdout via `kazma_core/tracing/`
 
 ### 9.2 Inspect the TaskStore directly

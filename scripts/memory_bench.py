@@ -4,6 +4,8 @@
   python scripts/memory_bench.py vectors           # record bge-m3's vectors for CI
   python scripts/memory_bench.py run [--real]      # score recall(); --real loads the model
   python scripts/memory_bench.py lock              # raise the CI ratchet to today's scores
+  python scripts/memory_bench.py lock --trade "why"  # a reviewed trade (see TRADE_RULE)
+  python scripts/memory_bench.py extraction [--record]  # extraction scores; --record asks the model
 
 The dataset is a persona's life told across dated chat sessions -- facts the
 user states, facts only the assistant said, facts that change, codes and
@@ -21,6 +23,7 @@ Reads no install: the benchmark writes its own temp database.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import random
@@ -33,6 +36,8 @@ REPO = Path(__file__).resolve().parents[1]
 DATASET = REPO / "kazma-core" / "kazma_core" / "memory" / "benchmark_data" / "dataset.json"
 VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
 THRESHOLDS = REPO / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
+EXTRACTION = DATASET.with_name("extraction.json")
+LLM_REPLIES = REPO / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
 
 SEED = 20260926
 
@@ -688,6 +693,67 @@ QUESTIONS: list[tuple[str, str, str, list[str], list[str]]] = [
 ]
 
 
+#: Held out (Memory audit M24): recall's thresholds were swept on QUESTIONS, so
+#: their scores say how well the tuning fits them. These were written after
+#: the last sweep, against the same memories, and are never used to choose a
+#: threshold: the gap between the two is how far the tuning generalizes.
+#: ``mixed`` asks in one language about a memory in the other, or switches
+#: language inside the question. Several abstain questions come close to a
+#: real memory (a dentist, a car), which is where injecting nothing is hard.
+HELDOUT: list[tuple[str, str, str, list[str], list[str]]] = [
+    ("h001", "What's my partner's name?", "single", ["p02#2|f07"], []),
+    ("h002", "Which breed is Pixel?", "single", ["p01#2|f37"], ["x03"]),
+    ("h003", "What's the name of my guitar teacher?", "single", ["p12#1|f19|h08#1"], []),
+    ("h004", "Who is my boss on the footbridge job?", "paraphrase", ["p06#2|f13"], ["h04#1", "x04"]),
+    ("h005", "What food would make me ill?", "paraphrase", ["p02#1|f06"], ["x02"]),
+    ("h006", "Which flowers does my mum like?", "paraphrase", ["p20#1|f24"], []),
+    ("h007", "Where does my little girl go to school?", "paraphrase", ["p07#1|f14"], []),
+    ("h008", "What time do I have to head out for the school run?", "paraphrase", ["p08#1|f16"], []),
+    ("h009", "How much is the house loan each month?", "assistant", ["p11#1"], []),
+    ("h010", "Which book did you pick for the reading group?", "assistant", ["p19#1"], []),
+    ("h011", "What did you say about the laptop's charge limit?", "assistant", ["p21#1"], []),
+    ("h012", "Which city do I live in now?", "update", ["p15#1|f25"], ["p01#1", "x01"]),
+    ("h013", "What is my current job title?", "update", ["p17#1|f34"], ["p01#1"]),
+    ("h014", "When is the footbridge retrofit due now?", "update", ["p27#1|f12b"], ["p06#1"]),
+    ("h015", "Are we getting an electric car?", "update", ["p30#1|f35"], ["p29#1", "f36"]),
+    ("h016", "Which hotel booking is ZX4-91Q?", "keyword", ["p22#1|f32"], []),
+    ("h017", "What's the check word on the stress-run marker?", "fact", ["z11"], []),
+    ("h018", "Which neighbour keeps a key to our place?", "fact", ["n01"], []),
+    ("h019", "Who insures our car?", "fact", ["n03"], []),
+    ("h020", "is it true that my blood group is negative or what?", "noise", ["p10#1|f18"], []),
+    ("h021", "وين أسكن الحين؟", "mixed", ["p15#1|f25"], ["p01#1", "x01"]),
+    ("h022", "شنو فصيلة دمي؟", "mixed", ["p10#1|f18"], []),
+    ("h023", "متى ينتهي جوازي؟", "mixed", ["p05#1|f10"], []),
+    ("h024", "What's my brother's name?", "mixed", ["a01#1|g01"], []),
+    ("h025", "Which bank does Fahad work at?", "mixed", ["a01#1|g02"], []),
+    ("h026", "شنو رقم رحلتنا إلى Lisbon؟", "mixed", ["p23#1|f26"], ["h07#1", "x07"]),
+    ("h027", "Maya وش تسوي يوم الأربعاء؟", "mixed", ["a06#1|g07"], []),
+    ("h028", "رحلة إسطنبول متى بالضبط؟", "arabic", ["a04#1|g05"], []),
+    ("h029", "عطني رقم ملفي الطبي", "arabic", ["a05#1|g06"], []),
+    ("h030", "شنو اسم الرواية العربية اللي نصحتني فيها؟", "arabic", ["a08#1"], []),
+    ("h031", "What is my sister's name?", "abstain", [], []),
+    ("h032", "Which dentist does Noor see?", "abstain", [], []),
+    ("h033", "What colour is my car?", "abstain", [], []),
+    ("h034", "When is Maya's birthday?", "abstain", [], []),
+    ("h035", "شنو اسم مدير أخوي فهد؟", "abstain", [], []),
+    ("h036", "What's my salary at the new job?", "abstain", [], []),
+    ("h037", "Catch me up on the bathroom remodel.", "abstain", [], []),
+    ("h038", "وش رقم سيارتي؟", "abstain", [], []),
+    ("h039", "What was my finishing time in the Lisbon half?", "overview", ["sr10|r10#1"], []),
+    ("h040", "What do you know about our Istanbul plans?", "overview", ["sw6|a04#1|g05"], []),
+]
+
+
+def _questions(rows, refs, fact_ids, summary_ids) -> list[dict[str, Any]]:
+    out = []
+    for qid, text, cat, gold, below in rows:
+        for ref in [a for piece in gold for a in piece.split("|")] + below:
+            if ref not in refs and ref not in fact_ids and ref not in summary_ids:
+                raise ValueError(f"{qid}: unknown memory {ref}")
+        out.append({"id": qid, "text": text, "category": cat, "gold": gold, "below": below})
+    return out
+
+
 def build() -> dict[str, Any]:
     rng = random.Random(SEED)
     sessions = [
@@ -728,20 +794,103 @@ def build() -> dict[str, Any]:
     summary_ids = {s["id"] for s in summaries}
     if len(summary_ids) != len(summaries) or summary_ids & (fact_ids | refs):
         raise ValueError("duplicate summary id")
-    questions = []
-    for qid, text, cat, gold, below in QUESTIONS:
-        for ref in [a for piece in gold for a in piece.split("|")] + below:
-            if ref not in refs and ref not in fact_ids and ref not in summary_ids:
-                raise ValueError(f"{qid}: unknown memory {ref}")
-        questions.append({"id": qid, "text": text, "category": cat, "gold": gold, "below": below})
-    return {"version": 4, "seed": SEED, "sessions": sessions, "facts": facts,
-            "summaries": summaries, "questions": questions}
+    questions = _questions(QUESTIONS, refs, fact_ids, summary_ids)
+    heldout = _questions(HELDOUT, refs, fact_ids, summary_ids)
+    if {q["id"] for q in questions} & {q["id"] for q in heldout} or {q["text"] for q in questions} & {
+            q["text"] for q in heldout}:
+        raise ValueError("a held-out question repeats a tuning question")
+    return {"version": 5, "seed": SEED, "sessions": sessions, "facts": facts,
+            "summaries": summaries, "questions": questions, "heldout": heldout}
+
+
+#: The extraction benchmark (Memory audit M24): one chat turn each, in English,
+#: Arabic (Gulf and MSA) or both, with the facts a reader would keep from it
+#: -- each fact a list of acceptable (subject, predicate names, value) -- or
+#: none (a question, thanks: nothing should be kept). Scored by
+#: ``benchmark.run_extraction_benchmark``.
+EXTRACTION_TURNS: list[tuple[str, str, str, list[list[tuple[str, list[str], str]]]]] = [
+    ("e01", "en", "My name is Layla and I live in Lisbon now.",
+     [[("user", ["name", "name_is"], "Layla")], [("user", ["lives_in", "location", "city"], "Lisbon")]]),
+    ("e02", "en", "I work at Northwind Labs as a data analyst.",
+     [[("user", ["works_at", "employer", "company"], "Northwind Labs")],
+      [("user", ["job_title", "role", "occupation", "job"], "data analyst")]]),
+    ("e03", "en", "I prefer tea over coffee in the mornings.",
+     [[("user", ["prefers", "drink_preference", "beverage_preference", "morning_drink"], "tea")]]),
+    ("e04", "en", "My favourite city is Kyoto.",
+     [[("user", ["favorite_city", "favourite_city"], "Kyoto")]]),
+    ("e05", "en", "I'm allergic to penicillin, please remember that.",
+     [[("user", ["allergic_to", "allergy", "allergies"], "penicillin")]]),
+    ("e06", "en", "We moved to Rotterdam last month.",
+     [[("user", ["lives_in", "location", "city", "moved_to"], "Rotterdam")]]),
+    ("e07", "en", "My sister Hana is a pilot with KLM.",
+     [[("user", ["sister", "has_sister", "sibling"], "Hana"), ("hana", ["relation", "relationship"], "sister")],
+      [("hana", ["job", "job_title", "occupation", "role", "profession"], "pilot"),
+       ("hana", ["works_at", "employer"], "KLM")]]),
+    ("e08", "en", "Can you explain how a heat pump works?", []),
+    ("e09", "en", "Thanks, that's really helpful!", []),
+    ("e10", "en", "I love hiking and I use a Garmin watch.",
+     [[("user", ["prefers", "likes", "hobby", "hobbies", "enjoys"], "hiking")],
+      [("user", ["uses", "owns", "device", "watch"], "Garmin")]]),
+    ("e11", "en", "The project deadline is the 3rd of May.",
+     [[("project", ["deadline", "due_date"], "3rd of May"), ("user", ["project_deadline", "deadline"], "3rd of May")]]),
+    ("e12", "en", "What's the weather like in Porto in April?", []),
+    ("a01", "ar", "اسمي ليلى وساكنة في دبي.",
+     [[("user", ["name", "name_is"], "ليلى")], [("user", ["lives_in", "location", "city"], "دبي")]]),
+    ("a02", "ar", "أشتغل في شركة أرامكو مهندسة.",
+     [[("user", ["works_at", "employer", "company"], "أرامكو")],
+      [("user", ["job_title", "job", "occupation", "role", "profession"], "مهندسة")]]),
+    ("a03", "ar", "أحب الشاي بالنعناع.",
+     [[("user", ["prefers", "likes", "drink_preference", "beverage_preference"], "الشاي بالنعناع")]]),
+    ("a04", "ar", "عندي حساسية من الفول السوداني.",
+     [[("user", ["allergic_to", "allergy", "allergies"], "الفول السوداني")]]),
+    ("a05", "ar", "انتقلنا إلى الرياض الشهر الماضي.",
+     [[("user", ["lives_in", "location", "city", "moved_to"], "الرياض")]]),
+    ("a06", "ar", "أختي نورة طبيبة أسنان.",
+     [[("user", ["sister", "has_sister", "sibling"], "نورة"), ("نورة", ["relation", "relationship"], "أخت")],
+      [("نورة", ["job", "job_title", "occupation", "profession", "role"], "طبيبة أسنان")]]),
+    ("a07", "ar", "شكراً، وايد مفيد", []),
+    ("a08", "ar", "كيف أسوي كيكة بدون بيض؟", []),
+    ("a09", "ar", "جوازي ينتهي في ٢٠٢٩",
+     [[("user", ["passport_expires", "passport_expiry", "passport_expiration"], "٢٠٢٩")]]),
+    ("a10", "ar", "رياضتي المفضلة السباحة",
+     [[("user", ["favorite_sport", "favourite_sport", "sport", "hobby"], "السباحة")]]),
+    ("m01", "mixed", "My name is Omar وساكن في Kuwait City.",
+     [[("user", ["name", "name_is"], "Omar")], [("user", ["lives_in", "location", "city"], "Kuwait City")]]),
+    ("m02", "mixed", "أشتغل at Gulf Bank as a teller.",
+     [[("user", ["works_at", "employer", "company"], "Gulf Bank")],
+      [("user", ["job_title", "job", "occupation", "role"], "teller")]]),
+    ("m03", "mixed", "I prefer القهوة العربية with cardamom.",
+     [[("user", ["prefers", "likes", "coffee_preference", "drink_preference"], "القهوة العربية")]]),
+    ("m04", "mixed", "عندي meeting مع Sarah كل Sunday الساعة 9.",
+     [[("user", ["meeting", "recurring_meeting", "meets_with", "schedule"], "Sarah"),
+       ("user", ["meeting", "recurring_meeting", "schedule"], "Sunday")]]),
+    ("m05", "mixed", "My daughter Lulwa تدرس في Bayan School.",
+     [[("lulwa", ["school", "studies_at", "attends"], "Bayan School"),
+       ("user", ["daughter_school"], "Bayan School")],
+      [("user", ["daughter", "has_daughter", "child"], "Lulwa"), ("lulwa", ["relation", "relationship"], "daughter")]]),
+    ("m06", "mixed", "ok تمام", []),
+    ("m07", "mixed", "I work at Zain الحين, moved from Ooredoo.",
+     [[("user", ["works_at", "employer", "company"], "Zain")]]),
+    ("m08", "mixed", "Call me Abu Faisal يا Kazma.",
+     [[("user", ["name", "name_is", "nickname", "preferred_name"], "Abu Faisal")]]),
+]
+
+
+def build_extraction() -> dict[str, Any]:
+    turns = []
+    for tid, lang, text, facts in EXTRACTION_TURNS:
+        turns.append({"id": tid, "lang": lang, "user": text,
+                      "facts": [[{"subject": a, "predicates": b, "object": c} for a, b, c in alts] for alts in facts]})
+    if len({t["id"] for t in turns}) != len(turns):
+        raise ValueError("duplicate extraction turn id")
+    return {"version": 1, "turns": turns}
 
 
 def _cmd_build() -> int:
     from kazma_core.memory.benchmark import load_dataset
 
     data = build()
+    EXTRACTION.write_text(json.dumps(build_extraction(), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     before = load_dataset() if DATASET.is_file() else None
     DATASET.parent.mkdir(parents=True, exist_ok=True)
     DATASET.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -818,6 +967,18 @@ def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
         extra = "  ".join(f"{k} {v}" for k, v in row.items() if k not in ("n",))
         print(f"  {name:<11} n={row['n']:<3} {extra}")
     print("overall:", json.dumps(report["overall"]))
+    held = report.get("heldout")
+    if held:
+        print(f"held out: {held['overall']['questions']} questions")
+        for name, row in held["categories"].items():
+            extra = "  ".join(f"{k} {v}" for k, v in row.items() if k not in ("n",))
+            print(f"  {name:<11} n={row['n']:<3} {extra}")
+        print("held-out overall:", json.dumps(held["overall"]))
+    from kazma_core.memory.benchmark import gated_scores
+
+    scores = gated_scores(report)
+    for key, target in TARGETS.items():
+        print(f"target {key}: {scores.get(key)} (target {target})")
     if details:
         for r in report.get("results", []):
             if not r["hit"]:
@@ -825,7 +986,38 @@ def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
     return 0
 
 
-def _cmd_lock(rebaseline: bool) -> int:
+#: Where recall should get to, not a floor: injecting nothing for a question
+#: nothing answers (Memory audit M24). The report shows the distance.
+TARGETS = {"abstain.hit_rate": 0.6, "heldout.abstain.hit_rate": 0.6}
+
+#: A reviewed trade (``lock --trade "why"``): a change may lower gated scores
+#: only when every lowered score drops by at most TRADE_MAX_DROP, at least one
+#: score rises by at least TRADE_MIN_GAIN, and the abstention scores never
+#: drop -- they are the target the trade must not move away from. The trade is
+#: recorded in thresholds.json (date, reason, what fell, what rose), so the
+#: review sees it in the diff.
+TRADE_MAX_DROP = 0.05
+TRADE_MIN_GAIN = 0.05
+_NEVER_TRADED = ("abstain.hit_rate", "heldout.abstain.hit_rate")
+
+
+def trade_problems(old: dict[str, float], new: dict[str, float]) -> list[str]:
+    """Why a lock that lowers *old* to *new* is not an acceptable trade
+    (empty when it is)."""
+    problems = []
+    lowered = {k: (v, new.get(k, -1.0)) for k, v in old.items() if new.get(k, -1.0) < v}
+    raised = {k: (old.get(k, -1.0), v) for k, v in new.items() if v > old.get(k, -1.0)}
+    for k, (was, now) in sorted(lowered.items()):
+        if k in _NEVER_TRADED:
+            problems.append(f"{k} falls ({was} -> {now}): abstention is never traded")
+        elif was - now > TRADE_MAX_DROP:
+            problems.append(f"{k} falls by {round(was - now, 4)} (> {TRADE_MAX_DROP})")
+    if lowered and not any(now - was >= TRADE_MIN_GAIN for k, (was, now) in raised.items() if k in old):
+        problems.append(f"nothing rises by {TRADE_MIN_GAIN} or more to pay for it")
+    return problems
+
+
+def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
     """Write the replayed scores as the ratchet; refuse to lower any of them.
 
     The ratchet names the dataset version it was measured on. A new dataset
@@ -858,19 +1050,66 @@ def _cmd_lock(rebaseline: bool) -> int:
               f"v{version}: record its vectors, then lock --rebaseline", file=sys.stderr)
         return 1
     lower = {k: (v, scores.get(k)) for k, v in old_scores.items() if scores.get(k, -1.0) < v}
-    if lower:
+    trades = list(old.get("trades", []))
+    if lower and trade:
+        problems = trade_problems(old_scores, scores)
+        if problems:
+            for line in problems:
+                print(f"  {line}", file=sys.stderr)
+            print("refusing the trade (see TRADE_RULE in scripts/memory_bench.py)", file=sys.stderr)
+            return 1
+        import datetime as _dt
+
+        trades.append({
+            "date": _dt.date.today().isoformat(), "dataset_version": version, "reason": trade,
+            "lowered": {k: [was, now] for k, (was, now) in sorted(lower.items())},
+            "raised": {k: [old_scores.get(k), v] for k, v in sorted(scores.items())
+                       if k in old_scores and v > old_scores[k]},
+        })
+    elif lower:
         for k, (was, now) in sorted(lower.items()):
             print(f"  {k}: {now} < {was}", file=sys.stderr)
-        print("refusing to lower the ratchet: fix the regression", file=sys.stderr)
+        print("refusing to lower the ratchet: fix the regression, or propose a reviewed "
+              "trade with --trade \"why\"", file=sys.stderr)
         return 1
     THRESHOLDS.write_text(
-        json.dumps({"dataset_version": version, "scores": scores}, indent=1) + "\n",
+        json.dumps({"dataset_version": version, "scores": scores, "targets": TARGETS,
+                    "trades": trades, "extraction": _extraction_floor(old),
+                    # The opt-in Postgres-primary run's floors
+                    # (tests/test_memory_benchmark_pg.py), on the same dataset only.
+                    "postgres_primary": {} if rebaseline else old.get("postgres_primary", {})},
+                   indent=1, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     raised = sorted(k for k, v in scores.items() if v > old_scores.get(k, -1.0))
     print(f"{THRESHOLDS}: dataset v{version}, {len(raised)} raised")
     for k in raised:
         print(f"  {k}: {old_scores.get(k)} -> {scores[k]}")
+    return 0
+
+
+def _extraction_floor(old: dict[str, Any]) -> dict[str, Any]:
+    """The extraction scores, raised to today's (never lowered: refused above
+    for the recall scores; here the old value is kept where today's is lower,
+    and the gate test reports the drop)."""
+    from kazma_core.memory.benchmark import extraction_scores, run_extraction_benchmark
+
+    replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8")) if LLM_REPLIES.is_file() else None
+    now = extraction_scores(run_extraction_benchmark(llm_replies=replies))
+    was = (old.get("extraction") or {}).get("scores", {})
+    return {"version": json.loads(EXTRACTION.read_text(encoding="utf-8"))["version"],
+            "scores": {k: max(v, was.get(k, -1.0)) for k, v in sorted(now.items())}}
+
+
+def _cmd_extraction(record: bool) -> int:
+    from kazma_core.memory.benchmark import record_llm_extraction, run_extraction_benchmark
+
+    if record:
+        replies = asyncio.run(record_llm_extraction())
+        LLM_REPLIES.write_text(json.dumps(replies, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        print(f"{LLM_REPLIES}: {len(replies['replies'])} replies from {replies['model']}")
+    replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8")) if LLM_REPLIES.is_file() else None
+    print(json.dumps(run_extraction_benchmark(llm_replies=replies), ensure_ascii=False, indent=1))
     return 0
 
 
@@ -882,6 +1121,11 @@ def main(argv: list[str] | None = None) -> int:
     lock = sub.add_parser("lock")
     lock.add_argument("--rebaseline", action="store_true",
                       help="a new dataset version: its first scores become the ratchet")
+    lock.add_argument("--trade", metavar="REASON",
+                      help="lower some scores for a larger gain elsewhere, under TRADE_RULE; recorded")
+    ext = sub.add_parser("extraction")
+    ext.add_argument("--record", action="store_true",
+                     help="ask the configured model for each turn and save its replies (costs tokens)")
     run = sub.add_parser("run")
     run.add_argument("--real", action="store_true", help="load the real embedder")
     run.add_argument("--json", action="store_true")
@@ -892,7 +1136,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "vectors":
         return _cmd_vectors()
     if args.cmd == "lock":
-        return _cmd_lock(args.rebaseline)
+        return _cmd_lock(args.rebaseline, args.trade)
+    if args.cmd == "extraction":
+        return _cmd_extraction(args.record)
     return _cmd_run(args.real, args.json, args.details)
 
 

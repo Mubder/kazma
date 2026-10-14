@@ -358,12 +358,13 @@ async def test_swarm_manager_broadcast_wrapper_delegates_to_engine(empty_config)
             },
         ],
     )
-    manager.engine.broadcast = AsyncMock(return_value=expected)
+    # Through dispatch(), like every task (Swarm audit SW-E06).
+    manager.engine.dispatch = AsyncMock(return_value=expected)
 
     result = await manager.broadcast("Broadcast this", context="ctx")
 
-    manager.engine.broadcast.assert_awaited_once()
-    dispatched_task = manager.engine.broadcast.await_args.args[0]
+    manager.engine.dispatch.assert_awaited_once()
+    dispatched_task = manager.engine.dispatch.await_args.args[0]
     assert dispatched_task.prompt == "Broadcast this"
     assert dispatched_task.context == "ctx"
     assert dispatched_task.type == TaskType.BROADCAST
@@ -604,11 +605,22 @@ async def test_cancelled_dispatch_releases_worker_busy(empty_config):
 
     outer.cancel()
     release.set()
-    result = await outer  # engine.dispatch finalizes cancellation, no raise
+    # The caller's cancellation stops the work, records the ending, and is
+    # then raised to the caller (Swarm audit SW-E02/SW-E04: it used to be
+    # swallowed as a "Cancelled by user" result, so a caller's own deadline
+    # never raised).
+    with pytest.raises(asyncio.CancelledError):
+        await outer
+    result = engine.list_tasks()[0].result
 
     assert result.status == "cancelled"
     # Busy flag is released on the cancellation path...
     assert worker.busy is False
-    # ...while the current policy (a cancelled dispatch still counts as a
-    # breaker failure) is preserved.
-    assert engine.get_circuit_breaker("alpha").consecutive_failures == 1
+    # ...and a stop the caller asked for is not the worker's failure (Swarm
+    # audit SW-E11: it used to count against the breaker). The breaker's
+    # release runs in a thread (SW-E07): wait for it to a deadline.
+    breaker = engine.get_circuit_breaker("alpha")
+    deadline = asyncio.get_running_loop().time() + 5
+    while breaker._probe_in_flight and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.02)
+    assert breaker.consecutive_failures == 0

@@ -1,5 +1,5 @@
 {
- "version": 4,
+ "version": 5,
  "seed": 20260926,
  "sessions": [
   {
@@ -10613,6 +10613,375 @@
    "category": "overview",
    "gold": [
     "sr2|sr3|r02#1|r03#1"
+   ],
+   "below": []
+  }
+ ],
+ "heldout": [
+  {
+   "id": "h001",
+   "text": "What's my partner's name?",
+   "category": "single",
+   "gold": [
+    "p02#2|f07"
+   ],
+   "below": []
+  },
+  {
+   "id": "h002",
+   "text": "Which breed is Pixel?",
+   "category": "single",
+   "gold": [
+    "p01#2|f37"
+   ],
+   "below": [
+    "x03"
+   ]
+  },
+  {
+   "id": "h003",
+   "text": "What's the name of my guitar teacher?",
+   "category": "single",
+   "gold": [
+    "p12#1|f19|h08#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "h004",
+   "text": "Who is my boss on the footbridge job?",
+   "category": "paraphrase",
+   "gold": [
+    "p06#2|f13"
+   ],
+   "below": [
+    "h04#1",
+    "x04"
+   ]
+  },
+  {
+   "id": "h005",
+   "text": "What food would make me ill?",
+   "category": "paraphrase",
+   "gold": [
+    "p02#1|f06"
+   ],
+   "below": [
+    "x02"
+   ]
+  },
+  {
+   "id": "h006",
+   "text": "Which flowers does my mum like?",
+   "category": "paraphrase",
+   "gold": [
+    "p20#1|f24"
+   ],
+   "below": []
+  },
+  {
+   "id": "h007",
+   "text": "Where does my little girl go to school?",
+   "category": "paraphrase",
+   "gold": [
+    "p07#1|f14"
+   ],
+   "below": []
+  },
+  {
+   "id": "h008",
+   "text": "What time do I have to head out for the school run?",
+   "category": "paraphrase",
+   "gold": [
+    "p08#1|f16"
+   ],
+   "below": []
+  },
+  {
+   "id": "h009",
+   "text": "How much is the house loan each month?",
+   "category": "assistant",
+   "gold": [
+    "p11#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "h010",
+   "text": "Which book did you pick for the reading group?",
+   "category": "assistant",
+   "gold": [
+    "p19#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "h011",
+   "text": "What did you say about the laptop's charge limit?",
+   "category": "assistant",
+   "gold": [
+    "p21#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "h012",
+   "text": "Which city do I live in now?",
+   "category": "update",
+   "gold": [
+    "p15#1|f25"
+   ],
+   "below": [
+    "p01#1",
+    "x01"
+   ]
+  },
+  {
+   "id": "h013",
+   "text": "What is my current job title?",
+   "category": "update",
+   "gold": [
+    "p17#1|f34"
+   ],
+   "below": [
+    "p01#1"
+   ]
+  },
+  {
+   "id": "h014",
+   "text": "When is the footbridge retrofit due now?",
+   "category": "update",
+   "gold": [
+    "p27#1|f12b"
+   ],
+   "below": [
+    "p06#1"
+   ]
+  },
+  {
+   "id": "h015",
+   "text": "Are we getting an electric car?",
+   "category": "update",
+   "gold": [
+    "p30#1|f35"
+   ],
+   "below": [
+    "p29#1",
+    "f36"
+   ]
+  },
+  {
+   "id": "h016",
+   "text": "Which hotel booking is ZX4-91Q?",
+   "category": "keyword",
+   "gold": [
+    "p22#1|f32"
+   ],
+   "below": []
+  },
+  {
+   "id": "h017",
+   "text": "What's the check word on the stress-run marker?",
+   "category": "fact",
+   "gold": [
+    "z11"
+   ],
+   "below": []
+  },
+  {
+   "id": "h018",
+   "text": "Which neighbour keeps a key to our place?",
+   "category": "fact",
+   "gold": [
+    "n01"
+   ],
+   "below": []
+  },
+  {
+   "id": "h019",
+   "text": "Who insures our car?",
+   "category": "fact",
+   "gold": [
+    "n03"
+   ],
+   "below": []
+  },
+  {
+   "id": "h020",
+   "text": "is it true that my blood group is negative or what?",
+   "category": "noise",
+   "gold": [
+    "p10#1|f18"
+   ],
+   "below": []
+  },
+  {
+   "id": "h021",
+   "text": "وين أسكن الحين؟",
+   "category": "mixed",
+   "gold": [
+    "p15#1|f25"
+   ],
+   "below": [
+    "p01#1",
+    "x01"
+   ]
+  },
+  {
+   "id": "h022",
+   "text": "شنو فصيلة دمي؟",
+   "category": "mixed",
+   "gold": [
+    "p10#1|f18"
+   ],
+   "below": []
+  },
+  {
+   "id": "h023",
+   "text": "متى ينتهي جوازي؟",
+   "category": "mixed",
+   "gold": [
+    "p05#1|f10"
+   ],
+   "below": []
+  },
+  {
+   "id": "h024",
+   "text": "What's my brother's name?",
+   "category": "mixed",
+   "gold": [
+    "a01#1|g01"
+   ],
+   "below": []
+  },
+  {
+   "id": "h025",
+   "text": "Which bank does Fahad work at?",
+   "category": "mixed",
+   "gold": [
+    "a01#1|g02"
+   ],
+   "below": []
+  },
+  {
+   "id": "h026",
+   "text": "شنو رقم رحلتنا إلى Lisbon؟",
+   "category": "mixed",
+   "gold": [
+    "p23#1|f26"
+   ],
+   "below": [
+    "h07#1",
+    "x07"
+   ]
+  },
+  {
+   "id": "h027",
+   "text": "Maya وش تسوي يوم الأربعاء؟",
+   "category": "mixed",
+   "gold": [
+    "a06#1|g07"
+   ],
+   "below": []
+  },
+  {
+   "id": "h028",
+   "text": "رحلة إسطنبول متى بالضبط؟",
+   "category": "arabic",
+   "gold": [
+    "a04#1|g05"
+   ],
+   "below": []
+  },
+  {
+   "id": "h029",
+   "text": "عطني رقم ملفي الطبي",
+   "category": "arabic",
+   "gold": [
+    "a05#1|g06"
+   ],
+   "below": []
+  },
+  {
+   "id": "h030",
+   "text": "شنو اسم الرواية العربية اللي نصحتني فيها؟",
+   "category": "arabic",
+   "gold": [
+    "a08#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "h031",
+   "text": "What is my sister's name?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h032",
+   "text": "Which dentist does Noor see?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h033",
+   "text": "What colour is my car?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h034",
+   "text": "When is Maya's birthday?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h035",
+   "text": "شنو اسم مدير أخوي فهد؟",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h036",
+   "text": "What's my salary at the new job?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h037",
+   "text": "Catch me up on the bathroom remodel.",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h038",
+   "text": "وش رقم سيارتي؟",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h039",
+   "text": "What was my finishing time in the Lisbon half?",
+   "category": "overview",
+   "gold": [
+    "sr10|r10#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "h040",
+   "text": "What do you know about our Istanbul plans?",
+   "category": "overview",
+   "gold": [
+    "sw6|a04#1|g05"
    ],
    "below": []
   }

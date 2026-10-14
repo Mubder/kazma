@@ -260,7 +260,8 @@ async def dispatch_inner(
                     logger.info("[SwarmEngine] Auto-spawned '%s' for named dispatch",
                                 spawned.name)
         except Exception:
-            logger.debug("[SwarmEngine] autoscaler spawn-by-name failed", exc_info=True)
+            # The task then fails "no capable workers": say why (SW-E14).
+            logger.warning("[SwarmEngine] autoscaler spawn-by-name failed", exc_info=True)
 
     _created_adhoc = False
     if worker is None:
@@ -375,7 +376,7 @@ async def dispatch_inner(
                     0, getattr(engine, "_adhoc_worker_count", 1) - 1
                 )
             except Exception:
-                pass
+                logger.warning("[SwarmEngine] could not drop ad-hoc worker '%s'", _adhoc_name, exc_info=True)
 
     span_status = "ok" if result_status in ("success", "partial") else "error"
     engine._tracing_emitter.end_span(task_span, status=span_status)

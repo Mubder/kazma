@@ -76,7 +76,9 @@ async def test_discord_admin_can_still_approve(monkeypatch):
         await adapter._handle_interaction(SWARM_INTERACTION)
 
     assert acks
-    assert "Admin privilege required" not in acks[0]["data"]["content"]
+    # The admin's click is taken: a plain acknowledgement, the card left for
+    # the request's owner to edit to its outcome (Swarm audit SW-S05).
+    assert acks[0] == {"type": 6}
 
 
 @pytest.mark.asyncio

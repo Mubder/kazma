@@ -9,10 +9,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -201,13 +203,13 @@ def _like_literal(text: str) -> str:
 
 
 def _conn() -> sqlite3.Connection:
-    from kazma_core.memory.schema_v2 import ensure_primary_schema
-    from kazma_core.paths import primary_memory_db
+    """The memory database, its schema made ready once per process
+    (``routes_direct._shared.open_memory_db``). It ran ``ensure_primary_schema``
+    -- the entity-count backfill's UPDATEs included -- on every request, so
+    GET routes took the write lock and wrote (Memory audit M34)."""
+    from kazma_ui.routes_direct._shared import open_memory_db
 
-    c = sqlite3.connect(primary_memory_db(), check_same_thread=False, timeout=30)
-    c.row_factory = sqlite3.Row
-    ensure_primary_schema(c)
-    return c
+    return open_memory_db()
 
 
 #: What :func:`_read_json` answers for a body that is not JSON; each route
@@ -215,15 +217,47 @@ def _conn() -> sqlite3.Connection:
 _INVALID_JSON = object()
 
 
+#: The most a memory request body may hold (Memory audit M36: bodies were read
+#: whole, with no limit). About me, the longest, is 2,000 characters.
+_BODY_MAX_BYTES = 256 * 1024
+
+
+async def _bounded_body(request: Request) -> bytes:
+    """The request body, refused (413) past ``_BODY_MAX_BYTES``: a declared
+    length before a byte is read, an undeclared one as soon as it passes."""
+    from fastapi import HTTPException
+
+    too_large = HTTPException(status_code=413, detail={"ok": False, "error": "request_too_large",
+                                                      "code": "request_too_large"})
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.strip().isdigit() and int(declared) > _BODY_MAX_BYTES:
+        raise too_large
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > _BODY_MAX_BYTES:
+            raise too_large
+    return bytes(body)
+
+
 async def _read_json(request: Request) -> Any:
-    """The request's JSON body, or ``_INVALID_JSON``.
+    """The request's JSON body, or ``_INVALID_JSON``; bounded (``_bounded_body``).
 
     The routes below read the body here, on the loop, and do every
-    database step in a thread (AGENTS §35).
+    database step in a thread (AGENTS §35). An object that only has
+    ``json()`` (a route handing another route its own payload) is read as is.
     """
+    if not isinstance(request, Request):
+        try:
+            return await request.json()
+        except ValueError:
+            return _INVALID_JSON
+    raw = await _bounded_body(request)
+    if not raw.strip():
+        return _INVALID_JSON  # as request.json() answered an empty body
     try:
-        return await request.json()
-    except ValueError:
+        return json.loads(raw)
+    except (ValueError, RecursionError):
         return _INVALID_JSON
 
 
@@ -242,27 +276,11 @@ def _memory_tenant_id() -> str:
     every INSERT. The flag is read live so a Settings/env change takes effect
     without a restart.
     """
-    import os
+    from kazma_core.memory.config import memory_tenant_enforced
 
-    enforce = str(os.environ.get("KAZMA_MEMORY_ENFORCE_TENANT", "")).strip().lower() in (
-        "1", "true", "yes", "on",
-    )
-    if not enforce:
-        try:
-            from kazma_core.tenant_isolation import multi_user_or_production
-
-            enforce = bool(multi_user_or_production())
-        except Exception:
-            # Audit F-05: a failed probe used to silently disable isolation.
-            # Treat "cannot tell" as "enforce" — a single-tenant install is
-            # unaffected (its rows are all in `default`), while a multi-tenant
-            # one stays scoped.
-            logger.warning(
-                "[tenant] multi-user probe failed — enforcing isolation",
-                exc_info=True,
-            )
-            enforce = True
-    if enforce:
+    # The same answer turns use (memory.config.resolve_tenant_id): under
+    # enforcement both are the principal's tenant (Memory audit M07).
+    if memory_tenant_enforced():
         try:
             from kazma_core.tenant_isolation import require_tenant_id
 
@@ -472,11 +490,18 @@ def _memory_admin_summary_sync() -> dict[str, Any]:
             + tfilter,
             tparam,
         ).fetchone()[0]
+        # Memories recall can show: not forgotten tombstones, not retired
+        # copies (Memory audit M32 -- "Episodes: 1" after the only memory was
+        # forgotten).
+        from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
+        tiers = ",".join("?" for _ in RECALLABLE_TIERS)
         try:
             eps = conn.execute(
-                "SELECT COUNT(*) FROM episodes WHERE 1=1" + tfilter, tparam
+                f"SELECT COUNT(*) FROM episodes WHERE tier IN ({tiers})" + tfilter,
+                (*RECALLABLE_TIERS, *tparam),
             ).fetchone()[0]
-        except Exception:
+        except sqlite3.Error:
             eps = 0
         conn.close()
         return {
@@ -502,7 +527,9 @@ async def undo_action(token: str) -> dict[str, Any]:
 
     Tokens are single-use and expire. Returns the restore closure's result.
     """
-    entry = _consume_undo(token.strip())
+    # Off the loop: the tenant check reads the settings store (Memory audit
+    # M34 -- _memory_tenant_id -> multi_user_or_production -> a settings read).
+    entry = await asyncio.to_thread(_consume_undo, token.strip())
     if entry is None:
         return {"ok": False, "error": "undo token not found or expired"}
     try:
@@ -580,11 +607,16 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
             fts_rowids: list[int] | None = None
             if match_q:
                 try:
+                    # The tenant inside the subquery (Memory audit M36): its
+                    # 2,000 rows were taken across every tenant first, so
+                    # other tenants' matches crowded out the caller's own.
                     fts_rows = conn.execute(
                         "SELECT e.rowid FROM entities_fts "
                         "JOIN entities e ON e.rowid = entities_fts.rowid "
-                        "WHERE entities_fts MATCH ? LIMIT 2000",
-                        (match_q,),
+                        "WHERE entities_fts MATCH ?"
+                        + (" AND e.tenant_id = ?" if tid != "default" else "")
+                        + " LIMIT 2000",
+                        (match_q, tid) if tid != "default" else (match_q,),
                     ).fetchall()
                     fts_rowids = [int(r["rowid"]) for r in fts_rows]
                 except Exception:
@@ -738,6 +770,17 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
             conn.close()
             return {"ok": False, "error": "not_found"}
         created = False
+        tid = _memory_tenant_id()
+        if not row and tid != "default" and not conn.execute(
+            "SELECT 1 FROM beliefs WHERE tenant_id = ? AND (subject = ? OR object = ?) LIMIT 1",
+            (tid, eid, eid),
+        ).fetchone():
+            # Only a node of the caller's own graph becomes an entity: an id
+            # another tenant holds and an unused one answer alike (Memory
+            # audit M21 -- "created" for one and not_found for the other told
+            # a tenant which ids others hold).
+            conn.close()
+            return {"ok": False, "error": "not_found"}
         if not row:
             # Promote a graph node / hub id into a real entity so the
             # display name survives reloads (virtual facts, user hub).
@@ -789,12 +832,13 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
                 "UPDATE entities SET aliases_json=? WHERE id=?",
                 (json.dumps(aliases, ensure_ascii=False), eid),
             )
-            ensure_user_hub(
+            hub = ensure_user_hub(
                 conn,
                 new_name,
                 extra_aliases=list(aliases) + [eid, old_name],
+                tenant_id=tid,
             )
-            hub_synced = True
+            hub_synced = not hub.get("skipped")
 
         conn.commit()
         conn.close()
@@ -924,7 +968,7 @@ def _delete_entity_sync(entity_id: str) -> dict[str, Any]:
     kind = _protection(conn, eid)
     if kind:
         conn.close()
-        return {"ok": False, "error": f"protected entity: {eid}", "protected": kind}
+        return {"ok": False, "error": "protected", "code": "protected", "id": eid, "protected": kind}
     try:
         row = conn.execute(
             "SELECT id, type, name, aliases_json, metadata_json, is_high_stakes, is_protected "
@@ -1154,13 +1198,14 @@ def _merge_entities_sync(payload: Any) -> dict[str, Any]:
 
 
 def _entity_slug(text: str) -> str:
-    """Match belief_mutation._slug so entity rows align with belief subjects."""
-    import re
+    """The entity id of *text* -- the one rule (``entity_resolution.slug``),
+    so entity rows align with belief subjects; "" for an empty label."""
+    from kazma_core.memory.entity_resolution import slug
 
-    raw = (text or "").strip().lower()
-    s = re.sub(r"[^a-z0-9_]+", "_", raw)
-    s = re.sub(r"_+", "_", s).strip("_")
-    return (s[:80] or "entity")
+    try:
+        return slug(text)
+    except ValueError:
+        return ""
 
 
 def _ensure_entity_row(conn: sqlite3.Connection, eid: str, *, name: str | None = None) -> None:
@@ -1187,9 +1232,8 @@ async def link_entities(request: Request) -> dict[str, Any]:
     thread (audit F-06) so a lock wait cannot stall every other SSE and
     WebSocket stream sharing this loop.
     """
-    try:
-        body = await request.json()
-    except Exception:
+    body = await _read_json(request)
+    if body is _INVALID_JSON:
         return {"ok": False, "error": "invalid JSON"}
     return await asyncio.to_thread(_link_entities_sync, body)
 
@@ -1201,6 +1245,10 @@ def _link_entities_sync(body: Any) -> dict[str, Any]:
     obj = str((body or {}).get("object") or "").strip()
     if not subject or not obj:
         return {"ok": False, "error": "subject and object required"}
+    from kazma_core.memory.limits import too_long
+
+    if too_long(subject=subject, predicate=predicate, obj=obj):  # the one set (Memory audit M36)
+        return {"ok": False, "error": "field too long"}
     if subject == obj:
         return {"ok": False, "error": "source and target must differ"}
     if not predicate:
@@ -1494,7 +1542,9 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
         predicate = new_predicate if new_predicate is not None else str(row["predicate"])
         obj = new_object if new_object is not None else str(row["object"])
         ptype = new_ptype if new_ptype is not None else str(row["predicate_type"] or "set")
-        if len(subject) > 200 or len(predicate) > 120 or len(obj) > 4000:
+        from kazma_core.memory.limits import too_long
+
+        if too_long(subject=subject, predicate=predicate, obj=obj):  # the one set (Memory audit M36)
             conn.close()
             return {"ok": False, "error": "field too long"}
 
@@ -1644,9 +1694,8 @@ async def repoint_belief(belief_id: str, request: Request) -> dict[str, Any]:
     bid = (belief_id or "").strip()
     if not bid:
         return {"ok": False, "error": "belief_id required"}
-    try:
-        body = await request.json()
-    except Exception:
+    body = await _read_json(request)
+    if body is _INVALID_JSON or (body is not None and not isinstance(body, dict)):
         return {"ok": False, "error": "invalid JSON"}
     body = body or {}
     new_subject = str(body.get("subject") or "").strip() or None
@@ -1701,9 +1750,8 @@ def _repoint_orphan_warning(bid: str) -> list[str]:
 
 @router.post("/api/memory/v2/beliefs/invalidate-batch")
 async def invalidate_batch(request: Request) -> dict[str, Any]:
-    try:
-        body = await request.json()
-    except Exception:
+    body = await _read_json(request)
+    if body is _INVALID_JSON or (body is not None and not isinstance(body, dict)):
         return {"ok": False, "error": "invalid JSON"}
     ids = (body or {}).get("ids") or (body or {}).get("belief_ids") or []
     if not isinstance(ids, list) or not ids:
@@ -1890,6 +1938,11 @@ def _graph_groups_create_sync(payload: Any) -> dict[str, Any]:
     if root == member:
         return {"ok": False, "error": "group_root and member must differ"}
     label = str(body.get("label") or "").strip() or None
+    from kazma_core.memory.limits import SUBJECT_MAX, too_long
+
+    # Group fields were unbounded (Memory audit M36): ids as a fact's subject, the label as a name.
+    if len(root) > SUBJECT_MAX or len(member) > SUBJECT_MAX or too_long(name=label or ""):
+        return {"ok": False, "error": "field too long"}
     tid = _memory_tenant_id()
     try:
         conn = _conn()
@@ -2238,6 +2291,10 @@ def _invalidate_owned(belief_ids: list[str]) -> int:
     )
 
 
+#: Ended facts (invalidated or superseded) one hygiene run archives at most.
+_ARCHIVE_PER_RUN = 2000
+
+
 def _archive_invalidated_sync() -> dict[str, Any]:
     """Soft-hard: move the caller's invalidated beliefs to beliefs_archive, then DELETE.
 
@@ -2252,7 +2309,7 @@ def _archive_invalidated_sync() -> dict[str, Any]:
         rows = conn.execute(
             "SELECT * FROM beliefs "
             f"WHERE (invalidated_at IS NOT NULL OR valid_until IS NOT NULL){scope} "
-            "LIMIT 2000",
+            f"LIMIT {_ARCHIVE_PER_RUN}",
             (tid,) if scope else (),
         ).fetchall()
         n = 0
@@ -2272,7 +2329,12 @@ def _archive_invalidated_sync() -> dict[str, Any]:
             conn.execute("DELETE FROM beliefs WHERE id=?", (r["id"],))
             n += 1
         conn.commit()
-        return {"archived": n}
+        left = conn.execute(
+            f"SELECT COUNT(*) FROM beliefs WHERE (invalidated_at IS NOT NULL OR valid_until IS NOT NULL){scope}",
+            (tid,) if scope else (),
+        ).fetchone()[0]
+        # The cap is said, never silent (Memory audit M32).
+        return {"archived": n, "remaining": int(left), "cap": _ARCHIVE_PER_RUN}
     except Exception as exc:
         return {"error": safe_error(exc)}
     finally:
@@ -2291,15 +2353,15 @@ async def hygiene_run(request: Request) -> dict[str, Any]:
         "archive_invalidated": false
       }
     """
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    body = body or {}
+    body = await _read_json(request)
+    body = body if isinstance(body, dict) else {}
     out: dict[str, Any] = {"ok": True, "actions": {}}
 
     if body.get("purge_empty_entities"):
-        out["actions"]["purge_empty_entities"] = await asyncio.to_thread(_purge_empty_entities_sync)
+        try:
+            out["actions"]["purge_empty_entities"] = await asyncio.to_thread(_purge_empty_entities_sync)
+        except sqlite3.Error as exc:
+            out["actions"]["purge_empty_entities"] = {"error": safe_error(exc)}
 
     if body.get("invalidate_near_dup_noted"):
         preview = await asyncio.to_thread(hygiene_preview)
@@ -2315,6 +2377,13 @@ async def hygiene_run(request: Request) -> dict[str, Any]:
     if body.get("archive_invalidated"):
         out["actions"]["archive_invalidated"] = await asyncio.to_thread(_archive_invalidated_sync)
 
+    # The run is ok only when every action it ran is (Memory audit M32: it
+    # said ok over a failed archive, and the page said "Hygiene complete").
+    failed = [name for name, result in out["actions"].items() if isinstance(result, dict) and result.get("error")]
+    out["ok"] = not failed
+    if failed:
+        out["failed"] = failed
+        out["error"] = "hygiene_partial"
     return out
 
 
@@ -2390,17 +2459,22 @@ def _set_chat_memory_sync(chat_id: str, payload: Any) -> dict[str, Any]:
 
 
 @router.get("/api/memory/v2/summaries")
-def weekly_summaries(limit: int = 30) -> dict[str, Any]:
+def weekly_summaries(limit: int = 30, offset: int = 0) -> dict[str, Any]:
     """The caller's tenant's weekly topic summaries, newest week first (plan
-    C2), with the state of the summarizing: weeks done, queued, failed."""
-    from kazma_core.memory.topic_summaries import list_summaries, summary_health
+    C2), a page at a time with the ``total`` (Memory audit M23: the page
+    fetched the newest 40 and older ones could not be forgotten), and the
+    state of the summarizing: weeks done, queued, failed."""
+    from kazma_core.memory.topic_summaries import count_summaries, list_summaries, summary_health
 
     tid = _memory_tenant_id()
     conn = _conn()
     try:
+        off = max(0, int(offset or 0))
         return {
             "ok": True,
-            "summaries": list_summaries(conn, tenant_id=tid, limit=limit),
+            "summaries": list_summaries(conn, tenant_id=tid, limit=limit, offset=off),
+            "total": count_summaries(conn, tenant_id=tid),
+            "offset": off,
             "state": summary_health(conn, tenant_id=tid),
         }
     finally:
@@ -2445,78 +2519,200 @@ def _set_about_me_sync(payload: Any) -> dict[str, Any]:
     return set_about(_memory_tenant_id(), payload["about"])
 
 
+def _forgotten_at(meta: Any) -> tuple[bool, Any]:
+    """``(forgotten, when)`` from a fact's metadata (JSON text or a dict)."""
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta or "{}")
+        except (TypeError, ValueError):
+            meta = {}
+    forgotten = meta.get("forgotten") if isinstance(meta, dict) else None
+    if forgotten is None:
+        return False, None
+    return True, forgotten.get("at") if isinstance(forgotten, dict) else None
+
+
+def _exported_fact(fact: dict[str, Any], _conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """One fact as the export shows it. A forgotten fact says when, never
+    what: no subject, predicate, chat or turn (Memory audit M01 -- the export
+    kept all four, and a chat id and turn lead back to the words)."""
+    forgotten, at = _forgotten_at(fact.pop("metadata_json", None))
+    if not forgotten:
+        fact["forgotten"] = False
+        return fact
+    return {"tenant_id": fact.get("tenant_id"), "forgotten": True, "forgotten_at": at,
+            "ingested_at": fact.get("ingested_at")}
+
+
+def _exported_archived_fact(row: dict[str, Any], _conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """A fact in cold storage (``beliefs_archive``), shown like a fact: its
+    stored JSON without the vector, and a forgotten one without its words."""
+    try:
+        original = json.loads(row.get("original_belief_json") or "{}")
+    except (TypeError, ValueError):
+        original = {}
+    if not isinstance(original, dict):
+        original = {}
+    fact = {k: v for k, v in original.items() if k not in ("embedding", "access_count", "last_accessed")}
+    fact.setdefault("tenant_id", row.get("tenant_id"))
+    shown = _exported_fact(fact)
+    shown["archived_at"] = row.get("archived_at")
+    return shown
+
+
+def _exported_summary(row: dict[str, Any], conn: sqlite3.Connection) -> dict[str, Any]:
+    row["memories"] = [r[0] for r in conn.execute(
+        "SELECT episode_id FROM memory_summary_sources WHERE summary_id = ? ORDER BY episode_id",
+        (row["id"],),
+    )]
+    return row
+
+
+#: How each export section is read: ``(database, query, shape)``; ``{scope}``
+#: is the caller's tenant (every row, for the install's own). The sections are
+#: the ones ``memory_stores`` names: a table there names its section or says
+#: why it has none, and the export refuses to run when the two disagree.
+_EXPORT_QUERIES: dict[str, tuple[tuple[str, str, Any], ...]] = {
+    "about_me": (("state", "SELECT tenant_id, about, updated_at FROM memory_profile WHERE {scope}", None),),
+    "facts": ((
+        "state",
+        "SELECT tenant_id, subject, predicate, predicate_type, object, confidence, valid_from, "
+        "valid_until, invalidated_at, ingested_at, extraction_method, source_session, source_turn, "
+        "metadata_json FROM beliefs WHERE {scope} ORDER BY ingested_at",
+        _exported_fact,
+    ),),
+    "archived_facts": ((
+        "state",
+        "SELECT tenant_id, original_belief_json, archived_at FROM beliefs_archive WHERE {scope} "
+        "ORDER BY archived_at",
+        _exported_archived_fact,
+    ),),
+    "fact_changes": ((
+        "ops",
+        "SELECT tenant_id, timestamp, event_type, target_id, actor, reason, state_before_json, "
+        "state_after_json FROM memory_audit_log WHERE {scope} ORDER BY timestamp",
+        None,
+    ),),
+    "memories": ((
+        "state",
+        "SELECT tenant_id, id, session_id, turn_number, user_text, assistant_text, summary_text, tier, "
+        "created_at FROM episodes WHERE {scope} AND tier != 'forgotten' ORDER BY created_at",
+        None,
+    ),),
+    "weekly_summaries": ((
+        "state",
+        "SELECT tenant_id, id, period_key, title, summary_text, status, turn_count, chat_count, "
+        "first_turn_at, last_turn_at, created_at, updated_at FROM memory_summaries WHERE {scope} "
+        "ORDER BY period_start",
+        _exported_summary,
+    ),),
+    "entities": (("state", "SELECT tenant_id, id, type, name, aliases_json FROM entities WHERE {scope}", None),),
+    "entity_merges": (
+        ("state",
+         "SELECT tenant_id, source_entity_id, target_entity_id, status, merge_tier, confidence, "
+         "requested_at, resolved_at FROM entity_merges WHERE {scope} ORDER BY requested_at", None),
+        ("state",
+         "SELECT tenant_id, source_entity_id, target_entity_id, status, merge_tier, confidence, "
+         "requested_at, resolved_at, archived_at FROM entity_merges_archive WHERE {scope} "
+         "ORDER BY requested_at", None),
+    ),
+    "graph_groupings": ((
+        "state",
+        "SELECT tenant_id, group_root, member, member_tier, label, created_at, created_by "
+        "FROM graph_associations WHERE {scope} ORDER BY created_at",
+        None,
+    ),),
+    "procedures": ((
+        "state",
+        "SELECT tenant_id, name, description, dag_steps_json, success_count, total_trials, "
+        "confidence_score, status, created_at, last_executed FROM procedural_dags WHERE {scope} "
+        "ORDER BY created_at",
+        None,
+    ),),
+    "forgotten": ((
+        "state",
+        "SELECT tenant_id, session_key, turn_number, forgotten_at FROM memory_forgotten WHERE {scope} "
+        "ORDER BY forgotten_at",
+        None,
+    ),),
+}
+
+#: Rows read from the database at a time: the export holds one batch, never
+#: the whole memory (Memory audit M22: it built the body in memory).
+_EXPORT_BATCH = 500
+
+
+def _export_chunks(tid: str, now: Any) -> Iterator[bytes]:
+    """The export file, as it is written: one JSON value per row."""
+    from kazma_core.memory.memory_stores import EXTERNAL_STORES, MEMORY_TABLES, exported_sections
+    from kazma_core.paths import memory_ops_db
+
+    declared = exported_sections()
+    if declared != set(_EXPORT_QUERIES):
+        # A section the registry names that the export cannot read, or the
+        # other way round: refuse rather than send a file that is not all.
+        raise RuntimeError(f"memory export sections disagree with memory_stores: "
+                           f"{sorted(declared ^ set(_EXPORT_QUERIES))}")
+    scope, params = ("1 = 1", ()) if tid == "default" else ("tenant_id = ?", (tid,))
+    not_included = {
+        e.name: e.excluded for e in (*MEMORY_TABLES, *EXTERNAL_STORES) if not e.export and e.erase != "retired"
+    }
+    conns: dict[str, sqlite3.Connection | None] = {"state": _conn(), "ops": None}
+    ops_path = memory_ops_db()
+    if os.path.exists(ops_path):
+        conns["ops"] = sqlite3.connect(f"file:{ops_path}?mode=ro", uri=True, check_same_thread=False, timeout=30)
+        conns["ops"].row_factory = sqlite3.Row
+    try:
+        head = {"exported_at": now.isoformat(), "tenant": tid, "not_included": not_included}
+        yield json.dumps(head, ensure_ascii=False, indent=1)[:-2].encode("utf-8")
+        for section, queries in _EXPORT_QUERIES.items():
+            yield f',\n "{section}": ['.encode()
+            first = True
+            for db, sql, shape in queries:
+                conn = conns[db]
+                if conn is None:
+                    continue
+                try:
+                    cur = conn.execute(sql.format(scope=scope), params)
+                except sqlite3.OperationalError as exc:
+                    if "no such table" in str(exc):
+                        continue
+                    raise
+                while batch := cur.fetchmany(_EXPORT_BATCH):
+                    out = []
+                    for r in batch:
+                        item = dict(r)
+                        item = shape(item, conn) if shape else item
+                        out.append(("\n  " if first else ",\n  ") + json.dumps(item, ensure_ascii=False, default=str))
+                        first = False
+                    yield "".join(out).encode("utf-8")
+            yield b"\n ]"
+        yield b"\n}\n"
+    finally:
+        for conn in conns.values():
+            if conn is not None:
+                conn.close()
+
+
 @router.get("/api/memory/v2/export")
 def export_memory() -> Any:
-    """Everything the caller's tenant's memory holds, as a JSON download:
-    the user's "About me", facts (current and past, with the chat and turn they came from),
-    memories of conversations, weekly summaries (with the memories each was
-    written from), entities, and what was forgotten (when -- never what)."""
+    """Everything the caller's tenant's memory holds, as a JSON download.
+
+    The sections are the memory store registry's (``memory_stores``): "About
+    me", facts (current and past, with the chat and turn they came from), the
+    facts in cold storage, every change to a fact, memories of conversations,
+    weekly summaries (with the memories each was written from), entities,
+    entity merges, the operator's graph groupings, the tool procedures, and
+    what was forgotten (when -- never what). ``not_included`` names what the
+    file leaves out and why. Streamed, a batch of rows at a time.
+    """
     from datetime import UTC, datetime
 
-    from fastapi.responses import Response
-    from kazma_core.memory.forget import FORGOTTEN_TIER
+    from fastapi.responses import StreamingResponse
 
-    tid = _memory_tenant_id()
-    scope, params = ("", ()) if tid == "default" else (" WHERE tenant_id = ?", (tid,))
-    conn = _conn()
-    try:
-        def rows(sql: str, extra: tuple = ()) -> list[dict[str, Any]]:
-            return [dict(r) for r in conn.execute(sql, (*params, *extra)).fetchall()]
-
-        facts = rows(
-            "SELECT tenant_id, subject, predicate, predicate_type, object, confidence, "
-            "valid_from, valid_until, invalidated_at, ingested_at, extraction_method, "
-            "source_session, source_turn, metadata_json FROM beliefs" + scope
-            + " ORDER BY ingested_at"
-        )
-        for f in facts:
-            try:
-                meta = json.loads(f.pop("metadata_json") or "{}")
-            except (TypeError, ValueError):
-                meta = {}
-            f["forgotten"] = isinstance(meta, dict) and "forgotten" in meta
-        episodes = rows(
-            "SELECT tenant_id, id, session_id, turn_number, user_text, assistant_text, "
-            "summary_text, tier, created_at FROM episodes"
-            + (scope + " AND" if scope else " WHERE") + " tier != ? ORDER BY created_at",
-            (FORGOTTEN_TIER,),
-        )
-        entities = rows("SELECT tenant_id, id, type, name, aliases_json FROM entities" + scope)
-        forgotten = rows(
-            "SELECT tenant_id, session_key, turn_number, forgotten_at FROM memory_forgotten"
-            + scope + " ORDER BY forgotten_at"
-        )
-        summaries = rows(
-            "SELECT tenant_id, id, period_key, title, summary_text, status, turn_count, "
-            "chat_count, first_turn_at, last_turn_at, created_at, updated_at FROM memory_summaries"
-            + scope + " ORDER BY period_start"
-        )
-        for s in summaries:
-            s["memories"] = [r[0] for r in conn.execute(
-                "SELECT episode_id FROM memory_summary_sources WHERE summary_id = ? ORDER BY episode_id",
-                (s["id"],),
-            )]
-        about = rows("SELECT tenant_id, about, updated_at FROM memory_profile" + scope)
-    finally:
-        conn.close()
     now = datetime.now(UTC)
-    body = json.dumps(
-        {
-            "exported_at": now.isoformat(),
-            "tenant": tid,
-            "about_me": about,
-            "facts": facts,
-            "memories": episodes,
-            "weekly_summaries": summaries,
-            "entities": entities,
-            "forgotten": forgotten,
-        },
-        ensure_ascii=False,
-        indent=1,
-        default=str,
-    )
-    return Response(
-        content=body,
+    return StreamingResponse(
+        _export_chunks(_memory_tenant_id(), now),
         media_type="application/json",
         headers={
             "Content-Disposition": f'attachment; filename="kazma-memory-{now:%Y%m%d-%H%M}.json"'
@@ -2525,5 +2721,9 @@ def export_memory() -> Any:
 
 
 def mount_memory_api(app: Any) -> None:
-    """Include API router on the FastAPI app."""
+    """Include API router on the FastAPI app, and the recorder every memory
+    mutation passes (``memory_actions``: the trail and the status codes)."""
+    from kazma_ui.memory_actions import MemoryActionRecorder
+
     app.include_router(router)
+    app.add_middleware(MemoryActionRecorder)

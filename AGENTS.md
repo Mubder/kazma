@@ -199,6 +199,17 @@ code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
 - Both `record_success()` and `record_failure()` reset it
 - Never remove this flag or concurrent calls bypass the probe semantics
 - ReliabilityRegistry (P2-1 refactor) owns all breaker/retry/timeout/validator state
+- **An outcome names its admission** (Swarm audit SW-E11, 2026-10-14).
+  `admit()` / `check_or_raise()` return a `BreakerAdmission(generation,
+  probe)`; every change of state bumps `generation`. An outcome from an older
+  generation, or any outcome but the probe's own while a probe is in flight, is
+  stale: counted (`stale_outcomes`), never applied. A dispatch admitted before
+  the trip closed a half-open breaker while its probe still ran. Callers pass
+  the admission (`record_success(admission)`); one without it cannot resolve a
+  probe. Shared breakers write by compare-and-set: never over a newer
+  generation. A dispatch is one in-flight count whatever its retries
+  (`SwarmWorker.in_flight`); the autoscaler never reaps an instance with one in
+  flight (SW-E12). Gate: `tests/test_swarm_boundaries_and_signals.py`.
 
 ### 6. TaskStore WAL Mode (`kazma-core/kazma_core/swarm/task_store.py`)
 - SQLite uses WAL + `busy_timeout=5000` for concurrent read/write
@@ -239,8 +250,17 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   Telegram gate (2026-10-09). Within-turn duplicate/burst suppression remains.
   Gate: `tests/test_gateway_approval_card_retry.py` (all three transports,
   unchanged throttle as negative control, resume and other-thread isolation).
-- Double-gating prevention: graph sets ContextVars (`_graph_hitl_gate_ctx` /
-  `_hitl_approved_ctx`) so `LocalToolRegistry.execute` does **not** re-prompt the bus
+- Double-gating prevention, for ONE call (Swarm audit SW-S01, 2026-10-14):
+  the graph binds `_graph_hitl_gate_ctx` / `_hitl_approved_ctx` to the tool it
+  decided about (`safety/call_authority.py`: `call_authority(var, tool)`), and
+  that call's first execution consumes it (`claim_call_authority`). Work the
+  call starts -- `dispatch_swarm`'s task, a thread, another tool -- finds it
+  spent and asks the bus; detached starters run in `detached_context()`. The
+  old step-wide booleans travelled through `asyncio.create_task`'s context copy,
+  and a swarm worker's `file_write`/`send_message` ran with no card anywhere.
+  §30's "decision truth = hitl_gates.db" holds for detached swarm work and the
+  bus too: a bus request is a gate row (mechanism `swarm_bus`) with the human
+  actor and its own `timeout`/`cancelled` endings.
 
 **B. Swarm bus — `/swarm` + IDE `LocalToolRegistry.execute` path**
 - `tool_registry.py:execute()` calls `safety.check()` (async) for danger tools
@@ -253,14 +273,27 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   The drift warning repeats every 15 min either way.
 - Bus adapters: `TelegramBusAdapter`, `DiscordBusAdapter`, `SlackBusAdapter`
 - App wiring: **one** adapter if only one platform; **`FanOutBusAdapter`** when
-  multiple are configured. Swarm fan-out is **tri-state** (Wave 6 H-12): `True`
-  settles immediately; `False` is a vote until `expected_voters` or the deadline.
-  This is **not** web `claim_gate` (first claim 200, second 409). Do not restore
-  "first boolean / first approval wins" — a Discord Deny used to kill a Telegram
-  Approve. NullBus = internal-only / fail-closed danger
-- H-9: `is_danger_tool()` must call `requires_approval()` (tier floor), not a
-  name list that can un-gate by omission
-- Approval buttons resolve via `handle_callback()` on each adapter
+  multiple are configured. NullBus = internal-only / fail-closed danger.
+- **One request, one decision** (`swarm/shared_approvals.py`, Swarm audit
+  Stage 1, 2026-10-14; replaces Wave 6 H-12's tri-state vote). `check()` opens
+  the request under a freshly minted id bound to the tool and an arguments hash
+  -- never an id from the tool's arguments (SW-S02: one click approved every
+  later call carrying that `task_id`). Every platform's card shows every
+  argument, bounded and marked when cut (`swarm/approval_card.py`, SW-S03), and
+  waits on ONE shared row (`swarm.approval.<id>` in the settings store,
+  compare-and-set). The first human decision on any platform decides it -- an
+  Approve, or a Deny, which is final (owner decision D7) -- and every card shows
+  that outcome (SW-S05). The request's deadline is the only one: `timeout` and
+  `cancelled` are outcomes, never a deny (SW-S04). Do not bring back per-adapter
+  timers or votes. This is still **not** web `claim_gate`.
+- H-9: `is_danger_tool()` is `safety.hitl.approval_floor()`, the floor
+  `requires_approval()` uses (SW-S11: it gated only `danger`/`unsafe`, so an
+  unclassified tool passed the bus)
+- Approval buttons: `shared_approvals.decide_from_button(data, actor=,
+  platform=)` from each platform's click handler; no adapter instance is needed,
+  and a decision that cannot be recorded is a WARNING with the actor
+  (`kazma_swarm_failures_total{site="approval_resolve"}`). The gate row records
+  the human who pressed. Gate: `tests/test_swarm_bus_approvals.py`.
 
 **C. Pipeline checkpoints — swarm PIPELINE tasks** (separate from A and B)
 - `engine.py:_handle_pipeline_checkpoint` + `approve_checkpoint`
@@ -270,8 +303,10 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   the close and left Approve on cancelled tasks. Code that sets a terminal
   status itself must be declared in `tests/test_swarm_paused_task_endings.py`
   with how it covers those three.
-- A pipeline paused before a restart is restored into history only, never
-  `_active_tasks`; reject and cancel reach it there. `reject_checkpoint`
+- A pipeline paused before a restart is restored as a PAUSED in-flight task
+  (`_active_tasks`, Swarm audit SW-E09: the history is an LRU, and an evicted
+  restored pipeline could not be cancelled and came back paused at every boot);
+  paused tasks do not count against admission. `reject_checkpoint`
   decides "already finished?" BEFORE the handler runs — the handler marks the
   shared task failed, and judging after it left restored rejects unsaved
   (2026-09-25: four `200`s, still paused at the next boot).
@@ -371,11 +406,47 @@ compatibility. **All public API methods and constructors are unchanged.**
 |--------|---------------|-----------------|
 | `engine.py` | Dispatch, handoff, task lifecycle, worker registry | Always — the orchestrator |
 | `reliability_registry.py` | Circuit breakers, retries, timeouts, validators, concurrency | Configuring per-worker reliability |
-| `phonebook.py` | WorkerRegistry summon + dispatch_by_name | Topology/DAG worker lookup |
+| `phonebook.py` | WorkerRegistry summon + the fenced memory context of `dispatch_by_name` (which runs through `dispatch()`) | Topology/DAG worker lookup |
 | `checkpoint_manager.py` | HITL pipeline checkpoint state, timeout auto-reject, persistence | Pipeline pause/resume logic |
+| `shared_approvals.py` / `approval_card.py` | A bus approval request's one decision; the card's text | Swarm-bus HITL (§7B) |
+| `limits.py` | Input, pause and parallelism limits | A new task field or limit |
+| `single_operator.py` | The multi-user refusal (decision D1) | A new swarm surface |
 
 **Rules after refactor:**
 - New reliability features go in `reliability_registry.py`, not `engine.py`.
+- **The engine owns every run** (Swarm audit Stage 2-3, 2026-10-14):
+  `_run_owned` registers it before its first await, one run per task id; the
+  RUNNING row is an admission compare-and-set (`TaskStore.admit`, `generation`
+  and `run_id`); `persist_task` follows one transition table (a finished
+  status is never left, an older generation's write is refused and kept as
+  `orphan_results`). An interrupted run records `interrupted_by` and
+  `execution_outcome` (`none_invoked` / `unknown` with `invoked_tools`) from
+  its effect tracker; an uncertain result is stored `failed`; retrying an
+  unknown outcome needs `acknowledge_unknown`; a resumed pipeline skips its
+  journaled steps. Task writes run in threads, one task's in order
+  (`_persist` / `_flush_writes`). Gates: `tests/test_swarm_owned_lifecycle.py`,
+  `tests/test_swarm_interrupted_effects.py`.
+- **Swarm failures are loud and counted** (SW-E14): lost evidence or a lost
+  decision is a WARNING and `kazma_core.metrics.record_swarm_failure(site)`
+  (`kazma_swarm_failures_total{site}`). A catch-all handler in `swarm/` or the
+  bus adapters that stays below WARNING is declared with its reason in
+  `tests/test_swarm_boundaries_and_signals.py::_QUIET_HANDLERS`. Each worker
+  result is counted once in the worker metrics (`_finalize_task`).
+- **A worker's text reaches a model fenced** (SW-S10): `check_swarm_task`,
+  pipeline and handoff hand-ons, the synthesis prompt, the Refiner. Same gate
+  file (`_RESULT_TEXT_ONLY` declares the stored-result builders).
+- **`/api/swarm/*` has one role table** (`kazma_ui/swarm_panel/route_roles.py`,
+  SW-S07): GET is any signed-in user, everything else admin, enforced by the
+  routers' `RoleCheckedRoute`. On an install with platform users every swarm
+  surface refuses (`409 swarm_single_operator`, decision D1). Gate:
+  `tests/test_swarm_route_roles.py`.
+- **Bus posts are mention-safe** (SW-S13): every Discord and Slack bus post and
+  edit goes through `_post_message` / `_patch_message` / `_update_message`,
+  which apply the chat adapters' `sanitize_outbound` (and Discord's
+  `allowed_mentions: {"parse": []}`).
+- **The task store** strips NUL from every Postgres parameter
+  (`_pg_execute`) and runs SQLite at `synchronous=FULL` (the RUNNING row is
+  crash evidence, SW-E16); worker-metric days follow the task retention.
 - `engine.py` public methods are thin delegates — the real logic lives in the extracted modules.
 - The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
 - Constructor signature is unchanged — test fixtures work without modification.
@@ -606,56 +677,152 @@ them into every future system prompt. Two invariants must hold:
 
 ### 12. Time Travel Replay (`kazma-core/kazma_core/time_travel.py`)
 
-The time-travel subsystem captures a snapshot of the full `SupervisorState`
-after every supervisor iteration and persists it to
-`kazma-data/snapshots.db` (SQLite WAL, LRU-capped per-thread at 50).
+The time-travel subsystem saves the `SupervisorState` after supervisor
+iterations to `<data dir>/snapshots.db` (SQLite WAL). Hardened to the
+2026-10-13 audit (TT-01..TT-12, tracker
+`docs/plans/TIME_TRAVEL_INDUSTRIAL_HARDENING_GOAL.md`). Every restore, fork
+and approve test runs on the real graph and saver of `tests/_tt_graph.py`
+(the product SQLite saver; Postgres when a throwaway database is set).
 
 **A. The recorder must be wired into ALL graph-build sites.**
 - `SnapshotRecorder` is created once per agent (`agent_runner.py` via
   `create_recorder(config=...)`) and passed to `build_supervisor_graph(...,
   snapshot_recorder=...)` at all 3 call sites: the run graph
   (`_ensure_graph`), the streaming graph (`_ensure_streaming_graph`), and
-  child graphs (`build_child_graph`). The app.py post-startup recompile also
-  passes it. If any site omits the recorder, that path stops capturing
-  snapshots silently.
+  child graphs (`build_child_graph`); also the app.py post-startup recompile
+  and `kazma_core/cli/ask.py`. If any site omits the recorder, that path stops
+  capturing snapshots silently. The server registers it as the process's
+  recorder (`set_process_recorder`); the chat apps, the slash resolver and the
+  forget fan-out use `process_recorder()` (they each built their own).
 
-**B. Capture hook lives in the supervisor node.**
-- `graph_builder.py:_supervisor` calls `snapshot_recorder.capture(merged)`
-  after each iteration and stamps `snapshot_id`/`snapshot_iteration` into
-  the result state. This is conditional on `snapshot_recorder is not None`.
-  The SSE path reads `snapshot_id` from the terminal graph state to emit a
-  `snapshot` SSE event (Part 6).
+**B. One source of truth, one identity (TT-01).** The database only: no
+in-memory copy (it keyed `(thread_id, iteration)`, disagreed with SQLite and
+kept serving cleared steps). A step is addressed by its snapshot id;
+`iteration` restarts every turn and is a step number inside a turn. Rows carry
+`turn_key` (the turn's `created_at`), `turn_index` (user messages held, the
+memory turn number), `seq` (capture order), `message_count`, `nbytes`,
+`truncated`; an older file is backfilled from its own JSON at open. Restore,
+fork, detail and compare take the id on every surface (the chat apps accept
+its first 8+ characters, `resolve_ref`); listings group turns then steps
+(`replay_routes.group_steps`). Retention evicts by capture order.
 
-**C. Restore vs Fork — in-place vs branch.**
-- `/replay <n>` (`_handle_replay` in `graph.py`): loads a snapshot via
-  `ReplayEngine.replay_from(thread_id, iteration)` and writes it back to the
-  SAME thread via `graph.aupdate_state(config, state)` — rewinding the live
-  conversation. Same pattern as `/undo`.
-- `/fork <n>` (`_handle_fork` in `graph.py`): loads the same snapshot but
-  writes it under a NEW `thread_id` (mints `gw-{platform}-{sender}-{uuid}`).
-  Also copies session context + creates a Web UI session. The original
-  thread is NOT modified. Do NOT overwrite `active_thread.{sender}` — the
-  user stays on the original; the fork appears in the Web UI sidebar.
+**C. Capture (TT-06, TT-11).** `graph_builder._supervisor` calls
+`time_travel.capture_after_supervisor` (one function: the test graph runs the
+same path): off the loop, never failing the turn, thinned in a long turn
+(`_capture_due`: every step to 20, every 10th after, always the last), and
+stamping `snapshot_id` only when the durable write succeeded (`capture`
+returns None on failure; `kazma_time_travel_capture_total{result}`). Budgets
+are enforced in SQLite on every save, oldest first: per step
+(`max_snapshot_bytes`, 2 MB: a larger state is stored cut with
+`_time_travel_truncated` and can be read, never restored or forked), per turn
+(`max_per_turn`, first and newest), per chat (`max_snapshots`,
+`max_thread_bytes`) and in total (`max_global_snapshots`, `max_total_bytes`).
+Read failures raise `SnapshotStoreError`: 503 `store_unavailable` on the
+routes, a plain sentence in the chats -- never "no steps saved".
+`maintain_snapshots` VACUUMs only when a quarter of the file and 8 MB are
+free; a prune that did not stick is an ops alert
+(`time_travel.prune_not_sticking`); the run has a firing-ledger signature.
 
-**D. The slash-command resolver returns `None` for `/replay <n>` and `/fork`.**
-- These fall through to the graph handler (like `/undo`/`/edit`) because they
-  need `graph.aupdate_state`. The resolver only handles read-only subcommands
-  (`list`, `compare`, `clear`) which don't need graph access.
+**D. Restore and fork are one service (`kazma_ui/thread_rewind.py`, TT-02,
+TT-04, TT-G1).** Every surface calls `rewind_thread` / `fork_thread`: the
+page's routes (the TUI uses them), the chat apps' `/replay <step>` and
+`/fork <step>` (`_handle_replay` / `_handle_fork` in gateway `graph.py`; the
+slash resolver answers `list`, `compare`, `clear` and returns None for a
+step). Under the thread's mutation lock a restore refuses 409 `turn_running`
+(a registered turn, or the lock held by another task) and 409
+`approval_pending` naming the cards (registry or live interrupt; decision
+D11: nothing is settled behind the human), writes a turn-boundary state
+(`turn_boundary_payload`: nothing pending, tool chains sanitized,
+`SCRATCHPAD_CLEAR` first, written `as_node="respond"` so `next == ()`), takes
+the later turns back from memory (`rewind_memory`, D2), from the transcript
+(`_transcript_cut`: the chat-store rows after the step) and from Time Travel
+(the steps saved after it), bumps the thread's rewind generation, journals
+`thread_rewound` (every tab reloads; never replayed) and writes an audit row
+(`kazma_core/time_travel_audit.py`, `time_travel_audit.db`, refusals too). A
+fork records a chat app's owner first, off the loop (`record_thread_owner`
+returns False and logs WARNING; a failure refuses the fork), writes the
+boundary state under the new id, and saves a projected chat row (questions
+and answers only) with a catalog title (`replay.fork_title`). Do NOT
+overwrite `active_thread.{sender}` on a fork. Gates in
+`tests/test_time_travel_rewind.py`: only `thread_rewind` calls
+`apply_snapshot_to_thread`; every product function that calls
+`aupdate_state`/`adelete_thread` holds `thread_locks.thread_mutation` or is
+declared.
 
-**E. The web chat answers `/replay` and `/fork` without the model**
-(`kazma_ui/sse_chat/_time_travel.py`, 2026-09-28): the chat's saved steps and
-a link, `/replay?thread=<id>`, that `replay.js` opens on that chat's
-timeline, where restore and fork are buttons beside what each step holds.
-Before, the text reached the model, which searched the source for what
-"replay" means. `tests/test_web_time_travel_command.py`.
+**D2. A rewind rewinds memory** (Memory audit M09, 2026-10-13, decided with
+TT-03: memory is rewound, not kept). `/undo`, `/edit`, a restore
+(`apply_snapshot_to_thread`) and abort call `memory.forget.rewind_memory`
+after they write: the turns they took back -- episodes, the agent's notes,
+facts -- are forgotten under every key and tenant that holds them, journaled,
+with ledger rows from the old questions (a deferred write, the deep pass and
+turn reconcile from the unchanged transcript do not bring them back); a fork
+touches the original chat's memory not at all. The deep pass applies facts
+only while its turn is still remembered (`_apply_if_still_remembered`). The
+transforms are `agent/rewind.py`. Gate: `tests/test_memory_rewind.py` (each
+rewrite through a real LangGraph graph, recall after; the rewrite alone as
+the negative control; every product function calling `.aupdate_state(`
+calls `rewind_memory` or is declared not a rewind).
 
-**F. `/api/replay/*` is mounted when the app is built** (2026-10-01), and
+**E. One per-thread checkpoint-mutation lock (`kazma_ui/thread_locks.py`,
+TT-04).** Task-reentrant, per loop, bounded. Gateway turns and commands
+(`cmd_lock`), the approve route (`_approve_lock_for`), the web abort, `/reset`
+and chat delete, the dashboard delete, and the start of a web turn take it.
+A web turn reads the checkpoint before its stream starts; it starts the graph
+under the lock only if the thread's rewind generation is unchanged (else it
+answers `replay.turn_after_restore` and runs nothing).
+
+**F. The approve route resumes only a live interrupt, keyed (TT-02,
+§30 B2).** `next` without an interrupt is a 409 (it was "still try resume"
+with a gate-less security command: the restored step's denied call ran); a
+card the registry knows as another gate is a 409
+(`hitl_gate_bridge.gate_names_interrupt`); there is no gate-less fallback.
+`build_resume_command(..., interrupt_id=)` keys every approval and deny
+resume by LangGraph's interrupt id (web route, gateway `/hitl`, timeout
+auto-deny, supersede, CLI): a resume whose interrupt is gone resumes nothing.
+Gate: `test_every_approval_resume_is_keyed_by_its_interrupt`.
+
+**G. Delete and Forget reach the steps (TT-05).** Chat delete
+(`sse_chat` delete route), forgetting a chat (`forget_chat`), a user's Forget
+of a memory (`forget_episode`, by "user": the chat's steps from that turn on,
+under every key) and `/replay clear` on every surface go through
+`forget_thread_snapshots` / `forget_turn_snapshots`; a rewind's own
+`forget_episode(by="rewind")` leaves the steps to the restore. Registered in
+`memory_stores.EXTERNAL_STORES`. `snapshots.db` is `machine` in
+`store_registry` (not carried in a bundle) and in `NOT_BACKED_UP` (the
+universal backup leaves it out): a copy elsewhere would bring back deleted or
+forgotten chats. `/reset` keeps the steps (documented).
+
+**H. The web chat answers `/replay` and `/fork` without the model**
+(`kazma_ui/sse_chat/_time_travel.py`, 2026-09-28), in the page's language:
+the saved steps (plural forms) and a link, `/replay?thread=<id>`, that
+`replay.js` opens on that chat's timeline; `/replay clear` deletes the steps.
+Before, the text reached the model. `tests/test_web_time_travel_command.py`.
+
+**I. `/api/replay/*` is mounted when the app is built** (2026-10-01), and
 reads the recorder and the graph per request (`create_replay_router(
 recorder_getter=, graph_getter=)`): 503 `time_travel_unavailable` until
-startup makes a recorder. It was mounted in `_on_startup` with the graph of
-that moment, so a model switch left restore and fork writing through the old
-graph, and no route-table gate saw it. A fork's chat is saved in a thread, and
-a failure to save it is a WARNING. `tests/test_replay_router_getters.py`.
+startup makes a recorder. A model switch rebuilds the graph, which a router
+given one at mount time never saw. `tests/test_replay_router_getters.py`.
+
+**J. Settings reads the live recorder (TT-08):** `max_snapshots`,
+`max_global_snapshots` and `limits` are public properties;
+`/api/settings/time_travel` reports them and the live retention, so "restart
+required" clears after a restart. **Migration (TT-09):** `path_rewrite`
+rewrites JSON-escaped Windows paths (`C:\\Users\\...`) both ways, converts the
+path's rest to the target's separators, and keeps a JSON row whose rewrite
+would not parse. Gates: `tests/test_time_travel_bounds.py`,
+`tests/test_time_travel_identity.py`.
+
+**K. Off the loop, and every surface driven (TT-Q1).** Building a recorder
+(`create_recorder` reads the settings store), the process recorder, the
+fan-out deletes, the owner record, the fork's chat row, the web chat's reply
+and the audit store are loop-stall helpers (`_LOOP_STALL_HELPERS`; Time Travel
+is a `_CROSS_MODULE_AREAS` area). The chat apps' real handler and the TUI's
+commands list, restore and fork on the fixture graph
+(`tests/test_time_travel_surfaces.py`); the page, reached by the sidebar, in
+English and Arabic, a restored chat, and a failed step list shown as an error
+are `tests/e2e/test_time_travel_page.py` (run explicitly: `fast_test` skips
+`tests/e2e`).
 
 ### 13. Proxy Provider Addon (`kazma-core/kazma_core/proxy/`)
 
@@ -744,7 +911,11 @@ swarm works with zero pre-registered workers.
   mutates the active profile. Env-lock (`KAZMA_MODEL`) always wins.
 - **Handoff cycle guards (§4) still apply** to auto-spawned instances — they are
   regular `InProcessWorker`s once spawned. Idle-reap after 5 min;
-  `record_activity` refreshes the timer.
+  `record_activity` refreshes the timer, and an instance with a dispatch in
+  flight is never reaped (`SwarmWorker.in_flight`, SW-E12). Instances are named
+  `<template>-pool-<boot tag>-<n>` (a new tag each start, so an earlier run's
+  shared breaker is never inherited); a reaped instance's shared breaker keys
+  are deleted.
 - **The Swarm page offers "auto"** in both worker pickers, chosen by default
   when nothing is registered, and the status says "On demand" when templates
   exist and nothing runs (`/api/swarm/status` `templates`). Until 2026-09-28
@@ -817,7 +988,23 @@ scheduler needs a case there.
   native `sqlite3.backup()` of both memory DBs (`backup.py`) + JSONL/GraphML
   dumps (`export.py`) + a filtered `pg_dump` of Kazma's Postgres
   shared-state tables (§21). First sweep 120s after boot. Kept separate
-  from macro_sleep so a slow disk on backup can't stall decay.
+  from macro_sleep so a slow disk on backup can't stall decay. The export is
+  a portable text snapshot, whole (2026-10-13, Memory audit M30): no vector
+  column, other bytes as base64 (it wrote Python `b'...'` literals), every
+  table paged through (the audit log stopped at its newest 20,000 rows), a
+  count per piece; a piece that fails fails the task (`_ExportResult.failed`,
+  M20 -- failures were logged at DEBUG and counted done).
+- **Lifecycle failures are seen** (2026-10-13, Memory audit M20): the
+  schedulers enqueue through `worker_bootstrap._enqueue_checked` (a refused
+  task is a WARNING and the ops alert `memory.enqueue_failed`; the result was
+  ignored, and a broken `memory_ops.db` stopped every cadence while health
+  showed an empty queue). Vector repair and recovery let a locked or busy
+  database reach the runner (they reported it as nothing to do); the runner
+  logs it at INFO for two passes, WARNING from the third, and every sweep's
+  last outcome is in memory health (`sweeps`, `sweep_health()`), with the
+  queue's oldest pending and running ages and each task type's last success
+  (`queue`). Three failed passes in a row degrade health (`sweep_failing`).
+  Gate: `tests/test_memory_lifecycle_signals.py`.
 - **24h reconsolidation:** `global_reconsolidation` (dedupe + re-embed of
   beliefs, subject-hash partitioned).
 - **15-min commitment GC:** TTL expiry + tiered retention (§20). Every
@@ -828,7 +1015,8 @@ scheduler needs a case there.
   `swarm.task_retention_days`, default 30, 0 keeps all — checkpoint
   retention, §41, the supervisor
   watch, §39, memory vector repair, knowledge vector repair (§24F), memory
-  recovery and memory turn reconcile, §15F, memory mirror sync, §15K,
+  recovery, retired knowledge promotions and memory turn reconcile, §15F,
+  memory mirror sync, §15K,
   weekly topic summaries, §15J, entity count repair, §15L),
   run by ONE isolated
   runner so a failing sweep never stops the rest -- and is logged at WARNING
@@ -850,10 +1038,64 @@ re-boot / repeated calls and let the backup handlers register
 independently of the core V2 set.
 
 **D. The durable queue lives in `memory_ops.db` (`task_queue.py`).** Bounded
-retries: `max_attempts` (default 3) then dead-letter (`status='failed'`);
-stuck `processing` rows past 300s are reclaimed. Per-task short-lived
-SQLite connections (no WAL contention with chat reads on
-`memory_state.db`). `enqueue_task` is best-effort and never raises.
+retries: `max_attempts` (6 for a memory write, `MEMORY_LANE`; 3 for
+maintenance) then dead-letter (`status='failed'`); stuck `processing` rows
+past 300s are reclaimed. Per-task short-lived SQLite connections (no WAL
+contention with chat reads on `memory_state.db`). `enqueue_task` is
+best-effort and never raises. Since 2026-10-13 (Memory audits M12, M13):
+- **A failed attempt waits its backoff** (`next_attempt_at`, `_retry_delay`:
+  30 s, x4 each time, at most an hour). It went back to `pending` at once:
+  three attempts in three polls, so a ten-minute provider outage
+  dead-lettered every deep pass of it.
+- **A dead letter is kept until the operator retries or clears it** (the
+  Memory page's queue): `purge_completed_tasks` deletes completed rows only.
+  One dead letter degrades memory health (`status_detail: dead_letters`) and
+  raises the ops alert `memory.dead_letter`. They were deleted after a week,
+  and health (five or more) cleared itself.
+- **A failure is a failure.** `dual_write.write_episode` says `written`,
+  `refused` (the user keeps the turn out) or `failed`; a failed write raises
+  `EpisodeWriteFailed` in the post-turn pipeline, counts `mirror_fail`, and
+  the live thread hands the turn to the queue (`post_turn_memory`) -- the
+  None was ignored and the turn counted `ok`. The deep pass tells "the model
+  is unavailable" (`belief_extractor._llm_extract`: no client, or the call
+  raised -- retried, `deep_pass_failed`) from "it answered with nothing"
+  (done); an outage ended as a heuristic-only "done", never redone.
+- **A lane claims no more rows than it has free slots, and memory writes
+  have their own lane** (`MEMORY_LANE`: post-turn memory, the deep pass,
+  entity merges, summary rebuilds). The worker claimed eight and ran two:
+  a row that waited past the stuck threshold was claimed again and ran
+  twice, and a pg_dump or a restic check held up a user's turn.
+Gate: `tests/test_memory_queue_retries.py` (each with its negative control:
+the ignored None, the one-None extractor, no backoff, the old purge, the old
+batch-claim loop, one lane).
+
+**D2. No slow call under a memory write lock; one vector per row** (2026-10-13,
+Memory audits M14, M15, `memory/vector_write.py`). No embedding, Postgres
+mirror, graph or vector-index call runs inside a memory SQLite write
+transaction, `belief_mutation._mutation_lock` or the episode writer's lock:
+a fact was embedded inside the mutation's `BEGIN IMMEDIATE` under the
+process-wide lock (every belief write waited on one embedder call, up to two
+minutes), the superseded fact's graph delete and mirror tombstone ran there,
+and `macro_sleep` made a Postgres round trip per archived fact inside its
+transaction. Now `mutate_belief` writes the vector after the commit
+(`_store_belief_vector`), the superseded edge and tombstone after it too, and
+`macro_sleep` unmirrors after its commit. A row's vector is embedded ONCE
+(`encode_vector`, no lock held), written by one guarded `UPDATE`
+(`write_local_vector`: no vector yet and the row still holds what was embedded;
+it commits only a transaction it began), and sent to the remote index only
+(`index_remotely` through `backends.get_remote_vector_backend`, taken back out
+if a forget landed meanwhile). An episode was embedded twice, the second write
+ran on the shared connection without the lock or the tier guard (a forgotten
+memory got its vector back), and `LocalSqliteVectorBackend.upsert` committed
+the caller's transaction; no memory writer upserts through it now. Recall's
+access bump waits at most 50 ms for the write lock and keeps its counts when
+the database is busy (`recall.flush_access_bumps`, written by the next recall
+or `macro_sleep`) -- it waited the full busy timeout (5.54 s measured) on the
+turn path and dropped them. Gate: `tests/test_memory_io_outside_locks.py`
+(a probe in every embed, mirror, graph and vector hook used by
+`belief_mutation`, `macro_sleep`, `hygiene`, `forget` and the episode writer
+finds the database free and no memory lock held; one embedding per write; the
+forget race; a gate on local upserts; each with its negative control).
 
 **E. The split-DB design is load-bearing.** `memory_state.db` (hot reads:
 beliefs, episodes, entities, procedural DAGs) is isolated from
@@ -881,7 +1123,7 @@ came up short, and archiving had erased 76 memories.
   sources are earlier backups of the memory DB (a same-row copy whose text
   reproduces the stub), the chat store + spool and checkpoint history
   (`chat_history.py`, both backends), `noted` beliefs, `memory_store` tool
-  calls (resumable scan), the knowledge library. Anything but a backup must
+  calls (resumable scan). Anything but a backup must
   reproduce the episode id (`dual_write._episode_id` /
   `swarm_bridge.bridge_episode_id`) AND the stub (`_archive_stub`, checked
   against the old SQL). Sources must agree or nothing is restored; text is
@@ -899,6 +1141,19 @@ came up short, and archiving had erased 76 memories.
   previous turn's when there was none); the episode `turn_number` is the
   turn index (`user_turn_index`), not the iteration count that made a
   repeated question collide into one memory.
+- **A poison turn is set aside** (2026-10-13, Memory audit M27): a
+  reconciled turn whose fact extraction fails `_FACT_ATTEMPTS` (3) passes in
+  a row is marked `metadata.facts_failed` (a WARNING names it) and the facts
+  cursor moves on; the count rides the reconcile state (`fact_attempts`). A
+  locked database is never a verdict: it raises to the runner. One failing
+  turn used to keep the cursor before it for good. The embedding rebuild
+  (M28) loads the model first and re-encodes in place (a row keeps its old
+  vector until the new one is written; it NULLed every vector and committed
+  before the model loaded), and takes its pre-rebuild copy again each time
+  (it kept the first one forever). `macro_sleep`'s tier moves are
+  compare-and-set on the tier and last touch it read (M29: a forget during
+  the sweep had its "forgotten" overwritten; `moves_skipped` counts them).
+  Gate: `tests/test_memory_lifecycle_cas.py`.
 - **Turn reconcile** (`turn_reconcile.run_turn_reconcile_pass`, 15 min, ~60
   s): every chat-store turn older than 10 minutes without an episode gets
   one, with its own time, through `mirror_episode`. Then the turns it wrote
@@ -907,7 +1162,36 @@ came up short, and archiving had erased 76 memories.
   pass) -- at the turn's own time (§15H; a rowid cursor, `facts_after`).
   Repeated questions are counted, erased-row stubs count as present, and the
   cursor passes only settled sessions. On live it found 1,004 of 1,174 chat
-  turns missing.
+  turns missing. **The cursors live in `memory_state.db`**
+  (`memory_reconcile_state`, `turn_reconcile.read_state`, 2026-10-14): in
+  the settings store a restored older memory database met a cursor already
+  past the chats changed since its backup, and their newer turns were never
+  memories again. Without the row (an older build's database, an older
+  backup) every chat is read once. `memory.backup.restore_memory_backup` --
+  the Memory page's restore -- copies the backup over the live file, then
+  applies the forget journal and runs turn reconcile at once (forgets made
+  since came back until the next 15-minute pass). Gates:
+  `tests/test_memory_restore_drill.py` (RPO/RTO at any size,
+  `KAZMA_TEST_MEMORY_RESTORE_DRILL_TURNS`; the cursor of after the backup as
+  the negative control). `scripts/memory_soak.py` is the soak harness
+  (private stores, a process per cycle, killed cycles, restores; checks every
+  cycle), held by `tests/test_memory_soak_harness.py`.
+- **Knowledge Library text is injected, never written into memory** (Memory
+  audit M04, 2026-10-13). The supervisor copied up to two injected chunks a
+  turn into the chat's memory (`promote_kb_hits_to_episodes`, setting
+  `memory.v2.promote_kb_to_episodes`, on by default), inline in the async
+  node -- a chat-store read, an insert, embeddings, the vector index and the
+  Postgres mirror on the loop -- as `user_text="[Knowledge: ...] ..."`:
+  crawled text recalled as history, grouped into summaries as the user's,
+  and kept after its library was deleted. The promotion, its setting and
+  Settings toggle, and recovery's library source are gone; the maintenance
+  sweep "retired knowledge promotions" (`forget.retire_knowledge_promotions`)
+  empties the copies an earlier build left -- no ledger row, the library
+  keeps the text. `mirror_episode` is a loop-stall helper. Gate:
+  `tests/test_memory_kb_never_in_memory.py` (a real supervisor call that
+  injects library text under a loop SQLite/embedder tracer: no memory write;
+  recall shows none; the old call on the loop as the tracer's control; the
+  retirement; nothing writes the old source).
 - **Nothing repoints live memory** (item I): no product code rebinds a
   `kazma_core.paths` function or resets the shared `dual_write` writer
   (`_reset_mirror` is a test helper; gate in `tests/test_memory_every_turn.py`).
@@ -990,6 +1274,15 @@ four injected were noise.
   and as whole words with an optional و/ف prefix -- "تذكرة" (a ticket) is
   not "تذكر". It promotes the turn to the recall tier (`episode_row`) and is
   a durable cue (`is_filler_turn`: "تذكر هذا" is eight characters).
+- **Write-path details** (2026-10-13, Memory audit M26): English "remember"
+  phrases match whole words, and one right after "do/did you" is a question
+  ("Can you denote that" matched "note that" and became a recall-tier
+  memory); `dual_write.mirror_belief` (no caller, past the trust gate, the
+  ledger and supersede) is deleted; a single-valued fact's current value is
+  the newest, and extra current rows are closed at its start; the deep pass
+  marks its episode (`metadata.deep_pass`, `_DEEP_PASS_VERSION`) and a
+  second task for it does nothing; the embedder singleton is built once
+  under a lock. Gate: `tests/test_memory_write_path_items.py`.
 - **Small talk is kept, never recalled (W5).** `episode_text.is_small_talk`:
   the whole message is small talk by its words, never by length ("Pixel's
   age?" is short and a question). A greeting, thanks or goodbye with a reply
@@ -1006,6 +1299,32 @@ four injected were noise.
   (one round past the walk's radius, so the edges between its outermost
   nodes are there); the seeds come from every entity name. Same graph as
   before whenever the old cut held everything.
+- **Recall has a deadline and embeds the question once** (2026-10-13, Memory
+  audit M16). `recall()` wraps the body (`_recall`) with a per-recall memo
+  (`_QUERY_MEMO`): each text is embedded at most once, a failure included
+  (a failed embedding was tried by every channel, four times a recall), in a
+  bounded daemon thread (`_embed_within`, two in flight at most) waited on
+  until `memory.v2.recall_deadline_s` (default 5 s). Past it, or with the
+  embedder failing, recall answers from keywords and sets
+  `RecallResult.degraded`; `memory_search` then says the search was
+  incomplete, never "No relevant memories found.". Both embedders carry a
+  circuit breaker (`embedder._EmbedderBreaker`: 30 s doubling to ten
+  minutes, no call and no log while open, one log line per opening) shown in
+  memory health (`embedder`, `status_detail: embedder_unavailable`). Gate:
+  `tests/test_memory_recall_deadline.py` (negative controls: the body
+  without its memo or deadline, a breaker that never opens).
+- **Recall reads the question's text, bounded** (2026-10-13, Memory audits
+  M17, M25). The supervisor's latest user text is
+  `turn_input.extract_latest_user_text(messages, image_marker=False)`: the
+  text parts only. It was `str(content)` -- on a photo turn the Python repr of
+  the parts, base64 included (recall embedded 200,125 characters and built a
+  6,029-term keyword query; the language lock and the router read it too).
+  `recall()` reads at most `_QUESTION_MAX_CHARS` (2,000: the start and the
+  end of a long paste), the keyword query and the graph walk's seeds at most
+  `_QUESTION_MAX_TERMS` (32) words, each once. Gate:
+  `tests/test_memory_question_bounds.py` (a photo turn through the real
+  supervisor node; recall at 2,000 words within twice 20 words on a seeded
+  store; the bounds lifted as the negative control).
 - **Hybrid vector search merges (R8).** `HybridVectorBackend.search`
   returned the remote index's hits alone whenever it had any, so a memory
   not yet in the remote index was invisible to meaning search. Both are
@@ -1031,7 +1350,7 @@ four injected were noise.
 - **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
   private database the product's way -- turns via `episode_row`, facts via
   `mutate_belief(private=True)`, which keeps every write in that database (no
-  state mirror, graph, unified index or remote vector index), and (v3) weekly
+  state mirror, graph or remote vector index), and (v3) weekly
   summaries as `topic_summaries` stores them, a summary answering when it
   stands for an answering turn -- and asks the real `recall()`. CI replays bge-m3's recorded vectors
   (`tests/fixtures/memory_bench/vectors.npz`); `thresholds.json` is a
@@ -1040,7 +1359,25 @@ four injected were noise.
   dataset version only. A change to the dataset's texts needs `vectors`
   re-recorded with the real model. The Dashboard's golden eval seeds facts
   the same way; a case marked `needs_meaning` is skipped without an
-  embedder and must pass with one.
+  embedder and must pass with one. **Dataset v5 (2026-10-14, Memory audit
+  M24)** adds 40 held-out questions (`HELDOUT`: never used to choose a
+  threshold; the builder refuses one that repeats a tuning question; a
+  `mixed` category asks across languages), scored apart
+  (`report["heldout"]`, gated as `heldout.*`); an extraction benchmark
+  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 30 turns
+  EN/AR/mixed, recall, precision and "quiet" per language; the heuristic
+  pass in CI, the model's deep pass from recorded replies,
+  `tests/fixtures/memory_bench/extraction_llm.json`, recorded with
+  `extraction --record` on the configured model -- the owner's to run, it
+  costs a call a turn; a turn with no recording is an error, never "the
+  model was down"); explicit abstention targets (`TARGETS`, 0.6, goals not
+  gates); a reviewed trade (`lock --trade "why"`, `trade_problems`: no
+  score falls more than 0.05, one rises 0.05 or more, abstention never
+  falls; recorded in `trades`); and the Postgres-primary run
+  (`tests/test_memory_benchmark_pg.py`, opt-in, pgvector, floors in
+  `postgres_primary`). The report (both backends, held out, extraction) is
+  the guide's "Benchmark report"; the measured limits at 10x and 100x are
+  the guide's "Measured limits" (`tests/test_memory_scale_bench.py`).
 - **Nothing on the hot path parses `kazma.yaml` (S4):**
   `config_loader.install_yaml_section` -- the install root's file, parsed
   once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.
@@ -1084,7 +1421,7 @@ four injected were noise.
   statement, cuts the previous one short, and never becomes current. It adds
   nothing when a neighbour says the same, and the trust gate applies to the
   value it would cut short. History rows reach the state mirror, never the
-  graph or the unified index. Until 2026-09-27 the last WRITE won, so any
+  graph. Until 2026-09-27 the last WRITE won, so any
   late writer could put an old "I live in Paris" over "I moved to London".
 - **Every writer that runs after its turn passes the turn's time.** The
   post-turn scheduler stamps `at` when the turn closes; the durable queue
@@ -1094,6 +1431,15 @@ four injected were noise.
   heuristic and the deep pass means the deep pass may still correct its own
   turn. Gate: `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
   (every call in the late-writer modules names its time).
+- The quick (heuristic) pass reads Arabic and mixed text too
+  (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
+  0.00 Arabic recall). Token rules from the grammar, compared folded: a
+  negation, an imperative without its hamza ("استخدم البحث"), a question, a
+  participle outside the user's own clause ("أخوي ساكن في دبي") and "work in
+  a field" keep nothing; a place must end where it is read. One fact per
+  kind, the English reading first. Gate: `tests/test_memory_arabic_facts.py`
+  (sentences not in the benchmark, both ways; the pass switched off as the
+  negative control).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each
@@ -1123,10 +1469,60 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   Every product site that inserts an episode is declared in
   `tests/test_memory_forget.py`, and the live writers must ask the ledger.
 - The facts a forgotten turn produced (`source_session`/`source_turn`) are
-  invalidated and lose their value (`object = ''`, `metadata.forgotten`);
-  a forget cut short (`invalidate_belief` commits as it goes) is finished by
-  asking again. The Postgres mirror gets the tombstones; the remote vector
-  index loses the vectors.
+  invalidated and lose their value, their vector and every metadata field
+  but where they came from (`object = ''`, `embedding = NULL`; an operator
+  edit's `previous` goes with it); a forget cut short (`invalidate_belief`
+  commits as it goes) is finished by asking again. The Postgres mirror gets
+  the tombstones; the remote vector index loses the turn's AND its facts'
+  vectors.
+- **Every copy is on one list** (`memory/memory_stores.py`, Memory audit
+  M01, 2026-10-13): each table of `memory_state.db` and `memory_ops.db`,
+  and each store outside them, with what Forget does there, its export
+  section or why it has none, its retention and its bound. Forget reached
+  the episode and the fact's value column only: the value stayed in the
+  fact's vector and edit history, `beliefs_archive` (Hygiene and the
+  180-day sweep), `memory_audit_log` (now redacted to a hash, the event
+  kept), a queued turn's payload, the legacy tables, the full-text index
+  segments (`purge_search_index`: FTS5 keeps a deleted row's words until a
+  merge) and `unified_items`, a copy of every fact and Knowledge chunk with
+  no delete path that federated search served -- retired, dropped by
+  `ensure_ops_schema`. A tool record keeps argument NAMES, never values
+  (`procedural.strip_argument_values` rewrites older ones). What Forget
+  cannot reach is the erasure horizon (`ERASURE_HORIZON`: backups, restic,
+  exports, the pre-rebuild copy, freed SQLite pages), said in the Forget
+  dialog and the guide. Gates: `tests/test_memory_store_registry.py` (one
+  word planted through every writer, forget, every column of every table of
+  both databases read for it -- the forget of the day before and the
+  missing purge as negative controls; every table declared, a planted one
+  fails), `tests/test_memory_forget_witnesses.py` (the audit's witnesses,
+  inverted).
+- **Forget converges, and a restore does not undo it** (Memory audits
+  M08/M10, 2026-10-13; `memory/forget_journal.py`). Every forget, keep-out,
+  "remember again" and summary forget is appended to the forget journal
+  (`<data dir>/memory_forget_journal.db`, its own file) BEFORE it changes
+  anything; the memory database records what it applied
+  (`memory_forget_applied`, inside it, so a restored older copy lacks the
+  marks of later forgets). `forget_episode` runs EVERY step every time (the
+  "already" path finished the facts only; summaries stayed active) and
+  marks its entry applied only after the last one. The maintenance entry
+  "forget convergence" (first of the memory sweeps, and at boot) applies
+  pending entries in order, stopping at a failure (a keep-out then
+  "remember" must keep their order), enforces the ledger on stored rows
+  (`forget.enforce_ledger`: a forgotten turn's copy, a row written into a
+  kept-out chat after the keep-out, a chat's past forgotten in the last day,
+  an active summary from a forgotten turn) and retries remote deletes that
+  failed (`forget_remote_pending`, also in the journal file). The writer's
+  ledger check and insert are one `BEGIN IMMEDIATE`, and it pushes the row
+  as it is now to the mirror and the remote index, never its arguments.
+  Recovery and `scripts/scan_old_sessions.py` ask the ledger. A tombstone
+  keeps a note's chat and turn (provenance, not content). The restore drill
+  reports the forgets a backup would replay. Gate:
+  `tests/test_memory_forget_converges.py` (a fault after each of ten steps,
+  then one pass -> the M01 completeness scan passes; without the pass each
+  leaves something; the three L05 witnesses inverted; a keep-out racing the
+  writer on another thread; a pre-forget copy restored -> forgotten again,
+  reconcile does not rebuild; negative control without the replay; only the
+  forget code may pass `journal=False`).
 - **"Don't remember this chat"** is the whole-chat ledger row: the writer
   refuses its turns, the post-turn worker (`_run_turn_memory`) extracts no
   facts, the past-chats search skips the chat -- and reads other chats
@@ -1155,17 +1551,40 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   and `graph_helpers._ensure_about_user` places it right after the system
   prompt and personality, replacing an earlier copy. Never inferred: a
   profile built from facts would have shown 4 past reset dates every turn.
-  `tests/test_memory_about_me.py`.
+  Changing it is admin-only under RBAC (`platform_rbac.role_allows`, Memory
+  audit M11): it is guidance for every user of the tenant, like the
+  personality. `tests/test_memory_about_me.py`, `tests/test_memory_tools_fenced.py`.
 - **Deleting a chat keeps its memories (S3, the owner's rule)** unless the
   dialog's "Also forget what Kazma learned from this chat" is ticked: then
   the page asks `PUT .../chats/{id}/memory {remember: false, forget_past:
   true}` FIRST (the forget finds the chat's other key through the chat
   store, which the delete empties) and deletes only if that succeeded.
   `tests/e2e/test_chat_delete_forget.py` (unticked makes no forget request).
-- **Export** (`GET /api/memory/v2/export`): the caller's tenant's facts
-  (with provenance), memories, weekly summaries, entities and what was
-  forgotten (when, never what). The Memory page's "Memories of
-  conversations" panel forgets one.
+- **Export** (`GET /api/memory/v2/export`, M22 2026-10-13): one section
+  per `memory_stores` export section (`memory_api._EXPORT_QUERIES`; the
+  export refuses to run when the two disagree) -- About me, facts, archived
+  facts, every change to a fact, memories, weekly summaries, entities,
+  entity merges, graph groupings, tool procedures, what was forgotten --
+  and `not_included`, each table left out with why. A forgotten fact shows
+  when, never what (no subject, predicate, chat or turn). Streamed, 500
+  rows at a time, never built in memory. Gates in
+  `tests/test_memory_store_registry.py` (every table with a tenant names
+  its section or why not; a planted table and a section without a reader
+  fail). The Memory page's "Memories of conversations" panel forgets one.
+  **Every memory and weekly summary is reachable there** (Memory audit M23,
+  2026-10-14): the panel listed the newest 30 memories and 40 summaries, and
+  an older one could be forgotten only through the API. Both routes page
+  (`offset`, `total`; the page shows "1–30 of N"), the memories route takes
+  `q` (`routes_direct/memory._every_word_match`: every content word, each in
+  any of its search forms -- recall's OR expression, newest first, filled the
+  page with any memory sharing one word), and the probe's and "Search both
+  stores" memory and summary hits carry Forget (`_forgetEpisode`,
+  `_forgetSummary`, one dialog each). Gates:
+  `tests/test_memory_forget_reachable.py` (every row reached page by page,
+  the first page alone as the negative control; a list with Forget that
+  loads without an offset fails), `tests/e2e/test_memory_forget_older.py`
+  (the oldest of 35 forgotten through the page, English by paging, Arabic by
+  search; ledger and tier checked).
 
 **J. Weekly topic summaries (C2, 2026-09-27, `memory/topic_summaries.py`).**
 Recall injects five turns and five facts; one topic on live ran to 100+
@@ -1204,7 +1623,17 @@ queued by the maintenance sweep with at most two weeks in flight.
   user forgets is a tombstone its week never writes again (`_covered`: a
   topic mostly made of another summary's turns is that summary, even after a
   late turn joins it). The model's text passes `prompt_fence.filter_injection`
-  and a credential mask.
+  and a credential mask. **The store is a compare-and-set** (`_store`,
+  Memory audit M05, 2026-10-13): the model call takes up to a minute per
+  topic, so inside one write transaction the source turns are read again --
+  a text written from a turn forgotten meanwhile is never stored (the turns
+  left, if still a topic, wait as `rebuild`) -- and a summary written again
+  must still be `rebuild` (a forgotten one stays a tombstone). Until then a
+  forget during the weekly run landed in an ACTIVE summary, and a rebuild
+  overwrote a summary the user had just forgotten. Gate:
+  `tests/test_memory_summary_store_cas.py` (both witnesses inverted; every
+  statement that sets a summary active names the status it replaces; the
+  old store as negative control).
 - **Local only:** summaries live in the local memory database, like the
   graph, and are not mirrored to the Postgres state backend; they are
   rebuilt from turns. The Memory page's "Weekly summaries" panel lists and
@@ -1244,11 +1673,61 @@ an answer ("User prefers dark mode").
 - **The mirror sync** (maintenance entry "memory mirror sync",
   `sync_state_mirror`): compares the whole mirror with the local store -- id,
   tier and an md5 of the texts; for a fact, current or not and the value --
-  and pushes what differs, newest first, at most 500 rows a pass. A row only
+  and pushes what differs, newest first, at most 5,000 rows a pass
+  (`_SYNC_LIMIT`; 500 while every push had its own connection), episodes in
+  batches. A comparison still pushing with more behind is not stamped, so the
+  next pass compares again (`catching_up`). A row only
   the mirror holds is counted (memory health `mirror`) and left alone, never
-  deleted or copied back. Skipped with no mirror and when Postgres is the
-  primary store. Digests match Postgres's own (real-Postgres test, Arabic,
-  emoji, NULLs); NUL bytes are dropped on every mirror write.
+  deleted or copied back. Skipped with no mirror only: it runs when Postgres
+  is the primary store too (2026-10-13, Memory audit M06) -- recall reads the
+  mirror there, and a forget whose mirror write failed stayed whole in it for
+  good. Digests match Postgres's own (real-Postgres test, Arabic, emoji,
+  NULLs); NUL bytes are dropped on every mirror write.
+- **A pass pushes what changed; the full comparison runs daily** (2026-10-14,
+  Memory audit M31). Triggers (`schema_v2._ensure_mirror_outbox`) queue each
+  episode or fact written, or changed in a column the mirror holds, in
+  `memory_mirror_outbox` -- in the change's own transaction -- and a deleted
+  fact (its mirror copy goes). The pass drains the queue (each row once, as
+  it is now; a failed push retried 5 times, then left to the comparison; a
+  row another region owns dequeued and counted, `outbox_conflicts`). The full
+  comparison above runs once in `memory.v2.mirror_verify_hours` (24, 1-168;
+  stamp `memory.v2.mirror_full_verify`, its findings kept in
+  `memory.v2.mirror_verify_result`, both runtime). No mirror configured: the
+  queue is emptied; configured but down: kept. A new mirrored column needs a
+  trigger column -- `test_every_column_the_mirror_holds_queues_its_row` reads
+  the upserts' SQL. Pushes go through a pool (`PostgresStateBackend._connect`,
+  psycopg_pool, §44's `check=`) and in batches (`mirror_episode_rows`, 500 a
+  batch, one region read per batch; `remirror_episodes` uses it and takes
+  what it pushed off the queue, entries queued before its read only). Every
+  row on its own connection, the first macro-sleep pass at 10x the live size
+  took 336 s; batched, 7 s. **A mirror that went back is compared at once**
+  (`_mirror_went_back`, 2026-10-14): a pass asks the mirror
+  (`present_ids`) for the newest local rows it was already sent, and one
+  missing (a `pg_restore` of an older dump) forces the full comparison, at
+  most once an hour. The outbox had been drained for those rows, so recall
+  on the primary path missed every memory since the dump until the daily
+  comparison. Gates: `tests/test_memory_restore_drill_pg.py` (real Postgres,
+  `pg_dump`/`pg_restore`; the incremental pass alone as the negative
+  control), `tests/test_memory_mirror_incremental.py`. Measured limits (recall is the ceiling: 8 s a
+  question at 170,000 memories) are in the guide, from the opt-in
+  `tests/test_memory_scale_bench.py`. Gates:
+  `tests/test_memory_mirror_incremental.py` (each with its negative control:
+  a full pass reads both digests, a backend without batches pushes per row,
+  the pool's connection count against a connection each, real Postgres).
+- **Postgres-primary recall reads only what this install still remembers**
+  (2026-10-13, M06). The mirror's keyword search and id fetch read only
+  `RECALLABLE_TIERS`; the keyword channel orders by how many of the
+  question's words a row holds (`words_held`), then by time -- it took the
+  newest rows holding ANY word, so an older memory only its words would find
+  fell out of the slice (the slice gate in `test_memory_nothing_lost.py`
+  covers `state_backend.py`). Recall drops every row whose local copy is a
+  tombstone or whose turn the forget ledger names (`recall._locally_forgotten`),
+  whoever wrote it. Measured on the retrieval benchmark with the mirror as
+  primary and the index on the same vectors: hit rate and MRR equal to local,
+  precision 0.0166 lower (`PRIMARY_DELTA`). Gate:
+  `tests/test_memory_pg_primary.py` (real Postgres: a forget with the mirror
+  write failing, left out of recall, repaired by one pass; each with its
+  negative control). The mirror tables are in `KAZMA_PG_TABLES` (§21A).
 - **The top-up reads only other installs' rows.** Mirror writes carry the
   writer's install id (`metadata.install`, `<data dir>/install_id`);
   `written_elsewhere` admits a remote-only row only when another install
@@ -1283,6 +1762,34 @@ drawing, the rest by extraction.
   auto-merge raised (logged at DEBUG) and created a duplicate. Quarantine
   creates the new entity before its ledger row for the same reason. The
   extractor files a fact under the id a name resolved onto.
+- **An entity's id keeps its script** (`entity_resolution.slug`, the ONE
+  id rule, Memory audit M02, 2026-10-13): NFKC, casefolded, the letters,
+  marks and digits of every script, other runs one `_`, 80 characters; an
+  id for a label with no letter (an emoji) from its own text; an empty label
+  has none (`ValueError`; `mutate_belief` refuses it). The rule kept
+  `a-z0-9` and fell back to `"entity"`, in four copies plus the Memory
+  API's: every all-Arabic, Persian or CJK subject was `entity`, unrelated
+  facts superseded each other, and later non-Latin objects were rewritten to
+  `entity`. ASCII ids are unchanged. Spellings that differ by vowel marks or
+  letter forms meet in the alias hash (`documents.arabic.fold_for_search`),
+  never in the id. Service names (`current_facts`) and the same-words key
+  (`graph_hygiene`) use it too. Rows the old rule wrote: `entity_repair`
+  (`scripts/memory_entity_repair.py size`, then `apply` on a copy) quarantines
+  each collapsed fact and queues its turn for the deep pass -- nothing is
+  guessed; the live run is the owner's. Gate: `tests/test_memory_entity_ids.py`
+  (Arabic, Persian, CJK, emoji through the writer and the extractor; no
+  `a-z0-9` keep-list or `"entity"` fallback in memory code, the old rule as
+  the negative control; the repair on a copy).
+- **Tier-2 resolution queries stored name vectors** (2026-10-13, Memory audit
+  M18): an entity keeps its name's vector (`entities.embedding`, stored at
+  creation, by `_store_name_vector` on an exact match, and by the vector
+  repair pass for older rows, `repair_entity_name_vectors`), and
+  `resolve_entity` asks `VectorEngine.nearest_entities` for the nearest. Every
+  extraction embedded every entity name of the tenant (93 names, seconds of
+  CPU a turn on live; past 4,096 names the short-text cache thrashed). An
+  extraction now embeds only the names it resolves. Gate:
+  `tests/test_memory_entity_name_vectors.py` (the same embed calls at 60 and
+  6,000 entities; the old scan as the negative control).
 - **Subjects that are work items are not entities**
   (`ego_anchor.subject_should_mint_entity`: phases, tickets, versions,
   hashes, paths, mostly-digit and sentence-length slugs). The fact is still
@@ -1327,6 +1834,54 @@ drawing, the rest by extraction.
   counted redirects and stayed above zero after a purge.
   `tests/test_entity_count_repair.py` (the source-and-target-only
   recompute as the negative control).
+- **The Memory page says what happened** (2026-10-13, Memory audit M32):
+  hygiene is `ok` only when every action it ran is (`failed`, `error:
+  hygiene_partial`; it said "Hygiene complete" over a failed archive); the
+  Episodes chip counts `RECALLABLE_TIERS` only (it counted tombstones); the
+  archive of ended facts returns `remaining` and its `cap` (2,000 a run, said
+  in the label and the toast); a forget whose remote vector delete is pending
+  says so; the probe panel shows weekly summaries and a degraded search;
+  server messages the page shows are codes (`not_found`, `protected`,
+  `about_too_long` with `length`/`max`) worded by the page in its language.
+  Gates: `tests/test_memory_page_truth.py`,
+  `tests/e2e/test_about_me_limit_arabic.py`.
+- **Every operator memory change leaves a trail and a real status** (2026-10-13,
+  Memory audit M35, `kazma_ui/memory_actions.py`): `MemoryActionRecorder`,
+  mounted with the memory API, records every POST/PUT/PATCH/DELETE under
+  `/api/memory` -- an INFO line (`[memory] operator action=... actor=...
+  tenant=... ids=... status=...`) and a `memory_audit_log` row
+  (`operator_action`): route, actor from the session (never the body),
+  tenant, the path's ids, the status; never a value. It answers a handler's
+  `ok: false` with 404 (not found), 409 (refused), 422 (a wrong request) or
+  500 (`safe_error`); most routes answered 200 for every failure. One
+  recorder, so a new memory route is recorded the day it is added. The daily
+  digest counts the forgets ("Planned work"), and `/metrics` carries
+  `kazma_memory_operator_actions_total{action=}` (this process, any
+  outcome). `invalidate_belief` returns
+  `safe_error`, never the exception's text. Gate: `tests/test_memory_actions.py`
+  (every mutating memory route requested and recorded; the routes without the
+  recorder as the negative control). The tenant gate takes a handler's own
+  4xx (a body with `ok`) as reached.
+- **Memory input is bounded and escaped** (2026-10-13, Memory audit M36): one
+  set of length limits (`memory/limits.py`: subject 200, predicate 120,
+  object 4,000, a name 120) checked first in `mutate_belief` -- refused, never
+  cut -- and by the edit, link and group routes (the edit route alone capped,
+  `mutate_belief` and group fields nothing); a memory request body is refused
+  past 256 KiB (`memory_api._bounded_body`, declared or streamed; bodies were
+  read whole); the entity search applies the tenant inside its full-text
+  subquery (its 2,000 rows were taken across every tenant first); every
+  database value the Memory console puts in an HTML attribute goes through
+  `_attr` (`_esc` left quotes, and a migrated entity type wrote its own
+  attributes); `/memory off` in a chat app asks for `/memory off confirm`
+  before it forgets. Gates: `tests/test_memory_input_bounds.py`,
+  `tests/e2e/test_memory_hostile_type.py` (a hostile type renders as text, no
+  handler, the filter still toggles).
+- **The graph export is well-formed and says when it was cut** (2026-10-13,
+  Memory audit M33): `GET /api/memory/v2/graph/export` builds GraphML with
+  ElementTree (`saxutils.escape` left `"` in attributes: any fact with a quote
+  made the file unreadable), drops characters XML cannot hold, and both
+  formats carry `truncated` (and the `X-Kazma-Truncated` header) when the
+  graph passed `limit`. Gate: `tests/test_memory_graph_export.py`.
 - **The Entities search finds an entity by its id**
   (`memory_api._fts_match_expr`): words split where the index splits them
   (an underscore separates), the id matches even when the index holds no
@@ -1341,31 +1896,55 @@ drawing, the rest by extraction.
   no work-item, isolated or empty entity; each rule with the old behaviour
   as its negative control).
 
-### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
+### 16. Scheduled reminders and tasks (`kazma-core/kazma_core/cron/`)
 
-The user-facing reminder cron (`schedule_task` native skill → `CronScheduler`
-→ `kazma-data/cron.db`). Two invariants must hold:
+The agent's `schedule_task` / `list_scheduled` / `edit_scheduled` /
+`cancel_scheduled` (native `task_scheduler_cron`) and the Scheduled page
+(`/scheduled`, `kazma_ui/scheduled_api.py`) → `CronScheduler`
+(`cron/scheduler.py`) → `SQLiteCronStore` (`cron/store.py`,
+`kazma-data/cron.db`). X posts on the same page are the X publication
+store's operations (§29C). Hardened 2026-10-14 against the Scheduled audit
+(`docs/audits/AUDIT_SCHEDULED_2026-10-13.md`, tracker
+`docs/plans/SCHEDULED_INDUSTRIAL_HARDENING_GOAL.md`; the 7-day fake-clock
+soak is still open). Every rule below must hold:
 
 **A. The scheduler MUST be constructed with a `graph_builder=`.**
 `app.py` builds `CronScheduler(store=…, graph_builder=_cron_graph_builder,
-poll_interval=…)`. Without `graph_builder=`, a job fires and `_execute()`
-raises `RuntimeError("No graph builder configured")` — every reminder
-silently crashes on fire. The closure returns the agent's one-shot
-`build_child_graph()` (checkpointer=None), mirroring the sub-agent
-graph-builder closure defined just above it.
+poll_interval=…)`. The closure returns `cron_fire_graph(agent,
+capabilities=…)` (`cron/capabilities.py`): the agent's one-shot
+`build_child_graph(declared_tools=…)` (checkpointer=None). Without it a
+task's fire fails -- counted and alerted, never delivered. A reminder needs
+no graph.
+
+**A2. A fired job does only what it declared** (decision D12, SCH-S05).
+`kind="reminder"` (the tool's default) delivers its stored text with NO
+model call. `kind="task"` runs an agent turn offered exactly its declared
+tools: `read` (read-tier tools, the default) or `read_write` (the write
+tier too); MCP and `ALWAYS_HITL` tools never. `DeclaredToolExecutor`
+refuses a call to anything else, and the job's one delivery is the
+scheduler's, not a tool. The prompt reaches the model labelled as a stored
+instruction. The booking's approval card says what the job will do, and an
+edit's card shows the prompt now and after (`cron/card.py`). A task does
+not fire while HITL is off unless the operator set
+`safety.cron_fire_without_hitl` (the agent cannot: `safety.` is protected,
+§45). Gate: `tests/test_cron_capabilities.py` (the old builder's whole
+registry as the negative control).
 
 **B. `delivery_target` is captured at schedule time, not resolved at fire time.**
 `schedule_task` reads `get_current_delivery_target()` (the
 `_current_delivery_target` ContextVar, bound at the gateway handler entry
 AND re-set in the tool-worker node from the `_gateway` routing block —
 same two-layer pattern as `_current_thread_id`) and stores it on the job.
-At fire time `_deliver()` uses `job.delivery_target` as the `target_id`.
-The fire-time SessionStore lookup is NOT a viable fallback — sessions
-TTL-evict after 5 min (`_session_ttl_seconds=300`), so any reminder >5 min
-out would miss. Legacy rows with empty `delivery_target` fall back to
-`thread_id`, then `"{platform}:unknown"`. The platform-isolation invariant
-(§2) is preserved — `chat_id` never enters graph state; `delivery_target`
-joins `thread_id`/`platform` in the internal `_gateway` routing sub-dict.
+At fire time the job's own target is used. A job whose target is empty or
+malformed adopts a sibling job's target on the same thread (and keeps it),
+then tries the thread's session -- best effort only: sessions TTL-evict
+after 5 min, so no reminder may rely on it. With none, the delivery is
+`undeliverable` at once, with an alert naming the job; nothing goes to a
+guessed address (the old `"{platform}:unknown"` fallback is gone). No tool
+result or page answer carries the address: `ScheduledJob.to_dict()` gives
+`destination`, a label (SCH-S10). The platform-isolation invariant (§2) is
+preserved — `chat_id` never enters graph state; `delivery_target` joins
+`thread_id`/`platform` in the internal `_gateway` routing sub-dict.
 
 **B2. A web turn's delivery target is for reminders, not for answers.**
 `web_gateway_block` stamps the operator's Telegram as a web turn's
@@ -1386,15 +1965,133 @@ transaction. In Python's default mode a DELETE opens a transaction even when
 it matches nothing, and the purge (at start and hourly) committed only when
 it had deleted something: from each boot until the next reminder fired the
 server held cron.db's write lock, and the live-data cleanup stopped half way
-with "database is locked". Every store method is one write statement; one
-that needs two writes together takes an explicit `BEGIN IMMEDIATE ... COMMIT`.
-Gates: `tests/test_cron_store_write_lock.py` (every public method, then
-another connection must take the write lock at once) and §35's kept-connection
-gate.
+with "database is locked". A group of writes (a claim, a fire's finish, a
+delivery's outcome) is one `BEGIN IMMEDIATE` through
+`db.sqlite_session.write_transaction`. Gates:
+`tests/test_cron_store_write_lock.py` (every public method, then another
+connection must take the write lock at once) and §35's kept-connection gate.
+
+**D. A fire is a durable, leased record, and ends once** (SCH-E04, E01,
+E07). A fire claims its job by compare-and-swap (`claim_job`: pending →
+running, with `fire_owner`, `lease_until`, `fire_due`, `fire_attempt` and
+the version it read). Its result, a recurring job's next occurrence, the
+job's status and the delivery row then commit in ONE transaction
+(`finish_fire`). A crash anywhere leaves either nothing (the fire runs
+again) or a finished fire whose delivery the outbox owns. Recovery decides
+per phase. At boot every running row belongs to a dead runtime and goes
+back to pending at the same occurrence; it used to be marked FAILED,
+delivered or not. While running, a row past its lease, or ours with no
+task, goes back the same way. A failed agent turn (an exception, `error`,
+`turn_failed`) is a failed fire: counted and alerted (`cron.job_failure`;
+`cron.job_failed` when its budget of 3 runs out), never delivered as the
+reminder. Shutdown stops cron first and drains fires within a bound;
+`/health/activity` counts them (`active_fires`), and
+`kazma_guard.py --reload --when-idle` waits for them. Retention purges by
+`finished_at`, and recovery reads every running row. Gates:
+`tests/test_cron_fire_record.py`, `tests/test_cron_crash_matrix.py` (a real
+child killed at each phase, one-off and daily: exactly one delivery, or one
+honest state with an alert; the old RUNNING→FAILED recovery is the negative
+control).
+
+**E. Delivery goes through a leased outbox, acknowledged only on `sent:`**
+(SCH-E02, §51). `cron_deliveries` holds a row per message. It is claimed
+with a lease, retried with backoff (30 s doubling to 15 min, at most 6
+attempts within 2 hours), and acknowledged only when `send_message`
+answers `sent:`. A refused delivery ends `undeliverable` -- the job too,
+never DONE -- with exactly one alert (`cron.delivery_failed`). A row whose
+sender died mid-send ends `unknown` (`delivery_unknown` on the job, alert
+`cron.delivery_unknown`) and is never sent twice. The job, the page and the
+daily digest show the outcome. Gate: `tests/test_cron_delivery_outbox.py`
+(the old deliver-then-finalize order is the negative control).
+
+**F. Missed is missed** (SCH-E06). A job due longer ago than its catch-up
+window does not run. The window is `cron.catchup_minutes` (default 60), or
+`KAZMA_CRON_STALE_HOURS` when that is unset; a window given at booking wins
+over both. The job is `missed` (a recurring job moves on to its next
+occurrence), and its chat gets ONE notice through the outbox. A late fire
+inside the window says how late ("(due 09:00 Asia/Kuwait, 12 min late)").
+X posts keep their own 5-minute hold (§29C). Gate:
+`tests/test_cron_fire_record.py::test_each_lateness_band`.
+
+**G. One timing model, in the operator's zone** (SCH-E03, E05, E09;
+`cron/timing.py`). A naive time means `cron.timezone` (else `KAZMA_TZ`,
+else UTC) on every path: chat, the Web form, `edit_scheduled` and X
+booking resolve one string to one instant. It accepts `5m`/`2h`/`3d`,
+RFC 3339 (`Z` and offsets honoured), and a typed recurrence: daily,
+weekdays or weekly at a clock time, or an RRULE subset (FREQ daily/weekly,
+BYDAY, BYHOUR/BYMINUTE, UNTIL/COUNT, TZID). It refuses, naming the zone:
+the past; more than two years ahead (`MAX_HORIZON`); more than 100
+characters; and a one-off inside a clock change's gap or fold. A recurring
+job takes the earlier time of a fold and shifts across a gap. X booking
+takes one-offs only. The commitment gate (§20) never rewrites a recurrence,
+and rewrites a one-off only to an aware instant in that zone; a recurring
+request booked as a one-off is refused. Gate:
+`tests/test_cron_timing_model.py`. It runs one fixture in UTC, Asia/Kuwait,
+America/New_York and Europe/London, a daily series across two clock
+changes, and checks that every docstring, manifest and hint example is
+accepted by its validator.
+
+**H. Only legal actions, and the stored truth** (SCH-E12, S02, S07, S04).
+The statuses are pending, running, delivering, done, failed, cancelled,
+undeliverable, missed and delivery_unknown.
+- Edit and cancel carry the version the form read; a stale one is 409
+  `conflict`. During a fire they are recorded and applied when it ends
+  (202 `edit_pending` / `cancel_pending`).
+- A finished job comes back only through Restore
+  (`POST /api/scheduled/cron/{id}/restore`).
+- The page offers only what the server lists in a job's `actions`. Its
+  dialog fetches the full prompt and sends only the changed fields, so a
+  timing edit never touches the prompt.
+- The page's X rows are the publication store's operations, changed through
+  `/api/x/queue/{op}/reschedule|cancel`. The page's own X PUT/DELETE routes
+  are gone.
+- Every change records its actor and source (`cron_events`).
+- The API and the page share one status-class map
+  (`tests/test_scheduled_presentation.py`).
+
+Gates: `tests/test_scheduled_api.py` (real scheduler and store),
+`tests/test_cron_fire_record.py::test_state_by_action_matrix`,
+`tests/js/test_scheduled_page.js`.
+
+**I. One operator, bounded, off the loop** (SCH-S03, E14, E10, E11, S12).
+- **Single operator:** on an install with platform users every Scheduled
+  surface refuses (decision D1, `cron/single_operator.py`). The routes answer
+  409 `scheduled_single_operator`, the page shows a banner, the tools give the
+  reason. In production mode reads and changes keep to the caller's tenant;
+  another tenant's id reads as unknown.
+- **Bounds:** 500 jobs a tenant and 50 a thread (Settings keys
+  `cron.max_jobs_per_*`); a prompt of 8,000 characters and a timing of 100; a
+  `scheduled` rate bucket (30 a minute); a task turn's budget
+  (`cron.task_budget_seconds`).
+- **Throughput:** a pass starts every due job, and the semaphore holds all but
+  `max_concurrent`. 50 jobs due among 1,000 fire in one pass
+  (`tests/test_cron_load.py`; the old four-a-pass rule is the negative
+  control).
+- **Off the loop:** the zone, the tenant rule, the address and the graph build
+  are resolved in a thread (static gate area `scheduled`,
+  `tests/test_scheduled_off_loop.py`).
+- **Readiness and metrics:** readiness reads the poll heartbeat
+  (`CronScheduler.liveness()`), degraded within two intervals of a dead or
+  stuck loop. /metrics carries fires, missed jobs, lateness p50/p95, the
+  outbox and the heartbeat. The digest counts outcomes from the
+  `[cron] outcome` line (`tests/test_cron_liveness.py`).
+- **Dates and origin:** dates on the page and in X Studio go through
+  `KazmaFormat`. `kazma_ui/same_origin.verify_same_origin` is the one
+  same-origin check for the Scheduled, X and email routes.
 
 **Multi-tenant memory:** tenants are enforced with
 `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with
-multi-user on (`memory_api._memory_tenant_id`). Then every `/api/memory` route
+multi-user on (`memory.config.memory_tenant_enforced`, the one answer for
+turns and surfaces). **Turns and surfaces resolve the same tenant** (Memory
+audit M07, 2026-10-13): under enforcement both are the principal's tenant in
+every mode (`resolve_tenant_id` wrote shared-mode turns to "default" while the
+page looked in the principal's), and only `shared` can be saved
+(`settings_validation`, key `memory.config.TENANT_MODE_KEY`); not enforced,
+the page keeps the install's own view, and its "Don't remember" ledger rows
+and About me (`profile.about_for_turn`) reach every tenant's turns. The chat
+delete says when there was nothing to forget. Gate:
+`tests/test_memory_tenant_matrix.py` (mode x enforcement x principal; the old
+resolver as negative control). Then every `/api/memory` route
 reads, counts and changes only the request tenant's rows -- another tenant's
 id reads as not found (`memory_api._row_tenant_ok`,
 `hygiene.invalidate_belief(tenant_id=)`) -- and the engine's own maintenance
@@ -1404,7 +2101,17 @@ binding) is the install's view (`_tenant_clause`). Gate:
 `tests/test_memory_routes_tenant_scope.py` -- every route, enumerated from the
 app, called as one tenant with another's ids; nothing of the other shown or
 changed, and the caller's own rows shown. Note: `entities.id` is a global PK,
-not per-tenant.
+not per-tenant -- so the boundary is held by rules (Memory audit M21,
+2026-10-13): entity creation never appends to another tenant's row
+(`entity_resolution._create_entity`), the hub sync (`self_hub.ensure_user_hub`)
+writes only the caller's own `user` row (the install's tenant may write any),
+rename promotes only a node of the caller's own facts (an id another tenant
+holds and an unused one both answer not_found), and the agent merge tool asks
+the routes' tenant rule. Gate: `tests/test_memory_entity_tenancy.py` (the four
+witnesses inverted; every agent tool taking an id, as another tenant, leaves
+beta's rows unchanged; the install's tenant as negative control). Keying
+entities by `(tenant_id, id)` -- every entity statement and a migration of
+non-default tenants' rows -- is not built.
 
 ### 17. Lifecycle Status Notifier (`kazma-core/kazma_core/lifecycle_notifier.py`)
 
@@ -1494,16 +2201,21 @@ copy-paste migration.
 
 **B. Embedded absolute paths are rewritten to the target root.** A Linux
 source (`/home/user/kazma`) has its workspace root baked into
-`workspaces.root_path`, `snapshots.state_json` (full SupervisorState blobs),
-`chat_sessions.messages`, memory entities/episodes, cron prompts. The
-importer rewrites them all to the target path across OS separator
-conventions (`migration/path_rewrite.py`). Two correctness properties: (1)
+`workspaces.root_path`, `chat_sessions.messages`, memory entities/episodes,
+cron prompts. The importer rewrites them all to the target path across OS
+separator conventions (`migration/path_rewrite.py`). Time-travel snapshots
+(`snapshots.db`) are no longer carried at all (2026-10-14, Time Travel audit
+TT-05: a copy elsewhere would bring back chats the owner deleted or forgot;
+§12, `store_registry`: `machine`). Three correctness properties: (1)
 `PathMap` is ordered **longest-source-first** so `/home/u/kazma` doesn't
 partially rewrite `/home/u/kazma-repos/ShipX`; (2) substitution is
-byte-level substring on the column text (NOT a JSON parse — the state_json
-blob is huge and paths appear anywhere), with both forward-slash and
-backslash variants handled. No false positives (e.g. `barcode` ≠ `code`).
-Workspace root rewrite also fires `notify_root_changed()` so MCP rebinds.
+byte-level substring on the column text (NOT a JSON parse -- paths appear
+anywhere), with forward-slash, backslash AND the JSON-escaped Windows form
+(`C:\\Users\\...`, every backslash doubled inside a JSON column; TT-09: a
+Windows-source migration left those paths on the old machine) handled. No
+false positives (e.g. `barcode` ≠ `code`); (3) a JSON column whose rewritten
+text would no longer parse keeps its original text (`_parses`). Workspace
+root rewrite also fires `notify_root_changed()` so MCP rebinds.
 
 **C. Import is atomic — never corrupt the target mid-flight.** The importer
 (`migration/importer.py:import_bundle`) stages to `kazma-data/.migrate-staging-<ts>/`,
@@ -1565,12 +2277,24 @@ refuses the bundle.
 - `kazma-cli/kazma_cli/migrate.py` — CLI dispatch (`kazma migrate export|verify|import`)
 - `memory/backup.py:backup_one()` — the WAL-safe SQLite copier reused by the
   importer's pre-swap safety backup (promoted from `_backup_one`).
-- Document store export/import is also wired (`documents.db` + content-addressed
-  tree under the document-store root) — see §19 and `migration/exporter.py`.
+- Document store export/import is also wired — see §19 F3 and
+  `migration/exporter.py`. What travels follows where the document CATALOG is
+  (`documents.backup.installed_document_backends`: the running service, else
+  the configured backends, so the CLI sees a Postgres store too): a SQLite
+  catalog as `documents.db` + the content it references; a Postgres catalog as
+  `data/postgres.dump` + every content file it references (copied after the
+  dump: a superset); a Postgres catalog beside a SQLite queue is refused by
+  name. The export records a refusal or a missing referenced file under
+  `_document_store`, and `verify` refuses the bundle. A document restore that
+  fails on import fails the import (2026-10-13, DOC-A7/A8).
 
 ### 19. Document Intelligence (`kazma-core/kazma_core/documents/`)
 
-Secure durable document platform (phases 0–10). Docs SoT:
+Durable document platform (phases 0–10), hardened 2026-10-13 against the
+Documents audit (tracker `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md`,
+F01–F10 / Q01–Q05; an independent review and the 48–72 h soak are still
+open, and the default `process` worker profile is not qualified for hostile
+documents, E). Docs SoT:
 `docs/docs/guide/document-intelligence.md`, phases
 `docs/docs/guide/document-phases.md`, security
 `docs/docs/security/document-security.md`, ops
@@ -1579,10 +2303,11 @@ Secure durable document platform (phases 0–10). Docs SoT:
 **A. Two boundaries — do not invent a third path.**
 - **Durable public boundary:** `DocumentIngestionService` — Web
   `/api/documents/*` (`documents_api.py`), native `document-platform` tools,
-  gateway `/documents`/`/docs`, TUI `DocumentsPanel`. Tenant/actor ACL, capacity,
-  audit, jobs, index.
+  gateway `/documents`/`/docs`, TUI `DocumentsPanel` (through the Web API).
+  Tenant/actor ACL, capacity, audit, jobs, index.
 - **Execution boundary:** `DocumentService` — sniff/parse/OCR/render inside
-  isolated subprocesses. Durable workers call it; chat
+  an isolated worker (a bounded subprocess, or a per-job container: E).
+  Durable workers call it; chat
   `agent_handler/attachments.py` may call it for **transient** fenced excerpts
   only (not a second durable store).
 - Gateway/UI **must not** import `documents.parsers`, `documents.ocr`,
@@ -1594,20 +2319,166 @@ parsing|ocr_running → normalizing → indexing → verifying → ready`
 (+ `retry_wait`, `rejected`, `cancelled`, `dead_letter`). Do not reintroduce
 generic PENDING/ACCEPTED/PROCESSING labels in product code or docs.
 
+**B2. Intake admission is durable; a partial publication is undone only by
+its owner or after its owner is PROVEN dead.**
+`documents/admission.py` reserves pending queue and tenant rate/byte budgets in
+the job backend before durable ingestion reads bytes. SQLite uses a short
+`BEGIN IMMEDIATE`; Postgres locks the one `document_intake_mutex` row
+(`SELECT ... FOR UPDATE`). No DB lock is held
+during streaming. Declared lengths are enforced before CAS publication; unknown
+lengths reserve the intake maximum and reconcile actual bytes. Replay is checked
+before fresh admission. Retries reserve a slot and require write ACL on a live
+document. A published job closes its reservation. Since 2026-10-13 every
+reservation records its OWNER (install, host, pid, process start time) and,
+before any metadata write, the ids it publishes under; the rows it creates
+carry its `intake_token`. A failed intake rolls its own rows back
+(`_abandon_own_intake`). At start and every minute while the workers run
+(`_sweep_stranded_intakes`), `_recover_stranded_intakes` claims (CAS) and
+rolls back intakes whose owner is provably dead (same install and host, pid
+gone or reused) or restored from a backup. An owner that cannot be proven dead
+(another host, an unreadable process) holds a LEASE: it renews
+`heartbeat_epoch` every quarter of its own `lease_seconds`
+(`documents.intake.lease_seconds`, default 300, stored on the row) while the
+intake runs, and is taken over only once that has lapsed. The takeover FENCES
+it: `jobs.enqueue(intake_fence=)` creates the publishing job only in a
+transaction that finds the reservation still active and still the caller's,
+under the admission mutex the claim also takes, and a claim refuses a
+reservation whose job exists. A fenced owner removes the rows tagged with its
+token (`_discard_tagged`) and answers `intake_taken_over` (409); the sweep
+removes what a fenced owner wrote and left, for a day after the takeover
+(`fenced_epoch`). A legacy row (no owner or no heartbeat: a build without the
+fence) is never taken over and is reported (`stranded`, readiness
+`document_intake_reservations_stranded`; a remote intake renewing its lease is
+not stranded). Never add age-only expiry without the fence. The Web route
+answers every budget BEFORE reading the body (`precheck_upload`; F08 below).
+Gates: `tests/test_document_admission_hardening.py`,
+`tests/test_document_crash_recovery.py` (a real child killed after each of 7
+intake stages and inside 4 job stages, SQLite and real Postgres),
+`tests/test_document_intake_lease.py` (a real child on "another host",
+paused, taken over and resumed; without the fence it publishes over the
+takeover, without the sweep its rows stay), the real-Postgres races in
+`tests/test_document_jobs_pg_idempotency.py`, and the opt-in
+`tests/test_document_intake_lease_containers.py`
+(`KAZMA_TEST_CONTAINER_LEASE_DRILL_IMAGE`): the stale owner in a real other
+container -- frozen with `docker pause`, or cut off the network -- is taken
+over on the database's clock and fenced when it returns; with its renewals
+blind the fence alone refuses it; blind and unfenced it publishes (control).
+
+**B3. Admission, scratch and claims are bounded and fair** (2026-10-13, F08).
+The Web upload refuses a declared length past the limit, a disabled platform,
+a disk whose free space minus the incoming file is below the floor, a full
+queue, a tenant cap or a spent rate window before reading a byte, and holds
+one of `documents.capacity.max_concurrent_uploads` spool slots (per process)
+while receiving. Spools, staged copies and parser/operation run directories
+live under the storage root: the floor measures them and GC sweeps what a
+crash left (`retention._sweep_scratch`). A worker stage below the floor is
+retried (`storage_full`), never started. Postgres metadata enforces the tenant
+blob quota (an advisory lock per tenant serializes check and insert). Claims
+are fair across tenants (`jobs.fair_claim_order`: fewest running first, then
+by when the job became ready, so a retry does not jump the queue), on both
+backends. The ten JSON routes (`/import`, `/generate`, `/merge`, `/convert`,
+`/split`, `/fill-form`, `/redact`, `/index`, `/unindex`, `/search`) read their
+body through `documents_api._json_body`: a declared length past 2 MiB is
+refused unread, an undeclared one is cut off at the cap, malformed or
+too-deep JSON is a 422. FastAPI's `Body(...)` parsed any size into memory
+before a route could look at it; never take a document route's body that way.
+Gates: `tests/test_document_upload_admission.py` (body-read counter,
+the old route as its control), `tests/test_document_claim_fairness.py`,
+`tests/test_document_quota_both_backends.py`,
+`tests/test_document_json_body_cap.py` (`Body(...)` as its control).
+
+**B4. Every job read names its caller** (2026-10-13, F05). `job_status`,
+`job_events`, `jobs_for_document`, `cancel_job` and `retry_job` take a required
+`actor_id`; `ingestion.SYSTEM_ACTOR` (not a string) is for code that already
+authorized the read. A missing actor is refused -- it used to mean "no check".
+An unreadable job reads exactly like an unknown one on the Web routes, the
+agent's tools and the gateway (no existence oracle; a replay by another actor
+is `idempotency_conflict`). `/api/documents/ops/audit` is admin-only. Gate:
+`tests/test_document_job_read_matrix.py` (signature gate with its control).
+
+**B4b. One operator, one principal** (2026-10-13, DOC-A3). The Web page acted
+as the signed-in name and chat `/documents` and the agent's tools as `agent`:
+a page upload was invisible to chat and the agent, and theirs to the page. On
+a single-operator install every surface acts as `documents.principal.OPERATOR`;
+`DocumentIngestionService.grant_operator_access` gives it an `owner` ACL row
+on documents ingested under another name (granted by their owner, audited,
+ownership unchanged, re-checked at most once a minute per tenant). With
+platform users (`multi_user_enabled`) the page acts as each user and chat and
+the agent refuse (`MULTI_USER_REFUSAL`, D1); a failed mode check refuses.
+`operator_for` (the one helper the three surfaces call) and
+`grant_operator_access` are loop-stall helpers. No
+surface passes a literal actor. Gate: `tests/test_document_operator_principal.py`
+(page->chat->agent and back on a real service; the old `agent` principal and
+a literal actor as controls).
+
+**B6. One status per error code** (2026-10-13, DOC-A4/A9).
+`documents_api._STATUS_BY_CODE` answers every route: writes off, an unavailable
+required scanner and `worker_isolation_*` are 503 with `Retry-After`
+everywhere (writes-off was 422 on the action routes; the scanner 400). The
+upload precheck asks `malware_blocks_intake` before reading the body. Every
+body goes through the 2 MiB reader (`_json_body`, `_optional_json_body` for
+delete); no route calls `request.json()`/`body()`/`form()`. Gates:
+`tests/test_document_api_statuses.py`, `tests/test_document_json_body_cap.py`.
+
+**B5. Outages are retried; only content is rejected** (2026-10-13, F07). A
+required malware scanner that is unavailable, a full disk (`storage_full`), a
+locked or unreachable metadata store (`metadata_unavailable`, SQLite or
+Postgres: `errors.infrastructure_errors`) go to the queue's finite retry
+budget, then dead-letter -- never REJECTED. (At upload, a required scanner
+that cannot run refuses the upload with `malware_scanner_unavailable`; nothing
+is published.) A store error while recording a
+stage's outcome leaves the job leased for lease recovery and never ends the
+worker loop. Gate: `tests/test_document_fault_transitions.py` (old handling as
+the negative-control witness).
+
 **C. Config is ConfigStore-nested.** Primary keys are
 `documents.intake.*`, `documents.limits.*`, `documents.ocr.*`,
 `documents.workers.*`, `documents.capacity.*`, `documents.retention.*`,
-`documents.gc.*`, `documents.security.*`, plus rollout
-`documents.enabled` / `shadow` / `default_authoritative`. Prefer
-`get_document_config()` live reads. Flat aliases exist only for a few intake
-keys — do not invent `documents.max_pages` style flat keys without wiring
-aliases.
+`documents.gc.*`, `documents.security.*`, `documents.indexing.*`,
+`documents.quotas.*`, `documents.render.*` and `documents.storage_root`, plus
+rollout `documents.enabled` / `shadow` / `default_authoritative`. Prefer
+`get_document_config()` live reads. Legacy aliases exist for a few keys only
+(`documents.intake_max_bytes` / `intake_max_files`, `documents.worker.*`,
+`documents.shadow_mode`, `documents.authoritative_by_default`,
+`documents.limits.max_uncompressed_bytes`) — do not invent
+`documents.max_pages` style flat keys without wiring aliases. A default
+coordinator captures one strict immutable policy per operation
+from `ConfigStore.snapshot("documents")` (one SELECT, no per-key TTL). Share its
+`DocumentPolicy` with execution, render, capacity, knowledge and GC layers; never
+refresh a shared mutable config during an operation. Explicit configs stay fixed.
+Worker tasks must detach startup's ContextVar and capture again per stage.
+Unavailable/invalid live policy refuses execution; rollout never enables writes
+on a settings outage. Remote parsing still checks live denial before each upload.
+Storage root, committed-reference quota, worker concurrency/lease/heartbeat and
+queue retry timing are constructed-resource settings: pin them until coordinator
+reconstruction and report configured/effective differences in readiness `policy`.
+Intake version metadata and parsed manifests record the effective policy hash.
+Backup/migration resolve the installed CAS root (`get_document_storage_root`),
+never a pending proposed root, and offline resolution does not create a service.
+Backup and migration take their path from where the catalog is
+(`backup.installed_document_backends`, F3); a fallback SQLite database never
+stands in for a Postgres catalog.
+A new document Postgres table goes in `db.pg_backup.KAZMA_PG_TABLES` (gate:
+`tests/test_pg_backup.py::test_kazma_pg_tables_covers_document_ddl`, which reads
+the DDL) AND in `backup_pg.DOCUMENT_PG_TABLES` (gate since 2026-10-13, DOC-A13:
+`tests/test_document_pg_tables.py`, the DDL and a started store on real
+Postgres, both directions). The Postgres store's backup and restore are F2;
+RPO/RTO on deployment hardware and store sizes remain open.
+Every `DocumentConfig` field has a reader outside `config.py` (DOC-A2: eight
+settings were read, validated and acted on by nothing -- `fence_llm_content`,
+`allow_encrypted_documents`, `allow_external_render_resources` among them --
+and were removed; none was shipped in kazma.yaml, so no stored default to
+retire). Gate: `tests/test_document_config_fields_read.py`.
+Gates: `tests/test_document_live_policy.py`, `tests/test_config_store_snapshot.py`.
 
 **D. Multi-replica honesty.**
 `jobs_pg.py` can claim jobs with `SELECT … FOR UPDATE SKIP LOCKED` when
-Postgres is configured. Document **metadata** (documents/versions/blobs)
-defaults to SQLite and moves to `repository_pg.py` when
-`KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and the pool is up. Readiness
+Postgres is configured. The job queue is on Postgres whenever Kazma's backend
+is (`KAZMA_DOCUMENTS_JOBS_BACKEND=sqlite` keeps it local). Document
+**metadata** (documents/versions/blobs) follows the job backend when
+`KAZMA_DOCUMENTS_METADATA_BACKEND` is unset or `auto` -- so it is on Postgres
+by default on a Postgres install -- `postgres` forces `repository_pg.py` and
+`sqlite` keeps SQLite; either Postgres store needs the pool up. Readiness
 must report single-replica for metadata **whenever the SQLite backend is
 active** — never claim multi-replica HA from the availability of the Postgres
 path alone, only from the backend actually in use. Single-replica is a
@@ -1625,7 +2496,56 @@ default. Redaction UI confirm is Web-only; API/tools can redact under ACL.
 **Malware:** `documents/malware.py` runs on quarantine via
 `scan_if_configured` (`auto`/`on`/`off` + fail-closed). Uses system
 `clamscan`/`clamdscan` only — no third-party upload of document bytes.
-Sandbox: scrubbed env + resource limits; not a full network namespace.
+Sandbox, `KAZMA_DOCUMENT_WORKER_ISOLATION=process` (default): scrubbed env;
+Windows Job Object memory/CPU-rate/process limits with fail-closed parser
+start -- the worker starts SUSPENDED and is resumed only once the job holds it
+(DOC-A12, 2026-10-13: a venv's `python.exe` is a launcher, and a job assigned
+a moment late held only the launcher, so the first run of every process ran
+uncapped while reporting "enforced"); the CPU cap is `cpu_cores=1`, sized by
+`security.process_budget.job_cpu_rate` (CpuRate is a share of the WHOLE
+machine: the old 100*100 was no cap). Every Job Object assignment in product
+code holds a suspended child (gate `tests/test_job_objects_hold_suspended_children.py`,
+`code_exec` too; busy-worker and memory-hog measurements with the old launch
+as controls in `tests/test_document_sandbox.py`); Unix memory/CPU-time
+`setrlimit` (no process-count limit). It confines
+no filesystem/network access; readiness says `hostile_document_profile:
+unqualified`. `container` (2026-10-13): both worker call sites (service
+parser, operations mutation/renderer) branch to
+`worker_container.run_container_worker` -> the broker
+(`documents/worker_broker.py`, stdlib-only), the ONLY holder of the Docker
+socket -- never mount it into Kazma. One container per job under one fixed
+policy (no network/mounts, read-only root, tmpfs, cgroup limits, caps
+dropped, uid 10001); the broker attests it from inside the image before
+serving. Inputs/outputs are digest-checked bundles (`worker_bundle.py`); the
+output is untrusted. No fallback to `process`; an invalid mode refuses every
+run; a crash with no stream is `parser_result_missing`, as locally. Never
+block the output pump on a kill: an attached container whose stdout backs up
+cannot be killed (Docker 29). In container mode the four readiness factories
+(`get_parser_registry`, `get_renderer_registry`, `get_mutation_registry`,
+`get_ocr_health`) answer from the image's own capability report, as live
+views, never from host packages; the broker refuses to serve without it. A
+broker that is not ready answers the retryable `worker_isolation_unavailable`
+(a full one `worker_isolation_busy`), never a permanent engine error. The
+image reports a fingerprint of its document code: readiness says
+`image_code_matches: false` and `document_worker_image_outdated` when the
+image was built from other code than Kazma runs (rebuild it and restart the
+broker). The image carries no Docling and no httpx: local salvage is not part
+of the container profile, and remote parsing stays in the Kazma process (K).
+`security.execution.container_required` refuses the `process` profile
+(`worker_isolation_required`; unreadable policy refuses too) -- checked where
+Kazma starts a worker, never inside one. Gates:
+`tests/test_document_worker_container.py`; real Docker
+(`KAZMA_TEST_DOCUMENT_WORKER_IMAGE`, CI job `Document worker container
+profile`): `tests/test_document_worker_container_docker.py`.
+Rendering engines: a readiness probe imports exactly what its render path
+uses -- WeasyPrint 70 (the locked floor) removed `default_url_fetcher`, and
+every HTML->PDF job failed while the engine read "ready". The renderer's
+fetcher (a `URLFetcher` subclass) allows only `data:` and files inside the
+approved asset folder (`tests/test_weasyprint_renderer.py`). A LibreOffice call
+made through `binaries.run_soffice_cli` kills the whole process tree on
+timeout and bounds the last wait: `subprocess.run(timeout=)` waited without a
+limit for the pipes soffice.bin still held and hung the certification
+(`tests/test_soffice_call_bounded.py`, the old call as its control).
 
 **E2. A deleted document is never still searchable** (2026-09-28).
 `DocumentService.delete_document` takes the document out of every library
@@ -1635,20 +2555,165 @@ leave stops the delete (`document_unindex_failed`, naming the library) so a
 retry can finish it. It used to swallow the failure and archive a document
 chat could still quote. `tests/test_document_library_membership.py`.
 
+**E3. One PDF active-content policy, applied only inside the worker**
+(2026-10-13, F01). `documents/pdf_policy.assert_pdf_safe` walks the object
+graph (not page streams or extracted text), bounded at 100,000 objects and
+depth 128, and refuses script (JavaScript, XFA), actions that run, open,
+submit or fetch outside the document (Launch, remote GoTo, SubmitForm,
+ImportData, renditions, rich media, sound, movie), embedded files (a bare
+`/EF` without `/Type` too) and links that are not absolute http, https or
+mailto (`file:`, UNC and relative targets leak credentials when opened).
+Navigation inside the document and web links stay. A graph it cannot read, or
+one past its budget, is refused, never passed. It runs on intake (`sniff`), on
+every mutation input and output (redaction opened its source before the
+policy until 2026-10-13) and on every PDF Kazma renders (LibreOffice,
+WeasyPrint, ReportLab), always in the worker. No PDF library opens a PDF in
+the server process: the document intent handler and the document pipeline
+read through `DocumentService` (the pipeline used to fall back to fitz
+exactly when the worker had refused a file), and structural preflight and
+local salvage run in the worker too. Gates:
+`tests/test_pdf_openers_stay_in_workers.py` (any PDF-library opener outside
+the worker-side modules fails, except declared checks of a PDF Kazma itself
+just generated; the old reader as its control), `tests/test_document_pdf_policy.py`
+(real inert PDFs: each denial, navigation and web links kept, shared indirect
+`/URI`, the call-site matrix through the real worker),
+`tests/test_document_worker_preflight.py`.
+
 **F. Multi-replica backends.**
-Jobs: `jobs_pg.py` when Postgres. Metadata: `repository_pg.py` when
-`KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and pool is up. GC is
+Jobs: `jobs_pg.py` when Postgres. Metadata: `repository_pg.py` when the
+metadata backend resolves to Postgres (D) and the pool is up. GC is
 backend-agnostic: `retention._mark` dispatches to `repository.gc_mark`, which
 both backends implement, so mark/sweep runs on Postgres metadata. The old
 `gc_postgres_metadata_sql_port_pending` skip is gone and
 `tests/test_leftovers_except_g.py` asserts it stays gone. Audit works on both
 backends.
 
+**F2. A Postgres store is backed up as ONE point in time** (2026-10-13, F06).
+`documents/backup_pg.py`: a REPEATABLE READ transaction exports its snapshot,
+reads the blob/manifest references inside it, PINS them (`.backup-pins`; GC
+re-reads pins before each delete), and `pg_dump --snapshot` dumps the document
+tables while that transaction stays open; the files are copied with
+checksums. The scheduled document backup takes this path whenever the
+installed store is on Postgres. A restore goes only into an EMPTY database and
+storage root, re-checks every table's row count against the snapshot, expires
+the dead source's leases and marks its unfinished intakes `restored` (rolled
+back at start). The knowledge index is a separate store (library chunks in
+the settings store, vectors in Chroma): restore reports `reindex_required`,
+and every worker start runs `DocumentIngestionService.reconcile_index` once,
+which re-publishes each version the store records as indexed but no library
+holds, from its own manifest, as the owner, through `index_document_ir`. Each
+is re-checked under the document's publication lock
+(`DocumentKnowledgeAdapter.publication_lock`, striped per tenant and
+document; index and unindex hold it), so an unindex is never undone. A
+missing library, a superseded version or a missing manifest is reported,
+never invented; chunks the store does not record are reported and removed
+only with `index --apply --prune`. Operator: `scripts/document_pg_backup.py`
+(`backup`, `verify`, `restore`, `index`). Gates:
+`tests/test_document_pg_backup_restore.py` (real Postgres, private databases;
+a dump outside the snapshot is caught by the row-count check),
+`tests/test_document_backup_pins.py`, `tests/test_document_reindex_after_restore.py`
+(both backends; without the re-check an unindex is undone), and the opt-in
+`tests/test_document_pg_restore_drill_scale.py` (`KAZMA_TEST_RESTORE_DRILL_DOCUMENTS`).
+
+**F3. Backup, export and import follow the CATALOG** (2026-10-13, DOC-A6/A7/A8).
+`backup.installed_document_backends()` is the one answer: the running
+service's repositories, else the configured backends (a CLI has no service;
+asking only the service exported a Postgres store as its empty local
+`documents.db`). Postgres catalog -> coordinated backup (F2); its files travel
+in a migration bundle, the catalog in `data/postgres.dump`. SQLite catalog
+beside a Postgres queue -> the SQLite snapshot, with quarantine->originals
+promotions read from the queue after the snapshot and kept in the manifest
+(`promoted_versions`, read again by `verify_document_backup`); the jobs
+backend alone used to pick the coordinated backup, which read a catalog that
+was not there. Postgres catalog beside a SQLite queue (a fallback) ->
+`UNSUPPORTED_SHAPE`, by name. Backups are written under a `.…partial` name
+and renamed when complete. A failed document restore fails `kazma migrate
+import`. Restoring BOTH Postgres backups into one database: the whole-database
+dump first, then `restore --replace-document-tables` (drops the dump's older
+document tables only after the backup verifies and the storage root is empty).
+Gates: `tests/test_document_backup_shapes.py`,
+`tests/test_document_pg_restore_order.py` (both wrong orders as controls),
+`tests/test_document_backup_restore_hardening.py`.
+
+**F4. The Postgres audit is append-only too** (2026-10-13, DOC-A1). Trigger
+`document_audit_guard` (function `kazma_document_audit_guard`) refuses every
+UPDATE and every DELETE outside a transaction the retention prune marks
+(`SET LOCAL kazma.document_audit_prune`); the prune runs in bounded batches on
+Postgres (it called the SQLite connection, `None` there, and the table grew
+forever). `pg_dump -t` carries a trigger but not its function: every restore
+creates `db/pg_backup.KAZMA_PG_FUNCTIONS` first, and any trigger function in
+product code must be declared there. Gate: `tests/test_document_audit_pg.py`
+(old prune, no trigger and no function step as controls).
+
 **G. Certification.**
-`scripts/certify_documents.py` + `tests/test_document_certification_phase10.py`
-+ `hostile_corpus.py` / committed `tests/fixtures/documents/hostile_manifest.json`.
-Keep CLI gates and pytest groups honest (architecture/a11y/crash matrix are
-pytest; CLI has NOT RUN placeholders for soak/Postgres/external review).
+`scripts/certify_documents.py` (`documents/certification.py`) +
+`tests/test_document_certification_phase10.py` + `hostile_corpus.py` /
+committed `tests/fixtures/documents/hostile_manifest.json`. Keep CLI gates and
+pytest groups honest (architecture/a11y/crash matrix are pytest). The report
+runs what it names: the hostile corpus, a bounded performance smoke, engine
+readiness, rollout, the isolation profile configured NOW (`process` is
+CONDITIONAL and never reported as confined; `container` passes only attested
+and with a current image), the fidelity corpus (G2) and a real SQLite backup,
+verify and restore. Postgres multi-replica, metadata multi-replica, a 48-72 h
+soak and an external security review are NOT RUN, `default_ready` stays
+false, and `--soak` is an extended smoke, never a soak
+(`tests/test_document_certification_honesty.py`). The soak harness is
+`scripts/document_soak.py` (Q03: private SQLite stores unless `--use-env`,
+restarts and killed intakes, fails on a job left unfinished, a reservation
+left pending or scratch left behind); a two-minute pilot is not the soak.
+
+**G2. Fidelity is measured on a versioned corpus** (2026-10-13, F09/Q02).
+`documents/fidelity.py` builds EN/AR/bilingual cases with Kazma's own engines
+(DOCX, PDF, HTML, OCR from a rasterized page) from a ground-truth spec and
+measures the real parser: word recall, segment recall, order, exact numbers,
+table cells, page honesty, alignment, CER/WER. Floors and release targets are
+declared per corpus version in `tests/fixtures/documents/fidelity_thresholds.json`;
+the `qualified` list must match the measurement. Change the corpus = bump
+`CORPUS_VERSION` and re-lock (`scripts/document_fidelity.py --lock`, which
+never lowers a floor within a version). Version 2 adds long documents (EN/AR,
+many pages), two columns from another producer (MuPDF Story), wide wrapping
+tables and a degraded scan. A segment counts as recovered only when its
+words come back together (`_SPAN_SLACK`): words in order but interleaved with
+another column are not. Alignment judges every line that shows its side
+against its segment's direction by `arabic.direction_of`, the engines' own
+per-block rule. Version 3 adds `*-ocr-table`, an OCR page with its ruled
+table; the OCR reference text is the whole page, table included. Not
+qualified, each with its reason in the thresholds file: `ar-ocr` and
+`ar-ocr-table` (Tesseract does not read Arabic-Indic digits, and its layout
+analysis drops lines of the Arabic page) and `en-ocr-degraded` (3.75 read as
+3:75). A re-lock keeps the file's `notes` and `measured_on`. Certification
+runs the corpus and reports the actual isolation profile and backends (F10).
+Gate: `tests/test_document_fidelity.py`.
+
+**G3. Scanned pages: tables cell by cell; real scans measured opt-in**
+(2026-10-13, from a real 300 dpi copier scan of an Arabic booklet).
+`ocr/tesseract._parse_tsv` reads Tesseract's TSV with `quoting=QUOTE_NONE`: a
+word OCR reads as starting with `"` opened a CSV quoted field that swallowed
+every later row, so a page's "text" held other rows' coordinates (one line of
+14,386 characters) and lost words. `ocr/tables.py` (Pillow only) finds ruled
+grids and reads each cell (`TesseractProvider.recognize_region`, psm 6/7); when
+`eng` is installed, a cell with no letters, or one read below 0.5 confidence,
+is read again as digits only (`eng`), and that reading wins only at
+confidence >= 0.75. The page's lines inside a table become one `TABLE` block (`extractor: ocr-grid`, cells right to left
+for an RTL table). Rules the scan taught, each gated with the old rule as its
+control: a ruling line is ONE continuous stroke (a joined Arabic baseline is
+as dark as a rule on average, and cut text lines in half); a cell is >= 3 %
+of the page wide (the strips of a page border made every boxed section a
+"table"); the line cut follows the page's paper (pale tinted grids). At most
+600 cells and 120 s a page: past either, the tables already read are kept and
+the rest keep the page's own reading; a cell that fails to read drops the
+table pass for that page (`documents.ocr.tables`, default on, Settings →
+Documents). Measured on the scan: a contents table's numbers 22 % -> 91 %,
+its rows kept together 3 % -> 56 % complete, 6 of 6 searches on the right
+page. Tesseract did not read Arabic-Indic digits in any font measured (fast or
+best `ara` model, any segmentation mode); a different engine is the owner's
+decision. Gates: `tests/test_document_ocr_tables.py`,
+`tests/test_document_ocr_phase5.py` (the quote with the old quoting as
+control), `test_ocr_without_the_table_pass_fails_the_floor`, and the opt-in
+`tests/test_document_real_scans.py` (`KAZMA_TEST_REAL_SCANS_MANIFEST`: a
+manifest outside the repository names each scan by path and SHA-256, the
+pages, the numbers, symbols and single terms each holds -- never page text --
+the searches and the floors; without it the test skips).
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
 `documents/arabic.py` is the ONLY home for Arabic text policy. Do not
@@ -1675,6 +2740,29 @@ call-site-local normalization.
   search time (`knowledge.py:fts_search`). A fold on one side only is worse
   than none. SQLite's `unicode61` treats harakat (`Mn`) as separators, so
   vocalized Arabic indexes as single letters without this.
+- **PDF lines with right-to-left script are re-read glyph by glyph**
+  (`parsers/pdf_rtl.py`, 2026-10-13). PyMuPDF reverses such a line
+  character by character, which turned numbers drawn left to right around
+  ("١٢٣٤٥٦٧" -> "٧٦٥٤٣٢١") and swapped the letters of ligature glyphs ("في" ->
+  "يف"); Arabic table cells came out fully reversed. Glyphs come from
+  `page.get_texttrace` (a ligature's extra characters carry glyph -1, in
+  logical order); only right-to-left runs are reversed, as whole glyphs. A
+  block's base direction comes from its layout when a line shows it (Kazma
+  sets RTL paragraphs against the right margin), else `is_rtl_dominant`. An
+  RTL table's columns are read right to left. Digits after Arabic letters are
+  ARABIC numbers to the bidi algorithm (W2): "-" does not join them (W4) and
+  a space between two of them is right-to-left (N1), so "في 2026-09-30" is
+  drawn "30-09-2026 يف" and a table row's numbers right to left. Each number
+  cluster's reading is the one `arabic.visual_order` (python-bidi) draws as
+  the page shows; with none, the left-to-right reading stands. A gap wider
+  than half a font size is a word break; a zero-advance glyph that is not a
+  mark is a misread mark (LibreOffice maps a tanween to "/") and is dropped.
+  OCR words get the same rule: `arabic.number_in_logical_order` puts a
+  separated number read off an Arabic line back in logical order (the TSV
+  parser applies it with the paragraph text before the word). Gates:
+  `tests/test_document_pdf_rtl.py` (round trips laid out by python-bidi
+  itself; without the check the date reads back reversed),
+  `tests/test_document_number_order.py`.
 - **`to_logical()` runs in `parsers/common.IRBuilder.add_page`**, before limits,
   quality assessment and chunking. It NFKC-folds Arabic presentation forms back
   to base letters so a legacy visual-dump PDF is recovered without OCR. Pages
@@ -1701,10 +2789,16 @@ call-site-local normalization.
   never affected. DOCX names `THEME["font_latin"]` / `THEME["font_arabic"]`
   (both IBM Plex Sans Arabic); LibreOffice needs the family, or the PDF
   route copies the TTFs into the soffice user profile.
-- **The image and CI carry the system deps.** `fonts-noto-naskh-arabic`,
-  `libreoffice-writer`, `tesseract-ocr(-ara)`. Removing them from either does
-  not fail a test — it silently returns the platform to blank Arabic PDFs, and
-  makes `tests/test_docx_rtl_visual.py` skip instead of run.
+- **The images and CI carry the system deps.** `fonts-noto-core` (the Naskh
+  faces ship inside it; `fonts-noto-naskh-arabic` is not a Debian/Ubuntu
+  package, and naming it failed the image build and CI's Tests job),
+  `libreoffice-writer` (`-nogui` in the worker image), `tesseract-ocr` with
+  `-ara` and `-eng` -- in the
+  application image (`Dockerfile`), the document worker image
+  (`deploy/document-worker/Dockerfile`) and CI, which checks `fc-list` for
+  Naskh. Removing them does not fail a test — it silently returns the platform
+  to blank Arabic PDFs, and makes `tests/test_docx_rtl_visual.py` skip instead
+  of run.
 
 **I. Direction is per BLOCK, not per document.**
 `DocProfile.direction` is the *document* base direction — margins, section,
@@ -1752,11 +2846,25 @@ assertions.
 `extract_salvage.try_remote_parse` uploads the ORIGINAL document bytes to
 LlamaParse/Reducto. It requires `documents.security.remote_parse` (default
 **off**); an API key in the environment is not consent. Local Docling salvage
-is `documents.security.local_salvage` (default on). Every remote call records
-an `egress`/`remote_parse` audit row with provider and byte count via the hook
-`DocumentIngestionService._install_salvage_audit` installs. The legacy
+is `documents.security.local_salvage` (default on), inside the bounded parser
+worker, along with structural preflight. Every remote attempt requires a
+durable `egress` audit row carrying immutable job identity before upload,
+with separate success/failure events; a context-scoped recorder prevents
+cross-tenant attribution. Actor, request digest and OCR intent belong to the
+job, not a deduplicated version. Consent is rechecked at each provider attempt.
+A failed provider is audited (`failure`) and the next configured one is tried,
+after the live policy is read again (until 2026-10-13 the first failure
+re-raised and the fallback never ran). Both providers use one client
+(`_provider_client`): no ambient proxy environment, no redirects (an upload is
+never re-sent elsewhere), decoded answers capped at 32 MiB
+(`remote_parse_response_limit`). Remote parsing runs in the Kazma process
+(`DocumentService`), never in the worker; local salvage runs only in the
+worker. Transient excerpts lack durable egress scope and cannot upload remotely. The legacy
 `KAZMA_REMOTE_PARSE=0` / `KAZMA_DOCLING=0` env switches remain as an additional
-veto only — they can turn a tier off, never on.
+veto only — they can turn a tier off, never on. Gates:
+`tests/test_document_egress_hardening.py`, `tests/test_document_egress_pg.py`
+(the same rules on real Postgres metadata, jobs, audit and settings),
+`tests/test_extract_salvage.py`.
 
 ### 20. Commitment Layer (`kazma-core/kazma_core/safety/commitment/`)
 
@@ -1783,14 +2891,19 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   the exec denylist / outbound allowlist / config protected-key resolvers DO
   enforce here).
 - `memory/belief_mutation.py:_mutate_functional` — the memory corruption half
-  is gated by its OWN source-trust check (a `user_explicit` functional belief
-  cannot be superseded by `llm_inferred`/`system_tool`), NOT by an
+  is gated by its OWN source-trust check (a fact the user stated yields only
+  to the user's own words, `memory.provenance.may_overrule`), NOT by an
   `authorize_effect` call — two independent defenses, by design.
 
 **B. The decision mapping (§3.4). `authorize_effect` returns one of:**
 - `allow` (+ optional `rewritten_args`): for the remind act, the gate anchors
   the relative phrase to a memory event and **rewrites the tool args to the
-  memory-correct fire_at**. For exec, the denylist blocks catastrophes before
+  memory-correct fire_at**: an aware ISO instant computed in the operator's
+  zone (`cron.timezone`, §16G), never a naive time read as UTC. A recurring
+  timing is never rewritten, and a recurring request ("every day at 9")
+  booked as a one-off is denied (Scheduled audit SCH-E03, E05, 2026-10-14).
+  `edit_scheduled` is its own act (`edit_job`): the caller's own jobs only,
+  and the new timing through the same resolver. For exec, the denylist blocks catastrophes before
   the HITL card. For config, protected keys are denied. For outbound, the
   target allowlist is checked.
 - `clarify` / `confirm`: a real interrupt card fires on the unified HITL bus
@@ -1803,11 +2916,32 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   `delegate` (HMAC trust at skill-load).
 
 **C. Invariants — removing any reintroduces the incident class:**
-- **Source-trust gate** (`_mutate_functional`): a `user_explicit` functional
-  belief may NOT be superseded by a lower-trust (`llm_inferred`/`system_tool`)
-  source. Kill-switch: `cfg.v2.functional_supersede_requires_user_assert`.
+- **Source-trust gate** (`_mutate_functional`, and the history path): a fact
+  the user stated may NOT be superseded by a lower-trust source. Kill-switch:
+  `cfg.v2.functional_supersede_requires_user_assert`. **The provenance
+  ladder** (`memory/provenance.py`, Memory audit M03, 2026-10-13):
+  `user_explicit` -- the user's own channel only (the Memory page, a chat
+  command, or a memory tool on a turn whose latest user message asks to
+  remember AND holds 80 % of the stored words); `user_stated` -- the user's
+  literal statement read by the heuristic pass from their own message;
+  then `system_tool`, `agent_asserted` (a memory tool the user did not ask
+  for) and `llm_inferred`. A `user_*` fact yields only to `user_*`, except
+  the model pass correcting the heuristic reading of the SAME turn (§15H).
+  Until then `memory_store` / `memory_link_entities` wrote `user_explicit`
+  for anything the model chose (a fetched page, an email), unscreened, and
+  the user's own words were `llm_inferred`: the model's fact blocked the
+  user's correction. The tools now screen (`filter_injection`,
+  `is_override_delta`; refused, nothing stored) and answer
+  `user_fact_stands` when a write would replace the user's fact -- the user
+  corrects their own facts. Gate: `tests/test_memory_provenance.py` (the
+  R02 witnesses inverted, EN/AR remember requests, the injection corpus,
+  the same-turn rule, the old gate as negative control, every product site
+  writing `user_explicit` declared as a user channel).
 - **Rewrite-on-allow**: the gate's fire_at wins over the model's args — do not
   let the original (possibly wrong) `timing` reach the scheduler for remind.
+  The fire_at is one instant in the operator's zone, and a recurrence is kept
+  as the user asked, never turned into one fire
+  (`tests/test_cron_timing_model.py`).
 - **Exec denylist**: catastrophic commands (`rm -rf /`, fork bombs, `curl|sh`,
   `dd of=/dev/`, `mkfs`, shutdown, `chmod 777 /`) are denied BEFORE the HITL
   card. Safe commands pass through (HITL still applies).
@@ -1836,9 +2970,12 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   (`mcp__*`) route through `classify_mcp_tool_effect`.
 - `authorize.py` — `authorize_effect` (the policy gate) + `EffectDecision` +
   the act resolvers: `_resolve_remind_act`, `_resolve_cancel_job_act`,
-  `_resolve_exec_act` (denylist+cwd), `_resolve_send_outbound_act` (allowlist),
-  `_resolve_config_change_act` (protected keys).
-- `relative_time.py` — `resolve_remind` (EN+AR). G2-measured (0 false-allow).
+  `_resolve_edit_job_act`, `_resolve_exec_act` (denylist+cwd),
+  `_resolve_send_outbound_act` (allowlist), `_resolve_config_change_act`
+  (protected keys).
+- `relative_time.py` — `resolve_remind` (EN+AR). G2-measured (0 false-allow)
+  on one-off requests; recurring requests (EN+AR) are measured by the
+  Scheduled corpus in `tests/test_cron_timing_model.py`, not by G2.
 - `store.py` — `Commitment` + ops-SQLite tables + TTL/GC + tiered retention +
   `list_pending_soul()` (the confirm queue).
 - `constraints.py` — `is_commitment_enabled` + `load_constraint_beliefs` +
@@ -1884,11 +3021,20 @@ The list lives in `kazma_core/db/pg_backup.py` (not here — this file will
 drift). It includes LangGraph `checkpoints*`, shared-state
 (`kazma_settings`, `kazma_chat_sessions`, `kazma_swarm_tasks`,
 `kazma_swarm_worker_metrics`, `kazma_platform_users`, `kazma_web_sessions`),
-document jobs (`document_jobs`, `document_job_events`), **and** the document
-catalog from H-13 (`documents`, `document_blobs`, `document_versions`,
-`document_artifacts`, `document_acl`, `document_tombstones`,
-`document_chunks`, `document_audit_events`). A new shared-state PG table
-MUST be added to that Python list or it silently stops being backed up.
+document jobs (`document_jobs`, `document_job_events`), document intake
+ownership and admission (`document_intake_reservations`,
+`document_intake_mutex`, §19 B2), **and** the document catalog from H-13
+(`documents`, `document_blobs`, `document_versions`, `document_artifacts`,
+`document_acl`, `document_tombstones`, `document_chunks`,
+`document_audit_events`), and the memory mirror (`kazma_episodes`,
+`kazma_beliefs`, §15K: recall's store when Postgres is the primary, and the
+only copy of what other replicas wrote; boot requires them only when memory's
+state backend is Postgres, `pg_backup._required_pg_tables`). A new shared-state PG table MUST be added to that
+Python list or it silently stops being backed up
+(`tests/test_pg_backup.py::test_kazma_pg_tables_covers_document_ddl` reads the
+document stores' DDL). This dump does not carry the document store's content
+files; a document store on Postgres is backed up as one point in time with its
+files by `documents/backup_pg.py` (§19 F2).
 The dump is deliberately table-filtered — never a whole-DB dump — so a
 shared database neither leaks foreign-app data into Kazma's backups nor
 restores over another app's tables. `hitl_gates.db` is SQLite (single-process
@@ -1938,6 +3084,25 @@ alert carries its reason (`last_pg_backup_failure`), redacted. Putting the
 folder back on PATH then needs only `kazma_guard.py --reload`: the server
 adopts PATH entries the OS settings gained since the guard started (§38).
 
+**E3. Schema setup takes no table lock it does not need**
+(`kazma_core/db/pg_schema.py`, 2026-10-13). Postgres takes `ALTER TABLE ...
+ADD COLUMN IF NOT EXISTS`'s ACCESS EXCLUSIVE lock -- and `CREATE INDEX IF NOT
+EXISTS`'s SHARE lock -- BEFORE it looks for the column or index (measured: the
+ALTER waits behind `pg_dump`'s read locks, both wait behind any open writer).
+Every store sent them at every start, so starts deadlocked each other (a
+4-writer restore drill, in the intake store's constructor), and a start during
+a dump waited for the whole dump with every query on the table queued behind
+it -- the core schema's 5 s timeout then failed the pool. `ensure_schema`
+takes one transaction-scoped advisory lock every Kazma schema setup shares,
+and sends a `CREATE TABLE`, `CREATE INDEX` or `ADD COLUMN` only when the
+catalog says it is missing; any other `ALTER TABLE` is refused. Every
+Postgres DDL site uses it: the core schema, the swarm task store, the memory
+mirror and pgvector table, and the document jobs, catalog and intake stores.
+Gate: `tests/test_pg_schema_setup.py` (no `ADD COLUMN IF NOT EXISTS` sent
+outside it, the old shapes as control; on real Postgres each store's setup
+completes under a held dump lock and an open writer, and fresh starts at the
+same moment both succeed -- the direct statements wait and collide).
+
 **F. Universal backup — "never left anything behind"**
 (`kazma_core/backup/universal.py`). One unified backup that backs up
 literally everything: every `*.db` in `kazma-data/` (WAL-safe via
@@ -1954,6 +3119,16 @@ Delete/archive/download: `DELETE /api/backup/{name}`,
 `POST …/archive` (zip), `GET …/download`. The per-file copy MUST be robust
 (`_robust_copytree`) — `shutil.copytree` aborts on one vanishing file and
 loses the entire `document-store`. Do NOT revert to `copytree`.
+**Every copy of a live SQLite database is one step, through one helper**
+(`kazma_core.db.sqlite_snapshot.snapshot_copy`, 2026-10-13, Memory audit M19):
+the universal backup, the native memory backup (`memory/backup.backup_one`,
+also the migration importer's pre-swap copy), the embedding rebuild's
+pre-copy, the memory restore route and the X shadow script. A batched copy
+(`pages=N`) restarts whenever the source is written: the native memory
+backup -- the declared restore source -- finished only in a quiet window (778
+restarts in two seconds). Gate: `tests/test_sqlite_snapshot.py` (the copy
+finishes under a writer every 2 ms; `pages=100` as the negative control; no
+`.backup(` call outside the helper).
 
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
@@ -2195,9 +3370,20 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   requires the qualified Linux namespace; Windows refuses strict launch. See
   `docs/audits/WEB_ACQUISITION_IMPLEMENTATION_2026-10-10.md` for remaining gates.
   `web_acquire.crawl_jobs` persists KB ownership before Web acceptance, bounded
-  page/BFS frontiers and metadata effects before fetch/indexing. Four active
-  jobs, 24 retained, 8MiB; explicit resume requires identical policy and skips
-  completed/uncertain effects. Metadata keeps parsed links, never raw bodies.
+  page/BFS frontiers and metadata effects before fetch/indexing. One settings
+  row per job (`acquisition.crawl.<digest>`, its own CAS revision; Knowledge
+  audit KB-E04, 2026-10-14): a page update writes its own job only. Four
+  active, 24 retained, 16 MiB, 4 MiB a job (frontier admission checks it);
+  finished jobs are evicted by count AND bytes, never a running one;
+  `kazma acquisition purge-finished` is the operator's purge. Owners carry
+  install, host, pid, start time and a lease renewed on every write (300 s,
+  KB-E07): a dead owner on this host is recovered, another host's only after
+  its lease lapsed, and the taken-over owner's next write is refused; rows of
+  another install are never read. One crawl per KB library (`CrawlLibraryBusy`,
+  KB-E14); the journal is the only crawl state (`kb.ingest_jobs` and
+  `stores/kb_jobs.py` retired). An explicit KB resume fetches uncertain pages
+  again and skips completed ones; resume requires identical policy. Gate:
+  `tests/test_knowledge_crawl_journal.py`. Metadata keeps parsed links, never raw bodies.
   Faithful identity preserves `.md`, slash, matrix parameters and query bytes;
   do not infer aliases without an observed redirect. Web recovery uses the
   journal as truth; errors/partial coverage cannot become a success toast.
@@ -2526,7 +3712,82 @@ module was deleted and the import's `except` said "chromadb not installed".
   other. The memory Rebuild (`reembed.rebuild_embeddings`) used to finish
   with `shutil.rmtree(data_dir/vector_memory)` -- the V1 chat index once,
   the Knowledge Library's live store since 2026-09-26; it no longer touches
-  it.
+  it. Nor does `scripts/reembed.py` (2026-10-14): it kept its own copy of the
+  rebuild, step 7 included, and now runs `rebuild_embeddings`. No function
+  deletes a folder tree and names the store
+  (`tests/test_reembed_keeps_knowledge_vectors.py`, the old step as the
+  negative control).
+- **A vector's tag names the embedder INSTANCE** (`embedder_identity`: class,
+  model, size, endpoint digest; Knowledge audit KB-E03, 2026-10-14), never the
+  configured name: a Settings change waiting for a restart, or a remote model
+  that fell back to the local one, tagged vectors with a model that had not
+  made them. Search filters on the active identity (`_raw_layers`), an
+  untagged vector is re-made, and a query against a collection of another
+  size waits for the sweep (one INFO). Health is the sweep's recorded
+  coverage (`knowledge_vector_status`, states unknown/ok/rebuilding/
+  unavailable/failed): listing libraries opens no collection and loads no
+  model (KB-S15).
+- **The sweep is isolated per library and observed** (`run_repair_sweep`,
+  KB-E11): a failing library is recorded and the others repaired, then the
+  pass raises for the runner's WARNING; the first unavailable pass and the
+  recovery are WARNINGs; three bad passes raise the ops alert
+  `knowledge.meaning_search` (6 h cooldown); `/metrics` carries
+  `kazma_kb_vector_*`, readiness `knowledge_vectors` (never critical,
+  `topology: single_install`), the daily digest a "Needs attention" line.
+  The keyword index's coverage is checked each pass and rebuilt with a
+  WARNING; an FTS storage error is a WARNING and `keyword_index_ok: false`,
+  a query syntax error stays DEBUG. `KB_FOLD_VERSION` is stored in
+  `knowledge_meta`; a new value rebuilds the index at open (a fingerprint
+  test fails when `fold_for_search` changes without it).
+- **One `KnowledgeIndex` per store** (`knowledge_index_for`, shared with
+  Documents; KB-E12), and a collection another handle dropped is re-opened
+  by name and the call retried once (`VectorStore._reopen_if_missing`). Only
+  `knowledge_index_for` constructs an index in product code (gate in
+  `tests/test_knowledge_vectors.py`).
+
+**G. The Knowledge store and its surfaces** (Knowledge audit 2026-10-13,
+tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
+- **Own file** `knowledge.db` (`paths.knowledge_db`, a `bundle` store; KB-E10):
+  a quota on the store's own pages in use (1 GiB, refused before fetch with
+  `KnowledgeStorageFull`, reads unaffected), `auto_vacuum=INCREMENTAL` and the
+  maintenance pass's `compact()` (never `VACUUM`: it renumbers the rowids the
+  FTS is keyed by). `settings.db`'s old tables move in on the first open
+  (`copy_legacy_knowledge`, explicit columns, FTS rebuilt, a non-http seed
+  blanked) and a bundle in the older layout is staged the same way
+  (`importer._stage_legacy_knowledge`; no Knowledge DDL in `migration/`,
+  KB-E01). Every connection sets the pragmas, `foreign_keys` included, and
+  `close()` takes the store lock (KB-E13).
+- **One publication path** (`KnowledgeStore.publish_page`, KB-E02): a page's
+  retire and insert, FTS included, in one `BEGIN IMMEDIATE`; a deleted
+  library refuses (`KnowledgeLibraryGone`), a failed page fails and the crawl
+  ends `partial`. Chunk ids carry the position (`make_chunk_id`, KB-E05). The
+  FTS is keyed by rowid and deleted by `rowid AND chunk_id` (KB-E06); library
+  deletes run in 500-row batches with the lock released between them.
+- **Delete goes through `knowledge_lifecycle.delete_library`** (KB-E08): 409
+  while a crawl owns the library, the documents it holds unindexed through
+  the Documents service first, then vectors, chunks and the fetched pages
+  (`<data dir>/knowledge_provenance/<library>`, a `bundle` entry).
+- **Model boundary**: the supervisor builds the turn's ONE Knowledge block
+  (`_knowledge_inject_for_turn`, off the loop; KB-S08), stripping an earlier
+  turn's note at iteration 0; the transports inject nothing. The "Memory
+  used" record lists exactly the injected chunks (KB-S02), even with recall
+  suppressed. `knowledge_search` keeps its scaffolding outside the fence and
+  the page's text inside (KB-S01). Federated search ranks each store on its
+  own budget. Stored URLs are http(s) only (`validate_web_url`, every
+  writer), rendered through `safeHref` (KB-S09).
+- **Surfaces**: `/api/kb/*` refuses with stable codes (`KB_ERROR_CODES`,
+  `knowledge.err.<code>` EN+AR; KB-S05) and reads bodies under 64 KiB with
+  bounded models (KB-S13); every KB surface refuses an install with platform
+  users (`kb_refusal`, the shared single-operator rule; KB-S04); `/kb
+  add|crawl|refresh|delete` are handled in the gateway, admin-only through
+  `changes_global_config`, and report the journal's outcome (KB-S07).
+  `window.kazmaSave` rejects `{ok: false}` and every Settings save does too
+  (KB-S10).
+- Gates: `tests/test_knowledge_publication.py`, `test_knowledge_crawl_journal.py`,
+  `test_knowledge_vectors.py`, `test_knowledge_model_boundary.py`,
+  `test_kb_api_contract.py`, `test_kb_gateway_commands.py`,
+  `test_knowledge_migration.py`, `test_knowledge_docs_claims.py`, each with
+  its negative control.
 - Gate: `tests/test_knowledge_meaning_search.py` (a fake chromadb in CI, the
   real one where the `rag` extra is installed).
 
@@ -2671,9 +3932,15 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
 
 **G. Fenced tool output.**
 - Fetched pages, search results, saved research chunks and MCP resource
-  bodies go through `prompt_fence.fence_untrusted()`. They are the largest
-  source of attacker-controlled text in the system and used to reach the
-  model raw. CI: `test_no_unfenced_web_tool_output`.
+  bodies go through `prompt_fence.fence_untrusted()`. So do memory and
+  Knowledge read back by a tool (Memory audit M11, Knowledge KB-S01,
+  2026-10-13): `memory_search`, `memory_list_*`, `memory_admin`'s lists and
+  `knowledge_search` (its citation directive stays outside the fence).
+  `memory_search` shows a memory's display text and says "unavailable, NOT
+  an empty result" when recall fails. The per-function gate
+  (`FENCED_TOOL_FUNCTIONS`) reads tools registered inside `register_*` too.
+  They are the largest source of attacker-controlled text in the system and
+  used to reach the model raw. CI: `test_no_unfenced_web_tool_output`.
 
 **H. One writer for the procedural recorder.**
 - A thread-per-tool-call used to crash Windows (`AccessViolation` in FTS /
@@ -2894,7 +4161,12 @@ every one, no chat post went out, and an eval test had locked that in as a
 "property". `tests/test_x_post_proposal_gate.py` +
 `test_a_verified_publish_stops_at_the_approval_card` pin both halves. The HITL card (Web `renderHitlCard`
 + gateway `_build_approval_prompt`) renders the stored proposal text, so
-what the user approves is what publishes.
+what the user approves is what publishes. That covers the time too
+(Scheduled audit SCH-E08, 2026-10-14): a rebook of a cancelled, failed or
+expired booking is a new key revision at the new time, a booking still live
+at another time answers `booking_conflict`, and every booking reply gives
+the stored time and state, `ok` only when the state is `scheduled`
+(`tests/test_x_rebook_and_fire_cycle.py`).
 
 **D. The summary net fires on EVERY trim that drops turns.** Never gate
 `inject_summary_of_dropped` on a percentage-of-window again — trim fires at
@@ -2974,8 +4246,15 @@ verifies the body's `interrupt_id` against the registry BEFORE resuming
 (`_gate_not_pending`, `routes_direct/misc.py`). Only a `pending` row may
 be resumed; `claimed`/`resuming`/terminal answer 409 `not_pending` with
 the server's actual view, and a row owned by another thread answers 409
-`foreign`. A missing row or id can still reach the checkpoint liveness
-check for legacy dashboard/TUI/platform clients, but execution now requires
+`foreign`. The route resumes only a LIVE approval interrupt
+(`_live_hitl_interrupt`: a checkpoint with a next step and no interrupt is
+not paused, 409), keyed by that interrupt's id, and a gate the registry
+knows that is not the live interrupt answers 409 (`gate_names_interrupt`);
+the gate-less "security resume" fallback is gone on the web and the
+gateway (2026-10-14, Time Travel audit TT-02: after a restore wrote a
+mid-turn step, a still-live card resumed it and ran a call the human had
+denied). A missing row or id can still reach the live interrupt
+for legacy dashboard/TUI/platform clients, but execution now requires
 `record_gate_decision(..., require_durable=True)` (2026-10-05). It backfills
 the verified gate, strictly claims it once and records resuming before any
 projection or drive. Registry off/unreadable answers 503 and stays paused;
@@ -3105,8 +4384,10 @@ keep both in sync):
 2. **H-8 / `tool_registry.execute`:** apply `rewritten_args`; `clarify`/`confirm`
    fail closed (“run from chat”). Never mint a second gate row on the web path.
 3. **T-2 pipeline timeout:** finalize the task **and** `settle_gate`.
-4. **H-9 bus:** `is_danger_tool()` → `requires_approval()`. Not FanOut first-wins.
-5. **H-12:** swarm bus tri-state only. Must not retarget web `claim_gate`.
+4. **H-9 bus:** `is_danger_tool()` → `approval_floor()` (the `requires_approval()` floor).
+5. **H-12 (superseded 2026-10-14):** a bus request has one shared decision
+   (`shared_approvals`): the first human Approve or Deny decides, every card
+   shows it, timeout/cancel are their own outcomes. Must not retarget web `claim_gate`.
 
 Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`,
 `_hitlAlreadyClaimed`, `_serverGates`), `turn_document.js`,
@@ -3411,6 +4692,10 @@ witness is archived in `docs/audits/evidence/browser_redirect_before_broker_2026
 
 Model fallbacks (§38) ride the second row plus the web banner
 (`AlertDispatcher.post_banner`, banner only) — not a fourth notifier.
+Swarm results take the swarm output target (`/swarm config`, Settings). The
+separate `swarm_notify` module (`SWARM_BOT_TOKEN`), a fourth notifier that
+reported a send Telegram refused as sent, was removed on 2026-10-14 (Swarm
+audit SW-S15); a set `SWARM_BOT_TOKEN` is a startup WARNING.
 
 **An alert reaches someone, or says it did not (2026-10-02).**
 - An alert raised in a worker thread is delivered ON the server's loop
@@ -3715,6 +5000,19 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   research loaders, the MCP manager's path gate, the gateway's web-session
   sync (four per turn, chat-store writes), the document tools'
   `_resolve_input` (8), `x_test`'s status payload.
+- **On the memory path the inference follows imports** (2026-10-13, Memory
+  audit M34): `test_the_memory_path_reaches_no_helper_through_another_module`
+  resolves calls through each module's own `from kazma_... import` bindings,
+  public functions included, to a fixed point (`_qualified_stall_helpers`),
+  and holds the memory modules to it. Undo resolved its tenant on the loop
+  through three hops in two modules (`_consume_undo` -> `_memory_tenant_id`
+  -> `multi_user_or_production` -> a settings read); the memory worker raised
+  ops alerts and queued retries on the loop. Product-wide the same inference
+  names ~130 sites in other areas: each area's own change. The memory GET
+  routes write nothing (`test_a_memory_get_route_writes_nothing`, every GET
+  traced): `memory_api._conn()` makes the schema ready once per process
+  (it ran the entity-count backfill on every request), and the operator's
+  graph search is a read-only diagnostic (no access bump).
 - **The settings store is never used on the loop** (2026-09-30,
   `test_the_settings_store_is_not_used_on_the_loop`, negative control beside
   it). On Postgres a settings read that misses the cache, and every write, is a
@@ -4900,8 +6198,10 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
 - **The answer is `sent:<target>` or `Error: ...`**: the backend returns the
   error when the platform did not take the message (no adapter, a refusal, a
   timeout). `send_failed(result)` is the one reader. A caller either returns
-  the answer (a tool) or reads it with `send_failed`: the cron delivery logs
-  `delivery FAILED` (CRITICAL) or `delivered`, the scheduled-post notice falls
+  the answer (a tool) or reads it with `send_failed`: the cron outbox
+  acknowledges a message only on `sent:` and otherwise retries it, then ends
+  it `undeliverable` with an alert (§16E; the job was finalized DONE whatever
+  the answer until 2026-10-14), the scheduled-post notice falls
   through to the fan-out and says when no chat app took it, the cron denial
   notice warns, `send_file` and the dispatcher tools return the `Error:` (a
   failed tool call, §37).
@@ -5401,6 +6701,8 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
 - `docs/docs/guide/document-phases.md` — Document phases 0–10 map
 - `docs/docs/security/document-security.md` — Document threat model
 - `docs/docs/ops/document-processing.md` — Document ops (metrics/GC/capacity)
+- `docs/docs/guide/document-rendering.md` — Unified document rendering (one `DocProfile` for every output format)
+- `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md` — Documents hardening tracker (F01–F10, Q01–Q05): what is implemented, with evidence, and what stays open (independent review, the 48–72 h soak, Arabic OCR); handoff `docs/plans/DOCUMENTS_INDUSTRIAL_HANDOFF_2026-10-13.md`
 - `docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md` — Document docs remediation goal
 - `docs/plans/MEMORY_REMAINING.md` — Memory done vs later backlog
 - `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
@@ -5410,7 +6712,8 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
 - `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` — Binding industrial audit (waves 0–8 shipped). Do **not** follow dump `AUDIT_DEEP_2026-09-01.md` Part 6 order.
 - `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` — Deep-structure audit (22 findings, change-impact map, CI recovery, Telegram desync §20)
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Historical production audit (2026-07-21)
-- `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report
+- `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report (historical, 2026-08-11; not a current qualification — the current state is the hardening tracker above)
+- `docs/audits/AUDIT_{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_2026-10-13.md` and their trackers `docs/plans/{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_INDUSTRIAL_HARDENING_GOAL.md` — the 2026-10-13 audits of those areas (findings, AGENTS.md claims the code does not match, staged path) and the open remediation, one tracker per area, modelled on Documents
 - `docs/plans/HITL_GATE_REGISTRY_PLAN.md` — Gate registry (P6)
 - `docs/plans/TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md` — Turn Delivery V2
 - `docs/plans/CONTEXT_INTEGRITY_HARDENING_PLAN.md` — Context integrity

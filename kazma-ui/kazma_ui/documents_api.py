@@ -53,15 +53,17 @@ import asyncio
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
+from kazma_core.diagnostic_scope import read_only_diagnostic
+from kazma_core.documents.errors import DocumentPolicyError
+from kazma_core.errors import safe_error
 
 from kazma_ui.rate_limit import rate_limit
-from kazma_core.diagnostic_scope import read_only_diagnostic
-from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,13 @@ async def _resolve_scope(request: Request) -> tuple[str, str, str]:
         pass
 
     def _actor_and_workspace() -> tuple[str, str]:
+        from kazma_core.documents.principal import operator_for
+
+        # One operator per install: the page, chat and the agent are the same
+        # principal (DOC-A3); with platform users the page acts as each user.
+        operator = operator_for(getattr(request.app.state, "documents", None), tenant)
+        if operator is not None:
+            return operator, _active_workspace_id()
         actor = "local"
         try:
             from kazma_ui.auth import get_request_principal
@@ -135,18 +144,7 @@ def create_documents_router() -> APIRouter:
     def _ingestion_error(exc: Any) -> JSONResponse:
         code = getattr(exc, "code", "document_error")
         message = getattr(exc, "safe_message", None) or str(exc)
-        status = {
-            "invalid_request": 400,
-            "intake_too_large": 413,
-            "quota_exceeded": 413,
-            "intake_corrupt": 400,
-            "document_access_denied": 404,
-            "not_ready": 409,
-            "document_platform_disabled": 503,
-        }.get(code, 400)
-        return JSONResponse(
-            status_code=status, content={"ok": False, "error": message, "code": code}
-        )
+        return _coded_error(code, message, default=400)
 
     def _capacity_error(exc: Any) -> JSONResponse:
         """Map a backpressure/capacity refusal to a truthful 429/503/507."""
@@ -174,6 +172,29 @@ def create_documents_router() -> APIRouter:
         return JSONResponse({"ok": False, "error": "Admin role required"}, status_code=403)
 
     # ── Upload intake (streamed, bounded) ───────────────────────────────
+
+    async def _admit_upload(
+        svc: Any, *, tenant: str, actor: str, workspace: str, declared: int | None
+    ) -> JSONResponse | None:
+        """The service's budget answer for this upload, before its body is read."""
+        import asyncio
+
+        from kazma_core.documents.capacity import CapacityError
+        from kazma_core.documents.ingestion import DocumentIngestionError
+
+        try:
+            await asyncio.to_thread(
+                svc.precheck_upload, tenant_id=tenant, actor_id=actor, workspace_id=workspace, byte_size=declared,
+            )
+        except DocumentPolicyError as exc:
+            return _policy_error(exc)
+        except CapacityError as exc:
+            return _capacity_error(exc)
+        except DocumentIngestionError as exc:
+            if exc.code == "intake_too_large":
+                return _too_large()
+            return _ingestion_error(exc)
+        return None
 
     @router.post("", dependencies=[Depends(rate_limit("documents", 10))])
     async def upload(request: Request) -> Any:
@@ -206,37 +227,79 @@ def create_documents_router() -> APIRouter:
             )
         idempotency_key = request.headers.get("X-Idempotency-Key") or None
         force_ocr = request.query_params.get("force_ocr", "").lower() in {"1", "true", "yes"}
-        max_bytes = int(svc.config.intake_max_bytes)
+        try:
+            max_bytes, max_uploads = await asyncio.to_thread(
+                lambda: (int(svc.config.intake_max_bytes), int(svc.config.capacity_max_concurrent_uploads))
+            )
+        except DocumentPolicyError as exc:
+            return _policy_error(exc)
 
-        # Stream the request body to a bounded temp file — never buffer the
-        # whole request in memory, and abort early past the cap.
-        fd, tmp_name = tempfile.mkstemp(prefix="doc-upload-")
-        tmp_path = Path(tmp_name)
+        # Admission BEFORE the body (2026-10-13, F08): a declared length past
+        # the limit, a disabled platform, a full queue, a tenant cap, a spent
+        # rate window or a disk below its floor answer now, not after up to
+        # the intake limit has been received and spooled.
+        declared_header = request.headers.get("content-length")
+        declared: int | None = None
+        if declared_header is not None:
+            try:
+                declared = int(declared_header)
+                if declared < 0:
+                    raise ValueError(declared_header)
+            except ValueError:
+                return JSONResponse(
+                    status_code=400, content={"ok": False, "error": "Invalid Content-Length", "code": "invalid_request"}
+                )
+            if declared > max_bytes:
+                return _too_large()
+        refusal = await _admit_upload(svc, tenant=tenant, actor=actor, workspace=workspace, declared=declared)
+        if refusal is not None:
+            return refusal
+        if not _UPLOAD_SLOTS.acquire(max_uploads):
+            return JSONResponse(
+                status_code=503,
+                headers={"Retry-After": "5"},
+                content={
+                    "ok": False,
+                    "error": "Too many uploads are being received; retry shortly.",
+                    "code": "uploads_busy",
+                    "reason": "upload_backpressure",
+                },
+            )
+
+        # Stream the request body to a bounded spool under the storage root
+        # (measured by the free-space floor, swept by garbage collection) --
+        # never buffer the whole request in memory, abort early past the cap,
+        # and write off the event loop.
+        tmp_path: Path | None = None
         total = 0
         try:
+            spool_dir = await asyncio.to_thread(svc.upload_spool_dir)
+            fd, tmp_name = await asyncio.to_thread(tempfile.mkstemp, prefix="doc-upload-", dir=spool_dir)
+            tmp_path = Path(tmp_name)
             with os.fdopen(fd, "wb") as handle:
+                pending = bytearray()
                 async for chunk in request.stream():
                     if not chunk:
                         continue
                     total += len(chunk)
-                    if total > max_bytes:
-                        return JSONResponse(
-                            status_code=413,
-                            content={
-                                "ok": False,
-                                "error": "Upload exceeds the configured intake limit",
-                                "code": "intake_too_large",
-                            },
-                        )
-                    handle.write(chunk)
+                    if total > max_bytes or (declared is not None and total > declared):
+                        return _too_large()
+                    pending += chunk
+                    if len(pending) >= _SPOOL_FLUSH_BYTES:
+                        await asyncio.to_thread(handle.write, bytes(pending))
+                        pending.clear()
+                if pending:
+                    await asyncio.to_thread(handle.write, bytes(pending))
             if total == 0:
                 return JSONResponse(
                     status_code=400,
                     content={"ok": False, "error": "Empty upload"},
                 )
 
+            spooled = tmp_path
+
             def _run() -> dict[str, Any]:
-                with tmp_path.open("rb") as source:
+                with spooled.open("rb") as source:
                     result = svc.ingest_stream(
                         source,
                         filename=filename,
@@ -252,6 +315,8 @@ def create_documents_router() -> APIRouter:
             payload = await asyncio.to_thread(_run)
             return {"ok": True, **payload}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             from kazma_core.documents.capacity import CapacityError
             from kazma_core.documents.ingestion import DocumentIngestionError
 
@@ -275,12 +340,14 @@ def create_documents_router() -> APIRouter:
                 },
             )
         finally:
-            tmp_path.unlink(missing_ok=True)
+            _UPLOAD_SLOTS.release()
+            if tmp_path is not None:
+                await asyncio.to_thread(tmp_path.unlink, missing_ok=True)
 
     # ── Workspace-safe local import ─────────────────────────────────────
 
     @router.post("/import", dependencies=[Depends(rate_limit("documents", 10))])
-    async def import_local(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
+    async def import_local(request: Request, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         import asyncio
 
         svc = _svc(request)
@@ -318,8 +385,13 @@ def create_documents_router() -> APIRouter:
             data = await asyncio.to_thread(_run)
             return {"ok": True, **data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
+            from kazma_core.documents.capacity import CapacityError
             from kazma_core.documents.ingestion import DocumentIngestionError
 
+            if isinstance(exc, CapacityError):
+                return _capacity_error(exc)
             if isinstance(exc, DocumentIngestionError):
                 return _ingestion_error(exc)
             logger.warning("[documents_api] import failed type=%s", type(exc).__name__)
@@ -331,7 +403,7 @@ def create_documents_router() -> APIRouter:
     # ── Document actions (convert / pdf / redact / generate / merge) ─────
 
     @router.post("/generate", dependencies=[Depends(rate_limit("documents", 10))])
-    async def generate(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
+    async def generate(request: Request, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -361,10 +433,12 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, **data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "generate")
 
     @router.post("/merge", dependencies=[Depends(rate_limit("documents", 10))])
-    async def merge(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
+    async def merge(request: Request, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -391,6 +465,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "artifact": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "merge")
 
     @router.get("/artifacts/{artifact_id}/download")
@@ -409,6 +485,8 @@ def create_documents_router() -> APIRouter:
                 artifact_id=artifact_id,
             )
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "download")
         return FileResponse(
             path=info["path"],
@@ -417,7 +495,7 @@ def create_documents_router() -> APIRouter:
         )
 
     @router.post("/{document_id}/convert", dependencies=[Depends(rate_limit("documents", 10))])
-    async def convert(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
+    async def convert(request: Request, document_id: str, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -438,6 +516,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "artifact": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "convert")
 
     @router.get("/{document_id}/pdf-info")
@@ -455,10 +535,12 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, **data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "pdf_info")
 
     @router.post("/{document_id}/split", dependencies=[Depends(rate_limit("documents", 10))])
-    async def split(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
+    async def split(request: Request, document_id: str, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -482,10 +564,12 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "artifact": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "split")
 
     @router.post("/{document_id}/fill-form", dependencies=[Depends(rate_limit("documents", 10))])
-    async def fill_form(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
+    async def fill_form(request: Request, document_id: str, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -506,10 +590,12 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "artifact": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "fill_form")
 
     @router.post("/{document_id}/redact", dependencies=[Depends(rate_limit("documents", 10))])
-    async def redact(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
+    async def redact(request: Request, document_id: str, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -530,6 +616,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "artifact": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "redact")
 
     @router.get("/{document_id}/artifacts")
@@ -549,6 +637,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "artifacts": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _action_error(exc, "artifacts")
 
     # ── Health ──────────────────────────────────────────────────────────
@@ -562,6 +652,8 @@ def create_documents_router() -> APIRouter:
             with read_only_diagnostic("/api/documents/health"):
                 return {"ok": True, "health": svc.health()}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] health failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500, content={"ok": False, "error": "health unavailable"}
@@ -583,6 +675,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "documents": docs}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] list failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500,
@@ -606,6 +700,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "document": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "detail")
 
     @router.get("/{document_id}/versions")
@@ -625,6 +721,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "versions": data["versions"]}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "versions")
 
     @router.get("/{document_id}/content")
@@ -657,12 +755,14 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "content": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "content")
 
     # ── Knowledge index / search ────────────────────────────────────────
 
     @router.post("/{document_id}/index", dependencies=[Depends(rate_limit("documents", 10))])
-    async def index(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
+    async def index(request: Request, document_id: str, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         import asyncio
 
         svc = _svc(request)
@@ -684,10 +784,12 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "index": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "index")
 
     @router.post("/{document_id}/unindex")
-    async def unindex(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
+    async def unindex(request: Request, document_id: str, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         import asyncio
 
         svc = _svc(request)
@@ -709,10 +811,12 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "unindex": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "unindex")
 
     @router.post("/search", dependencies=[Depends(rate_limit("documents", 30))])
-    async def search(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
+    async def search(request: Request, payload: dict[str, Any] = Depends(_json_body)) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -736,6 +840,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "search": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "search")
 
     # ── Jobs ────────────────────────────────────────────────────────────
@@ -747,10 +853,10 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, _actor, _ = await _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
-                svc.job_status, tenant_id=tenant, job_id=job_id
+                svc.job_status, tenant_id=tenant, job_id=job_id, actor_id=actor
             )
             if data is None:
                 return JSONResponse(
@@ -758,6 +864,8 @@ def create_documents_router() -> APIRouter:
                 )
             return {"ok": True, "job": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "job_status")
 
     @router.get("/jobs/{job_id}/events")
@@ -767,13 +875,15 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, _actor, _ = await _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
-                svc.job_events, tenant_id=tenant, job_id=job_id
+                svc.job_events, tenant_id=tenant, job_id=job_id, actor_id=actor
             )
             return {"ok": True, "events": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "job_events", not_found_default=True)
 
     @router.post("/jobs/{job_id}/cancel")
@@ -790,6 +900,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "job": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             return _error_for(exc, "cancel")
 
     @router.post("/jobs/{job_id}/retry")
@@ -806,6 +918,12 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "job": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
+            from kazma_core.documents.capacity import CapacityError
+
+            if isinstance(exc, CapacityError):
+                return _capacity_error(exc)
             return _error_for(exc, "retry")
 
     # ── Phase 9: operations (metrics / capacity / audit / maintenance) ───
@@ -822,6 +940,8 @@ def create_documents_router() -> APIRouter:
             data = await asyncio.to_thread(svc.metrics_snapshot, tenant_id=tenant)
             return {"ok": True, "metrics": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] metrics failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500, content={"ok": False, "error": "metrics unavailable"}
@@ -839,6 +959,8 @@ def create_documents_router() -> APIRouter:
             data = await asyncio.to_thread(svc.capacity_snapshot, tenant_id=tenant)
             return {"ok": True, "capacity": data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] capacity failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500, content={"ok": False, "error": "capacity unavailable"}
@@ -853,6 +975,8 @@ def create_documents_router() -> APIRouter:
             with read_only_diagnostic("/api/documents/ops/readiness"):
                 return {"ok": True, "readiness": svc.readiness()}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] readiness failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500, content={"ok": False, "error": "readiness unavailable"}
@@ -883,6 +1007,8 @@ def create_documents_router() -> APIRouter:
                 },
             }
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] retention failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500, content={"ok": False, "error": "retention unavailable"}
@@ -892,6 +1018,11 @@ def create_documents_router() -> APIRouter:
     async def documents_audit(request: Request) -> Any:
         import asyncio
 
+        # The trail names every document, job and actor of the tenant,
+        # including documents the caller cannot read: an operator view.
+        denied = _require_admin(request)
+        if denied is not None:
+            return denied
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -912,6 +1043,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, **data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] audit failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500, content={"ok": False, "error": "audit unavailable", "events": []}
@@ -934,6 +1067,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "report": report}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] maintenance dry-run failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500, content={"ok": False, "error": "maintenance failed"}
@@ -956,6 +1091,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, "report": report}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning("[documents_api] maintenance run failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500, content={"ok": False, "error": "maintenance failed"}
@@ -985,6 +1122,8 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, **data}
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, DocumentPolicyError):
+                return _policy_error(exc)
             logger.warning(
                 "[documents_api] delete failed doc=%s actor=%s type=%s err=%s",
                 document_id[:12],
@@ -995,14 +1134,12 @@ def create_documents_router() -> APIRouter:
             return _error_for(exc, "delete", not_found_default=True)
 
     @router.post("/{document_id}/delete")
-    async def delete_document(request: Request, document_id: str) -> Any:
-        reason = "user_requested"
-        try:
-            body = await request.json()
-            if isinstance(body, dict) and body.get("reason"):
-                reason = str(body["reason"])[:200]
-        except Exception:  # noqa: BLE001
-            pass
+    async def delete_document(
+        request: Request, document_id: str, payload: dict[str, Any] = Depends(_optional_json_body),
+    ) -> Any:
+        # The same bounded reader as every other route (DOC-A4): this one
+        # read any size with request.json() and ignored what it could not parse.
+        reason = str(payload["reason"])[:200] if payload.get("reason") else "user_requested"
         return await _delete_document_impl(request, document_id, reason=reason)
 
     @router.delete("/{document_id}")
@@ -1036,34 +1173,162 @@ def _opt_int(value: Any, default: int) -> int | None:
         return None
 
 
+def _policy_error(exc: DocumentPolicyError) -> JSONResponse:
+    return JSONResponse(status_code=503,
+                        content={"ok": False, "code": exc.code, "error": exc.safe_message},
+                        headers={"Retry-After": "30"})
+
+
+#: One status per document error code, for every route (DOC-A4, 2026-10-13).
+#: Three route helpers kept three tables that had drifted: writes switched off
+#: answered 503 on upload, import, index, unindex, delete and retry but 422 on
+#: the action routes, and a required malware scanner that could not run
+#: answered 400, as if the file were at fault. A refusal the server's state
+#: causes (writes off, no scanner, no permitted worker profile) is a 503 with
+#: Retry-After; the caller's request is not wrong. A code missing here keeps
+#: its route's default (400 for intake and lifecycle, 422 for actions).
+_STATUS_BY_CODE: dict[str, int] = {
+    "invalid_request": 400,
+    "invalid_document_request": 400,
+    "invalid_document_scope": 400,
+    "invalid_document_encoding": 400,
+    "intake_corrupt": 400,
+    "document_access_denied": 404,
+    "artifact_access_denied": 404,
+    "not_ready": 409,
+    "idempotency_conflict": 409,
+    "intake_taken_over": 409,
+    "intake_too_large": 413,
+    "quota_exceeded": 413,
+    "unsupported_document_operation": 422,
+    "document_delete_failed": 500,
+    "document_unindex_failed": 500,
+    "document_platform_disabled": 503,
+    "document_engine_unavailable": 503,
+    "repository_unavailable": 503,
+    "malware_scanner_unavailable": 503,
+    "worker_isolation_required": 503,
+    "worker_isolation_invalid": 503,
+    "worker_isolation_unavailable": 503,
+    "worker_isolation_busy": 503,
+}
+
+
+def _coded_error(code: str, message: str, *, default: int) -> JSONResponse:
+    status = _STATUS_BY_CODE.get(code, default)
+    headers = {"Retry-After": "30"} if status == 503 else None
+    return JSONResponse(
+        status_code=status,
+        content={"ok": False, "error": message, "code": code},
+        headers=headers,
+    )
+
+
 def _action_error(exc: Exception, op: str) -> JSONResponse:
     """Map a document-action failure to a truthful HTTP status."""
     from kazma_core.documents.ingestion import DocumentIngestionError
 
+    if isinstance(exc, DocumentPolicyError):
+        return _policy_error(exc)
     if isinstance(exc, DocumentIngestionError):
-        code = exc.code
-        status = {
-            "invalid_request": 400,
-            "invalid_document_request": 400,
-            "invalid_document_scope": 400,
-            "invalid_document_encoding": 400,
-            "intake_too_large": 413,
-            "quota_exceeded": 413,
-            "not_ready": 409,
-            "document_access_denied": 404,
-            "artifact_access_denied": 404,
-            "document_engine_unavailable": 503,
-            "unsupported_document_operation": 422,
-            "repository_unavailable": 503,
-        }.get(code, 422)
-        return JSONResponse(
-            status_code=status,
-            content={"ok": False, "error": exc.safe_message, "code": code},
-        )
+        return _coded_error(exc.code, exc.safe_message, default=422)
     logger.warning("[documents_api] %s failed type=%s", op, type(exc).__name__)
     return JSONResponse(
         status_code=400,
         content={"ok": False, "error": f"{op} failed ({type(exc).__name__})"},
+    )
+
+
+#: The largest JSON body a document route reads (2026-10-13, F08). FastAPI's
+#: ``Body(...)`` parsed any size into memory before a route could check it;
+#: the largest legitimate body is a 1 MiB generation payload plus its frame.
+_JSON_BODY_MAX_BYTES = 2 * 1024 * 1024
+
+
+async def _optional_json_body(request: Request) -> dict[str, Any]:
+    """:func:`_json_body` for a route whose body may be absent: none is ``{}``."""
+    return await _read_json_body(request, allow_empty=True)
+
+
+async def _json_body(request: Request) -> dict[str, Any]:
+    """The request's JSON object (a FastAPI dependency); see the reader."""
+    return await _read_json_body(request, allow_empty=False)
+
+
+async def _read_json_body(request: Request, *, allow_empty: bool) -> dict[str, Any]:
+    """The request's JSON object, read under ``_JSON_BODY_MAX_BYTES``.
+
+    A declared length past the cap is refused before a byte is read; an
+    undeclared or false one is cut off as soon as the running total passes
+    it. Malformed JSON, a non-object and nesting too deep for the parser are
+    422s, never a 500.
+    """
+    import json
+
+    def _refuse(status: int, error: str, code: str) -> HTTPException:
+        return HTTPException(status_code=status, detail={"ok": False, "error": error, "code": code})
+
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > _JSON_BODY_MAX_BYTES:
+                raise _refuse(413, "Request body is too large", "request_too_large")
+        except ValueError:
+            raise _refuse(400, "Invalid Content-Length", "invalid_request") from None
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > _JSON_BODY_MAX_BYTES:
+            raise _refuse(413, "Request body is too large", "request_too_large")
+    if allow_empty and not bytes(body).strip():
+        return {}
+    try:
+        value = json.loads(bytes(body) or b"null")
+    except (ValueError, RecursionError):
+        raise _refuse(422, "Request body is not valid JSON", "invalid_json") from None
+    if not isinstance(value, dict):
+        raise _refuse(422, "Request body must be a JSON object", "invalid_json")
+    return value
+
+
+#: Spooled bytes are written to disk in pieces of this size, off the loop.
+_SPOOL_FLUSH_BYTES = 1024 * 1024
+
+
+class _UploadSlots:
+    """Uploads being received by this process at once (each spooled)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held = 0
+
+    def acquire(self, limit: int) -> bool:
+        with self._lock:
+            if self._held >= max(1, limit):
+                return False
+            self._held += 1
+            return True
+
+    def release(self) -> None:
+        with self._lock:
+            self._held = max(0, self._held - 1)
+
+    @property
+    def held(self) -> int:
+        return self._held
+
+
+_UPLOAD_SLOTS = _UploadSlots()
+
+
+def _too_large() -> JSONResponse:
+    return JSONResponse(
+        status_code=413,
+        content={
+            "ok": False,
+            "error": "Upload exceeds the configured intake limit",
+            "code": "intake_too_large",
+        },
     )
 
 
@@ -1074,20 +1339,10 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
         JobNotFoundError,
     )
 
+    if isinstance(exc, DocumentPolicyError):
+        return _policy_error(exc)
     if isinstance(exc, DocumentIngestionError):
-        code = exc.code
-        status = {
-            "invalid_request": 400,
-            "not_ready": 409,
-            "document_access_denied": 404,
-            "document_delete_failed": 500,
-            "document_unindex_failed": 500,
-            "document_platform_disabled": 503,
-        }.get(code, 400)
-        return JSONResponse(
-            status_code=status,
-            content={"ok": False, "error": exc.safe_message, "code": code},
-        )
+        return _coded_error(exc.code, exc.safe_message, default=400)
     if isinstance(exc, JobNotFoundError):
         return JSONResponse(
             status_code=404, content={"ok": False, "error": "Job not found"}

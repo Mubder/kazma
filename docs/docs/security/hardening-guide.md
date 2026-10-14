@@ -4,10 +4,19 @@ sidebar_position: 3
 
 # Hardening Guide
 
-**Document Intelligence:** treat every upload as hostile — enable ClamAV for production
-intake (`documents.security.malware_scan=on` when `clamscan`/`clamdscan` is on PATH),
-keep fences on, and review [Document security](./document-security). Prefer
-`document-platform` over legacy generators for multi-user deployments.
+**Document Intelligence:** treat every upload as hostile. The default `process`
+worker profile bounds time, memory and output but confines neither the file
+system nor the network; for documents you do not trust run the attested
+`container` profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container` with the
+document worker broker) and set `security.execution.container_required` so the
+`process` profile is refused. Enable ClamAV for production intake
+(`documents.security.malware_scan=on` when `clamscan`/`clamdscan` is on PATH, or
+`documents.security.malware_fail_closed=true`, the default under
+`KAZMA_PRODUCTION=1`), and leave `documents.security.remote_parse` off unless
+original documents may be uploaded to LlamaParse or Reducto. Document text
+always reaches the model inside the untrusted-data fence (not a setting).
+Review [Document security](./document-security). Prefer `document-platform`
+over legacy generators for multi-user deployments.
 
 ## Server binding
 

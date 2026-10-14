@@ -30,7 +30,7 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
 | Research | `/research` | **Start deep research** (live SSE sessions), results list, archive, compare, export |
-| Documents | `/documents` | Document Intelligence: upload, library, content preview, convert/redact, **ops panel** (capacity, readiness, audit, GC dry-run + confirm) |
+| Documents | `/documents` | Document Intelligence: upload, library, content preview, Knowledge libraries, convert/split/redact, job history, **ops panel** (capacity, readiness, audit, GC dry-run + confirm) |
 | IDE | `/ide` | CodeMirror 5 editor, workspace files, apply-patch, run, git, AI-assisted edit |
 | **X Studio** | `/x` | Compose, schedule, reschedule, thread hops, delete a live tweet, load saved drafts. Operator click is the approval. **All clocks** opens `/scheduled`. |
 | Scheduled | `/scheduled` | Mixed clock: cron jobs **and** X posts |
@@ -38,11 +38,28 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 
 ### Documents page (product path)
 
-1. Drop or pick a file (optional **Force OCR**).
-2. Library lists opaque ids + processing state (`received` … `ready` / fail states).
-3. Detail: fenced content preview (`dir="auto"` for BiDi), versions, jobs, convert/PDF tools when engines are ready.
-4. Ops card: capacity `degraded_reasons`, readiness (jobs/metadata multi-replica), audit, GC dry-run → `kazmaConfirm` → run.
-5. Settings → **Documents** for live limits and malware/rollout without editing YAML.
+1. Drop or pick a file (optional **Force OCR**). An upload past a limit (size,
+   the storage free-space floor, the queue, the tenant's caps or rate) is
+   refused before the server reads the file, and the page shows why.
+2. Library lists opaque ids + processing state (`received` … `ready` / fail
+   states). On a single-operator install the page, the chat commands and the
+   agent's tools are one principal, the operator, so the documents the agent
+   imported appear here too; with platform users the page lists what the
+   signed-in user owns or was granted.
+3. Detail: fenced content preview (first 8,000 characters, `dir="auto"` for
+   BiDi), versions, jobs with their event history (**Cancel** while a job runs,
+   **Retry** for a dead-lettered or rejected one), the Knowledge libraries the
+   document is in (add, remove, or create a library), convert / PDF info /
+   split / redact when the engines are ready (redact asks first), the artifacts
+   with downloads, and **Delete / Archive** (asks first; the document leaves
+   every library, and garbage collection reclaims its bytes later).
+4. Ops card: capacity `degraded_reasons`, queue (depth, leases, retry waiting,
+   dead letters), storage and quota, readiness (jobs/metadata multi-replica),
+   a notice when saved settings need a restart, audit history, GC dry-run →
+   `kazmaConfirm` → run. The audit history and GC are for administrators: for
+   anyone else the history stays empty and GC says admin privileges are needed.
+5. Settings → **Documents** for live limits, OCR (including reading ruled
+   tables on scanned pages), malware and rollout without editing YAML.
 
 REST: `/api/documents/*` · Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document processing](../ops/document-processing).
 

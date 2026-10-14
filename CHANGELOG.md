@@ -1,5 +1,181 @@
 # CHANGELOG
 
+## Knowledge Library: the industrial audit (2026-10-14)
+
+- The Knowledge Library has its own database, `knowledge.db`, with a 1 GiB
+  quota that refuses a crawl before it fetches. On first open the old tables
+  move in from `settings.db`, and a migration bundle in the older layout is
+  staged the same way. A page is published in one transaction (its old chunks
+  retired, the new ones and the keyword index written together). A deleted
+  library refuses late writes. Chunk ids carry their position.
+- One delete, from the page and from `/kb`: refused while a crawl owns the
+  library; the documents it holds are taken out through the Documents
+  service, then vectors, chunks and the fetched pages.
+- The crawl journal is the only crawl state: one row per job with its own
+  revision, bounded by count and bytes, owners with a renewed lease, and one
+  crawl per library. `kb.ingest_jobs` and `stores/kb_jobs.py` are retired;
+  `kazma acquisition purge-finished` clears finished jobs.
+- Meaning search tags a vector with the embedder that made it (class, model,
+  size, endpoint), so a model switch or a fallback re-embeds instead of
+  mixing vectors. The repair sweep isolates each library, says when the
+  vector store is away (WARNING, an ops alert after three passes, `/metrics`,
+  readiness and the daily digest), and checks the keyword index each pass.
+- What the model sees: the supervisor builds the turn's one Knowledge block
+  (the transports no longer inject their own), "Memory used" lists exactly
+  the chunks injected, and `knowledge_search` fences the page text while its
+  own scaffolding stays outside. Stored URLs are http(s) only.
+- Surfaces: stable error codes in English and Arabic, bounded request
+  bodies, `/kb add|crawl|refresh|delete` handled by the gateway (admin
+  only), every Knowledge surface refuses an install with platform users
+  (decision D1), and `window.kazmaSave` treats `{ok: false}` as a failure on
+  every Settings save.
+- Open: the scale measurement and multi-day soak (owner, D3), the retrieval
+  benchmark, and an independent review. Error wording and page polish
+  (KB-S05, KB-S15) are partial. Tracker:
+  `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`.
+
+## Time Travel: the industrial audit (2026-10-14)
+
+- One rewind for every surface (`kazma_ui/thread_rewind.py`): the web page,
+  `/replay` and `/fork` in the chat apps and the API restore and fork under
+  the same per-thread lock turns, approvals, `/undo`, `/edit` and `/compact`
+  take. A restore refuses while a turn runs or an approval waits, writes a
+  turn-boundary state (a step's unfinished tool calls are dropped), rewinds
+  the chat's transcript and scratchpad, and repaints open tabs. The approve
+  route resumes only the live approval interrupt, by its id: a late answer
+  to a card whose question is gone resumes nothing.
+- Steps are addressed by a unique id with the turn they belong to, never by
+  a bare iteration number that repeats every turn. Restoring a step deletes
+  the steps after it.
+- Deleting a chat, forgetting its past or `/replay clear` deletes its steps
+  under every key the chat has. `snapshots.db` is not backed up and does not
+  travel in a migration bundle: a copy elsewhere would bring a deleted chat
+  back.
+- Declared byte budgets per step, per chat and in total, enforced in the
+  database; a failed capture says so (no step id, no frame); a store that
+  cannot be read answers 503; each restore and fork leaves an audit row.
+  Settings shows the recorder's real limits.
+- Migration rewrites JSON-escaped Windows paths and keeps a JSON row whose
+  rewrite would not parse.
+- One fork for the web and the chat apps: the transcript without system
+  notes or raw tool messages, a title in the chat's language, failures
+  reported.
+- Open: the long soak (owner, D3) and an independent review. Tracker:
+  `docs/plans/TIME_TRAVEL_INDUSTRIAL_HARDENING_GOAL.md`.
+
+## Scheduled: the industrial audit (2026-10-14)
+
+- A scheduled job says what it may do, and does only that. A reminder
+  delivers its stored message with no model and no tool; a task declares
+  `read` (the default) or `read_write` tools at booking, the approval card
+  shows it, and the fire's executor refuses any other tool. Fired tasks do not
+  run while approvals are switched off unless `safety.cron_fire_without_hitl`
+  is set. Jobs booked before this change are read-only tasks: book again with
+  `read_write` one that needs to write.
+- Nothing is lost across a restart: each fire is a leased record, recovery
+  decides per phase, and shutdown waits for fires; a reload with `--when-idle`
+  waits for them too. Deliveries go through a leased outbox and count only
+  when the platform took them; a refused one ends `undeliverable` with one
+  alert, never "done". A failed turn is a failed fire.
+- A job late by more than its catch-up window (60 minutes by default; it was
+  24 hours) is `missed`, with one notice, instead of running late.
+- One time model for every path (chat, the Web page, `edit_scheduled`, X):
+  a time with no zone means the operator's zone; English and Arabic
+  recurring requests stay recurring; one validator for cron and X across
+  clock changes.
+- The Scheduled page shows each job's state, recurrence, failures and last
+  delivery, and X posts' real state, in English and Arabic; an edit of the
+  timing never rewrites the prompt; edit and cancel are versioned.
+- Bounds, a rate bucket, a liveness heartbeat, metrics and a digest line. On
+  an install with platform users the Scheduled surfaces refuse (decision D1).
+- Open: the 7-day soak (owner, D3) and an independent review. Tracker:
+  `docs/plans/SCHEDULED_INDUSTRIAL_HARDENING_GOAL.md`.
+
+## Swarm: the industrial audit, Stages 1-5 (2026-10-14)
+
+- Swarm approvals are a real boundary. The approval a chat turn gave covers
+  that one tool call: work it starts (a swarm task from `dispatch_swarm`, a
+  background task) asks the bus again; a swarm worker's `file_write` or
+  `send_message` used to run with no card anywhere. Each bus request has a
+  fresh id (never one taken from the tool's arguments), a card showing every
+  argument, and one decision shared by every platform: the first human
+  Approve or Deny decides, every card shows it, and a timeout or cancel is its
+  own outcome, never a deny. The gate record names the person who pressed.
+- The engine owns every task's run: cancel and timeouts stop the work before
+  the ending is recorded, a task id runs once, a finished task stays finished,
+  and an interrupted run records which tools that change things had already
+  run. A resumed pipeline skips the steps it already finished; retrying a task
+  whose effects are unknown asks first.
+- The Swarm page reads every answer, approves in the background (202) and
+  follows progress on a resumable stream (event ids, heartbeat, caps), in
+  English and Arabic. Inputs are bounded; a full swarm answers 429.
+- One role table for `/api/swarm/*`: reading for signed-in users, everything
+  else for the admin. On an install with platform users the swarm refuses,
+  with the reason, until per-user swarm work is built. Sending a result to
+  another chat from `/swarm` is admin-only.
+- A worker's text reaches every model as fenced data. Circuit breakers ignore
+  outcomes from an older generation; a pool worker with a dispatch in flight
+  is never reaped. Discord and Slack swarm posts cannot ping the channel.
+- Lost swarm bookkeeping is a WARNING and counts
+  `kazma_swarm_failures_total{site}`; a refusal is counted once; worker
+  metrics follow the task retention. Postgres task rows take a NUL safely, and
+  the SQLite task store survives a power cut.
+- The separate swarm notifier (`SWARM_BOT_TOKEN`) is removed: swarm results go
+  to the swarm output target. A set `SWARM_BOT_TOKEN` is a startup warning.
+- Open (owner decisions): handoff as a feature or extension point (D6),
+  semantic routing and the pipeline Refiner (D8), the Temporal test server
+  (D9), the soak (D3). Tracker: `docs/plans/SWARM_INDUSTRIAL_HARDENING_GOAL.md`.
+
+## Memory: the industrial audit (2026-10-13 to 2026-10-14)
+
+- Forget reaches every copy (a fact's vector and history, archives, the audit
+  log, queued payloads, the search index) and converges: a forget cut short is
+  finished, and a restored older backup forgets again. Memory written from
+  Knowledge Library text is retired; library text is injected, never stored.
+- Entity ids keep their script (Arabic, Persian, CJK), the user's own facts
+  outrank what the model inferred, and the memory tools screen and fence what
+  they store and show.
+- The queue backs off failed work and keeps dead letters until the operator
+  retries or clears them; recall has a deadline and says when it is
+  incomplete; no slow call runs under a memory write lock; the Postgres mirror
+  is pushed by change and fully compared once a day.
+- Every memory and weekly summary can be found and forgotten from the Memory
+  page; every operator change leaves a trail and a real status. Tracker:
+  `docs/plans/MEMORY_INDUSTRIAL_HARDENING_GOAL.md`.
+
+## Documents: the documentation review's code fixes (2026-10-13)
+
+- The document worker on Windows now starts suspended and runs only once its
+  Job Object holds it. A venv's `python.exe` is a launcher, and a job assigned
+  a moment late held only the launcher: on the first run of every process the
+  parser ran with no memory, CPU or process limit while the result said the
+  limits were enforced (measured: 3.93-3.99 cores used under a one-core cap;
+  1.03-1.30 after). The CPU cap is now sized from the processor count (the old
+  value capped nothing). `python_exec`'s host mode launches the same way, and
+  a gate holds every Job Object assignment to it.
+- The Web Documents page, chat `/documents` and the agent's document tools act
+  as one principal, the install's operator, on a single-operator install: a
+  document uploaded on the page is read in chat and by the agent, and the
+  reverse. Older documents get an audited `owner` grant; ownership never
+  changes. With platform users chat and the agent refuse.
+- Every document route answers an error code with one status: writes off, a
+  required malware scanner that cannot run and no permitted worker profile are
+  503 with Retry-After everywhere (the scanner refusal now comes before the
+  upload is read). The delete route reads its body through the 2 MiB reader.
+- On Postgres the document audit is append-only (a trigger) and the retention
+  prune works there; every restore recreates the trigger's function first.
+- Backups, `kazma migrate` and restores follow where the document catalog is.
+  A SQLite catalog beside a Postgres queue is backed up (it was sent to a
+  backup that read a catalog that was not there); a Postgres catalog's files
+  now travel in a migration bundle; a failed document restore fails the
+  import; backups are renamed into place only when complete. Restoring both
+  Postgres backups into one database has a drilled order
+  (`restore --replace-document-tables`).
+- Eight document settings that nothing acted on were removed, and a gate
+  requires every remaining one to have a reader. `document_import` says when a
+  job is still processing after its 30-second wait. The coordinated backup's
+  table list is checked against the tables the store creates.
+
 ## Persistent research and crawler alerts (2026-10-12)
 
 - Add local, durable completion/result, partial/failure/interruption, stalled

@@ -72,6 +72,9 @@ KAZMA_PG_TABLES: list[str] = [
     # Document job queue (auto-created by documents/jobs_pg.py)
     "document_jobs",
     "document_job_events",
+    # Durable intake ownership and admission budgets (documents/admission.py).
+    "document_intake_reservations",
+    "document_intake_mutex",
     # Document catalog / ACL (documents/repository_pg.py) — required when
     # KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto (audit H-13 / §21A).
     "documents",
@@ -82,7 +85,51 @@ KAZMA_PG_TABLES: list[str] = [
     "document_tombstones",
     "document_chunks",
     "document_audit_events",
+    # The memory state mirror (memory/state_backend.py; Memory audit M06):
+    # the recall store when Postgres is the primary, and the only copy of
+    # what other replicas wrote. Required at boot only when memory's state
+    # backend is Postgres (:func:`_required_pg_tables`).
+    "kazma_episodes",
+    "kazma_beliefs",
 ]
+
+#: Tables in the dump that only some installs have.
+_MEMORY_MIRROR_TABLES = ("kazma_episodes", "kazma_beliefs")
+
+
+def _required_pg_tables() -> list[str]:
+    """The tables boot requires: every Kazma table, the memory mirror's only
+    when memory's state backend is configured as Postgres."""
+    from kazma_core.memory.state_backend import mirrors_to_postgres
+
+    mirror = mirrors_to_postgres()
+    return [t for t in KAZMA_PG_TABLES if mirror or t not in _MEMORY_MIRROR_TABLES]
+
+#: Functions the triggers on Kazma's tables call. ``pg_dump -t`` dumps a
+#: table's triggers but never the functions they call, so every restore
+#: creates these in the target first (``migration.pg_bridge.restore_database``)
+#: -- otherwise a restore into a fresh database (the weekly rehearsal, a drill,
+#: a new machine) cannot recreate the trigger. ``tests/test_document_audit_pg.py``
+#: holds every trigger function product code creates to this mapping.
+KAZMA_PG_FUNCTIONS: dict[str, str] = {
+    # documents/audit.py: audit rows are immutable, and deleted only by the
+    # retention prune, which sets kazma.document_audit_prune for its own
+    # transaction (the Postgres side of the SQLite triggers there).
+    "kazma_document_audit_guard": """
+CREATE OR REPLACE FUNCTION kazma_document_audit_guard() RETURNS trigger
+LANGUAGE plpgsql AS $guard$
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        RAISE EXCEPTION 'audit events are immutable';
+    END IF;
+    IF coalesce(current_setting('kazma.document_audit_prune', true), '') <> 'on' THEN
+        RAISE EXCEPTION 'audit events may only be pruned by retention';
+    END IF;
+    RETURN OLD;
+END
+$guard$
+""",
+}
 
 # How many raw .dump files stay on local disk. These are staging, not the
 # archive: restic snapshots each dump and keeps the real history under
@@ -349,4 +396,4 @@ def verify_required_pg_tables(pool: Any) -> list[str] | None:
     except Exception:
         logger.warning("[pg_backup] schema verification skipped (pool unavailable)", exc_info=True)
         return None
-    return [t for t in KAZMA_PG_TABLES if t not in present]
+    return [t for t in _required_pg_tables() if t not in present]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     from kazma_core.documents.content_model import ContentModel
     from kazma_core.documents.profile import DocProfile
 
+from .errors import DocumentSecurityError
 from .resources import validate_restricted_render_resources
 
 _PROTOCOL_VERSION = 1
@@ -441,32 +443,58 @@ def _generate_pptx(output: Path, payload: dict[str, Any]) -> None:
 
 
 def _weasy_pdf(output: Path, source: str, assets: Path) -> None:
-    from weasyprint import HTML, default_url_fetcher
+    # WeasyPrint >= 70 (the locked floor) takes a URLFetcher subclass; the
+    # old ``default_url_fetcher`` function no longer exists, and an ordinary
+    # exception from a fetcher only skips the resource with a warning. A
+    # denial raises FatalURLFetchingError so rendering stops instead.
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
 
+    from weasyprint import HTML
+    from weasyprint.urls import FatalURLFetchingError, URLFetcher
+
+    # No approved assets means no asset folder: an empty approval, not an
+    # error. (iterdir() on the missing folder raised, and a catch-all turned
+    # it into "external resource denied" for every asset-free HTML->PDF.)
+    approved = (
+        frozenset(path.name for path in assets.iterdir() if path.is_file())
+        if assets.is_dir()
+        else frozenset()
+    )
     try:
-        validate_restricted_render_resources(
-            source,
-            approved_asset_names=frozenset(
-                path.name for path in assets.iterdir() if path.is_file()
-            ),
-        )
-    except Exception as exc:
+        validate_restricted_render_resources(source, approved_asset_names=approved)
+    except DocumentSecurityError as exc:
         raise WorkerError(
             "external_resource_denied",
             "External or unapproved local resources are forbidden during rendering",
         ) from exc
     assets_root = assets.resolve()
 
-    def fetch(url: str, *args: Any, **kwargs: Any) -> Any:
-        if url.startswith("data:"):
-            return default_url_fetcher(url, *args, **kwargs)
-        if url.startswith("file:"):
-            candidate = Path(url[5:]).resolve()
-            if candidate.is_relative_to(assets_root) and candidate.is_file():
-                return default_url_fetcher(url, *args, **kwargs)
-        raise WorkerError("external_resource_denied", "External rendering fetch was denied")
+    class _Denied(FatalURLFetchingError):
+        pass
 
-    HTML(string=source, base_url=assets.as_uri() + "/", url_fetcher=fetch).write_pdf(output)
+    class _ApprovedAssetFetcher(URLFetcher):
+        """data: URIs and files inside the approved asset folder only."""
+
+        def fetch(self, url: str, headers: Any = None) -> Any:
+            if url.startswith("data:"):
+                return super().fetch(url, headers)
+            parsed = urlparse(url)
+            if parsed.scheme == "file":
+                candidate = Path(url2pathname(parsed.path)).resolve()
+                if candidate.is_relative_to(assets_root) and candidate.is_file():
+                    return super().fetch(url, headers)
+            raise _Denied("External rendering fetch was denied")
+
+    fetcher = _ApprovedAssetFetcher(
+        allowed_protocols={"data", "file"}, allow_redirects=False, fail_on_errors=True
+    )
+    try:
+        HTML(string=source, base_url=assets.as_uri() + "/", url_fetcher=fetcher).write_pdf(output)
+    except FatalURLFetchingError as exc:
+        raise WorkerError(
+            "external_resource_denied", "External rendering fetch was denied"
+        ) from exc
 
 
 def _extract_docx_text(source: Path) -> tuple[str, list[str]]:
@@ -669,6 +697,35 @@ def _render(request: dict[str, Any], output: Path) -> tuple[str, str, list[str]]
     return renderer, str(request.get("renderer_version", "1")), warnings
 
 
+def _assert_rendered_pdf_safe(output: Path) -> None:
+    """A rendered PDF passes the intake/mutation policy before it leaves.
+
+    LibreOffice, WeasyPrint and ReportLab render documents derived from
+    untrusted input; whatever they emit is checked like an upload would be.
+    """
+
+    try:
+        from pypdf import PdfReader
+        from pypdf.errors import PyPdfError
+    except ImportError as exc:
+        output.unlink(missing_ok=True)
+        raise WorkerError(
+            "renderer_unavailable", "PDF output cannot be verified without pypdf"
+        ) from exc
+    from .pdf_policy import assert_pdf_safe
+
+    try:
+        # From memory: a reader holding the file open would stop the unlink
+        # below on Windows. The size was bounded just before this check.
+        assert_pdf_safe(PdfReader(io.BytesIO(output.read_bytes()), strict=False))
+    except DocumentSecurityError as exc:
+        output.unlink(missing_ok=True)
+        raise WorkerError("unsafe_document", f"The rendered PDF was refused: {exc.safe_message}") from exc
+    except (PyPdfError, OSError, ValueError) as exc:
+        output.unlink(missing_ok=True)
+        raise WorkerError("invalid_output", "The rendered PDF could not be verified") from exc
+
+
 def execute(request_path: Path, result_path: Path) -> int:
     try:
         request = _request(request_path)
@@ -689,6 +746,8 @@ def execute(request_path: Path, result_path: Path) -> int:
         if output.stat().st_size > int(request.get("max_output_bytes", 256 * 1024 * 1024)):
             output.unlink(missing_ok=True)
             raise WorkerError("document_limit_exceeded", "Rendered document exceeds output limit")
+        if output.suffix.lower() == ".pdf":
+            _assert_rendered_pdf_safe(output)
         extension = output.suffix.lower().lstrip(".")
         _write(
             result_path,

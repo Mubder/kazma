@@ -13,8 +13,10 @@ Design notes:
     booking time (always-HITL); the fire is the execution of that approval.
   * Double-post guard: a failed fire is NEVER auto-retried on an ambiguous
     error (timeout / mid-stream drop) because we cannot know whether the post
-    reached X. Only a provably-unsent error (connection refused before send)
-    is retried. This matches ``XClient``'s "writes are not retried" contract.
+    reached X. A provably-unsent error (the connection never opened) is tried
+    again a minute later, at most three attempts in all, and an HTTP 429 is
+    deferred by its Retry-After (``publication_service._dispatch_operation``).
+    A post later than five minutes is held for review, never caught up.
   * Quota is reserved at BOOKING time: pending scheduled posts count toward
     the daily/monthly caps so the schedule cannot be used to exceed them.
   * Kill-switch ``KAZMA_X_SCHEDULE=0`` disables the fire loop (and booking).

@@ -117,9 +117,10 @@ def test_chunk_ids_differ_across_pages_with_same_body():
     b = chunk_to_dict(chunk_markdown_doc(md, source_url="https://x/b", library_id="lib")[0])
     assert a["content_hash"] == b["content_hash"]
     assert a["id"] != b["id"]
-    # Explicit helper contract.
-    assert make_chunk_id("lib", "https://x/a", a["content_hash"]) == a["id"]
-    assert make_chunk_id("lib", "https://x/b", b["content_hash"]) == b["id"]
+    # Explicit helper contract: the id names the chunk's position too
+    # (Knowledge KB-E05; tests/test_knowledge_publication.py).
+    assert make_chunk_id("lib", "https://x/a", a["content_hash"], a["chunk_index"]) == a["id"]
+    assert make_chunk_id("lib", "https://x/b", b["content_hash"], b["chunk_index"]) == b["id"]
 
 
 # ── Header walking ──────────────────────────────────────────────────────────

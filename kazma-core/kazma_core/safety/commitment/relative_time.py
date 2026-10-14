@@ -33,7 +33,7 @@ import functools
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -332,7 +332,7 @@ def parse_belief_date(obj: str, *, default_year: int | None = None) -> datetime 
     return None
 
 
-def parse_absolute_timing(timing: str) -> datetime | None:
+def parse_absolute_timing(timing: str, *, zone: tzinfo | None = None) -> datetime | None:
     """Parse a schedule_task ``timing`` arg as an ABSOLUTE datetime, or None.
 
     Accepts ISO 8601 forms (``2026-08-19``, ``2026-08-19T05:17:00+00:00``,
@@ -341,6 +341,12 @@ def parse_absolute_timing(timing: str) -> datetime | None:
     chat-text resolution. This is stricter than ``parse_belief_date`` on
     purpose: only a real absolute timestamp counts as "the model already
     resolved the fire time" (PR4 / Class C — incident 2026-08-12).
+
+    A time with no offset is in *zone* -- the operator's zone, as the
+    scheduler reads it (Scheduled audit SCH-E03). It was read as UTC here, and
+    the gate rewrote the booking to that instant: "09:00" booked from chat
+    fired at 12:00 for an operator in Asia/Kuwait. *zone* None keeps UTC for
+    callers that compare stored dates.
     """
     raw = normalize_digits((timing or "").strip())
     if not raw:
@@ -350,10 +356,74 @@ def parse_absolute_timing(timing: str) -> datetime | None:
         candidates.append(raw + "T00:00:00")
     for cand in candidates:
         try:
-            return _to_utc(datetime.fromisoformat(cand.replace("Z", "+00:00")))
+            dt = datetime.fromisoformat(cand.replace("Z", "+00:00").replace("z", "+00:00"))
         except ValueError:
             continue
+        if dt.tzinfo is None and zone is not None:
+            dt = dt.replace(tzinfo=zone)
+        return _to_utc(dt)
     return None
+
+
+# ── Recurrence and clock times in what the user said (SCH-E05) ───────────
+#
+# "Remind me every day at 9am" reached the gate as timing "daily at 9am",
+# which no rule here read: the gate denied it ("pass Nm/Nh or ISO") or, when
+# the text held any relative phrase ("starting tomorrow"; the Arabic "كل يوم",
+# where يوم reads as one day), allowed it and REWROTE it to one fire at
+# request_at + 1 day -- the recurrence and the 09:00 both gone.
+
+# Phrases, not words: "daily standup" or "my weekly report" are not a request
+# to repeat, and "يومين" (two days) begins with "يومي".
+_RE_RECURRING_EN = re.compile(
+    r"\b(every\s+(day|morning|evening|night|week|weekday|monday|tuesday|wednesday|thursday|friday|"
+    r"saturday|sunday|mon|tue|wed|thu|fri|sat|sun)s?|each\s+(day|morning|evening|week)"
+    r"|daily\s+at|weekdays\s+at|on\s+weekdays|remind\s+me\s+(daily|weekly))\b",
+    re.IGNORECASE,
+)
+_RE_RECURRING_AR = re.compile(
+    r"(كل\s*(يوم|صباح|مساء|ليلة|أسبوع|اسبوع|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|سبت|أحد|احد)"
+    r"(?![ء-ي])"
+    r"|(يوميا|يومياً|يوميًا|أسبوعيا|اسبوعيا|أسبوعياً|اسبوعياً)(?![ء-ي]))"
+)
+
+
+def is_recurring_request(text: str | None) -> bool:
+    """Whether the user asked for something that repeats (English or Arabic)."""
+    norm = normalize_digits(text or "")
+    return bool(_RE_RECURRING_EN.search(norm) or _RE_RECURRING_AR.search(norm))
+
+
+_RE_CLOCK_EN = re.compile(
+    r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?(?![\d:])", re.IGNORECASE)
+_RE_CLOCK_AR = re.compile(
+    r"(?:الساعة|الساعه|ساعة)\s*(\d{1,2})(?::(\d{2}))?\s*"
+    r"(الصبح|صباحا|صباحاً|صباحًا|صباح|الظهر|العصر|مساء|مساءً|مساءا|المساء|الليل|بالليل|ليلا|ليلاً)?"
+)
+_AR_PM = ("الظهر", "العصر", "مساء", "مساءً", "مساءا", "المساء", "الليل", "بالليل", "ليلا", "ليلاً")
+
+
+def _clock_in_text(text: str | None) -> tuple[int, int] | None:
+    """The time of day the user named ("at 9am", "at 21:30", "الساعة 9 الصبح"), or None."""
+    norm = normalize_digits(text or "")
+    m = _RE_CLOCK_EN.search(norm)
+    if m:
+        hour, minute = int(m.group(1)), int(m.group(2) or 0)
+        ampm = (m.group(3) or "").replace(".", "").lower()
+        if ampm:
+            if not 1 <= hour <= 12:
+                return None
+            hour = hour % 12 + (12 if ampm == "pm" else 0)
+    else:
+        m = _RE_CLOCK_AR.search(norm)
+        if not m:
+            return None
+        hour, minute = int(m.group(1)), int(m.group(2) or 0)
+        if m.group(3) in _AR_PM and hour < 12:
+            hour += 12
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return hour, minute
 
 
 # Same form cron.scheduler.parse_timing accepts for relative delays.
@@ -384,8 +454,12 @@ def validate_timing_against_memory(
     user_text: str | None = None,
     request_at: datetime | None = None,
     require_subject_match: bool = False,
+    zone: tzinfo | None = None,
 ) -> tuple[str, dict[str, Any] | None]:
     """Validate a ``timing`` arg against stored beliefs (CoPilot guard).
+
+    *zone* is the operator's zone: a time without an offset is read there,
+    as the scheduler reads it (SCH-E03).
 
     Returns ``(consistency, matched_belief)`` where consistency is:
 
@@ -427,7 +501,7 @@ def validate_timing_against_memory(
     """
     win = window if window is not None else timedelta(days=2)
 
-    abs_dt = parse_absolute_timing(timing)
+    abs_dt = parse_absolute_timing(timing, zone=zone)
     if abs_dt is None and request_at is not None:
         delta = compact_relative_delta(timing)
         if delta is not None:
@@ -438,7 +512,7 @@ def validate_timing_against_memory(
     # 1. Did the user themselves name this moment in this turn?
     if user_text:
         try:
-            for expr in parse_time_expressions(user_text, request_at=request_at):
+            for expr in parse_time_expressions(user_text, request_at=request_at, zone=zone):
                 if expr.kind == "absolute" and expr.absolute is not None:
                     if abs(abs_dt - _to_utc(expr.absolute)) <= win:
                         return ("user_asserted", None)
@@ -613,9 +687,12 @@ def _parse_ar(norm: str) -> list[TimeExpression]:
 
 
 def parse_time_expressions(
-    text: str, *, request_at: datetime | None = None,
+    text: str, *, request_at: datetime | None = None, zone: tzinfo | None = None,
 ) -> list[TimeExpression]:
-    """Extract all time expressions from *text*. Pure parse — no anchoring."""
+    """Extract all time expressions from *text*. Pure parse — no anchoring.
+
+    A date and time the user typed without an offset is in *zone* (the
+    operator's), UTC when it is None."""
     norm = normalize_digits(text or "")
     exprs: list[TimeExpression] = []
 
@@ -679,7 +756,7 @@ def parse_time_expressions(
                 d = d.replace(hour=hh, minute=mm)
             exprs.append(TimeExpression(
                 phrase=m.group(0), kind="absolute",
-                absolute=d.replace(tzinfo=timezone.utc), direction="after",
+                absolute=_to_utc(d.replace(tzinfo=zone or timezone.utc)), direction="after",
             ))
         except ValueError:
             continue
@@ -806,8 +883,14 @@ def resolve_remind(
     memory_beliefs: list[dict[str, Any]] | None = None,
     lang_hint: str = "auto",
     relevance_window: timedelta | None = None,
+    zone: tzinfo | None = None,
 ) -> RemindResolution:
     """Resolve a remind intent to a fire_at or a clarify/deny.
+
+    *zone* is the operator's zone: a date the user typed without an offset is
+    read there, and a calendar relative with a time of day ("tomorrow at
+    9am", "بكرة الساعة 9 الصبح") fires at that time there -- it added a bare
+    day to the request time (SCH-E05).
 
     Decision logic (plan §3.7, §3.4):
 
@@ -825,7 +908,7 @@ def resolve_remind(
     """
     memory_beliefs = memory_beliefs or []
     res = RemindResolution(anchor="none", overwrite_belief=False)
-    res.time_expressions = parse_time_expressions(text, request_at=request_at)
+    res.time_expressions = parse_time_expressions(text, request_at=request_at, zone=zone)
     res.matched_events = [p for p, _, _ in _match_events(text, memory_beliefs)]
 
     matched = _match_events(text, memory_beliefs)
@@ -886,6 +969,12 @@ def resolve_remind(
         # from-now fire candidate
         if expr.kind in ("relative_from_now", "calendar") and expr.lead is not None:
             fire_at = request_at + expr.lead
+            # A whole-day lead with a named time of day: that day, at that time.
+            whole_days = expr.lead.total_seconds() % 86400 == 0
+            clock = _clock_in_text(text) if whole_days and zone is not None else None
+            if clock is not None:
+                day = (request_at.astimezone(zone) + expr.lead).date()
+                fire_at = _to_utc(datetime.combine(day, time(*clock), tzinfo=zone))
             # check for a *relevant* unmentioned nearby event → ambiguous
             window = relevance_window if relevance_window is not None else _RELEVANCE_WINDOW
             nearby = _nearby_unmentioned_event(fire_at, memory_beliefs, window)

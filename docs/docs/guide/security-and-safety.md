@@ -7,7 +7,9 @@ description: Kazma Security & Safety — code-audited reference
 > Kazma's safety model: **three HITL execution paths + one gate registry**, default-deny tool tiers, fail-closed bus, CSRF / trusted-proxy, SSRF pin-IP, HMAC skills, and hardening. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §7, §26, §30–§32.
 
 **Also see:** [Document security](../security/document-security) — hostile intake,
-sandbox, fencing, malware scan, redaction model for Document Intelligence.
+the two worker isolation profiles (`process`, which has no filesystem or network
+jail, and the attested per-job `container` profile), fencing, malware scan,
+remote-parse egress, redaction model for Document Intelligence.
 
 ---
 
@@ -414,6 +416,10 @@ read out of the content is a trust decision the attacker writes.
 A fencing failure also fails **closed** — if the fence raises, the caller gets a
 placeholder naming the source and the number of characters withheld, not the raw
 text.
+
+Document text is fenced by the documents platform itself, with
+`format_untrusted_block` (sources `document`, `document_attachment` and
+`document_knowledge`); see [Document security](../security/document-security).
 
 ### What it is measured to do
 

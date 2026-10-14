@@ -189,20 +189,20 @@ class _Store:
         self.repaired = (job_id, target)
 
 
+# The repair chain resolves the address a fire's message goes to; the send
+# itself goes through the delivery outbox since the Scheduled audit
+# (SCH-E02, 2026-10-14). These three tests pinned ``_deliver`` (resolve +
+# send in one); they now pin the resolution (``_resolve_target``) and the
+# send (``_send``) it feeds.
+
+
 @pytest.mark.asyncio
 async def test_deliver_adopts_and_persists_sibling_target(monkeypatch):
-    sent: list[tuple[str, str, str]] = []
-
-    async def fake_send(target, text, backend=None, **kw):
-        sent.append((target, text, str(backend)))
-
-    monkeypatch.setattr(_sm_mod(), "send_message", fake_send)
     s = sched.CronScheduler.__new__(sched.CronScheduler)
     s._store = _Store(sibling="telegram:1804015016")
 
     job = _job(target="", thread="th-1")
-    await s._deliver(job, "result text")
-    assert sent and sent[0][0] == "telegram:1804015016"  # adopted sibling
+    assert await s._resolve_target(job) == "telegram:1804015016"  # adopted sibling
     assert s._store.repaired == ("cron-x", "telegram:1804015016")  # healed row
 
 
@@ -212,23 +212,29 @@ async def test_deliver_valid_target_untouched(monkeypatch):
 
     async def fake_send(target, text, backend=None, **kw):
         sent.append((target, text))
+        return f"sent:{target}"
 
     monkeypatch.setattr(_sm_mod(), "send_message", fake_send)
     s = sched.CronScheduler.__new__(sched.CronScheduler)
     s._store = _Store(sibling="telegram:OTHER")
-    await s._deliver(_job(target="telegram:111"), "hello")
+    target = await s._resolve_target(_job(target="telegram:111"))
+    assert target == "telegram:111"
+    assert await s._send({"job_id": "cron-x", "target": target, "body": "hello", "attempts": 1}) == (True, "")
     assert sent == [("telegram:111", "hello")]
     assert s._store.repaired is None  # valid row never touched
 
 
 @pytest.mark.asyncio
-async def test_deliver_undeliverable_logs_critical_never_crashes(monkeypatch, caplog):
+async def test_deliver_undeliverable_logs_critical_never_crashes(monkeypatch):
+    """No sibling and no session: no address, and nothing is sent to a guess.
+    The outbox records it undeliverable and logs CRITICAL naming the job
+    (tests/integration/test_cron_and_adapters.py runs that whole path)."""
     monkeypatch.setattr(_sm_mod(), "send_message", None)
     s = sched.CronScheduler.__new__(sched.CronScheduler)
     s._store = _Store(sibling="")  # no sibling, no session
-    with caplog.at_level("CRITICAL", logger="kazma_core.cron.scheduler"):
-        await s._deliver(_job(target="", thread="ghost"), "text")
-    assert any("UNDELIVERABLE" in r.message for r in caplog.records)
+    assert await s._resolve_target(_job(target="", thread="ghost")) == ""
+    ok, error = await s._send({"job_id": "cron-x", "target": "", "body": "text", "attempts": 1})
+    assert ok is False and "delivery target" in error
 
 
 # ── Item 3: denial notification ───────────────────────────────────────

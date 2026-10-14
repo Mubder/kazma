@@ -40,8 +40,10 @@ def test_concurrent_captures_and_reads_do_not_race(tmp_path: Path):
         while not stop.is_set():
             try:
                 recorder.list_distinct_threads()
-                recorder.list_snapshots("t0-1")
-                recorder.get_snapshot("t1-2", 7)
+                listed = recorder.list_snapshots("t0-1")
+                # By id since TT-01 (was get_snapshot(thread, iteration)).
+                if listed:
+                    recorder.get(listed[-1].id)
             except Exception as exc:  # noqa: BLE001
                 errors[f"reader: {type(exc).__name__}"] += 1
 

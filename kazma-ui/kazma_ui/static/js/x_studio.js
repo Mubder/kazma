@@ -275,7 +275,7 @@ function xStudioPage() {
     convWhen(epoch) {
       if (!epoch) return '';
       try {
-        return window.KazmaFormat ? window.KazmaFormat.dateTime(Number(epoch)) : new Date(Number(epoch) * 1000).toLocaleString();
+        return window.KazmaFormat ? window.KazmaFormat.dateTime(Number(epoch)) : new Date(Number(epoch) * 1000).toISOString();
       } catch (e) {
         return '';
       }
@@ -642,7 +642,7 @@ function xStudioPage() {
         const key = this._localKey(d);
         days.push({
           key: key,
-          label: d.toLocaleDateString(locale, { weekday: 'short' }),
+          label: window.KazmaFormat ? window.KazmaFormat.dateTime(d, { weekday: 'short' }) : key,
           count: counts[key] || 0,
         });
       }
@@ -671,13 +671,16 @@ function xStudioPage() {
       return shifted.toISOString().slice(0, 16);
     },
 
+    /* Through KazmaFormat, with the zone named (Scheduled audit SCH-S12):
+     * the browser's own locale rules gave Arabic-Indic digits in some
+     * engines, and the time named no zone. */
     fmtWhen(iso) {
       if (!iso) return '';
-      try {
-        return new Date(iso).toLocaleString(document.documentElement.lang || 'en', {
-          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-        });
-      } catch (_e) { return iso; }
+      const fmt = window.KazmaFormat;
+      if (!fmt) return iso;
+      return fmt.dateTime(iso, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+      }) || iso;
     },
 
     auditText(entry) {
@@ -713,7 +716,7 @@ function xStudioPage() {
       const bits = [];
       if (entry.ts) {
         try {
-          bits.push(window.KazmaFormat ? window.KazmaFormat.dateTime(entry.ts) : new Date(entry.ts).toLocaleString());
+          bits.push(window.KazmaFormat ? window.KazmaFormat.dateTime(entry.ts) : String(entry.ts));
         } catch (_e) { bits.push(String(entry.ts)); }
       }
       if (entry.status && entry.status !== 'success') {

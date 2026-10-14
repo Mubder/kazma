@@ -80,7 +80,9 @@ def test_a_local_caller_gets_the_counts(monkeypatch):
     _no_pending(monkeypatch, count=2)
     register_turn("t1", _Task(done=False))
     body = _client(LOCAL).get("/health/activity").json()
-    assert body == {"active_turns": 1, "pending_approvals": 2, "idle": False}
+    # ``active_fires`` since 2026-10-14 (Scheduled audit SCH-E04): a reload
+    # with --when-idle waits for a scheduled fire as it does for a turn.
+    assert body == {"active_turns": 1, "pending_approvals": 2, "active_fires": 0, "idle": False}
     unregister_turn("t1")
     assert _client(LOCAL).get("/health/activity").json()["idle"] is True
 

@@ -107,13 +107,20 @@ def test_the_pdf_fallback_keeps_arabic_and_english_as_written(tmp_path, monkeypa
     from kazma_core.agent.pipelines import document as pipeline
     from kazma_core.documents.service import DocumentService
 
+    # 2026-10-13 (F01): the in-process fallback this test was written for is
+    # gone -- no PDF is opened outside the bounded worker -- so the property
+    # is held where the text now comes from: the documents service's parser
+    # (with its right-to-left glyph repair, F09).
+    extracted = pipeline._read_pdf(pdf)
+    assert "مرحبا" in extracted, f"logical Arabic came back reordered: {extracted!r}"
+    assert "Quarterly report, final." in extracted, f"English was reordered: {extracted!r}"
+
+    # And with the service unavailable nothing reads the PDF in-process.
     def _unavailable(*_a, **_k):
         raise RuntimeError("documents service unavailable")
 
     monkeypatch.setattr(DocumentService, "read_transient_sync", _unavailable)
-    extracted = pipeline._read_pdf(pdf)
-    assert "مرحبا" in extracted, f"logical Arabic came back reordered: {extracted!r}"
-    assert "Quarterly report, final." in extracted, f"English was reordered: {extracted!r}"
+    assert pipeline._read_pdf(pdf) == ""
 
 
 # ── the gate: nothing outside the home shapes or reorders ────────────────

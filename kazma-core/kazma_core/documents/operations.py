@@ -26,11 +26,20 @@ from .models import (
 )
 from .mutation import get_mutation_registry
 from .parsers.common import sha256_path
+from .policy import DocumentPolicy, policy_operation
 from .renderers import RendererCapability, RendererRegistry, get_renderer_registry
 from .repository import DocumentRepository
 from .resources import validate_restricted_render_resources
 from .sandbox import SandboxRequest, run_isolated_subprocess
 from .storage import ContentAddressedStorage
+from .worker_container import (
+    CONTAINER,
+    image_engines_unavailable,
+    operation_container_request,
+    process_profile_refusal,
+    run_container_worker,
+    worker_isolation_mode,
+)
 
 _PROTOCOL_VERSION = 1
 _EXTENSIONS = {
@@ -82,13 +91,18 @@ class DocumentOperations:
         repository: DocumentRepository | None = None,
         renderer_registry: RendererRegistry | None = None,
         mutation_registry: RendererRegistry | None = None,
+        policy: DocumentPolicy | None = None,
     ) -> None:
-        self.config = config
+        self._policy = policy or DocumentPolicy(config)
         self.validator = validator
         self.storage = storage or ContentAddressedStorage(config.storage_root)
         self.repository = repository
         self.renderers = renderer_registry or get_renderer_registry()
         self.mutations = mutation_registry or get_mutation_registry()
+
+    @property
+    def config(self) -> DocumentConfig:
+        return self._policy.current
 
     @staticmethod
     def _error(code: str, message: str, *, retryable: bool = False) -> DocumentResult[Any]:
@@ -103,6 +117,14 @@ class DocumentOperations:
     def _capability(
         registry: RendererRegistry, operation: str
     ) -> RendererCapability | DocumentResult[Any]:
+        problem = image_engines_unavailable()
+        if problem is not None:
+            # The container profile with no ready broker: infrastructure,
+            # not a missing engine (an invalid setting is not retryable).
+            code, message = problem
+            return DocumentOperations._error(
+                code, message, retryable=code != "worker_isolation_invalid"
+            )
         try:
             capability = registry.resolve(operation)
         except ValueError:
@@ -122,6 +144,7 @@ class DocumentOperations:
             )
         return capability
 
+    @policy_operation
     def generate(
         self,
         *,
@@ -158,6 +181,7 @@ class DocumentOperations:
             approved_assets=approved_assets,
         )
 
+    @policy_operation
     def convert(
         self,
         source: Path,
@@ -225,6 +249,7 @@ class DocumentOperations:
             "document_engine_unavailable", "No document conversion engine succeeded"
         )
 
+    @policy_operation
     def pdf_info(
         self, source: Path, *, scope: OperationScope
     ) -> DocumentResult[dict[str, Any]]:
@@ -267,6 +292,7 @@ class DocumentOperations:
         finally:
             shutil.rmtree(run_dir, ignore_errors=True)
 
+    @policy_operation
     def pdf_operation(
         self,
         operation: str,
@@ -552,25 +578,44 @@ class DocumentOperations:
             f"sys.path.insert(0,{str(core_root)!r});"
             f"runpy.run_module({module!r},run_name='__main__')"
         )
-        result = run_isolated_subprocess(
-            SandboxRequest(
-                command=(
-                    _python_exe,
-                    "-I",
-                    "-c",
-                    bootstrap,
-                    # Absolute paths: sandbox cwd is run_dir.
-                    str(request_path.resolve()),
-                    str(result_path.resolve()),
-                ),
-                work_dir=run_dir,
-                timeout_seconds=self.config.worker_timeout_seconds,
-                stdout_limit_bytes=4_096,
-                stderr_limit_bytes=65_536,
-                memory_limit_bytes=self.config.worker_memory_mb * 1024 * 1024,
-                cpu_limit_seconds=self.config.worker_timeout_seconds,
+        if worker_isolation_mode() == CONTAINER:
+            worker, container_request, staged = operation_container_request(
+                module, request, run_dir
             )
-        )
+            result = run_container_worker(
+                worker=worker,
+                request=container_request,
+                inputs=staged,
+                run_dir=run_dir,
+                timeout_seconds=self.config.worker_timeout_seconds,
+                max_output_bytes=self.config.max_expanded_bytes
+                + self.config.worker_result_max_bytes,
+            )
+        else:
+            refusal = process_profile_refusal()
+            if refusal is not None:
+                raise refusal
+            result = run_isolated_subprocess(
+                SandboxRequest(
+                    command=(
+                        _python_exe,
+                        "-I",
+                        "-c",
+                        bootstrap,
+                        # Absolute paths: sandbox cwd is run_dir.
+                        str(request_path.resolve()),
+                        str(result_path.resolve()),
+                    ),
+                    work_dir=run_dir,
+                    timeout_seconds=self.config.worker_timeout_seconds,
+                    stdout_limit_bytes=4_096,
+                    stderr_limit_bytes=65_536,
+                    memory_limit_bytes=self.config.worker_memory_mb * 1024 * 1024,
+                    cpu_limit_seconds=self.config.worker_timeout_seconds,
+                    cpu_cores=1 if os.name == "nt" else None,
+                    process_limit=32 if os.name == "nt" else None,
+                )
+            )
         if result.timed_out:
             raise DocumentSandboxError(
                 "Document worker exceeded its time limit", code="document_worker_timeout"

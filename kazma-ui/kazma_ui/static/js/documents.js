@@ -90,15 +90,20 @@ function documentsPage() {
       // Capacity/queue snapshot, storage metrics, readiness, and audit page.
       try {
         const [cap, met, rdy, aud] = await Promise.all([
-          fetch("/api/documents/ops/capacity").then((r) => r.json()).catch(() => ({})),
-          fetch("/api/documents/ops/metrics").then((r) => r.json()).catch(() => ({})),
-          fetch("/api/documents/ops/readiness").then((r) => r.json()).catch(() => ({})),
-          fetch("/api/documents/ops/audit?limit=25").then((r) => r.json()).catch(() => ({})),
+          window.kazmaGetJson("/api/documents/ops/capacity"),
+          window.kazmaGetJson("/api/documents/ops/metrics"),
+          window.kazmaGetJson("/api/documents/ops/readiness"),
+          window.kazmaGetJson("/api/documents/ops/audit?limit=25"),
         ]);
-        if (cap.ok) this.capacity = cap.capacity;
-        if (met.ok) this.ops = met.metrics;
-        if (rdy.ok) this.readiness = rdy.readiness;
-        if (aud.ok) this.auditEvents = aud.events || [];
+        this.capacity = cap?.ok && cap.capacity ? cap.capacity : {
+          status: "unavailable", degraded_reasons: [cap?.code || "capacity_unavailable"],
+        };
+        this.ops = met?.ok ? met.metrics || null : null;
+        this.readiness = rdy?.ok && rdy.readiness ? rdy.readiness : {
+          status: "unavailable", accepting_durable_writes: false,
+          degraded_reasons: [rdy?.code || "readiness_unavailable"],
+        };
+        if (aud?.ok) this.auditEvents = aud.events || [];
       } catch (e) {
         /* non-fatal */
       }

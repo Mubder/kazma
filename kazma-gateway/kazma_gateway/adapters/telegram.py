@@ -1407,6 +1407,8 @@ class TelegramAdapter(BaseAdapter):
             else:
                 approved = "approve" in data
                 alert_text = "✅ Approved — processing..." if approved else "❌ Denied."
+        elif action.kind == "swarm":
+            alert_text = "Answer recorded."
         self._spawn(self._answer_callback_query(cb_id, alert_text))
 
         # Immediately deactivate the inline keyboard to prevent double-click or stale interaction
@@ -1428,30 +1430,22 @@ class TelegramAdapter(BaseAdapter):
                     logger.warning("[telegram] Failed to remove HITL keyboard: %s", exc)
 
         if action.kind == "swarm":
-            # Swarm HITL approval — resolve bus Event in-process.
-            # Fan-out safe: when 2+ platforms are configured the bus is a
-            # FanOutBusAdapter, so unwrap it and dispatch to the Telegram
-            # child (same pattern as discord_callbacks.route_swarm_bus —
-            # previously the isinstance check failed under FanOut and the
-            # approval button silently no-opped).
-            task_id = None
-            try:
-                from kazma_core.swarm.bus import FanOutBusAdapter, get_message_bus
+            # A swarm-bus card's button: decide the shared request it names
+            # (shared_approvals), with the user who pressed it; the card is
+            # edited by the request's owner to the one final outcome on every
+            # platform (Swarm audit SW-S02, SW-S05). No adapter instance is
+            # needed: a FanOut bus or a sender rebuilt since the card was
+            # posted cannot drop the click.
+            from kazma_core.swarm.shared_approvals import decide_from_button
 
-                from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
+            from kazma_gateway.adapters.callback_store import decode_callback_data
 
-                adapter = get_message_bus().adapter
-                if isinstance(adapter, FanOutBusAdapter):
-                    for child in adapter.adapters:
-                        if isinstance(child, TelegramBusAdapter):
-                            task_id = child.handle_callback(action.swarm_data or data)
-                            break
-                elif isinstance(adapter, TelegramBusAdapter):
-                    task_id = adapter.handle_callback(action.swarm_data or data)
-            except Exception as exc:
-                logger.warning("[telegram] Swarm approval callback failed: %s", exc)
+            task_id = decide_from_button(
+                decode_callback_data(action.swarm_data or data),
+                actor=_approver, platform="telegram",
+            )
             if task_id is not None:
-                logger.info("[telegram] Swarm approval resolved: %s", task_id)
+                logger.info("[telegram] Swarm approval answered: %s by %s", task_id, _approver)
             return
 
         if action.kind == "sys_install":

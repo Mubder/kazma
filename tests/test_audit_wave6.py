@@ -45,106 +45,140 @@ def _mock_store() -> tuple[dict, MagicMock]:
 # ── H-12 ────────────────────────────────────────────────────────────────
 
 
+# Re-pointed by the Swarm audit's stage 1 (2026-10-13). H-12 was "a Discord
+# timeout counted as a no that denied a later Telegram Approve". The vote
+# count that fixed it is gone: a platform's wait is not a vote at all, the
+# request's own deadline is the only deadline, and only a human click decides
+# -- once. An explicit human Deny is final (owner decision D7), and every
+# card shows the one outcome (SW-S05).
+
+
+def _open(approval_id: str, *, deadline: float = 30.0) -> None:
+    shared_approvals.open_request(approval_id, tool="git_push", args="{}", deadline=time.time() + deadline)
+
+
+def _approval_store() -> tuple[dict, MagicMock]:
+    """A store without compare-and-set (one process): get, set and delete."""
+    store, full = _mock_store()
+    mock = MagicMock(spec=["get", "set", "delete"])
+    mock.get.side_effect = full.get.side_effect
+    mock.set.side_effect = full.set.side_effect
+    mock.delete.side_effect = full.delete.side_effect
+    return store, mock
+
+
 def test_single_reject_settles_when_expected_one() -> None:
-    store, mock = _mock_store()
+    store, mock = _approval_store()
     with patch("kazma_core.config_store.get_config_store", return_value=mock):
-        shared_approvals.create_pending("t-one")
-        shared_approvals.resolve("t-one", False)
-        assert shared_approvals.get_result("t-one") is False
+        _open("t-one")
+        assert shared_approvals.resolve("t-one", False, actor="discord:1") is True
+        assert shared_approvals.get("t-one")["status"] == "denied"
 
 
 def test_reject_is_a_vote_until_expected_voters() -> None:
-    store, mock = _mock_store()
+    """A human Deny is final (D7): a later Approve on another platform
+    changes nothing, and is told so (False)."""
+    store, mock = _approval_store()
     with patch("kazma_core.config_store.get_config_store", return_value=mock):
-        shared_approvals.create_pending("t-votes", expected_voters=2)
-        shared_approvals.resolve("t-votes", False)
-        assert shared_approvals.get_result("t-votes") is None
-        row = store.get("swarm.approval.t-votes")
-        assert int(row["reject_votes"]) == 1
-        shared_approvals.resolve("t-votes", False)
-        assert shared_approvals.get_result("t-votes") is False
+        _open("t-votes")
+        assert shared_approvals.resolve("t-votes", False, actor="discord:1") is True
+        assert shared_approvals.resolve("t-votes", True, actor="telegram:1") is False
+        assert shared_approvals.get("t-votes")["status"] == "denied"
 
 
-def test_approve_wins_after_one_reject_when_expected_two() -> None:
-    """H-12 ordering A: Discord deny (timeout-as-False) then Telegram Approve."""
-    store, mock = _mock_store()
+@pytest.mark.asyncio
+async def test_approve_wins_after_one_reject_when_expected_two() -> None:
+    """H-12 ordering A: one platform's card ends without a click (its post
+    failed) and the request stays open: a later Telegram Approve decides."""
+    store, mock = _approval_store()
     with patch("kazma_core.config_store.get_config_store", return_value=mock):
-        shared_approvals.create_pending("t-deny-then-yes", expected_voters=2)
-        shared_approvals.resolve("t-deny-then-yes", False)
-        assert shared_approvals.get_result("t-deny-then-yes") is None
-        shared_approvals.resolve("t-deny-then-yes", True)
-        assert shared_approvals.get_result("t-deny-then-yes") is True
+        _open("t-deny-then-yes")
+
+        class _Failed:
+            async def request_approval(self, approval, timeout=60.0):
+                return False  # this platform could not post its card
+
+        import asyncio
+
+        waiting = asyncio.Event()
+
+        class _Waits:
+            async def request_approval(self, approval, timeout=60.0):
+                waiting.set()
+                return await shared_approvals.await_card(approval.task_id, AsyncMock())
+
+        fan = FanOutBusAdapter([_Failed(), _Waits()])  # type: ignore[list-item]
+        decided: list[bool] = []
+
+        async def click() -> None:
+            await waiting.wait()  # the other platform's card is up
+            decided.append(shared_approvals.resolve("t-deny-then-yes", True, actor="telegram:1"))
+
+        clicker = asyncio.create_task(click())
+        ok = await fan.request_approval(
+            ApprovalRequest(worker_name="w", task_description="t", proposed_output="x",
+                            task_id="t-deny-then-yes"), timeout=30)
+        await clicker
+        assert ok is True
+        assert decided == [True], "the request was still pending when the Approve came"
 
 
 def test_approve_not_clobbered_by_later_reject() -> None:
-    """H-12 ordering B: Telegram Approve then Discord deny must stay True."""
-    store, mock = _mock_store()
+    """H-12 ordering B: Telegram Approve then Discord deny must stay approved."""
+    store, mock = _approval_store()
     with patch("kazma_core.config_store.get_config_store", return_value=mock):
-        shared_approvals.create_pending("t-yes-then-deny", expected_voters=2)
-        shared_approvals.resolve("t-yes-then-deny", True)
-        shared_approvals.resolve("t-yes-then-deny", False)
-        assert shared_approvals.get_result("t-yes-then-deny") is True
+        _open("t-yes-then-deny")
+        shared_approvals.resolve("t-yes-then-deny", True, actor="telegram:1")
+        assert shared_approvals.resolve("t-yes-then-deny", False, actor="discord:1") is False
+        assert shared_approvals.get("t-yes-then-deny")["status"] == "approved"
 
 
 @pytest.mark.asyncio
 async def test_timeout_is_a_vote_not_global_deny_when_expected_gt_one() -> None:
-    store, mock = _mock_store()
+    """The deadline is the request's own, and ending it is a timeout -- never
+    a deny (SW-S04). A click after it changes nothing."""
+    store, mock = _approval_store()
     with patch("kazma_core.config_store.get_config_store", return_value=mock):
-        shared_approvals.create_pending("t-timeout-vote", expected_voters=2)
-        ok = await shared_approvals.wait_for_resolution("t-timeout-vote", timeout=0.35)
-        assert ok is False
-        # One waiter gave up — the request is still pending so a later
-        # Approve on another platform can still win.
-        assert shared_approvals.get_result("t-timeout-vote") is None
-        shared_approvals.resolve("t-timeout-vote", True)
-        assert shared_approvals.get_result("t-timeout-vote") is True
+        _open("t-timeout-vote", deadline=0.35)
+        row = await shared_approvals._wait_outcome("t-timeout-vote")
+        assert row["status"] == "timeout"
+        assert shared_approvals.resolve("t-timeout-vote", True) is False
+        assert shared_approvals.get("t-timeout-vote")["status"] == "timeout"
 
 
 @pytest.mark.asyncio
 async def test_fanout_stamps_expected_voters(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict = {}
-
-    def _cp(task_id, *, meta=None, expected_voters=1, deadline=None):
-        seen["task_id"] = task_id
-        seen["expected"] = expected_voters
-        seen["deadline"] = deadline
-
-    monkeypatch.setattr(
-        "kazma_core.swarm.shared_approvals.create_pending", _cp
-    )
+    """Every platform's card is asked, and one platform's False (its card was
+    not posted) is not the answer when another platform's card was approved."""
+    asked: list[str] = []
 
     class _A:
+        def __init__(self, name: str, answer: bool) -> None:
+            self.name, self.answer = name, answer
+
         async def send(self, message):
-            return True  # the platform took it (BusAdapter.send's contract)
+            return True
 
         async def send_report(self, report):
             return None
 
         async def request_approval(self, approval, timeout=60.0):
-            return False
+            asked.append(self.name)
+            return self.answer
 
-    fan = FanOutBusAdapter([_A(), _A()])  # type: ignore[arg-type]
+    fan = FanOutBusAdapter([_A("telegram", False), _A("discord", True)])  # type: ignore[list-item]
     ok = await fan.request_approval(
-        ApprovalRequest(
-            worker_name="w",
-            task_description="t",
-            proposed_output="x",
-            task_id="task-fan",
-        ),
+        ApprovalRequest(worker_name="w", task_description="t", proposed_output="x", task_id="task-fan"),
         timeout=2.0,
     )
-    assert ok is False
-    assert seen["task_id"] == "task-fan"
-    assert seen["expected"] == 2
-    assert seen["deadline"] is not None
+    assert ok is True
+    assert sorted(asked) == ["discord", "telegram"]
 
 
 def test_h12_comment_is_not_web_claim_gate() -> None:
-    src = Path("kazma-core/kazma_core/swarm/shared_approvals.py").read_text(
-        encoding="utf-8"
-    )
+    src = Path("kazma-core/kazma_core/swarm/bus.py").read_text(encoding="utf-8")
     assert "claim_gate" in src
-    assert "NOT web" in src or "not web" in src.lower()
+    assert "not web" in src.lower()
 
 
 # ── M-14 autoscaler ─────────────────────────────────────────────────────
@@ -201,13 +235,15 @@ def test_half_open_probe_lease_blocks_second_replica(
         a.record_failure()
         a.persist_shared("w-probe")
         time.sleep(0.08)
-        a.check_or_raise("w-probe")
+        probe = a.check_or_raise("w-probe")
         assert a._probe_in_flight is True
         b = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
         with pytest.raises(CircuitBreakerOpenError):
             b.check_or_raise("w-probe")
         assert b._probe_in_flight is False
-        a.record_success()
+        # The probe's own outcome, with its admission (Swarm audit SW-E11:
+        # only the probe resolves a half-open breaker).
+        a.record_success(probe)
         assert a._probe_in_flight is False
 
 

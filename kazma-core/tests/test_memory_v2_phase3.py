@@ -345,6 +345,8 @@ def test_sweep_moves_reach_the_shared_mirrors(dbs, monkeypatch):
             return True
 
     class _RemoteIndex:
+        available = True
+
         def delete(self, item_id, *, tenant_id="default"):
             deleted.append(item_id)
             return True
@@ -355,6 +357,7 @@ def test_sweep_moves_reach_the_shared_mirrors(dbs, monkeypatch):
 
     monkeypatch.setattr(state_backend, "get_state_backend", lambda: _Mirror())
     monkeypatch.setattr(backends, "get_vector_backend", lambda conn=None: _RemoteIndex())
+    monkeypatch.setattr(backends, "get_remote_vector_backend", lambda: _RemoteIndex())
 
     p, _ = dbs
     now = _chat_turn(p, "gone", created_days=60)
@@ -384,6 +387,7 @@ def test_the_local_setup_touches_no_mirror(dbs, monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(local, "delete", lambda *a, **k: calls.append("delete"))
     monkeypatch.setattr(backends, "get_vector_backend", lambda conn=None: local)
+    monkeypatch.setattr(backends, "get_remote_vector_backend", lambda: None)  # local only
     now = _chat_turn(p, "gone", created_days=60)
     stats = run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
     assert stats["demoted_episodic"] == 1 and "sweep_error" not in stats

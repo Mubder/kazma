@@ -60,7 +60,11 @@ def _cached_status(job_id):
     acquisition.update(allowances=allowance, usage=allowance['provider_usage'],
         usage_available=allowance['provider_usage'] is not None,
         provider_balances=balances, credits=None, credits_available=any(row['fresh'] for row in balances),
-        resources_scope='current_python_process', status_read='cached_only')
+        resources_scope='current_python_process', status_read='cached_only',
+        # The crawl journal and the Knowledge Library are this install's own
+        # (KB-E07): even on a shared settings store, its crawls are only
+        # read, resumed or taken over by this install.
+        crawl_journal_scope='this_install', knowledge_topology='single_install')
     return report
 
 

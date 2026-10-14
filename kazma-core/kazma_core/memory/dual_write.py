@@ -42,10 +42,10 @@ from kazma_core.memory.remember_request import is_remember_request
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "DualWriteMirror",
+    "EpisodeWriteFailed",
     "episode_row",
-    "mirror_belief",
     "mirror_episode",
+    "write_episode",
 ]
 
 
@@ -63,51 +63,6 @@ def _embedding_model_version() -> str:
     except Exception:
         return ""
 
-# Predicates that are single-valued (functional) by nature. Mirrored
-# triples using one of these get predicate_type='functional'; everything
-# else is 'set' (multi-valued) to avoid accidental supersession during
-# the mirror — the V2 consolidator will re-classify when it runs.
-_FUNCTIONAL_PREDICATES = frozenset(
-    {
-        "name_is",
-        "lives_in",
-        "works_at",
-        "active_project",
-        "favorite_ide",
-        "favorite_editor",
-        "favorite_language",
-        "located_in",
-        "current_role",
-        "preferred_name",
-    }
-)
-
-
-def _slug(text: str) -> str:
-    """Canonicalize an entity label into a stable slug."""
-    import re
-
-    raw = (text or "").strip().lower()
-    s = re.sub(r"[^a-z0-9_]+", "_", raw)
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s[:80] or "entity"
-
-
-def _belief_id(tenant_id: str, subject: str, predicate: str, valid_from: float) -> str:
-    """Belief PK. Includes a uuid suffix so two mirrors at the same timestamp
-    (e.g. rapid programmatic writes that share a ``valid_from`` float-second)
-    don't collide on PK and silently drop via INSERT OR IGNORE. The hash prefix
-    keeps the id visually traceable to its (tenant, subject, predicate,
-    valid_from). Mirrors ``belief_mutation._belief_id`` (audit finding: this
-    copy was missing the suffix the other one added to fix exactly this)."""
-    import uuid
-
-    h = hashlib.sha256(
-        f"{tenant_id}|{subject}|{predicate}|{valid_from}".encode("utf-8")
-    ).hexdigest()
-    return f"b_{h[:20]}_{uuid.uuid4().hex[:6]}"
-
-
 def _episode_id(session_id: str, turn: int, content: str) -> str:
     """Stable episode PK."""
     h = hashlib.sha256(
@@ -120,7 +75,7 @@ def _episode_id(session_id: str, turn: int, content: str) -> str:
 #: Sources whose turns are written after the fact, so they are not the live
 #: session's short-term buffer and stay episodic.
 _AFTER_THE_FACT_SOURCES = frozenset(
-    {"knowledge_library_promote", "kb_promote", "turn_reconcile", "benchmark", "golden_eval"}
+    {"turn_reconcile", "benchmark", "golden_eval"}
 )
 
 
@@ -178,17 +133,15 @@ def episode_row(
     }
 
 
-def _infer_predicate_type(predicate: str) -> str:
-    """Heuristic: functional predicates are single-valued; else set-valued.
+class EpisodeWriteFailed(RuntimeError):
+    """The episode could not be written (the database could not be opened, or
+    the insert raised). A turn kept out of memory by the user is not this."""
 
-    Conservative on purpose — defaults to 'set' so the mirror never
-    supersedes an existing belief during the transition. The V2
-    consolidator (Phase 3) re-classifies with LLM extraction.
-    """
-    p = (predicate or "").strip().lower()
-    if p in _FUNCTIONAL_PREDICATES:
-        return "functional"
-    return "set"
+
+#: What :meth:`DualWriteMirror.write_episode` did: ``written`` (the row is
+#: there, an existing one included), ``refused`` (the user keeps the turn or
+#: the chat out of memory), ``failed`` (nothing written; retry).
+EpisodeWrite = tuple[str, str | None]
 
 
 class DualWriteMirror:
@@ -232,79 +185,6 @@ class DualWriteMirror:
 
     # ── Public mirror API ──────────────────────────────────────────────
 
-    def mirror_belief(
-        self,
-        subject: str,
-        predicate: str,
-        obj: str,
-        *,
-        fact_text: str = "",
-        tenant_id: str = "default",
-        source_session: str | None = None,
-        source_turn: int | None = None,
-        extraction_method: str = "llm_inferred",
-        confidence: float = 0.5,
-        importance: int = 1,
-        trust_weight: float = 0.60,
-    ) -> str | None:
-        """Mirror a legacy triple into the V2 ``beliefs`` table.
-
-        Conservative: always inserts a NEW belief row with
-        ``valid_from=now``. It does NOT supersede existing rows during
-        the mirror — that's the consolidator's job (Phase 3) once it can
-        classify predicate types with LLM confidence. This means the
-        mirror may create parallel rows for the same (subject, predicate)
-        during the transition; the consolidator reconciles them.
-
-        Returns the V2 belief id, or None if the mirror is inactive /
-        the write failed.
-        """
-        if not self._ensure():
-            return None
-        now = time.time()
-        sub = _slug(subject)
-        pred = (predicate or "").strip().lower().replace(" ", "_") or "related"
-        ptype = _infer_predicate_type(pred)
-        bid = _belief_id(tenant_id, sub, pred, now)
-        meta = {"source": "dual_write_mirror", "fact_text": (fact_text or "")[:500]}
-        try:
-            # `with self._primary:` commits, or rolls back when the write
-            # raises -- the writer is shared, and an open transaction on it
-            # would hold memory_state.db's write lock until the next write.
-            with self._lock, self._primary:
-                self._primary.execute(
-                    """
-                    INSERT OR IGNORE INTO beliefs (
-                        id, tenant_id, subject, predicate, predicate_type, object,
-                        confidence, structural_importance, source_trust_weight,
-                        valid_from, ingested_at, source_session, source_turn,
-                        extraction_method, metadata_json, embedding_model_version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        bid,
-                        tenant_id,
-                        sub,
-                        pred,
-                        ptype,
-                        (obj or "")[:500],
-                        float(confidence),
-                        int(importance),
-                        float(trust_weight),
-                        now,
-                        now,
-                        source_session,
-                        source_turn,
-                        extraction_method,
-                        json.dumps(meta, ensure_ascii=False),
-                        _embedding_model_version(),
-                    ),
-                )
-            return bid
-        except Exception:
-            logger.debug("[dual_write] belief mirror failed", exc_info=True)
-            return None
-
     def mirror_episode(
         self,
         *,
@@ -324,10 +204,39 @@ class DualWriteMirror:
 
         *created_at* is when the turn happened, for a turn written after the
         fact (``turn_reconcile``); it defaults to now. Returns the V2 episode
-        id, or None if inactive/failed.
+        id, or None if refused/inactive/failed -- :meth:`write_episode` says
+        which.
+        """
+        status, eid = self.write_episode(
+            session_id=session_id, turn_number=turn_number, user_text=user_text,
+            assistant_text=assistant_text, summary_text=summary_text, tenant_id=tenant_id, tier=tier,
+            importance=importance, source=source, created_at=created_at, metadata=metadata,
+        )
+        return eid if status == "written" else None
+
+    def write_episode(
+        self,
+        *,
+        session_id: str,
+        turn_number: int,
+        user_text: str = "",
+        assistant_text: str = "",
+        summary_text: str = "",
+        tenant_id: str = "default",
+        tier: str = "episodic",
+        importance: int = 1,
+        source: str = "dual_write_mirror",
+        created_at: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> EpisodeWrite:
+        """:meth:`mirror_episode`, saying what happened: ``(status, id)``.
+
+        A failed write is ``failed``, never the same None as a refusal (Memory
+        audit M12): the post-turn pipeline counted a turn whose episode was
+        never written as remembered, and its queue task as done.
         """
         if not self._ensure():
-            return None
+            return "failed", None
         row = episode_row(
             session_id=session_id,
             turn_number=turn_number,
@@ -356,7 +265,16 @@ class DualWriteMirror:
             # Every id of the chat (a chat-store read): outside the lock that
             # serializes the local writes.
             keys = chat_keys(session_id)
-            with self._lock:
+            # Lock only the local SQLite writes. The remote embed, vector
+            # upsert, and state mirror below can each block up to ~60s;
+            # holding self._lock across them serialized ALL V2 mirror writes
+            # process-wide behind one slow embed call (audit finding).
+            # The ledger check and the insert are ONE write transaction: a
+            # "don't remember this chat" or a forget committed between the two
+            # found nothing to forget, and the turn was written after it
+            # (Memory audit M08, 2026-10-13).
+            with self._lock, self._primary:
+                self._primary.execute("BEGIN IMMEDIATE")
                 refused = refuses_write(
                     self._primary,
                     tenant_id=tenant_id,
@@ -365,14 +283,9 @@ class DualWriteMirror:
                     user_text=row["user_text"],
                     keys=keys,
                 )
-            if refused:
-                logger.debug("[dual_write] turn kept out of memory by the user: %s", eid)
-                return None
-            # Lock only the local SQLite writes. The remote embed, vector
-            # upsert, and state mirror below can each block up to ~60s;
-            # holding self._lock across them serialized ALL V2 mirror writes
-            # process-wide behind one slow embed call (audit finding).
-            with self._lock, self._primary:
+                if refused:
+                    logger.debug("[dual_write] turn kept out of memory by the user: %s", eid)
+                    return "refused", None
                 self._primary.execute(
                     """
                     INSERT OR IGNORE INTO episodes (
@@ -398,78 +311,44 @@ class DualWriteMirror:
                     ),
                 )
 
-            # Compute + store the episode embedding so dense vector recall can
-            # find it. Also dual-write to VectorBackend (Qdrant/pgvector) when
-            # configured (P2-1 remote write path). All OUTSIDE the lock.
-            try:
-                from kazma_core.memory.embedder import (
-                    encode_text_to_blob,
-                    get_embedder,
-                )
+            # The episode's vector: embedded ONCE, outside the lock, then one
+            # guarded write under it (still no vector, not forgotten) and the
+            # remote index (Memory audit M15 -- it was embedded twice, and the
+            # second write ran on this shared connection without the lock or
+            # the tier guard, so a forget in between got its vector back).
+            from kazma_core.memory.vector_write import encode_vector, index_remotely, write_local_vector
 
-                ep_text = row["embed_text"]
-                if ep_text:
-                    emb_blob = encode_text_to_blob(ep_text)
-                    if emb_blob is not None:
-                        with self._lock, self._primary:
-                            self._primary.execute(
-                                "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL "
-                                "AND tier != 'forgotten'",
-                                (emb_blob, eid),
-                            )
-                    # Remote / hybrid vector upsert (best-effort)
-                    try:
-                        from kazma_core.memory.backends import get_vector_backend
+            vec = encode_vector(row["embed_text"])
+            if vec:
+                with self._lock, self._primary:
+                    write_local_vector(self._primary, "episodes", eid, vec, still_sql="tier != 'forgotten'")
 
-                        emb = get_embedder()
-                        if emb is not None:
-                            qvec = emb.encode(ep_text)
-                            if qvec:
-                                be = get_vector_backend(self._primary)
-                                be.upsert(
-                                    eid,
-                                    qvec,
-                                    tenant_id=tenant_id,
-                                    meta={
-                                        "kind": "episode",
-                                        "tier": effective_tier,
-                                        "session_id": session_id,
-                                    },
-                                )
-                    except Exception:
-                        logger.debug(
-                            "[dual_write] vector backend upsert failed for %s",
-                            eid,
-                            exc_info=True,
-                        )
-            except Exception:
-                logger.debug("[dual_write] episode embedding failed for %s", eid, exc_info=True)
+                def _still_held() -> bool:
+                    with self._lock:
+                        return self._primary.execute(
+                            "SELECT 1 FROM episodes WHERE id = ? AND tier = 'forgotten'", (eid,)
+                        ).fetchone() is None
+
+                index_remotely(eid, vec, tenant_id=tenant_id,
+                               meta={"kind": "episode", "tier": effective_tier, "session_id": session_id},
+                               still_held=_still_held)
 
             # Optional multi-replica state dual-mirror (Postgres) — outside lock.
+            # The row as it is now, never this call's arguments: a forget that
+            # ran meanwhile reaches the mirror as the tombstone it is (M08).
             try:
-                from kazma_core.memory.state_backend import mirror_episode_to_state
+                from kazma_core.memory.state_backend import episode_mirror_row, mirror_episode_to_state
 
-                mirror_episode_to_state(
-                    {
-                        "id": eid,
-                        "tenant_id": tenant_id,
-                        "session_id": session_id,
-                        "turn_number": int(turn_number),
-                        "user_text": (user_text or "")[:4000],
-                        "assistant_text": (assistant_text or "")[:4000],
-                        "summary_text": (summary_text or "")[:2000],
-                        "tier": effective_tier,
-                        "structural_importance": effective_importance,
-                        "created_at": now,
-                        "metadata": meta,
-                    }
-                )
+                with self._lock:
+                    current = episode_mirror_row(self._primary, eid)
+                if current is not None:
+                    mirror_episode_to_state(current)
             except Exception:
                 logger.debug("[dual_write] state mirror failed", exc_info=True)
-            return eid
+            return "written", eid
         except Exception:
-            logger.debug("[dual_write] episode mirror failed", exc_info=True)
-            return None
+            logger.warning("[dual_write] episode write failed for %s", eid, exc_info=True)
+            return "failed", None
 
     def close(self) -> None:
         with self._lock:
@@ -513,18 +392,13 @@ def _reset_mirror() -> None:
 # ── Convenience wrappers (drop-in for legacy call sites) ──────────────────
 
 
-def mirror_belief(
-    subject: str,
-    predicate: str,
-    obj: str,
-    **kwargs: Any,
-) -> str | None:
-    """Module-level convenience: mirror a triple into V2 beliefs."""
-    return _get_mirror().mirror_belief(subject, predicate, obj, **kwargs)
-
-
 def mirror_episode(*, session_id: str, turn_number: int, **kwargs: Any) -> str | None:
     """Module-level convenience: mirror a turn into V2 episodes."""
     return _get_mirror().mirror_episode(
         session_id=session_id, turn_number=turn_number, **kwargs
     )
+
+
+def write_episode(*, session_id: str, turn_number: int, **kwargs: Any) -> EpisodeWrite:
+    """Module-level :meth:`DualWriteMirror.write_episode`: ``(status, id)``."""
+    return _get_mirror().write_episode(session_id=session_id, turn_number=turn_number, **kwargs)

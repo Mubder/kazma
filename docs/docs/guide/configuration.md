@@ -268,7 +268,7 @@ safety:
     auto_deny_on_timeout: true
 ```
 
-> The **swarm bus** uses a separate, broader list (`_EXTENDED_DANGER` adds `python_exec`, `code_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `run_tests`). The **MCP** path classifies dynamically by name pattern. See [Security & Safety → danger-tool lists](security-and-safety#danger-tool-lists-three-of-them).
+> The **swarm bus** uses `_EXTENDED_DANGER`, a copy of the canonical list (`CANONICAL_DANGER_TOOLS`) with the same contents, not a broader one. The canonical list is always added to the list above (unless `KAZMA_HITL_CANONICAL_FLOOR=0`), so this file cannot narrow it. The **MCP** path classifies dynamically by name pattern. See [Security & Safety → danger-tool lists](security-and-safety#danger-tool-lists-three-of-them).
 
 ### `notifications.lifecycle`
 
@@ -338,6 +338,23 @@ Notifications route through the SwarmMessageBus (no parallel path). Set `connect
 | `swarm.workers` | list | `[]` | Populated at runtime via Web UI / `POST /api/swarm/workers`. |
 | `swarm.output_target` | obj | none | `\{bot_token, chat_id, platform, enabled\}` — when set, the token must match the active Telegram bot token. |
 
+### `cron.*` — scheduled reminders and tasks (ConfigStore)
+
+Read live by the scheduler; a value out of range is refused when it is saved
+(`PUT /api/settings/single`). The time zone has its own control (Settings,
+`cron.timezone`); these keys have none on a page yet.
+
+| Key | Type | Default (range) | Description |
+|---|---|---|---|
+| `cron.timezone` | string | empty (`KAZMA_TZ`, else UTC) | The zone a naive time and a clock time ("daily at 9am") are read in. |
+| `cron.catchup_minutes` | int | `60` (1–10080) | How late a job may still fire after Kazma was down. A later one is *missed*, with one notice. `KAZMA_CRON_STALE_HOURS` is used when this is unset. |
+| `cron.task_budget_seconds` | int | `300` (30–3600) | How long a fired agent task's turn may run. |
+| `cron.max_jobs_per_tenant` | int | `500` (1–10000) | Jobs still holding work per tenant; a booking past it is refused. |
+| `cron.max_jobs_per_thread` | int | `50` (1–1000) | The same, per conversation. |
+| `safety.cron_fire_without_hitl` | bool | `false` | Fire agent tasks while approvals (HITL) are off. Off: tasks do not fire then (reminders still do). Under `safety.`, so the agent cannot set it. |
+
+What a fired job may do: [Scheduled reminders and tasks](native-skills#scheduled-reminders-and-tasks).
+
 ### `pipelines`
 
 Two predefined pipelines (lists of stages, each with `worker`, `depends_on`, `system_prompt`):
@@ -349,33 +366,58 @@ Two predefined pipelines (lists of stages, each with `worker`, `depends_on`, `sy
 
 Not every key is in the shipped `kazma.yaml` skeleton; the authoritative defaults
 live on `DocumentConfig` (`kazma_core/documents/config.py`) and are read **live**
-via `get_document_config()`. Configure with:
+via `get_document_config()`: each operation takes one snapshot of the
+`documents` settings and keeps it to the end. Configure with:
 
-- **Settings → Documents** (`/settings?tab=documents`)
-- `GET/PUT /api/settings/documents`
-- `PUT /api/settings/single` with a nested key
+- **Settings → Documents** (`/settings?tab=documents`): durable writes, shadow
+  and authoritative mode, intake size and file count, worker timeout and
+  memory, the storage free-space floor, malware scan mode and fail-closed,
+  OCR, reading ruled tables on scanned pages (`documents.ocr.tables`), GC and
+  indexing; it also shows whether a malware scanner was found
+- `GET/PUT /api/settings/documents` (those same fields)
+- `PUT /api/settings/single` with a nested key, for every other key
 - optional `kazma.yaml` seed under a `documents:` section
+
+A saved value that cannot be read as its type is not replaced by a default:
+document operations answer 503 `document_policy_unavailable` until it is
+corrected, and a settings store that cannot be read refuses document work
+too. Nothing checks the value when it is saved through these routes.
 
 | Key prefix | Purpose |
 |---|---|
 | `documents.enabled` / `shadow` / `default_authoritative` | Rollout mode (disabled / shadow / compatibility / authoritative) |
-| `documents.intake.*` | Max bytes/files, remote fetch limits |
+| `documents.storage_root` | Where documents, uploads in progress and worker scratch live (restart to change) |
+| `documents.intake.*` | Max bytes/files, remote fetch limits, `lease_seconds` (300: how long an upload may go without renewing its reservation before another process may take it over) |
 | `documents.limits.*` | Pages, cells, archive members, compression, pixels, … |
-| `documents.security.*` | Malware scan mode, fence, encrypted/external-resource policy |
-| `documents.ocr.*` | Enable, languages, DPI, confidence, concurrency |
-| `documents.workers.*` | Timeout, memory, concurrency, lease, retries |
+| `documents.security.*` | Malware scan mode (`auto`) and fail-closed (off, but on by default under `KAZMA_PRODUCTION=1`), fence, encrypted/external-resource policy, `remote_parse` (third-party salvage, default off), `local_salvage` (Docling inside the worker, default on) |
+| `documents.render.embed_html_fonts` | Inline the pinned font in HTML exports (default on) |
+| `documents.ocr.*` | Enable, languages, DPI, confidence, concurrency, timeouts, output limit; `tables` (default on): ruled tables on scanned pages are read cell by cell, at most 600 cells and 120 s a page; a table not read within those bounds keeps the page's own reading |
+| `documents.workers.*` | Timeout, memory, concurrency, lease, heartbeat, retries, result size |
 | `documents.indexing.*` | Chunk tokens, overlap, preserve tables/pages |
 | `documents.retention.*` / `documents.gc.*` | Retention windows + GC schedule / bounds |
-| `documents.capacity.*` | Queue caps, rate/byte windows, storage free floor |
+| `documents.capacity.*` | Queue caps, rate/byte windows, storage free floor, `max_concurrent_uploads` (4 uploads received at once per process) |
 | `documents.quotas.*` | Per-tenant byte / daily page quotas |
 
-**Env (backend selection only):**
+Seven keys are bound to stores and workers built at start and take effect after
+a restart: `documents.storage_root`, `documents.quotas.tenant_bytes`, and
+`concurrency`, `lease_seconds`, `heartbeat_seconds`, `retry_base_seconds` and
+`retry_max_seconds` under `documents.workers.`. Until then readiness reports
+`policy.restart_required` with the configured and effective values, and the
+Documents page says some saved settings need a restart.
+
+`security.execution.container_required` (the strict execution profile, not a
+`documents.*` key) also refuses the local `process` document worker profile.
+
+**Env (backend selection and worker isolation):**
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `KAZMA_DOCUMENTS_JOBS_BACKEND` | auto | `sqlite` forces SQLite job queue; else Postgres when platform uses PG |
-| `KAZMA_DOCUMENTS_METADATA_BACKEND` | `auto` | `sqlite` / `postgres` / `auto` (auto follows jobs) |
-| `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Cert soak iterations |
+| `KAZMA_DOCUMENTS_JOBS_BACKEND` | unset | `sqlite` forces SQLite job queue; else Postgres when platform uses PG |
+| `KAZMA_DOCUMENTS_METADATA_BACKEND` | unset (`auto`) | `sqlite` / `postgres` / `auto` (auto follows jobs) |
+| `KAZMA_DOCUMENT_WORKER_ISOLATION` | `process` | `process` (local child, no filesystem or network isolation) or `container` (the document worker broker); with `KAZMA_DOCUMENT_BROKER_URL` and `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` |
+| `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Repetitions of the certification script's extended parse smoke (`--soak`); not a multi-day soak |
+
+Every document variable: [Environment variables](../reference/environment-variables.md#document-intelligence).
 
 Full product guide: [Document Intelligence](document-intelligence). Ops:
 [Document processing](../ops/document-processing).
@@ -396,7 +438,6 @@ Full product guide: [Document Intelligence](document-intelligence). Ops:
 | `DEEPSEEK_API_KEY` | **Declared in `.env.example` but not read by code** — set the key via the provider list instead. | empty |
 | `ANTHROPIC_API_KEY` | **Declared in `.env.example` but not read by code.** | empty |
 | `GOOGLE_CLOUD_PROJECT` | GCP project for Vertex AI (if ADC lacks a default). | commented out |
-| `SWARM_BOT_TOKEN` | Swarm output bot token. | empty |
 | `SWARM_CHAT_ID` | Swarm group chat id (feeds `swarm.group_chat_id`). | empty |
 | `KAZMA_SECRET` | HITL shared secret; binds `serve` to `0.0.0.0`; hub write-auth; `kazma hub sign`. | commented out |
 | `KAZMA_VECTOR_PATH` | Vector memory dir. | `~/.kazma/vector_memory` |

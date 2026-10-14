@@ -114,6 +114,14 @@ Durable job lifecycle enum: `received` → `quarantined` → `validating` →
 `ready_to_parse` / `ocr_required` → `parsing` / `ocr_running` → … → `ready`
 (plus `retry_wait`, `rejected`, `cancelled`, `dead_letter`).
 
+**Document worker profile**
+Where untrusted documents are parsed, edited and rendered
+(`KAZMA_DOCUMENT_WORKER_ISOLATION`). `process` (default): a child process with a
+scrubbed environment and memory/CPU limits, no filesystem or network
+confinement — reported as unqualified for hostile documents. `container`: a
+document broker runs each job in a fresh attested container with no network
+and no mounts; there is no fallback to `process`.
+
 **Dormant gate**
 A HITL gate that is inactive because `hitl_config` was not passed at graph build time (all tools go to `safe_tools`).
 

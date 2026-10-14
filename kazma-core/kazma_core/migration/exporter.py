@@ -9,7 +9,7 @@ Strategy (v1, "SQLite-portable"):
   * **Config**: read via ``ConfigStore.export_yaml()`` (handles either backend,
     resolves vault refs to their ``cfg:`` pointers, NOT plaintext). The
     matching ``vault.db`` travels separately + encrypted.
-  * **SQLite data files** (snapshots, memory_state, memory_ops, cron,
+  * **SQLite data files** (memory_state, memory_ops, cron,
     sessions, swarm_tasks, sandbox_emails, research_sessions, pipeline_logs,
     knowledge_graph, workspaces): copied via the WAL-safe online-backup API
     (:func:`kazma_core.memory.backup._backup_one`). These are the portable
@@ -63,8 +63,9 @@ __all__ = ["export_bundle"]
 # SQLite data files to copy as-is when they exist on disk (WAL-safe copy).
 # Path is the kazma_core.paths resolver function name; archive name is the
 # filename to use inside the bundle's data/ dir.
+#: snapshots.db is not carried (store_registry: a 30-day view of this
+#: machine's chats, Time Travel audit TT-05).
 _DATA_DBS: list[tuple[str, str]] = [
-    ("snapshots_db", "snapshots.db"),
     ("primary_memory_db", "memory_state.db"),
     ("memory_ops_db", "memory_ops.db"),
     ("swarm_tasks_db", "swarm_tasks.db"),
@@ -100,7 +101,6 @@ _DATA_DIR_DBS = _data_dir_dbs()
 # and workspaces path-rewrite concerns separate, we emit a dedicated
 # workspaces.db containing ONLY the workspaces table.
 _WORKSPACES_BUNDLE_NAME = "workspaces.db"
-_SETTINGS_BUNDLE_NAME = "settings.db"
 
 #: Never copied out of a carried folder: Python's caches, and the packages a
 #: project installs again from its own lock file.
@@ -172,16 +172,11 @@ def export_bundle(
     except Exception as exc:
         logger.warning("[migrate:export] workspaces export failed: %s", exc)
 
-    # 2b. settings.db — dedicated file holding ONLY the Knowledge Library
-    #     tables (knowledge_libraries + knowledge_chunks), so the importer's
-    #     _merge_kb_into_settings can restore the user's KB. NOT the whole
-    #     settings.db (the importer treats settings.db as merge-only; swapping
-    #     it whole would clobber the target's config/workspaces).
-    _log("Exporting Knowledge Library…")
-    try:
-        _export_kb_settings(staging / "data" / _SETTINGS_BUNDLE_NAME)
-    except Exception as exc:
-        logger.warning("[migrate:export] Knowledge Library export failed: %s", exc)
+    # 2b. The Knowledge Library is its own store, knowledge.db (Knowledge
+    #     audit KB-E10), carried with the other data-dir databases below
+    #     (``store_registry`` declares it ``bundle``). It used to be copied
+    #     out of settings.db into a KB-only settings.db that the importer
+    #     could not read (KB-E01).
 
     manifest.source_data_dir = str(data_dir)
 
@@ -430,61 +425,6 @@ def _detect_active_workspace_root() -> str:
         return ""
 
 
-def _export_kb_settings(dest: Path) -> int:
-    """Write a SQLite file containing ONLY the Knowledge Library tables.
-
-    The KB (``knowledge_libraries`` + ``knowledge_chunks``) lives in SQLite
-    ``settings.db`` regardless of backend — it is NOT in Postgres. Previously
-    the exporter shipped no ``settings.db`` at all, so the importer's
-    ``_merge_kb_into_settings`` never ran and the entire Knowledge Library
-    (libraries + chunk embeddings + FTS index) was silently lost on every
-    migration (audit finding).
-
-    This emits a dedicated KB-only ``settings.db`` (created via ATTACH +
-    create-as-select, so it survives any ALTER-TABLE migrations the live
-    schema has accumulated). The importer recreates the canonical schema and
-    copies by explicit column name, so the copy's column set just needs to be
-    a superset of those columns. Crucially this is NOT the whole settings.db
-    — restoring that would clobber the target's config/workspaces tables.
-    """
-    import sqlite3
-    from kazma_core import paths as _paths
-
-    try:
-        live = _paths.settings_db()
-    except Exception:
-        return 0
-    if not live or not Path(live).exists():
-        return 0
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        dest.unlink()
-    copied = 0
-    conn = sqlite3.connect(str(dest))
-    try:
-        conn.execute("ATTACH DATABASE ? AS src", (live,))
-        for tbl in ("knowledge_libraries", "knowledge_chunks"):
-            try:
-                exists = conn.execute(
-                    "SELECT name FROM src.sqlite_master WHERE type='table' AND name=?",
-                    (tbl,),
-                ).fetchone()
-                if not exists:
-                    continue
-                conn.execute(f"CREATE TABLE {tbl} AS SELECT * FROM src.{tbl}")
-                copied += 1
-            except sqlite3.OperationalError as exc:
-                logger.debug("[migrate:export] KB table %s copy skipped: %s", tbl, exc)
-        conn.commit()
-    finally:
-        try:
-            conn.execute("DETACH DATABASE src")
-        except Exception:  # noqa: BLE001
-            pass
-        conn.close()
-    return copied
-
-
 def _export_document_store(
     staging: Path, manifest: Manifest, _log: Callable[[str], None]
 ) -> None:
@@ -495,9 +435,30 @@ def _export_document_store(
     references already exists on disk (files precede rows), so the pair is
     consistent. The tree carries no embedded paths, so it needs no rewrite.
     """
-    from kazma_core.documents.config import get_document_config
+    from kazma_core.documents.backup import UNSUPPORTED_SHAPE, installed_document_backends
+    from kazma_core.documents.config import get_document_storage_root
 
-    root = Path(get_document_config().storage_root)
+    # Where the catalog is decides what travels (DOC-A7, 2026-10-13). The
+    # CLI has no running service, and the old check asked only the service:
+    # a Postgres store exported as its empty local documents.db, and the
+    # bundle carried none of its files.
+    metadata, jobs = installed_document_backends()
+    if metadata == "postgres" and jobs != "postgres":
+        raise RuntimeError(UNSUPPORTED_SHAPE)
+    root = Path(get_document_storage_root())
+    dsn = ""
+    if "postgres" in (metadata, jobs):
+        from kazma_core.db.backend import get_database_url
+
+        dsn = get_database_url() or ""
+        if not dsn:
+            raise RuntimeError(
+                "document_backup_backend_unsupported: the document store is on Postgres "
+                "but no database URL is set"
+            )
+    if metadata == "postgres":
+        _export_postgres_document_content(dsn, root, staging, manifest, _log)
+        return
     db_src = root / "documents.db"
     if not db_src.exists():
         _log("  (no documents.db — skipping document store)")
@@ -513,9 +474,19 @@ def _export_document_store(
     # 2) Copy referenced content + manifests verbatim (hashed by the manifest
     #    pass, so integrity is verified on import).
     try:
-        from kazma_core.documents.backup import _blob_rel_path, _read_references
+        from kazma_core.documents.backup import (
+            _blob_rel_path,
+            _read_references,
+            promoted_versions_from_postgres,
+        )
 
-        refs, versions = _read_references(db_dest if db_dest.exists() else db_src)
+        # A Postgres queue beside the SQLite catalog holds the promotions
+        # (read after the snapshot: a superset). The queue itself travels in
+        # data/postgres.dump.
+        promoted = promoted_versions_from_postgres(dsn) if jobs == "postgres" else None
+        refs, versions = _read_references(
+            db_dest if db_dest.exists() else db_src, promoted_versions=promoted
+        )
         blob_count = 0
         missing_blobs: list[str] = []
         for sha, kind in refs:
@@ -553,6 +524,44 @@ def _export_document_store(
         raise
 
 
+def _export_postgres_document_content(
+    dsn: str, root: Path, staging: Path, manifest: Manifest, _log: Callable[[str], None]
+) -> None:
+    """The content files a Postgres document catalog references.
+
+    The catalog itself is in ``data/postgres.dump``, taken BEFORE this step,
+    so the references read now are a superset of the dump's (blobs are
+    immutable and written before their rows). A referenced blob or required
+    manifest that is gone fails the export (verify then refuses the bundle).
+    """
+    import psycopg
+    from psycopg.rows import dict_row
+
+    from kazma_core.documents.backup_pg import _snapshot_references
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn, conn.cursor() as cur:
+        refs = _snapshot_references(cur)
+    dest_root = staging / "document-store"
+    copied = 0
+    missing: list[str] = []
+    for rel in sorted(refs["blobs"] | refs["manifests"]):
+        src = root / rel
+        if not src.is_file():
+            if rel in refs["blobs"] or rel in refs["required_manifests"]:
+                missing.append(rel)
+            continue
+        dst = dest_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied += 1
+    if missing:
+        raise RuntimeError(
+            "document store is incomplete; referenced file(s) are missing: " + ", ".join(missing[:3])
+        )
+    manifest.table_counts["_document_store"] = {"files": copied, "catalog": "postgres"}
+    _log(f"  document store: {copied} file(s); the catalog is in data/postgres.dump")
+
+
 def _dump_postgres_shared_state(
     staging: Path,
     manifest: Manifest,
@@ -568,7 +577,7 @@ def _dump_postgres_shared_state(
     ``pg_restore`` it into a target Postgres.
 
     Best-effort at the bundle level: a failure here logs + continues, because
-    the SQLite files (vault, memory, snapshots) are still valuable on their
+    the SQLite files (vault, memory, cron) are still valuable on their
     own. The importer will warn that the Postgres dump is missing.
     """
     try:

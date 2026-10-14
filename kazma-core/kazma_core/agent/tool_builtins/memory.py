@@ -52,6 +52,57 @@ def _chat_of_call() -> tuple[str, int]:
     return thread, user_turn_index(get_current_session_messages() or [])
 
 
+def _agent_write(*texts: str) -> tuple[str | None, str]:
+    """``(refusal, extraction method)`` for a memory tool's write (Memory
+    audit M03, ``memory.provenance``).
+
+    The tools wrote ``user_explicit`` -- the user's gold label, which blocks
+    the user's own later correction -- for whatever the model chose to store,
+    a fetched page or an email included, and screened nothing. A write is
+    refused when it reads as an instruction; it is the user's own only when
+    their latest message asks to remember and holds the words, else
+    ``agent_asserted``."""
+    from kazma_core.memory.provenance import agent_write_source, latest_user_message, screen_agent_text
+    from kazma_core.tools.export_session import get_current_session_messages
+
+    refusal = screen_agent_text(*texts)
+    if refusal:
+        return f"Not stored: {refusal}.", ""
+    latest = latest_user_message(get_current_session_messages() or [])
+    return None, agent_write_source(" ".join(t for t in texts if t), latest)
+
+
+#: What a memory tool answers when its write would replace the user's own fact.
+_USER_FACT_STANDS = (
+    "The user's own fact stands: a memory tool cannot replace what the user said. "
+    "If it changed, ask the user; their own words correct it."
+)
+
+
+#: What memory_search answers when recall itself failed: never "no memories",
+#: which reads as a fact (Memory audit M11; the recall deadline is M16).
+_RECALL_DEGRADED = (
+    "Memory search is unavailable right now (recall failed). This is NOT an empty result: "
+    "do not tell the user nothing is remembered."
+)
+
+
+def _fence_result(text: str, *, own: bool) -> str:
+    """Memory read back to the model is data, never instructions (Memory audit
+    M11): what a turn, a page or a tool once wrote reaches the model inside
+    the untrusted-data fence, as the per-turn recall block always did. *own*
+    is this tool's own message (an error, "nothing found"), left as it is."""
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    return text if own else fence_untrusted(text, source="memory_search")
+
+
+def _shown(hit: Any) -> str:
+    """What a recalled memory shows: its display text (question AND answer),
+    never only the match text (``recall._shown``'s rule)."""
+    return str((hit.metadata or {}).get("display") or hit.content or "")
+
+
 def _chat_kept_out(thread: str, tenant_id: str) -> bool:
     """True when the user keeps the chat *thread* out of memory (plan U1)."""
     if not thread:
@@ -206,11 +257,19 @@ def register_memory_tools(registry: Any) -> None:
             if merge_refusal(conn, src_id, tgt_id):
                 conn.close()
                 return f"Error: cannot merge protected source {src_id}"
+            # The routes' rule (memory_api._entity_tenant_ok): the install's
+            # own tenant may act on any entity, another only on its own --
+            # this tool read both rows without asking (Memory audit M21).
+            from kazma_core.safety.hitl import get_current_tenant_id
+
+            caller = get_current_tenant_id() or "default"
+            scope = "" if caller == "default" else " AND tenant_id = ?"
+            extra = () if caller == "default" else (caller,)
             src = conn.execute(
-                "SELECT id, name, aliases_json FROM entities WHERE id=?", (src_id,)
+                "SELECT id, name, aliases_json FROM entities WHERE id=?" + scope, (src_id, *extra)
             ).fetchone()
             tgt = conn.execute(
-                "SELECT id, name, aliases_json FROM entities WHERE id=?", (tgt_id,)
+                "SELECT id, name, aliases_json FROM entities WHERE id=?" + scope, (tgt_id, *extra)
             ).fetchone()
             if not src or not tgt:
                 conn.close()
@@ -326,6 +385,9 @@ def register_memory_tools(registry: Any) -> None:
         thread, turn = _chat_of_call()
         if _chat_kept_out(thread, get_current_tenant_id()):
             return _KEPT_OUT
+        refusal, method = _agent_write(sub, pred, object_)
+        if refusal:
+            return refusal
         try:
             primary = sqlite3.connect(
                 primary_memory_db(), check_same_thread=False
@@ -360,13 +422,15 @@ def register_memory_tools(registry: Any) -> None:
                 predicate_type=predicate_type if predicate_type in ("functional", "set", "state") else "set",
                 confidence=0.9,
                 importance=4,
-                extraction_method="user_explicit",
+                extraction_method=method,
                 tenant_id=tenant,
                 source_session=thread or None,
                 source_turn=turn or None,
             )
             ops.close()
             primary.close()
+            if result.get("blocked") == "lower_trust_source":
+                return json.dumps({"ok": False, "error": "user_fact_stands", "hint": _USER_FACT_STANDS})
             return json.dumps(
                 {
                     "ok": True,
@@ -539,6 +603,9 @@ def register_memory_tools(registry: Any) -> None:
             thread, turn = _chat_of_call()
             if _chat_kept_out(thread, _tenant):
                 return _KEPT_OUT
+            refusal, method = _agent_write(text)
+            if refusal:
+                return refusal
             # Episode (raw text snapshot) — always keep diary trail
             eid = mirror_episode(
                 session_id=str(meta.get("session_id", "memory_store")),
@@ -562,7 +629,7 @@ def register_memory_tools(registry: Any) -> None:
                             predicate_type=fact.get("predicate_type") or "functional",
                             confidence=float(fact.get("confidence") or 1.0),
                             importance=int(fact.get("importance") or 5),
-                            extraction_method="user_explicit",
+                            extraction_method=method,
                             tenant_id=_tenant,
                             source_session=thread or None,
                             source_turn=turn or None,
@@ -581,7 +648,7 @@ def register_memory_tools(registry: Any) -> None:
                         predicate_type="set",
                         confidence=1.0,
                         importance=5,
-                        extraction_method="user_explicit",
+                        extraction_method=method,
                         tenant_id=_tenant,
                         source_session=thread or None,
                         source_turn=turn or None,
@@ -590,11 +657,13 @@ def register_memory_tools(registry: Any) -> None:
                 )
             bids = [a.get("belief_id", "") for a in actions if a.get("belief_id")]
             supersedes = sum(1 for a in actions if a.get("action") == "supersede")
+            stands = sum(1 for a in actions if a.get("blocked") == "lower_trust_source")
             if eid or bids:
                 detail = f"beliefs={','.join(bids) or 'n/a'}"
                 if supersedes:
                     detail += f", superseded={supersedes}"
-                return f"Stored memory (v2 episode={eid or 'n/a'}, {detail})"
+                note = f" {_USER_FACT_STANDS}" if stands else ""
+                return f"Stored memory (v2 episode={eid or 'n/a'}, {detail}).{note}"
             return "Error: memory store failed — V2 write returned no ids."
         except Exception as exc:
             logger.warning("[memory_store] V2 write failed: %s", exc)
@@ -615,9 +684,10 @@ def register_memory_tools(registry: Any) -> None:
         # Recall reads SQLite and embeds the query: in a thread, never on the
         # loop that serves every chat stream (AGENTS §35). An async tool runs
         # on the loop; the registry threads only sync ones.
-        return await asyncio.to_thread(_memory_search_sync, query, limit)
+        body, own = await asyncio.to_thread(_memory_search_sync, query, limit)
+        return _fence_result(body, own=own)
 
-    def _memory_search_sync(query: str, limit: int) -> str:
+    def _memory_search_sync(query: str, limit: int) -> tuple[str, bool]:
         # V2 cognitive recall — the single memory read path (V1 removed).
         # Returns its results even when empty: an empty result is a real
         # "no memories match", not a signal to consult a legacy store.
@@ -627,29 +697,28 @@ def register_memory_tools(registry: Any) -> None:
 
             result = v2_recall(query, limit=limit, tenant_id=get_current_tenant_id())
             out: list[dict[str, Any]] = []
-            for h in result.beliefs:
-                out.append({
-                    "id": h.id, "content": h.content, "score": h.score,
-                    "kind": "belief", "source": h.source, "metadata": h.metadata,
-                })
-            for h in result.summaries:
-                # A week's topic summary (plan C2): its week, title and text.
-                out.append({
-                    "id": h.id, "content": (h.metadata or {}).get("display") or h.content,
-                    "score": h.score, "kind": "weekly_summary", "source": h.source,
-                    "metadata": h.metadata,
-                })
-            for h in result.episodes:
-                out.append({
-                    "id": h.id, "content": h.content, "score": h.score,
-                    "kind": "episode", "source": h.source, "metadata": h.metadata,
-                })
+            # A week's topic summary (plan C2) shows its week, title and text;
+            # a memory, its question and its answer.
+            for kind, hits in (("belief", result.beliefs), ("weekly_summary", result.summaries),
+                               ("episode", result.episodes)):
+                for h in hits:
+                    out.append({
+                        "id": h.id, "content": _shown(h), "score": h.score,
+                        "kind": kind, "source": h.source, "metadata": h.metadata,
+                    })
+            if result.degraded:
+                # Not "nothing remembered": a search that could not look by
+                # meaning says so (Memory audit M16).
+                note = f"Memory search was incomplete ({result.degraded}); keyword matches only."
+                if out:
+                    return note + "\n" + json.dumps(out, ensure_ascii=False, indent=2), False
+                return note + " " + _RECALL_DEGRADED, True
             if out:
-                return json.dumps(out, ensure_ascii=False, indent=2)
-            return "No relevant memories found."
+                return json.dumps(out, ensure_ascii=False, indent=2), False
+            return "No relevant memories found.", True
         except Exception as exc:
             logger.warning("[memory_search] V2 recall failed: %s", exc)
-            return "No relevant memories found."
+            return _RECALL_DEGRADED, True
     @registry.register(
         description=(
             "MEMORY ADMIN (read+write). Prefer this over SQL for all memory maintenance. "
@@ -724,9 +793,11 @@ def register_memory_tools(registry: Any) -> None:
             )
         # Every action is SQLite: in a thread, like memory_store.
         if act in ("list_beliefs", "beliefs"):
-            return await asyncio.to_thread(_mem_list_beliefs, q=q, limit=limit)
+            text = await asyncio.to_thread(_mem_list_beliefs, q=q, limit=limit)
+            return _fence_result(text, own=text.startswith("Error:"))
         if act in ("list_entities", "entities"):
-            return await asyncio.to_thread(_mem_list_entities, q=q, limit=limit)
+            text = await asyncio.to_thread(_mem_list_entities, q=q, limit=limit)
+            return _fence_result(text, own=text.startswith("Error:"))
         if act in ("invalidate", "invalidate_belief"):
             return await asyncio.to_thread(_mem_invalidate, id)
         if act in ("delete_entity", "delete"):
@@ -780,7 +851,8 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_list_beliefs(q: str = "", limit: int = 30) -> str:
-        return await asyncio.to_thread(_mem_list_beliefs, q=q, limit=limit)
+        text = await asyncio.to_thread(_mem_list_beliefs, q=q, limit=limit)
+        return _fence_result(text, own=text.startswith("Error:"))
     @registry.register(
         description=(
             "WRITE: Soft-invalidate one belief by id (from memory_list_beliefs). "
@@ -799,7 +871,8 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_list_entities(q: str = "", limit: int = 40) -> str:
-        return await asyncio.to_thread(_mem_list_entities, q=q, limit=limit)
+        text = await asyncio.to_thread(_mem_list_entities, q=q, limit=limit)
+        return _fence_result(text, own=text.startswith("Error:"))
     @registry.register(
         description=(
             "WRITE: Delete one memory entity by id (e.g. empty shell). "

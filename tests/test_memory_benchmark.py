@@ -135,5 +135,113 @@ def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
     write(version - 1, {"single.hit_rate": 0.99})  # an older dataset's ratchet
     assert script._cmd_lock(rebaseline=False) == 1
     assert script._cmd_lock(rebaseline=True) == 0
-    assert json.loads(locked.read_text(encoding="utf-8")) == {
+    written = json.loads(locked.read_text(encoding="utf-8"))
+    assert {k: written[k] for k in ("dataset_version", "scores")} == {
         "dataset_version": version, "scores": scores}
+    assert written["targets"] == script.TARGETS and written["trades"] == []
+
+
+# ── held out (Memory audit M24) ───────────────────────────────────────────
+
+
+def test_the_held_out_questions_are_scored_apart(report):
+    data = benchmark.load_dataset()
+    assert report["heldout"]["overall"]["questions"] == len(data["heldout"]) >= 40
+    gated = benchmark.gated_scores(report)
+    assert "heldout.overall.mrr" in gated and "heldout.mixed.hit_rate" in gated
+    # Never the same question twice: a held-out copy of a tuning question
+    # would score the tuning, not the generalization.
+    assert not {q["text"] for q in data["questions"]} & {q["text"] for q in data["heldout"]}
+
+
+def test_the_builder_refuses_a_held_out_question_that_repeats_a_tuning_one(monkeypatch):
+    script = _build_script()
+    monkeypatch.setattr(script, "HELDOUT", [*script.HELDOUT, ("h999", script.QUESTIONS[0][1], "single",
+                                                              script.QUESTIONS[0][3], [])])
+    with pytest.raises(ValueError, match="repeats a tuning question"):
+        script.build()
+
+
+# ── the abstention target and the trade rule ──────────────────────────────
+
+
+def test_abstention_has_an_explicit_target_above_its_floor():
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    for key, target in locked["targets"].items():
+        assert key.endswith("abstain.hit_rate") and target > locked["scores"][key]
+
+
+@pytest.mark.parametrize(("old", "new", "why"), [
+    ({"single.mrr": 0.8, "abstain.hit_rate": 0.4}, {"single.mrr": 0.86, "abstain.hit_rate": 0.38},
+     "abstention is never traded"),
+    ({"single.mrr": 0.8, "noise.precision": 0.7}, {"single.mrr": 0.9, "noise.precision": 0.6},
+     "falls by"),
+    ({"single.mrr": 0.8, "noise.precision": 0.7}, {"single.mrr": 0.82, "noise.precision": 0.68},
+     "nothing rises"),
+])
+def test_the_trade_rule_refuses(old, new, why):
+    problems = _build_script().trade_problems(old, new)
+    assert any(why in p for p in problems), problems
+
+
+def test_a_trade_inside_the_rule_is_recorded(tmp_path, monkeypatch):
+    """Negative control of the refusals: a small fall paid for by a larger
+    rise is accepted, and written down with its reason."""
+    script = _build_script()
+    locked = tmp_path / "thresholds.json"
+    version = benchmark.load_dataset()["version"]
+    monkeypatch.setattr(script, "THRESHOLDS", locked)
+    monkeypatch.setattr(benchmark, "gated_scores",
+                        lambda _r: {"single.mrr": 0.9, "noise.precision": 0.67, "abstain.hit_rate": 0.4})
+    monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
+    locked.write_text(json.dumps({"dataset_version": version, "scores": {
+        "single.mrr": 0.8, "noise.precision": 0.7, "abstain.hit_rate": 0.4}}), encoding="utf-8")
+    assert script._cmd_lock(rebaseline=False) == 1  # no reason given: refused
+    assert script._cmd_lock(rebaseline=False, trade="rank turns above facts") == 0
+    trade = json.loads(locked.read_text(encoding="utf-8"))["trades"][-1]
+    assert trade["reason"] == "rank turns above facts"
+    assert trade["lowered"] == {"noise.precision": [0.7, 0.67]} and "single.mrr" in trade["raised"]
+
+
+# ── extraction ────────────────────────────────────────────────────────────
+
+
+def test_extraction_only_improves():
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))["extraction"]
+    replies = FIXTURES / "extraction_llm.json"
+    report = benchmark.run_extraction_benchmark(
+        llm_replies=json.loads(replies.read_text(encoding="utf-8")) if replies.is_file() else None)
+    assert report["version"] == locked["version"]
+    dropped, rose = _compare(benchmark.extraction_scores(report), locked["scores"])
+    assert not dropped, "Extraction got worse:\n  " + "\n  ".join(dropped)
+    assert not rose, "Extraction improved -- lock it in: python scripts/memory_bench.py lock\n  " + "\n  ".join(rose)
+    # Every language is measured, each with turns that should keep nothing.
+    assert set(report["heuristic"]) == {"en", "ar", "mixed"}
+    assert all(row["quiet_turns"] >= 1 for row in report["heuristic"].values())
+
+
+def test_the_extraction_gate_sees_an_extractor_that_keeps_nothing(monkeypatch):
+    """Negative control: an extractor that keeps nothing loses its recall."""
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))["extraction"]
+    monkeypatch.setattr("kazma_core.memory.belief_extractor.extract_beliefs_heuristic", lambda _t: [])
+    dropped, _ = _compare(benchmark.extraction_scores(benchmark.run_extraction_benchmark()), locked["scores"])
+    assert any(d.startswith("heuristic.en.recall") for d in dropped), dropped
+
+
+def test_the_models_pass_replays_recorded_replies():
+    """The deep pass is scored from the model's own recorded replies; a turn
+    nobody recorded is an error, never a guess."""
+    data = json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))
+    turn = next(t for t in data["turns"] if t["id"] == "a01")
+    reply = json.dumps({"beliefs": [
+        {"subject": "user", "predicate": "name", "predicate_type": "functional", "object": "ليلى"},
+        {"subject": "user", "predicate": "lives_in", "predicate_type": "functional", "object": "دبي"}]},
+        ensure_ascii=False)
+    replies = {"model": "stand-in", "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
+    one = {"version": data["version"], "turns": [turn]}
+    report = benchmark.run_extraction_benchmark(one, llm_replies=replies)
+    assert report["llm"]["ar"]["recall"] == 1.0 and report["llm"]["ar"]["precision"] == 1.0
+    assert report["heuristic"]["ar"]["recall"] == 1.0  # the quick pass reads Arabic (arabic_facts)
+    other = {"version": data["version"], "turns": [next(t for t in data["turns"] if t["id"] == "e01")]}
+    with pytest.raises(KeyError, match="extraction --record"):
+        benchmark.run_extraction_benchmark(other, llm_replies=replies)

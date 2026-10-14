@@ -20,9 +20,10 @@ _RESEARCH_CONTROL: Final[frozenset[str]] = frozenset({
     "", "help", "status",
 })
 _IDE_WORK: Final[frozenset[str]] = frozenset({"swarm"})
-_KB_WORK: Final[frozenset[str]] = frozenset({
-    "add", "crawl", "refresh", "delete", "ingest",
-})
+# ``/kb`` is never rewritten: the gateway's ``_try_kb_command`` handles every
+# subcommand deterministically, admin-gated where it changes the library
+# (Knowledge audit KB-S07: the rewrite sent add/crawl/refresh/delete to the
+# model, and no handler ran).
 _SKILL_WORK: Final[frozenset[str]] = frozenset({
     "install", "uninstall", "activate",
 })
@@ -55,7 +56,7 @@ def is_control_slash(text: str) -> bool:
     if cmd in ("/documents", "/docs"):
         return True  # current surface is read-only inventory
     if cmd == "/kb":
-        return sub not in _KB_WORK
+        return True  # handled by the gateway intercept, never a model turn
     if cmd == "/skill":
         return sub not in _SKILL_WORK
     if cmd == "/ide":
@@ -124,13 +125,6 @@ def rewrite_work_slash(text: str) -> str | None:
         return (
             f"Dispatch a coding swarm task: {task}. "
             "Use the workspace-aware swarm send path / swarm dispatch tools."
-        )
-
-    if cmd == "/kb" and sub in _KB_WORK:
-        body = raw[len("/kb") :].strip()
-        return (
-            f"Knowledge library request: {body}. "
-            "Use the knowledge / crawl / ingest tools. Confirm before delete."
         )
 
     if cmd == "/skill" and sub in _SKILL_WORK:

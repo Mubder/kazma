@@ -28,7 +28,7 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="Session-local work directory (default: session-artifacts/document-cert-work)",
     )
-    parser.add_argument("--soak", action="store_true", help="Run the opt-in repeated parse soak")
+    parser.add_argument("--soak", action="store_true", help="Run extended repeated-parse smoke (does not certify a multi-day soak)")
     parser.add_argument(
         "--soak-iterations",
         type=int,

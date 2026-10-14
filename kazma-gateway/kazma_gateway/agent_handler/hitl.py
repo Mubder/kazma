@@ -917,20 +917,25 @@ async def _handle_hitl_resume(
             # (build_resume_command) so transports cannot drift again.
             from kazma_core.safety.commitment.resume import build_resume_command
 
+            # Keyed by the interrupt this card names (TT-02): the decision
+            # answers that interrupt and no other. ``pending`` is never None
+            # here (checked above), so there is no gate-less fallback: a
+            # resume that names no interrupt is not an answer to the card.
             _resume_cmd = build_resume_command(
                 pending,
                 approved=approved,
                 semantic_option=semantic_option,
                 scope="task" if is_task_grant else "once",
                 reason=action,
+                interrupt_id=str((pending or {}).get("interrupt_id") or ""),
             )
             if _resume_cmd is None:
-                # Stale (pending cleared between the check above and here) —
-                # treat as a security deny so the turn ends deterministically.
-                _resume_cmd = build_resume_command(
-                    {"type": "hitl_approval", "kind": "security"},
-                    approved=approved, scope="task" if is_task_grant else "once", reason=action,
-                )
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text="This approval card is stale. Use the current card or a new /hitl command for the pending request.",
+                    context_metadata=ctx,
+                ))
+                return True
             from kazma_ui.turn_runtime import invoke_turn as _invoke_hitl
 
             result_state = await _invoke_hitl(

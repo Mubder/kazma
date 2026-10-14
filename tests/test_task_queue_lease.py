@@ -171,8 +171,7 @@ async def test_process_registers_and_clears_lease(ops_db):
     claimed = worker._claim_batch()
     assert len(claimed) == 1
 
-    sem = asyncio.Semaphore(1)
-    proc = asyncio.create_task(worker._process(sem, claimed[0]))
+    proc = asyncio.create_task(worker._process("maintenance", claimed[0]))
     await asyncio.wait_for(entered.wait(), timeout=5)
     assert worker._leases.get(tid) == claimed[0]["lease_token"]
 

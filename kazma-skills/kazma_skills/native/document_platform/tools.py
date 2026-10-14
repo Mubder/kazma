@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 
 _MAX_OUTPUT_CHARS = 20_000
 _INGEST_WAIT_SECONDS = 30.0
+_TERMINAL_STATES = frozenset({"ready", "cancelled", "dead_letter", "rejected"})
 
 
-def _scope() -> tuple[str, str, str]:
-    """Resolve (tenant_id, workspace_id, actor_id) from context, safely."""
+def _tenant_and_workspace() -> tuple[str, str]:
+    """Resolve (tenant_id, workspace_id) from context, safely. Blocking."""
     tenant = "default"
     try:
         from kazma_core.tenant_context import get_current_tenant_id
@@ -46,7 +47,39 @@ def _scope() -> tuple[str, str, str]:
     except Exception:  # pragma: no cover - defensive
         pass
 
-    return tenant, workspace, "agent"
+    return tenant, workspace
+
+
+def _operator_scope() -> tuple[str, str, str] | None:
+    """(tenant, workspace, actor) for the install's operator, or None.
+
+    Every document surface acts as the install's operator (DOC-A3,
+    ``documents.principal``): a document uploaded on the Web page is the
+    agent's to read, and the reverse. Documents ingested under an older name
+    get an ACL row for the operator first. None with platform users: which
+    user the agent acts for is not built (D1). Blocking.
+    """
+    from kazma_core.documents.ingestion import peek_ingestion_service
+    from kazma_core.documents.principal import operator_for
+
+    tenant, workspace = _tenant_and_workspace()
+    # The running service, if there is one yet (``_ensure_service`` builds
+    # it inside the tool's own error handling); without it nothing is granted
+    # this time, and the operator still reads its own documents.
+    actor = operator_for(peek_ingestion_service(), tenant)
+    if actor is None:
+        return None
+    return tenant, workspace, actor
+
+
+async def _scope() -> tuple[str, str, str] | str:
+    """The tool's scope, or the refusal to answer with (off the event loop)."""
+    scope = await asyncio.to_thread(_operator_scope)
+    if scope is None:
+        from kazma_core.documents.principal import MULTI_USER_REFUSAL
+
+        return f"Error: {MULTI_USER_REFUSAL}"
+    return scope
 
 
 def _resolve_workspace_file(path: str) -> tuple[Path | None, str | None]:
@@ -80,9 +113,11 @@ async def _ensure_service():
 
 
 async def document_import(path: str, title: str = "") -> str:
-    """Ingest a workspace-safe local file and wait until it is processed.
+    """Ingest a workspace-safe local file and wait up to 30 s for processing.
 
-    Returns the opaque ``document_id`` / ``job_id`` and final state. Only
+    Returns the opaque ``document_id`` / ``job_id`` and the state the job has
+    reached: final when processing finished within the wait, otherwise the
+    state so far, said as such (``document_status`` follows it). Only
     files inside the active workspace are accepted.
     """
 
@@ -90,7 +125,10 @@ async def document_import(path: str, title: str = "") -> str:
     if error:
         return error
     assert resolved is not None
-    tenant, workspace, actor = _scope()
+    scope = await _scope()
+    if isinstance(scope, str):
+        return scope
+    tenant, workspace, actor = scope
     try:
         svc = await _ensure_service()
 
@@ -106,13 +144,20 @@ async def document_import(path: str, title: str = "") -> str:
                 )
 
         result = await asyncio.to_thread(_ingest)
-        state = await _wait_terminal(svc, tenant, str(result.job_id))
-        return (
+        state = await _wait_terminal(svc, tenant, str(result.job_id), actor)
+        reply = (
             f"Document ingested.\n"
             f"  document_id: {result.document_id}\n"
             f"  job_id: {result.job_id}\n"
             f"  state: {state}"
         )
+        if state not in _TERMINAL_STATES:
+            # DOC-A5: the wait ended before processing did; never imply final.
+            reply += (
+                f"\n  Still processing after {_INGEST_WAIT_SECONDS:g} s: "
+                "check document_status with this job_id."
+            )
+        return reply
     except Exception as exc:  # noqa: BLE001
         from kazma_core.documents.ingestion import DocumentIngestionError
 
@@ -130,19 +175,22 @@ async def document_status(document_id: str = "", job_id: str = "") -> str:
     returns that job's stage/attempts.
     """
 
-    tenant, _ws, actor = _scope()
+    scope = await _scope()
+    if isinstance(scope, str):
+        return scope
+    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
         if job_id.strip():
             status = await asyncio.to_thread(
-                svc.job_status, tenant_id=tenant, job_id=job_id.strip()
+                svc.job_status, tenant_id=tenant, job_id=job_id.strip(), actor_id=actor
             )
             if status is None:
                 return "Error: job not found"
             return _format_status(status)
         if document_id.strip():
             jobs = await asyncio.to_thread(
-                svc.jobs_for_document, tenant_id=tenant, document_id=document_id.strip()
+                svc.jobs_for_document, tenant_id=tenant, document_id=document_id.strip(), actor_id=actor
             )
             if not jobs:
                 return "Error: document not found or has no jobs"
@@ -161,13 +209,16 @@ async def document_read(
 ) -> str:
     """Read paged, fenced content of a processed document by opaque ID."""
 
-    tenant, _ws, _actor = _scope()
+    scope = await _scope()
+    if isinstance(scope, str):
+        return scope
+    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
         data = await asyncio.to_thread(
             svc.get_content,
             tenant_id=tenant,
-            actor_id="agent",
+            actor_id=actor,
             document_id=document_id.strip(),
             page=page,
             offset=offset,
@@ -195,13 +246,16 @@ async def document_index(document_id: str, library_id: str) -> str:
 
     if not library_id.strip():
         return "Error: library_id is required"
-    tenant, _ws, _actor = _scope()
+    scope = await _scope()
+    if isinstance(scope, str):
+        return scope
+    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
         result = await asyncio.to_thread(
             svc.index_document,
             tenant_id=tenant,
-            actor_id="agent",
+            actor_id=actor,
             document_id=document_id.strip(),
             library_id=library_id.strip(),
         )
@@ -223,7 +277,10 @@ async def document_search(library_id: str, query: str, top_k: int = 5) -> str:
 
     if not library_id.strip() or not query.strip():
         return "Error: library_id and query are required"
-    tenant, _ws, _actor = _scope()
+    scope = await _scope()
+    if isinstance(scope, str):
+        return scope
+    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
         data = await svc.search_library(
@@ -231,7 +288,7 @@ async def document_search(library_id: str, query: str, top_k: int = 5) -> str:
             library_id=library_id.strip(),
             query=query.strip(),
             top_k=int(top_k) if top_k else 5,
-            actor_id=_actor,
+            actor_id=actor,
         )
         context = data.get("prompt_context") or ""
         if not context:
@@ -247,11 +304,14 @@ async def document_cancel(job_id: str) -> str:
 
     if not job_id.strip():
         return "Error: job_id is required"
-    tenant, _ws, _actor = _scope()
+    scope = await _scope()
+    if isinstance(scope, str):
+        return scope
+    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
         status = await asyncio.to_thread(
-            svc.cancel_job, tenant_id=tenant, job_id=job_id.strip()
+            svc.cancel_job, tenant_id=tenant, job_id=job_id.strip(), actor_id=actor
         )
         return f"Cancellation requested. Current state: {status['state']}"
     except Exception as exc:  # noqa: BLE001
@@ -272,7 +332,10 @@ async def document_convert(
 
     if not document_id.strip() or not target_format.strip():
         return "Error: document_id and target_format are required"
-    tenant, workspace, actor = _scope()
+    scope = await _scope()
+    if isinstance(scope, str):
+        return scope
+    tenant, workspace, actor = scope
     try:
         svc = await _ensure_service()
         data = await svc.convert_document(
@@ -306,7 +369,10 @@ async def document_redact(
         return "Error: document_id is required"
     if not isinstance(terms, (list, tuple)) or not terms:
         return "Error: at least one redaction term is required"
-    tenant, workspace, actor = _scope()
+    scope = await _scope()
+    if isinstance(scope, str):
+        return scope
+    tenant, workspace, actor = scope
     try:
         svc = await _ensure_service()
         data = await svc.redact_document(
@@ -341,14 +407,14 @@ def _format_artifact(action: str, data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def _wait_terminal(svc, tenant: str, job_id: str) -> str:
+async def _wait_terminal(svc, tenant: str, job_id: str, actor: str) -> str:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _INGEST_WAIT_SECONDS
     state = "unknown"
-    terminal = {"ready", "cancelled", "dead_letter", "rejected"}
+    terminal = _TERMINAL_STATES
     while loop.time() < deadline:
         status = await asyncio.to_thread(
-            svc.job_status, tenant_id=tenant, job_id=job_id
+            svc.job_status, tenant_id=tenant, job_id=job_id, actor_id=actor
         )
         if status is not None:
             state = status["state"]

@@ -35,6 +35,7 @@ __all__ = [
     "gate_claimed",
     "gate_claimed_for_thread",
     "gate_is_pending",
+    "gate_names_interrupt",
     "gate_not_pending",
     "gate_resuming",
     "settle_thread_gates",
@@ -118,6 +119,33 @@ async def gate_is_pending(thread_id: str, gate_id: str) -> bool:
     if str(getattr(row, "thread_id", "") or "") not in ("", thread_id):
         return False
     return str(getattr(row, "state", "") or "") == "pending"
+
+
+async def gate_names_interrupt(
+    thread_id: str, gate_id: str, live_iid: str, live_payload: dict[str, Any] | None,
+) -> bool:
+    """Whether the card *gate_id* is the interrupt the checkpoint is paused at.
+
+    True when it is that interrupt's LangGraph id or its deterministic alias,
+    or when the registry's row for it names either; True too for an id the
+    registry has never heard of (legacy clients, a registry that is off).
+    False only on a definite answer: the registry holds *gate_id* and it is
+    another gate. After a Time Travel restore, gate A's still-live card
+    decided whatever the graph would run next (TT-02).
+    """
+    if not gate_id:
+        return True
+    live = {i for i in (live_iid,) if i}
+    if isinstance(live_payload, dict):
+        live.add(_alias_for(thread_id, str(live_payload.get("tool") or ""),
+                            live_payload.get("args") or {}))
+    if gate_id in live:
+        return True
+    row = await _gate_row(gate_id)
+    if row is None:
+        return True
+    names = {str(getattr(row, "gate_id", "") or ""), str(getattr(row, "alias_id", "") or "")} - {""}
+    return bool(names & live)
 
 
 def registry_on() -> bool:

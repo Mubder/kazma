@@ -449,7 +449,7 @@
           if (data.report_url && data.report_url.indexOf('/api/research/papers/file?path=') === 0) {
             var link = document.createElement('a');
             link.href = data.report_url;
-            link.textContent = i18n('research.ui.open_md', 'Open Markdown');
+            link.textContent = i18n('research.open_md', 'Open report');
             output.appendChild(document.createElement('br')); output.appendChild(link);
           }
         })

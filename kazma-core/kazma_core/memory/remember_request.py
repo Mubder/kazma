@@ -17,7 +17,9 @@ import re
 
 __all__ = ["is_remember_request"]
 
-#: English, as they always were (substring, lower case).
+#: English, as whole words (Memory audit M26: as substrings "Can you denote
+#: that" matched "note that"). "Do you remember that film?" asks Kazma to
+#: recall, not to remember: a phrase right after "do/did you" is a question.
 _ENGLISH = (
     "remember that",
     "remember my",
@@ -25,6 +27,9 @@ _ENGLISH = (
     "don't forget",
     "do not forget",
     "note that",
+)
+_ENGLISH_RE = re.compile(
+    r"(?<![\w'])(?<!do you )(?<!did you )(?:" + "|".join(re.escape(p) for p in _ENGLISH) + r")(?![\w'])"
 )
 
 #: Arabic (MSA and Gulf), written in folded form.
@@ -51,8 +56,8 @@ def is_remember_request(text: str | None) -> bool:
     """True when *text* asks Kazma to remember something."""
     if not text:
         return False
-    lowered = text.strip().lower()
-    if any(phrase in lowered for phrase in _ENGLISH):
+    lowered = " ".join(text.strip().lower().replace("\u2019", "'").split())
+    if _ENGLISH_RE.search(lowered):
         return True
     from kazma_core.documents.arabic import fold_for_search
 

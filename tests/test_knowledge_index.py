@@ -187,28 +187,32 @@ def test_search_empty_query_returns_empty(monkeypatch):
 
 
 # ── Auto-inject getter (Phase 2) ────────────────────────────────────────────
+# Re-pointed for Knowledge audit KB-S08 (2026-10-14): the async wrapper the
+# transports called is gone with their second injection; the supervisor
+# builds the turn's block through build_knowledge_inject (its .block is the
+# same text).
 
 
 def test_auto_inject_off_by_default_no_opt_in(monkeypatch):
     """With no library opted in, the getter returns "" even when the kill
     switch is on — behaviour is strictly opt-in per library."""
     from kazma_core.stores.knowledge_index import (
-        get_knowledge_auto_inject_block,
+        build_knowledge_inject,
         kb_auto_inject_enabled,
     )
 
     assert kb_auto_inject_enabled() is True  # default ON
     _setup(monkeypatch)  # fresh libs, none have auto_inject=1
-    assert asyncio.run(get_knowledge_auto_inject_block("whatsapp 401")) == ""
+    assert build_knowledge_inject("whatsapp 401").block == ""
 
 
 def test_auto_inject_returns_block_when_library_opted_in(monkeypatch):
-    from kazma_core.stores.knowledge_index import get_knowledge_auto_inject_block
+    from kazma_core.stores.knowledge_index import build_knowledge_inject
 
     store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     store.update_library("lib_a", auto_inject=True)
-    block = asyncio.run(get_knowledge_auto_inject_block("whatsapp 401 token"))
+    block = build_knowledge_inject("whatsapp 401 token").block
     assert block, "expected non-empty auto-inject block"
     # Provenance is mandatory in the injected block (for citation).
     assert "https://x/wa" in block
@@ -220,7 +224,7 @@ def test_auto_inject_kill_switch_disables_everything(monkeypatch):
     import os
 
     from kazma_core.stores.knowledge_index import (
-        get_knowledge_auto_inject_block,
+        build_knowledge_inject,
         kb_auto_inject_enabled,
     )
 
@@ -232,7 +236,7 @@ def test_auto_inject_kill_switch_disables_everything(monkeypatch):
     try:
         os.environ["KAZMA_KB_AUTO_INJECT"] = "0"
         assert kb_auto_inject_enabled() is False
-        assert asyncio.run(get_knowledge_auto_inject_block("whatsapp 401")) == ""
+        assert build_knowledge_inject("whatsapp 401").block == ""
     finally:
         if old is None:
             os.environ.pop("KAZMA_KB_AUTO_INJECT", None)
@@ -241,8 +245,8 @@ def test_auto_inject_kill_switch_disables_everything(monkeypatch):
 
 
 def test_auto_inject_empty_message_returns_empty(monkeypatch):
-    from kazma_core.stores.knowledge_index import get_knowledge_auto_inject_block
+    from kazma_core.stores.knowledge_index import build_knowledge_inject
 
     _setup(monkeypatch)
-    assert asyncio.run(get_knowledge_auto_inject_block("")) == ""
-    assert asyncio.run(get_knowledge_auto_inject_block("   ")) == ""
+    assert build_knowledge_inject("").block == ""
+    assert build_knowledge_inject("   ").block == ""

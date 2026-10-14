@@ -35,6 +35,7 @@ __all__ = [
     "stop_worker",
     "purge_completed_tasks",
     "async_purge_completed_tasks",
+    "MEMORY_LANE",
 ]
 
 # Reclaim threshold: a task stuck in 'processing' longer than this (seconds)
@@ -46,6 +47,47 @@ _STUCK_THRESHOLD_SEC = 300.0  # 5 minutes
 # large pg_backup or an LLM extraction under retry) is NOT re-claimed and
 # double-executed by the worker's own 2s poll loop.
 _LEASE_RENEW_INTERVAL_SEC = 60.0
+
+# Backoff after a failed attempt (Memory audit M12): 30 s, then four times as
+# long each time, at most an hour. A failed task went back to 'pending' at
+# once, so three attempts ran within three polls and a ten-minute provider
+# outage dead-lettered every deep pass of it.
+_BACKOFF_BASE_SEC = 30.0
+_BACKOFF_MAX_SEC = 3600.0
+
+#: Task types that write what a user said into memory. They have slots of
+#: their own: a pg_dump or a restic check never holds up a user's turn
+#: (Memory audit M13). Everything else is maintenance.
+MEMORY_LANE = frozenset({"post_turn_memory", "micro_consolidation", "entity_merge", "topic_summary_rebuild"})
+
+
+def _retry_delay(attempts: int) -> float:
+    """Seconds before a task that has failed *attempts* times runs again."""
+    return min(_BACKOFF_MAX_SEC, _BACKOFF_BASE_SEC * 4 ** max(0, int(attempts) - 1))
+
+
+def _report_dead_letters(task_types: list[str], error: str | None) -> None:
+    """A dead letter is an operation memory gave up on: logged, and an ops
+    alert. It is kept until the operator retries or clears it (the Memory
+    page's queue)."""
+    if not task_types:
+        return
+    logger.warning(
+        "[task_queue] %d memory task(s) gave up after their last attempt (%s): %s -- kept as dead "
+        "letters until retried or cleared on the Memory page",
+        len(task_types), ", ".join(sorted(set(task_types))), (error or "")[:200],
+    )
+    from kazma_core.observability.ops_alerts import alert  # never raises (AGENTS §33)
+
+    alert(
+        "memory.dead_letter",
+        "Memory gave up on a task",
+        f"{len(task_types)} task(s) ({', '.join(sorted(set(task_types)))}) failed every attempt and "
+        "are kept as dead letters. The Memory page's task queue retries or clears them.",
+        severity="warn",
+        cooldown_s=3600.0,
+    )
+
 
 # Handler registry: task_type → async callable(payload) -> bool (success)
 TaskHandler = Callable[[dict[str, Any]], Awaitable[bool]]
@@ -64,9 +106,13 @@ def enqueue_task(
     task_type: str,
     payload: dict[str, Any],
     *,
-    max_attempts: int = 3,
+    max_attempts: int | None = None,
 ) -> str | None:
     """Enqueue a durable task. Returns the task id, or None on failure.
+
+    *max_attempts* defaults to 6 for a memory write (``MEMORY_LANE``: with the
+    backoff, about an hour and forty minutes of outage before it is a dead
+    letter) and 3 for maintenance.
 
     Best-effort: never raises — a queue failure logs and returns None so
     the caller (post-turn hook) is never blocked.
@@ -82,6 +128,8 @@ def enqueue_task(
             ensure_ops_schema(conn)
             tid = "t_" + uuid.uuid4().hex[:20]
             now = time.time()
+            if max_attempts is None:
+                max_attempts = 6 if task_type in MEMORY_LANE else 3
             conn.execute(
                 """INSERT INTO memory_task_queue
                    (id, task_type, payload_json, status, max_attempts, created_at, updated_at)
@@ -102,7 +150,7 @@ def enqueue_task(
         finally:
             conn.close()
     except Exception:
-        logger.debug("[task_queue] enqueue failed for %s", task_type, exc_info=True)
+        logger.warning("[task_queue] enqueue failed for %s", task_type, exc_info=True)
         return None
 
 
@@ -117,9 +165,15 @@ class _MemoryWorker:
     handlers. Crashes are safe: unclaimed tasks remain pending.
     """
 
-    def __init__(self, *, max_concurrency: int = 2, poll_interval: float = 2.0) -> None:
+    def __init__(
+        self, *, max_concurrency: int = 2, poll_interval: float = 2.0, memory_concurrency: int = 2,
+    ) -> None:
         self.max_concurrency = max_concurrency
+        self.memory_concurrency = memory_concurrency
         self.poll_interval = poll_interval
+        # Slots per lane, and how many of each are running (loop thread only).
+        self._lane_sizes = {"memory": max(1, memory_concurrency), "maintenance": max(1, max_concurrency)}
+        self._busy = {"memory": 0, "maintenance": 0}
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._renewal_task: asyncio.Task | None = None
@@ -205,22 +259,33 @@ class _MemoryWorker:
                 logger.debug("[task_queue] lease renewal failed", exc_info=True)
 
     async def _run(self) -> None:
-        """Main poll loop: claim → dispatch → ack/nack, repeat."""
-        sem = asyncio.Semaphore(self.max_concurrency)
+        """Main poll loop: each lane claims what it has room for and runs it at once.
+
+        A lane claims no more rows than it has free slots (Memory audit M13).
+        It claimed eight and ran two: the rest waited on a semaphore,
+        "processing" with no lease, and once one had waited past the stuck
+        threshold the next claim took it again -- the task ran twice. The
+        lease is registered at the claim. Memory writes (``MEMORY_LANE``)
+        have slots of their own, so maintenance never holds them up.
+        """
         while self._running:
             try:
-                # Claim off the event loop (audit M-P4): _claim_batch does a
-                # sync BEGIN IMMEDIATE round-trip with busy_timeout=5000 —
-                # inline it used to pin the loop (every SSE/WS stream) for
-                # up to 5s per tick under contention. Same for the acks.
-                claimed = await asyncio.to_thread(self._claim_batch)
-                for task in claimed:
-                    await sem.acquire()
-                    t = asyncio.create_task(self._process(sem, task))
-                    self._inflight.add(t)
-                    t.add_done_callback(self._inflight.discard)
+                for lane, size in self._lane_sizes.items():
+                    free = size - self._busy[lane]
+                    if free <= 0:
+                        continue
+                    # Claim off the event loop (audit M-P4): _claim_batch does
+                    # a sync BEGIN IMMEDIATE round-trip with busy_timeout=5000.
+                    claimed = await asyncio.to_thread(self._claim_batch, free, lane)
+                    for task in claimed:
+                        self._busy[lane] += 1
+                        if task.get("lease_token"):
+                            self._leases[task["id"]] = task["lease_token"]
+                        t = asyncio.create_task(self._process(lane, task))
+                        self._inflight.add(t)
+                        t.add_done_callback(self._inflight.discard)
             except Exception:
-                logger.debug("[task_queue] poll cycle failed", exc_info=True)
+                logger.warning("[task_queue] poll cycle failed", exc_info=True)
             # Wait for the next poll interval or an explicit wake
             try:
                 self._wake.clear()
@@ -228,8 +293,12 @@ class _MemoryWorker:
             except asyncio.TimeoutError:
                 pass
 
-    def _claim_batch(self, batch_size: int = 8) -> list[dict[str, Any]]:
-        """Atomically claim up to ``batch_size`` pending/stuck tasks.
+    def _claim_batch(self, batch_size: int = 8, lane: str | None = None) -> list[dict[str, Any]]:
+        """Atomically claim up to ``batch_size`` pending/stuck tasks of *lane*
+        (``"memory"``, ``"maintenance"``; None = any).
+
+        A pending task waiting out its backoff (``next_attempt_at``) is not
+        claimable yet.
 
         Each claim mints a per-batch ``lease_token``; acks and lease renewals
         verify it, and a reclaim rotates it — so a stale handler (whose task
@@ -253,6 +322,14 @@ class _MemoryWorker:
                 conn.isolation_level = None  # manual BEGIN/COMMIT below
                 now = time.time()
                 stuck_cutoff = now - _STUCK_THRESHOLD_SEC
+                kinds = sorted(MEMORY_LANE)
+                marks = ",".join("?" for _ in kinds)
+                if lane == "memory":
+                    lane_sql, lane_args = f" AND task_type IN ({marks})", kinds
+                elif lane == "maintenance":
+                    lane_sql, lane_args = f" AND task_type NOT IN ({marks})", kinds
+                else:
+                    lane_sql, lane_args = "", []
                 # Claim pending tasks + reclaim stuck 'processing' ones.
                 # BEGIN IMMEDIATE takes the write lock BEFORE the SELECT so
                 # two processes (app + CLI / HA replicas) cannot claim the
@@ -263,21 +340,23 @@ class _MemoryWorker:
                 try:
                     # Dead-letter stuck rows whose next attempt would hit
                     # max_attempts (crash-looping handlers that never ack).
-                    conn.execute(
+                    dead = [r[0] for r in conn.execute(
                         """UPDATE memory_task_queue
                            SET status = 'failed', attempts = attempts + 1,
                                updated_at = ?,
                                error_log = 'lease expired: max attempts exceeded'
                            WHERE status = 'processing' AND updated_at < ?
-                             AND attempts + 1 >= max_attempts""",
+                             AND attempts + 1 >= max_attempts
+                           RETURNING task_type""",
                         (now, stuck_cutoff),
-                    )
+                    ).fetchall()]
                     rows = conn.execute(
-                        """SELECT * FROM memory_task_queue
-                           WHERE status = 'pending'
-                              OR (status = 'processing' AND updated_at < ?)
+                        f"""SELECT * FROM memory_task_queue
+                           WHERE ((status = 'pending'
+                                   AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+                              OR (status = 'processing' AND updated_at < ?)){lane_sql}
                            ORDER BY created_at ASC LIMIT ?""",
-                        (stuck_cutoff, batch_size),
+                        (now, stuck_cutoff, *lane_args, max(0, int(batch_size))),
                     ).fetchall()
                     claimed_ids = [r["id"] for r in rows]
                     if not claimed_ids:
@@ -286,6 +365,7 @@ class _MemoryWorker:
                         # claimable, or an exhausted stuck row rolls back to
                         # 'processing' and re-queues forever.
                         conn.execute("COMMIT")
+                        _report_dead_letters(dead, "lease expired: max attempts exceeded")
                         return []
                     placeholders = ",".join("?" * len(claimed_ids))
                     lease_token = uuid.uuid4().hex
@@ -302,8 +382,10 @@ class _MemoryWorker:
                     )
                     if not cur.rowcount:
                         conn.execute("COMMIT")
+                        _report_dead_letters(dead, "lease expired: max attempts exceeded")
                         return []
                     conn.execute("COMMIT")
+                    _report_dead_letters(dead, "lease expired: max attempts exceeded")
                 except Exception:
                     try:
                         conn.execute("ROLLBACK")
@@ -317,10 +399,10 @@ class _MemoryWorker:
             finally:
                 conn.close()
         except Exception:
-            logger.debug("[task_queue] claim failed", exc_info=True)
+            logger.warning("[task_queue] claim failed", exc_info=True)
             return []
 
-    async def _process(self, sem: asyncio.Semaphore, task: dict[str, Any]) -> None:
+    async def _process(self, lane: str, task: dict[str, Any]) -> None:
         """Dispatch one task to its handler; ack on success, retry/nack on failure."""
         task_id = task["id"]
         lease_token = task.get("lease_token")
@@ -354,7 +436,9 @@ class _MemoryWorker:
                 )
         finally:
             self._leases.pop(task_id, None)
-            sem.release()
+            if lane in self._busy:
+                self._busy[lane] = max(0, self._busy[lane] - 1)
+                self._wake.set()  # a slot is free: claim again now
 
     def _ack(self, task: dict[str, Any], *, success: bool, error: str | None) -> None:
         """Mark a task completed (success) or retry/dead-letter (failure).
@@ -385,24 +469,29 @@ class _MemoryWorker:
                     attempts = int(task.get("attempts", 0)) + 1
                     max_attempts = int(task.get("max_attempts", 3))
                     if attempts >= max_attempts:
-                        conn.execute(
+                        cur = conn.execute(
                             """UPDATE memory_task_queue
                                SET status='failed', attempts=?, updated_at=?, error_log=?, lease_token=NULL
                                WHERE id=? AND lease_token=?""",
                             (attempts, now, (error or "")[:1000], task["id"], token),
                         )
+                        if cur.rowcount:
+                            conn.commit()
+                            _report_dead_letters([str(task.get("task_type") or "?")], error)
                     else:
                         conn.execute(
                             """UPDATE memory_task_queue
-                               SET status='pending', attempts=?, updated_at=?, error_log=?, lease_token=NULL
+                               SET status='pending', attempts=?, updated_at=?, error_log=?, lease_token=NULL,
+                                   next_attempt_at=?
                                WHERE id=? AND lease_token=?""",
-                            (attempts, now, (error or "")[:1000], task["id"], token),
+                            (attempts, now, (error or "")[:1000], now + _retry_delay(attempts),
+                             task["id"], token),
                         )
                 conn.commit()
             finally:
                 conn.close()
         except Exception:
-            logger.debug("[task_queue] ack failed", exc_info=True)
+            logger.warning("[task_queue] ack failed for %s", task.get("id"), exc_info=True)
 
     def _renew_leases(self) -> None:
         """Extend the stuck-threshold window for in-flight tasks (heartbeat).
@@ -475,7 +564,12 @@ async def stop_worker() -> None:
 
 
 def purge_completed_tasks(retention_days: int = 7) -> int:
-    """Delete terminal tasks (completed/failed) older than retention_days (M2)."""
+    """Delete completed tasks older than retention_days (M2).
+
+    Never a dead letter (``failed``): it is an operation memory gave up on,
+    kept until the operator retries or clears it (Memory audit M12 -- dead
+    letters were deleted after a week, and the health check that counted
+    them cleared itself)."""
     from kazma_core.config_store import apply_sqlite_pragmas
     from kazma_core.paths import memory_ops_db
 
@@ -485,13 +579,13 @@ def purge_completed_tasks(retention_days: int = 7) -> int:
         apply_sqlite_pragmas(conn)
         cur = conn.execute(
             """DELETE FROM memory_task_queue
-               WHERE status IN ('completed', 'failed') AND updated_at < ?""",
+               WHERE status = 'completed' AND updated_at < ?""",
             (cutoff,),
         )
         conn.commit()
         deleted = cur.rowcount
         if deleted:
-            logger.info("[task_queue] purged %d completed/failed tasks (>%dd old)", deleted, retention_days)
+            logger.info("[task_queue] purged %d completed tasks (>%dd old)", deleted, retention_days)
         return deleted
     finally:
         conn.close()

@@ -260,8 +260,12 @@ async def test_cancel_of_an_unknown_or_finished_task_still_answers_false(db, boo
 # ── the reaper ────────────────────────────────────────────────────────
 
 
-def test_the_reaper_settles_the_gate_of_a_paused_pipeline(new_id):
-    """It dropped the checkpoint entry but never settled the gate row."""
+async def test_the_reaper_settles_the_gate_of_a_paused_pipeline(new_id):
+    """A paused pipeline waits on a human: its lifetime is its checkpoint
+    timeout, or none -- one rule before and after a restart (Swarm audit
+    SW-E05). The watchdog leaves it, checkpoint and gate row alike (it used to
+    reap one without a checkpoint timeout, and once dropped the entry without
+    settling the row); cancel ends it and settles both."""
     from kazma_core.safety.hitl_gates import live_gates
     from kazma_core.swarm.checkpoint import HITLCheckpoint
     from kazma_core.swarm.checkpoint_manager import _gate_register_pipeline
@@ -279,9 +283,15 @@ def test_the_reaper_settles_the_gate_of_a_paused_pipeline(new_id):
     )
     _gate_register_pipeline(task.id, 1, "alpha", "x")
 
-    assert engine.reap_stale_tasks() == 1
+    assert engine.reap_stale_tasks() == 0
+    assert engine.get_checkpoint_info(task.id) is not None
+    assert len(live_gates(task.id)) == 1
 
+    assert await engine.cancel_task(task.id) is True
     assert engine.get_checkpoint_info(task.id) is None
+    deadline = asyncio.get_running_loop().time() + 5  # the gate settles off the loop
+    while live_gates(task.id) and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.02)
     assert live_gates(task.id) == []
 
 
@@ -316,7 +326,7 @@ def test_the_reject_route_closes_a_paused_task_with_no_checkpoint(db, client, ne
     response = client().post(f"/api/swarm/tasks/{task_id}/reject")
 
     assert response.status_code == 200, response.text
-    assert response.json()["status"] == "failed"
+    assert response.json()["status"] == "ok" and response.json()["task_status"] == "failed"
     assert task_id not in _paused_on_disk(db)
 
 

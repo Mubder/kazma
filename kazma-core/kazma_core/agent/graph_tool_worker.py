@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -192,6 +193,11 @@ def _commitment_resolve_gate(
                             constraints=_beliefs,
                             tenant_id=_tenant,
                             enforce_unknown=_enforce_unknown,
+                            # The thread: the cancel_job and edit_job resolvers
+                            # run only with it, and nothing passed it, so both
+                            # were audit-only on this path (Scheduled audit
+                            # SCH-S03).
+                            thread_id=str(state.get("thread_id") or "") or None,
                         )
                     except Exception as _exc:
                         # Fail-closed per tool (deep-audit 2026-08-19, finding #9)
@@ -348,6 +354,8 @@ def _commitment_resolve_gate(
                 "tool": _tc["name"],
                 "commitment_id": _dec.commitment_id,
                 "question": _dec.clarify_question or _dec.reason or "needs clarification",
+                # The question for the person, worded by the page (SCH-S08).
+                "question_kind": getattr(_dec, "question_kind", "") or "",
                 "options": list(_dec.options) if _dec.options else [],
             } for _tc, _dec in semantic_hold]
             _sem_kind = ("semantic_confirm" if all(d.decision == "confirm" for _, d in semantic_hold)
@@ -766,12 +774,12 @@ async def tool_worker_node(
         safe_tools: list[PendingToolCall] = []
         danger_tools: list[PendingToolCall] = []
 
-        # Signal the tool registry that the graph is the HITL authority for
-        # this turn, so LocalToolRegistry.execute() skips the redundant
-        # SwarmMessageBus safety.check() (mechanism B) — the graph's
-        # interrupt() is the sole gate for single-agent chat. Restored in
-        # the finally below.
-        _graph_gate_token = None
+        # The graph is the HITL authority for the calls it classifies here:
+        # each runs with ``_graph_hitl_gate_ctx`` bound to that one call
+        # (``_exec_one``), so LocalToolRegistry.execute() skips the redundant
+        # SwarmMessageBus safety.check() (mechanism B) for it and for nothing
+        # else. A step-wide flag reached the work a call started (SW-S01:
+        # dispatch_swarm's worker ran danger tools with no card anywhere).
         # Live-read HITL policy when this graph was compiled WITH a gate
         # (audit M-3). A compile-time None still means "this path has no
         # HITL" (child graphs without a checkpointer). Do not invent a gate
@@ -813,9 +821,6 @@ async def tool_worker_node(
         # no ContextVar, ALWAYS_HITL_TOOLS-only danger split.
         _hitl_active = bool(hitl_config) and bool(hitl_config.get("enabled", True))
         if _hitl_active:
-            from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
-
-            _graph_gate_token = _graph_hitl_gate_ctx.set(True)
             for tc in pending:
                 if requires_approval(tc["name"], hitl_config) or _tc_is_git_write(tc):
                     danger_tools.append(tc)
@@ -954,13 +959,17 @@ async def tool_worker_node(
             except Exception:
                 _activity = None
             try:
-                if _tool_timeout and _tool_timeout > 0:
-                    result = await asyncio.wait_for(
-                        execute_effect(tool_executor, state, tc, _args),
-                        timeout=_tool_timeout,
-                    )
-                else:
-                    result = await execute_effect(tool_executor, state, tc, _args)
+                from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx, call_authority
+
+                with (call_authority(_graph_hitl_gate_ctx, tc["name"]) if _hitl_active
+                      else contextlib.nullcontext()):
+                    if _tool_timeout and _tool_timeout > 0:
+                        result = await asyncio.wait_for(
+                            execute_effect(tool_executor, state, tc, _args),
+                            timeout=_tool_timeout,
+                        )
+                    else:
+                        result = await execute_effect(tool_executor, state, tc, _args)
             except (EffectUncertain, asyncio.TimeoutError) as exc:
                 duration_ms = (time.monotonic() - start) * 1000
                 uncertain_effect = isinstance(exc, EffectUncertain)
@@ -1275,6 +1284,12 @@ async def tool_worker_node(
                 except Exception:  # noqa: BLE001 — a disclosure must not break the card
                     pass
 
+                # A scheduling call: what the job does when it fires, and the
+                # prompt an edit replaces (Scheduled audit SCH-S05, S03).
+                from kazma_core.cron.card import scheduling_card_notes
+
+                _notes += await scheduling_card_notes(danger_tools)
+
                 _jail = "\n".join(_notes)
             except Exception:
                 _jail = ""
@@ -1357,18 +1372,16 @@ async def tool_worker_node(
 
         # ── Execute/deny danger tools ─────────────────────────────────
         if danger_tools:
-            from kazma_core.agent.tool_registry import _hitl_approved_ctx
+            from kazma_core.agent.tool_registry import _hitl_approved_ctx, call_authority
 
             for tc in danger_tools:
                 tc_id = str(tc.get("id") or "")
                 allow = approved and (approved_ids is None or tc_id in approved_ids)
                 if allow:
                     logger.info("[ToolWorker] HITL approved: %s", tc["name"])
-                    _token = _hitl_approved_ctx.set(True)
-                    try:
+                    # The approval covers this call, not the work it starts.
+                    with call_authority(_hitl_approved_ctx, tc["name"]):
                         results.append(await _exec_one(tc))
-                    finally:
-                        _hitl_approved_ctx.reset(_token)
                 else:
                     logger.info("[ToolWorker] HITL denied: %s", tc["name"])
                     results.append(_denied_result(tc))
@@ -1589,13 +1602,6 @@ async def tool_worker_node(
         # Always restore prior ContextVar values, even if a tool raised or
         # the graph was interrupted by HITL.
         reset_current_session_messages(_messages_token)
-        try:
-            if _graph_gate_token is not None:
-                from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
-
-                _graph_hitl_gate_ctx.reset(_graph_gate_token)
-        except NameError:
-            pass
         if _state_tid_token is not None:
             reset_current_thread_id(_state_tid_token)
         reset_current_tenant_id(_state_tenant_token)
