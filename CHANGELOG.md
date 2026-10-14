@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## Soak harnesses for every audited area (2026-10-15)
+
+- Every soak harness rewrites its report as it runs (`"status": "running"`,
+  then `passed` or `failed`), through one shared module,
+  `scripts/soak_report.py`, so a run a reboot or an update ends early still
+  leaves its evidence. A report write never ends a soak: on Windows a reader
+  holding the file open refuses the rename, and the write is retried, then
+  left to the next one.
+- Swarm concurrency soak (`scripts/swarm_soak.py`, tracker row SQ01): a real
+  swarm engine on a private store, with scripted workers that succeed, fail
+  (tripping and recovering a breaker), run out of time, are cancelled or
+  ignore the cancel, `auto` tasks for the autoscaler, fan-outs, pipelines,
+  bursts at the admission limit and restarts. Every cycle it checks from the
+  task store that each task ends once and stays ended, that admission held,
+  that no stale breaker outcome was applied and that the autoscaler kept its
+  bounds; it measures loop lag and stall dumps.
+- Its first trial found a shutdown fault: the engine's shutdown returned
+  before the tasks it stopped were written, so a process that exited right
+  then left the next boot to record them as failures of unknown outcome. The
+  shutdown now waits for those writes (bounded, with a warning when one is
+  left).
+- Scheduled qualification soak (`scripts/scheduled_soak.py`, the Stage 5
+  gate): the real cron scheduler on a private store through seven simulated
+  days in minutes, with thousands of reminders and tasks in three zones
+  (one changing its clocks), edits and cancels, failing turns, refused and
+  interrupted deliveries, a locked database, restarts, a downtime past the
+  catch-up window and a dead poll loop. It checks every due occurrence ended
+  exactly once (delivered, missed with one notice, or failed with its reason
+  and one alert), nothing was sent twice, lateness stayed within a poll plus
+  the turn, and readiness saw the dead loop. The scheduler and its store now
+  read time from one clock object, which the soak replaces with a fake one;
+  the server's clock is the real one, as before.
+- Time Travel long soak (`scripts/time_travel_soak.py`, tracker row TT-G3):
+  a fresh process per cycle on private stores, with turns of 2,000 steps,
+  states past the per-step ceiling, every restore, fork, forget and delete
+  path, maintenance, and injected faults and kills. After every cycle it
+  checks every step and byte budget, the file and WAL bounds, memory, and
+  that a restored or forked chat equals its step and deleted steps never
+  come back.
+- Its first runs found that Time Travel's clean-up did not give the disk
+  back as it reported: on a running server a VACUUM left a write-ahead log
+  the size of the rewritten file, so the disk use rose while the clean-up
+  reported space reclaimed. It now truncates that log after the VACUUM, and
+  reports the sizes of the file and its log together.
+
 ## Swarm approvals on the web; Knowledge outcomes checked in a browser (2026-10-14)
 
 - Every swarm approval card (Telegram, Discord, Slack) links to the request on

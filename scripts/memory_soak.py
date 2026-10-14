@@ -53,6 +53,11 @@ from pathlib import Path
 from typing import Any
 
 _HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))  # the shared report helpers sit beside this file
+from soak_report import percentile as _percentile  # noqa: E402
+from soak_report import utc_stamp  # noqa: E402
+from soak_report import write_report as _write_report  # noqa: E402
+
 _ROOT = _HERE.parent
 for _pkg in ("kazma-core", "kazma-ui"):
     _p = str(_ROOT / _pkg)
@@ -280,13 +285,6 @@ def _size_mb(path: Path) -> float:
     return round(total / 1048576, 2)
 
 
-def _percentile(values: list[float], q: float) -> float | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int(round(q * (len(ordered) - 1))))]
-
-
 def _plan(cycle: int, rng: random.Random, args: argparse.Namespace, chats: dict[str, int],
           memory: list[dict[str, Any]], backups: list[Path]) -> dict[str, Any]:
     now = time.time()
@@ -366,10 +364,12 @@ def main(argv: list[str] | None = None) -> int:
         proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--child", str(plan_file)],
                               env=_env(data_dir), capture_output=True, text=True, encoding="utf-8",
                               errors="replace", timeout=900, check=False)
+        plan_file.unlink(missing_ok=True)  # thousands of cycles in a multi-day run
         report["child_seconds"].append(round(time.monotonic() - t0, 3))
         report["cycles"] = cycle
         if proc.returncode == _KILLED:
             report["crashes"] += 1
+            _write_report(args.report, _summary(report, started, memory, data_dir, "running"))
             continue
         line = next((x for x in proc.stdout.splitlines() if x.startswith("SOAK-RESULT ")), None)
         if proc.returncode != 0 or line is None:
@@ -388,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         problems = _check(data_dir, {
             t: ok for t, ok in (result.get("found") or {}).items() if not _forgotten(data_dir, t)})
         report["violations"] += [f"cycle {cycle}: {p}" for p in problems]
+        _write_report(args.report, _summary(report, started, memory, data_dir, "running"))
         if problems:
             break
         time.sleep(max(0.0, args.cycle_seconds))
@@ -404,10 +405,22 @@ def main(argv: list[str] | None = None) -> int:
     else:
         report["violations"] += [f"final: {p}" for p in _check(data_dir, {})]
     report["held"] = _held(data_dir)
-    lat = report.pop("recall_ms")
-    secs = report.pop("child_seconds")
-    rss = report.pop("peak_rss_mb")
-    report.update({
+    summary = _summary(report, started, memory, data_dir, "passed" if not report["violations"] else "failed")
+    _write_report(args.report, summary)
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return 0 if summary["healthy"] else 1
+
+
+def _summary(report: dict[str, Any], started: float, memory: list[dict[str, Any]], data_dir: Path,
+             status: str) -> dict[str, Any]:
+    """The report as it stands: ``running`` while the soak goes on, then
+    ``passed`` or ``failed``. Written after every cycle, so a run that a
+    reboot or a kill ends early still leaves its evidence."""
+    lat, secs, rss = report["recall_ms"], report["child_seconds"], report["peak_rss_mb"]
+    out = {k: v for k, v in report.items() if k not in ("recall_ms", "child_seconds", "peak_rss_mb")}
+    out.update({
+        "status": status,
+        "updated_at": utc_stamp(),
         "seconds": round(time.monotonic() - started, 1),
         "turns": len(memory),
         "recall_ms": {"p50": _percentile(lat, 0.5), "p95": _percentile(lat, 0.95),
@@ -418,11 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         "memory_ops_mb": _size_mb(data_dir / "memory_ops.db"),
         "healthy": not report["violations"],
     })
-    text = json.dumps(report, indent=2, ensure_ascii=False)
-    if args.report:
-        Path(args.report).write_text(text, encoding="utf-8")
-    print(text)
-    return 0 if report["healthy"] else 1
+    return out
 
 
 def _held(data_dir: Path) -> dict[str, Any]:

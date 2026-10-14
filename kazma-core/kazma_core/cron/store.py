@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -40,6 +39,8 @@ from enum import StrEnum
 from typing import Any
 
 import aiosqlite
+
+from kazma_core.cron.clock import SYSTEM_CLOCK, CronClock
 
 logger = logging.getLogger(__name__)
 
@@ -299,9 +300,12 @@ class SQLiteCronStore:
 
     Args:
         db_path: Path to the SQLite database.
+        clock:   Where every time this store records comes from (leases,
+                 backoff, events, finish times). The real clock unless a
+                 fake one is passed (the qualification soak).
     """
 
-    def __init__(self, db_path: str | None = None) -> None:
+    def __init__(self, db_path: str | None = None, *, clock: CronClock | None = None) -> None:
         # Default resolves via paths.data_dir() (walks up to the
         # pyproject.toml root) instead of a bare CWD-relative literal, so a
         # server started from a subdirectory opens the SAME cron.db instead
@@ -312,6 +316,11 @@ class SQLiteCronStore:
             db_path = str(data_dir() / "cron.db")
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
+        #: The store's clock; a scheduler on this store reads the same one.
+        self.clock: CronClock = clock or SYSTEM_CLOCK
+
+    def _now_iso(self) -> str:
+        return norm_iso(self.clock.now())
 
     def _conn(self) -> aiosqlite.Connection:
         if self._db is None:
@@ -362,7 +371,7 @@ class SQLiteCronStore:
                 await db.executemany("UPDATE cron_jobs SET next_run = ? WHERE job_id = ?", changes)
             await db.execute(
                 f"UPDATE cron_jobs SET finished_at = ? WHERE status IN {_TERMINAL_SQL} AND finished_at = ''",
-                (_now_iso(),))
+                (self._now_iso(),))
         if changes:
             logger.info("[CronStore] normalized next_run on %d row(s)", len(changes))
 
@@ -485,7 +494,7 @@ class SQLiteCronStore:
         retention counts from when a job ended, never from when it was made.
         """
         if job.status in TERMINAL_STATUSES and not job.finished_at:
-            job.finished_at = _now_iso()
+            job.finished_at = self._now_iso()
         async with self._tx() as db:
             await db.execute(
                 f"INSERT INTO cron_jobs ({_JOB_COLUMNS}) VALUES ({', '.join('?' * (9 + len(_ADDED_COLUMNS)))})",
@@ -541,7 +550,7 @@ class SQLiteCronStore:
                 await db.execute(
                     "UPDATE cron_jobs SET status = 'cancelled', finished_at = ?, last_outcome = 'cancelled', "
                     "version = version + 1, updated_by = ? WHERE job_id = ? AND status = 'pending'",
-                    (_now_iso(), actor, job_id))
+                    (self._now_iso(), actor, job_id))
                 outcome = "cancelled"
             elif status == "running":
                 await db.execute(
@@ -553,11 +562,11 @@ class SQLiteCronStore:
                 # cancelling stops the message.
                 await db.execute(
                     "UPDATE cron_deliveries SET state = 'cancelled', finished_at = ? "
-                    "WHERE job_id = ? AND state = 'pending'", (time.time(), job_id))
+                    "WHERE job_id = ? AND state = 'pending'", (self.clock.time(), job_id))
                 await db.execute(
                     "UPDATE cron_jobs SET status = 'cancelled', finished_at = ?, last_outcome = 'cancelled', "
                     "delivery_state = 'cancelled', version = version + 1, updated_by = ? WHERE job_id = ?",
-                    (_now_iso(), actor, job_id))
+                    (self._now_iso(), actor, job_id))
                 outcome = "cancelled"
             else:
                 return "not_cancellable"
@@ -652,7 +661,7 @@ class SQLiteCronStore:
         (``fire_due``) and counts attempts at that occurrence.
         """
         async with self._tx() as db:
-            args: list[Any] = [owner, time.time() + max(1.0, lease_seconds), job_id]
+            args: list[Any] = [owner, self.clock.time() + max(1.0, lease_seconds), job_id]
             version_clause = ""
             if expected_version is not None:
                 version_clause = " AND version = ?"
@@ -695,7 +704,7 @@ class SQLiteCronStore:
         *after* (None: not recurring, or the series ended). It is pure: the
         zone was resolved before the transaction.
         """
-        now = now or datetime.now(UTC)
+        now = now or self.clock.now()
         now_iso = norm_iso(now)
         async with self._tx() as db:
             row = await self._row(db, job_id, None)
@@ -714,7 +723,7 @@ class SQLiteCronStore:
                     "INSERT OR IGNORE INTO cron_deliveries (job_id, tenant_id, fire_key, purpose, target, body, "
                     "due_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (job_id, row["tenant_id"], fire_key, result.purpose, result.target, result.body[:4000],
-                     due, time.time()))
+                     due, self.clock.time()))
                 delivery_id = cur.lastrowid if cur.rowcount else None
             failures = 0 if result.success else int(row["failure_count"] or 0) + 1
             budget_exhausted = False
@@ -766,7 +775,7 @@ class SQLiteCronStore:
         after *now*. None when the job changed meanwhile (compare-and-swap on
         status and ``next_run``).
         """
-        now = now or datetime.now(UTC)
+        now = now or self.clock.now()
         async with self._tx() as db:
             row = await self._row(db, job_id, None)
             if row is None or str(row["status"]) != "pending" or str(row["next_run"]) != expected_next_run:
@@ -775,7 +784,7 @@ class SQLiteCronStore:
             cur = await db.execute(
                 "INSERT OR IGNORE INTO cron_deliveries (job_id, tenant_id, fire_key, purpose, target, body, "
                 "due_at, created_at) VALUES (?, ?, ?, 'missed', ?, ?, ?, ?)",
-                (job_id, row["tenant_id"], f"{job_id}:{due}:missed", target, notice[:4000], due, time.time()))
+                (job_id, row["tenant_id"], f"{job_id}:{due}:missed", target, notice[:4000], due, self.clock.time()))
             delivery_id = cur.lastrowid if cur.rowcount else None
             nxt = advance(str(row["timing"]), now, str(row["series_start"] or ""))
             if nxt is not None:
@@ -798,7 +807,7 @@ class SQLiteCronStore:
     async def claim_delivery(self, *, owner: str, now: float | None = None,
                              delivery_id: int | None = None) -> dict[str, Any] | None:
         """Lease the next due delivery (or *delivery_id*) to *owner* before sending."""
-        ts = time.time() if now is None else now
+        ts = self.clock.time() if now is None else now
         async with self._tx() as db:
             if delivery_id is not None:
                 cur = await db.execute(
@@ -829,7 +838,7 @@ class SQLiteCronStore:
         records each outcome in the same transaction. None when *owner* lost
         the lease.
         """
-        ts = time.time() if now is None else now
+        ts = self.clock.time() if now is None else now
         async with self._tx() as db:
             cur = await db.execute("SELECT * FROM cron_deliveries WHERE id = ? AND state = 'sending' AND lease_owner = ?",
                                    (delivery_id, owner))
@@ -849,7 +858,7 @@ class SQLiteCronStore:
                         "finished_at = CASE WHEN status = 'delivering' THEN ? ELSE finished_at END, "
                         "delivery_state = 'delivered', delivery_error = '', "
                         "last_outcome = CASE WHEN last_outcome IN ('delivering', 'delivered') THEN 'delivered' "
-                        "ELSE last_outcome END WHERE job_id = ?", (_now_iso(), job_id))
+                        "ELSE last_outcome END WHERE job_id = ?", (self._now_iso(), job_id))
                 else:
                     await db.execute("UPDATE cron_jobs SET delivery_state = 'delivered' WHERE job_id = ?", (job_id,))
             else:
@@ -866,7 +875,7 @@ class SQLiteCronStore:
                         "UPDATE cron_jobs SET status = CASE WHEN status = 'delivering' THEN 'undeliverable' "
                         "ELSE status END, finished_at = CASE WHEN status = 'delivering' THEN ? ELSE finished_at END, "
                         "delivery_state = 'undeliverable', delivery_error = ?, last_outcome = 'undeliverable' "
-                        "WHERE job_id = ?", (_now_iso(), error[:500], job_id))
+                        "WHERE job_id = ?", (self._now_iso(), error[:500], job_id))
                 else:
                     await db.execute(
                         "UPDATE cron_jobs SET delivery_state = 'retrying', delivery_error = ? WHERE job_id = ?",
@@ -878,7 +887,7 @@ class SQLiteCronStore:
 
     async def recover_deliveries(self, *, owner: str, now: float | None = None) -> list[dict[str, Any]]:
         """Sends a dead sender claimed: ``unknown`` (it may have arrived; never resent)."""
-        ts = time.time() if now is None else now
+        ts = self.clock.time() if now is None else now
         async with self._tx() as db:
             cur = await db.execute(
                 "SELECT * FROM cron_deliveries WHERE state = 'sending' AND (lease_owner != ? OR lease_until < ?)",
@@ -895,7 +904,7 @@ class SQLiteCronStore:
                     "finished_at = CASE WHEN status = 'delivering' THEN ? ELSE finished_at END, "
                     "delivery_state = 'unknown', last_outcome = 'delivery_unknown', "
                     "delivery_error = 'Kazma stopped while sending; check the chat.' WHERE job_id = ?",
-                    (_now_iso(), row["job_id"]))
+                    (self._now_iso(), row["job_id"]))
                 await self._event(db, row["job_id"], "delivery_unknown", source="scheduler",
                                   detail={"delivery_id": row["id"]})
             return rows
@@ -950,12 +959,11 @@ class SQLiteCronStore:
 
     # ── events and retention ─────────────────────────────────────────────
 
-    @staticmethod
-    async def _event(db: Any, job_id: str, event: str, *, actor: str = "", source: str = "",
+    async def _event(self, db: Any, job_id: str, event: str, *, actor: str = "", source: str = "",
                      detail: dict[str, Any] | None = None) -> None:
         await db.execute(
             "INSERT INTO cron_events (job_id, at, event, actor, source, detail) VALUES (?, ?, ?, ?, ?, ?)",
-            (job_id, time.time(), event, actor or "", source or "",
+            (job_id, self.clock.time(), event, actor or "", source or "",
              json.dumps(detail or {}, ensure_ascii=False, default=str)))
 
     async def record_event(self, job_id: str, event: str, *, actor: str = "", source: str = "",
@@ -982,7 +990,7 @@ class SQLiteCronStore:
         """
         if self._db is None:
             return 0
-        cutoff_dt = datetime.now(UTC) - timedelta(days=older_than_days)
+        cutoff_dt = self.clock.now() - timedelta(days=older_than_days)
         cutoff = norm_iso(cutoff_dt)
         finished = "COALESCE(NULLIF(finished_at, ''), NULLIF(last_fire_at, ''), created_at)"
         async with self._tx() as db:
@@ -1009,10 +1017,6 @@ class SQLiteCronStore:
         if self._db:
             await self._db.close()
             self._db = None
-
-
-def _now_iso() -> str:
-    return norm_iso(datetime.now(UTC))
 
 
 def _parse(value: Any) -> datetime | None:

@@ -40,7 +40,18 @@ import tempfile
 import time
 from pathlib import Path
 
+# The shared report helpers sit beside this file; a runner that does not put
+# the script's folder on the path (runpy, a priority wrapper) still finds them.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from soak_report import finished, process_tree_sample, utc_stamp  # noqa: E402
+from soak_report import percentile as _percentile  # noqa: E402
+from soak_report import write_report as _write_report  # noqa: E402
+
 _KILLED = 137
+
+#: How often a running soak rewrites its report.
+_PROGRESS_EVERY_S = 60.0
 
 
 def _config(root: Path):
@@ -84,28 +95,6 @@ def _corpus(work: Path) -> list[tuple[str, bytes]]:
     return items
 
 
-def _tree_sample() -> dict[str, float]:
-    import psutil
-
-    me = psutil.Process()
-    procs = [me, *me.children(recursive=True)]
-    rss = handles = 0
-    for proc in procs:
-        try:
-            rss += proc.memory_info().rss
-            handles += proc.num_handles() if os.name == "nt" else proc.num_fds()
-        except psutil.Error:
-            continue
-    return {"rss_mib": round(rss / 2**20, 1), "handles": handles, "processes": len(procs)}
-
-
-def _percentile(values: list[float], q: float) -> float | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    return round(ordered[min(len(ordered) - 1, int(q * len(ordered)))], 3)
-
-
 async def _soak(args: argparse.Namespace, root: Path, data_dir: str) -> dict:
     from kazma_core.documents.ingestion import SYSTEM_ACTOR, DocumentIngestionService
 
@@ -121,6 +110,7 @@ async def _soak(args: argparse.Namespace, root: Path, data_dir: str) -> dict:
     next_restart = started + args.restart_every
     next_crash = started + args.crash_every
     interval = 60.0 / max(1, args.rate)
+    next_report = started + _PROGRESS_EVERY_S
     svc = DocumentIngestionService(config=_config(root))
     await svc.start_workers()
     try:
@@ -155,7 +145,20 @@ async def _soak(args: argparse.Namespace, root: Path, data_dir: str) -> dict:
                 await svc.start_workers()
                 restarts += 1
                 next_restart = now + args.restart_every
-            samples.append({"t": round(now - started, 1), **_tree_sample()})
+            samples.append({"t": round(now - started, 1), **process_tree_sample()})
+            if now >= next_report:
+                # The run so far, so a reboot or a kill still leaves evidence.
+                latencies = [ready_at[j] - submitted[j] for j in ready_at]
+                _write_report(getattr(args, "report", None), {
+                    "status": "running",
+                    "updated_at": utc_stamp(),
+                    "seconds": round(now - started, 1), "submitted": len(submitted),
+                    "finished": len(ready_at), "restarts": restarts, "crashes_injected": crashes,
+                    "latency_seconds": {"p50": _percentile(latencies, 0.50),
+                                        "p95": _percentile(latencies, 0.95)},
+                    "resources_now": samples[-1], "error_count": len(errors), "errors": errors[-20:],
+                })
+                next_report = now + _PROGRESS_EVERY_S
             await asyncio.sleep(interval)
         # Drain: everything submitted must end.
         drain_until = time.monotonic() + args.drain
@@ -255,11 +258,9 @@ def main(argv: list[str] | None = None) -> int:
         and report["admission_end"].get("pending", 0) == 0
         and report["scratch_left"] == 0
     )
-    report["healthy"] = healthy
-    text = json.dumps(report, indent=2, sort_keys=True, default=str)
-    if args.report:
-        Path(args.report).write_text(text, encoding="utf-8")
-    print(text)
+    finished(report, healthy)
+    _write_report(args.report, report)
+    print(json.dumps(report, indent=2, sort_keys=True, default=str))
     return 0 if healthy else 1
 
 

@@ -145,6 +145,49 @@ def test_vacuum_runs_only_when_the_free_pages_justify_it(tmp_path):
     assert maintain_snapshots(str(tmp_path / "snapshots.db"), 30)["vacuum"].startswith("skipped")
 
 
+def _vacuum_on_a_running_store(tmp_path) -> tuple[dict, int, int]:
+    """Old steps pruned and VACUUMed while the recorder's connection stays
+    open, as on a running server. Returns the maintenance answer, the WAL's
+    size afterwards and the disk use, both read before the recorder closes."""
+    from kazma_core import time_travel
+
+    rec = _recorder(tmp_path)
+    for i in range(40):  # ~20 MB of steps that do not compress
+        rec.capture({"thread_id": f"T{i}", "iteration": 1, "created_at": f"turn-{i}",
+                     "messages": [{"role": "user", "content": os.urandom(250_000).hex()}]})
+    db = tmp_path / "snapshots.db"
+    with closing(sqlite3.connect(str(db))) as conn:
+        conn.execute("UPDATE snapshots SET timestamp = '2000-01-01T00:00:00+00:00'")
+        conn.commit()
+    try:
+        out = time_travel.maintain_snapshots(str(db), 30)
+        wal = Path(f"{db}-wal")
+        return out, (wal.stat().st_size if wal.exists() else 0), time_travel._disk_bytes(db)
+    finally:
+        rec.close()
+
+
+def test_a_vacuum_gives_the_disk_back_and_reports_what_it_gave(tmp_path):
+    """The TT-G3 soak found a VACUUM on a running store leaving a WAL the
+    size of the rewritten file, while maintenance reported the file's
+    shrink alone as reclaimed (27.5 MB reported, disk use up 26.6 MB)."""
+    out, wal, disk = _vacuum_on_a_running_store(tmp_path)
+    assert out["vacuum"] == "ok", out
+    assert wal == 0, "the VACUUM's WAL is checkpointed into the file and truncated"
+    assert out["size_after"] == disk
+    assert out["reclaimed"] == out["size_before"] - out["size_after"] > 10 * 1024 * 1024, out
+
+
+def test_without_the_truncation_the_wal_keeps_what_the_vacuum_wrote(tmp_path, monkeypatch):
+    """Negative control: the same maintenance without the checkpoint."""
+    from kazma_core import time_travel
+
+    monkeypatch.setattr(time_travel, "_truncate_wal", lambda conn: "ok")
+    out, wal, _disk = _vacuum_on_a_running_store(tmp_path)
+    assert out["vacuum"] == "ok"
+    assert wal > 1024 * 1024, wal
+
+
 async def _mission(recorder, thread_id: str, iterations: int, chunk: int):
     """A mission-length turn through the product's capture hook."""
     from kazma_core.time_travel import capture_after_supervisor

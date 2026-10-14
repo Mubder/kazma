@@ -461,6 +461,16 @@ compatibility. **All public API methods and constructors are unchanged.**
 - **The task store** strips NUL from every Postgres parameter
   (`_pg_execute`) and runs SQLite at `synchronous=FULL` (the RUNNING row is
   crash evidence, SW-E16); worker-metric days follow the task retention.
+- **The concurrency soak** (SQ01): `scripts/swarm_soak.py` is the soak harness
+  (a real engine on a private SQLite store, scripted workers, bursts, outages,
+  cancels, `auto` tasks and restarts; checks every cycle from the task store's
+  own status log), held by `tests/test_swarm_soak_harness.py`. Its first
+  trial found shutdown's `stop_all_runs` returning before the tasks it
+  stopped were written (the writes run in threads), so a process that exited
+  then left the next boot to record a failure of unknown outcome; it now
+  waits for them, bounded (`_flush_stopped_writes`, a WARNING and
+  `site="shutdown_write"` when one is left), and the soak counts one left as
+  a violation.
 - `engine.py` public methods are thin delegates — the real logic lives in the extracted modules.
 - The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
 - Constructor signature is unchanged — test fixtures work without modification.
@@ -734,8 +744,16 @@ are enforced in SQLite on every save, oldest first: per step
 Read failures raise `SnapshotStoreError`: 503 `store_unavailable` on the
 routes, a plain sentence in the chats -- never "no steps saved".
 `maintain_snapshots` VACUUMs only when a quarter of the file and 8 MB are
-free; a prune that did not stick is an ops alert
+free, then truncates the WAL the VACUUM wrote through (`_truncate_wal`), and
+reports sizes as the file plus its WAL and shared memory (`_disk_bytes`):
+with the recorder's connection open the WAL kept the rewritten file's size,
+and the "reclaimed" it reported was not the disk's (found by the TT-G3 soak,
+2026-10-15). A prune that did not stick is an ops alert
 (`time_travel.prune_not_sticking`); the run has a firing-ledger signature.
+The long soak (TT-G3) is `scripts/time_travel_soak.py`: a restart per cycle
+on private stores, 2,000-iteration turns, every restore/fork/forget path,
+injected faults and kills, these budgets checked after every cycle
+(`tests/test_time_travel_soak_harness.py`, with planted violations).
 
 **D. Restore and fork are one service (`kazma_ui/thread_rewind.py`, TT-02,
 TT-04, TT-G1).** Every surface calls `rewind_thread` / `fork_thread`: the
@@ -1923,7 +1941,8 @@ The agent's `schedule_task` / `list_scheduled` / `edit_scheduled` /
 store's operations (§29C). Hardened 2026-10-14 against the Scheduled audit
 (`docs/audits/AUDIT_SCHEDULED_2026-10-13.md`, tracker
 `docs/plans/SCHEDULED_INDUSTRIAL_HARDENING_GOAL.md`; the 7-day fake-clock
-soak is still open). Every rule below must hold:
+soak's harness is built, I; the run itself is still open). Every rule below
+must hold:
 
 **A. The scheduler MUST be constructed with a `graph_builder=`.**
 `app.py` builds `CronScheduler(store=…, graph_builder=_cron_graph_builder,
@@ -2095,6 +2114,14 @@ Gates: `tests/test_scheduled_api.py` (real scheduler and store),
 - **Dates and origin:** dates on the page and in X Studio go through
   `KazmaFormat`. `kazma_ui/same_origin.verify_same_origin` is the one
   same-origin check for the Scheduled, X and email routes.
+- **Qualification soak:** `scripts/scheduled_soak.py` (Stage 5) runs the real
+  scheduler and store on a private cron.db through seven simulated days of a
+  fake clock -- the engine reads every time and its poll wait from one
+  `CronClock` (`cron/clock.py`; gate `tests/test_cron_clock.py`) -- with
+  thousands of jobs, injected provider, delivery and database failures and
+  restarts, and checks each due occurrence against its own ground truth
+  (`tests/test_scheduled_soak_harness.py`: a short run, and planted losses as
+  negative controls).
 
 **Multi-tenant memory:** tenants are enforced with
 `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with

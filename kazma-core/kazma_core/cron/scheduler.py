@@ -31,7 +31,6 @@ import inspect
 import logging
 import os
 import re
-import time
 import uuid
 from collections.abc import Callable
 from contextvars import ContextVar as _ContextVar
@@ -39,6 +38,7 @@ from datetime import UTC, datetime, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from kazma_core.cron.clock import SYSTEM_CLOCK, CronClock
 from kazma_core.cron.store import (
     FireResult,
     JobStatus,
@@ -347,6 +347,9 @@ class CronScheduler:
         poll_interval:  Seconds between polls (default 30).
         max_concurrent: Fires at once (default 4).
         drain_seconds:  How long ``stop()`` waits for fires in flight.
+        clock:          Wall time and the poll loop's sleep; the store's clock
+                        unless given (the real one in production, a fake one
+                        in the qualification soak).
     """
 
     def __init__(
@@ -358,8 +361,10 @@ class CronScheduler:
         max_concurrent: int = 4,
         *,
         drain_seconds: float = 20.0,
+        clock: CronClock | None = None,
     ) -> None:
         self._store = store
+        self._clock: CronClock = clock or (store.clock if isinstance(store, SQLiteCronStore) else SYSTEM_CLOCK)
         self._graph_builder = graph_builder
         self._checkpointer = checkpointer
         self._poll_interval = poll_interval
@@ -388,7 +393,7 @@ class CronScheduler:
         if self._running:
             return
         self._running = True
-        self.started_at = time.time()
+        self.started_at = self._clock.time()
         self._sem = asyncio.Semaphore(self._max_concurrent)
         try:
             await self._store.purge_terminal_jobs()
@@ -440,7 +445,7 @@ class CronScheduler:
         """Prometheus lines for the last 24 hours (SCH-E11): fires by outcome,
         deliveries by state, missed jobs, lateness p50/p95, the outbox, and
         the poll loop's heartbeat age."""
-        since = time.time() - 86400
+        since = self._clock.time() - 86400
         counts = await self._store.outcome_counts(since=since)
         late = sorted(await self._store.lateness(since=since))
         out = ["# HELP kazma_cron_fires_24h Scheduled fires in the last 24 hours, by outcome",
@@ -468,7 +473,7 @@ class CronScheduler:
 
     def liveness(self) -> dict[str, Any]:
         """The poll loop's heartbeat, for readiness (SCH-E11)."""
-        now = time.time()
+        now = self._clock.time()
         task_alive = self._task is not None and not self._task.done()
         last = self.last_poll_at
         age = None if last is None else round(now - last, 1)
@@ -531,7 +536,7 @@ class CronScheduler:
         if len(text) > PROMPT_MAX_CHARS:
             raise CronLimitError(f"A prompt is at most {PROMPT_MAX_CHARS} characters.", code="prompt_too_long")
         zone, zone_name = await self._zone(zone, zone_name)
-        now = now or datetime.now(UTC)
+        now = now or self._clock.now()
         resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=now)
         if tenant_id is None:
             from kazma_core.tenant_isolation import require_tenant_id
@@ -555,6 +560,7 @@ class CronScheduler:
             prompt=text,
             platform=platform,
             thread_id=thread_id,
+            created_at=self._clock.now().isoformat(),
             next_run=norm_iso(resolved.first),
             tenant_id=tenant_id or "default",
             delivery_target=delivery_target,
@@ -663,7 +669,7 @@ class CronScheduler:
         if timing:
             zone, zone_name = await self._zone(zone, zone_name)
             try:
-                resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=datetime.now(UTC))
+                resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=self._clock.now())
             except TimingError as exc:
                 return {"status": "error", "job_id": job_id, "error": str(exc)}
             next_run = norm_iso(resolved.first)
@@ -686,7 +692,7 @@ class CronScheduler:
 
         zone, zone_name = await self._zone(zone, zone_name)
         try:
-            resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=datetime.now(UTC))
+            resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=self._clock.now())
         except TimingError as exc:
             return {"status": "error", "job_id": job_id, "error": str(exc)}
         next_run = norm_iso(resolved.first)
@@ -710,7 +716,7 @@ class CronScheduler:
                     break
             except ImportError:
                 pass
-            self.last_poll_at = time.time()
+            self.last_poll_at = self._clock.time()
             try:
                 await self._poll_once()
             except Exception:  # noqa: BLE001 — one bad pass must not end the loop
@@ -722,11 +728,11 @@ class CronScheduler:
                 except Exception:  # noqa: BLE001
                     # A purge that fails every pass lets cron.db grow forever.
                     logger.warning("[CronScheduler] purge of finished jobs failed", exc_info=True)
-            await asyncio.sleep(self._poll_interval)
+            await self._clock.sleep(self._poll_interval)
 
     async def _poll_once(self) -> None:
         await self._recover(boot=False)
-        now = datetime.now(UTC)
+        now = self._clock.now()
         sem = self._sem or asyncio.Semaphore(self._max_concurrent)
         settings = None
         for job in await self._store.due_jobs(now=now, limit=max(50, self._max_concurrent * 10)):
@@ -805,7 +811,7 @@ class CronScheduler:
         delivered or not. A send whose sender died ends ``unknown`` with an
         alert: it may have arrived, and it is never sent twice.
         """
-        now_ts = time.time()
+        now_ts = self._clock.time()
         for job in await self._store.list_running():
             if boot:
                 # One runtime per data dir: at start, every lease is a dead one's.
@@ -873,7 +879,7 @@ class CronScheduler:
             settings = await asyncio.to_thread(cron_settings)
             zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
             current = await self._store.get(job.job_id) or job
-            now = datetime.now(UTC)
+            now = self._clock.now()
             due = _parse_dt(current.fire_due or current.next_run)
             result = await self._produce(current, settings, zone, zone_name, due=due, now=now)
             result.target = await self._resolve_target(current)

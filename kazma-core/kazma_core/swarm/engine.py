@@ -926,7 +926,32 @@ class SwarmEngine:
             for tid, run in live.items():
                 if not run.done():
                     self._record_unstoppable(tid)
+            # The endings are written in threads (_persist). Returning before
+            # they land let the process exit first, and the next boot's orphan
+            # recovery recorded a task the shutdown had stopped as a failure
+            # of unknown outcome (the SQ01 soak measured 4 of 4 pending).
+            await self._flush_stopped_writes(set(live))
         return len(live)
+
+    async def _flush_stopped_writes(self, task_ids: set[str]) -> None:
+        """Wait, bounded, for the store writes of *task_ids* (later writes a
+        flushed one chained included); one left unwritten is a WARNING."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _STOP_GRACE_S
+        while True:
+            pending = {w for tid in task_ids
+                       if (w := self._writes.get(tid)) is not None and not w.done()}
+            if not pending:
+                return
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                logger.warning(
+                    "[SwarmEngine] %d stopped task(s) not yet written %.0fs after shutdown "
+                    "stopped them; the next boot records them as interrupted with an "
+                    "unknown outcome", len(pending), _STOP_GRACE_S)
+                record_swarm_failure("shutdown_write")
+                return
+            await asyncio.wait(pending, timeout=remaining)
 
     def stop_maintenance_loop(self) -> None:
         """Stop the background maintenance watchdog (idempotent)."""
