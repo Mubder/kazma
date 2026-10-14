@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## Soak harnesses for every audited area (2026-10-15)
+
+- Every soak harness rewrites its report as it runs (`"status": "running"`,
+  then `passed` or `failed`), through one shared module,
+  `scripts/soak_report.py`, so a run a reboot or an update ends early still
+  leaves its evidence. A report write never ends a soak: on Windows a reader
+  holding the file open refuses the rename, and the write is retried, then
+  left to the next one.
+- Swarm concurrency soak (`scripts/swarm_soak.py`, tracker row SQ01): a real
+  swarm engine on a private store, with scripted workers that succeed, fail
+  (tripping and recovering a breaker), run out of time, are cancelled or
+  ignore the cancel, `auto` tasks for the autoscaler, fan-outs, pipelines,
+  bursts at the admission limit and restarts. Every cycle it checks from the
+  task store that each task ends once and stays ended, that admission held,
+  that no stale breaker outcome was applied and that the autoscaler kept its
+  bounds; it measures loop lag and stall dumps.
+- Its first trial found a shutdown fault: the engine's shutdown returned
+  before the tasks it stopped were written, so a process that exited right
+  then left the next boot to record them as failures of unknown outcome. The
+  shutdown now waits for those writes (bounded, with a warning when one is
+  left).
+
 ## Swarm approvals on the web; Knowledge outcomes checked in a browser (2026-10-14)
 
 - Every swarm approval card (Telegram, Discord, Slack) links to the request on

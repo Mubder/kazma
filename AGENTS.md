@@ -461,6 +461,16 @@ compatibility. **All public API methods and constructors are unchanged.**
 - **The task store** strips NUL from every Postgres parameter
   (`_pg_execute`) and runs SQLite at `synchronous=FULL` (the RUNNING row is
   crash evidence, SW-E16); worker-metric days follow the task retention.
+- **The concurrency soak** (SQ01): `scripts/swarm_soak.py` is the soak harness
+  (a real engine on a private SQLite store, scripted workers, bursts, outages,
+  cancels, `auto` tasks and restarts; checks every cycle from the task store's
+  own status log), held by `tests/test_swarm_soak_harness.py`. Its first
+  trial found shutdown's `stop_all_runs` returning before the tasks it
+  stopped were written (the writes run in threads), so a process that exited
+  then left the next boot to record a failure of unknown outcome; it now
+  waits for them, bounded (`_flush_stopped_writes`, a WARNING and
+  `site="shutdown_write"` when one is left), and the soak counts one left as
+  a violation.
 - `engine.py` public methods are thin delegates — the real logic lives in the extracted modules.
 - The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
 - Constructor signature is unchanged — test fixtures work without modification.

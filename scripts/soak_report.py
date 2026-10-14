@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -27,19 +28,39 @@ def utc_stamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def write_report(path: str | os.PathLike[str] | None, report: dict[str, Any]) -> None:
+#: How long a rename refused by a reader is retried (on Windows a reader that
+#: holds the file open -- an editor, a script reading it -- refuses it).
+_REPLACE_RETRY_S = 2.0
+
+
+def write_report(path: str | os.PathLike[str] | None, report: dict[str, Any]) -> bool:
     """Replace the report file whole (a reader never sees half of one).
 
     Written to a temporary name beside it, then renamed over it. No path,
     no file: a harness run without ``--report`` prints its report only.
+
+    Never raises: a report write must not end a multi-day soak. A rename a
+    reader refuses is retried for ``_REPLACE_RETRY_S``; a write that still
+    fails says so on stderr, leaves the previous report in place, and
+    answers False, and the next write catches up.
     """
     if not path:
-        return
+        return True
     target = Path(path)
     tmp = target.with_name(target.name + ".tmp")
-    tmp.write_text(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False, default=str),
-                   encoding="utf-8")
-    os.replace(tmp, target)
+    text = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False, default=str)
+    deadline = time.monotonic() + _REPLACE_RETRY_S
+    while True:
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, target)
+            return True
+        except OSError as exc:
+            if time.monotonic() >= deadline:
+                print(f"soak_report: could not write {target}: {exc}; the next write will try "
+                      "again", file=sys.stderr, flush=True)
+                return False
+            time.sleep(0.05)
 
 
 def finished(report: dict[str, Any], healthy: bool) -> dict[str, Any]:

@@ -161,6 +161,45 @@ async def test_every_interruption_records_the_tools_that_ran(store: TaskStore, k
     assert stored.status in (TaskStatus.TIMEOUT, TaskStatus.CANCELLED, TaskStatus.FAILED, TaskStatus.COMPLETED)
 
 
+async def _stopped_row_at_return(store: TaskStore, monkeypatch: pytest.MonkeyPatch) -> TaskStatus:
+    """Shut down with a running task whose ending write is slow; the row as
+    it stands the moment ``stop_all_runs`` returns."""
+    engine, wrote = _engine_with_writer(store)
+    real = store.persist_task
+
+    def slow_persist(task):  # a busy disk: the ending lands after the run ended
+        if task.status != TaskStatus.RUNNING:
+            import time
+            time.sleep(0.5)
+        return real(task)
+
+    monkeypatch.setattr(store, "persist_task", slow_persist)
+    task = SwarmTask(prompt="p", id=_id("shutdownwrite"), workers=["w"])
+    caller = asyncio.create_task(engine.dispatch(task))
+    await asyncio.wait_for(wrote.wait(), 5)
+    assert await engine.stop_all_runs() == 1
+    status = store.get_task(task.id).status
+    await asyncio.wait_for(caller, 10)
+    return status
+
+
+async def test_shutdown_returns_after_the_stopped_tasks_are_written(store: TaskStore, monkeypatch) -> None:
+    """The SQ01 soak found ``stop_all_runs`` returning with every stopped
+    task's ending still unwritten: had the process exited then, the next
+    boot's orphan recovery would have recorded a failure of unknown outcome
+    instead of the shutdown."""
+    assert await _stopped_row_at_return(store, monkeypatch) == TaskStatus.CANCELLED
+
+
+async def test_without_the_flush_the_row_still_reads_running(store: TaskStore, monkeypatch) -> None:
+    """Negative control: the same shutdown without waiting for the writes."""
+    async def no_flush(self, task_ids):
+        return None
+
+    monkeypatch.setattr(SwarmEngine, "_flush_stopped_writes", no_flush)
+    assert await _stopped_row_at_return(store, monkeypatch) == TaskStatus.RUNNING
+
+
 async def test_a_caller_deadline_raises_timeout_not_a_user_cancel(store: TaskStore) -> None:
     """The SW-E04 witness inverted."""
     engine, wrote = _engine_with_writer(store)
