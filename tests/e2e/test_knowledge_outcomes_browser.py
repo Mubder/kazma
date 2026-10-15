@@ -43,8 +43,20 @@ def _arrive_at_knowledge(page, base: str) -> None:
     }""")
 
 
+#: Seeds refused at admission, and the code each is refused with: only an
+#: http(s) address is crawled (KB-S09), and never one on a private network
+#: (2026-10-15: a loopback seed was admitted, its library created and left
+#: empty, and the page said nothing).
+_REFUSED_SEEDS = [
+    ("file:///C:/Windows/win.ini", "invalid_url"),
+    ("http://127.0.0.1:9/docs", "security_blocked"),
+]
+
+
+@pytest.mark.parametrize(("seed", "expected_code"), _REFUSED_SEEDS)
 @pytest.mark.parametrize("language", ["en", "ar"])
-def test_a_refused_crawl_is_said_in_the_pages_language(language: str, caplog) -> None:
+def test_a_refused_crawl_is_said_in_the_pages_language(language: str, seed: str, expected_code: str,
+                                                       caplog) -> None:
     from playwright.sync_api import sync_playwright
 
     from kazma_ui.i18n import TRANSLATIONS
@@ -59,22 +71,23 @@ def test_a_refused_crawl_is_said_in_the_pages_language(language: str, caplog) ->
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             _arrive_at_knowledge(page, h.base)
-            # Refused at admission: only an http(s) address is crawled (KB-S09).
             page.fill('input[x-model="form.id"]', "private-docs")
-            page.fill('input[x-model="form.seed_url"]', "file:///C:/Windows/win.ini")
+            page.fill('input[x-model="form.seed_url"]', seed)
             crawl = page.locator("button", has_text=TRANSLATIONS["knowledge.crawl_tree"][language])
             with page.expect_response(lambda r: r.url.endswith("/api/kb/ingest")) as answered:
                 crawl.click()
             data = answered.value.json()
             assert data["ok"] is False and answered.value.status < 500, data
             code = data["code"]
-            assert code != "internal_error", data
+            assert code == expected_code, data
             entry = TRANSLATIONS[f"knowledge.err.{code}"][language]
             expected = entry.replace("{reason}", data.get("error") or "")
             page.wait_for_function("() => window.__toasts.length > 0", timeout=10000)
             assert page.evaluate("() => window.__toasts") == [["error", expected]]
             libraries = page.evaluate("async () => (await (await fetch('/api/kb/libraries')).json()).libraries")
             assert not [lib for lib in libraries if lib.get("id") == "private-docs"], "no empty library"
+            jobs = page.evaluate("async () => (await (await fetch('/api/kb/jobs')).json()).jobs")
+            assert not [job for job in jobs if job.get("library_id") == "private-docs"], "no journal row"
             assert not errors, errors
         finally:
             browser.close()

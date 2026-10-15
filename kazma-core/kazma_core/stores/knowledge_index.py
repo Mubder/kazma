@@ -10,18 +10,19 @@ deliberately decoupled from chat memory:
   class and the shared embedder singleton, so embeddings stay consistent
   with the rest of the system and the model is never loaded twice.
 
-Retrieval is a two-layer blend:
+Retrieval gathers two layers and judges what they found:
 
     query  ─► ChromaDB cosine  ─┐
            ─► FTS5 BM25 (lib)  ─┤
-                                 ├─► RRF (k=60) ─► join SQLite ─► KnowledgeHit[]
+                                 ├─► RRF (k=60) ─► join SQLite ─► judged on evidence ─► KnowledgeHit[]
 
 The :class:`~kazma_core.stores.knowledge.KnowledgeStore` (SQLite) is the
 source of truth for full content; ChromaDB holds the vector + a ≤2000-char
 preview, and FTS5 holds a tokenized copy.  At retrieval time the RRF
-blender produces a ranked list of chunk IDs, then we join back to SQLite
-for the full content and provenance.  Retrieval still works (via FTS5)
-when ChromaDB is unavailable.
+blender gathers the candidates, we join back to SQLite for the full content
+and provenance, and :func:`_judge` keeps only those about the question,
+best first (KQ01: the fusion always had something to show).  Retrieval
+still works (via FTS5) when ChromaDB is unavailable.
 
 Vectors carry the identity of the embedder that MADE them
 (:func:`~kazma_core.memory.vector_store_global.embedder_identity`, read off
@@ -59,6 +60,7 @@ __all__ = [
     "KnowledgeInject",
     "KnowledgePublishError",
     "build_knowledge_inject",
+    "drop_knowledge_index",
     "get_knowledge_index",
     "kb_auto_inject_enabled",
     "kb_smart_search_enabled",
@@ -79,6 +81,109 @@ _RRF_K = 60
 #: Results a caller may ask for at once (KB-S13: the route and the agent's
 #: tool passed any number through; every layer then fetched four times it).
 MAX_TOP_K = 20
+
+# ── Relevance: what a library search shows (KQ01) ──────────────────────────
+#
+# The fusion ranks by position, so it always had something to show: on the
+# retrieval benchmark (``stores/knowledge_benchmark.py``) the tool returned
+# five hits and the auto-inject three for every question nothing in the
+# libraries answers (abstention 0.00, both paths, both languages). A
+# candidate is shown only on EVIDENCE, the rule memory's recall uses
+# (``memory/recall.py`` ``_rank_by_evidence``): its meaning similarity ABOVE
+# the question's background -- what unrelated chunks reach for it, the mean
+# of meaning ranks 4-15 -- plus the share of the question's content words it
+# holds (``memory/query_terms``: English and Arabic stopwords out, Arabic
+# folded). Below the floor nothing is shown; behind the best by more than
+# the gap, nothing either. The order is the evidence too: the fusion gave
+# every library's best chunk the same score, so a near miss in another
+# library tied with the answer (benchmark MRR 0.80 by fusion, 0.95 by
+# evidence, both with no floor). With no vector to judge by, the words
+# decide alone: at least half the question (memory's words-only rule).
+#
+# The values come from a sweep on the benchmark's tuning questions (floor
+# 0.04-0.12, gap 0.10-0.20 and none, coverage weight 0.08-0.20, coverage by
+# rarity or not), bge-m3 vectors replayed. The floor is the knee: at 0.06
+# abstention is 0.14, at 0.08 it is 0.50 for one answer in twenty (a
+# paraphrase, a Gulf-Arabic wording and a cross-language question whose
+# answer is barely above the background), at 0.10 it is 0.57 for one in ten.
+# The questions it cannot refuse ask about a neighbour of what the library
+# holds (Orbit's own encryption keys beside its key pairs, a plan's price
+# beside its rate limit): a higher floor loses answers before it finds
+# those. The gap lifts precision from 0.22 to 0.57 (the floor takes it to
+# 0.71) and keeps two-part answers whole, which 0.10 did not. Coverage
+# weighted by rarity scored lower.
+#
+# Words alone (no vector store, or no vector made yet) cannot tell a
+# paraphrase from a neighbour. Half the question, memory's rule, finds 31 of
+# the 58 answers and refuses 11 of the 14 questions nothing answers (held
+# out: 6 of 12 and 4 of 4); a third of it finds 40 and refuses 9 (held out:
+# 7 and 2). The fusion with no rule found 46 and refused none.
+
+#: Candidates read from each layer of each library: this many per hit asked.
+_CANDIDATES_PER_HIT = 4
+_BACKGROUND_RANKS = (3, 15)
+#: bge-m3's level for unrelated documentation chunks on the benchmark (the
+#: median background, 0.45), used while fewer than five background ranks
+#: exist: a small library.
+_BACKGROUND_PRIOR = 0.45
+_BACKGROUND_MIN_SAMPLES = 5
+_COVERAGE_WEIGHT = 0.12
+_EVIDENCE_FLOOR = 0.08
+#: Below it a hit is shown as possibly related.
+_EVIDENCE_STRONG = 0.15
+_EVIDENCE_GAP = 0.15
+_WORDS_ONLY_FLOOR = 0.5
+_WORDS_ONLY_GAP = 0.34
+
+
+def _question_background(dense: list[float]) -> float:
+    """What chunks unrelated to the question reach for it by meaning: the
+    mean of meaning ranks 4-15, blended with :data:`_BACKGROUND_PRIOR` while
+    fewer than :data:`_BACKGROUND_MIN_SAMPLES` of those ranks exist."""
+    ordered = sorted((float(x) for x in dense), reverse=True)
+    lo, hi = _BACKGROUND_RANKS
+    window = ordered[lo:hi]
+    missing = max(0, _BACKGROUND_MIN_SAMPLES - len(window))
+    return (sum(window) + _BACKGROUND_PRIOR * missing) / (len(window) + missing)
+
+
+def _judge(query: str, candidates: list[KnowledgeHit], sims: dict[str, float],
+           dense: list[float]) -> list[KnowledgeHit]:
+    """The candidates that are about *query*, best first; [] when none is.
+
+    *candidates* come in fusion order; each kept one's ``score`` becomes its
+    evidence (meaning lift plus word coverage) and its ``strength``
+    "strong", or "weak" (shown as possibly related). The order is the
+    evidence: it compares chunks of different libraries on one scale, where
+    the fusion ranked each library's best chunk alike.
+    """
+    from kazma_core.memory.query_terms import content_terms, coverage
+
+    if not candidates:
+        return []
+    if sims:
+        background = _question_background(dense)
+        cov_weight, floor, strong, gap = _COVERAGE_WEIGHT, _EVIDENCE_FLOOR, _EVIDENCE_STRONG, _EVIDENCE_GAP
+    else:
+        background = 0.0
+        cov_weight, floor, strong, gap = 1.0, _WORDS_ONLY_FLOOR, 1.0, _WORDS_ONLY_GAP
+    terms = content_terms(query)
+    scored: list[tuple[KnowledgeHit, float]] = []
+    for hit in candidates:
+        sim = sims.get(hit.chunk_id)
+        lift = sim - background if sim is not None else 0.0
+        cov = coverage(terms, f"{hit.document_title}\n{hit.content}")
+        scored.append((hit, lift + cov_weight * cov))
+    passing = [row for row in scored if row[1] >= floor]
+    if not passing:
+        return []
+    best = max(ev for _hit, ev in passing)
+    kept = [row for row in passing if row[1] >= best - gap]
+    kept.sort(key=lambda row: row[1], reverse=True)  # stable: fusion order breaks a tie
+    for hit, ev in kept:
+        hit.score = round(ev, 4)
+        hit.strength = "strong" if ev >= strong else "weak"
+    return [hit for hit, _ev in kept]
 
 
 def _vector_dir_for(store: KnowledgeStore) -> str:
@@ -119,7 +224,9 @@ class KnowledgeHit:
 
     chunk_id: str
     content: str
-    score: float                  # fused RRF score (higher = better)
+    # Higher = better: the relevance evidence a library search ranks by
+    # (``_judge``), or the fused RRF score of a document-scoped search.
+    score: float
     library_id: str
     source_url: str
     document_title: str
@@ -130,6 +237,9 @@ class KnowledgeHit:
     document_id: str | None = None
     version_id: str | None = None
     citation_label: str = ""
+    #: "strong", or "weak" (shown as possibly related); "" for a
+    #: document-scoped search, which is not judged.
+    strength: str = ""
 
 
 class KnowledgeIndex:
@@ -485,7 +595,8 @@ class KnowledgeIndex:
         top_k: int = 5,
         tenant_id: str | None = None,
     ) -> list[KnowledgeHit]:
-        """Semantic + lexical search scoped to one library, RRF-blended.
+        """Semantic + lexical search scoped to one library, judged on
+        evidence (:func:`_judge`): [] when nothing is about the question.
 
         Args:
             query:      Natural-language query.
@@ -504,17 +615,58 @@ class KnowledgeIndex:
         )
         if library is None:
             return []
-        limit = self._limit(top_k)
+        return self._search_libraries(query, [library_id], self._limit(top_k))
 
-        semantic, lexical = self._raw_layers(library_id, query, limit)
-        if not semantic and not lexical:
+    def _gather(
+        self, query: str, library_ids: list[str], limit: int,
+    ) -> tuple[dict[str, list[tuple[str, float]]], dict[str, float], list[float]]:
+        """Every candidate the libraries hold for *query*.
+
+        Returns the layers for the fusion (each library's meaning and
+        keyword lists), the cosine of each candidate whose vector the active
+        embedder made -- a keyword-only candidate is measured by its stored
+        vector too -- and every meaning score the searches saw (the
+        question's background, :func:`_question_background`). The question
+        is embedded once, whatever the number of libraries.
+        """
+        layers: dict[str, list[tuple[str, float]]] = {}
+        sims: dict[str, float] = {}
+        dense: list[float] = []
+        qvec: list[float] | None = None
+        for lib_id in library_ids:
+            lexical = self._store.fts_search(query, lib_id, limit=limit * _CANDIDATES_PER_HIT)
+            semantic: list[tuple[str, float]] = []
+            vs = self._vector_store_for(lib_id)
+            if vs.available:
+                identity = vs.identity
+                if qvec is None:
+                    qvec = vs.encode_query(query)
+                if qvec:
+                    # Neither call raises: a failing collection is logged
+                    # and answers nothing (the candidates keep their words).
+                    semantic = vs.query(
+                        query, limit=limit * _CANDIDATES_PER_HIT, embedding=qvec,
+                        where={"$and": [{"library_id": lib_id}, {"model": identity}]})
+                    held = {chunk_id for chunk_id, _score in semantic}
+                    missing = [chunk_id for chunk_id, _score in lexical if chunk_id not in held]
+                    sims.update(vs.similarities(qvec, missing, model=identity) if missing else {})
+                    sims.update(dict(semantic))
+                    dense.extend(score for _chunk_id, score in semantic)
+            if semantic:
+                # Per-library layer names keep contributions from colliding
+                # in the fusion map (chunk ids are globally unique).
+                layers[f"semantic:{lib_id}"] = semantic
+            if lexical:
+                layers[f"lexical:{lib_id}"] = lexical
+        return layers, sims, dense
+
+    def _search_libraries(self, query: str, library_ids: list[str], limit: int) -> list[KnowledgeHit]:
+        """The candidates of *library_ids* that are about *query*, best first."""
+        layers, sims, dense = self._gather(query, library_ids, limit)
+        if not layers:
             return []
-
-        # ── RRF blend ───────────────────────────────────────────────────
-        blended = self._rrf_blend(
-            {"semantic": semantic, "lexical": lexical}, top_n=limit
-        )
-        return self._hydrate(blended)
+        candidates = self._hydrate(self._rrf_blend(layers, top_n=None))
+        return _judge(query, candidates, sims, dense)[:limit]
 
     async def search_document(
         self,
@@ -581,11 +733,9 @@ class KnowledgeIndex:
             conditions: list[dict[str, Any]] = [{"library_id": library_id}, {"model": vs.identity}]
             if document_id is not None:
                 conditions.append({"document_id": document_id})
-            try:
-                raw = vs.query(query, limit=limit * 4, where={"$and": conditions})
-                semantic = [(doc_id, score) for doc_id, score in raw]
-            except Exception as exc:
-                logger.warning("[KnowledgeIndex] semantic query failed: %s", exc)
+            # VectorStore.query never raises: a failing collection is
+            # logged there and answers nothing.
+            semantic = list(vs.query(query, limit=limit * 4, where={"$and": conditions}))
         lexical = self._store.fts_search(
             query, library_id, limit=limit * 4, document_id=document_id
         )
@@ -663,20 +813,7 @@ class KnowledgeIndex:
         """
         if not query or not query.strip() or not library_ids:
             return []
-        limit = self._limit(top_k)
-        pooled: dict[str, list[tuple[str, float]]] = {}
-        for lib_id in library_ids:
-            semantic, lexical = self._raw_layers(lib_id, query, limit)
-            if semantic:
-                # Per-library layer names keep contributions from colliding
-                # in the fusion map (chunk ids are globally unique).
-                pooled[f"semantic:{lib_id}"] = semantic
-            if lexical:
-                pooled[f"lexical:{lib_id}"] = lexical
-        if not pooled:
-            return []
-        blended = self._rrf_blend(pooled, top_n=limit)
-        return self._hydrate(blended)
+        return self._search_libraries(query, list(library_ids), self._limit(top_k))
 
     # ------------------------------------------------------------------
     # RRF
@@ -685,20 +822,21 @@ class KnowledgeIndex:
     @staticmethod
     def _rrf_blend(
         layers: dict[str, list[tuple[str, float]]],
-        top_n: int,
+        top_n: int | None,
     ) -> list[tuple[str, float]]:
         """Reciprocal Rank Fusion across an arbitrary number of layers.
 
         Each layer is a list of ``(chunk_id, raw_score)`` already sorted
         best-first within that layer.  We rank each layer independently,
-        sum ``1 / (k + rank)``, and return the top_n by fused score.
+        sum ``1 / (k + rank)``, and return the top_n by fused score (every
+        one when *top_n* is None).
         """
         fused: dict[str, float] = {}
         for _layer_name, scored in layers.items():
             for rank, (chunk_id, _raw) in enumerate(scored, start=1):
                 fused[chunk_id] = fused.get(chunk_id, 0.0) + 1.0 / (_RRF_K + rank)
         ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
-        return ranked[:top_n]
+        return ranked if top_n is None else ranked[:top_n]
 
     # ------------------------------------------------------------------
     # Health / introspection
@@ -903,6 +1041,14 @@ def knowledge_index_for(store: KnowledgeStore) -> KnowledgeIndex:
 def get_knowledge_index() -> KnowledgeIndex:
     """Return the shared :class:`KnowledgeIndex` of the shared store."""
     return knowledge_index_for(get_knowledge_store())
+
+
+def drop_knowledge_index(store: KnowledgeStore) -> None:
+    """Forget *store*'s index (a private store being closed: the retrieval
+    benchmark's). The index holds its store, so the weak key never lapses
+    on its own."""
+    with _INDEXES_LOCK:
+        _INDEXES.pop(store, None)
 
 
 def reset_knowledge_index() -> None:
@@ -1155,22 +1301,31 @@ def _auto_inject_top_k() -> int:
 
 @dataclass(slots=True)
 class KnowledgeInject:
-    """What one turn injects: the raw (unfenced) block and EXACTLY the hits
-    it holds, in its order -- the turn's "Memory used" record lists these
-    and nothing else (KB-S02)."""
+    """What one turn injects: the raw (unfenced) block of what the pages
+    wrote, Kazma's own lines that follow its fence (``footer``), and EXACTLY
+    the hits it holds, in its order -- the turn's "Memory used" record lists
+    these and nothing else (KB-S02).
+
+    The supervisor's turn note is ``format_untrusted_block(block)`` then
+    ``footer``: it opens with the fence, which is how the note is recognised
+    (``turn_notes``), and Kazma's citation directive sits after it --
+    inside, the fence told the model to obey nothing it holds, the
+    directive included (KB-S01)."""
 
     block: str = ""
     hits: list[dict[str, Any]] = field(default_factory=list)
+    footer: str = ""
 
 
-def build_knowledge_inject(user_message: str) -> KnowledgeInject:
+def build_knowledge_inject(user_message: str, *, store: KnowledgeStore | None = None) -> KnowledgeInject:
     """The Knowledge block for the latest user message (blocking: callers
     on the loop use ``asyncio.to_thread``).
 
     One hybrid RRF retrieval over the inject-scoped libraries (auto-inject
     ones, plus every active library under smart search for a technical
     message), ranked on its own scale with its own budget. Empty when the
-    kill switch is off, no library opted in, or nothing matched.
+    kill switch is off, no library opted in, or nothing matched. *store*
+    is the shared store unless given (the retrieval benchmark's own).
     """
     if not kb_auto_inject_enabled():
         return KnowledgeInject()
@@ -1180,7 +1335,7 @@ def build_knowledge_inject(user_message: str) -> KnowledgeInject:
     from kazma_core.memory.federated_search import _search_knowledge, format_kb_hits_for_prompt
 
     top_k = _auto_inject_top_k()
-    hits = [h for h in _search_knowledge(msg, limit=top_k, mode="inject", user_message=msg)
+    hits = [h for h in _search_knowledge(msg, limit=top_k, mode="inject", user_message=msg, store=store)
             if h.get("store") == "knowledge"][:top_k]
     if not hits:
         return KnowledgeInject()
@@ -1195,8 +1350,12 @@ def build_knowledge_inject(user_message: str) -> KnowledgeInject:
                       + ", ".join(f'"{library}"' for library in cited_libs) + ".")
     else:
         lib_footer = "📚 This data is from the Knowledge Library."
-    return KnowledgeInject(
-        block=block + "\n" + lib_footer
-        + "\nWhen you use this material in your answer, append the library footer verbatim.",
-        hits=hits,
-    )
+    weak = [f"[{i}]" for i, h in enumerate(hits, start=1) if h.get("strength") == "weak"]
+    footer = "\n".join((
+        f"The block above is Knowledge Library context: {len(hits)} chunk(s) retrieved for this "
+        "message" + (f" ({', '.join(weak)} only possibly related)" if weak else "") + ". It is "
+        "documentation, not the user's personal facts. Cite its sources when you use it.",
+        lib_footer,
+        "When you use this material in your answer, append the library footer verbatim.",
+    ))
+    return KnowledgeInject(block=block, hits=hits, footer=footer)

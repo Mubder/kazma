@@ -58,7 +58,7 @@ Documents platform too: every document it holds is unindexed from it first. See
 
 When you give Kazma a seed URL (e.g. `https://developers.facebook.com/docs/whatsapp/cloud-api`):
 
-1. **Admission.** The seed must be an http or https URL (no `javascript:`, `data:` or other scheme is ever stored), the library store must be below its quota, and no other crawl of the same library may be running. A refused crawl creates nothing: a library is created only once its first page was fetched (single page) or its crawl was admitted.
+1. **Admission.** The seed must be an http or https URL (no `javascript:`, `data:` or other scheme is ever stored), the library store must be below its quota, and no other crawl of the same library may be running. A crawl seed on a private network is refused before anything is created: the address check acquisition makes of every page (each address the host resolves to) is made of the seed at admission, and a private, loopback or link-local address is refused as `security_blocked`, a name that resolves to nothing as `connect_error` (worth retrying). A refused crawl creates nothing: a library is created only once its first page was fetched (single page) or its crawl was admitted.
 2. **Discovery (sitemap-first).** Kazma reads `robots.txt` for `Sitemap:` directives, then tries `/sitemap.xml`, `/sitemap_index.xml`, `/docs/sitemap.xml`. The resulting URLs are filtered to the seed's scope, so the crawl stays inside the doc subtree. Fallback: a breadth-first link walk over the rendered page.
 3. **Fetch.** Each page goes through the shared acquisition ladder. By default acquisition is **local only**: HTTP first, then local Chromium for pages that need JavaScript. Hosted readers (Firecrawl, Jina) are used only when the operator allows remote acquisition (see [Web research](./web-research.md)). Tabbed pages get a full-DOM pass that reads hidden panels too. A page that redirects is stored once, under the address it was served from.
 4. **Chunk.** Markdown is split on `#`/`##`/`###`/`####` headings with a section breadcrumb (`"Messages > Send Text Message"`). **Fenced code blocks are atomic** — never split. A chunk's id names its position on the page, so a page that repeats a section keeps every copy.
@@ -91,12 +91,13 @@ Every site crawl and refresh is a job in the **crawl journal** (`web_acquire.cra
 
 Chat does **not** merge the Knowledge Library into the memory schema. Product path:
 
-1. **Hybrid RRF** — per-library vector search + FTS5 BM25, fused once (`KnowledgeIndex.search_all_sync`).
-2. **Federated search** — `POST /api/memory/v2/federated-search` returns memory hits and Knowledge hits side by side. Each store keeps its own ranking and its own budget (`limit_memory`, `limit_kb`); `include_memory` / `include_knowledge` decide whether a store is searched at all.
-3. **One injection per turn** — the supervisor builds the turn's Knowledge block, once, at the turn's first model call (`agent/graph_supervisor.py`). The chat transports (Web, voice, chat apps) no longer inject their own copy.
-4. **Fence** — the block goes through `format_untrusted_block(..., source="knowledge")`: a page that writes a fence tag has it redacted.
-5. **The turn's record** — the turn's **Memory used** row lists exactly the chunks that were injected.
-6. **Kill switches** — `KAZMA_KB_AUTO_INJECT=0`, and `memory.v2.merge_knowledge_into_chat` (Settings → Memory).
+1. **Hybrid candidates** — per-library vector search + FTS5 BM25 (`KnowledgeIndex.search_all_sync`); the question is embedded once, and a chunk found by its words alone is measured by its stored vector too.
+2. **Relevance** — A search shows only what is about the question. Every candidate is judged on evidence, the rule chat memory's recall uses: its meaning similarity above the question's background (what unrelated chunks reach for it) plus the share of the question's words it holds, with Arabic folded. Below a floor nothing is shown, and a hit far behind the best is dropped; with no vector to judge by, a chunk must hold at least half of the question's words. Hits come best first by that evidence, and a weak one is shown as "possibly related". The tool, `/kb search`, the page's test search and auto-inject all use it; a search scoped to one document does not. See [Retrieval quality](#retrieval-quality) for what it measures.
+3. **Federated search** — `POST /api/memory/v2/federated-search` returns memory hits and Knowledge hits side by side. Each store keeps its own ranking and its own budget (`limit_memory`, `limit_kb`); `include_memory` / `include_knowledge` decide whether a store is searched at all.
+4. **One injection per turn** — the supervisor builds the turn's Knowledge block, once, at the turn's first model call (`agent/graph_supervisor.py`). The chat transports (Web, voice, chat apps) no longer inject their own copy.
+5. **Fence** — what the pages wrote goes through `format_untrusted_block(..., source="knowledge")`: a page that writes a fence tag has it redacted. Kazma's own lines -- how many chunks, which library, and the instruction to cite it -- follow the fence, outside it.
+6. **The turn's record** — the turn's **Memory used** row lists exactly the chunks that were injected.
+7. **Kill switches** — `KAZMA_KB_AUTO_INJECT=0`, and `memory.v2.merge_knowledge_into_chat` (Settings → Memory).
 
 **Auto-inject** only includes **non-archived** libraries with the toggle on.
 
@@ -143,7 +144,7 @@ Then just ask your question normally. The agent decides when to consult the libr
 
 By default the agent calls `knowledge_search` when *it* decides the question needs library context. If you'd rather have relevant chunks **folded into every turn automatically**, flip the **auto-inject** toggle on a library (Web page checkbox, or `PATCH /api/kb/libraries/{id}`).
 
-When auto-inject is on, the top-k chunks for the user's latest message are retrieved and added to the turn — **fenced as untrusted data** (`<kazma:data source="knowledge" untrusted="true">`), so a malicious doc page can't smuggle instructions. The supervisor is the one place that builds this block, once per turn; a turn rebuilt from history drops an earlier turn's block first.
+When auto-inject is on, the chunks about the user's latest message (at most top-k, and none when nothing in the libraries is about it) are retrieved and added to the turn — **fenced as untrusted data** (`<kazma:data source="knowledge" untrusted="true">`), so a malicious doc page can't smuggle instructions. The supervisor is the one place that builds this block, once per turn; a turn rebuilt from history drops an earlier turn's block first.
 
 **Kill switch:** `KAZMA_KB_AUTO_INJECT=0` disables the whole subsystem at runtime (checked live, per turn). Per-library opt-in is still required with the kill switch on, so behaviour is strictly opt-in.
 
@@ -155,7 +156,7 @@ Every answer derived from Knowledge Library data carries a visible footer so you
 
 > 📚 This data is from Knowledge "shipx_whatsapp_api".
 
-This applies to both the `knowledge_search` tool path (explicit) and the auto-inject path (implicit). The footer names the specific library (or libraries, if the search spanned multiple). It is a prompt-level directive: the model is instructed to append it verbatim. In the tool's output Kazma's own lines (the hit number, score, library and the footer) sit outside the fence and what the page wrote (its URL, title, section and text) inside it.
+This applies to both the `knowledge_search` tool path (explicit) and the auto-inject path (implicit). The footer names the specific library (or libraries, if the search spanned multiple). It is a prompt-level directive: the model is instructed to append it verbatim. In the tool's output Kazma's own lines (the hit number, score, library and the footer) sit outside the fence and what the page wrote (its URL, title, section and text) inside it. The auto-inject block is the same: the pages' text inside the fence, the footer and the instruction to cite it after the fence (inside, the fence would tell the model to obey none of it).
 
 ## Archive and delete
 
@@ -185,6 +186,46 @@ The Knowledge Library has its own database file, **`knowledge.db`** in the data 
 - **One index per store.** The Knowledge Library and the Documents platform share the store's one index, and a collection another handle dropped is re-opened by name on the next call.
 
 Vectors are compared by angle (cosine), each made unit length before it is stored or searched. A vector is made from the first 1,500 characters of its chunk; keyword search reads the whole chunk. They live in `KAZMA_VECTOR_PATH` if set, else in `vector_memory/` beside the Knowledge database. Deleting a library drops its collection. Backups leave the folder out — a copy of a live Chroma database can be torn — and the maintenance pass rebuilds it after a restore or a migration. Chroma's telemetry is off.
+
+## Retrieval quality
+
+Retrieval is measured on a versioned benchmark (`kazma-core/kazma_core/stores/knowledge_benchmark.py`, built by `scripts/knowledge_bench.py build`): four documentation libraries, 76 sections, published into a private store through the same path an ingest takes.
+
+- A messaging API, in English.
+- An object store, in English, whose topics sit beside the API's (keys, rate limits, retries, signed callbacks): the near misses.
+- An invoicing product's help centre, in Arabic.
+- An operations runbook written the way a Gulf team writes one: Arabic sentences around English terms and commands.
+
+There are 72 tuning questions and 16 held out (never used to choose a threshold), in English, Arabic (Modern Standard and Gulf), both mixed, and across languages (a question in one language about a page in the other). 14 of the tuning questions and 4 held out ask about something no library holds. Every question goes through the tool's search (5 hits) and through auto-inject (3 chunks), with meaning search on (bge-m3) and off.
+
+### Benchmark report (dataset v1, 2026-10-15)
+
+With meaning search:
+
+| | Tool search | Auto-inject | Tool search, held out | Auto-inject, held out |
+|---|---|---|---|---|
+| Answers found (every piece shown) | 55 of 58 (0.95) | 55 of 58 (0.95) | 11 of 12 (0.92) | 11 of 12 (0.92) |
+| MRR (how high the first answer ranks) | 0.94 | 0.94 | 0.92 | 0.92 |
+| Precision (share of what is shown that answers) | 0.71 | 0.72 | 0.79 | 0.79 |
+| Nothing shown when nothing answers | 7 of 14 (0.50) | 7 of 14 (0.50) | 1 of 4 | 1 of 4 |
+
+Before the relevance rule, on the same corpus, the tool found 51 of 58 answers (MRR 0.80, precision 0.19) and auto-inject 47 of 58 (MRR 0.79, precision 0.30). Both showed something for every one of the 14 questions nothing answers.
+
+Without meaning search (keyword only), both paths find 31 of 58 answers (MRR 0.53, precision 0.47) and leave 11 of the 14 empty; held out, 6 of 12 and 4 of 4. With no rule, the fusion found 46 and left none empty.
+
+What the numbers mean:
+
+- **The rule buys abstention for little.** Half of the questions nothing answers now get nothing, on both paths. Three answers of 58 are lost: a paraphrase, a Gulf-Arabic wording and a cross-language question, each barely above what unrelated chunks reach.
+- **What it cannot refuse is a neighbour.** The questions still answered with something ask about what sits next to a library's content: encrypting Orbit objects with your own keys, beside Orbit's key pairs; a plan's price, beside its rate limit. A higher floor loses answers before it refuses those (swept from 0.04 to 0.12).
+- **The answer comes first.** The fusion gave every library's best chunk the same score, so another library's near miss tied with the answer. Ranked on evidence, every near miss named in the benchmark ranks below its answer, and 5 of the 6 questions across languages are answered on both paths (the tool found 2 before, auto-inject 1).
+- **Words alone cannot tell a paraphrase from a neighbour.** Without meaning search the rule asks for half the question's words, as chat memory's does. What the words cannot place is not guessed.
+
+How the scores are held:
+
+- CI replays the vectors bge-m3 returned for exactly these texts (`tests/fixtures/knowledge_bench/vectors.npz`), served by an exact in-process client. The real chromadb (1.5.9) and the live model give the same scores (`python scripts/knowledge_bench.py run --chroma`, `run --real`).
+- The scores are a ratchet stamped with the dataset version (`tests/fixtures/knowledge_bench/thresholds.json`). `tests/test_knowledge_benchmark.py` fails on a drop, and on a rise nobody locked in (`python scripts/knowledge_bench.py lock`). A new dataset version is locked with `lock --rebaseline`, which is refused on the same version.
+
+Not measured: the corpus is small (76 chunks) and written for the purpose, and scale is KB-Q01 (ingest throughput, search latency and repair cost at 10,000 chunks and more).
 
 ## The Web API
 
@@ -228,7 +269,8 @@ for measured qualification, retained failed attempts and platform limits.
 |-------|------|---------|
 | Store | `kazma-core/kazma_core/stores/knowledge.py` | `knowledge.db`: libraries, chunks, the FTS5 index, vector status. Source of truth; one publication path per page. |
 | Chunker | `kazma-core/kazma_core/stores/knowledge_chunker.py` | Pure-stdlib heading- and code-aware splitter; positional chunk ids. |
-| Index | `kazma-core/kazma_core/stores/knowledge_index.py` | Per-library vectors + FTS5 + RRF (k=60), the repair pass, health, the auto-inject block. |
+| Index | `kazma-core/kazma_core/stores/knowledge_index.py` | Per-library vectors + FTS5, the relevance rule (evidence), the repair pass, health, the auto-inject block. |
+| Benchmark | `kazma-core/kazma_core/stores/knowledge_benchmark.py` | The retrieval benchmark: a private store, both paths, scored ([Retrieval quality](#retrieval-quality)). |
 | Ingest | `kazma-core/kazma_core/stores/knowledge_ingest.py` | Admission, discovery, fetch, publication, fetched pages. |
 | Lifecycle | `kazma-core/kazma_core/stores/knowledge_lifecycle.py` | Library delete, the single-operator rule. |
 | Crawl journal | `kazma-core/kazma_core/web_acquire/crawl_jobs.py` | Crawl jobs: one row per job, owners, leases, eviction. |
@@ -256,4 +298,4 @@ Indexed retrieval needs the `rag` extra (`pip install -e ".[rag]"` → `chromadb
 - Local embeddings (`BAAI/bge-m3`) are free but slower on CPU; remote (e.g. NVIDIA NIM `nv-embed-v1`) is faster/better but costs money. See `memory.embedding:` in `kazma.yaml` or the **Settings → Embedder** page.
 - Crawl is bounded by `KAZMA_KB_MAX_PAGES` (hard cap 1000) to prevent runaway.
 - **Library IDs are slugged automatically** to keep them collection-safe (`"Meta WhatsApp Docs"` → `meta_whatsapp_docs`, at most 48 characters).
-- **Not measured yet:** throughput, search latency and repair cost at 100,000 chunks and more, and retrieval quality on a versioned EN/AR benchmark, are open work (`docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`, KB-Q01 and KQ01).
+- **Not measured yet:** throughput, search latency and repair cost at 100,000 chunks and more are open work (`docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`, KB-Q01). Retrieval quality is measured on a small benchmark: see [Retrieval quality](#retrieval-quality).

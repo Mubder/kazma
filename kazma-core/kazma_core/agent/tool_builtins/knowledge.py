@@ -311,9 +311,12 @@ def register_knowledge_tools(registry: Any) -> None:
             # stored -- stays outside the fence; what the page itself wrote
             # (title, section, text) goes inside it (KB-S01). A header that
             # tries to close the fence is redacted by the fence.
+            # A hit on thin evidence is said to be possibly related (KQ01).
             parts = [f"# Knowledge search — {len(hits)} hit(s)"]
             for i, h in enumerate(hits, start=1):
-                parts.append(f"\n## [{i}] score={h.score:.4f} — library {h.library_id}, chunk {h.chunk_index}")
+                weak = " (possibly related)" if h.strength == "weak" else ""
+                parts.append(f"\n## [{i}] score={h.score:.4f} — library {h.library_id}, "
+                             f"chunk {h.chunk_index}{weak}")
                 page = []
                 if h.source_url:
                     page.append(f"Source: {h.source_url}")

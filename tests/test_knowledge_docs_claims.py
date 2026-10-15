@@ -94,6 +94,30 @@ def _kb_admin_only() -> bool:
     return all(changes_global_config(f"/kb {s} docs https://e.test/") for s in ("add", "crawl", "refresh", "delete"))
 
 
+def _searches_are_judged() -> bool:
+    """KQ01: every library search goes through the relevance rule."""
+    from kazma_core.stores import knowledge_index
+
+    return knowledge_index._EVIDENCE_FLOOR > 0 and "_judge(" in inspect.getsource(
+        knowledge_index.KnowledgeIndex._search_libraries)
+
+
+def _benchmark_report_version() -> bool:
+    """The report the guide gives is of the dataset the ratchet measures."""
+    import json
+
+    from kazma_core.stores.knowledge_benchmark import load_dataset
+
+    locked = json.loads((REPO / "tests/fixtures/knowledge_bench/thresholds.json").read_text(encoding="utf-8"))
+    return locked["dataset_version"] == load_dataset()["version"] == 1
+
+
+def _private_seed_refused_at_admission() -> bool:
+    from kazma_core.stores import knowledge_ingest
+
+    return "_admit_public_seed(" in inspect.getsource(knowledge_ingest._prepare_ingest_site)
+
+
 @dataclass(frozen=True)
 class Claim:
     topic: str
@@ -124,6 +148,12 @@ CLAIMS = [
           "Commands that change a library are for the gateway's admins only.", _kb_admin_only),
     Claim("kb_api routes", None,
           "`/api/kb/*` (`kazma-ui/kazma_ui/kb_api.py`) has 16 routes.", _route_count),
+    Claim("relevance", "and retrieval quality on a versioned EN/AR benchmark, are open work",
+          "A search shows only what is about the question.", _searches_are_judged),
+    Claim("benchmark report", None, "### Benchmark report (dataset v1, 2026-10-15)", _benchmark_report_version),
+    Claim("private crawl seed", None,
+          "A crawl seed on a private network is refused before anything is created",
+          _private_seed_refused_at_admission),
 ]
 
 
@@ -156,6 +186,20 @@ def test_the_old_guide_fails_every_row_it_held():
     problems = claim_problems(old.stdout)
     for topic in ("pruning", "isolation from chat memory", "job durability", "fetch order", "tool location",
                   "injection sites", "archived-library search", "/kb commands"):
+        assert any(p.startswith(topic + ":") for p in problems), topic
+
+
+def test_the_guide_before_kq01_fails_the_new_rows():
+    """Negative control: the guide as merged on 2026-10-14 (718389b5), when
+    retrieval quality was not measured and a private seed was admitted."""
+    old = subprocess.run(["git", "show", "718389b5:docs/docs/guide/knowledge-library.md"], cwd=REPO,
+                         capture_output=True, text=True, encoding="utf-8")
+    if old.returncode != 0:  # a shallow clone without that commit
+        import pytest
+
+        pytest.skip("the 2026-10-14 guide is not in this clone")
+    problems = claim_problems(old.stdout)
+    for topic in ("relevance", "benchmark report", "private crawl seed"):
         assert any(p.startswith(topic + ":") for p in problems), topic
 
 

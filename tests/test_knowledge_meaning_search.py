@@ -392,9 +392,19 @@ def test_the_backfill_stops_at_its_budget_and_the_next_pass_continues(kb, monkey
     assert part["embedded"] + rest["embedded"] == 10 and rest["complete"] is True
 
 
+#: Chunks about other things. A search shows what is about the question
+#: ABOVE what unrelated chunks reach for it (KQ01, ``knowledge_index._judge``):
+#: a library of two chunks has no such background, and the prior that stands
+#: in for it is bge-m3's level, which this toy embedder's similarities sit
+#: below. These give it one, as any real library does.
+_UNRELATED = ["Upload a profile photo", "Rotate the signing key monthly", "Pick a colour theme",
+              "Export invoices as spreadsheet files", "Archive old projects", "Delete unused buckets",
+              "Choose the billing currency", "Print the quarterly report"]
+
+
 def test_meaning_search_finds_what_shares_no_word_with_the_question(kb):
     """The point of the vector: no keyword of the question is in the answer."""
-    _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool"])
+    _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool", *_UNRELATED])
     question = "how many attempts are made to resend callbacks"
     assert kb.store.fts_search(question, "api", limit=5) == []  # words alone: nothing
 
@@ -495,8 +505,8 @@ def test_with_the_real_chromadb(tmp_path, monkeypatch):
     store = KnowledgeStore(db_path=str(tmp_path / "settings.db"))
     try:
         kb = types.SimpleNamespace(store=store, index=KnowledgeIndex(store))
-        _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool"])
-        assert kb.index.backfill_vectors(time_budget_s=60)["embedded"] == 2
+        _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool", *_UNRELATED])
+        assert kb.index.backfill_vectors(time_budget_s=60)["embedded"] == 2 + len(_UNRELATED)
         question = "how many attempts are made to resend callbacks"
         hits = kb.index.search_sync(question, "api")
         assert hits and hits[0].chunk_id == "api-0"

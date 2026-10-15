@@ -1199,8 +1199,13 @@ async def supervisor_node(
     if _kb_inject is not None and _kb_inject.block:
         from kazma_core.safety.prompt_fence import format_untrusted_block
 
-        messages.insert(1, {"role": "system",
-                            "content": format_untrusted_block(_kb_inject.block, source="knowledge")})
+        # What the pages wrote inside the fence; Kazma's own lines -- the
+        # library footer and the instruction to cite it -- after it
+        # (KB-S01): inside, the fence tells the model to obey none of it.
+        note = format_untrusted_block(_kb_inject.block, source="knowledge")
+        if _kb_inject.footer:
+            note += "\n" + _kb_inject.footer
+        messages.insert(1, {"role": "system", "content": note})
         logger.info("[Supervisor] Knowledge Library: %d chunk(s) injected for the turn",
                     len(_kb_inject.hits))
         # Recall suppressed or off: the turn still says which chunks it

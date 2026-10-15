@@ -19,12 +19,14 @@ import logging
 import math
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from kazma_core.memory.embedder import get_embedder
 
-__all__ = ["VectorStore", "embedder_identity", "get_encoder"]
+__all__ = ["VectorStore", "directory_client", "embedder_identity", "get_encoder"]
 
 logger = logging.getLogger(__name__)
 
@@ -91,15 +93,24 @@ def _collection_space(collection: Any) -> str:
     return str(space or "l2")
 
 
+def _client_key(persist_dir: str | None) -> str:
+    return str(Path(persist_dir).expanduser().resolve()) if persist_dir else ":memory:"
+
+
 def _shared_client(persist_dir: str | None) -> Any:
     """The process's Chroma client for *persist_dir* (in-memory when None).
 
-    Telemetry off: Chroma's default sends usage events to PostHog.
+    A client registered for the folder (:func:`directory_client`) is used
+    as it is. Telemetry off: Chroma's default sends usage events to PostHog.
     """
+    key = _client_key(persist_dir)
+    with _CLIENTS_LOCK:
+        client = _CLIENTS.get(key)
+        if client is not None:
+            return client
     import chromadb
     from chromadb.config import Settings
 
-    key = str(Path(persist_dir).expanduser().resolve()) if persist_dir else ":memory:"
     with _CLIENTS_LOCK:
         client = _CLIENTS.get(key)
         if client is None:
@@ -111,6 +122,29 @@ def _shared_client(persist_dir: str | None) -> Any:
                 client = chromadb.Client(settings)
             _CLIENTS[key] = client
         return client
+
+
+@contextmanager
+def directory_client(persist_dir: str, client: Any) -> Iterator[Any]:
+    """Serve every store on *persist_dir* from *client* while the block runs.
+
+    For a private folder only -- the Knowledge retrieval benchmark's
+    (``stores/knowledge_benchmark.py``), whose exact in-process client
+    stands in for Chroma where chromadb is not installed. A folder some
+    client already serves is refused: the block never takes over a live
+    store's vectors.
+    """
+    key = _client_key(persist_dir)
+    with _CLIENTS_LOCK:
+        if key in _CLIENTS:
+            raise RuntimeError(f"a vector client already serves {key}")
+        _CLIENTS[key] = client
+    try:
+        yield client
+    finally:
+        with _CLIENTS_LOCK:
+            if _CLIENTS.get(key) is client:
+                del _CLIENTS[key]
 
 
 def embedder_identity(model: Any) -> str:
@@ -310,12 +344,54 @@ class VectorStore:
                 return False
         return False
 
+    def encode_query(self, text: str) -> list[float] | None:
+        """*text*'s unit vector from this store's embedder (None when the
+        store is unavailable or the model gives nothing), so one question is
+        embedded once however many collections it searches."""
+        if not self.available:
+            return None
+        return _unit(self._encode(text))
+
+    def similarities(self, embedding: list[float], ids: list[str], *, model: str) -> dict[str, float]:
+        """Cosine of *embedding* (a unit vector) with each stored vector of
+        *ids* that *model* made (``embedder_identity``); an id with no such
+        vector, or one of another size, is left out. A failing collection is
+        logged and answers nothing, as :meth:`query` does: the caller judges
+        those ids by their words."""
+        ids = [str(i) for i in ids if i]
+        if not ids or not embedding or not self._ensure_client():
+            return {}
+        got: dict[str, Any] = {}
+        for attempt in (0, 1):
+            try:
+                got = self._collection.get(ids=ids, include=["embeddings", "metadatas"])
+                break
+            except Exception as exc:
+                if attempt == 0 and self._reopen_if_missing(exc):
+                    continue
+                logger.warning("[VectorStore] Similarity lookup failed: %s", exc)
+                return {}
+        out: dict[str, float] = {}
+        found = got.get("ids") or []
+        vectors = got.get("embeddings")
+        metas = got.get("metadatas") or [None] * len(found)
+        if vectors is None:
+            return {}
+        for doc_id, vec, meta in zip(found, vectors, metas):
+            if (meta or {}).get("model") != model or vec is None or len(vec) != len(embedding):
+                continue
+            # Stored vectors are unit length (every write goes through _unit).
+            out[str(doc_id)] = float(sum(float(a) * float(b) for a, b in zip(embedding, vec)))
+        return out
+
     def query(
         self,
         text: str,
         limit: int = 10,
         where: dict[str, Any] | None = None,
         tenant_id: str | None = None,
+        *,
+        embedding: list[float] | None = None,
     ) -> list[tuple[str, float]]:
         """Semantic search via cosine similarity.
 
@@ -323,10 +399,12 @@ class VectorStore:
 
         Args:
             tenant_id: If provided, results are filtered to this tenant.
+            embedding: *text*'s unit vector when the caller already has it
+                (:meth:`encode_query`); else it is embedded here.
         """
         if not self.available:
             return []
-        embedding = _unit(self._encode(text))
+        embedding = embedding or _unit(self._encode(text))
         if not embedding:
             logger.warning("[VectorStore] Query skipped — empty embedding")
             return []

@@ -3916,9 +3916,55 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   turn's note at iteration 0; the transports inject nothing. The "Memory
   used" record lists exactly the injected chunks (KB-S02), even with recall
   suppressed. `knowledge_search` keeps its scaffolding outside the fence and
-  the page's text inside (KB-S01). Federated search ranks each store on its
+  the page's text inside (KB-S01); so does the turn note since 2026-10-15
+  (`KnowledgeInject.block` fenced, then `.footer` -- the library footer and
+  the instruction to cite it -- after the fence: inside, the fence told the
+  model to obey none of it; the note still opens with the fence, its
+  `turn_notes` kind). Federated search ranks each store on its
   own budget. Stored URLs are http(s) only (`validate_web_url`, every
   writer), rendered through `safeHref` (KB-S09).
+- **A search shows only what is about the question** (KQ01, 2026-10-15,
+  `knowledge_index._judge`): the tool, `/kb search`, the page's test search
+  and auto-inject all rank on memory's EVIDENCE rule -- meaning similarity
+  above the question's background (meaning ranks 4-15) plus content-word
+  coverage (`memory/query_terms`) -- with a floor (0.08), a gap (0.15) and
+  memory's words-only rule when no vector judges; `score` is that evidence
+  and `strength` "weak" is shown as possibly related. The fusion ranked by
+  position and always showed something: five hits and three injected chunks
+  for every question nothing answers. A keyword-only candidate is measured
+  by its stored vector (`VectorStore.similarities`); the question is
+  embedded once per search. A document-scoped search is not judged.
+- **Retrieval quality is measured and ratcheted** (KQ01):
+  `stores/knowledge_benchmark.py` publishes a versioned EN/AR/mixed corpus
+  (`knowledge_benchmark_data/dataset.json`, built by
+  `scripts/knowledge_bench.py build`) into a PRIVATE store through the
+  product's publication path and asks every question through
+  `search_all_sync` (the tool) and `build_knowledge_inject(store=)` (the turn
+  note), with meaning (`hybrid`) and without (`keyword`), tuning and held-out
+  questions apart. CI replays bge-m3's recorded vectors
+  (`tests/fixtures/knowledge_bench/vectors.npz`) through an exact in-process
+  client registered for the private vector folder only
+  (`vector_store_global.directory_client`; `run --chroma` gave the same
+  scores on chromadb 1.5.9, `run --real` on the live model). The scores are a
+  ratchet stamped with the dataset version (`thresholds.json`; `lock` raises
+  and refuses to lower, `lock --rebaseline` for a new version only). Gate:
+  `tests/test_knowledge_benchmark.py` (the pre-KQ01 fusion order and a search
+  that shows nothing as negative controls). Measured numbers: the guide's
+  "Benchmark report".
+- **A crawl seeded on a private network is refused at admission**
+  (2026-10-15, `knowledge_ingest._admit_public_seed`, last check of
+  `_prepare_ingest_site`, before the journal row; every caller creates the
+  library only after it returns): the check acquisition makes
+  (`dns_worker.validate_public_url`, never `to_thread(validate_url)`),
+  `security_blocked` for a private, loopback or link-local address,
+  `connect_error` (transient) for a name that resolves to nothing
+  (`ssrf.UnresolvedHostError`). Until then the seed was admitted, the crawl
+  refused it before discovery and the library stayed empty with no refusal
+  shown. Gate: `tests/test_knowledge_crawl_admission.py` (every surface --
+  Web crawl and refresh, `/kb crawl|refresh|add`, both agent tools, a page
+  ingest -- and `STARTERS`, the class gate: a new crawl starter must be
+  declared and admitted before its library exists; the old admission as the
+  negative control), `tests/e2e/test_knowledge_outcomes_browser.py` (EN/AR).
 - **Surfaces**: `/api/kb/*` refuses with stable codes (`KB_ERROR_CODES`,
   `knowledge.err.<code>` EN+AR; KB-S05) and reads bodies under 64 KiB with
   bounded models (KB-S13); every KB surface refuses an install with platform

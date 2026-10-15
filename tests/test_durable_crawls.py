@@ -144,10 +144,15 @@ def test_registry_retention_and_byte_limits_are_real_refusals(journal, monkeypat
 
 @pytest.mark.asyncio
 async def test_durable_write_failure_prevents_any_acquisition(journal, monkeypatch):
-    from kazma_core.stores import knowledge_ingest as ki
     import sqlite3
+
+    import kazma_core.security.ssrf as ssrf
+    from kazma_core.stores import knowledge_ingest as ki
     async def forbidden(*args,**kwargs):
         pytest.fail('Acquisition must not start without a durable job')
+    # Admission checks the seed's address before the journal row (2026-10-15);
+    # docs.example is a reserved name that resolves nowhere.
+    monkeypatch.setattr(ssrf,'validate_url',lambda *args,**kwargs: ())
     monkeypatch.setattr(ki,'kb_discover_pages',forbidden)
     monkeypatch.setattr(journal,'batch_set',lambda *args,**kwargs: (_ for _ in ()).throw(sqlite3.OperationalError('disk full')))
     with pytest.raises(AcquisitionError) as failure:
@@ -389,7 +394,11 @@ async def test_metadata_storage_denial_precedes_fetch_and_corruption_is_visible(
 
 @pytest.mark.asyncio
 async def test_policy_snapshot_does_not_change_when_operator_env_changes_during_yield(journal, monkeypatch):
+    import kazma_core.security.ssrf as ssrf
     from kazma_core.stores import knowledge_ingest as ki
+    # The seed's address is checked at admission (2026-10-15); docs.example
+    # resolves nowhere.
+    monkeypatch.setattr(ssrf,'validate_url',lambda *args,**kwargs: ())
     async def implementation(*args,**kwargs):
         assert not policy.acquisition_policy().permits('jina')
         yield ki.ProgressUpdate(phase='discover')

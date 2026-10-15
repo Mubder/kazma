@@ -1,0 +1,1341 @@
+{
+ "version": 1,
+ "libraries": [
+  {
+   "id": "relay_api",
+   "name": "Relay Messaging API",
+   "seed": "https://docs.relay.example",
+   "pages": [
+    {
+     "url": "https://docs.relay.example/auth",
+     "title": "Authentication",
+     "sections": [
+      {
+       "ref": "relay.auth.api_keys",
+       "heading": "API keys",
+       "body": "Every request to the Relay API is authenticated with an API key. Create keys in the dashboard under Settings, Developers, API keys. Send the key in the `Authorization` header as `Bearer <key>`. A key is shown once, when it is created: keep it in a secrets manager, never in client-side code."
+      },
+      {
+       "ref": "relay.auth.rotation",
+       "heading": "Rotating keys",
+       "body": "An account can hold two active keys at the same time, so you can rotate without downtime: create the new key, deploy it, then revoke the old one. We recommend rotating every 90 days. A revoked key stops working within 60 seconds."
+      },
+      {
+       "ref": "relay.auth.oauth",
+       "heading": "OAuth for partner apps",
+       "body": "Partner applications that act for other Relay accounts use the OAuth 2.0 authorization code flow. Request only the scopes you need: `messages:send`, `messages:read` and `templates:manage`. Access tokens expire after one hour; use the refresh token to get a new one."
+      },
+      {
+       "ref": "relay.auth.errors",
+       "heading": "Authentication errors",
+       "body": "A missing or malformed key returns `401 Unauthorized`. A valid key without the required scope returns `403 Forbidden`, and the error body names the missing scope."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.relay.example/rate-limits",
+     "title": "Rate limits",
+     "sections": [
+      {
+       "ref": "relay.rate_limits.per_plan",
+       "heading": "Limits per plan",
+       "body": "Each plan has a request rate limit per account: Starter allows 20 requests per second, Business 200 requests per second and Enterprise 1,000 requests per second. The limit applies across all API keys of the account."
+      },
+      {
+       "ref": "relay.rate_limits.burst",
+       "heading": "Bursts",
+       "body": "Short bursts above the limit are absorbed by a token bucket: you may send up to twice your plan's rate for 10 seconds before requests are rejected."
+      },
+      {
+       "ref": "relay.rate_limits.too_many",
+       "heading": "Handling 429 responses",
+       "body": "When you exceed the limit the API answers `429 Too Many Requests` with a `Retry-After` header giving the number of seconds to wait. Back off for at least that long; retrying sooner extends the block."
+      },
+      {
+       "ref": "relay.rate_limits.tiers",
+       "heading": "Messaging tiers",
+       "body": "Separately from the request rate, a new sender may message at most 1,000 unique recipients in 24 hours. The tier rises to 10,000 and then 100,000 recipients once the sender keeps a high quality rating for 7 days."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.relay.example/webhooks",
+     "title": "Webhooks",
+     "sections": [
+      {
+       "ref": "relay.webhooks.subscribe",
+       "heading": "Subscribing to events",
+       "body": "Register a webhook URL in the dashboard or with `POST /v2/webhooks`. The URL must use HTTPS with a valid certificate. Relay first sends a verification request carrying a `challenge` parameter, and your endpoint must answer with the same value within 5 seconds."
+      },
+      {
+       "ref": "relay.webhooks.signatures",
+       "heading": "Verifying signatures",
+       "body": "Every webhook request carries an `X-Relay-Signature` header: an HMAC-SHA256 of the raw request body, keyed with your app secret and encoded as hex. Compute it over the raw bytes before parsing the JSON, and compare in constant time."
+      },
+      {
+       "ref": "relay.webhooks.retries",
+       "heading": "Delivery and retries",
+       "body": "Your endpoint must answer with a 2xx status within 10 seconds. If it does not, Relay retries with exponential backoff for up to 72 hours, at most 12 attempts. After that the event is dropped and listed under failed deliveries in the dashboard."
+      },
+      {
+       "ref": "relay.webhooks.events",
+       "heading": "Event types",
+       "body": "Relay sends `message.sent`, `message.delivered`, `message.read` and `message.failed` events for outbound messages, and `message.received` for inbound ones. Events can arrive out of order: use the `timestamp` field to order them."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.relay.example/messages",
+     "title": "Sending messages",
+     "sections": [
+      {
+       "ref": "relay.messages.send_text",
+       "heading": "Send a text message",
+       "body": "Send a message with `POST /v2/messages`, giving the recipient in E.164 format (for example `+96550000000`), `type: text` and the `body`. A text body may hold up to 4,096 characters; a longer body is rejected with error 4003."
+      },
+      {
+       "ref": "relay.messages.media",
+       "heading": "Media messages",
+       "body": "Images may be JPEG or PNG up to 5 MB, video MP4 up to 16 MB, audio AAC or OGG up to 16 MB and documents up to 100 MB. Upload the file first with `POST /v2/media` and send its id, or give a public HTTPS link."
+      },
+      {
+       "ref": "relay.messages.status",
+       "heading": "Message status",
+       "body": "A message moves through `accepted`, `sent`, `delivered` and `read`, or ends `failed`. Read receipts depend on the recipient's privacy settings, so `read` may never arrive even for a message that was read."
+      },
+      {
+       "ref": "relay.messages.window",
+       "heading": "The 24-hour window",
+       "body": "You may send free-form messages to a user only within 24 hours of their last message to you. Outside that window only approved template messages can be sent; a free-form message is refused with error 4701."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.relay.example/templates",
+     "title": "Message templates",
+     "sections": [
+      {
+       "ref": "relay.templates.create",
+       "heading": "Creating a template",
+       "body": "Template names use lowercase letters, digits and underscores, up to 512 characters. Choose a category: `marketing`, `utility` or `authentication`. The category decides the price and which content is allowed."
+      },
+      {
+       "ref": "relay.templates.review",
+       "heading": "Template review",
+       "body": "New templates are reviewed before use, and most are approved within 24 hours. Common reasons for rejection are missing variable samples, a category that does not match the content, and links to shortened URLs."
+      },
+      {
+       "ref": "relay.templates.variables",
+       "heading": "Variables",
+       "body": "Placeholders are numbered `{{1}}`, `{{2}}` and so on, and a template may hold up to 10 of them. Every placeholder needs a sample value when you submit the template; the real values are filled in when you send it."
+      },
+      {
+       "ref": "relay.templates.languages",
+       "heading": "Languages",
+       "body": "A template exists once per language code, such as `en_US`, `ar` or `fr`. Send the language code with the message. If the template has no translation for it, the send fails with error 4302; it never falls back to another language."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.relay.example/errors",
+     "title": "Error codes",
+     "sections": [
+      {
+       "ref": "relay.errors.format",
+       "heading": "Error format",
+       "body": "Errors return a JSON body with `code`, `message` and `trace_id`. Quote the `trace_id` when you contact support: it lets us find the request in our logs."
+      },
+      {
+       "ref": "relay.errors.common",
+       "heading": "Common error codes",
+       "body": "4001: the phone number is not in E.164 format. 4003: the message body is too long. 4290: you are being rate limited. 4302: the template has no translation for the requested language. 4701: a free-form message outside the 24-hour window. 1310: the recipient has opted out of messages from you."
+      },
+      {
+       "ref": "relay.errors.retry_guidance",
+       "heading": "When to retry",
+       "body": "Retry 5xx errors and 429 responses with exponential backoff and jitter. Do not retry other 4xx errors: the request itself is wrong and will fail again. Send an `Idempotency-Key` header so that a retried send is never delivered twice."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.relay.example/pagination",
+     "title": "Pagination",
+     "sections": [
+      {
+       "ref": "relay.pagination.cursor",
+       "heading": "Cursor pagination",
+       "body": "List endpoints return at most `limit` items (default 25, maximum 100) and a `next_cursor`. Pass it as `cursor` to fetch the next page; a null `next_cursor` means you have reached the end."
+      },
+      {
+       "ref": "relay.pagination.filtering",
+       "heading": "Filtering lists",
+       "body": "Filter message lists with `created_after` and `created_before` (ISO 8601 timestamps) and with `status`. Several filters combine with AND."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.relay.example/sdks",
+     "title": "SDKs and sandbox",
+     "sections": [
+      {
+       "ref": "relay.sdks.python",
+       "heading": "Python SDK",
+       "body": "Install the Python SDK with `pip install relay-sdk`; it supports Python 3.9 and newer. Create a client with `relay.Client(api_key=...)`. The client retries 429 and 5xx responses for you."
+      },
+      {
+       "ref": "relay.sdks.node",
+       "heading": "Node.js SDK",
+       "body": "Install the Node.js SDK with `npm install @relay/sdk`. It needs Node.js 18 or newer and ships TypeScript types."
+      },
+      {
+       "ref": "relay.sdks.sandbox",
+       "heading": "Sandbox",
+       "body": "Every account has a sandbox with test numbers. Messages sent from the sandbox are not delivered to real phones and do not count against your tier. Sandbox keys start with `rk_test_`, live keys with `rk_live_`."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "orbit_storage",
+   "name": "Orbit Object Storage",
+   "seed": "https://docs.orbit-storage.example",
+   "pages": [
+    {
+     "url": "https://docs.orbit-storage.example/buckets",
+     "title": "Buckets",
+     "sections": [
+      {
+       "ref": "orbit.buckets.naming",
+       "heading": "Naming rules",
+       "body": "Bucket names are 3 to 63 characters long, use lowercase letters, digits and hyphens, and must be unique across all Orbit accounts."
+      },
+      {
+       "ref": "orbit.buckets.regions",
+       "heading": "Regions",
+       "body": "Create a bucket in one region: `eu-west`, `us-east` or `me-central`. A bucket cannot move between regions; copy its objects to a new bucket instead."
+      },
+      {
+       "ref": "orbit.buckets.versioning",
+       "heading": "Versioning",
+       "body": "Turn on versioning to keep every version of an object. Deleting an object leaves a delete marker, and older versions can be restored until a lifecycle rule removes them."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.orbit-storage.example/access",
+     "title": "Access keys and policies",
+     "sections": [
+      {
+       "ref": "orbit.access.pairs",
+       "heading": "Key pairs",
+       "body": "Orbit authenticates requests with an access key id and a secret key, signed with HMAC-SHA256 in the `Authorization` header. A user may hold two key pairs at once."
+      },
+      {
+       "ref": "orbit.access.policies",
+       "heading": "Bucket policies",
+       "body": "A bucket policy is a JSON document that allows or denies actions such as `orbit:GetObject` to users and keys. A deny always wins over an allow."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.orbit-storage.example/limits",
+     "title": "Request limits",
+     "sections": [
+      {
+       "ref": "orbit.limits.prefix_rates",
+       "heading": "Request rates",
+       "body": "Orbit supports at least 3,500 write requests and 5,500 read requests per second for each key prefix. Spread heavy workloads across prefixes to go beyond that."
+      },
+      {
+       "ref": "orbit.limits.object_size",
+       "heading": "Object size",
+       "body": "A single upload may be up to 5 GB. Larger objects, up to 5 TB, must use multipart upload with parts between 5 MB and 5 GB."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.orbit-storage.example/lifecycle",
+     "title": "Lifecycle rules",
+     "sections": [
+      {
+       "ref": "orbit.lifecycle.transitions",
+       "heading": "Storage class transitions",
+       "body": "Lifecycle rules move objects to the `cold` class after a number of days, for example 30, and to `archive` after 180. Reading an archived object back takes up to 12 hours."
+      },
+      {
+       "ref": "orbit.lifecycle.expiration",
+       "heading": "Expiration",
+       "body": "An expiration rule deletes objects a set number of days after they were created. Rules run once a day, so a deletion can lag by up to 24 hours."
+      }
+     ]
+    },
+    {
+     "url": "https://docs.orbit-storage.example/notifications",
+     "title": "Event notifications",
+     "sections": [
+      {
+       "ref": "orbit.notifications.config",
+       "heading": "Configuring notifications",
+       "body": "Orbit can call an HTTPS endpoint when an object is created or deleted. Notifications are delivered at least once, so make your handler idempotent; failed deliveries are retried for 24 hours."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "hesab_help",
+   "name": "مساعدة حساب",
+   "seed": "https://help.hesab.example/ar",
+   "pages": [
+    {
+     "url": "https://help.hesab.example/ar/invoices",
+     "title": "الفواتير",
+     "sections": [
+      {
+       "ref": "hesab.invoices.create",
+       "heading": "إنشاء فاتورة",
+       "body": "لإنشاء فاتورة جديدة افتح قائمة «الفواتير» واضغط «فاتورة جديدة»، ثم اختر العميل وأضف البنود بالكمية والسعر. يُعطى رقم الفاتورة تلقائيًا بالتسلسل ويبدأ بالبادئة INV، ويمكن تغيير البادئة من الإعدادات."
+      },
+      {
+       "ref": "hesab.invoices.recurring",
+       "heading": "الفواتير المتكررة",
+       "body": "الفاتورة المتكررة تُنشأ وتُرسل تلقائيًا كل أسبوع أو كل شهر أو كل سنة في التاريخ الذي تحدده. يمكنك إيقاف التكرار مؤقتًا دون أن تُحذف الفواتير السابقة."
+      },
+      {
+       "ref": "hesab.invoices.cancel",
+       "heading": "إلغاء فاتورة",
+       "body": "لا يمكن حذف فاتورة بعد إصدارها. لإلغائها أصدر إشعارًا دائنًا بالمبلغ نفسه من صفحة الفاتورة، فتظهر الفاتورة ملغاة في التقارير ويبقى سجلها محفوظًا."
+      },
+      {
+       "ref": "hesab.invoices.reminders",
+       "heading": "تذكير العملاء بالدفع",
+       "body": "يرسل النظام تذكيرًا بالبريد الإلكتروني قبل موعد الاستحقاق بثلاثة أيام، وتذكيرًا ثانيًا بعد التأخر بسبعة أيام. يمكنك تعديل نص التذكير أو إيقافه لكل عميل."
+      }
+     ]
+    },
+    {
+     "url": "https://help.hesab.example/ar/tax",
+     "title": "الضريبة",
+     "sections": [
+      {
+       "ref": "hesab.tax.vat",
+       "heading": "ضريبة القيمة المضافة",
+       "body": "تُحسب ضريبة القيمة المضافة بنسبة 15% افتراضيًا، ويمكن تحديد نسبة مختلفة لكل بند. يجب إدخال الرقم الضريبي للمنشأة في الإعدادات قبل إصدار أول فاتورة ضريبية."
+      },
+      {
+       "ref": "hesab.tax.einvoice",
+       "heading": "الفاتورة الإلكترونية",
+       "body": "تحمل كل فاتورة ضريبية رمز QR يتضمن اسم البائع ورقمه الضريبي وتاريخ الفاتورة والمبلغ والضريبة، وتُرسل نسخة منها إلى بوابة هيئة الضرائب خلال 24 ساعة من إصدارها."
+      },
+      {
+       "ref": "hesab.tax.exempt",
+       "heading": "الإعفاء والنسبة الصفرية",
+       "body": "تخضع الصادرات إلى خارج الدولة لنسبة صفرية، أما الخدمات المعفاة مثل بعض الخدمات المالية فلا تُضاف عليها ضريبة. اختر نوع الإعفاء لكل بند حتى يظهر في الإقرار الضريبي بشكل صحيح."
+      }
+     ]
+    },
+    {
+     "url": "https://help.hesab.example/ar/payments",
+     "title": "المدفوعات",
+     "sections": [
+      {
+       "ref": "hesab.payments.online",
+       "heading": "الدفع الإلكتروني",
+       "body": "اربط حسابك ببوابة الدفع من «الإعدادات ثم المدفوعات» ليتمكن العميل من الدفع ببطاقة مدى أو فيزا أو ماستركارد من رابط الفاتورة. تقتطع البوابة رسومًا قدرها 2.5% من كل عملية."
+      },
+      {
+       "ref": "hesab.payments.manual",
+       "heading": "تسجيل دفعة يدوية",
+       "body": "إذا دفع العميل بتحويل بنكي أو نقدًا فسجّل الدفعة يدويًا من صفحة الفاتورة مع تاريخها وطريقتها، وأرفق إيصال التحويل إن وجد."
+      },
+      {
+       "ref": "hesab.payments.partial",
+       "heading": "الدفعات الجزئية",
+       "body": "يمكن تسجيل أكثر من دفعة على الفاتورة الواحدة، ويظهر الرصيد المتبقي في أعلى الفاتورة حتى تُسدَّد بالكامل فتتحول حالتها إلى «مدفوعة»."
+      },
+      {
+       "ref": "hesab.payments.refund",
+       "heading": "استرداد مبلغ",
+       "body": "يمكن استرداد دفعة إلكترونية خلال 30 يومًا من تاريخها من صفحة الدفعة. يصل المبلغ إلى بطاقة العميل خلال 5 إلى 10 أيام عمل حسب البنك."
+      }
+     ]
+    },
+    {
+     "url": "https://help.hesab.example/ar/currencies",
+     "title": "العملات",
+     "sections": [
+      {
+       "ref": "hesab.currencies.multi",
+       "heading": "الفوترة بعملات متعددة",
+       "body": "يمكنك إصدار فاتورة بالدولار أو اليورو أو أي عملة أخرى. يُجلب سعر الصرف تلقائيًا كل يوم، ولك أن تكتب سعرًا مختلفًا للفاتورة قبل إصدارها."
+      },
+      {
+       "ref": "hesab.currencies.base",
+       "heading": "العملة الأساسية",
+       "body": "تُحدَّد العملة الأساسية عند إنشاء الحساب، وتُعرض بها كل التقارير. لا يمكن تغييرها بعد إصدار أول فاتورة."
+      }
+     ]
+    },
+    {
+     "url": "https://help.hesab.example/ar/reports",
+     "title": "التقارير",
+     "sections": [
+      {
+       "ref": "hesab.reports.pnl",
+       "heading": "تقرير الأرباح والخسائر",
+       "body": "يعرض تقرير الأرباح والخسائر الإيرادات والمصروفات وصافي الربح لأي فترة تختارها، ويمكن مقارنة الفترة بالفترة السابقة."
+      },
+      {
+       "ref": "hesab.reports.aging",
+       "heading": "أعمار الديون",
+       "body": "يقسم تقرير أعمار الديون المبالغ المستحقة على العملاء إلى فئات: أقل من 30 يومًا، ومن 31 إلى 60، ومن 61 إلى 90، وأكثر من 90 يومًا."
+      },
+      {
+       "ref": "hesab.reports.export",
+       "heading": "تصدير البيانات",
+       "body": "يمكن تصدير أي تقرير أو قائمة فواتير إلى Excel أو CSV أو PDF من زر «تصدير» في أعلى الصفحة."
+      }
+     ]
+    },
+    {
+     "url": "https://help.hesab.example/ar/users",
+     "title": "المستخدمون",
+     "sections": [
+      {
+       "ref": "hesab.users.roles",
+       "heading": "صلاحيات المستخدمين",
+       "body": "هناك ثلاثة أدوار: المدير يملك كل الصلاحيات، والمحاسب يصدر الفواتير ويسجل الدفعات ولا يستطيع حذف البيانات أو تغيير الإعدادات، والمشاهد يطّلع على التقارير فقط."
+      },
+      {
+       "ref": "hesab.users.invite",
+       "heading": "إضافة مستخدم",
+       "body": "أضف مستخدمًا بدعوته عبر بريده الإلكتروني من «الإعدادات ثم المستخدمون». تتيح الباقة الأساسية خمسة مستخدمين، والباقة المتقدمة عددًا غير محدود."
+      },
+      {
+       "ref": "hesab.users.twofa",
+       "heading": "التحقق بخطوتين",
+       "body": "فعّل التحقق بخطوتين من ملفك الشخصي باستخدام تطبيق مصادقة. التحقق بخطوتين إلزامي لكل من يملك دور المدير."
+      }
+     ]
+    },
+    {
+     "url": "https://help.hesab.example/ar/data",
+     "title": "البيانات",
+     "sections": [
+      {
+       "ref": "hesab.data.backup",
+       "heading": "النسخ الاحتياطي اليومي",
+       "body": "تُؤخذ نسخة احتياطية من بياناتك كل يوم تلقائيًا، وتُحفظ كل نسخة 30 يومًا. لاستعادة نسخة سابقة تواصل مع الدعم الفني واذكر التاريخ المطلوب."
+      },
+      {
+       "ref": "hesab.data.import",
+       "heading": "استيراد البيانات",
+       "body": "يمكن استيراد العملاء والمنتجات من ملف Excel باستخدام القالب المتاح في صفحة الاستيراد. تُرفض الصفوف التي ينقصها اسم العميل وتظهر في تقرير الأخطاء."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ops_runbook",
+   "name": "Ops runbook",
+   "seed": "https://wiki.ops.example/runbook",
+   "pages": [
+    {
+     "url": "https://wiki.ops.example/runbook/deploy",
+     "title": "Deploy",
+     "sections": [
+      {
+       "ref": "ops.deploy.release",
+       "heading": "Deploy to production",
+       "body": "قبل أي deploy للإنتاج لازم يكون الـ CI أخضر على فرع main، وفيه موافقة من شخصين على الـ pull request. بعدها شغّل `make release VERSION=x.y.z` من جهازك، والـ pipeline يبني الـ image ويرفعها للـ registry ويسوي rollout تدريجي."
+      },
+      {
+       "ref": "ops.deploy.rollback",
+       "heading": "Rollback",
+       "body": "إذا طلع خطأ بعد الـ deploy لا تحاول تصلحه مباشرة على الإنتاج. ارجع للإصدار السابق بأمر `kubectl rollout undo deployment/api -n prod` وبعدين افتح incident."
+      },
+      {
+       "ref": "ops.deploy.freeze",
+       "heading": "Deploy freeze",
+       "body": "ما في deploy يوم الخميس بعد الساعة 2 الظهر ولا في أيام الإجازات الرسمية، إلا hotfix لحادثة P1 بموافقة الـ on-call lead."
+      },
+      {
+       "ref": "ops.deploy.flags",
+       "heading": "Feature flags",
+       "body": "الميزات الجديدة تنزل مطفية خلف feature flag في Flagset وتتفعل بالتدريج: 5% ثم 25% ثم 100%. أي flag عمرها أكثر من 90 يوم لازم تنشال من الكود."
+      }
+     ]
+    },
+    {
+     "url": "https://wiki.ops.example/runbook/oncall",
+     "title": "On-call",
+     "sections": [
+      {
+       "ref": "ops.oncall.rotation",
+       "heading": "On-call rotation",
+       "body": "المناوبة أسبوعية وتبدأ يوم الأحد الساعة 9 الصبح بتوقيت الكويت. تقدر تبدّل مناوبتك مع زميل بشرط تحدّث الجدول في Beacon قبلها بـ 48 ساعة."
+      },
+      {
+       "ref": "ops.oncall.escalation",
+       "heading": "Escalation",
+       "body": "إذا ما أحد رد على تنبيه P1 خلال 15 دقيقة يتصعّد تلقائيًا للـ team lead، وبعد 30 دقيقة للـ CTO."
+      },
+      {
+       "ref": "ops.oncall.handover",
+       "heading": "Handover",
+       "body": "في نهاية المناوبة اكتب handover note في قناة #ops-handover، فيها الحوادث المفتوحة والتنبيهات المزعجة اللي تحتاج متابعة."
+      }
+     ]
+    },
+    {
+     "url": "https://wiki.ops.example/runbook/database",
+     "title": "Database",
+     "sections": [
+      {
+       "ref": "ops.database.backups",
+       "heading": "Database backups",
+       "body": "يصير `pg_dump` كامل لقاعدة الإنتاج كل ليلة الساعة 2 بتوقيت UTC، والنسخ تنحفظ في bucket اسمه `ops-backups` لمدة 14 يوم."
+      },
+      {
+       "ref": "ops.database.restore",
+       "heading": "Restore",
+       "body": "للاسترجاع: نزّل آخر dump من `ops-backups`، استرجعه على خادم staging أول وتأكد من البيانات، وبعدها استرجعه على الإنتاج بأمر `pg_restore --clean`. الاسترجاع على الإنتاج يحتاج موافقة الـ CTO."
+      },
+      {
+       "ref": "ops.database.slow_queries",
+       "heading": "Slow queries",
+       "body": "أي query تاخذ أكثر من 500 ms تنسجل في `pg_stat_statements`. راجع أبطأ عشر queries كل أسبوع وافتح ticket لأي وحدة تتكرر."
+      },
+      {
+       "ref": "ops.database.migrations",
+       "heading": "Schema migrations",
+       "body": "الـ migrations لازم تكون backward compatible: أضف العمود أول، انشر الكود، وبعدين احذف القديم في release منفصل. ممنوع `ALTER TABLE` يقفل جدول كبير وقت الذروة."
+      }
+     ]
+    },
+    {
+     "url": "https://wiki.ops.example/runbook/access",
+     "title": "Access",
+     "sections": [
+      {
+       "ref": "ops.access.vpn",
+       "heading": "VPN",
+       "body": "الدخول لأي نظام داخلي يكون عن طريق WireGuard VPN. كل موظف ياخذ config خاص فيه من IT portal، والـ config ما ينشارك أبدًا."
+      },
+      {
+       "ref": "ops.access.ssh",
+       "heading": "SSH access",
+       "body": "الـ SSH للخوادم يمر عبر الـ bastion host `bastion.ops.example` بمفاتيح فقط، والدخول بكلمة سر مقفل. المفاتيح تنضاف بطلب في IT portal."
+      },
+      {
+       "ref": "ops.access.secrets",
+       "heading": "Secrets",
+       "body": "كلمات السر والمفاتيح محفوظة في Vault تحت المسار `secret/apps/<app-name>`. إذا موظف ترك الشركة، كل الـ secrets اللي كان يوصل لها تتغيّر خلال 24 ساعة."
+      }
+     ]
+    },
+    {
+     "url": "https://wiki.ops.example/runbook/incidents",
+     "title": "Incidents",
+     "sections": [
+      {
+       "ref": "ops.incidents.severity",
+       "heading": "Severity levels",
+       "body": "P1 يعني توقف كامل يأثر على العملاء، P2 أداء ضعيف أو ميزة مهمة واقفة، P3 مشكلة بسيطة لها حل مؤقت."
+      },
+      {
+       "ref": "ops.incidents.postmortem",
+       "heading": "Postmortem",
+       "body": "بعد أي حادثة P1 أو P2 لازم ينكتب postmortem خلال 5 أيام عمل على القالب الـ blameless، ويتراجع في اجتماع الأربعاء."
+      },
+      {
+       "ref": "ops.incidents.status_page",
+       "heading": "Status page",
+       "body": "حدّث الـ status page خلال 10 دقايق من بداية أي حادثة P1، وبعدها كل 30 دقيقة لين ما تنحل."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "questions": [
+  {
+   "id": "e01",
+   "text": "How long does Relay keep retrying webhook deliveries?",
+   "category": "exact",
+   "gold": [
+    "relay.webhooks.retries"
+   ],
+   "below": [
+    "orbit.notifications.config"
+   ]
+  },
+  {
+   "id": "e02",
+   "text": "What is the request rate limit on the Business plan?",
+   "category": "exact",
+   "gold": [
+    "relay.rate_limits.per_plan"
+   ],
+   "below": [
+    "orbit.limits.prefix_rates"
+   ]
+  },
+  {
+   "id": "e03",
+   "text": "Which header carries the webhook signature?",
+   "category": "exact",
+   "gold": [
+    "relay.webhooks.signatures"
+   ],
+   "below": []
+  },
+  {
+   "id": "e04",
+   "text": "What is the maximum size of a video message?",
+   "category": "exact",
+   "gold": [
+    "relay.messages.media"
+   ],
+   "below": []
+  },
+  {
+   "id": "e05",
+   "text": "How many variables can a message template hold?",
+   "category": "exact",
+   "gold": [
+    "relay.templates.variables"
+   ],
+   "below": []
+  },
+  {
+   "id": "e06",
+   "text": "What does error 4701 mean?",
+   "category": "exact",
+   "gold": [
+    "relay.errors.common|relay.messages.window"
+   ],
+   "below": []
+  },
+  {
+   "id": "e07",
+   "text": "How do I install the Python SDK?",
+   "category": "exact",
+   "gold": [
+    "relay.sdks.python"
+   ],
+   "below": []
+  },
+  {
+   "id": "e08",
+   "text": "What is the maximum page size for list endpoints?",
+   "category": "exact",
+   "gold": [
+    "relay.pagination.cursor"
+   ],
+   "below": []
+  },
+  {
+   "id": "e09",
+   "text": "How long does template review take?",
+   "category": "exact",
+   "gold": [
+    "relay.templates.review"
+   ],
+   "below": []
+  },
+  {
+   "id": "e10",
+   "text": "How large can a single Orbit upload be?",
+   "category": "exact",
+   "gold": [
+    "orbit.limits.object_size"
+   ],
+   "below": []
+  },
+  {
+   "id": "e11",
+   "text": "What are the bucket naming rules?",
+   "category": "exact",
+   "gold": [
+    "orbit.buckets.naming"
+   ],
+   "below": []
+  },
+  {
+   "id": "e12",
+   "text": "Which prefix do sandbox API keys start with?",
+   "category": "exact",
+   "gold": [
+    "relay.sdks.sandbox"
+   ],
+   "below": []
+  },
+  {
+   "id": "p01",
+   "text": "My server was down for a day, will I lose the events Relay tried to send me?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.webhooks.retries"
+   ],
+   "below": [
+    "orbit.notifications.config"
+   ]
+  },
+  {
+   "id": "p02",
+   "text": "How can I swap out a credential without any outage?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.auth.rotation"
+   ],
+   "below": [
+    "orbit.access.pairs"
+   ]
+  },
+  {
+   "id": "p03",
+   "text": "Can I message a customer who last wrote to us three days ago?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.messages.window"
+   ],
+   "below": []
+  },
+  {
+   "id": "p04",
+   "text": "The API told me to slow down. How long should I pause?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.rate_limits.too_many"
+   ],
+   "below": []
+  },
+  {
+   "id": "p05",
+   "text": "How do I confirm a callback really came from Relay and was not forged?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.webhooks.signatures"
+   ],
+   "below": []
+  },
+  {
+   "id": "p06",
+   "text": "Why might I never see that a recipient opened my message?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.messages.status"
+   ],
+   "below": []
+  },
+  {
+   "id": "p07",
+   "text": "How many different people can a brand-new sender reach per day?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.rate_limits.tiers"
+   ],
+   "below": []
+  },
+  {
+   "id": "p08",
+   "text": "Is it safe to resend a request after a timeout without the customer getting it twice?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.errors.retry_guidance"
+   ],
+   "below": []
+  },
+  {
+   "id": "p09",
+   "text": "How do I get my objects into cheaper storage automatically after a month?",
+   "category": "paraphrase",
+   "gold": [
+    "orbit.lifecycle.transitions"
+   ],
+   "below": []
+  },
+  {
+   "id": "p10",
+   "text": "Can I relocate a bucket to another geography?",
+   "category": "paraphrase",
+   "gold": [
+    "orbit.buckets.regions"
+   ],
+   "below": []
+  },
+  {
+   "id": "p11",
+   "text": "What happens if I send a template in a language it was never translated into?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.templates.languages"
+   ],
+   "below": []
+  },
+  {
+   "id": "p12",
+   "text": "How long is a partner app's access token valid?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.auth.oauth"
+   ],
+   "below": []
+  },
+  {
+   "id": "a01",
+   "text": "كيف أنشئ فاتورة جديدة؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.invoices.create"
+   ],
+   "below": []
+  },
+  {
+   "id": "a02",
+   "text": "كم نسبة ضريبة القيمة المضافة الافتراضية؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.tax.vat"
+   ],
+   "below": []
+  },
+  {
+   "id": "a03",
+   "text": "ما رسوم بوابة الدفع الإلكتروني؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.payments.online"
+   ],
+   "below": []
+  },
+  {
+   "id": "a04",
+   "text": "كم يستغرق وصول المبلغ المسترد إلى بطاقة العميل؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.payments.refund"
+   ],
+   "below": []
+  },
+  {
+   "id": "a05",
+   "text": "كم مستخدمًا تتيح الباقة الأساسية؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.users.invite"
+   ],
+   "below": []
+  },
+  {
+   "id": "a06",
+   "text": "ما مدة حفظ النسخ الاحتياطية في حساب؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.data.backup"
+   ],
+   "below": [
+    "ops.database.backups"
+   ]
+  },
+  {
+   "id": "a07",
+   "text": "ما فئات تقرير أعمار الديون؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.reports.aging"
+   ],
+   "below": []
+  },
+  {
+   "id": "a08",
+   "text": "هل يمكن تغيير العملة الأساسية؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.currencies.base"
+   ],
+   "below": []
+  },
+  {
+   "id": "r01",
+   "text": "طلعت فاتورة غلط، أقدر أمسحها؟",
+   "category": "arabic_paraphrase",
+   "gold": [
+    "hesab.invoices.cancel"
+   ],
+   "below": []
+  },
+  {
+   "id": "r02",
+   "text": "العميل دفع نص المبلغ بس، شلون أسجلها؟",
+   "category": "arabic_paraphrase",
+   "gold": [
+    "hesab.payments.partial"
+   ],
+   "below": []
+  },
+  {
+   "id": "r03",
+   "text": "أبي النظام يرسل الفاتورة لحاله كل شهر",
+   "category": "arabic_paraphrase",
+   "gold": [
+    "hesab.invoices.recurring"
+   ],
+   "below": []
+  },
+  {
+   "id": "r04",
+   "text": "المحاسب عندنا يقدر يغيّر الإعدادات؟",
+   "category": "arabic_paraphrase",
+   "gold": [
+    "hesab.users.roles"
+   ],
+   "below": []
+  },
+  {
+   "id": "r05",
+   "text": "زبون حوّل لي على البنك، وين أسجل هالشي؟",
+   "category": "arabic_paraphrase",
+   "gold": [
+    "hesab.payments.manual"
+   ],
+   "below": []
+  },
+  {
+   "id": "r06",
+   "text": "أبي أطلع قائمة الفواتير ملف إكسل",
+   "category": "arabic_paraphrase",
+   "gold": [
+    "hesab.reports.export"
+   ],
+   "below": []
+  },
+  {
+   "id": "r07",
+   "text": "متى يذكّر النظام العميل إذا ما دفع؟",
+   "category": "arabic_paraphrase",
+   "gold": [
+    "hesab.invoices.reminders"
+   ],
+   "below": []
+  },
+  {
+   "id": "m01",
+   "text": "شلون أسوي rollback إذا خرب الـ deploy؟",
+   "category": "mixed",
+   "gold": [
+    "ops.deploy.rollback"
+   ],
+   "below": []
+  },
+  {
+   "id": "m02",
+   "text": "متى تبدأ مناوبة الـ on-call؟",
+   "category": "mixed",
+   "gold": [
+    "ops.oncall.rotation"
+   ],
+   "below": []
+  },
+  {
+   "id": "m03",
+   "text": "How long do we keep the production database dumps?",
+   "category": "mixed",
+   "gold": [
+    "ops.database.backups"
+   ],
+   "below": [
+    "hesab.data.backup"
+   ]
+  },
+  {
+   "id": "m04",
+   "text": "إذا ما أحد رد على P1 alert، لمين يتصعّد؟",
+   "category": "mixed",
+   "gold": [
+    "ops.oncall.escalation"
+   ],
+   "below": []
+  },
+  {
+   "id": "m05",
+   "text": "Can I deploy on Thursday afternoon?",
+   "category": "mixed",
+   "gold": [
+    "ops.deploy.freeze"
+   ],
+   "below": []
+  },
+  {
+   "id": "m06",
+   "text": "وين محفوظة الـ secrets حق التطبيقات؟",
+   "category": "mixed",
+   "gold": [
+    "ops.access.secrets"
+   ],
+   "below": []
+  },
+  {
+   "id": "m07",
+   "text": "How do I SSH into a production server?",
+   "category": "mixed",
+   "gold": [
+    "ops.access.ssh"
+   ],
+   "below": []
+  },
+  {
+   "id": "m08",
+   "text": "متى لازم نكتب الـ postmortem؟",
+   "category": "mixed",
+   "gold": [
+    "ops.incidents.postmortem"
+   ],
+   "below": []
+  },
+  {
+   "id": "m09",
+   "text": "What counts as a slow query for us?",
+   "category": "mixed",
+   "gold": [
+    "ops.database.slow_queries"
+   ],
+   "below": []
+  },
+  {
+   "id": "c01",
+   "text": "كم مرة يعيد Relay إرسال الـ webhook إذا ما رد السيرفر؟",
+   "category": "cross",
+   "gold": [
+    "relay.webhooks.retries"
+   ],
+   "below": []
+  },
+  {
+   "id": "c02",
+   "text": "ما الحد الأقصى لطول الرسالة النصية؟",
+   "category": "cross",
+   "gold": [
+    "relay.messages.send_text"
+   ],
+   "below": []
+  },
+  {
+   "id": "c03",
+   "text": "How long does a refund take to reach the customer's card in Hesab?",
+   "category": "cross",
+   "gold": [
+    "hesab.payments.refund"
+   ],
+   "below": []
+  },
+  {
+   "id": "c04",
+   "text": "Is two-factor authentication mandatory for admins in Hesab?",
+   "category": "cross",
+   "gold": [
+    "hesab.users.twofa"
+   ],
+   "below": []
+  },
+  {
+   "id": "c05",
+   "text": "كيف أتحقق من توقيع الطلب القادم من Relay؟",
+   "category": "cross",
+   "gold": [
+    "relay.webhooks.signatures"
+   ],
+   "below": []
+  },
+  {
+   "id": "c06",
+   "text": "What VAT rate does Hesab apply by default?",
+   "category": "cross",
+   "gold": [
+    "hesab.tax.vat"
+   ],
+   "below": []
+  },
+  {
+   "id": "x01",
+   "text": "What are the limits on request rate and on unique recipients for a new sender?",
+   "category": "multi",
+   "gold": [
+    "relay.rate_limits.per_plan",
+    "relay.rate_limits.tiers"
+   ],
+   "below": []
+  },
+  {
+   "id": "x02",
+   "text": "Which events does Relay send, and how fast must my endpoint answer them?",
+   "category": "multi",
+   "gold": [
+    "relay.webhooks.events",
+    "relay.webhooks.retries"
+   ],
+   "below": []
+  },
+  {
+   "id": "x03",
+   "text": "كيف أسجل دفعة يدوية، وكيف أسترد دفعة إلكترونية؟",
+   "category": "multi",
+   "gold": [
+    "hesab.payments.manual",
+    "hesab.payments.refund"
+   ],
+   "below": []
+  },
+  {
+   "id": "x04",
+   "text": "How do we roll back a bad deploy, and how soon must the status page be updated?",
+   "category": "multi",
+   "gold": [
+    "ops.deploy.rollback",
+    "ops.incidents.status_page"
+   ],
+   "below": []
+  },
+  {
+   "id": "n01",
+   "text": "How do I delete my Relay account?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "n02",
+   "text": "How much does the Business plan cost per month?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "n03",
+   "text": "Does Relay support voice calls?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "n04",
+   "text": "How do I configure SAML single sign-on for the dashboard?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "n05",
+   "text": "What is the weather in Lisbon tomorrow?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "n06",
+   "text": "Give me a recipe for lentil soup.",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "n07",
+   "text": "Which GraphQL query lists my contacts?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "n08",
+   "text": "How do I encrypt Orbit objects with my own keys?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "z01",
+   "text": "كيف أحذف حسابي في حساب نهائيًا؟",
+   "category": "abstain_ar",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "z02",
+   "text": "كم سعر الاشتراك السنوي في الباقة المتقدمة؟",
+   "category": "abstain_ar",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "z03",
+   "text": "هل يدعم النظام إدارة الرواتب؟",
+   "category": "abstain_ar",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "z04",
+   "text": "شنو أفضل مطعم مشاوي في الكويت؟",
+   "category": "abstain_ar",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "z05",
+   "text": "شلون أنزل تطبيق الجوال على App Store؟",
+   "category": "abstain_ar",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "z06",
+   "text": "كم يوم إجازة سنوية للموظف؟",
+   "category": "abstain_ar",
+   "gold": [],
+   "below": []
+  }
+ ],
+ "heldout": [
+  {
+   "id": "h01",
+   "text": "What scopes can an OAuth partner app request?",
+   "category": "exact",
+   "gold": [
+    "relay.auth.oauth"
+   ],
+   "below": []
+  },
+  {
+   "id": "h02",
+   "text": "If my handler is slow to respond, when does Relay stop waiting for it?",
+   "category": "paraphrase",
+   "gold": [
+    "relay.webhooks.retries"
+   ],
+   "below": []
+  },
+  {
+   "id": "h03",
+   "text": "Which audio formats can I send?",
+   "category": "exact",
+   "gold": [
+    "relay.messages.media"
+   ],
+   "below": []
+  },
+  {
+   "id": "h04",
+   "text": "How many writes per second does Orbit allow on one key prefix?",
+   "category": "exact",
+   "gold": [
+    "orbit.limits.prefix_rates"
+   ],
+   "below": [
+    "relay.rate_limits.per_plan"
+   ]
+  },
+  {
+   "id": "h05",
+   "text": "كيف أفعّل التحقق بخطوتين؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.users.twofa"
+   ],
+   "below": []
+  },
+  {
+   "id": "h06",
+   "text": "أبغى أعرف ربحي هالسنة مقارنة بالسنة اللي فاتت",
+   "category": "arabic_paraphrase",
+   "gold": [
+    "hesab.reports.pnl"
+   ],
+   "below": []
+  },
+  {
+   "id": "h07",
+   "text": "ماذا يتضمن رمز QR في الفاتورة الضريبية؟",
+   "category": "arabic",
+   "gold": [
+    "hesab.tax.einvoice"
+   ],
+   "below": []
+  },
+  {
+   "id": "h08",
+   "text": "شلون أشغّل feature جديدة لنسبة صغيرة من المستخدمين؟",
+   "category": "mixed",
+   "gold": [
+    "ops.deploy.flags"
+   ],
+   "below": []
+  },
+  {
+   "id": "h09",
+   "text": "Where do I get my VPN config?",
+   "category": "mixed",
+   "gold": [
+    "ops.access.vpn"
+   ],
+   "below": []
+  },
+  {
+   "id": "h10",
+   "text": "متى نحذف عمود قديم من الجدول؟",
+   "category": "mixed",
+   "gold": [
+    "ops.database.migrations"
+   ],
+   "below": []
+  },
+  {
+   "id": "h11",
+   "text": "ما مدة صلاحية رمز الوصول لتطبيقات الشركاء؟",
+   "category": "cross",
+   "gold": [
+    "relay.auth.oauth"
+   ],
+   "below": []
+  },
+  {
+   "id": "h12",
+   "text": "Can I import my customers from Excel into Hesab?",
+   "category": "cross",
+   "gold": [
+    "hesab.data.import"
+   ],
+   "below": []
+  },
+  {
+   "id": "h13",
+   "text": "How do I export my Relay message history to BigQuery?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h14",
+   "text": "Who won the football match yesterday?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h15",
+   "text": "هل يمكن ربط حساب بمتجر سلة الإلكتروني؟",
+   "category": "abstain_ar",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "h16",
+   "text": "وين ألقى كلمة سر الواي فاي حق المكتب؟",
+   "category": "abstain_ar",
+   "gold": [],
+   "below": []
+  }
+ ]
+}

@@ -24,9 +24,9 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | Catch-all autoscaler instance never reused | SQ01 soak | An idle catch-all instance takes the next unmatched task | In progress |
 | Handoff end to end | SW-E13, D6 | A shipped worker hands off through a tool; guards intact | In progress |
 | Chaos runs | SQ04 | Fault injection per case with the recorded outcome | In progress |
-| Knowledge retrieval quality | KQ01 | Versioned EN/AR benchmark, explicit search and auto-inject, ratchet | In progress |
-| A crawl seeded with a private address | 2026-10-14 deploy | Refused at admission on every surface, EN/AR | In progress |
-| Knowledge deviations (KB-S01, KB-E03, KB-E12) | Knowledge tracker | Each accepted with its reason, or the letter implemented | In progress |
+| Knowledge retrieval quality | KQ01 | Versioned EN/AR benchmark, explicit search and auto-inject, ratchet | Done: `tests/test_knowledge_benchmark.py` (224 floors locked, dataset v1). It found abstention 0.00 on both paths; an evidence rule now abstains on 7 of 14 unanswerable questions and lifts precision 0.19 -> 0.71 |
+| A crawl seeded with a private address | 2026-10-14 deploy | Refused at admission on every surface, EN/AR | Done: `tests/test_knowledge_crawl_admission.py` (every starter, a gate over them, the old admission as control), browser EN/AR |
+| Knowledge deviations (KB-S01, KB-E03, KB-E12) | Knowledge tracker | Each accepted with its reason, or the letter implemented | Done: KB-S01 implemented (Kazma's lines outside the fence); KB-E03 and KB-E12 accepted with reasons |
 | Dropped Chroma collections leave vectors on disk | KB-Q01 harness | Orphan segment folders removed when nothing holds them | In progress |
 | Chroma cannot read a small collection after a sweep | KB-Q01 harness | Root cause fixed (a newer chromadb, persistence settings or recovery) | In progress |
 | A deleted library's words stay in the FTS index | KB-Q01 harness | Purged after a library delete | In progress |
@@ -40,6 +40,8 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | Temporal durable path | SQ03, SW-E16, D9 | Time-skipping test server (download approved), Temporal timeouts | Queued (after the handoff/chaos merge) |
 | A memory backup older than a table could not be restored | Memory soak, cycle 420 | The restore brings the copy's schema up to date before it reads it | Done: `test_a_backup_from_before_a_table_restores_and_keeps_its_forgets` (the old restore as control) |
 | Model-pass extraction recording | M24 | `scripts/memory_bench.py extraction --record`, then `lock` | Queued (after the Memory merge) |
+| The LLM ledger row is written on the event loop | Swarm routing agent | Every ledger write from async code off the loop, a static gate | In progress |
+| Tests that load the real embedder or reach a real provider | Swarm routing agent | Stubbed, and a permanent guard (no non-loopback socket, no real model, unless marked) | In progress |
 | A daily job fired twice on one local day | Scheduled 28-day soak on c4e8f51c: 2 of 67k occurrences, 224 restarts | The cause found from the ledger; a product fix or a precise check fix, the 28-day soak passing | In progress |
 
 ## Measurements (soaks)

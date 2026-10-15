@@ -66,6 +66,16 @@
 - A memory backup taken before one of the store's tables existed (an older
   build's, for example) can be restored again: the restore brings the copy's
   schema up to date before it reads it. It failed on the missing table.
+- Knowledge Library search now leaves out what is not about the question.
+  A versioned English/Arabic retrieval benchmark (explicit search and the
+  library text injected into a turn) found that every question got hits,
+  even ones nothing in the libraries answers; an evidence rule like memory's
+  now answers 7 of 14 such questions with nothing, lifts precision from 0.19
+  to 0.71 and cross-language answers from 2 of 6 to 5 of 6. Its scores are
+  locked so they cannot fall unnoticed.
+- A Knowledge crawl seeded with a private or loopback address is refused at
+  once, on every surface, before a library is made; it used to leave an empty
+  library.
 - Knowledge Library scale and soak harness (`scripts/knowledge_soak.py`,
   tracker row KB-Q01): `scale` measures ingest, keyword, meaning and hybrid
   search, the repair sweep, library delete and the re-embed time after a

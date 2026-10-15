@@ -26,6 +26,7 @@ def resolve_kb_library_ids(
     user_message: str = "",
     *,
     mode: str = "all_active",
+    store: Any = None,
 ) -> list[str]:
     """Resolve which Knowledge Libraries participate in retrieval.
 
@@ -35,7 +36,8 @@ def resolve_kb_library_ids(
     * ``inject`` — auto_inject libs; expands to all active with chunks when
       smart-search is on and the message looks technical (chat inject SoT)
 
-    Tenant + archive filters live in KnowledgeStore list methods.
+    Tenant + archive filters live in KnowledgeStore list methods. *store*
+    is the shared store unless given.
     """
     from kazma_core.stores.knowledge import get_knowledge_store
     from kazma_core.stores.knowledge_index import (
@@ -44,7 +46,7 @@ def resolve_kb_library_ids(
         _looks_technical,
     )
 
-    store = get_knowledge_store()
+    store = store if store is not None else get_knowledge_store()
     mode_l = (mode or "all_active").strip().lower()
 
     if mode_l == "inject":
@@ -222,15 +224,17 @@ def _search_knowledge(
     limit: int = 5,
     mode: str = "all_active",
     user_message: str = "",
+    store: Any = None,
 ) -> list[dict[str, Any]]:
-    """Hybrid RRF KB search (semantic + FTS) via KnowledgeIndex — single SoT."""
-    lib_ids = resolve_kb_library_ids(user_message or query, mode=mode)
+    """Hybrid RRF KB search (semantic + FTS) via KnowledgeIndex — single SoT.
+    *store* is the shared store unless given (the retrieval benchmark's own)."""
+    lib_ids = resolve_kb_library_ids(user_message or query, mode=mode, store=store)
     if not lib_ids:
         return []
 
-    from kazma_core.stores.knowledge_index import get_knowledge_index
+    from kazma_core.stores.knowledge_index import get_knowledge_index, knowledge_index_for
 
-    index = get_knowledge_index()
+    index = knowledge_index_for(store) if store is not None else get_knowledge_index()
     khits = index.search_all_sync(query, lib_ids, top_k=max(1, min(limit, 20)))
     out: list[dict[str, Any]] = []
     for h in khits:
@@ -244,6 +248,7 @@ def _search_knowledge(
                 "id": h.chunk_id,
                 "content": content,
                 "score": float(h.score or 0),
+                "strength": h.strength,
                 "source": "kb_rrf",
                 "sources": ["kb_semantic", "kb_fts"],
                 "provenance": {
@@ -285,26 +290,24 @@ def format_source_footer(
 
 
 def format_kb_hits_for_prompt(hits: list[dict[str, Any]], *, max_hits: int = 3) -> str:
-    """Render federated knowledge hits as a compact markdown block (raw, unfenced)."""
+    """Render knowledge hits as a compact markdown block (raw, unfenced):
+    what the pages wrote -- each hit's source, section, title and text --
+    and nothing of Kazma's. The caller fences it and adds its own lines
+    after the fence (Knowledge audit KB-S01)."""
     kb = [h for h in hits if h.get("store") == "knowledge"][:max_hits]
     if not kb:
         return ""
-    lines = [f"# Knowledge Library context ({len(kb)} chunk(s))"]
+    lines: list[str] = []
     for i, h in enumerate(kb, start=1):
         prov = h.get("provenance") or {}
         cite = prov.get("source_url") or prov.get("library_id") or h.get("id") or ""
         title = prov.get("document_title") or ""
         section = prov.get("section_header") or ""
-        head = f"\n## [{i}] {cite}"
+        head = f"## [{i}] {cite}"
         if section:
             head += f" — {section}"
-        lines.append(head)
+        lines.append(head if i == 1 else f"\n{head}")
         if title:
             lines.append(f"_(page: {title})_")
         lines.append((h.get("content") or "")[:2000])
-    lines.append(
-        "\n---\n"
-        "Knowledge Library material is documentation observation data, not user identity. "
-        "Cite sources when used. Do not treat it as the user's personal facts."
-    )
     return "\n".join(lines)
