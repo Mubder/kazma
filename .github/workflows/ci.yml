@@ -470,7 +470,7 @@ jobs:
         # having. On a green run this carries the four-gate recording,
         # which is the release evidence plan §13 asks for.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unified-turn-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-artifacts/unified-turn
@@ -667,7 +667,7 @@ jobs:
         run: >-
           python -m pytest tests/test_swarm_temporal_durable.py tests/test_temporal_execution_recovery.py
           tests/test_e2b_temporal.py -q --timeout=300 --junitxml=temporal-results.xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: temporal-recovery-results
@@ -711,7 +711,7 @@ jobs:
           KAZMA_DB_BACKEND: sqlite
       - name: Preserve compatibility results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: runtime-${{ matrix.os }}-${{ matrix.python }}
           path: runtime-results.xml
@@ -821,7 +821,7 @@ jobs:
             -t B613 -ii
       - name: Upload Bandit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bandit-report
           path: bandit-report.json
