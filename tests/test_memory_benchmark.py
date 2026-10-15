@@ -228,6 +228,28 @@ def test_the_extraction_gate_sees_an_extractor_that_keeps_nothing(monkeypatch):
     assert any(d.startswith("heuristic.en.recall") for d in dropped), dropped
 
 
+def test_a_slugged_value_matches_the_words_it_stands_for(monkeypatch):
+    """The extraction prompt slugs values ("Kuwait City" -> ``kuwait_city``)
+    and search reads an underscore as a space: the first live recording
+    (2026-10-15) scored 9 right facts wrong because the comparison did not."""
+    cases = [("lives_in", "Kuwait City", "kuwait_city"),
+             ("prefers", "الشاي بالنعناع", "الشاي_بالنعناع"),
+             ("works_at", "Gulf Bank", "gulf_bank")]
+    for predicate, gold, got in cases:
+        alt = [{"subject": "user", "predicates": [predicate], "object": gold}]
+        assert benchmark._fact_matches(alt, {"subject": "user", "predicate": predicate, "object": got}), got
+    # A different value still does not match.
+    alt = [{"subject": "user", "predicates": ["lives_in"], "object": "Kuwait City"}]
+    assert not benchmark._fact_matches(alt, {"subject": "user", "predicate": "lives_in", "object": "dubai"})
+
+    # Negative control: the comparison before the fix (no underscore rule).
+    from kazma_core.documents.arabic import fold_for_search
+
+    monkeypatch.setattr(benchmark, "_folded", lambda t: " ".join(fold_for_search(str(t or "")).lower().split()))
+    alt = [{"subject": "user", "predicates": ["lives_in"], "object": "Kuwait City"}]
+    assert not benchmark._fact_matches(alt, {"subject": "user", "predicate": "lives_in", "object": "kuwait_city"})
+
+
 def test_the_models_pass_replays_recorded_replies():
     """The deep pass is scored from the model's own recorded replies; a turn
     nobody recorded is an error, never a guess."""

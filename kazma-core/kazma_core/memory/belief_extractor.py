@@ -125,6 +125,10 @@ Rules:
   identifiers (session, message, run or task ids), unless the user asked to
   remember them.
 - Slug subjects/objects: "John Smith" -> "john_smith". Use "user" for the user themselves.
+- Keep every subject and object in the language and script the user wrote it in.
+  Never translate or transliterate it: "اسمي سلمى" -> object "سلمى" (not "salma"),
+  "أعيش في الدوحة" -> "الدوحة", "أخوي منصور طيار" -> subject "منصور", "١٤٤٦" stays "١٤٤٦".
+  Only predicates are English snake_case.
 - Reuse a subject from the "Subjects already in use" list when it is the same thing
   ("acme", not "acme_app" or "ac_me"). A subject is a thing the user deals with
   (a person, project, product, place, tool) -- never a phase, step, ticket, version,

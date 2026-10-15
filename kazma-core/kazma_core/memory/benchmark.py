@@ -411,9 +411,12 @@ def _slug(text: str) -> str:
 
 
 def _folded(text: str) -> str:
+    """A value as search reads it: folded, and an underscore separates words
+    (``memory/query_terms``, FTS5) -- the extraction prompt slugs values, so
+    ``kuwait_city`` is the user's "Kuwait City"."""
     from kazma_core.documents.arabic import fold_for_search
 
-    return " ".join(fold_for_search(str(text or "")).lower().split())
+    return " ".join(fold_for_search(str(text or "").replace("_", " ")).lower().split())
 
 
 def _fact_matches(alternatives: list[dict[str, Any]], got: dict[str, Any]) -> bool:
@@ -548,5 +551,7 @@ async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[s
         blob = _llm_blob(t["user"])
         raw = await client.chat([{"role": "system", "content": _EXTRACT_SYSTEM}, {"role": "user", "content": blob}])
         replies[_text_key(blob)] = raw.content if hasattr(raw, "content") else str(raw or "")
-    model = getattr(client, "model", None) or getattr(registry, "active_model", None) or "unknown"
+    # The provider client keeps its model on its config (``LLMProvider.config``).
+    model = (getattr(getattr(client, "config", None), "model", None) or getattr(client, "model", None)
+             or getattr(registry, "active_model", None) or "unknown")
     return {"model": str(model), "extraction_version": data["version"], "replies": replies}

@@ -85,6 +85,24 @@ def test_a_recording_missing_a_turn_is_refused_not_guessed(model, tmp_path):
         benchmark.run_extraction_benchmark(_dataset(3), llm_replies=recorded)
 
 
+def test_the_recording_names_the_model_of_a_provider_client(monkeypatch, tmp_path):
+    """A provider client keeps its model on ``config`` (``LLMProvider``) and
+    has no ``.model``: the first live recording (2026-10-15) said "unknown"."""
+    class _Provider(_Model):
+        model = None
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(model="deepseek-flash")
+
+    stand_in = _Provider()
+    registry = SimpleNamespace(get_client=lambda: stand_in, active_model=None)
+    monkeypatch.setattr("kazma_core.model_registry.get_model_registry", lambda: registry)
+    out = tmp_path / "extraction_llm.json"
+    _script().record_to(out, _dataset(1))
+    assert json.loads(out.read_text(encoding="utf-8"))["model"] == "deepseek-flash"
+
+
 def test_out_is_required(model, monkeypatch, capsys):
     """Run inside an install, a default output would write into the
     install's own checkout."""
