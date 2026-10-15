@@ -151,7 +151,7 @@ def test_the_list_says_which_servers_are_switched_on() -> None:
 def _mcp_row_fields() -> set[str]:
     html = SETTINGS_HTML.read_text(encoding="utf-8")
     start = html.index('<template x-for="s in mcpServers"')
-    end = html.index("</template>\n\n            <div x-show=\"mcpServers.length === 0", start)
+    end = html.index("</template>\n\n            <div x-show=\"mcpServersLoaded && mcpServers.length === 0", start)
     return set(re.findall(r"\bs\.(\w+)", html[start:end]))
 
 

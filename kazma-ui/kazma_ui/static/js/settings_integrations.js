@@ -15,9 +15,12 @@
         return {
         async loadMcpServers() {
             try {
-                this.mcpServers = await this._fetch('/api/mcp/servers') || [];
+                const data = await this._fetch('/api/mcp/servers');
+                this.mcpServers = data || [];
+                this.mcpServersLoaded = !!data;
             } catch (e) {
                 this.mcpServers = [];
+                this.mcpServersLoaded = false;
             }
         },
 
@@ -121,9 +124,12 @@
 
         async loadSkills() {
             try {
-                this.skills = await this._fetch('/api/skills') || [];
+                const data = await this._fetch('/api/skills');
+                this.skills = data || [];
+                this.skillsLoaded = !!data;
             } catch (e) {
                 this.skills = [];
+                this.skillsLoaded = false;
             }
         },
 
@@ -206,9 +212,12 @@
         async loadVoiceModels() {
             try {
                 const provider = this.voiceForm.tts_provider || 'edgetts';
+                // Another provider's voices say nothing about this one's.
+                this.voiceModelsLoaded = false;
                 const models = await this._fetch(`/api/voice/voices?provider=${provider}`);
                 if (Array.isArray(models)) {
                     this.voiceModels = models;
+                    this.voiceModelsLoaded = true;
                     var cur = String(this.voiceForm.tts_voice || '').toLowerCase();
                     if (cur === 'auto') {
                         this.ttsVoiceType = 'auto';
@@ -287,6 +296,7 @@
                     if (normalized.length) {
                         this.sttModelOptions = normalized;
                     }
+                    this.sttModelsLoaded = true;
                 } else {
                     console.warn('[Settings] STT models HTTP', resp.status, '— using fallback for', provider);
                 }
@@ -1248,6 +1258,7 @@
                     this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
                     this.xReplyPolicyStaged = false;
                     this.xReplySavedSignature = this.xReplySettingsSnapshot();
+                    this.xReplyLoaded = true;
                 }
             } catch (e) {
                 showToast(_k('settings.int.failed_to_load_auto_reply', 'Failed to load auto-reply settings: ') + e.message, 'error');
@@ -1266,8 +1277,10 @@
                     libs.unshift({ id: saved, name: saved, chunk_count: 0 });
                 }
                 this.xReplyLibraries = libs;
+                this.xReplyLibrariesLoaded = !!(data && Array.isArray(data.libraries));
             } catch (_e) {
                 this.xReplyLibraries = [];
+                this.xReplyLibrariesLoaded = false;
             }
         },
 

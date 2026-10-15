@@ -597,10 +597,55 @@ whole process tree's resident memory.
   `tests/test_document_real_scans.py` (per engine, opt-in),
   `tests/test_document_worker_container_docker.py` (the image reads
   Arabic-Indic digits; control: Tesseract in the same image does not).
-- **Open:** Arabic decimals and dates with the Arabic separators (`arabic_g1`
-  has no "٫" and rarely reads "/" between Arabic-Indic digits); the "الم"
-  ligature on real scans; a second real scan; speed (one core) -- the
-  per-document time limit decides how many pages stay on the neural engine.
+- **Open:** dates with "/" between Arabic-Indic digits (`arabic_g1` rarely
+  reads it); the "الم" ligature on real scans; a second real scan; speed (one
+  core) -- the per-document time limit decides how many pages stay on the
+  neural engine. (Arabic decimals: closed below.)
+
+## 2026-10-15: the corpus's last OCR misses (Q02, follow-up)
+
+The live install (container profile, neural engine) read `ar-ocr` as "ريالأ"
+for "ريالاً", "٣,٧٥" for "٣٫٧٥", "التغليف ." and no final full stop; the table
+page "ربالأ"; the degraded English scan "3,75". Each cause was found by
+logging every reader's output per line (EasyOCR with its per-character
+probabilities, PaddleOCR, Tesseract's words, the vote) on the corpus pages,
+in process and through the isolated worker; the readings matched the live
+install's exactly.
+
+| Miss | Cause (evidence) | Rule |
+|---|---|---|
+| "٣,٧٥" | Neither EasyOCR `arabic_g1` (184 classes) nor Tesseract `ara` (85 symbols, one of the ten Arabic-Indic digits) has ٫ or ٬; EasyOCR wrote "," at 0.915. PaddleOCR's dictionary has both but read the number "٣٥". | `arabic.arabic_number_separators`, both engines: a group of other than three digits follows the decimal separator; three digits before another separator are thousands; before exactly three it stays as read (thousands or fils: a wrong guess is a thousandfold) |
+| "التغليف ." | EasyOCR emits a space (0.92) between the full stop and a final ف: the font's gap. | A space before a full stop or comma (and ، ؛ ؟) goes; not before ":" ";" "!" "?" (French spacing) |
+| last "." lost | The vote replaced EasyOCR's whole word "المراجعة." with PaddleOCR's confident "المراجعة": PaddleOCR drops full stops on every line. | The vote is over letters; punctuation is EasyOCR's |
+| "ريالأ" | EasyOCR reads the alef + tanween as أ (0.944; its fathatan class 0.004): EasyOCR's own list for Arabic leaves the harakat out. Tesseract read "ريالاً"; PaddleOCR garbled the word. | Where EasyOCR wrote a hamza or madda and another reader of the same letters saw harakat on that side of that letter, those stand; a mark only another reader saw is never added (Tesseract also wrote "الشماليٍ") |
+| "ربالأ" (table page) | EasyOCR ب 0.742 / ي 0.257; Tesseract "ريالاً"; PaddleOCR no aligned word, so no two readers agreed. On both pages every letter EasyOCR misread had the right one second (0.22-0.34). | EasyOCR's second reading (>= 0.1, same bidi class) is a reading: a reader that reads it makes two |
+| "3,75" (degraded) | A speck of the scan's salt noise beside the decimal point (EasyOCR "," at 0.985; Tesseract ":" from a speck above). Specks were 1-3 px of area; the smallest real mark, a blurred full stop at stroke 3, 6; clean 300 dpi dots 9 and up. | Before a line is read, ink with area under half its own stroke squared and no side over a stroke is removed from its box, unless it continues past the box |
+
+Tried and not adopted: a crop margin of a tenth of the line's height
+(EasyOCR's own pipeline crops with it). It read English line-final full
+stops right (english_g2 reads some as ":", 0.82 even on the clean page) but
+added full stops to Arabic headings and the footer, which have none, and
+misread a word on each Arabic page ("بلفت" on one, "ربالأ" on the table
+page). Punctuation is not counted by the fidelity
+measure, so the English ":" changes no case; it is left as read.
+
+Measured (corpus v4, both engines, through the isolated worker, then
+`scripts/document_fidelity.py --lock`):
+
+| Case | neural before | neural after | Tesseract (unchanged) |
+|---|---|---|---|
+| `ar-ocr` | all 1.0, CER/WER 0 (marks and separators wrong, not counted) | all 1.0, CER/WER 0; text as written | token 0.658, number 0.333, CER 0.242 |
+| `ar-ocr-table` | token 0.984, segment 0.857, CER 0.003, WER 0.018 | all 1.0, CER/WER 0 | token 0.658, number 0.143, cells 0.556 |
+| `en-ocr-degraded` | number 0.75 | number 1.0 | number 0.75 (3:75) |
+| `en-ocr`, `en-ocr-table` | all 1.0 | all 1.0 | all 1.0 |
+
+Neural qualified: 5 of 5 OCR cases (19 of 19 with the 14 text cases);
+Tesseract 2 of 5 (16 of 19). Floors raised by the lock, none lowered. Gate:
+`tests/test_document_ocr_reading_rules.py` (each rule with the old rule as
+its control; end to end on the table page and the degraded scan, the old
+rules re-run on the same model outputs). The worker image must be rebuilt
+(`scripts/document_worker_image.py build`) for a container install to read
+with these rules.
 
 ## 2026-10-15: documents refused on a strict install (no broker)
 

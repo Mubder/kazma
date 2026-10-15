@@ -70,7 +70,7 @@
                             <button class="btn btn-primary btn-sm" @click="openHubProviderModal()">+ {{ t('settings.add_provider') }}</button>
                         </div>
 
-                        <div x-show="hubProviders.length === 0 && !loading" class="empty-state" x-cloak>
+                        <div x-show="hubProvidersLoaded && hubProviders.length === 0" class="empty-state" x-cloak>
                             {{ t('settings.no_providers') }}
                         </div>
 
@@ -266,7 +266,7 @@
                     <h3>{{ t('settings.saved_profiles') }}</h3>
                     <button class="btn btn-primary btn-sm" @click="openHubProfileModal()">+ {{ t('settings.save_profile') }}</button>
                 </div>
-                <div x-show="hubProfiles.length === 0" class="empty-state" style="padding:16px" x-cloak>
+                <div x-show="hubProfilesLoaded && hubProfiles.length === 0" class="empty-state" style="padding:16px" x-cloak>
                     {{ t('settings.no_saved_profiles') }}
                 </div>
                 <template x-for="p in hubProfiles" :key="p.name">
@@ -631,7 +631,7 @@
                             </div>
                         </div>
                     </template>
-                    <div x-show="!hubConnectors.some(x => x.name === 'email' || x.name === 'webhook')" class="empty-state" x-cloak>
+                    <div x-show="hubConnectorsLoaded && !hubConnectors.some(x => x.name === 'email' || x.name === 'webhook')" class="empty-state" x-cloak>
                         {{ t('settings.no_connectors') }}
                     </div>
                     <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px" x-cloak>
@@ -1582,7 +1582,7 @@
                             <td style="padding:6px 8px" x-text="v.beliefs"></td>
                         </tr>
                     </template>
-                    <tr x-show="embedderDbVersions().length === 0" x-cloak>
+                    <tr x-show="embedderLoaded && embedderDbVersions().length === 0" x-cloak>
                         <td colspan="3" style="padding:10px 8px;color:var(--text-muted)">{{ t('settings.embedder_db_empty') }}</td>
                     </tr>
                 </tbody>
@@ -1664,7 +1664,7 @@
                 </div>
             </template>
 
-            <div x-show="mcpServers.length === 0 && !loading" class="empty-state" x-cloak>
+            <div x-show="mcpServersLoaded && mcpServers.length === 0" class="empty-state" x-cloak>
                 {{ t('settings.no_mcp_servers') }}
             </div>
         </div>
@@ -1740,7 +1740,7 @@
                 </template>
             </div>
 
-            <div x-show="skills.length === 0 && !loading" class="empty-state" x-cloak>
+            <div x-show="skillsLoaded && skills.length === 0" class="empty-state" x-cloak>
                 {{ t('settings.no_skills') }}
             </div>
         </div>
@@ -1900,7 +1900,7 @@
                 </div>
               </template>
             </div>
-            <div x-show="apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.no_api_tokens') }}</div>
+            <div x-show="apiTokensLoaded && apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.no_api_tokens') }}</div>
         </div>
 
         <!-- Sessions -->
@@ -1922,7 +1922,7 @@
                 </div>
               </template>
             </div>
-            <div x-show="sessions.length === 0" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.no_active_sessions') }}</div>
+            <div x-show="sessionsLoaded && sessions.length === 0" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.no_active_sessions') }}</div>
         </div>
 
         <!-- Platform users (SaaS multi-user) — admin only -->
@@ -1973,7 +1973,7 @@
                 </div>
               </template>
             </div>
-            <div x-show="platformUsers.length === 0" class="empty-state" style="padding:16px" x-cloak>
+            <div x-show="platformUsersLoaded && platformUsers.length === 0" class="empty-state" style="padding:16px" x-cloak>
               {{ t('settings.no_platform_users') }}
             </div>
 
@@ -2036,7 +2036,7 @@
                 </template>
             </div>
 
-            <div x-show="tools.length === 0 && !loading" class="empty-state" x-cloak>
+            <div x-show="toolsLoaded && tools.length === 0" class="empty-state" x-cloak>
                 {{ t('settings.no_tools') }}
             </div>
         </div>
@@ -2265,7 +2265,7 @@
                 <template x-for="(line, i) in logs" :key="i">
                     <div translate="no" x-text="line" :style="line.includes('ERROR') || line.includes('error') ? 'color:var(--danger)' : line.includes('WARNING') ? 'color:var(--warning)' : 'color:var(--text-secondary)'"></div>
                 </template>
-                <div x-show="logs.length === 0" style="color:var(--text-muted)" x-cloak>{{ t('settings.no_logs_available') }}</div>
+                <div x-show="logsLoaded && logs.length === 0" style="color:var(--text-muted)" x-cloak>{{ t('settings.no_logs_available') }}</div>
             </div>
         </div>
 
@@ -2451,7 +2451,7 @@
                         </template>
                     </tbody>
                 </table>
-                <div x-show="filteredPkgCore.length === 0 && !pkgLoading" x-cloak class="pkg-loading">{{ t('packages.no_match') }}</div>
+                <div x-show="pkgLoaded && filteredPkgCore.length === 0 && !pkgLoading" x-cloak class="pkg-loading">{{ t('packages.no_match') }}</div>
             </div>
         </div>
 
@@ -3349,7 +3349,7 @@
                                     x-text="kazmaCount('settings.xt.lib_chunks', lib.chunk_count || 0, { name: lib.name || lib.id })"></option>
                         </template>
                     </select>
-                    <p x-show="!xReplyLibraries.length" x-cloak
+                    <p x-show="xReplyLibrariesLoaded && !xReplyLibraries.length" x-cloak
                        style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 0;">
                         {{ t('settings.xt.no_libraries') }}
                     </p>
@@ -3411,7 +3411,7 @@
                     <button class="btn btn-sm btn-secondary" @click="xReplyAddSubject()">{{ t('settings.xt.add_subject') }}</button>
                 </div>
 
-                <template x-if="!xReply.subjects || !xReply.subjects.length">
+                <template x-if="xReplyLoaded && (!xReply.subjects || !xReply.subjects.length)">
                     <p style="font-size:0.85rem;color:var(--text-tertiary);margin-top:8px;">
                         {{ t('settings.xt.no_subjects') | safe }}
                     </p>
@@ -3601,7 +3601,7 @@
                         <span x-show="xReplyOpen !== null" x-cloak>
                             {{ t('settings.xt.try_open') }}
                         </span>
-                        <span x-show="xReplyOpen === null && !xReply.subjects.length" x-cloak>
+                        <span x-show="xReplyLoaded && xReplyOpen === null && !xReply.subjects.length" x-cloak>
                             {{ t('settings.xt.try_voice_only') }}
                         </span>
                     </p>
@@ -3795,7 +3795,7 @@
                                 </template>
                                 <option value="custom">{{ t('voice.stt_model_custom') }}</option>
                             </select>
-                            <p class="form-help" style="margin-top:4px" x-show="!sttModelOptions.length" x-cloak>
+                            <p class="form-help" style="margin-top:4px" x-show="sttModelsLoaded && !sttModelOptions.length" x-cloak>
                                 {{ t('voice.stt_model_empty') }}
                             </p>
                             <p class="form-help" style="margin-top:4px" x-show="voiceForm.stt_provider === 'nvidia'" x-cloak>
@@ -3921,7 +3921,7 @@
                                         <option :value="model" x-text="model"></option>
                                     </template>
                                 </select>
-                                <p class="form-help" style="margin-top:4px;" x-show="!arabicVoices().length" x-cloak>
+                                <p class="form-help" style="margin-top:4px;" x-show="voiceModelsLoaded && !arabicVoices().length" x-cloak>
                                     {{ t('settings.no_arabic_voices') }}
                                 </p>
                             </div>
@@ -4021,7 +4021,7 @@
         </div>
         <div class="settings-group">
             <h3>{{ t('settings.backup_history') }}</h3>
-            <div x-show="backupList.length === 0 && !backupRunning" class="empty-state" x-cloak>
+            <div x-show="backupListLoaded && backupList.length === 0 && !backupRunning" class="empty-state" x-cloak>
                 <p>{{ t('settings.backup_none') }}</p>
             </div>
             <template x-for="b in backupList" :key="b.dir">

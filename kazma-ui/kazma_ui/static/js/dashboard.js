@@ -680,7 +680,13 @@
         var data = {};
         try { data = await resp.json(); } catch (e) { data = {}; }
         if (loadingEl) loadingEl.style.display = 'none';
-        if (!resp.ok || data.error || !data.sessions || data.sessions.length === 0) {
+        // A refused read is not "no sessions": say it failed, and leave the
+        // empty state to an answer (tests/test_empty_states_after_load.py).
+        if (!resp.ok || data.error || !Array.isArray(data.sessions)) {
+          showSessionsFailed();
+          return;
+        }
+        if (data.sessions.length === 0) {
           _sessionsCache = [];
           if (emptyEl) emptyEl.style.display = 'block';
           if (tableEl) tableEl.style.display = 'none';
@@ -694,11 +700,17 @@
         _sessionsCache = data.sessions.slice();
         renderSessionRows();
       } catch (e) {
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (emptyEl) emptyEl.style.display = 'block';
-        if (tableEl) tableEl.style.display = 'none';
-        if (expandWrap) expandWrap.style.display = 'none';
+        showSessionsFailed();
       }
+    }
+
+    function showSessionsFailed() {
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = 'none';
+      if (tableEl) tableEl.style.display = 'none';
+      if (cardsEl) cardsEl.innerHTML = '';
+      if (expandWrap) expandWrap.style.display = 'none';
+      if (summaryEl) summaryEl.textContent = label('common.request_failed', 'Request failed');
     }
 
     if (expandBtn && !expandBtn._bound) {
@@ -757,20 +769,11 @@
   function boot() {
     init();
     startResourceMonitor();
+    // The session list ends its own skeleton: with the rows, with "no
+    // sessions" when the server said so, or with a failure. A timer here
+    // used to declare it empty after 2.5 s whatever the server was still
+    // doing (tests/test_empty_states_after_load.py).
     initSessionManagement();
-    // Memory board poll lives in the page inline script (I18N strings);
-    // ensure sessions never stay on skeleton if that inline block races.
-    setTimeout(function() {
-      var loadingEl = document.getElementById('sessions-loading');
-      if (loadingEl && loadingEl.style.display !== 'none') {
-        var tableEl = document.getElementById('sessions-table');
-        var emptyEl = document.getElementById('sessions-empty');
-        if (!tableEl || tableEl.style.display === 'none') {
-          loadingEl.style.display = 'none';
-          if (emptyEl) emptyEl.style.display = 'block';
-        }
-      }
-    }, 2500);
   }
 
   if (document.readyState === 'loading') {

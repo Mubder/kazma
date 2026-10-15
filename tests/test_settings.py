@@ -439,6 +439,13 @@ class TestSettingsAPI:
         from kazma_ui.settings import create_settings_router
         router = create_settings_router(mock_agent, cs, templates)
         app.include_router(router)
+        # The voice lists the Settings page reads are the voice router's (one
+        # copy since 2026-10-15); mounted here as the app mounts it, with its
+        # kept edge-tts list emptied so no test sees another's.
+        from kazma_ui import routes_voice
+
+        routes_voice._edge_voices_cache.update(voices=None, until=0.0)
+        app.include_router(routes_voice.router)
 
         from fastapi.testclient import TestClient
         test_client = TestClient(app)

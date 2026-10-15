@@ -279,7 +279,9 @@
             ]);
             // Always replace arrays so Alpine x-for sees a new reference.
             this.apiTokens = Array.isArray(tokens) ? tokens.slice() : [];
+            this.apiTokensLoaded = Array.isArray(tokens);
             this.sessions = Array.isArray(sessions) ? sessions.slice() : [];
+            this.sessionsLoaded = Array.isArray(sessions);
             await this.loadSaasAdmin();
         },
 
@@ -295,6 +297,7 @@
                     this._fetch('/api/saas/tenants'),
                 ]);
                 this.platformUsers = (usersResp && usersResp.users) ? usersResp.users.slice() : [];
+                this.platformUsersLoaded = !!(usersResp && Array.isArray(usersResp.users));
                 this.tenants = (tenantsResp && tenantsResp.tenants) ? tenantsResp.tenants.slice() : [];
             } catch (e) {
                 console.debug('[settings] saas admin load skipped', e);
@@ -500,6 +503,7 @@
                 // Re-fetch with cache bust so a stale GET cannot resurrect the row.
                 const tokens = await this._fetch('/api/settings/account/tokens?_=' + Date.now());
                 this.apiTokens = Array.isArray(tokens) ? tokens.slice() : [];
+                this.apiTokensLoaded = Array.isArray(tokens);
                 showToast(_t('settings.token_revoked', 'Token revoked'), 'success');
             } catch (e) {
                 showToast(_t('settings.revoke_failed', 'Revoke failed: {error}', {error: e.message}), 'error');
@@ -508,9 +512,12 @@
 
         async loadTools() {
             try {
-                this.tools = await this._fetch('/api/settings/tools') || [];
+                const data = await this._fetch('/api/settings/tools');
+                this.tools = data || [];
+                this.toolsLoaded = !!data;
             } catch (e) {
                 this.tools = [];
+                this.toolsLoaded = false;
             }
         },
 
@@ -553,8 +560,10 @@
             try {
                 const data = await this._fetch(`/api/settings/system/logs?lines=${this.logLines}`);
                 this.logs = data?.lines || [];
+                this.logsLoaded = !!(data && Array.isArray(data.lines));
             } catch (e) {
                 this.logs = [];
+                this.logsLoaded = false;
             }
         },
 
@@ -641,6 +650,7 @@
                     this.pkgDbBackend = data.db_backend || 'sqlite';
                     this.pkgDbUrlSet = !!data.db_url_set;
                     this.pkgMemory = data.memory || { status: '', summary: '', headline: '', layers: {}, issues: [] };
+                    this.pkgLoaded = true;
                 }
             } catch (e) { /* silent */ }
             this.pkgLoading = false;
@@ -1281,8 +1291,10 @@
                     b.archiving = false; // client-only transient; server provides archived
                     return b;
                 });
+                this.backupListLoaded = resp.ok && Array.isArray(data.backups);
             } catch (e) {
                 this.backupList = [];
+                this.backupListLoaded = false;
             }
         },
 

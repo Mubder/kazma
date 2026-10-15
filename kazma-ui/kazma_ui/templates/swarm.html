@@ -463,7 +463,9 @@
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-active-tasks" style="display:none;">
     <div id="active-tasks-container">
-      <div id="active-tasks-empty" style="text-align:center;padding:48px;color:var(--text-muted);">
+      {# Hidden until /api/swarm/tasks/active answers with none (swarm.js
+         loadActiveTasks): before that "No active tasks" is a guess. #}
+      <div id="active-tasks-empty" style="display:none;text-align:center;padding:48px;color:var(--text-muted);">
         <div style="font-size:2rem;margin-bottom:8px;"><span x-html="KazmaIcons.zap()"></span></div>
         <p style="font-size:0.9rem;">{{ t('swarm.no_active_tasks') }}</p>
         <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('swarm.active_tasks_hint') }}</p>
@@ -488,7 +490,9 @@
     </div>
 
     <div id="results-dashboard-container">
-      <div id="results-dashboard-empty" style="text-align:center;padding:48px;color:var(--text-muted);">
+      {# Hidden until the results load answers with none (swarm.js
+         renderResultsDashboard). #}
+      <div id="results-dashboard-empty" style="display:none;text-align:center;padding:48px;color:var(--text-muted);">
         <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></div>
         <p style="font-size:0.9rem;">{{ t('swarm.no_completed_tasks') }}</p>
         <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('swarm.completed_tasks_hint') }}</p>

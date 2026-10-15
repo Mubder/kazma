@@ -230,6 +230,9 @@ export function kazmaApp() {
 export function sidebarComponent() {
     return {
         activeModel: '',
+        // "No model selected" only once /api/provider/active answered: it
+        // was on every page for as long as the two reads took.
+        activeModelLoaded: false,
         modelOptions: [],
 
         async init() {
@@ -269,6 +272,7 @@ export function sidebarComponent() {
                     const store = Alpine.store('settings');
                     if (store) store.appearance.active_chat_model = data.model;
                 }
+                this.activeModelLoaded = true;
             } catch (e) { /* keep default */ }
         },
 

@@ -151,6 +151,10 @@
         // ── Embedder Tab ──
         embedder: { provider: 'local', model: 'BAAI/bge-m3', dim: 1024, base_url: '', api_key_env: 'KAZMA_EMBED_API_KEY', _preset: 'BAAI/bge-m3' },
         embedderStatus: { config: {}, active: null, db: { episodes: {}, beliefs: {} } },
+        // Every list on these tabs says "none" only after the server answered
+        // with none: an empty array before that is "not loaded yet", and a
+        // failed read is not an answer (tests/test_empty_states_after_load.py).
+        embedderLoaded: false,
         embedderPresets: [
             { model: 'BAAI/bge-m3', dim: 1024, label: 'BAAI/bge-m3 — multilingual (recommended)', note: 'multilingual_recommended' },
             { model: 'BAAI/bge-large-en-v1.5', dim: 1024, label: 'BAAI/bge-large-en-v1.5 — English', note: 'english' },
@@ -244,7 +248,9 @@
         // ── Unified Providers & Connectors Hub ──
         hubSubtab: 'providers',
         hubProviders: [],
+        hubProvidersLoaded: false,
         hubConnectors: [],
+        hubConnectorsLoaded: false,
         // Delivery & Routing (Settings → Providers & Connectors →
         // Platform Connectors): every field the old per-platform cards
         // carried — token, allowed users, guild/workspace, enabled —
@@ -272,6 +278,7 @@
         adapterRoutingTesting: '',
         adapterRoutingTest: null,
         hubProfiles: [],
+        hubProfilesLoaded: false,
         hubProviderModal: false,
         hubConnectorModal: false,
         hubProfileModal: false,
@@ -292,12 +299,14 @@
 
         // ── MCP Tab ──
         mcpServers: [],
+        mcpServersLoaded: false,
         showMcpModal: false,
         newMcpServer: { name: '', transport: 'stdio', command: '', url: '', env: '' },
         testingMcp: null,
 
         // ── Skills Tab ──
         skills: [],
+        skillsLoaded: false,
         skillFilter: '',
 
         // ── Appearance Tab ──
@@ -311,19 +320,23 @@
         // ── Account Tab ──
         account: { username: 'admin', created_at: '' },
         apiTokens: [],
+        apiTokensLoaded: false,
         sessions: [],
+        sessionsLoaded: false,
         passwordForm: { old_password: '', new_password: '', confirm_password: '' },
         tokenName: '',
         lastCreatedToken: '',
         // SaaS multi-user
         saasStatus: null,
         platformUsers: [],
+        platformUsersLoaded: false,
         tenants: [],
         newUser: { username: '', password: '', role: 'operator' },
         newTenant: { id: '', name: '' },
 
         // ── Tools Tab ──
         tools: [],
+        toolsLoaded: false,
         toolSearch: '',
         selectedTool: null,
         toolTestArgs: '{}',
@@ -331,6 +344,7 @@
 
         // ── System Tab ──
         logs: [],
+        logsLoaded: false,
         logLines: 100,
         diagnostics: {},
         updateInfo: null,
@@ -350,6 +364,7 @@
         pkgMemory: { status: '', summary: '', headline: '', layers: {}, issues: [] },
         pkgSearch: '',
         pkgLoading: false,
+        pkgLoaded: false,
         pkgInstalling: '',
         pkgInstallMsg: '',
         pkgInstallOk: false,
@@ -369,6 +384,7 @@
         backupProgressText: '',
         backupProgressPhase: '',
         backupList: [],
+        backupListLoaded: false,
         backupRetention: 7,
         _backupPollId: null,
 
@@ -418,9 +434,11 @@
         },
         voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
         voiceModels: [],
+        voiceModelsLoaded: false,
         /** Normalized STT options: always [{id, label}] for Alpine x-for */
         sttModelOptions: [],
         sttModelsLoading: false,
+        sttModelsLoaded: false,
         sttModelType: 'default',
         sttLanguageType: 'auto',
         ttsVoiceType: 'default',
@@ -520,7 +538,9 @@
         xReplyModelResult: null,
         xReplySummonersText: '',
         xReplyLibraries: [],
+        xReplyLibrariesLoaded: false,
         xReplyLoading: false,
+        xReplyLoaded: false,
         xReplySaving: false,
         xReplyProblems: [],
         xReplyPolicyBaseline: [],

@@ -470,6 +470,9 @@ export function registerStores() {
             open: false,
             count: 0,
             items: [],
+            // True once the server answered: "No system alerts" before that
+            // is a guess (tests/test_empty_states_after_load.py).
+            loaded: false,
             error: '',
 
             init() {
@@ -492,6 +495,7 @@ export function registerStores() {
                     const alerts = await res.json();
                     this.items = Array.isArray(alerts) ? alerts : [];
                     this.count = this.items.length;
+                    this.loaded = true;
                     this.error = '';
                 } catch (e) {
                     this.error = 'alerts unavailable';

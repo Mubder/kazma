@@ -10,6 +10,13 @@
 function documentsPage() {
   return {
     documents: [],
+    // The library and the audit history say "none" only after the server
+    // answered: an empty list before that is "not loaded yet", and the page
+    // said "No documents yet." for seconds over a library of five
+    // (2026-10-15, tests/test_empty_states_after_load.py).
+    documentsLoading: false,
+    documentsLoaded: false,
+    auditLoaded: false,
     selected: null,
     versions: [],
     jobs: [],
@@ -101,12 +108,18 @@ function documentsPage() {
     },
 
     async loadDocuments() {
+      this.documentsLoading = true;
       try {
         const r = await fetch("/api/documents");
         const j = await r.json();
-        if (j.ok) this.documents = j.documents || [];
+        if (j.ok) {
+          this.documents = j.documents || [];
+          this.documentsLoaded = true;
+        }
       } catch (e) {
         this.toast(kazmaT('documents.js.failed_to_load_documents', "Failed to load documents"), "error");
+      } finally {
+        this.documentsLoading = false;
       }
     },
 
@@ -137,7 +150,10 @@ function documentsPage() {
           status: "unavailable", accepting_durable_writes: false,
           degraded_reasons: [rdy?.code || "readiness_unavailable"],
         };
-        if (aud?.ok) this.auditEvents = aud.events || [];
+        if (aud?.ok) {
+          this.auditEvents = aud.events || [];
+          this.auditLoaded = true;
+        }
       } catch (e) {
         /* non-fatal */
       }

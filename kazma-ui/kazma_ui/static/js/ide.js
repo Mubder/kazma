@@ -18,6 +18,8 @@ function ideApp() {
   return {
     // ── State ──
     tree: [],
+    // "Empty folder" only once a listing came back (tests/test_empty_states_after_load.py).
+    treeLoaded: false,
     treePath: '',
     currentFile: '',
     currentLang: 'plaintext',
@@ -550,12 +552,15 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._get('/api/workspace/files?path=' + encodeURIComponent(path || ''));
-        this.tree = (data.files || []).map(function (f) {
+        // A refused listing is a failure, not an empty folder.
+        if (!data || data.error || !Array.isArray(data.files)) throw new Error('listing refused');
+        this.tree = data.files.map(function (f) {
           var name = String(f.name || '');
           f.ext = f.is_dir ? 'dir' : (name.split('.').pop() || '').toLowerCase();
           return f;
         });
         this.treePath = data.path || '';
+        this.treeLoaded = true;
       } catch (err) {
         this.toast(this._tx('ide.toast_list_failed', 'Failed to list files'), false);
       } finally {

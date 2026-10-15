@@ -716,6 +716,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "— لا توجد نماذج متاحة —",
         "en": "— no models available —",
     },
+    # The model picker when the provider list could not be read: "no models
+    # available" would be a claim the page cannot make (2026-10-15).
+    "swarm.models_load_failed": {
+        "ar": "— تعذّر تحميل النماذج —",
+        "en": "— could not load the models —",
+    },
     "swarm.no_preview": {
         "ar": "لا توجد معاينة",
         "en": "No preview",

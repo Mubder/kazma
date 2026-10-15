@@ -3027,9 +3027,11 @@ cases are measured per engine (`fidelity.OCR_ENGINES`: `tesseract`,
 test and is refused by `--lock`, and a lock keeps the floors of an engine not
 installed where it runs. Not qualified, each with its reason in the
 thresholds file: with Tesseract `ar-ocr`, `ar-ocr-table` (no Arabic-Indic
-digits, lines dropped) and `en-ocr-degraded` (3.75 read as 3:75); with the
-neural engine `ar-ocr-table` (one word misread) and `en-ocr-degraded` (3,75).
-A re-lock keeps the file's `notes` and `measured_on`. Certification runs the
+digits, lines dropped) and `en-ocr-degraded` (3.75 read as 3:75: a speck
+above the decimal point). With the neural engine every OCR case qualifies
+since 2026-10-15 (G4: the speck rule, EasyOCR's second readings, the marks
+and punctuation rules). A re-lock keeps the file's `notes` and
+`measured_on`: a note for a case that now qualifies is removed by hand. Certification runs the
 corpus and reports the actual isolation profile and backends (F10). Gate:
 `tests/test_document_fidelity.py`.
 
@@ -3055,7 +3057,8 @@ Documents). Measured on the scan: a contents table's numbers 22 % -> 91 %,
 its rows kept together 3 % -> 56 % complete, 6 of 6 searches on the right
 page. Tesseract did not read Arabic-Indic digits in any font measured (fast or
 best `ara` model, `script/Arabic` fast or best, any segmentation mode): the
-neural engine (G4) does. Gates: `tests/test_document_ocr_tables.py`,
+installed `ara` model's character set holds one of the ten (٠) and neither
+Arabic separator. The neural engine (G4) does. Gates: `tests/test_document_ocr_tables.py`,
 `tests/test_document_ocr_phase5.py` (the quote with the old quoting as
 control), `test_ocr_without_the_table_pass_fails_the_floor`, and the opt-in
 `tests/test_document_real_scans.py` (`KAZMA_TEST_REAL_SCANS_MANIFEST`: a
@@ -3079,7 +3082,27 @@ their ink; EasyOCR `arabic_g1` reads each line (`english_g2` a line without
 Arabic, and English-only pages); each word without a digit is voted on with
 PaddleOCR's PP-OCRv5 Arabic recognizer and Tesseract's words on the page --
 the two agreeing, or PaddleOCR at >= 0.9 alone, replace EasyOCR's word; a
-number is always EasyOCR's. A drawn line goes to logical order by
+number is always EasyOCR's. EasyOCR's own second reading of a letter it
+doubted (>= 0.1, a letter of the same bidi class) is a reading too: another
+reader that reads it makes two (the table page's "ربالأ", ب 0.74 / ي 0.26,
+is Tesseract's "ريالاً"). The vote is over letters: a word's punctuation is
+EasyOCR's (PaddleOCR drops a full stop), and a space read before a full
+stop or comma goes (EasyOCR reads the gap a font leaves after a final ف as
+one). EasyOCR writes no harakat (its Arabic list leaves them out) and draws
+the tanween over an alef as a hamza ("ريالأ"): where another reader read the
+same letters with harakat on that side of that letter, those stand, unless
+a reader read EasyOCR's hamza too; a mark only another reader saw is never
+added (Tesseract writes "الشماليٍ"). Before a line is read, ink smaller than
+the line's own pen (area under half the stroke squared, no side longer than
+a stroke) is removed from its box, unless it continues past the box: on the
+degraded scan a speck beside the decimal point read "3.75" as "3,75"
+(specks 1-3 px of area; the smallest real mark, a blurred full stop, 6). A
+"," or "." between Arabic-Indic digits is put back as ٫/٬ by a number's
+grammar (`arabic.arabic_number_separators`, both engines: neither EasyOCR
+`arabic_g1` nor Tesseract `ara` can write those marks). Not adopted: a crop
+margin (EasyOCR's own 0.1 of the height) read English line-final full stops
+right (english_g2 reads some as ":") but added full stops to Arabic headings
+that have none. A drawn line goes to logical order by
 `parsers.pdf_rtl.logical_line`, never a recognizer's `get_display` (which
 leaves "30-09-2026" reversed). The page pass skips the lines inside ruled
 tables (`skips_table_regions`; `tables.table_regions` is `read_tables`' own
@@ -3103,7 +3126,10 @@ EasyOCR alone, tessdata_best and the 2-reader combinations:
 `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md` (Q02). Gates:
 `tests/test_document_ocr_neural.py` (each rule with its control; the
 end-to-end readings need the models and skip without them),
-`tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
+`tests/test_document_ocr_reading_rules.py` (separators, punctuation, second
+readings, marks, specks; the old rules as controls, and end to end on the
+corpus's table page and degraded scan, the old rules re-run on the same
+model outputs), `tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
 the image `test_the_neural_ocr_engine_reads_inside_the_container`.
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
@@ -3150,10 +3176,16 @@ call-site-local normalization.
   mark is a misread mark (LibreOffice maps a tanween to "/") and is dropped.
   OCR words get the same rule: `arabic.number_in_logical_order` puts a
   separated number read off an Arabic line back in logical order (the TSV
-  parser applies it with the paragraph text before the word). Gates:
+  parser applies it with the paragraph text before the word), and
+  `arabic.arabic_number_separators` puts back the ٫/٬ an OCR reader wrote as
+  "," or "." between Arabic-Indic digits (a group of other than three digits
+  follows a decimal separator; before exactly three it stays as read:
+  thousands or fils). OCR readings only: a text layer's marks are the
+  page's. Gates:
   `tests/test_document_pdf_rtl.py` (round trips laid out by python-bidi
   itself; without the check the date reads back reversed),
-  `tests/test_document_number_order.py`.
+  `tests/test_document_number_order.py`,
+  `tests/test_document_ocr_reading_rules.py` (the separators).
 - **`to_logical()` runs in `parsers/common.IRBuilder.add_page`**, before limits,
   quality assessment and chunking. It NFKC-folds Arabic presentation forms back
   to base letters so a legacy visual-dump PDF is recovered without OCR. Pages
@@ -7207,7 +7239,16 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
 - **A list shows its empty state only after it has loaded.** The chat
   sidebar painted "No sessions yet" for a second on every visit (an early
   re-render replaced the "Loading…" placeholder).
-  `tests/e2e/test_session_list_loading.py`.
+  `tests/e2e/test_session_list_loading.py`. Every template empty state
+  (length vs zero, `!list.length`, `!list.some(...)`) names a flag its loader
+  sets on SUCCESS (`xLoaded`), or loading AND error flags -- `!loading` alone
+  says "none" over a failed read -- or is declared with why in
+  `tests/test_empty_states_after_load.py` (2026-10-15: Documents said "No
+  documents yet." for seconds over five, and 39 other empty states had the shape;
+  `tests/e2e/test_documents_list_loading.py`). A failed read says it failed:
+  no `catch` in a page script paints an empty list, an empty-state text or
+  made-up rows (the same gate; the Workspace showed a fake `kazma-core/`
+  listing when its file read failed).
 - **A poller reads through `window.kazmaGetJson`** (`auth-guard.js`): the
   parsed body of a 2xx JSON response, else null (an error status, a proxy's
   HTML page, no network); it never throws or logs. While the server restarts

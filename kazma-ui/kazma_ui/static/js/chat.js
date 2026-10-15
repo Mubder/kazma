@@ -2581,8 +2581,13 @@
         }
 
         // Fetch all providers so we can group models by provider
+        // A refused read is a failed read, never "no providers": the list
+        // below decides whether a persisted model is still offered.
         fetch('/api/providers')
-          .then(function(r) { return r.ok ? r.json() : []; })
+          .then(function(r) {
+            if (!r.ok) throw new Error('providers read ' + r.status);
+            return r.json();
+          })
           .then(function(providers) {
             // Build provider groups: [{ name, label, models: [] }]
             var providerGroups = [];
@@ -2617,17 +2622,13 @@
                 }
               });
             }
-            populateModelSelector(providerGroups, savedModels);
+            populateModelSelector(providerGroups, savedModels, true);
           })
-          .catch(function() { populateModelSelector([], savedModels); });
+          .catch(function() { populateModelSelector(_persistedModelGroup(), savedModels, false); });
       })
       .catch(function() {
         // If both fetches fail, at least show the persisted model
-        var fallback = [];
-        if (selectedModel) {
-          fallback.push({ name: 'active', label: ti('models_active', 'Active'), models: [selectedModel] });
-        }
-        populateModelSelector(fallback, savedModels);
+        populateModelSelector(_persistedModelGroup(), savedModels, false);
       });
 
     // ?new=1 asks for a fresh session (New Chat, Ctrl+N from another page);
@@ -2651,7 +2652,19 @@
     }
   }
 
-  function populateModelSelector(providerGroups, savedProfiles) {
+  // The model this page last chose, offered on its own when the provider
+  // list could not be read.
+  function _persistedModelGroup() {
+    return selectedModel
+      ? [{ name: 'active', label: ti('models_active', 'Active'), models: [selectedModel] }]
+      : [];
+  }
+
+  // `complete`: the provider list was read. Only a complete list may drop a
+  // persisted model it no longer offers (a keyless default would pin a 401);
+  // after a failed read -- a 502 while the server restarts -- the user's
+  // choice is kept (2026-10-15: a partial list erased it from storage).
+  function populateModelSelector(providerGroups, savedProfiles, complete) {
     if (!modelSelectorEl) return;
     savedProfiles = savedProfiles || [];
     providerGroups = providerGroups || [];
@@ -2687,7 +2700,7 @@
     // send() does not pin a 401.
     if (selectedModel) {
       modelSelectorEl.value = selectedModel;
-      if (modelSelectorEl.value !== selectedModel) {
+      if (complete === true && modelSelectorEl.value !== selectedModel) {
         selectedModel = modelSelectorEl.value || '';
         try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch (eLs) {}
       }

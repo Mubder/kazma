@@ -346,22 +346,50 @@ async def list_voices(provider: str = "edgetts") -> list[str]:
             "Magpie-Multilingual.ZH-CN.Xiaoxiao",
         ]
     elif p_lower == "edgetts":
-        try:
-            import edge_tts  # type: ignore
-            voices = await edge_tts.VoicesManager.create()
-            return ["default"] + sorted([v["ShortName"] for v in voices.voices])
-        except Exception:
-            return [
-                "default",
-                "en-US-AriaNeural",
-                "en-US-GuyNeural",
-                "en-GB-SoniaNeural",
-                "en-GB-RyanNeural",
-                "es-ES-ElviraNeural",
-                "fr-FR-DeniseNeural",
-                "ar-EG-SalmaNeural",
-            ]
+        return await _edge_voices()
     return ["default"]
+
+
+#: Microsoft's voice list for edge-tts, kept: it is fetched from Microsoft's
+#: servers, and every visit to Settings -> Voice asked for it again
+#: (2026-10-15). A list read is kept a day; a failed read answers the short
+#: list below and is asked again after ten minutes.
+_EDGE_VOICES_TTL_S = 24 * 3600
+_EDGE_VOICES_RETRY_S = 600
+_EDGE_FALLBACK_VOICES = [
+    "default",
+    "en-US-AriaNeural",
+    "en-US-GuyNeural",
+    "en-GB-SoniaNeural",
+    "en-GB-RyanNeural",
+    "es-ES-ElviraNeural",
+    "fr-FR-DeniseNeural",
+    "ar-EG-SalmaNeural",
+    "ar-EG-ShakirNeural",
+    "ar-SA-HamedNeural",
+    "ar-SA-ZariyahNeural",
+]
+_edge_voices_cache: dict[str, Any] = {"voices": None, "until": 0.0}
+
+
+async def _edge_voices() -> list[str]:
+    import time
+
+    now = time.monotonic()
+    cached = _edge_voices_cache.get("voices")
+    if cached is not None and now < float(_edge_voices_cache.get("until") or 0.0):
+        return list(cached)
+    try:
+        import edge_tts  # type: ignore
+
+        manager = await edge_tts.VoicesManager.create()
+        voices = ["default"] + sorted(v["ShortName"] for v in manager.voices)
+        _edge_voices_cache.update(voices=voices, until=now + _EDGE_VOICES_TTL_S)
+    except Exception as exc:  # noqa: BLE001 -- no list: the short one, asked again later
+        logger.info("[voice] edge-tts voice list unavailable (%s): showing the short list", type(exc).__name__)
+        voices = list(_EDGE_FALLBACK_VOICES)
+        _edge_voices_cache.update(voices=voices, until=now + _EDGE_VOICES_RETRY_S)
+    return list(voices)
 
 
 @router.get("/stt-models")

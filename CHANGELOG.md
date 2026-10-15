@@ -1,5 +1,136 @@
 # CHANGELOG
 
+## A status read loads no model; one copy of each route (2026-10-15)
+
+- **Memory health no longer loads the embedding model.** The Memory page
+  polls `/api/system/status`, and both memory health reports asked the
+  embedder whether it was ready by building it, which loads the local
+  model (gigabytes) on a status read. They now report what the process
+  holds: ready, "loads at the first search", or unavailable. A held model
+  is still probed with a real encode. Checking whether a package is
+  installed no longer imports it (importing the model package loads
+  torch). `tests/test_health_builds_no_embedder.py` holds every health,
+  status and readiness function to it, with the old code as its control.
+- **One copy of each voice route.** `/api/voice/providers`, `/voices` and
+  `/stt-models` were registered twice, in the Settings router and the voice
+  router; the first ran and the second drifted. The voice router's are now
+  the only ones, and `tests/test_no_route_registered_twice.py` fails on any
+  method and path registered twice.
+- **The edge-tts voice list is kept for a day.** Settings -> Voice asked
+  Microsoft's servers for it on every visit. A failed read shows the short
+  list and is asked again after ten minutes.
+- **The chat page keeps the model you chose when the model list cannot be
+  read.** After a failed read (a 502 while the server restarts) the page
+  dropped the chosen model from the browser's storage, as if it were no
+  longer offered. Only a complete list drops one now.
+- **The route gates see every route at its real path.** The helper that
+  lists the app's routes dropped a prefix given when a router is included,
+  so the Telegram webhook's routes were checked under the wrong paths.
+- **The browser tests run under the egress guard.** Six of thirteen page
+  tours failed once the guard refused the real model and the network: a
+  chat turn's memory embedded with the real model, and Settings asked
+  Microsoft for voices. Every browser test now runs with no model and no
+  voice service, as the rest of the suite does.
+
+## A list says "none" only after it has loaded (2026-10-15)
+
+- **The Documents page no longer says "No documents yet." while the
+  library loads.** On the live install it showed that line for several
+  seconds, then five documents appeared. It now shows "Loading…" until the
+  server answers, and "No documents yet." only when the answer is empty.
+  When the read fails, it says neither.
+- **The same fix everywhere else.** The same rule now holds for every list
+  that comes from the server:
+  - Documents: the audit history.
+  - Settings: providers, connectors, profiles, MCP servers, skills, tools,
+    API tokens, sessions, platform users, logs, packages, backups, the
+    embedder's database versions, voices, speech models, and the X reply
+    libraries and subjects.
+  - Workspace: the GitHub tabs, the activity feed, the repository picker
+    and the file list.
+  - The IDE's file tree, the Memory tables, the Knowledge libraries, the
+    Scheduled list and its X activity, the Agents page's history and
+    tools, the skills marketplace search, the alerts menu, and the
+    sidebar's "No model selected".
+  - Several of these used `!loading`. That flag also ends when a read
+    fails, so a failed read used to show "none".
+- **Lists the page fills by script follow the same rule.** The Dashboard's
+  "No pending approvals" and the Swarm page's "No active tasks" and "No
+  completed tasks" no longer show before the first answer. The Dashboard
+  stopped declaring its session list empty after 2.5 s. The Swarm task
+  history, templates and worker logs, and the Memory console's lists, now
+  report a refused read as a failure instead of as "none".
+- **A failed read says it failed.**
+  - Workspace: the file list showed a made-up listing (kazma-core/,
+    README.md...) when its read failed; that listing is gone. A failed read
+    now shows "Request failed" and keeps the listing the page already had.
+  - Research: when every read failed, the page showed "No research yet"
+    under its "results unavailable" warning. With any read unavailable, an
+    empty list now shows the warning alone, on both tabs.
+  - Swarm: the model picker said "no models available" when the provider
+    list could not be read. It now says it could not load the models (new
+    catalog text, English and Arabic), and keeps the models an earlier read
+    gave.
+  - Memory page: the beliefs, entities and pending-merges tables show "Load
+    failed" in the table when their read fails, instead of an empty table.
+- **A class gate keeps it.** `tests/test_empty_states_after_load.py` reads
+  every template. Each empty-state condition (a length compared with zero,
+  `!list.length`, `!list.some(...)`) must name a flag its loader sets on
+  success, or both a loading flag and an error flag. Otherwise it is
+  declared with its reason (a filter over a loaded list, a terminal's
+  "ready" line). Each flag must be set somewhere. On the code before the
+  fix it flags 40 empty states. A second check reads every page script:
+  no `catch` block paints an empty list, an empty-state text or made-up
+  rows. On the code before the fix it flags the Swarm history and the
+  Workspace file list. `tests/e2e/test_documents_list_loading.py` holds the
+  library read in a real browser, with the page reached directly and by the
+  sidebar.
+
+## Arabic OCR reads numbers, marks and full stops as written (2026-10-15)
+
+- **Arabic decimal and thousands separators come back.** No OCR reader
+  Kazma uses for numbers can write the Arabic decimal separator (٫) or
+  thousands separator (٬): neither EasyOCR's Arabic model nor Tesseract's
+  `ara` has them. Each writes the nearest mark it has, "," or ".". Between
+  Arabic-Indic digits Kazma now puts the Arabic mark back by a number's
+  grammar: a thousands group is exactly three digits, so a mark before any
+  other number of digits is the decimal separator ("٣,٧٥" becomes "٣٫٧٥").
+  A mark before exactly three digits stays as read. It could be thousands,
+  or three decimal places (the Kuwaiti dinar has three), and a guess would
+  change the value a thousandfold. Both OCR engines apply the rule. European
+  digits are never changed.
+- **A full stop stays with its word.** The neural engine read the gap a
+  font leaves before a full stop as a space ("التغليف ."). Its letter vote
+  also took PaddleOCR's whole word, and PaddleOCR drops full stops, so a
+  line could lose its last one. A space before a full stop or comma is now
+  removed, and the vote decides letters only: the punctuation is EasyOCR's.
+- **A doubted letter is checked against the other readers.** When EasyOCR
+  is unsure of a letter, its own second reading now counts in the vote. If
+  Tesseract or PaddleOCR reads that word, two readers agree. On the table
+  page this turned "ربالأ" into "ريالاً".
+- **Tanween is read.** EasyOCR cannot write harakat, so it wrote the
+  tanween of "ريالاً" as a hamza: "ريالأ". Where another reader read the same
+  letters with harakat at that letter, those are now kept. A mark that only
+  another reader saw is never added: Tesseract writes marks that are not on
+  the page.
+- **Specks on a poor scan are removed before a line is read.** On the
+  degraded English scan, a speck beside the decimal point made "3.75" read
+  "3,75". Ink smaller than any mark the line's own pen draws is now removed
+  first. Real marks keep a wide margin: specks measured 1 to 3 pixels of
+  area, and the smallest real mark, a blurred full stop, 6.
+- **Every OCR case of the fidelity corpus qualifies with the neural
+  engine.** `ar-ocr-table` and `en-ocr-degraded` now meet the release
+  targets: word, segment and number recall 1.0, character and word error
+  0. The two Arabic pages read character for character as written. With
+  Tesseract nothing changed: its `ara` model holds one of the ten
+  Arabic-Indic digits, and it reads the degraded scan's decimal point as a
+  colon.
+- **Not fixed: an English line's last full stop.** The neural engine's
+  English model sometimes reads a full stop at the end of a line as ":".
+  The fidelity measure does not count punctuation, so no case changes. A
+  wider crop margin fixed it on English pages but added full stops to
+  Arabic headings that have none, so it was not adopted.
+
 ## The model-call record off the event loop; tests stay off the network (2026-10-15)
 
 - **Every model call's record is written off the event loop.** The record

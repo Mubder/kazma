@@ -249,7 +249,10 @@
             </tr>
           </thead>
           <tbody>
-            <template x-if="!beliefs.length">
+            <template x-if="beliefsFailed">
+              <tr><td colspan="6" role="alert" style="padding:1rem;color:var(--danger);">{{ t('memory.console.load_failed') }}</td></tr>
+            </template>
+            <template x-if="beliefsLoaded && !beliefs.length">
               <tr><td colspan="6" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No rows'"></td></tr>
             </template>
             <template x-for="b in beliefs" :key="b.id">
@@ -317,7 +320,10 @@
             </tr>
           </thead>
           <tbody>
-            <template x-if="!entities.length">
+            <template x-if="entitiesFailed">
+              <tr><td colspan="7" role="alert" style="padding:1rem;color:var(--danger);">{{ t('memory.console.load_failed') }}</td></tr>
+            </template>
+            <template x-if="entitiesLoaded && !entities.length">
               <tr><td colspan="7" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No rows'"></td></tr>
             </template>
             <template x-for="e in entities" :key="e.id">
@@ -376,7 +382,10 @@
             <tr><th scope="col">ID</th><th scope="col">{{ t('memory.source') }}</th><th scope="col">{{ t('memory.target') }}</th><th scope="col">{{ t('memory.pg.tier') }}</th><th scope="col">{{ t('memory.pg.conf') }}</th><th scope="col"><span class="sr-only" aria-hidden="true">{{ t('chat.actions') }}</span></th></tr>
           </thead>
           <tbody>
-            <template x-if="!merges.length">
+            <template x-if="mergesFailed">
+              <tr><td colspan="6" role="alert" style="padding:1rem;color:var(--danger);">{{ t('memory.console.merges_load_failed') }}</td></tr>
+            </template>
+            <template x-if="mergesLoaded && !merges.length">
               <tr><td colspan="6" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No pending merges'"></td></tr>
             </template>
             <template x-for="m in merges" :key="m.id">

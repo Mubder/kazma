@@ -52,7 +52,10 @@
     <div class="hitl-approval-list" style="padding:16px 20px;">
       <!-- Approval cards injected by hitl_approval.js -->
     </div>
-    <div class="hitl-approval-empty" style="display:block;text-align:center;padding:24px 20px;color:var(--text-muted);">
+    {# Hidden until /api/pending-approvals answers with none
+       (hitl_approval.js renderApprovals): before that "No pending
+       approvals" is a guess, and a question may be waiting. #}
+    <div class="hitl-approval-empty" style="display:none;text-align:center;padding:24px 20px;color:var(--text-muted);">
       {# data-icon avoids Alpine x-html rendering the literal "undefined" when icons load late #}
       <div style="display:flex;justify-content:center;margin-bottom:8px;"><span class="ki icon-lg" data-icon="check-circle" aria-hidden="true"></span></div>
       <p style="margin:0;">{{ t('dashboard.no_pending_approvals') }}</p>

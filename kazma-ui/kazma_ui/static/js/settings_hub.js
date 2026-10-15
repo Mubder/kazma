@@ -235,9 +235,11 @@
                     if (p._modelQuery === undefined) p._modelQuery = '';
                     return p;
                 });
+                this.hubProvidersLoaded = true;
             } catch (e) {
                 console.error('[Hub] Failed to load providers:', e);
                 this.hubProviders = [];
+                this.hubProvidersLoaded = false;
             }
         },
 
@@ -246,9 +248,11 @@
                 const data = await this._fetch('/api/connectors');
                 if (!data) throw new Error('connectors unavailable');
                 this.hubConnectors = data;
+                this.hubConnectorsLoaded = true;
             } catch (e) {
                 console.error('[Hub] Failed to load connectors:', e);
                 this.hubConnectors = [];
+                this.hubConnectorsLoaded = false;
             }
         },
 
@@ -661,9 +665,11 @@
                 const data = await this._fetch('/api/models/profiles');
                 if (!data) throw new Error('profiles unavailable');
                 this.hubProfiles = data;
+                this.hubProfilesLoaded = true;
             } catch (e) {
                 console.error('[Hub] Failed to load profiles:', e);
                 this.hubProfiles = [];
+                this.hubProfilesLoaded = false;
             }
         },
 

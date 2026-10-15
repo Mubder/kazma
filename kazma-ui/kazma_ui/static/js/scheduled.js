@@ -50,6 +50,9 @@ function scheduledPage() {
     return {
         tasks: [],
         loading: false,
+        // "Nothing scheduled" only after the server answered
+        // (tests/test_empty_states_after_load.py).
+        tasksLoaded: false,
         timezone: '',
 
         t(key) { return (window.t && window.t(key)) || key; },
@@ -403,6 +406,7 @@ function scheduledPage() {
                 if (resp.ok && data.ok) {
                     this.tasks = data.tasks || [];
                     this.timezone = String(data.timezone || '');
+                    this.tasksLoaded = true;
                 } else {
                     window.showToast(data.error || window.kazmaT('scheduled.ui.load_failed', 'Failed to load scheduled tasks'), 'error');
                 }

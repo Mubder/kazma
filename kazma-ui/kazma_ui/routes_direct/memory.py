@@ -1075,12 +1075,13 @@ def register_memory_routes(self: Any) -> None:
                     emb > 0 or ep == 0,
                     f"embedded={emb}/{ep}",
                 )
-            try:
-                from kazma_core.memory.embedder import get_embedder
+            # Never built here (it loads the model): an embedder this process
+            # has not loaded yet is not counted -- the first recall builds it.
+            from kazma_core.memory.embedder import embedder_readiness
 
-                _check("embedder_ready", get_embedder() is not None)
-            except Exception:
-                _check("embedder_ready", False, "error")
+            readiness = embedder_readiness()
+            if readiness["state"] != "not_loaded":
+                _check("embedder_ready", readiness["ready"], readiness["state"])
             try:
                 from kazma_core.memory.backends import vector_capability
 

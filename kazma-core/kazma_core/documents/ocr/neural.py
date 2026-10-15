@@ -18,14 +18,30 @@ engine is the combination that measured best, every step of it measured:
    with no Arabic letter, and every line of an English-only page.
 3. **Letters, by vote.** Each word without a digit is checked against two
    more readers of the same line: PaddleOCR's PP-OCRv5 Arabic recognizer and
-   Tesseract's words on the page. When those two agree on another word, or
-   PaddleOCR is confident (>= 0.9) on its own, theirs is kept; otherwise
-   EasyOCR's. Numbers are always EasyOCR's (the others drop or misread
-   them). Without Tesseract, PaddleOCR's confident words alone are used.
-4. **Order.** A line is read left to right as drawn; it is put in logical
+   Tesseract's words on the page. When those two agree on another word,
+   when one of them reads the word EasyOCR itself read second (a letter it
+   doubted, its second reading >= 0.1), or when PaddleOCR is confident
+   (>= 0.9) on its own, theirs is kept; otherwise EasyOCR's. The vote is
+   over letters: a word's punctuation is EasyOCR's (PaddleOCR drops a full
+   stop). Numbers are always EasyOCR's (the others drop or misread them).
+   Without Tesseract, PaddleOCR's confident words alone are used.
+4. **Marks.** EasyOCR writes no harakat (its Arabic list leaves them out); a
+   mark it sees over a letter it writes as the nearest letter it has -- the
+   tanween of "ريالاً" as the hamza of "ريالأ". Where another reader read the
+   same letters with harakat on the same side of that letter, its marks are
+   kept; a mark only another reader saw is not (Tesseract adds marks that
+   are not on the page).
+5. **Order.** A line is read left to right as drawn; it is put in logical
    order by Kazma's glyph-line rule (``parsers.pdf_rtl.logical_line``), the
    one the PDF reader uses -- never a recognizer's own ``get_display`` (a
-   date drawn "30-09-2026" in Arabic text is "2026-09-30").
+   date drawn "30-09-2026" in Arabic text is "2026-09-30"). A space read
+   before a full stop or comma is the gap the font leaves there, and goes;
+   a "," or "." between Arabic-Indic digits is put back as ٫ or ٬ by the
+   grammar of a number (``arabic.arabic_number_separators``).
+6. **Specks.** Before a line is read, ink smaller than any mark its own pen
+   draws (area under half the stroke width squared, no side longer than a
+   stroke) is removed: on a poor scan a speck beside a decimal point read
+   "3.75" as "3,75".
 
 The models run with ONNX Runtime in this process -- the document worker --
 and come from ``neural_models`` (verified against their manifest before
@@ -36,6 +52,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import statistics
 import threading
 import time
@@ -85,6 +102,24 @@ _DIGIT_PASS_CHARS = frozenset("0123456789.,/:-")
 _PAGE_BUDGET = 4
 #: EasyOCR's own score a digits-only cell reading must reach.
 _DIGIT_PASS_SCORE = 0.75
+#: EasyOCR's second reading of a letter, at or above this probability, is
+#: one more reading of the word the vote may count (on the fidelity corpus
+#: every letter EasyOCR misread had the right one second, at 0.22-0.34).
+_ALTERNATIVE = 0.1
+#: A space before a full stop or comma (and the Arabic comma, semicolon and
+#: question mark) ending a word: no script Kazma reads puts one there, and a
+#: recognizer reads the gap a font leaves after a final ف or ق as one. The
+#: colon, semicolon, "!" and "?" are left as read (French sets a space before
+#: them).
+_SPACE_BEFORE_PUNCTUATION = re.compile(r"(?<=\S)\s+(?=[.,\u060c\u061b\u061f](?:\s|$))")
+#: Marks EasyOCR writes as part of a letter: hamza above / below and madda
+#: (أ إ آ ؤ ئ, decomposed).
+_CARRIED_MARKS = frozenset("\u0653\u0654\u0655")
+#: The harakat -- tanween, the short vowels, shadda, sukun: EasyOCR's Arabic
+#: recognizer writes none of them.
+_HARAKAT = frozenset("\u064b\u064c\u064d\u064e\u064f\u0650\u0651\u0652")
+#: Marks drawn below their letter; every other one is drawn above it.
+_BELOW = frozenset("\u064d\u0650\u0655")
 
 
 def _runtime_problem() -> str | None:
@@ -144,6 +179,93 @@ def _logical(visual: str) -> str:
     return logical_line(glyphs) if glyphs else ""
 
 
+def _line_text(visual: str) -> str:
+    """A recognizer's line in logical order, its full stops and commas
+    against the word they end."""
+    return _SPACE_BEFORE_PUNCTUATION.sub("", _logical(visual))
+
+
+def _variants(visual: str, alternatives: tuple[tuple[int, str], ...]) -> dict[int, set[str]]:
+    """EasyOCR's second readings of single letters (``alternatives``: drawn
+    position, letter), as other readings of the word each falls in: word
+    index in the logical line -> the words. A letter swapped for one of the
+    same bidi class leaves the line's order as it was."""
+    if not alternatives:
+        return {}
+    base = _line_text(visual).split()
+    variants: dict[int, set[str]] = {}
+    for position, letter in alternatives:
+        words = _line_text(visual[:position] + letter + visual[position + 1:]).split()
+        if len(words) != len(base):
+            continue
+        changed = [index for index, (mine, theirs) in enumerate(zip(base, words)) if mine != theirs]
+        if len(changed) == 1:
+            variants.setdefault(changed[0], set()).add(words[changed[0]])
+    return variants
+
+
+def _word_parts(word: str) -> tuple[str, str, str]:
+    """(punctuation before, the word, punctuation after): letters, marks and
+    digits are the word."""
+    kept = [index for index, char in enumerate(word) if unicodedata.category(char)[0] in "LMN"]
+    if not kept:
+        return word, "", ""
+    return word[:kept[0]], word[kept[0]:kept[-1] + 1], word[kept[-1] + 1:]
+
+
+def _clusters(word: str) -> list[tuple[str, str]]:
+    """The word decomposed (NFD): each base character with the marks on it."""
+    out: list[tuple[str, str]] = []
+    for char in unicodedata.normalize("NFD", word):
+        if unicodedata.category(char) == "Mn" and out:
+            out[-1] = (out[-1][0], out[-1][1] + char)
+        else:
+            out.append((char, ""))
+    return out
+
+
+def _side(marks: str) -> str:
+    below = {mark in _BELOW for mark in marks}
+    return "below" if below == {True} else "above" if below == {False} else "both"
+
+
+def _marks_from_readers(word: str, readers: list[str]) -> str:
+    """``word`` with the harakat another reader of the same letters saw where
+    EasyOCR saw a mark it could only write as a hamza or madda.
+
+    EasyOCR's Arabic recognizer writes no harakat: the tanween over the alef
+    of "ريالاً" comes out as the hamza of "ريالأ". A reader that writes
+    harakat (Tesseract, PaddleOCR) and read the same letters, with harakat on
+    the same side of that letter, decides which mark it is -- unless another
+    reader read EasyOCR's hamza there too (then it stands), or the readers'
+    harakat differ. Where EasyOCR saw no mark, another reader's is never
+    added: Tesseract writes marks that are not on the page ("الشماليٍ")."""
+    from ..arabic import fold_for_search
+
+    mine = _clusters(word)
+    if not any(set(marks) & _CARRIED_MARKS for _base, marks in mine):
+        return word
+    seen: dict[int, set[str]] = {}
+    for reader in readers:
+        theirs = _clusters(reader)
+        if fold_for_search(reader) != fold_for_search(word) or len(theirs) != len(mine):
+            continue
+        if any(fold_for_search(a) != fold_for_search(b) for (a, _m), (b, _n) in zip(mine, theirs)):
+            continue
+        for index, ((_base, my_marks), (_other, their_marks)) in enumerate(zip(mine, theirs)):
+            if not my_marks or not set(my_marks) <= _CARRIED_MARKS:
+                continue
+            if their_marks == my_marks or (
+                    their_marks and set(their_marks) <= _HARAKAT and _side(my_marks) == _side(their_marks)):
+                seen.setdefault(index, set()).add(their_marks)
+    changed = {index: next(iter(marks)) for index, marks in seen.items()
+               if len(marks) == 1 and next(iter(marks)) != mine[index][1]}
+    if not changed:
+        return word
+    rebuilt = "".join(base + changed.get(index, marks) for index, (base, marks) in enumerate(mine))
+    return unicodedata.normalize("NFC", rebuilt)
+
+
 def _has_digit(text: str) -> bool:
     return any(char.isdigit() for char in text)
 
@@ -156,10 +278,19 @@ def _has_latin(text: str) -> bool:
     return any(char.isascii() and char.isalpha() for char in text)
 
 
-def _vote_words(easy: str, letters: str, letters_confidence: float, tesseract: list[str]) -> str:
-    """One line read three times (each in logical order): per word, EasyOCR's,
-    unless the word holds no digit and the two other readers agree on another
-    word, or PaddleOCR (``letters``) is confident on its own."""
+def _vote_words(easy: str, letters: str, letters_confidence: float, tesseract: list[str],
+                variants: dict[int, set[str]] | None = None) -> str:
+    """One line read three times (each in logical order): per word, EasyOCR's
+    letters, unless the word holds no digit and
+
+    * the two other readers agree on another word, or
+    * one of them reads the word EasyOCR read second (``variants``: a letter
+      EasyOCR doubted, its second reading -- two readers agree), or
+    * PaddleOCR (``letters``) is confident on its own.
+
+    The vote is over letters: the punctuation around a word is EasyOCR's
+    (PaddleOCR drops a full stop); where the letters are EasyOCR's, the
+    harakat it cannot write come from ``_marks_from_readers``."""
     import difflib
 
     from ..arabic import fold_for_search
@@ -167,12 +298,16 @@ def _vote_words(easy: str, letters: str, letters_confidence: float, tesseract: l
     words = easy.split()
     if not words:
         return easy
-    folded = [fold_for_search(word) for word in words]
+
+    def core(word: str) -> str:
+        return _word_parts(word)[1]
+
+    keys = [fold_for_search(core(word)) for word in words]
 
     def aligned(other: list[str]) -> dict[int, str]:
         mapping: dict[int, str] = {}
-        theirs = [fold_for_search(word) for word in other]
-        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, folded, theirs, autojunk=False).get_opcodes():
+        theirs = [fold_for_search(core(word)) for word in other]
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, keys, theirs, autojunk=False).get_opcodes():
             if op == "equal" or (op == "replace" and i2 - i1 == j2 - j1):
                 for k in range(i2 - i1):
                     mapping[i1 + k] = other[j1 + k]
@@ -181,17 +316,24 @@ def _vote_words(easy: str, letters: str, letters_confidence: float, tesseract: l
     by_letters, by_tesseract = aligned(letters.split()), aligned(tesseract)
     out = []
     for index, word in enumerate(words):
-        if _has_digit(word):
+        before, own, after = _word_parts(word)
+        if not own or _has_digit(word):
             out.append(word)
             continue
-        other, third = by_letters.get(index), by_tesseract.get(index)
-        if (other is not None and third is not None and not _has_digit(other)
-                and fold_for_search(other) == fold_for_search(third)):
-            out.append(other)
-        elif other is not None and letters_confidence >= _LETTERS_CONFIDENT and not _has_digit(other):
-            out.append(other)
+        other, third = (core(by.get(index, "")) for by in (by_letters, by_tesseract))
+        other, third = ("" if _has_digit(reading) else reading for reading in (other, third))
+        readers = {fold_for_search(reading) for reading in (other, third) if reading}
+        second = sorted(core(variant) for variant in (variants or {}).get(index, ()))
+        agreed = next((variant for variant in second if fold_for_search(variant) in readers), None)
+        if other and third and fold_for_search(other) == fold_for_search(third):
+            chosen = other
+        elif agreed:
+            chosen = _marks_from_readers(agreed, [r for r in (third, other) if r])
+        elif other and letters_confidence >= _LETTERS_CONFIDENT:
+            chosen = other
         else:
-            out.append(word)
+            chosen = _marks_from_readers(own, [r for r in (third, other) if r])
+        out.append(before + chosen + after)
     return " ".join(out)
 
 
@@ -206,8 +348,10 @@ def _blocks_from_lines(
     lines: list[_Line], *, page_number: int, language: str, engine_version: str | None, dpi: int,
 ) -> tuple[tuple[DocumentBlock, ...], float | None]:
     """Text lines as blocks, top to bottom; lines on one row in their reading
-    order (right to left for an Arabic row), joined when their gap is small."""
-    from ..arabic import is_rtl_dominant
+    order (right to left for an Arabic row), joined when their gap is small.
+    A "," or "." between Arabic-Indic digits is put back as the Arabic
+    separator it stands for (EasyOCR has neither ٫ nor ٬)."""
+    from ..arabic import arabic_number_separators, is_rtl_dominant
 
     items = sorted((line for line in lines if line.text.strip()), key=lambda line: (line.box[1] + line.box[3]) / 2)
     rows: list[list[_Line]] = []
@@ -234,7 +378,7 @@ def _blocks_from_lines(
             else:
                 segments.append([current])
         for segment in segments:
-            text = " ".join(" ".join(s.text.split()) for s in segment)
+            text = arabic_number_separators(" ".join(" ".join(s.text.split()) for s in segment))
             confidence = sum(s.confidence for s in segment) / len(segment)
             confidences.extend(s.confidence for s in segment)
             blocks.append(DocumentBlock(
@@ -460,17 +604,48 @@ def _contrast(grey: Any, target: float) -> Any:
     return grey
 
 
-def _easyocr_read(session: Any, classes: str, ignored: frozenset[str], crop: Any) -> tuple[str, float, float]:
+Reading = tuple[str, float, float, tuple[tuple[int, str], ...]]
+
+
+def _second_readings(probs: Any, index: Any, keep: Any, classes: str, text: str) -> tuple[tuple[int, str], ...]:
+    """Per emitted letter, EasyOCR's second reading at the frame it was
+    surest of: (position in ``text``, letter), when it reaches
+    ``_ALTERNATIVE`` and is a letter of the same bidi class (a swap that
+    leaves the line's order as it was)."""
+    import numpy as np
+
+    out: list[tuple[int, str]] = []
+    starts = np.flatnonzero(keep)
+    for position, start in enumerate(starts):
+        cls = int(index[start])
+        end = int(start) + 1
+        while end < len(index) and int(index[end]) == cls:
+            end += 1
+        frame = int(start) + int(np.argmax(probs[0, start:end, cls]))
+        row = probs[0, frame].copy()
+        row[0] = row[cls] = 0.0
+        second = int(row.argmax())
+        if second == 0 or row[second] < _ALTERNATIVE:
+            continue
+        letter, emitted = classes[second - 1], text[position]
+        if (letter != emitted and letter.isalpha() and emitted.isalpha()
+                and unicodedata.bidirectional(letter) == unicodedata.bidirectional(emitted)):
+            out.append((position, letter))
+    return tuple(out)
+
+
+def _easyocr_read(session: Any, classes: str, ignored: frozenset[str], crop: Any) -> Reading:
     """EasyOCR's recognition of one grey crop (get_image_list + AlignCollate +
     greedy CTC, with its low-confidence contrast retry), left to right:
-    (text, EasyOCR's own score, mean character probability)."""
+    (text, EasyOCR's own score, mean character probability, its second
+    readings of doubted letters -- ``_second_readings``)."""
     import cv2
     import numpy as np
     from PIL import Image
 
     height, width = crop.shape[:2]
     if height <= 0 or width <= 0:
-        return "", 0.0
+        return "", 0.0, 0.0, ()
     ratio = width / height
     if ratio < 1.0:
         ratio = 1.0 / ratio
@@ -482,7 +657,7 @@ def _easyocr_read(session: Any, classes: str, ignored: frozenset[str], crop: Any
     # character listed twice keeps its second class, and so does this.
     ignore = sorted({classes.index(char) + 1 for char in ignored if char in classes})
 
-    def read(contrast: bool) -> tuple[str, float, float]:
+    def read(contrast: bool) -> Reading:
         image = _contrast(resized, 0.5) if contrast else resized
         pil = Image.fromarray(image, "L")
         w, h = pil.size
@@ -508,7 +683,7 @@ def _easyocr_read(session: Any, classes: str, ignored: frozenset[str], crop: Any
         # the confidence reported is the mean character probability, the
         # scale Tesseract's and PaddleOCR's confidences are on.
         score = float(best.prod() ** (2.0 / np.sqrt(len(best))))
-        return text, score, float(best.mean())
+        return text, score, float(best.mean()), _second_readings(probs, index, keep, classes, text)
 
     first = read(False)
     if first[1] < 0.1:
@@ -543,6 +718,61 @@ def _paddle_read(models: _Models, crop: Any) -> tuple[str, float]:
     text = "".join(classes[i] for i in index[keep] if i < len(classes))
     confidence = float(np.mean(preds.max(axis=1)[keep])) if keep.any() else 0.0
     return text, confidence
+
+
+def _stroke_width(ink: Any) -> float:
+    """The pen's width: the median horizontal run of ink (0 with no ink)."""
+    import numpy as np
+
+    padded = np.pad(ink.astype(np.int8), ((0, 0), (1, 1)))
+    steps = np.diff(padded, axis=1)
+    starts, ends = np.flatnonzero(steps == 1), np.flatnonzero(steps == -1)
+    return float(np.median(ends - starts)) if len(starts) else 0.0
+
+
+def _remove_specks(page: Any, box: Box) -> int:
+    """Whiten, in ``page`` (writable), the ink specks in one text line's box;
+    returns how many.
+
+    A speck is ink smaller than any mark the line's own pen draws: area under
+    half the stroke width squared, and no side longer than a stroke. Measured
+    on the fidelity corpus (2026-10-15): specks of a poor scan are 1-3 px of
+    area; the smallest real mark -- a blurred full stop on that scan, stroke
+    3 -- is 6, and dots on clean 300 dpi pages (stroke 3-4) are 9 and up.
+    The stroke is the line's own (a heading's pen is not a footnote's), and
+    only the line's box is cleaned (detection draws it well past the ink, and
+    the crop is cut to the ink inside it): a neighbouring line in a smaller
+    type keeps its dots. Ink that continues past the box (one pixel around
+    it) is never a speck: it is the end of a neighbour's letter or rule. A
+    speck ON the box's edge is still one."""
+    import cv2
+    import numpy as np
+
+    page_h, page_w = page.shape[:2]
+    x0, y0 = max(0, int(box[0])), max(0, int(box[1]))
+    x1, y1 = min(page_w, int(box[2])), min(page_h, int(box[3]))
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return 0
+    stroke = _stroke_width(page[y0:y1, x0:x1] < _INK)
+    if stroke < 2:
+        return 0
+    # The box and a one-pixel ring around it: a component reaching the
+    # ring's outer edge (or the page's) goes on outside the box.
+    region = page[max(0, y0 - 1):y1 + 1, max(0, x0 - 1):x1 + 1]
+    _count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        (region < _INK).astype(np.uint8), connectivity=8)
+    left, upper = stats[1:, cv2.CC_STAT_LEFT], stats[1:, cv2.CC_STAT_TOP]
+    width, height = stats[1:, cv2.CC_STAT_WIDTH], stats[1:, cv2.CC_STAT_HEIGHT]
+    inside = (left > 0) & (upper > 0) & (left + width < region.shape[1]) & (upper + height < region.shape[0])
+    small = (stats[1:, cv2.CC_STAT_AREA] < stroke * stroke / 2) & (np.maximum(width, height) <= stroke)
+    specks = np.flatnonzero(inside & small) + 1
+    if not len(specks):
+        return 0
+    mask = np.isin(labels, specks)
+    # The speck's light halo (a scan's blur, JPEG) goes with it.
+    halo = cv2.dilate(mask.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool) & (labels == 0)
+    region[mask | halo] = 255
+    return int(len(specks))
 
 
 def _ink_rows(grey: Any, box: Box) -> tuple[int, int, int, int] | None:
@@ -674,31 +904,37 @@ class NeuralOcrProvider:
                     skip_regions: tuple[tuple[float, float, float, float], ...] = ()) -> list[_Line]:
         english_only = language.split("+") == ["eng"]
         lines: list[_Line] = []
+        # Specks are removed line by line, each by its own line's pen, in a
+        # copy: the page image itself is the caller's.
+        clean = grey.copy()
         for box in _merge_line_boxes(_detect(models, bgr)):
             centre_x, centre_y = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
             if any(r[0] <= centre_x <= r[2] and r[1] <= centre_y <= r[3] for r in skip_regions):
                 continue
             if time.monotonic() > deadline:
                 raise DocumentOcrError("Neural OCR exceeded its time limit", code="ocr_timeout")
-            cut = _ink_rows(grey, box)
+            _remove_specks(clean, box)
+            cut = _ink_rows(clean, box)
             if cut is None:
                 continue
             x0, y0, x1, y1 = cut
-            crop = grey[y0:y1, x0:x1]
+            crop = clean[y0:y1, x0:x1]
             if english_only:
-                visual, _score, confidence = _easyocr_read(models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
-                lines.append(_Line(box, confidence, _logical(visual)))
+                visual, _score, confidence, _second = _easyocr_read(
+                    models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
+                lines.append(_Line(box, confidence, _line_text(visual)))
                 continue
-            visual, _score, confidence = _easyocr_read(models.rec_arabic, _ARABIC_G1, _ARABIC_G1_IGNORED, crop)
+            visual, _score, confidence, second = _easyocr_read(models.rec_arabic, _ARABIC_G1, _ARABIC_G1_IGNORED, crop)
             if _has_latin(visual) and not _has_arabic(visual):
-                visual, _score, confidence = _easyocr_read(models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
-                lines.append(_Line(box, confidence, _logical(visual)))
+                visual, _score, confidence, _second = _easyocr_read(
+                    models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
+                lines.append(_Line(box, confidence, _line_text(visual)))
                 continue
-            text = _logical(visual)
+            text = _line_text(visual)
             if _has_arabic(text):
                 letters, letters_confidence = _paddle_read(models, crop)
                 inside = [word for (cx, cy, word) in words if box[0] <= cx <= box[2] and box[1] <= cy <= box[3]]
-                text = _vote_words(text, _logical(letters), letters_confidence, inside)
+                text = _vote_words(text, _logical(letters), letters_confidence, inside, _variants(visual, second))
             lines.append(_Line(box, confidence, text))
         return lines
 
@@ -761,16 +997,18 @@ class NeuralOcrProvider:
 
         try:
             if psm == 7 or digits_only:
+                grey = grey.copy()
+                _remove_specks(grey, (0.0, 0.0, float(grey.shape[1]), float(grey.shape[0])))
                 cut = _ink_crop(grey)
                 if cut is None:
                     return result([])
                 crop, box = cut
                 if digits_only or language.split("+") == ["eng"]:
-                    visual, score, confidence = _easyocr_read(models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED,
-                                                              crop)
+                    visual, score, confidence, second = _easyocr_read(
+                        models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
                 else:
-                    visual, score, confidence = _easyocr_read(models.rec_arabic, _ARABIC_G1, _ARABIC_G1_IGNORED,
-                                                              crop)
+                    visual, score, confidence, second = _easyocr_read(
+                        models.rec_arabic, _ARABIC_G1, _ARABIC_G1_IGNORED, crop)
                 # The digits-only reading stands only when it IS digits and
                 # EasyOCR itself is sure of it (its own score, the scale the
                 # pass was measured on): an English reading of Arabic-Indic
@@ -778,14 +1016,15 @@ class NeuralOcrProvider:
                 if digits_only and not (visual.strip() and set(visual.strip()) <= _DIGIT_PASS_CHARS
                                         and score >= _DIGIT_PASS_SCORE):
                     return result([])
-                text = _logical(visual)
+                text = _line_text(visual)
                 if not digits_only and _has_arabic(text):
                     # A cell's words get the same letter vote as a page's lines.
                     letters, letters_confidence = _paddle_read(models, crop)
                     words = self._tesseract_words(
                         Path(image_path), language, dpi=dpi, timeout_seconds=timeout_seconds,
                         output_limit_bytes=output_limit_bytes, work_dir=work_dir)
-                    text = _vote_words(text, _logical(letters), letters_confidence, [w for _x, _y, w in words])
+                    text = _vote_words(text, _logical(letters), letters_confidence, [w for _x, _y, w in words],
+                                       _variants(visual, second))
                 return result([_Line(box, confidence, text)])
             deadline = time.monotonic() + _PAGE_BUDGET * max(1.0, float(timeout_seconds))
             words = [] if language.split("+") == ["eng"] else self._tesseract_words(

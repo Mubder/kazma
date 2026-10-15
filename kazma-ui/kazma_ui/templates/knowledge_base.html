@@ -202,7 +202,7 @@
       {{ t('knowledge.loading') }}
     </div>
 
-    <div x-show="!loading && libraries.length === 0" style="padding:1.5rem;text-align:center;color:var(--text-secondary);" x-cloak>
+    <div x-show="librariesLoaded && !loading && libraries.length === 0" style="padding:1.5rem;text-align:center;color:var(--text-secondary);" x-cloak>
       <span x-show="!viewArchived" x-cloak>{{ t('knowledge.empty') }}</span>
       <span x-show="viewArchived" x-text="S.archived_empty || 'No archived libraries.'" x-cloak></span>
     </div>

@@ -223,10 +223,17 @@ citations. In the `container` profile there is no Docling tier.
     letters, both digit sets) with `english_g2` for lines without Arabic, and a
     vote on letters with PaddleOCR's PP-OCRv5 Arabic recognizer and
     Tesseract's words (two readers agreeing, or a confident PaddleOCR word,
-    replace EasyOCR's; a number is always EasyOCR's). All four models run on
-    ONNX Runtime inside the document worker; a drawn line is put in logical
-    order with the PDF reader's rule, never a recognizer's own. All the models
-    are Apache-2.0.
+    replace EasyOCR's; EasyOCR's own second reading of a letter it doubted
+    counts as a reader; a number and a word's punctuation are always
+    EasyOCR's). EasyOCR writes no harakat: where it wrote a hamza and another
+    reader of the same letters saw a tanween there ("ريالاً"), the tanween is
+    kept. Specks smaller than the line's own pen are removed before a line is
+    read, and a "," or "." between Arabic-Indic digits is put back as the
+    Arabic separator ٫ or ٬ when a number's grammar decides it (before
+    exactly three digits it stays as read: thousands, or three decimal
+    places). All four models run on ONNX Runtime inside the document worker;
+    a drawn line is put in logical order with the PDF reader's rule, never a
+    recognizer's own. All the models are Apache-2.0.
   - **Cost:** about 15 s for an Arabic text page and 30–45 s for a page with
     ruled tables on one core (the document worker's limit), against 2–8 s with
     Tesseract; about 800 MB of memory in the worker (inside its 1 GiB). Near

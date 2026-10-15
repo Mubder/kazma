@@ -1395,56 +1395,9 @@ class SettingsRouterBuilder:
                 config_store.batch_set(items)
             return {"status": "ok", "updated": str(len(items))}
 
-        @router.get("/api/voice/providers")
-        def api_get_voice_providers() -> dict[str, list[str]]:
-            """Get available voice providers for STT and TTS."""
-            return {
-                "stt": ["openai", "groq", "cohere", "nvidia", "faster-whisper"],
-                "tts": ["edgetts", "openai", "nvidia", "kokoro", "coqui"],
-            }
-
-        @router.get("/api/voice/voices")
-        async def api_get_voice_voices(provider: str = "edgetts") -> list[str]:
-            """Get available voice models/ShortNames for a specific TTS provider."""
-            p_lower = provider.strip().lower()
-            if p_lower == "openai":
-                return ["default", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]
-            elif p_lower == "nvidia":
-                return [
-                    "default",
-                    "Magpie-Multilingual.EN-US.Aria",
-                    "Magpie-Multilingual.EN-US.Benjamin",
-                    "Magpie-Multilingual.ES-ES.Alba",
-                    "Magpie-Multilingual.FR-FR.Denise",
-                    "Magpie-Multilingual.ZH-CN.Xiaoxiao",
-                ]
-            elif p_lower == "edgetts":
-                try:
-                    import edge_tts  # type: ignore
-                    voices = await edge_tts.VoicesManager.create()
-                    return ["default"] + sorted([v["ShortName"] for v in voices.voices])
-                except Exception:
-                    return [
-                        "default",
-                        "en-US-AriaNeural",
-                        "en-US-GuyNeural",
-                        "en-GB-SoniaNeural",
-                        "en-GB-RyanNeural",
-                        "es-ES-ElviraNeural",
-                        "fr-FR-DeniseNeural",
-                        "ar-EG-SalmaNeural",
-                        "ar-EG-ShakirNeural",
-                        "ar-SA-HamedNeural",
-                        "ar-SA-ZariyahNeural",
-                    ]
-            return ["default"]
-
-        @router.get("/api/voice/stt-models")
-        async def api_get_voice_stt_models(provider: str = "openai") -> list[Any]:
-            """Get available STT models (delegates to voice router catalog)."""
-            from kazma_ui.routes_voice import list_stt_models
-
-            return await list_stt_models(provider=provider)
+        # The voice lists (/api/voice/providers, /voices, /stt-models) are
+        # routes_voice.py's: this file registered a second copy of each, first,
+        # so the voice module's never ran (2026-10-15, tests/test_no_route_registered_twice.py).
 
 
 

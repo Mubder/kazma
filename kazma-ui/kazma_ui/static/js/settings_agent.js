@@ -609,6 +609,7 @@
                     active: data.active || null,
                     db: data.db || { episodes: {}, beliefs: {} },
                 };
+                this.embedderLoaded = true;
                 const store = data.store || {};
                 if (store.model) {
                     this.embedder = {
