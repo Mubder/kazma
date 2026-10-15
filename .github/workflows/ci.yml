@@ -622,6 +622,7 @@ jobs:
             tests/e2e/test_new_chat_button.py \
             tests/e2e/test_chat_delete_forget.py \
             tests/e2e/test_session_list_loading.py \
+            tests/e2e/test_documents_list_loading.py \
             tests/e2e/test_layout_widths.py \
             tests/e2e/test_instant_reply_closes.py \
             tests/e2e/test_dashboard_session_table.py \

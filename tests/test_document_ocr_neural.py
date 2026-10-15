@@ -414,7 +414,7 @@ def test_lines_inside_a_skipped_region_are_never_read(monkeypatch):
     monkeypatch.setattr(neural, "_detect", lambda models, bgr: boxes)
     monkeypatch.setattr(neural, "_ink_rows", lambda grey, box: tuple(int(v) for v in box))
     monkeypatch.setattr(neural, "_remove_specks", lambda page, box: 0)
-    monkeypatch.setattr(neural, "_easyocr_read", lambda *a: read.append(a) or ("abc", 0.9, 0.9, ()))
+    monkeypatch.setattr(neural, "_easyocr_read", lambda *a: read.append(a) or neural.Reading("abc", 0.9, 0.9))
     provider = neural.NeuralOcrProvider(Path("unused"))
     if not _numpy():
         pytest.skip("numpy is not installed")

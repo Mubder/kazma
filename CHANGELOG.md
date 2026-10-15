@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## OCR reads a line's last mark as written, and the fidelity measure checks marks (2026-10-15)
+
+- **A line's last full stop is no longer read as a colon.** The live
+  install read "...and were placed under review." as "...under review:".
+  The neural engine's English model cannot tell a line's final "." from ":",
+  or "," from ";". When it read the right mark, the wrong one was its second
+  choice at up to 0.43, and the other way round. So no confidence threshold
+  on that model alone separates them. Now two readers decide. EasyOCR says
+  that a mark is there, and Tesseract's reading of the same word says which
+  one. A mark that only Tesseract reads is never added, no mark is removed,
+  and a number's own marks are never touched.
+- **Measured on 176 generated lines** in English and Arabic, clean and as
+  poor scans. English line ends went from 61 to 83 of 88 right, with no
+  wrong mark left (22 before). Arabic went from 70 to 74 right of 88 ("؛" read
+  as ";" or ":" is now right), with 3 wrong left (6 before). No mark was
+  added anywhere. Tesseract's Arabic model has no Arabic comma ("،"), so on
+  an Arabic line its "," means a comma of either form.
+- **English pages run Tesseract only when needed.** It runs once per page,
+  only when a line ends in a mark to decide.
+- **The fidelity measure now checks punctuation** (corpus version 5). Every
+  other measure compares words, so "under review:" passed all of them. A
+  mark read wrong, dropped or added now counts against a case. Marks inside
+  a number are left to the number check. With the neural engine every OCR
+  case reads its punctuation right (the English pages were at 0.5 to 0.75).
+  With Tesseract the degraded scan is at 0.8 and the Arabic pages at 0.75.
+  Every text-format case is at 1.0. No earlier floor was lowered.
+- **Not fixed: a mark read as a letter.** EasyOCR sometimes reads "!" as the
+  letter "l", and an Arabic "." as "ء". Its own probability for the right
+  mark there is mostly under 0.1, so the two readers never agree on it, and
+  a fix would need a hand-written table of look-alikes.
+
 ## A status read loads no model; one copy of each route (2026-10-15)
 
 - **Memory health no longer loads the embedding model.** The Memory page
@@ -135,11 +166,10 @@
   Tesseract nothing changed: its `ara` model holds one of the ten
   Arabic-Indic digits, and it reads the degraded scan's decimal point as a
   colon.
-- **Not fixed: an English line's last full stop.** The neural engine's
-  English model sometimes reads a full stop at the end of a line as ":".
-  The fidelity measure does not count punctuation, so no case changes. A
-  wider crop margin fixed it on English pages but added full stops to
-  Arabic headings that have none, so it was not adopted.
+- **An English line's last full stop** was still read as ":" by the neural
+  engine's English model. A wider crop margin fixed it on English pages but
+  added full stops to Arabic headings that have none, so it was not adopted;
+  the same day's later entry (above) fixes it with a vote between readers.
 
 ## A large Knowledge library's meaning search finds what a small one's does (2026-10-15)
 

@@ -22,7 +22,12 @@ old behaviour fails the test):
   reader saw is never added (Tesseract writes marks that are not there);
 * ink smaller than the line's own pen is a speck and is removed before the
   line is read (a speck beside a decimal point made "3.75" read "3,75"); real
-  marks and ink continuing past the line's box stay.
+  marks and ink continuing past the line's box stay;
+* a line's last mark is two readers' (the same day, after the live install
+  read "placed under review:"): EasyOCR says THAT a mark is there, Tesseract's
+  reading of the same word says WHICH -- one mark; a mark Tesseract alone
+  reads is never added, a number's own marks are never touched, and on an
+  Arabic line Tesseract's "," (``ara`` has no "،") is a comma of either form.
 
 The end-to-end readings need the neural engine's packages and models (and,
 for the Arabic page, LibreOffice and Tesseract with ``ara``); without them
@@ -208,10 +213,10 @@ def test_the_recognizer_returns_its_second_readings():
             return [np.log(probs)]
 
     crop = np.full((32, 96), 255, dtype=np.uint8)
-    read, _score, _mean, second = neural._easyocr_read(Session(), _CLASSES, frozenset(), crop)
-    assert (read, second) == ("يب1", ((0, "ب"),))
+    reading = neural._easyocr_read(Session(), _CLASSES, frozenset(), crop)
+    assert (reading.text, reading.second) == ("يب1", ((0, "ب"),))
     # An empty crop is an empty reading of the same shape.
-    assert neural._easyocr_read(Session(), _CLASSES, frozenset(), crop[:0]) == ("", 0.0, 0.0, ())
+    assert neural._easyocr_read(Session(), _CLASSES, frozenset(), crop[:0]) == neural.Reading("", 0.0, 0.0)
 
 
 def test_a_second_reading_counts_only_when_another_reader_reads_it():
@@ -245,6 +250,98 @@ def test_the_hamza_easyocr_wrote_for_a_tanween_takes_the_reader_s_harakat():
     assert neural._marks_from_readers("ريالأ", ["ريالاٍ"]) == "ريالأ"
     # Readers that disagree on the harakat leave EasyOCR's reading.
     assert neural._marks_from_readers("ريالأ", ["ريالاً", "ريالاَ"]) == "ريالأ"
+
+
+# ── a line's last mark ────────────────────────────────────────────────────
+
+def _current_vote(text: str, tesseract: list[str]) -> str:
+    """What the engine did before the final-mark vote: the letter vote, which
+    keeps EasyOCR's punctuation (the negative control)."""
+    return neural._vote_words(text, "", 0.0, tesseract)
+
+
+@pytest.mark.parametrize(("easy", "tesseract", "beyond", "written"), [
+    # EasyOCR's English model reads a line-final "." as ":" (0.82 on the
+    # clean corpus page), "," as ";".
+    ("were placed under review:", ["were", "placed", "under", "review."], 0.0, "were placed under review."),
+    ("improved by evening;", ["improved", "by", "evening,"], 0.0, "improved by evening,"),
+    ("takes the evening route?,", ["takes", "the", "evening", "route?"], 0.0, "takes the evening route?"),
+    # A mark EasyOCR gave >= 0.1 past its last letter, but did not write.
+    ("after the packaging change", ["after", "the", "packaging", "change."], 0.37, "after the packaging change."),
+    # Arabic: EasyOCR reads "؛" as ";" or ":"; Tesseract's ara writes "؛".
+    ("وتفتح البوابة في الثامنة;", ["وتفتح", "البوابة", "في", "الثامنة؛"], 0.0, "وتفتح البوابة في الثامنة؛"),
+    ("وجفت الطرق صباحا:", ["وجفت", "الطرق", "صباحا؛"], 0.0, "وجفت الطرق صباحا؛"),
+    # Tesseract's "," on an Arabic line: ara cannot write "،".
+    ("تحسنت التوقعات مساء.", ["تحسنت", "التوقعات", "مساء,"], 0.0, "تحسنت التوقعات مساء،"),
+    ("تحسنت التوقعات مساء,", ["تحسنت", "التوقعات", "مساء,"], 0.0, "تحسنت التوقعات مساء,"),
+])
+def test_easyocr_says_a_mark_is_there_tesseract_says_which(easy, tesseract, beyond, written):
+    assert neural._vote_final_mark(easy, tesseract, beyond) == written
+    if easy != written:
+        assert _current_vote(easy, tesseract) == easy  # negative control: the current vote keeps the misread
+
+
+@pytest.mark.parametrize(("easy", "tesseract", "beyond"), [
+    ("Findings", ["Findings."], 0.0),                                   # a heading: no mark is added
+    ("النتائج", ["النتائج."], 0.0),
+    ("during the drill", ["during", "the", "drill."], 0.04),            # EasyOCR saw no mark (< 0.1)
+    ("before cleaning itl", ["before", "cleaning", "it!"], 0.0),        # not the same letters
+    ("the same day;", ["the", "same", "day;."], 0.0),                   # Tesseract's two marks
+    ("on 2026-09-30:", ["on", "30-09-2026."], 0.0),                     # another reading of the number
+    ("fell to 3,75", ["fell", "to", "3.75"], 0.9),                     # a number's own mark: never touched
+    ("the end.)", ["the", "end:)"], 0.0),                              # not a lone mark: left as read
+    ("the end.", [], 0.0),                                              # no Tesseract
+])
+def test_what_two_readers_do_not_agree_on_stays_as_read(easy, tesseract, beyond):
+    assert neural._vote_final_mark(easy, tesseract, beyond) == easy
+
+
+def test_the_marks_easyocr_gave_past_each_end_of_a_line():
+    np = pytest.importorskip("numpy")
+    classes = "ab.:"  # 1 a, 2 b, 3 ".", 4 ":"
+    probs = _probabilities([
+        {0: 0.6, 4: 0.4},   # before the first letter: ":" 0.4
+        {1: 1.0},
+        {0: 0.9, 3: 0.1},   # between letters: not past an end
+        {2: 1.0},
+        {0: 0.63, 4: 0.37},  # past the last letter: ":" 0.37
+        {0: 0.55, 3: 0.45},  # padding past the crop (stronger): not looked at
+    ], len(classes))
+    index = probs.argmax(axis=2)[0]
+    keep = np.insert(index[1:] != index[:-1], 0, True) & (index != 0)
+    left, right = neural._marks_beyond(probs, keep, classes, used=0.5)
+    assert (round(left, 2), round(right, 2)) == (0.4, 0.37)
+    # The trap the helper avoids: an integer, a slice and a list put the
+    # list's axis first.
+    assert probs[0, :, [3, 4]].shape == (2, 6) and probs[0][:, [3, 4]].shape == (6, 2)
+
+
+def test_an_english_page_asks_tesseract_only_for_a_mark_to_vote_on(monkeypatch):
+    pytest.importorskip("numpy")
+    from types import SimpleNamespace
+
+    boxes = [(10.0, 10.0, 300.0, 40.0), (10.0, 60.0, 300.0, 90.0)]
+    texts = iter([])
+    monkeypatch.setattr(neural, "_detect", lambda models, bgr: boxes)
+    monkeypatch.setattr(neural, "_ink_rows", lambda grey, box: tuple(int(v) for v in box))
+    monkeypatch.setattr(neural, "_remove_specks", lambda page, box: 0)
+    monkeypatch.setattr(neural, "_easyocr_read", lambda *a: neural.Reading(next(texts), 0.9, 0.9))
+    asked: list[int] = []
+
+    def words():
+        asked.append(1)
+        return [(150.0, 75.0, "under"), (250.0, 75.0, "review.")]
+
+    provider = neural.NeuralOcrProvider(Path("unused"))
+    grey = __import__("numpy").full((120, 320), 255, dtype="uint8")
+    models = SimpleNamespace(rec_latin=None, rec_arabic=None)
+    texts = iter(["Findings", "under review:"])
+    lines = provider._read_lines(models, None, grey, "eng", deadline=1e18, words=words)
+    assert [line.text for line in lines] == ["Findings", "under review."] and asked == [1]
+    texts = iter(["Findings", "Summary"])  # no line ends in a mark: Tesseract is not run
+    asked.clear()
+    provider._read_lines(models, None, grey, "eng", deadline=1e18, words=words)
+    assert asked == []
 
 
 # ── specks ────────────────────────────────────────────────────────────────
@@ -352,6 +449,9 @@ def test_the_arabic_table_page_reads_as_written(tmp_path, monkeypatch):
     text = read(image, "ara", tmp_path)
     for written in ("ريالاً", "المناطق.", "٣٫٧٥", "التغليف.", "المراجعة."):
         assert written in text, (written, text)
+    # The final-mark vote adds no mark the page does not have: the heading
+    # and the footer end in none.
+    assert "النتائج." not in text and "الاصطناعي." not in text, text
     # Negative control: the same model readings under the old rules.
     _old_rules(monkeypatch)
     old = read(image, "ara", tmp_path)
@@ -360,12 +460,36 @@ def test_the_arabic_table_page_reads_as_written(tmp_path, monkeypatch):
     assert "المراجعة." not in old
 
 
+def _tesseract_reads(language: str) -> None:
+    from kazma_core.documents.ocr.tesseract import TesseractProvider
+
+    if not TesseractProvider().probe((language,)).available:
+        pytest.skip(f"Tesseract with '{language}' is not installed (the final-mark vote's second reader)")
+
+
 def test_the_degraded_scan_reads_its_decimal_point(tmp_path, monkeypatch):
     directory = _installed()
+    _tesseract_reads("eng")
     image = _page("en-ocr-degraded", tmp_path)
     read = _reader(directory, monkeypatch)
     text = read(image, "eng", tmp_path)
     assert "3.75" in text and "3,75" not in text, text
-    # Negative control: without the speck removal the speck reads as a comma.
+    assert "packaging change." in text and "under review." in text, text
+    # Negative controls: without the final-mark vote EasyOCR's colon stands;
+    # without the speck removal the speck reads as a comma.
+    monkeypatch.setattr(neural, "_vote_final_mark", lambda line, tesseract, beyond: line)
+    assert "under review:" in read(image, "eng", tmp_path)
     _old_rules(monkeypatch)
     assert "3,75" in read(image, "eng", tmp_path)
+
+
+def test_a_clean_page_s_last_full_stop_is_read_as_written(tmp_path, monkeypatch):
+    # The live install, 2026-10-15: "...and were placed under review:".
+    directory = _installed()
+    _tesseract_reads("eng")
+    image = _page("en-ocr", tmp_path)
+    read = _reader(directory, monkeypatch)
+    text = read(image, "eng", tmp_path)
+    assert "placed under review." in text and "review:" not in text, text
+    monkeypatch.setattr(neural, "_vote_final_mark", lambda line, tesseract, beyond: line)
+    assert "placed under review:" in read(image, "eng", tmp_path)  # negative control

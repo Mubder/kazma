@@ -42,6 +42,10 @@ engine is the combination that measured best, every step of it measured:
    draws (area under half the stroke width squared, no side longer than a
    stroke) is removed: on a poor scan a speck beside a decimal point read
    "3.75" as "3,75".
+7. **A line's last mark.** EasyOCR's English model cannot tell a line-final
+   "." from ":" (nor "," from ";"): EasyOCR says THAT a mark is there,
+   Tesseract's reading of the same word says WHICH (``_vote_final_mark``).
+   English pages ask Tesseract only when a line has such a mark.
 
 The models run with ONNX Runtime in this process -- the document worker --
 and come from ``neural_models`` (verified against their manifest before
@@ -57,9 +61,10 @@ import statistics
 import threading
 import time
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from ..errors import DocumentLimitError, DocumentOcrError, DocumentOcrUnavailableError
 from ..models import BlockType, BoundingBox, DocumentBlock
@@ -112,6 +117,12 @@ _ALTERNATIVE = 0.1
 #: colon, semicolon, "!" and "?" are left as read (French sets a space before
 #: them).
 _SPACE_BEFORE_PUNCTUATION = re.compile(r"(?<=\S)\s+(?=[.,\u060c\u061b\u061f](?:\s|$))")
+#: The marks a line may end with (the readers write the Arabic comma,
+#: semicolon and question mark too).
+_END_MARKS = frozenset(".,:;!?\u060c\u061b\u061f")
+#: Tesseract's ``ara`` model has no Arabic comma: on an Arabic line its ","
+#: is a comma of either form.
+_ARABIC_COMMAS = frozenset(",\u060c")
 #: Marks EasyOCR writes as part of a letter: hamza above / below and madda
 #: (أ إ آ ؤ ئ, decomposed).
 _CARRIED_MARKS = frozenset("\u0653\u0654\u0655")
@@ -278,6 +289,79 @@ def _has_latin(text: str) -> bool:
     return any(char.isascii() and char.isalpha() for char in text)
 
 
+def _aligned(keys: list[str], other: list[str]) -> dict[int, str]:
+    """``other``'s words by the index of the word they read (``keys``: each
+    word's folded letters): equal runs, and runs replaced word for word."""
+    import difflib
+
+    from ..arabic import fold_for_search
+
+    mapping: dict[int, str] = {}
+    theirs = [fold_for_search(_word_parts(word)[1]) for word in other]
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, keys, theirs, autojunk=False).get_opcodes():
+        if op == "equal" or (op == "replace" and i2 - i1 == j2 - j1):
+            for k in range(i2 - i1):
+                mapping[i1 + k] = other[j1 + k]
+    return mapping
+
+
+def _ends_in_a_mark(text: str, beyond: float) -> bool:
+    """EasyOCR saw a mark at the line's end: it wrote one after the last
+    word, or gave one >= ``_ALTERNATIVE`` past its last character
+    (``beyond``: the end's side of ``Reading.beyond``)."""
+    words = text.split()
+    if not words:
+        return False
+    after = _word_parts(words[-1])[2]
+    return bool(after) and set(after) <= _END_MARKS or not after and beyond >= _ALTERNATIVE
+
+
+def _end_beyond(reading: Reading, text: str) -> float:
+    """``Reading.beyond`` at the line's logical end: the left of a
+    right-to-left line as drawn, else the right."""
+    from ..arabic import is_rtl_dominant
+
+    return reading.beyond[0] if is_rtl_dominant(text) else reading.beyond[1]
+
+
+def _vote_final_mark(text: str, tesseract: list[str], beyond: float) -> str:
+    """The mark ending a line (logical order), by two readers: EasyOCR says
+    THAT one is there, Tesseract's reading of the same word says WHICH.
+
+    Measured on 176 generated lines (EN/AR, clean and degraded, 2026-10-15):
+    EasyOCR's English model confuses "." with ":" and "," with ";" at a line's
+    end (61 of 88 right; the right mark second at 0.07-0.40, so no
+    probability threshold separates them), and its Arabic model ";" with
+    "؛"; Tesseract named 87 of 88 English marks and wrote "؛" right, but
+    never the Arabic comma (``ara`` has none) and it adds marks of its own
+    (";." for ";"). So: only where EasyOCR saw a mark (``_ends_in_a_mark``),
+    Tesseract read the same letters, and its reading there is ONE mark, that
+    mark stands. A mark Tesseract alone reads is never added, none is ever
+    removed, and a number's own marks are never touched (only what follows
+    the last word). On an Arabic line Tesseract's "," is a comma of either
+    form: EasyOCR's form when it read a comma, else "،"."""
+    from ..arabic import fold_for_search, is_rtl_dominant, strip_bidi_controls
+
+    words = text.split()
+    if not words or not tesseract or not _ends_in_a_mark(text, beyond):
+        return text
+    before, own, after = _word_parts(words[-1])
+    if not own:
+        return text
+    keys = [fold_for_search(_word_parts(word)[1]) for word in words]
+    theirs = _aligned(keys, [strip_bidi_controls(word) for word in tesseract]).get(len(words) - 1)
+    if theirs is None:
+        return text
+    _lead, their_own, mark = _word_parts(theirs)
+    if fold_for_search(their_own) != fold_for_search(own) or len(mark) != 1 or mark not in _END_MARKS:
+        return text
+    if mark in _ARABIC_COMMAS and is_rtl_dominant(text):
+        mark = after if after in _ARABIC_COMMAS else "\u060c"
+    if mark == after:
+        return text
+    return " ".join([*words[:-1], before + own + mark])
+
+
 def _vote_words(easy: str, letters: str, letters_confidence: float, tesseract: list[str],
                 variants: dict[int, set[str]] | None = None) -> str:
     """One line read three times (each in logical order): per word, EasyOCR's
@@ -290,9 +374,8 @@ def _vote_words(easy: str, letters: str, letters_confidence: float, tesseract: l
 
     The vote is over letters: the punctuation around a word is EasyOCR's
     (PaddleOCR drops a full stop); where the letters are EasyOCR's, the
-    harakat it cannot write come from ``_marks_from_readers``."""
-    import difflib
-
+    harakat it cannot write come from ``_marks_from_readers``. The line's
+    last mark is ``_vote_final_mark``'s."""
     from ..arabic import fold_for_search
 
     words = easy.split()
@@ -303,17 +386,7 @@ def _vote_words(easy: str, letters: str, letters_confidence: float, tesseract: l
         return _word_parts(word)[1]
 
     keys = [fold_for_search(core(word)) for word in words]
-
-    def aligned(other: list[str]) -> dict[int, str]:
-        mapping: dict[int, str] = {}
-        theirs = [fold_for_search(core(word)) for word in other]
-        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, keys, theirs, autojunk=False).get_opcodes():
-            if op == "equal" or (op == "replace" and i2 - i1 == j2 - j1):
-                for k in range(i2 - i1):
-                    mapping[i1 + k] = other[j1 + k]
-        return mapping
-
-    by_letters, by_tesseract = aligned(letters.split()), aligned(tesseract)
+    by_letters, by_tesseract = _aligned(keys, letters.split()), _aligned(keys, tesseract)
     out = []
     for index, word in enumerate(words):
         before, own, after = _word_parts(word)
@@ -604,7 +677,32 @@ def _contrast(grey: Any, target: float) -> Any:
     return grey
 
 
-Reading = tuple[str, float, float, tuple[tuple[int, str], ...]]
+class Reading(NamedTuple):
+    """One EasyOCR reading of a crop, left to right."""
+
+    text: str
+    score: float  # EasyOCR's own score
+    confidence: float  # mean character probability
+    second: tuple[tuple[int, str], ...] = ()  # ``_second_readings``
+    #: EasyOCR's strongest probability for a mark (``_END_MARKS``) in the
+    #: frames before its first and after its last character: (left, right).
+    beyond: tuple[float, float] = (0.0, 0.0)
+
+
+def _marks_beyond(probs: Any, keep: Any, classes: str, used: float) -> tuple[float, float]:
+    """``Reading.beyond``: frames past the crop's own pixels (the padding to
+    the batch width) are not looked at."""
+    import numpy as np
+
+    marks = [classes.index(mark) + 1 for mark in _END_MARKS if mark in classes]
+    emitted = np.flatnonzero(keep)
+    if not marks or not len(emitted):
+        return 0.0, 0.0
+    frames = probs[0][:, marks]  # (frame, mark); probs[0, :, marks] would put the marks first
+    last = min(frames.shape[0], int(frames.shape[0] * used) + 2)
+    left = float(frames[:emitted[0]].max()) if emitted[0] > 0 else 0.0
+    right = float(frames[emitted[-1] + 1:last].max()) if emitted[-1] + 1 < last else 0.0
+    return round(left, 6), round(right, 6)
 
 
 def _second_readings(probs: Any, index: Any, keep: Any, classes: str, text: str) -> tuple[tuple[int, str], ...]:
@@ -636,16 +734,16 @@ def _second_readings(probs: Any, index: Any, keep: Any, classes: str, text: str)
 
 def _easyocr_read(session: Any, classes: str, ignored: frozenset[str], crop: Any) -> Reading:
     """EasyOCR's recognition of one grey crop (get_image_list + AlignCollate +
-    greedy CTC, with its low-confidence contrast retry), left to right:
-    (text, EasyOCR's own score, mean character probability, its second
-    readings of doubted letters -- ``_second_readings``)."""
+    greedy CTC, with its low-confidence contrast retry), left to right: a
+    ``Reading`` (text, EasyOCR's own score, mean character probability, its
+    second readings of doubted letters, the marks it gave past its ends)."""
     import cv2
     import numpy as np
     from PIL import Image
 
     height, width = crop.shape[:2]
     if height <= 0 or width <= 0:
-        return "", 0.0, 0.0, ()
+        return Reading("", 0.0, 0.0)
     ratio = width / height
     if ratio < 1.0:
         ratio = 1.0 / ratio
@@ -683,12 +781,13 @@ def _easyocr_read(session: Any, classes: str, ignored: frozenset[str], crop: Any
         # the confidence reported is the mean character probability, the
         # scale Tesseract's and PaddleOCR's confidences are on.
         score = float(best.prod() ** (2.0 / np.sqrt(len(best))))
-        return text, score, float(best.mean()), _second_readings(probs, index, keep, classes, text)
+        return Reading(text, score, float(best.mean()), _second_readings(probs, index, keep, classes, text),
+                       _marks_beyond(probs, keep, classes, target / image_width))
 
     first = read(False)
-    if first[1] < 0.1:
+    if first.score < 0.1:
         second = read(True)
-        if second[1] >= first[1]:
+        if second.score >= first.score:
             first = second
     return first
 
@@ -899,11 +998,35 @@ class NeuralOcrProvider:
         except (DocumentOcrError, DocumentOcrUnavailableError, DocumentLimitError, OSError):
             return []
 
+    def _page_words(self, image_path: Path, language: str, **tesseract: Any) -> (
+            list[tuple[float, float, str]] | Callable[[], list[tuple[float, float, str]]]):
+        """Tesseract's words for ``_read_lines``: read now on an Arabic page
+        (the letter vote needs them on every line), on demand on an English
+        one (only a line's last mark is voted there)."""
+        def read() -> list[tuple[float, float, str]]:
+            return self._tesseract_words(image_path, language, **tesseract)
+
+        return read if language.split("+") == ["eng"] else read()
+
     def _read_lines(self, models: _Models, bgr: Any, grey: Any, language: str, *, deadline: float,
-                    words: list[tuple[float, float, str]],
+                    words: list[tuple[float, float, str]] | Callable[[], list[tuple[float, float, str]]],
                     skip_regions: tuple[tuple[float, float, float, float], ...] = ()) -> list[_Line]:
+        """The page's lines, read and voted. ``words``: Tesseract's words on
+        the page, or how to get them -- an English page asks Tesseract only
+        when a line's last mark is to be voted on."""
         english_only = language.split("+") == ["eng"]
+        fetched: list[list[tuple[float, float, str]]] = [] if callable(words) else [words]
+
+        def page_words() -> list[tuple[float, float, str]]:
+            if not fetched:
+                fetched.append(words())  # type: ignore[operator]
+            return fetched[0]
+
+        def inside(box: Box) -> list[str]:
+            return [word for (cx, cy, word) in page_words() if box[0] <= cx <= box[2] and box[1] <= cy <= box[3]]
+
         lines: list[_Line] = []
+        ends: list[float] = []
         # Specks are removed line by line, each by its own line's pen, in a
         # copy: the page image itself is the caller's.
         clean = grey.copy()
@@ -920,22 +1043,27 @@ class NeuralOcrProvider:
             x0, y0, x1, y1 = cut
             crop = clean[y0:y1, x0:x1]
             if english_only:
-                visual, _score, confidence, _second = _easyocr_read(
-                    models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
-                lines.append(_Line(box, confidence, _line_text(visual)))
-                continue
-            visual, _score, confidence, second = _easyocr_read(models.rec_arabic, _ARABIC_G1, _ARABIC_G1_IGNORED, crop)
-            if _has_latin(visual) and not _has_arabic(visual):
-                visual, _score, confidence, _second = _easyocr_read(
-                    models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
-                lines.append(_Line(box, confidence, _line_text(visual)))
-                continue
-            text = _line_text(visual)
-            if _has_arabic(text):
-                letters, letters_confidence = _paddle_read(models, crop)
-                inside = [word for (cx, cy, word) in words if box[0] <= cx <= box[2] and box[1] <= cy <= box[3]]
-                text = _vote_words(text, _logical(letters), letters_confidence, inside, _variants(visual, second))
-            lines.append(_Line(box, confidence, text))
+                reading = _easyocr_read(models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
+                text = _line_text(reading.text)
+            else:
+                reading = _easyocr_read(models.rec_arabic, _ARABIC_G1, _ARABIC_G1_IGNORED, crop)
+                if _has_latin(reading.text) and not _has_arabic(reading.text):
+                    reading = _easyocr_read(models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
+                    text = _line_text(reading.text)
+                else:
+                    text = _line_text(reading.text)
+                    if _has_arabic(text):
+                        letters, letters_confidence = _paddle_read(models, crop)
+                        text = _vote_words(text, _logical(letters), letters_confidence, inside(box),
+                                           _variants(reading.text, reading.second))
+            lines.append(_Line(box, reading.confidence, text))
+            ends.append(_end_beyond(reading, text))
+        # The last mark of each line, once every line is read: an English
+        # page reads Tesseract only if a line has one to vote on.
+        for index, (line, beyond) in enumerate(zip(lines, ends)):
+            if _ends_in_a_mark(line.text, beyond):
+                lines[index] = _Line(line.box, line.confidence,
+                                     _vote_final_mark(line.text, inside(line.box), beyond))
         return lines
 
     def recognize(
@@ -954,9 +1082,8 @@ class NeuralOcrProvider:
         models = self._ready_models()
         bgr, grey = self._load(Path(image_path), max_pixels)
         deadline = time.monotonic() + _PAGE_BUDGET * max(1.0, float(timeout_seconds))
-        words = [] if language.split("+") == ["eng"] else self._tesseract_words(
-            Path(image_path), language, dpi=dpi, timeout_seconds=timeout_seconds,
-            output_limit_bytes=output_limit_bytes, work_dir=work_dir)
+        words = self._page_words(Path(image_path), language, dpi=dpi, timeout_seconds=timeout_seconds,
+                                 output_limit_bytes=output_limit_bytes, work_dir=work_dir)
         try:
             lines = self._read_lines(models, bgr, grey, language, deadline=deadline, words=words,
                                      skip_regions=tuple(skip_regions))
@@ -1004,33 +1131,36 @@ class NeuralOcrProvider:
                     return result([])
                 crop, box = cut
                 if digits_only or language.split("+") == ["eng"]:
-                    visual, score, confidence, second = _easyocr_read(
-                        models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
+                    reading = _easyocr_read(models.rec_latin, _ENGLISH_G2, _ENGLISH_G2_IGNORED, crop)
                 else:
-                    visual, score, confidence, second = _easyocr_read(
-                        models.rec_arabic, _ARABIC_G1, _ARABIC_G1_IGNORED, crop)
+                    reading = _easyocr_read(models.rec_arabic, _ARABIC_G1, _ARABIC_G1_IGNORED, crop)
+                visual = reading.text
                 # The digits-only reading stands only when it IS digits and
                 # EasyOCR itself is sure of it (its own score, the scale the
                 # pass was measured on): an English reading of Arabic-Indic
                 # digits is confident by character and wrong as a number.
-                if digits_only and not (visual.strip() and set(visual.strip()) <= _DIGIT_PASS_CHARS
-                                        and score >= _DIGIT_PASS_SCORE):
-                    return result([])
+                if digits_only:
+                    if not (visual.strip() and set(visual.strip()) <= _DIGIT_PASS_CHARS
+                            and reading.score >= _DIGIT_PASS_SCORE):
+                        return result([])
+                    return result([_Line(box, reading.confidence, _line_text(visual))])
                 text = _line_text(visual)
-                if not digits_only and _has_arabic(text):
-                    # A cell's words get the same letter vote as a page's lines.
-                    letters, letters_confidence = _paddle_read(models, crop)
-                    words = self._tesseract_words(
+                words: list[str] = []
+                if _has_arabic(text) or _ends_in_a_mark(text, _end_beyond(reading, text)):
+                    # A cell's words get the same votes as a page's lines.
+                    words = [w for _x, _y, w in self._tesseract_words(
                         Path(image_path), language, dpi=dpi, timeout_seconds=timeout_seconds,
-                        output_limit_bytes=output_limit_bytes, work_dir=work_dir)
-                    text = _vote_words(text, _logical(letters), letters_confidence, [w for _x, _y, w in words],
-                                       _variants(visual, second))
-                return result([_Line(box, confidence, text)])
+                        output_limit_bytes=output_limit_bytes, work_dir=work_dir)]
+                if _has_arabic(text):
+                    letters, letters_confidence = _paddle_read(models, crop)
+                    text = _vote_words(text, _logical(letters), letters_confidence, words,
+                                       _variants(visual, reading.second))
+                text = _vote_final_mark(text, words, _end_beyond(reading, text))
+                return result([_Line(box, reading.confidence, text)])
             deadline = time.monotonic() + _PAGE_BUDGET * max(1.0, float(timeout_seconds))
-            words = [] if language.split("+") == ["eng"] else self._tesseract_words(
-                Path(image_path), language, dpi=dpi, timeout_seconds=timeout_seconds,
-                output_limit_bytes=output_limit_bytes, work_dir=work_dir)
-            return result(self._read_lines(models, bgr, grey, language, deadline=deadline, words=words))
+            block_words = self._page_words(Path(image_path), language, dpi=dpi, timeout_seconds=timeout_seconds,
+                                           output_limit_bytes=output_limit_bytes, work_dir=work_dir)
+            return result(self._read_lines(models, bgr, grey, language, deadline=deadline, words=block_words))
         except (DocumentOcrError, DocumentLimitError):
             raise
         except _engine_errors() as exc:  # a model run failure fails this cell only

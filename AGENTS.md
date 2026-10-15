@@ -3006,7 +3006,7 @@ left pending or scratch left behind); a two-minute pilot is not the soak.
 `documents/fidelity.py` builds EN/AR/bilingual cases with Kazma's own engines
 (DOCX, PDF, HTML, OCR from a rasterized page) from a ground-truth spec and
 measures the real parser: word recall, segment recall, order, exact numbers,
-table cells, page honesty, alignment, CER/WER. Floors and release targets are
+table cells, page honesty, alignment, CER/WER, punctuation. Floors and release targets are
 declared per corpus version in `tests/fixtures/documents/fidelity_thresholds.json`;
 the `qualified` list must match the measurement. Change the corpus = bump
 `CORPUS_VERSION` and re-lock (`scripts/document_fidelity.py --lock`, which
@@ -3025,12 +3025,18 @@ cases are measured per engine (`fidelity.OCR_ENGINES`: `tesseract`,
 `neural`), each with its own floors and `qualified` list under
 `ocr_engines.<engine>`; a case another engine read (a fallback) fails the
 test and is refused by `--lock`, and a lock keeps the floors of an engine not
-installed where it runs. Not qualified, each with its reason in the
+installed where it runs. Version 5 (same day) measures `punctuation`: each
+ground-truth word's following marks against the marks after the word it
+aligns to, where either has one (wrong, dropped and added marks are errors;
+a mark inside a number is `number_recall`'s); release target 1.0. Every
+other metric reads words, so the live install's "placed under review:"
+passed them all. Not qualified, each with its reason in the
 thresholds file: with Tesseract `ar-ocr`, `ar-ocr-table` (no Arabic-Indic
 digits, lines dropped) and `en-ocr-degraded` (3.75 read as 3:75: a speck
-above the decimal point). With the neural engine every OCR case qualifies
-since 2026-10-15 (G4: the speck rule, EasyOCR's second readings, the marks
-and punctuation rules). A re-lock keeps the file's `notes` and
+above the decimal point; a full stop it adds mid-line). With the neural
+engine every OCR case qualifies, punctuation included (G4: the speck rule,
+EasyOCR's second readings, the marks and punctuation rules, the final-mark
+vote). A re-lock keeps the file's `notes` and
 `measured_on`: a note for a case that now qualifies is removed by hand. Certification runs the
 corpus and reports the actual isolation profile and backends (F10). Gate:
 `tests/test_document_fidelity.py`.
@@ -3099,10 +3105,24 @@ degraded scan a speck beside the decimal point read "3.75" as "3,75"
 (specks 1-3 px of area; the smallest real mark, a blurred full stop, 6). A
 "," or "." between Arabic-Indic digits is put back as ٫/٬ by a number's
 grammar (`arabic.arabic_number_separators`, both engines: neither EasyOCR
-`arabic_g1` nor Tesseract `ara` can write those marks). Not adopted: a crop
-margin (EasyOCR's own 0.1 of the height) read English line-final full stops
-right (english_g2 reads some as ":") but added full stops to Arabic headings
-that have none. A drawn line goes to logical order by
+`arabic_g1` nor Tesseract `ara` can write those marks). A line's last mark
+is two readers' (`_vote_final_mark`, after the letter vote): EasyOCR says
+THAT a mark is there (it wrote one after the last word, or gave one >= 0.1
+past its last character: `Reading.beyond`), Tesseract's reading of the same
+word -- same folded letters -- says WHICH, when it is ONE mark; on an Arabic
+line Tesseract's "," is a comma of either form (`ara` has no "،": EasyOCR's
+form if it read a comma, else "،"). A mark Tesseract alone reads is never
+added, none is removed, a number's own marks are never touched. English
+pages read Tesseract only when a line ends in a mark to vote on. Measured
+on 176 generated lines (EN/AR, clean and degraded; the live install read
+"placed under review:"): English 61 -> 83 of 88 right, 22 -> 0 wrong;
+Arabic 70 -> 74, 6 -> 3 wrong; 0 marks added; no probability threshold on
+EasyOCR alone separates "." from ":" (the right mark second at 0.07-0.40).
+Left: a mark EasyOCR reads as a letter ("!" as "l", Arabic "." as "ء") --
+its own second reading there is mostly under 0.1, so no two readers agree.
+Not adopted: a crop margin (EasyOCR's own 0.1 of the height) read English
+line-final full stops right but added full stops to Arabic headings that
+have none. A drawn line goes to logical order by
 `parsers.pdf_rtl.logical_line`, never a recognizer's `get_display` (which
 leaves "30-09-2026" reversed). The page pass skips the lines inside ruled
 tables (`skips_table_regions`; `tables.table_regions` is `read_tables`' own
@@ -3127,9 +3147,9 @@ EasyOCR alone, tessdata_best and the 2-reader combinations:
 `tests/test_document_ocr_neural.py` (each rule with its control; the
 end-to-end readings need the models and skip without them),
 `tests/test_document_ocr_reading_rules.py` (separators, punctuation, second
-readings, marks, specks; the old rules as controls, and end to end on the
-corpus's table page and degraded scan, the old rules re-run on the same
-model outputs), `tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
+readings, marks, specks, a line's last mark; the old rules as controls, and
+end to end on the corpus's table page, clean page and degraded scan, the old
+rules re-run on the same model outputs), `tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
 the image `test_the_neural_ocr_engine_reads_inside_the_container`.
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**

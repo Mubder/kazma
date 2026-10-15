@@ -227,7 +227,10 @@ citations. In the `container` profile there is no Docling tier.
     counts as a reader; a number and a word's punctuation are always
     EasyOCR's). EasyOCR writes no harakat: where it wrote a hamza and another
     reader of the same letters saw a tanween there ("ريالاً"), the tanween is
-    kept. Specks smaller than the line's own pen are removed before a line is
+    kept. A line's last mark is decided by two readers: EasyOCR says that a
+    mark is there, Tesseract's reading of the same word says which (EasyOCR's
+    English model often reads a final "." as ":"); a mark only Tesseract
+    reads is never added. Specks smaller than the line's own pen are removed before a line is
     read, and a "," or "." between Arabic-Indic digits is put back as the
     Arabic separator ٫ or ٬ when a number's grammar decides it (before
     exactly three digits it stays as read: thousands, or three decimal

@@ -912,7 +912,8 @@ A versioned corpus (EN, AR and bilingual documents rendered by Kazma's own
 DOCX, PDF and HTML engines, plus OCR of a rasterized page) is parsed by the
 real parser and measured: word and segment recall (a segment's words must come
 back together), reading order, exact numbers, table cells, honest page claims,
-paragraph alignment, OCR CER/WER. Version 2 adds long documents (English and
+paragraph alignment, OCR CER/WER, and (since version 5) punctuation: a mark
+read wrong, dropped or added after a word. Version 2 adds long documents (English and
 Arabic, many pages), two columns laid out by another producer (MuPDF), wide
 tables of wrapping cells, and a degraded scan (rotated, blurred, speckled,
 JPEG-compressed); version 3 adds an OCR page with a ruled table, in English

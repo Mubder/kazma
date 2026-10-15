@@ -1,10 +1,10 @@
 {
-  "corpus_version": "2026-10-15.4",
+  "corpus_version": "2026-10-15.5",
   "measured_on": "2026-10-15, Windows 11, Python 3.12.9, PyMuPDF 1.28.2, python-bidi 0.6.10, LibreOffice 26.2.6.3 (Arabic PDF route)",
   "notes": {},
   "ocr_engines": {
     "neural": {
-      "measured_on": "2026-10-15, re-measured after the reading rules (speck removal, EasyOCR's second readings, harakat and punctuation in the vote, Arabic separators): documents.ocr.engine neural: PP-OCRv5 mobile detection + EasyOCR 1.7.2 arabic_g1/english_g2 + PP-OCRv5 Arabic recognition, ONNX Runtime 1.27.0, OpenCV 4.12.0, Tesseract 5.4.0 as the third reader; in the document worker (process profile, 1 core, 1 GiB)",
+      "measured_on": "2026-10-15, corpus version 5 (punctuation measured), after the reading rules (speck removal, EasyOCR's second readings, harakat and punctuation in the vote, Arabic separators, the final-mark vote with Tesseract): documents.ocr.engine neural: PP-OCRv5 mobile detection + EasyOCR 1.7.2 arabic_g1/english_g2 + PP-OCRv5 Arabic recognition, ONNX Runtime 1.27.0, OpenCV 4.12.0, Tesseract 5.4.0 as the third reader; in the document worker (process profile, 1 core, 1 GiB)",
       "notes": {},
       "qualified": [
         "ar-ocr",
@@ -19,6 +19,7 @@
           "number_recall": 0.98,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.98,
           "segment_recall": 0.98,
           "token_recall": 0.98,
           "wer": 0.02
@@ -28,6 +29,7 @@
           "number_recall": 0.98,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.98,
           "segment_recall": 0.98,
           "table_cell_recall": 1.0,
           "token_recall": 0.98,
@@ -38,6 +40,7 @@
           "number_recall": 0.98,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.98,
           "segment_recall": 0.98,
           "token_recall": 0.98,
           "wer": 0.02
@@ -47,6 +50,7 @@
           "number_recall": 0.98,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.98,
           "segment_recall": 0.98,
           "token_recall": 0.98,
           "wer": 0.02
@@ -56,6 +60,7 @@
           "number_recall": 0.98,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.98,
           "segment_recall": 0.98,
           "table_cell_recall": 1.0,
           "token_recall": 0.98,
@@ -66,9 +71,9 @@
     "tesseract": {
       "measured_on": "2026-10-15, Tesseract 5.4.0 (ara, eng), the installed fast models",
       "notes": {
-        "ar-ocr": "Below release: Tesseract 'ara' does not read Arabic-Indic digits in any font or model measured (fast, script/Arabic, tessdata_best ara and script/Arabic) -- the installed fast model's character set holds one of the ten (U+0660) and neither Arabic separator -- and its layout analysis skips a heading and a paragraph (both are read when cropped). Token recall 0.66, CER 0.24, WER 0.29 against the whole page (corpus version 4).",
-        "ar-ocr-table": "Below release: the table is found and read cell by cell (its labels come back), but the Arabic-Indic digits in its cells are not read (the same limit as ar-ocr), and the page around it loses the same heading and paragraph.",
-        "en-ocr-degraded": "Below release: on the degraded scan Tesseract reads 3.75 as 3:75 -- a speck of the scan's salt noise sits above the decimal point. The neural engine removes specks from each line before reading it; Tesseract reads the page whole, and a page-wide speck filter would take one pen for every line (on the Arabic page the footer's dots, area 9 with its own pen 3, sit just above the body pen's speck size, 8: a smaller type would lose its dots). Every word is right (CER/WER count words, not the punctuation inside them), so numbers OCR'd from poor scans are not qualified with Tesseract."
+        "ar-ocr": "Below release: Tesseract 'ara' does not read Arabic-Indic digits in any font or model measured (fast, script/Arabic, tessdata_best ara and script/Arabic) -- the installed fast model's character set holds one of the ten (U+0660) and neither Arabic separator -- and its layout analysis skips a heading and a paragraph (both are read when cropped). Token recall 0.66, CER 0.24, WER 0.29 against the whole page (corpus version 4). Punctuation 0.75 (version 5): a '/' read after 'الفصل' where it misreads the number.",
+        "ar-ocr-table": "Below release: the table is found and read cell by cell (its labels come back), but the Arabic-Indic digits in its cells are not read (the same limit as ar-ocr), and the page around it loses the same heading and paragraph. Punctuation 0.75: the same '/' as ar-ocr.",
+        "en-ocr-degraded": "Below release: on the degraded scan Tesseract reads 3.75 as 3:75 -- a speck of the scan's salt noise sits above the decimal point. The neural engine removes specks from each line before reading it; Tesseract reads the page whole, and a page-wide speck filter would take one pen for every line (on the Arabic page the footer's dots, area 9 with its own pen 3, sit just above the body pen's speck size, 8: a smaller type would lose its dots). Every word is right (CER/WER count words, not the punctuation inside them), so numbers OCR'd from poor scans are not qualified with Tesseract. Punctuation 0.8 (version 5): a full stop it adds mid-line, 'reached.1,234,567.89'."
       },
       "qualified": [
         "en-ocr",
@@ -80,6 +85,7 @@
           "number_recall": 0.3133,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.73,
           "segment_recall": 0.2657,
           "token_recall": 0.6379,
           "wer": 0.3117
@@ -89,6 +95,7 @@
           "number_recall": 0.1229,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.73,
           "segment_recall": 0.2657,
           "table_cell_recall": 0.5556,
           "token_recall": 0.6379,
@@ -99,6 +106,7 @@
           "number_recall": 0.98,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.98,
           "segment_recall": 0.98,
           "token_recall": 0.98,
           "wer": 0.02
@@ -108,6 +116,7 @@
           "number_recall": 0.73,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.78,
           "segment_recall": 0.98,
           "token_recall": 0.98,
           "wer": 0.02
@@ -117,6 +126,7 @@
           "number_recall": 0.98,
           "order": 1.0,
           "page_honesty": 1.0,
+          "punctuation": 0.98,
           "segment_recall": 0.98,
           "table_cell_recall": 1.0,
           "token_recall": 0.98,
@@ -147,6 +157,7 @@
     "number_recall": 1.0,
     "order": 1.0,
     "page_honesty": 1.0,
+    "punctuation": 1.0,
     "segment_recall": 0.95,
     "table_cell_recall": 1.0,
     "token_recall": 0.99,
@@ -157,6 +168,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -165,6 +177,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -174,6 +187,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -183,6 +197,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "token_recall": 1.0
     },
@@ -190,6 +205,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -198,6 +214,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -207,6 +224,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -215,6 +233,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -223,6 +242,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -231,6 +251,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -240,6 +261,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
@@ -248,6 +270,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "token_recall": 1.0
     },
@@ -256,6 +279,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "token_recall": 1.0
     },
@@ -264,6 +288,7 @@
       "number_recall": 1.0,
       "order": 1.0,
       "page_honesty": 1.0,
+      "punctuation": 1.0,
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
