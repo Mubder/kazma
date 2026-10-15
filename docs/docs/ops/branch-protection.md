@@ -8,8 +8,9 @@ description: How main is protected, which checks it requires, and why no bot wri
 # Protecting `main`
 
 **State since 2026-09-27:** `main` is protected by the ruleset
-`KazmaLatestRule` (section 2): the original eleven CI checks must pass, force
-pushes and deletion are blocked, and the repository admin may bypass. Only the
+`KazmaLatestRule` (section 2): every check in section 1 must pass (all 21
+since 2026-10-15), force pushes and deletion are blocked, and the repository
+admin may bypass. Only the
 owner (and the agent working with the owner's credentials) pushes to `main`;
 no workflow writes to it (section 3). Before that day `main` had no protection
 at all.
@@ -46,10 +47,11 @@ checks for `.github/workflows/ci.yml`:
 | `Runtime hardening (windows-latest, Python 3.13)` | the same Windows acceptance set on Python 3.13 |
 | `Runtime hardening (windows-latest, Python 3.14)` | the same Windows acceptance set on Python 3.14 |
 
-The nine recovery and compatibility checks were added on 2026-10-05. Their
-remote results must pass and the owner must add their exact reported names
-to the ruleset before they are required. This page does not change repository
-settings. Matrix templates are expanded here: a literal `${{ matrix.os }}`
+The ruleset requires all 21. The nine recovery and compatibility checks were
+added to CI on 2026-10-05, then to the ruleset. The document worker check was
+the last one added to the ruleset, on 2026-10-15, with the owner's approval
+(`gh api -X PUT`, section 2). Only that approval changed the setting; this
+page itself does not. Matrix templates are expanded here: a literal `${{ matrix.os }}`
 is not a check name GitHub will report.
 
 ## 2. The ruleset

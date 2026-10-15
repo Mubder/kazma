@@ -70,18 +70,19 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 
 | Soak | Started | Ends | Report |
 |---|---|---|---|
-| Memory (72 h) | 2026-10-14 20:22 UTC | 2026-10-17 | `C:\Users\balfa\kazma-soak\2026-10-14\memory\report.json` |
+| Memory (72 h) on defcc3ad | 2026-10-14 20:22 UTC | failed at cycle 420 (a backup older than a table could not be restored; fixed in 526fef85) | `C:\Users\balfa\kazma-soak\finished-reports\2026-10-14\memory\report.json` |
+| Memory (72 h) on 526fef85 | 2026-10-15 00:10 UTC | 2026-10-18 | `...\2026-10-15\memory-526fef85\run\report.json` |
 | Documents Q03 (48 h) | 2026-10-14 20:22 UTC | 2026-10-16 | `...\2026-10-14\documents\report.json` |
-| Swarm SQ01 (24 h) on ec6b8512 | 2026-10-14 21:36 UTC | failed at restart 53 (fixed in c19ab323) | `...\2026-10-15\swarm\run\report.json` |
-| Swarm SQ01 (24 h) on 01cba7cb | 2026-10-15 02:33 UTC | failed at 10.4 h on the breaker refresh race 5d6353e1 fixed (one refresh put a same-generation state back); 99,587 submissions, 310 restarts, that 1 violation | `...\2026-10-15\swarm-01cba7cb\run\report.json` |
-| Swarm SQ01 (24 h) on 35670ff4 | 2026-10-15 14:05 UTC | 2026-10-16 | `...\2026-10-15\swarm-35670ff4\run\report.json` |
-| Scheduled Stage 5 (7 fake days) on c4e8f51c | 2026-10-14 | passed | `...\2026-10-15\scheduled\run\report.json` |
-| Scheduled (28 fake days, 8,000 jobs) on c4e8f51c | 2026-10-14 | failed: 2 double fires, a check error (see the Code table); passed on f632db5f (68,397 occurrences, 251 restarts, 0 violations) | `...\2026-10-15\scheduled-28d-f632db5f\run\report.json` |
-| Scheduled Stage 5 on b52b2fab (the alert outbox) | 2026-10-15 | passed: 5,228 occurrences each ended once, 260 alerts = 257 expected + 3 recorded redeliveries, 0 violations | `...\2026-10-15\scheduled-b52b2fab\run\report.json` |
-| Time Travel TT-G3 on 680c5367 | 2026-10-14 22:08 UTC | stopped after 258 clean cycles (the code changed) | `...\2026-10-15\time-travel\run\report-old-code-680c5367.json` |
+| Swarm SQ01 (24 h) on ec6b8512 | 2026-10-14 21:36 UTC | failed at restart 53 (fixed in c19ab323) | `...\finished-reports\2026-10-15\swarm\report.json` |
+| Swarm SQ01 (24 h) on 01cba7cb | 2026-10-15 02:33 UTC | failed at 10.4 h on the breaker refresh race 5d6353e1 fixed (one refresh put a same-generation state back); 99,587 submissions, 310 restarts, that 1 violation | `...\finished-reports\2026-10-15\swarm-01cba7cb\report.json` |
+| Swarm SQ01 (24 h) on 35670ff4 | 2026-10-15 14:00 UTC | 2026-10-16 | `...\2026-10-15\swarm-35670ff4\run\report.json` |
+| Scheduled Stage 5 (7 fake days) on c4e8f51c | 2026-10-14 | passed | `...\finished-reports\2026-10-15\scheduled\report.json` |
+| Scheduled (28 fake days, 8,000 jobs) on c4e8f51c | 2026-10-14 | failed: 2 double fires, a check error (see the Code table); passed on f632db5f (68,397 occurrences, 251 restarts, 0 violations) | `...\finished-reports\2026-10-15\scheduled-28d-f632db5f\report.json` |
+| Scheduled Stage 5 on b52b2fab (the alert outbox) | 2026-10-15 | passed: 5,228 occurrences each ended once, 260 alerts = 257 expected + 3 recorded redeliveries, 0 violations | `...\finished-reports\2026-10-15\scheduled-b52b2fab\report.json` |
+| Time Travel TT-G3 on 680c5367 | 2026-10-14 22:08 UTC | stopped after 258 clean cycles (the code changed) | `...\finished-reports\2026-10-15\time-travel\report-old-code-680c5367.json` |
 | Time Travel TT-G3 (72 h) on 87b0cea8 | 2026-10-15 | 2026-10-18 | `...\2026-10-15\time-travel-87b0cea8\run\report.json` |
 | Knowledge KB-Q01 scale (100k, 1M, hash embedder) on 01cba7cb | 2026-10-15 02:33 UTC | when both steps end | `...\2026-10-15\kb-scale-01cba7cb\run\report.json` |
-| Knowledge KB-Q01 multi-day on 01cba7cb | 2026-10-15 02:33 UTC | failed at cycle 76 (deleted words in FTS5; fixed in 1badfb85) | `...\2026-10-15\kb-soak-01cba7cb\run\report.json` |
+| Knowledge KB-Q01 multi-day on 01cba7cb | 2026-10-15 02:33 UTC | failed at cycle 76 (deleted words in FTS5; fixed in 1badfb85) | `...\finished-reports\2026-10-15\kb-soak-01cba7cb\report.json` |
 | Knowledge KB-Q01 multi-day (72 h) on f7345de3 | 2026-10-15 | 2026-10-18 | `...\2026-10-15\kb-soak-f7345de3\run\report.json` |
 
 SQ05 (published limits) is tied to the Swarm soak's numbers when it ends.
