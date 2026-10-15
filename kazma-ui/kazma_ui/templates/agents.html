@@ -128,7 +128,7 @@
         <span style="font-size:0.75rem;color:var(--text-muted);" x-text="toolHistory.length + ' ' + t('agents.calls')"></span>
       </div>
       <div style="max-height:420px;overflow-y:auto;">
-        <template x-if="toolHistory.length === 0">
+        <template x-if="toolHistoryLoaded && toolHistory.length === 0">
           <div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
             <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="wrench" aria-hidden="true"></span></div>
             <p>{{ t('agents.no_executions') }}</p>
@@ -165,7 +165,7 @@
         <span style="font-size:0.75rem;color:var(--text-muted);" x-text="reasoningSteps.length + ' ' + t('agents.steps')"></span>
       </div>
       <div style="max-height:420px;overflow-y:auto;">
-        <template x-if="reasoningSteps.length === 0">
+        <template x-if="reasoningLoaded && reasoningSteps.length === 0">
           <div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
             <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="brain" aria-hidden="true"></span></div>
             <p>{{ t('agents.no_traces') }}</p>
@@ -245,7 +245,7 @@
               x-text="statusLoaded ? (((agent.tools && agent.tools.count) || 0) + ' ' + t('agents.available')) : '—'"></span>
       </h3>
       <div style="max-height:260px;overflow-y:auto;">
-        <template x-if="!agent.tools || !agent.tools.list || agent.tools.list.length === 0">
+        <template x-if="statusLoaded && (!agent.tools || !agent.tools.list || agent.tools.list.length === 0)">
           <div style="text-align:center;padding:20px;color:var(--text-muted);">{{ t('agents.no_tools') }}</div>
         </template>
         <template x-for="(tool, idx) in (agent.tools && agent.tools.list) || []" :key="idx">

@@ -520,6 +520,9 @@
     try {
       const resp = await fetch('/api/system/memory/backups');
       const data = await resp.json();
+      // A refused read lands in the catch's "failed", never in "no backups"
+      // (tests/test_empty_states_after_load.py).
+      if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const backups = data.backups || [];
       
       if (backups.length === 0) {
@@ -806,7 +809,9 @@
       if (embEl) {
         embEl.textContent = h.embedder_ready
           ? _mt('memory.console.embedder_ready', 'embedder: ready')
-          : _mt('memory.console.embedder_unavailable', 'embedder: unavailable');
+          : (h.embedder_state === 'not_loaded'
+            ? _mt('memory.console.embedder_not_loaded', 'embedder: loads at the first search')
+            : _mt('memory.console.embedder_unavailable', 'embedder: unavailable'));
       }
       const rc = document.getElementById('v2-reconsol-meta');
       if (rc) {
@@ -1116,6 +1121,7 @@
       const resp = await fetch('/api/memory/v2/queue?limit=20');
       if (resp.status === 403) { el.textContent = _mt('memory.console.queue_admins', "The task queue is the install's: admins only."); return; }
       const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const tasks = data.tasks || [];
       if (!tasks.length) { el.textContent = _mt('memory.console.queue_empty', 'Queue empty.'); return; }
       // A task's status is an interface word, in the page's language; it was
@@ -1174,6 +1180,7 @@
     try {
       const resp = await fetch('/api/memory/v2/entity-merges?limit=20');
       const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const merges = data.merges || [];
       if (!merges.length) { el.textContent = _mt('memory.console.no_pending_merges', 'No pending merges.'); return; }
       el.innerHTML = merges.map(function(m) {
@@ -1328,6 +1335,7 @@
     try {
       const resp = await fetch('/api/memory/v2/procedural?limit=15');
       const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const dags = data.dags || [];
       if (!dags.length) { el.textContent = _mt('memory.console.no_active_skills', 'No active skills yet.'); return; }
       el.innerHTML = dags.map(function(d) {
@@ -1418,6 +1426,7 @@
         (_memQuery ? '&q=' + encodeURIComponent(_memQuery) : '');
       const resp = await fetch(url);
       const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const eps = data.episodes || [];
       const total = Number(data.total || 0);
       _pageRange('v2-memories-range', _memOffset, eps.length, total);
@@ -1493,6 +1502,7 @@
     try {
       const resp = await fetch('/api/memory/v2/summaries?limit=' + _SUM_PAGE + '&offset=' + _sumOffset);
       const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const st = data.state || {};
       _pageRange('v2-summaries-range', _sumOffset, (data.summaries || []).length, Number(data.total || 0));
       _pagerButtons('v2-summaries', _sumOffset, (data.summaries || []).length, Number(data.total || 0));
@@ -1549,6 +1559,8 @@
       const data = await resp.json();
       const list = document.getElementById('v2-belief-list');
       if (!list) return;
+      // A refused read is not "No active beliefs yet".
+      if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const beliefs = data.beliefs || [];
       const emptyCta = document.getElementById('v2-belief-empty-cta');
       if (!beliefs.length) {

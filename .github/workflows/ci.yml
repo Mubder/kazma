@@ -187,7 +187,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install deps
-        run: pip install -e ".[test]"
+        # pymupdf: the neural OCR test draws its Arabic page with it in the
+        # test process (a skip fails this job, below).
+        run: pip install -e ".[test]" pymupdf
       - name: Build the worker and broker images
         run: |
           docker version --format 'engine {{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'
@@ -620,6 +622,7 @@ jobs:
             tests/e2e/test_new_chat_button.py \
             tests/e2e/test_chat_delete_forget.py \
             tests/e2e/test_session_list_loading.py \
+            tests/e2e/test_documents_list_loading.py \
             tests/e2e/test_layout_widths.py \
             tests/e2e/test_instant_reply_closes.py \
             tests/e2e/test_dashboard_session_table.py \

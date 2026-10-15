@@ -68,6 +68,9 @@ __all__ = [
     "to_arabic_numerals",
     "visual_order",
     "number_in_logical_order",
+    "arabic_number_separators",
+    "ARABIC_DECIMAL_SEPARATOR",
+    "ARABIC_THOUSANDS_SEPARATOR",
     "PRESENTATION_FORMS_RE",
 ]
 
@@ -366,6 +369,59 @@ def number_in_logical_order(drawn: str, preceding: str) -> str:
     for number, separator in zip(reversed(numbers[:-1]), reversed(separators), strict=True):
         rebuilt.extend((separator, number))
     return drawn[:start] + "".join(rebuilt) + drawn[end:]
+
+
+ARABIC_DECIMAL_SEPARATOR = "\u066b"
+ARABIC_THOUSANDS_SEPARATOR = "\u066c"
+_INDIC_DIGIT_RANGES = "\u0660-\u0669\u06f0-\u06f9"
+# A run of Arabic-Indic digits joined by ASCII "," or "." -- the whole run:
+# no digit or separator-and-digit of any script on either side.
+_STAND_IN_NUMBER_RE = re.compile(
+    rf"(?<![0-9{_INDIC_DIGIT_RANGES}.,])[{_INDIC_DIGIT_RANGES}]+(?:[.,][{_INDIC_DIGIT_RANGES}]+)+"
+    rf"(?![0-9{_INDIC_DIGIT_RANGES}]|[.,][0-9{_INDIC_DIGIT_RANGES}])"
+)
+
+
+def _number_separators(match: re.Match[str]) -> str:
+    token = match.group(0)
+    groups = re.split(r"[.,]", token)
+    head, inner, last = groups[0], groups[1:-1], groups[-1]
+    if inner and (len(head) > 3 or any(len(group) != 3 for group in inner)):
+        return token  # not one grouped number: a date, a version, a list
+    if len(last) == 3:
+        return token  # thousands or three decimals: not decidable, kept as read
+    return ARABIC_THOUSANDS_SEPARATOR.join([head, *inner]) + ARABIC_DECIMAL_SEPARATOR + last
+
+
+def arabic_number_separators(text: str) -> str:
+    """An OCR reading's numbers in Arabic-Indic digits with Arabic separators.
+
+    No recognizer Kazma reads numbers with can write the Arabic decimal
+    separator ``٫`` or thousands separator ``٬`` (EasyOCR ``arabic_g1`` and
+    Tesseract ``ara`` have neither in their character sets): each writes the
+    nearest mark it has, an ASCII "," or ".". Between Arabic-Indic digits
+    that mark is never the page's, so it is put back by the grammar of a
+    number, which holds whatever mark was read:
+
+    * a thousands group is exactly three digits, so a separator followed by
+      a group of any other length is the decimal separator ``٫`` -- and only
+      the last separator of a number can be that;
+    * a separator followed by three digits AND by another separator is a
+      thousands separator ``٬`` (a number has one decimal separator, last);
+    * the last separator before exactly three digits stays as read, and so
+      does the whole number: ``١٢,٣٤٥`` is twelve thousand or twelve point
+      three four five -- a Kuwaiti dinar has three decimal places (fils) --
+      and a guess would change the value a thousandfold;
+    * a run whose inner groups are not three digits (a date such as
+      ``٣٠.٠٩.٢٠٢٦``, a version, a list) is not one number and stays as read.
+
+    European digits are left alone: "99.95" in Arabic text is written with
+    the European marks. Only for OCR readings: a text layer's characters are
+    the page's own.
+    """
+    if not text or not any("\u0660" <= c <= "\u0669" or "\u06f0" <= c <= "\u06f9" for c in text):
+        return text
+    return _STAND_IN_NUMBER_RE.sub(_number_separators, text)
 
 
 def visual_order(text: str, base_dir: str) -> str | None:

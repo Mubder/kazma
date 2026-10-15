@@ -24,6 +24,9 @@ function agentsPage() {
     personalities: [],
     toolHistory: [],
     reasoningSteps: [],
+    // "None yet" only after the server answered (tests/test_empty_states_after_load.py).
+    toolHistoryLoaded: false,
+    reasoningLoaded: false,
     loadingAction: false,
     statusLoading: false,
     statusLoaded: false,
@@ -114,6 +117,7 @@ function agentsPage() {
         if (!data) return;
         // Newest first
         this.toolHistory = (data.tools || []).reverse();
+        this.toolHistoryLoaded = true;
       } catch (err) {
       }
     },
@@ -124,6 +128,7 @@ function agentsPage() {
         if (!data) return;
         // Newest first
         this.reasoningSteps = (data.steps || []).reverse();
+        this.reasoningLoaded = true;
       } catch (err) {
       }
     },

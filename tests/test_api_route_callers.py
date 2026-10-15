@@ -50,6 +50,11 @@ _TRIAGE = "vulnerability-report triage for operators; reports are submitted from
 #: Routes no page or client calls, each with the reason it has no control.
 NOT_CALLED_BY_A_PAGE: dict[str, str] = {
     # ── reached from outside the product's own client code ──────────────
+    "/api/webhooks/telegram": (
+        "Telegram's servers post updates here when the operator sets a webhook "
+        "(listed under its real path since the route listing kept include prefixes, 2026-10-15)"
+    ),
+    "/api/webhooks/telegram/health": "a check for the operator's webhook setup and its proxy",
     "/api/email/oauth/gmail/callback": "Google's OAuth redirect lands here",
     "/api/email/oauth/microsoft/callback": "Microsoft's OAuth redirect lands here",
     "/api/github/oauth/callback": "GitHub's OAuth redirect lands here",
@@ -300,11 +305,39 @@ def calls() -> Calls:
 # ── the routes ───────────────────────────────────────────────────────────
 
 def _all_routes(routes) -> list:
+    """Every route the app serves, with the path it is served at.
+
+    FastAPI keeps an included router as one entry (``_IncludedRouter``); its
+    ``effective_candidates()`` carry the prefix given at ``include_router``.
+    Reading ``original_router.routes`` instead lost that prefix (2026-10-15):
+    the Telegram webhook's ``/api/webhooks/telegram/health`` was listed as
+    ``/health``, and its routes were outside every ``/api/`` check.
+    """
     out = []
     for route in routes:
+        effective = getattr(route, "effective_candidates", None)
+        if callable(effective):
+            out.extend(_all_routes(effective()))
+            continue
         inner = getattr(route, "original_router", None)
         out.extend(_all_routes(inner.routes) if inner is not None else [route])
     return out
+
+
+def test_route_listing_keeps_an_include_prefix() -> None:
+    """A prefix given at include time is part of the path the app serves."""
+    from fastapi import APIRouter, FastAPI
+
+    router = APIRouter()
+
+    @router.get("/health")
+    def _health() -> dict:
+        return {}
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/webhooks/telegram")
+    paths = {getattr(r, "path", "") for r in _all_routes(app.routes)}
+    assert "/api/webhooks/telegram/health" in paths and "/health" not in paths
 
 
 @pytest.fixture(scope="module")

@@ -172,6 +172,46 @@ def test_an_altered_number_fails_the_floor(tmp_path, declared):
     assert _check(metrics, declared["thresholds"]["en-docx"])
 
 
+@pytest.mark.parametrize(("case_id", "written", "misreads"), [
+    ("en-docx", "placed under review.", (
+        "placed under review:",   # the live install's reading, 2026-10-15
+        "placed under review",    # a dropped mark
+        "placed under, review.",  # an added mark
+    )),
+    ("ar-docx", "تحت المراجعة.", (
+        "تحت المراجعة:",
+        "تحت المراجعة",
+        "تحت، المراجعة.",
+    )),
+])
+def test_a_misread_mark_fails_the_floor_the_word_metrics_pass(case_id, written, misreads, tmp_path, declared):
+    from kazma_core.documents.service import DocumentService
+
+    case = next(c for c in fidelity.corpus() if c.case_id == case_id)
+    source = fidelity.build_case(case, tmp_path)
+    ir = DocumentService().parse_ingested_blob(source)
+    assert fidelity.measure_case(case, ir, source)["punctuation"] == 1.0
+    for misread in misreads:
+        metrics = fidelity.measure_case(
+            case, _rewrite(ir, lambda b, m=misread: replace(b, text=b.text.replace(written, m))), source)
+        assert metrics["punctuation"] < 1.0, misread
+        assert _check(metrics, declared["thresholds"][case_id]), misread
+        # Negative control: every word metric is blind to it (version 4's
+        # measure passed "under review:").
+        assert metrics["token_recall"] == metrics["number_recall"] == 1.0, misread
+
+
+def test_a_mark_inside_a_number_is_the_number_s_not_punctuation(tmp_path):
+    from kazma_core.documents.service import DocumentService
+
+    case = next(c for c in fidelity.corpus() if c.case_id == "en-docx")
+    source = fidelity.build_case(case, tmp_path)
+    ir = DocumentService().parse_ingested_blob(source)
+    metrics = fidelity.measure_case(case, _rewrite(ir, lambda b: replace(b, text=b.text.replace("3.75", "3,75"))),
+                                    source)
+    assert metrics["number_recall"] < 1.0 and metrics["punctuation"] == 1.0
+
+
 def test_swapped_sections_fail_the_floor(tmp_path, declared):
     def swap(ir):
         blocks = [b for page in ir.pages for b in page.blocks]

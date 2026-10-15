@@ -79,6 +79,7 @@ __all__ = [
     "SPARE_COLLECTIONS",
     "STORE_ID_FILE",
     "catalog_text_rows",
+    "collection_size",
     "compact_catalog",
     "compaction_due",
     "holds_text",
@@ -375,6 +376,39 @@ def _catalog_ro(persist_dir: str | Path) -> sqlite3.Connection | None:
     if not catalog.is_file():
         return None
     return sqlite3.connect(f"file:{catalog.as_posix()}?mode=ro", uri=True, timeout=5)
+
+
+def collection_size(persist_dir: str | Path | None, collection: str) -> int | None:
+    """How many records *collection* holds, read from the catalog (its
+    metadata segment's rows, which Chroma writes with every record): 0 for a
+    collection that is not there, None when the catalog cannot be read or
+    there is none.
+
+    Read here, not with ``Collection.count()``: every read Chroma serves --
+    a count, a ``get``, a query -- loads the collection's HNSW index, and an
+    index keeps the search breadth it was loaded with for as long as the
+    process holds it (chromadb 1.5.9, measured). The size that decides a
+    collection's breadth is read before anything loads its index. Read only.
+    """
+    if not persist_dir:
+        return None
+    try:
+        conn = _catalog_ro(persist_dir)
+    except sqlite3.Error:
+        return None
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM embeddings WHERE segment_id IN ("
+            "SELECT s.id FROM segments s JOIN collections c ON c.id = s.collection "
+            "WHERE c.name = ? AND s.scope = 'METADATA')", (collection,)).fetchone()
+        return int(row[0]) if row else 0
+    except sqlite3.Error as exc:
+        logger.info("[chroma] could not read how many records %s holds in %s: %s", collection, persist_dir, exc)
+        return None
+    finally:
+        conn.close()
 
 
 def holds_text(persist_dir: str | Path, collection: str, kept_keys: Iterable[str]) -> bool | None:

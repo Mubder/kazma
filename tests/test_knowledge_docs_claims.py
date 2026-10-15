@@ -134,6 +134,26 @@ def _hnsw_settings() -> bool:
     return (_HNSW["max_neighbors"], _HNSW["ef_construction"], _HNSW["ef_search"]) == (48, 400, 256)
 
 
+def _breadth_steps_text() -> str:
+    """The guide's words for the search-breadth table, built from the table
+    itself: a step changed without the guide fails the row."""
+    from kazma_core.memory.vector_store_global import _BREADTH_STEPS, _HNSW
+
+    steps = [f"{breadth:,} from {size:,}" for size, breadth in _BREADTH_STEPS]
+    return f"a search breadth of {_HNSW['ef_search']:,} below {_BREADTH_STEPS[0][0]:,} vectors, " + ", ".join(steps)
+
+
+def _breadth_follows_the_size() -> bool:
+    from kazma_core.memory import vector_store_global as vsg
+    from kazma_core.stores import knowledge_index
+
+    return (vsg.search_breadth(0) == vsg._HNSW["ef_search"] < vsg.search_breadth(10**7)
+            and "self._fit_breadth()" in inspect.getsource(vsg.VectorStore._open)
+            and "chroma_local.collection_size(" in inspect.getsource(vsg.VectorStore._size)
+            and "fit_search_breadth()" in inspect.getsource(knowledge_index.KnowledgeIndex.backfill_vectors)
+            and "reload_vector_indexes(" in inspect.getsource(knowledge_index.run_repair_sweep))
+
+
 def _delete_purges_words() -> bool:
     from kazma_core.stores.knowledge import KnowledgeStore
 
@@ -258,6 +278,10 @@ CLAIMS = [
     Claim("purge after a kill", None,
           "**a process stopped before the purge ends leaves it to the next open of the store or the next "
           "maintenance pass**", _purge_outlives_the_process),
+    # KB-Q01's follow-up (2026-10-15): the search breadth follows the library's size.
+    Claim("search breadth", "which is not set yet", "**The search widens as a library grows.**",
+          _breadth_follows_the_size),
+    Claim("search breadth table", None, _breadth_steps_text(), _breadth_follows_the_size),
 ]
 
 
@@ -334,6 +358,31 @@ def test_the_guide_before_the_multi_day_soak_fails_its_rows():
     problems = claim_problems(old.stdout)
     for topic in ("purge checked", "purge after a kill"):
         assert any(p.startswith(topic + ":") for p in problems), topic
+
+
+def test_the_guide_before_the_growing_search_breadth_fails_its_rows():
+    """Negative control: the guide as committed in 0ad31815, when the search
+    breadth was 256 at every size and the guide said a wider one was not set."""
+    old = subprocess.run(["git", "show", "0ad31815:docs/docs/guide/knowledge-library.md"], cwd=REPO,
+                         capture_output=True, text=True, encoding="utf-8")
+    if old.returncode != 0:  # a shallow clone without that commit
+        import pytest
+
+        pytest.skip("the guide of 0ad31815 is not in this clone")
+    problems = claim_problems(old.stdout)
+    for topic in ("search breadth", "search breadth table"):
+        assert any(p.startswith(topic + ":") for p in problems), topic
+    assert "search breadth: the guide still says 'which is not set yet'" in problems
+
+
+def test_a_changed_breadth_step_fails_the_table_row(monkeypatch):
+    """Negative control without git: the code's table moved, the guide not."""
+    from kazma_core.memory import vector_store_global as vsg
+
+    guide = GUIDE.read_text(encoding="utf-8")
+    monkeypatch.setattr(vsg, "_BREADTH_STEPS", ((vsg._BREADTH_STEPS[0][0] + 1, vsg._BREADTH_STEPS[0][1]),
+                                                *vsg._BREADTH_STEPS[1:]))
+    assert _breadth_steps_text() not in guide
 
 
 def test_a_stale_claim_is_caught():

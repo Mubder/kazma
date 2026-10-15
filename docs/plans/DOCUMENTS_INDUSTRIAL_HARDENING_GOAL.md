@@ -17,7 +17,7 @@ must not become permanent tests that require those defects to remain.
 | ID | Required result | Evidence required | State |
 |---|---|---|---|
 | F01 | One bounded, fail-closed PDF active-content policy on intake and mutation | Real inert nested/indirect/chained PDF fixtures, valid navigation controls, traversal budgets | Implemented 2026-10-13 — one policy in the worker on intake, every mutation input/output (redaction bypass closed) and every rendered PDF; XFA, remote/submit/import/rendition/media actions, untyped embedded files and non-web links refused; no PDF opened outside the worker (class gate). Independent review and a broader real-world PDF corpus remain under Q02/Q04 |
-| F02 | Structural preflight and local salvage execute inside enforced worker containment; credentialed remote egress is separate | OS-specific CPU/memory/process/output/time, filesystem/network, cancellation and cleanup tests | In progress — Docker profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container`, broker-owned attested per-job containers) qualified on Docker Desktop 29.8.2 / Windows 11: no network/mounts, memory/PID/CPU/scratch/deadline/output limits, disconnect cancellation, descendant cleanup, stale sweep, compose-shaped topology. Default `process` profile: Windows Job Object caps and Unix rlimits only, no filesystem/network jail (reported unqualified). Engine readiness now comes from the image; `security.execution.container_required` refuses the `process` profile. A Linux Docker Engine run is pending the new CI job's first run; rootless/Kubernetes, gVisor/Kata, native OS jails and the Unix process cap open. 2026-10-15: on a native install the guard runs the broker (no hand-run process, no `.env` lines), the profile is the admin's protected setting, and the worker image is named by its build inputs and built by one command (see the 2026-10-15 entry) |
+| F02 | Structural preflight and local salvage execute inside enforced worker containment; credentialed remote egress is separate | OS-specific CPU/memory/process/output/time, filesystem/network, cancellation and cleanup tests | In progress — Docker profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container`, broker-owned attested per-job containers) qualified on Docker Desktop 29.8.2 / Windows 11: no network/mounts, memory/PID/CPU/scratch/deadline/output limits, disconnect cancellation, descendant cleanup, stale sweep, compose-shaped topology. Default `process` profile: Windows Job Object caps and Unix rlimits only, no filesystem/network jail (reported unqualified). Engine readiness now comes from the image; `security.execution.container_required` refuses the `process` profile. A Linux run of the CI job (`document-worker-container`, unchanged steps, plain unlabelled `docker build`) passed on 2026-10-15 at `0685ab9f`: Kazma and the broker on Linux (python:3.11-slim, Python 3.11.16, Docker CLI 29.8.2) against Docker Desktop's Linux engine 29.8.2 -- attestation verified with no problems, the qualification suite 139 passed with none skipped, the compose-shaped topology all 10 checks, no job container left; its first run found two defects, fixed in `0685ab9f` (an unlabelled image refused under Docker 29; the OCR test's PyMuPDF). The GitHub job itself waits on the account's billing lock; rootless/Kubernetes, gVisor/Kata, native OS jails and the Unix process cap open. 2026-10-15: on a native install the guard runs the broker (no hand-run process, no `.env` lines), the profile is the admin's protected setting, and the worker image is named by its build inputs and built by one command (see the 2026-10-15 entry) |
 | F03 | Effective settings match saved policy; security revocation applies immediately before egress | Existing-service, queued/in-flight revocation, coherent policy revision/readiness tests | Implemented — coherent operation snapshots and readiness (earlier); live revocation rechecked before EACH provider, including after a failed provider, on SQLite and on a real PostgreSQL settings store (2026-10-13). Representative deployment qualification and independent review open (Q03/Q04) |
 | F04 | Every remote attempt carries correct immutable tenant/actor/document/version/job identity and durable intent | Concurrent/multiple-service, attachment, failed-upload and audit-outage tests | Implemented — identity, failure phases, transient-read refusal and audit-outage refusal pass on SQLite and on real PostgreSQL 16.15 metadata/jobs/audit/settings (2026-10-13); provider fallback actually runs, each attempt audited; provider transport ignores ambient proxies, refuses redirects and caps responses |
 | F05 | Idempotency is authorized and request-bound; all job-read surfaces enforce document ACL | Actor/workspace/payload conflicts, concurrent replay, API/tool/gateway/TUI matrix | Implemented 2026-10-13 — durable request reservation and real PostgreSQL admission races (earlier); every job read (`job_status`, `job_events`, `jobs_for_document`, `cancel_job`, `retry_job`) now requires a named actor (`SYSTEM_ACTOR` only for code that authorized the read; a missing actor is refused — it meant "no check"); an unreadable job answers exactly like an unknown one on the Web routes, the agent tools and the gateway (identical 404, replay by another actor = `idempotency_conflict`); the agent cancel tool checks access (it cancelled any job in the tenant); `/ops/audit` is admin-only. Matrix `tests/test_document_job_read_matrix.py` (signature gate + control). Chat surfaces act as the single `agent` principal by design; per-chat-user identity mapping not built; TUI reads via the Web API |
@@ -597,10 +597,55 @@ whole process tree's resident memory.
   `tests/test_document_real_scans.py` (per engine, opt-in),
   `tests/test_document_worker_container_docker.py` (the image reads
   Arabic-Indic digits; control: Tesseract in the same image does not).
-- **Open:** Arabic decimals and dates with the Arabic separators (`arabic_g1`
-  has no "٫" and rarely reads "/" between Arabic-Indic digits); the "الم"
-  ligature on real scans; a second real scan; speed (one core) -- the
-  per-document time limit decides how many pages stay on the neural engine.
+- **Open:** dates with "/" between Arabic-Indic digits (`arabic_g1` rarely
+  reads it); the "الم" ligature on real scans; a second real scan; speed (one
+  core) -- the per-document time limit decides how many pages stay on the
+  neural engine. (Arabic decimals: closed below.)
+
+## 2026-10-15: the corpus's last OCR misses (Q02, follow-up)
+
+The live install (container profile, neural engine) read `ar-ocr` as "ريالأ"
+for "ريالاً", "٣,٧٥" for "٣٫٧٥", "التغليف ." and no final full stop; the table
+page "ربالأ"; the degraded English scan "3,75". Each cause was found by
+logging every reader's output per line (EasyOCR with its per-character
+probabilities, PaddleOCR, Tesseract's words, the vote) on the corpus pages,
+in process and through the isolated worker; the readings matched the live
+install's exactly.
+
+| Miss | Cause (evidence) | Rule |
+|---|---|---|
+| "٣,٧٥" | Neither EasyOCR `arabic_g1` (184 classes) nor Tesseract `ara` (85 symbols, one of the ten Arabic-Indic digits) has ٫ or ٬; EasyOCR wrote "," at 0.915. PaddleOCR's dictionary has both but read the number "٣٥". | `arabic.arabic_number_separators`, both engines: a group of other than three digits follows the decimal separator; three digits before another separator are thousands; before exactly three it stays as read (thousands or fils: a wrong guess is a thousandfold) |
+| "التغليف ." | EasyOCR emits a space (0.92) between the full stop and a final ف: the font's gap. | A space before a full stop or comma (and ، ؛ ؟) goes; not before ":" ";" "!" "?" (French spacing) |
+| last "." lost | The vote replaced EasyOCR's whole word "المراجعة." with PaddleOCR's confident "المراجعة": PaddleOCR drops full stops on every line. | The vote is over letters; punctuation is EasyOCR's |
+| "ريالأ" | EasyOCR reads the alef + tanween as أ (0.944; its fathatan class 0.004): EasyOCR's own list for Arabic leaves the harakat out. Tesseract read "ريالاً"; PaddleOCR garbled the word. | Where EasyOCR wrote a hamza or madda and another reader of the same letters saw harakat on that side of that letter, those stand; a mark only another reader saw is never added (Tesseract also wrote "الشماليٍ") |
+| "ربالأ" (table page) | EasyOCR ب 0.742 / ي 0.257; Tesseract "ريالاً"; PaddleOCR no aligned word, so no two readers agreed. On both pages every letter EasyOCR misread had the right one second (0.22-0.34). | EasyOCR's second reading (>= 0.1, same bidi class) is a reading: a reader that reads it makes two |
+| "3,75" (degraded) | A speck of the scan's salt noise beside the decimal point (EasyOCR "," at 0.985; Tesseract ":" from a speck above). Specks were 1-3 px of area; the smallest real mark, a blurred full stop at stroke 3, 6; clean 300 dpi dots 9 and up. | Before a line is read, ink with area under half its own stroke squared and no side over a stroke is removed from its box, unless it continues past the box |
+
+Tried and not adopted: a crop margin of a tenth of the line's height
+(EasyOCR's own pipeline crops with it). It read English line-final full
+stops right (english_g2 reads some as ":", 0.82 even on the clean page) but
+added full stops to Arabic headings and the footer, which have none, and
+misread a word on each Arabic page ("بلفت" on one, "ربالأ" on the table
+page). Punctuation is not counted by the fidelity
+measure, so the English ":" changes no case; it is left as read.
+
+Measured (corpus v4, both engines, through the isolated worker, then
+`scripts/document_fidelity.py --lock`):
+
+| Case | neural before | neural after | Tesseract (unchanged) |
+|---|---|---|---|
+| `ar-ocr` | all 1.0, CER/WER 0 (marks and separators wrong, not counted) | all 1.0, CER/WER 0; text as written | token 0.658, number 0.333, CER 0.242 |
+| `ar-ocr-table` | token 0.984, segment 0.857, CER 0.003, WER 0.018 | all 1.0, CER/WER 0 | token 0.658, number 0.143, cells 0.556 |
+| `en-ocr-degraded` | number 0.75 | number 1.0 | number 0.75 (3:75) |
+| `en-ocr`, `en-ocr-table` | all 1.0 | all 1.0 | all 1.0 |
+
+Neural qualified: 5 of 5 OCR cases (19 of 19 with the 14 text cases);
+Tesseract 2 of 5 (16 of 19). Floors raised by the lock, none lowered. Gate:
+`tests/test_document_ocr_reading_rules.py` (each rule with the old rule as
+its control; end to end on the table page and the degraded scan, the old
+rules re-run on the same model outputs). The worker image must be rebuilt
+(`scripts/document_worker_image.py build`) for a container install to read
+with these rules.
 
 ## 2026-10-15: documents refused on a strict install (no broker)
 

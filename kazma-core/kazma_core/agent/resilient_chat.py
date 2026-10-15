@@ -215,7 +215,7 @@ async def resilient_chat(
     try:
         from kazma_core.agent.nonstop import get_nonstop_config
 
-        ns = get_nonstop_config() if frozen_failover is None else None
+        ns = await asyncio.to_thread(get_nonstop_config) if frozen_failover is None else None
     except Exception:
         ns = None
     chain = tuple(name for name, _ in frozen_failover.clients) if frozen_failover is not None else tuple(ns.failover.chain) if ns and ns.failover.enabled else ()

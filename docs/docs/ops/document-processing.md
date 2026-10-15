@@ -912,7 +912,8 @@ A versioned corpus (EN, AR and bilingual documents rendered by Kazma's own
 DOCX, PDF and HTML engines, plus OCR of a rasterized page) is parsed by the
 real parser and measured: word and segment recall (a segment's words must come
 back together), reading order, exact numbers, table cells, honest page claims,
-paragraph alignment, OCR CER/WER. Version 2 adds long documents (English and
+paragraph alignment, OCR CER/WER, and (since version 5) punctuation: a mark
+read wrong, dropped or added after a word. Version 2 adds long documents (English and
 Arabic, many pages), two columns laid out by another producer (MuPDF), wide
 tables of wrapping cells, and a degraded scan (rotated, blurred, speckled,
 JPEG-compressed); version 3 adds an OCR page with a ruled table, in English
@@ -921,7 +922,9 @@ the floors and the release targets; the cases that meet the targets are listed
 as `qualified`. On 2026-10-13, 16 of 19 cases met them. Not qualified: Arabic
 OCR, with or without a table (Tesseract `ara` misreads Arabic-Indic digits and
 skips two lines its layout analysis drops; CER 0.23) and numbers OCR'd from
-the degraded scan (3.75 read as 3:75). The corpus is generated: handwriting,
+the degraded scan (3.75 read as 3:75). Since 2026-10-15 the OCR cases are
+measured per engine: with the neural engine all five OCR cases meet the
+targets (19 of 19); with Tesseract the three above still do not. The corpus is generated: handwriting,
 forms and merged-cell tables are not represented.
 
 **Real scans** are measured opt-in (`tests/test_document_real_scans.py`):

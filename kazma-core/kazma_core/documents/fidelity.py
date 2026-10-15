@@ -33,6 +33,14 @@ measured against. Every case is then parsed by the real isolated parser
 ``alignment``         (PDF) share of paragraphs laid out on their language's
                       side: Arabic right, English left.
 ``cer`` / ``wer``     (OCR) character / word error rate against the page text.
+``punctuation``       share of the marks after the case's words read as
+                      written: each ground-truth word's following marks
+                      ("." "," ":" "،" "؟" ...) against the marks after the
+                      word it aligns to, over the boundaries where either has
+                      one -- a wrong, dropped or added mark is an error. A
+                      mark inside a number (between digits, no space) is
+                      ``number_recall``'s. ``cer`` and ``wer`` compare words
+                      and cannot see a mark.
 
 Version 2 adds the shapes a clean generated page does not show, still
 generated from a spec so the truth cannot drift:
@@ -62,6 +70,11 @@ whatever the engine. Which furniture a page carries is read from the
 rendered PDF's own text layer (``_drawn_furniture``), never assumed per
 language. The ``*-ocr`` cases are measured with each OCR engine Kazma can
 run (``documents.ocr.engine``), each against its own floors.
+
+Version 5 (2026-10-15, the same documents): ``punctuation`` is measured.
+Every other metric reads words, so the neural engine's "under review:" for
+"under review." -- live on the install that day -- passed every floor and
+every release target.
 
 What this is NOT: a corpus of real-world documents. Paper scans,
 handwriting, forms, nested or merged-cell tables and documents from
@@ -93,7 +106,7 @@ __all__ = [
     "run_corpus",
 ]
 
-CORPUS_VERSION = "2026-10-15.4"
+CORPUS_VERSION = "2026-10-15.5"
 
 #: Metrics where lower is better (a ceiling, not a floor).
 ERROR_RATES = frozenset({"cer", "wer"})
@@ -109,13 +122,14 @@ RELEASE_TARGETS: dict[str, float] = {
     "alignment": 1.0,
     "cer": 0.02,
     "wer": 0.05,
+    "punctuation": 1.0,
 }
 #: Recognition varies a little between Tesseract builds; text formats, page
 #: claims and order do not.
 _OCR_MARGIN = 0.02
 #: Tokens of page furniture allowed inside one recovered segment.
 _SPAN_SLACK = 25
-_RECOGNITION = frozenset({"token_recall", "segment_recall", "number_recall", "cer", "wer"})
+_RECOGNITION = frozenset({"token_recall", "segment_recall", "number_recall", "cer", "wer", "punctuation"})
 
 _EN_TITLE = "Quarterly Operations Review"
 _EN_SECTIONS = (
@@ -428,6 +442,42 @@ def _tokens(text: str) -> list[str]:
     return _WORD.findall(_norm(text))
 
 
+def _marked_tokens(text: str) -> list[tuple[str, str, bool]]:
+    """Each word with the marks after it up to the next word, and whether a
+    space follows it (the last word: True)."""
+    norm = _norm(text)
+    found = list(_WORD.finditer(norm))
+    out = []
+    for index, match in enumerate(found):
+        end = found[index + 1].start() if index + 1 < len(found) else len(norm)
+        between = norm[match.end():end]
+        spaced = index + 1 == len(found) or any(char.isspace() for char in between)
+        out.append((match.group(0), "".join(char for char in between if not char.isspace()), spaced))
+    return out
+
+
+def _punctuation(case: FidelityCase, doc: list[tuple[str, str, bool]]) -> float | None:
+    """Share of the marks after the case's words read as written (see the
+    module docstring); None when neither the truth nor the reading has one."""
+    doc_tokens = [token for token, _marks, _spaced in doc]
+    correct = counted = 0
+    for segment in case.segments():
+        truth = _marked_tokens(segment)
+        if not truth:
+            continue
+        matcher = difflib.SequenceMatcher(None, doc_tokens, [token for token, _m, _s in truth], autojunk=False)
+        for block in matcher.get_matching_blocks():
+            for k in range(block.size):
+                token, marks, spaced = truth[block.b + k]
+                if not spaced and token.isdigit() and truth[block.b + k + 1][0].isdigit():
+                    continue  # a mark inside a number: number_recall's
+                read = doc[block.a + k][1]
+                if marks or read:
+                    counted += 1
+                    correct += marks == read
+    return round(correct / counted, 4) if counted else None
+
+
 def _lis(values: list[int]) -> int:
     import bisect
 
@@ -575,6 +625,7 @@ def measure_case(case: FidelityCase, ir: Any, source: Path) -> dict[str, Any]:
         "order": round(_lis(positions) / len(positions), 4) if positions else 0.0,
         "number_recall": round(len(numbers) / len(case.numbers), 4) if case.numbers else None,
         "page_honesty": _page_honesty(case, ir, source),
+        "punctuation": _punctuation(case, _marked_tokens(text)),
     }
     if case.table is not None:
         cells = [c for row in (case.table[0], *case.table[1]) for c in row]

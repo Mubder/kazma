@@ -320,36 +320,46 @@
 
   // Provider -> models map fetched from /api/providers (authoritative)
   var providerModelMap = []; // [{ name, label, models: [] }]
+  // True while the last /api/providers read failed: the picker then says so,
+  // never "no models available" (tests/js/test_swarm_model_picker.js).
+  var providerModelsFailed = false;
 
   function populateSwarmModelSelects() {
     // Fetch the authoritative provider list with discovered models
     fetch('/api/providers')
-      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(providers) {
+        if (!Array.isArray(providers)) throw new Error('providers unavailable');
+        providerModelsFailed = false;
         providerModelMap = [];
-        if (Array.isArray(providers)) {
-          providers.forEach(function(p) {
-            if (!p.enabled) return;
-            var models = [];
-            var visible = p.visible_models || [];
-            var disc = p.discovered_models || [];
-            var manual = p.models || [];
-            if (Array.isArray(visible) && visible.length) {
-              visible.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
-            } else {
-              if (Array.isArray(disc)) disc.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
-              if (Array.isArray(manual)) manual.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
-            }
-            if (models.length > 0) {
-              providerModelMap.push({ name: p.name, label: p.display_name || p.name, models: models });
-            }
-          });
-        }
+        providers.forEach(function(p) {
+          if (!p.enabled) return;
+          var models = [];
+          var visible = p.visible_models || [];
+          var disc = p.discovered_models || [];
+          var manual = p.models || [];
+          if (Array.isArray(visible) && visible.length) {
+            visible.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+          } else {
+            if (Array.isArray(disc)) disc.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+            if (Array.isArray(manual)) manual.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+          }
+          if (models.length > 0) {
+            providerModelMap.push({ name: p.name, label: p.display_name || p.name, models: models });
+          }
+        });
         renderSwarmModelSelect('add-model-select', defaultModelOption());
         renderSwarmModelSelect('edit-worker-model', '');
       })
       .catch(function() {
+        // The models an earlier read gave are still real; with none, the
+        // picker says the read failed.
+        providerModelsFailed = true;
         renderSwarmModelSelect('add-model-select', defaultModelOption());
+        renderSwarmModelSelect('edit-worker-model', '');
       });
   }
 
@@ -357,7 +367,7 @@
     var sel = $(selectId);
     if (!sel) return;
     if (providerModelMap.length === 0) {
-      sel.innerHTML = '<option value="">' + esc(t('swarm.no_models')) + '</option>';
+      sel.innerHTML = '<option value="">' + esc(t(providerModelsFailed ? 'swarm.models_load_failed' : 'swarm.no_models')) + '</option>';
       return;
     }
     var html = '';
@@ -1212,7 +1222,11 @@
   function loadResultsDashboard() {
     // Load recent completed tasks from API
     fetch('/api/swarm/tasks?pageSize=20')
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        // A refused read is a failure, never "no completed tasks".
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(data) {
         var tasks = data.tasks || [];
         // Merge with in-memory results
@@ -1225,7 +1239,15 @@
         renderResultsDashboard(allResults, 'all');
       })
       .catch(function() {
-        renderResultsDashboard(completedResults, 'all');
+        // What this page saw finish is still true; "none" would not be.
+        if (completedResults.length) {
+          renderResultsDashboard(completedResults, 'all');
+        } else {
+          var emptyEl = $('results-dashboard-empty');
+          if (emptyEl) emptyEl.style.display = 'none';
+          var container = $('results-dashboard-list');
+          if (container) container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">' + esc(t('common.request_failed')) + '</div>';
+        }
       });
   }
 
@@ -1538,7 +1560,10 @@
     if (searchQuery) url += '&q=' + encodeURIComponent(searchQuery);
 
     fetch(url)
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(data) {
         historyData = data.tasks || [];
         historyTotal = data.total || historyData.length;
@@ -1546,7 +1571,9 @@
         updateHistoryPagination();
       })
       .catch(function() {
-        renderHistoryTable([]);
+        // A failed read is not "No tasks found" (tests/test_empty_states_after_load.py).
+        var tbody = $('history-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted);">' + esc(t('common.request_failed')) + '</td></tr>';
       });
   }
 
@@ -1844,7 +1871,11 @@
     modal.style.display = 'flex';
 
     fetch('/api/swarm/workers/' + encodeURIComponent(workerName) + '/logs')
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        // A refused read is a failure, never "No logs yet".
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(data) {
         if (!contentEl) return;
         var lines = data.logs || [];
@@ -3094,7 +3125,11 @@
 
   function loadTemplates() {
     fetch('/api/swarm/templates')
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        // A refused read is a failure, never "No templates".
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(data) {
         renderTemplates(data.templates || [], data.instances || []);
       })

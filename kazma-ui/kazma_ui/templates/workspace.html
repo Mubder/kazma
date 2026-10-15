@@ -132,7 +132,7 @@
             <span x-show="r.private" style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 6px;border-radius:3px;flex-shrink:0;" x-cloak x-text="t('workspace.private_badge')"></span>
           </div>
         </template>
-        <div x-show="ghRepoFiltered.length === 0" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.8rem;" x-cloak>
+        <div x-show="ghRepoFiltered.length === 0 && (ghRepoListLoaded || ghCloning)" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.8rem;" x-cloak>
           <span x-show="!ghCloning" x-text="t('workspace.no_repos')" x-cloak></span>
           <span x-show="ghCloning" x-text="t('workspace.cloning_wait')" x-cloak></span>
         </div>
@@ -521,7 +521,7 @@
               </div>
             </div>
           </template>
-          <div x-show="ghPrs.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_prs')" x-cloak></div>
+          <div x-show="ghTabLoaded.pulls && ghPrs.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_prs')" x-cloak></div>
         </div>
 
         <!-- ISSUES TAB -->
@@ -539,7 +539,7 @@
               </div>
             </div>
           </template>
-          <div x-show="ghIssues.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_issues')" x-cloak></div>
+          <div x-show="ghTabLoaded.issues && ghIssues.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_issues')" x-cloak></div>
         </div>
 
         <!-- COMMITS TAB -->
@@ -551,7 +551,7 @@
               <span translate="no" style="font-size:0.62rem;color:var(--text-muted);flex-shrink:0;margin-left:auto;" x-text="c.author"></span>
             </div>
           </template>
-          <div x-show="ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_recent_commits')" x-cloak></div>
+          <div x-show="ghTabLoaded.commits && ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_recent_commits')" x-cloak></div>
         </div>
 
         <!-- WORKFLOWS TAB -->
@@ -568,7 +568,7 @@
               </div>
             </div>
           </template>
-          <div x-show="ghWorkflows.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_workflow_runs')" x-cloak></div>
+          <div x-show="ghTabLoaded.workflows && ghWorkflows.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_workflow_runs')" x-cloak></div>
         </div>
 
         <!-- RELEASES TAB -->
@@ -583,7 +583,7 @@
               <a :href="rel.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">{{ t('workspace.ws.view') }}</a>
             </div>
           </template>
-          <div x-show="ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_releases')" x-cloak></div>
+          <div x-show="ghTabLoaded.releases && ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_releases')" x-cloak></div>
         </div>
 
       </div><!-- /Main GitHub Card Body -->
@@ -630,6 +630,7 @@
           <span style="flex:1;">..</span>
           <span style="font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.up_one_level') }}</span>
         </div>
+        <div x-show="filesFailed && !loading" role="alert" style="padding:12px 16px;text-align:center;color:var(--danger);font-size:0.8rem;" x-cloak>{{ t('common.request_failed') }}</div>
         <template x-for="item in files" :key="item.path">
           <div class="file-row"
                :class="{ 'is-directory': item.is_dir }"
@@ -640,7 +641,7 @@
             <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
           </div>
         </template>
-        <div x-show="files.length === 0 && !loading" style="padding:20px;text-align:center;color:var(--text-muted);" x-cloak>
+        <div x-show="filesLoaded && !filesFailed && files.length === 0 && !loading" style="padding:20px;text-align:center;color:var(--text-muted);" x-cloak>
           <div style="font-size:1.5rem;margin-bottom:4px;"><span class="ki" data-icon="inbox" aria-hidden="true"></span></div>
           <p style="margin:0;font-size:0.8rem;">{{ t('workspace.no_files') }}</p>
         </div>
@@ -708,7 +709,7 @@
             <span style="font-size:0.6rem;color:var(--text-tertiary);flex-shrink:0;" x-text="ghRelativeTime(a.timestamp)"></span>
           </div>
         </template>
-        <div x-show="ghActivity.length === 0 && !loading" style="padding:30px 20px;text-align:center;color:var(--text-muted);" x-cloak>
+        <div x-show="ghActivity.length === 0 && !loading && ghOAuthChecked && (!ghOAuthConnected || ghActivityLoaded)" style="padding:30px 20px;text-align:center;color:var(--text-muted);" x-cloak>
           <p style="margin:0;font-size:0.8rem;" x-text="ghOAuthConnected ? t('workspace.no_activity') : t('workspace.connect_for_activity')"></p>
         </div>
       </div>
@@ -750,6 +751,11 @@ function workspaceApp() {
 
     // Files
     files: [],
+    // Each list says "none" only once the server answered with none: an
+    // empty array before that is "not loaded yet", and a failed read is not
+    // an answer (tests/test_empty_states_after_load.py).
+    filesLoaded: false,
+    filesFailed: false,
     currentPath: '/',
     parentPath: '',
     loading: true,
@@ -806,10 +812,14 @@ function workspaceApp() {
     ghCommits: [],
     ghWorkflows: [],
     ghReleases: [],
+    // Which GitHub tab lists have come back from the server.
+    ghTabLoaded: { pulls: false, issues: false, commits: false, workflows: false, releases: false },
     // Activity card + repo picker + autocomplete
     ghActivity: [],
+    ghActivityLoaded: false,
     ghActivityFilter: 'all',
     ghRepoList: [],
+    ghRepoListLoaded: false,
     ghRepoSearch: '',
     showRepoPicker: false,
     ghCloning: false,
@@ -1103,23 +1113,27 @@ function workspaceApp() {
       this.loading = false;
     },
 
+    // A failed read says it failed. It used to show a made-up listing
+    // (kazma-core/, README.md...) that was in no workspace
+    // (tests/js/test_workspace_files_failed_read.js). The listing the page
+    // already had stays: it is still true of currentPath.
     async loadFiles(path) {
       path = path || '';
       try {
         const resp = await fetch('/api/workspace/files?path=' + encodeURIComponent(path));
-        if (resp.ok) {
-          const data = await resp.json();
-          this.files = data.files || [];
-          this.currentPath = path || '/';
-          this.parentPath = data.parent || '';
-          if (data.root) {
-            this.absoluteRoot = data.root;
-          }
-        } else {
-          this.files = fallbackFiles();
+        const data = resp.ok ? await resp.json() : null;
+        // The route answers a refused folder with an error and no files.
+        if (!data || data.error || !Array.isArray(data.files)) throw new Error('listing refused');
+        this.files = data.files;
+        this.filesLoaded = true;
+        this.filesFailed = false;
+        this.currentPath = path || '/';
+        this.parentPath = data.parent || '';
+        if (data.root) {
+          this.absoluteRoot = data.root;
         }
       } catch (e) {
-        this.files = fallbackFiles();
+        this.filesFailed = true;
       }
     },
 
@@ -1282,6 +1296,7 @@ function workspaceApp() {
           this.ghTokenValid = false;
           this.ghActiveTab = 'overview';
           this.ghPrs = []; this.ghIssues = []; this.ghCommits = []; this.ghWorkflows = []; this.ghReleases = [];
+          this.ghTabLoaded = { pulls: false, issues: false, commits: false, workflows: false, releases: false };
           KazmaStream.toast(t('workspace.toast_gh_disconnected'), 'info', 2000);
           await this.loadOAuthStatus();
           await this.loadGitHubStatus();
@@ -1304,6 +1319,7 @@ function workspaceApp() {
         else if (tab === 'commits') this.ghCommits = data.commits || [];
         else if (tab === 'workflows') this.ghWorkflows = data.workflows || [];
         else if (tab === 'releases') this.ghReleases = data.releases || [];
+        if (tab in this.ghTabLoaded) this.ghTabLoaded[tab] = true;
       } catch (e) { /* non-fatal */ }
     },
 
@@ -1379,7 +1395,10 @@ function workspaceApp() {
         const resp = await fetch('/api/github/activity?limit=30');
         if (resp.ok) {
           const data = await resp.json();
-          if (!data.error) this.ghActivity = data.activity || [];
+          if (!data.error) {
+            this.ghActivity = data.activity || [];
+            this.ghActivityLoaded = true;
+          }
         }
       } catch (e) { /* non-fatal */ }
     },
@@ -1405,6 +1424,7 @@ function workspaceApp() {
           if (resp.ok) {
             const data = await resp.json();
             this.ghRepoList = data.repos || [];
+            this.ghRepoListLoaded = !data.error && Array.isArray(data.repos);
           }
         } catch (e) { /* non-fatal */ }
       }
@@ -1653,16 +1673,6 @@ function workspaceApp() {
   };
 }
 
-function fallbackFiles() {
-  return [
-    { name: 'kazma-core/', is_dir: true, path: '/kazma-core', size: '—' },
-    { name: 'kazma-ui/', is_dir: true, path: '/kazma-ui', size: '—' },
-    { name: 'kazma-gateway/', is_dir: true, path: '/kazma-gateway', size: '—' },
-    { name: 'tests/', is_dir: true, path: '/tests', size: '—' },
-    { name: 'README.md', is_dir: false, path: '/README.md', size: '—' },
-    { name: 'requirements.txt', is_dir: false, path: '/requirements.txt', size: '—' },
-  ];
-}
 </script>
 {% endblock %}
 

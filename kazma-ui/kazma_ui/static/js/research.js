@@ -333,7 +333,8 @@
         readResults('/api/research/papers?limit=50', 'papers'),
         readResults('/api/research/sessions?limit=30', 'sessions'),
       ]).then(function (triple) {
-        warning('research-load-error', triple.some(function (p) { return p.error; }), 'research.ui.results_unavailable');
+        listIncomplete = triple.some(function (p) { return p.error; });
+        warning('research-load-error', listIncomplete, 'research.ui.results_unavailable');
         var data = triple[0] || {};
         var papersPayload = triple[1] || {};
         var sessionsPayload = triple[2] || {};
@@ -395,7 +396,8 @@
         readResults('/api/research/tasks?page=1&page_size=50&archived=true', 'tasks'),
         readResults('/api/research/sessions?limit=50&archived=true', 'sessions'),
       ]).then(function (results) {
-        warning('research-archived-load-error', results.some(function (p) { return p.error; }), 'research.ui.results_unavailable');
+        archivedIncomplete = results.some(function (p) { return p.error; });
+        warning('research-archived-load-error', archivedIncomplete, 'research.ui.results_unavailable');
         var tasks = results[0].tasks || [];
         var sessions = (results[1].sessions || []).map(function (s) {
           // Render archived sessions through the task-shaped card.
@@ -413,7 +415,10 @@
         });
         archivedTasks = tasks.concat(sessions);
         renderArchivedList(archivedTasks);
-      }).catch(function () { warning('research-archived-load-error', true, 'research.ui.results_unavailable'); });
+      }).catch(function () {
+        archivedIncomplete = true;
+        warning('research-archived-load-error', true, 'research.ui.results_unavailable');
+      });
     },
 
     searchArchived: function (e) {
@@ -1038,10 +1043,16 @@
       : esc(i18n('research.ui.no_prompt', '(no prompt)'));
   }
 
+  // "No research yet" answers reads that all came back. With one of them
+  // unavailable the list is incomplete: an empty one says nothing, and the
+  // warning above it is the page's answer (tests/js/test_research_unavailable.js).
+  var listIncomplete = false;
+  var archivedIncomplete = false;
+
   function renderList(tasks) {
     var el = $('research-list');
     if (!tasks.length) {
-      el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_results')) + '</div>';
+      el.innerHTML = listIncomplete ? '' : '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_results')) + '</div>';
       return;
     }
     el.innerHTML = tasks.map(function (t) {
@@ -1103,7 +1114,7 @@
     var el = $('research-archived-list');
     if (!el) return;
     if (!tasks.length) {
-      el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_archived')) + '</div>';
+      el.innerHTML = archivedIncomplete ? '' : '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_archived')) + '</div>';
       return;
     }
     el.innerHTML = tasks.map(function (t) {

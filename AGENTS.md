@@ -3006,7 +3006,7 @@ left pending or scratch left behind); a two-minute pilot is not the soak.
 `documents/fidelity.py` builds EN/AR/bilingual cases with Kazma's own engines
 (DOCX, PDF, HTML, OCR from a rasterized page) from a ground-truth spec and
 measures the real parser: word recall, segment recall, order, exact numbers,
-table cells, page honesty, alignment, CER/WER. Floors and release targets are
+table cells, page honesty, alignment, CER/WER, punctuation. Floors and release targets are
 declared per corpus version in `tests/fixtures/documents/fidelity_thresholds.json`;
 the `qualified` list must match the measurement. Change the corpus = bump
 `CORPUS_VERSION` and re-lock (`scripts/document_fidelity.py --lock`, which
@@ -3025,11 +3025,19 @@ cases are measured per engine (`fidelity.OCR_ENGINES`: `tesseract`,
 `neural`), each with its own floors and `qualified` list under
 `ocr_engines.<engine>`; a case another engine read (a fallback) fails the
 test and is refused by `--lock`, and a lock keeps the floors of an engine not
-installed where it runs. Not qualified, each with its reason in the
+installed where it runs. Version 5 (same day) measures `punctuation`: each
+ground-truth word's following marks against the marks after the word it
+aligns to, where either has one (wrong, dropped and added marks are errors;
+a mark inside a number is `number_recall`'s); release target 1.0. Every
+other metric reads words, so the live install's "placed under review:"
+passed them all. Not qualified, each with its reason in the
 thresholds file: with Tesseract `ar-ocr`, `ar-ocr-table` (no Arabic-Indic
-digits, lines dropped) and `en-ocr-degraded` (3.75 read as 3:75); with the
-neural engine `ar-ocr-table` (one word misread) and `en-ocr-degraded` (3,75).
-A re-lock keeps the file's `notes` and `measured_on`. Certification runs the
+digits, lines dropped) and `en-ocr-degraded` (3.75 read as 3:75: a speck
+above the decimal point; a full stop it adds mid-line). With the neural
+engine every OCR case qualifies, punctuation included (G4: the speck rule,
+EasyOCR's second readings, the marks and punctuation rules, the final-mark
+vote). A re-lock keeps the file's `notes` and
+`measured_on`: a note for a case that now qualifies is removed by hand. Certification runs the
 corpus and reports the actual isolation profile and backends (F10). Gate:
 `tests/test_document_fidelity.py`.
 
@@ -3055,7 +3063,8 @@ Documents). Measured on the scan: a contents table's numbers 22 % -> 91 %,
 its rows kept together 3 % -> 56 % complete, 6 of 6 searches on the right
 page. Tesseract did not read Arabic-Indic digits in any font measured (fast or
 best `ara` model, `script/Arabic` fast or best, any segmentation mode): the
-neural engine (G4) does. Gates: `tests/test_document_ocr_tables.py`,
+installed `ara` model's character set holds one of the ten (٠) and neither
+Arabic separator. The neural engine (G4) does. Gates: `tests/test_document_ocr_tables.py`,
 `tests/test_document_ocr_phase5.py` (the quote with the old quoting as
 control), `test_ocr_without_the_table_pass_fails_the_floor`, and the opt-in
 `tests/test_document_real_scans.py` (`KAZMA_TEST_REAL_SCANS_MANIFEST`: a
@@ -3079,7 +3088,41 @@ their ink; EasyOCR `arabic_g1` reads each line (`english_g2` a line without
 Arabic, and English-only pages); each word without a digit is voted on with
 PaddleOCR's PP-OCRv5 Arabic recognizer and Tesseract's words on the page --
 the two agreeing, or PaddleOCR at >= 0.9 alone, replace EasyOCR's word; a
-number is always EasyOCR's. A drawn line goes to logical order by
+number is always EasyOCR's. EasyOCR's own second reading of a letter it
+doubted (>= 0.1, a letter of the same bidi class) is a reading too: another
+reader that reads it makes two (the table page's "ربالأ", ب 0.74 / ي 0.26,
+is Tesseract's "ريالاً"). The vote is over letters: a word's punctuation is
+EasyOCR's (PaddleOCR drops a full stop), and a space read before a full
+stop or comma goes (EasyOCR reads the gap a font leaves after a final ف as
+one). EasyOCR writes no harakat (its Arabic list leaves them out) and draws
+the tanween over an alef as a hamza ("ريالأ"): where another reader read the
+same letters with harakat on that side of that letter, those stand, unless
+a reader read EasyOCR's hamza too; a mark only another reader saw is never
+added (Tesseract writes "الشماليٍ"). Before a line is read, ink smaller than
+the line's own pen (area under half the stroke squared, no side longer than
+a stroke) is removed from its box, unless it continues past the box: on the
+degraded scan a speck beside the decimal point read "3.75" as "3,75"
+(specks 1-3 px of area; the smallest real mark, a blurred full stop, 6). A
+"," or "." between Arabic-Indic digits is put back as ٫/٬ by a number's
+grammar (`arabic.arabic_number_separators`, both engines: neither EasyOCR
+`arabic_g1` nor Tesseract `ara` can write those marks). A line's last mark
+is two readers' (`_vote_final_mark`, after the letter vote): EasyOCR says
+THAT a mark is there (it wrote one after the last word, or gave one >= 0.1
+past its last character: `Reading.beyond`), Tesseract's reading of the same
+word -- same folded letters -- says WHICH, when it is ONE mark; on an Arabic
+line Tesseract's "," is a comma of either form (`ara` has no "،": EasyOCR's
+form if it read a comma, else "،"). A mark Tesseract alone reads is never
+added, none is removed, a number's own marks are never touched. English
+pages read Tesseract only when a line ends in a mark to vote on. Measured
+on 176 generated lines (EN/AR, clean and degraded; the live install read
+"placed under review:"): English 61 -> 83 of 88 right, 22 -> 0 wrong;
+Arabic 70 -> 74, 6 -> 3 wrong; 0 marks added; no probability threshold on
+EasyOCR alone separates "." from ":" (the right mark second at 0.07-0.40).
+Left: a mark EasyOCR reads as a letter ("!" as "l", Arabic "." as "ء") --
+its own second reading there is mostly under 0.1, so no two readers agree.
+Not adopted: a crop margin (EasyOCR's own 0.1 of the height) read English
+line-final full stops right but added full stops to Arabic headings that
+have none. A drawn line goes to logical order by
 `parsers.pdf_rtl.logical_line`, never a recognizer's `get_display` (which
 leaves "30-09-2026" reversed). The page pass skips the lines inside ruled
 tables (`skips_table_regions`; `tables.table_regions` is `read_tables`' own
@@ -3103,7 +3146,10 @@ EasyOCR alone, tessdata_best and the 2-reader combinations:
 `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md` (Q02). Gates:
 `tests/test_document_ocr_neural.py` (each rule with its control; the
 end-to-end readings need the models and skip without them),
-`tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
+`tests/test_document_ocr_reading_rules.py` (separators, punctuation, second
+readings, marks, specks, a line's last mark; the old rules as controls, and
+end to end on the corpus's table page, clean page and degraded scan, the old
+rules re-run on the same model outputs), `tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
 the image `test_the_neural_ocr_engine_reads_inside_the_container`.
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
@@ -3150,10 +3196,16 @@ call-site-local normalization.
   mark is a misread mark (LibreOffice maps a tanween to "/") and is dropped.
   OCR words get the same rule: `arabic.number_in_logical_order` puts a
   separated number read off an Arabic line back in logical order (the TSV
-  parser applies it with the paragraph text before the word). Gates:
+  parser applies it with the paragraph text before the word), and
+  `arabic.arabic_number_separators` puts back the ٫/٬ an OCR reader wrote as
+  "," or "." between Arabic-Indic digits (a group of other than three digits
+  follows a decimal separator; before exactly three it stays as read:
+  thousands or fils). OCR readings only: a text layer's marks are the
+  page's. Gates:
   `tests/test_document_pdf_rtl.py` (round trips laid out by python-bidi
   itself; without the check the date reads back reversed),
-  `tests/test_document_number_order.py`.
+  `tests/test_document_number_order.py`,
+  `tests/test_document_ocr_reading_rules.py` (the separators).
 - **`to_logical()` runs in `parsers/common.IRBuilder.add_page`**, before limits,
   quality assessment and chunking. It NFKC-folds Arabic presentation forms back
   to base letters so a legacy visual-dump PDF is recovered without OCR. Pages
@@ -4244,17 +4296,37 @@ module was deleted and the import's `except` said "chromadb not installed".
     library+model filter vs 4 ms without; 100k, 353 vs 6 ms (p95 442 vs 10),
     recall the same either way.
   - *The index is built for recall* (`_HNSW`: 48 neighbours, construction
-    400, search 256). Chroma's defaults (16/100/100) returned 31-39 of 40
-    planted answers at 10k chunks while exact search ranked all 40 first;
-    these return 40/40 in EN, AR and mixed in 11 of 12 harness measurements
-    (39 in one: Chroma builds in parallel) for ~1 ms more a query. An older
-    collection's search breadth is raised by `modify` (applies at the index's
-    next load) and its graph rebuilt by the repair pass from its own vectors
-    (`VectorStore.rebuild_collection`). At 100k the same settings found 32 of
-    40 planted answers with or without a filter, where exact search ranks all
-    40 first; search breadth 512/1,000/2,000 found 35/38/40 (p50 7.5/11.8/19.5
-    ms against 4.6). A breadth that grows with the collection is open (the
-    100k step).
+    400, search 256 for a small library). Chroma's defaults (16/100/100)
+    returned 31-39 of 40 planted answers at 10k chunks while exact search
+    ranked all 40 first; these return 40/40 in EN, AR and mixed in 11 of 12
+    harness measurements (39 in one: Chroma builds in parallel) for ~1 ms
+    more a query. An older collection's graph is rebuilt by the repair pass
+    from its own vectors (`VectorStore.rebuild_collection`).
+  - *The search widens as the library grows* (`vector_store_global.search_breadth`,
+    2026-10-15): one candidate for every 12 vectors, rounded up to the next
+    of `_BREADTH_GRID` (256 below 3,072 vectors ... 12,288 from 98,304,
+    24,576 from 196,608, 49,152 from 393,216: never under n/12, at most 1.5
+    times it). `scripts/knowledge_soak.py breadth` (two corpora x EN/AR/mixed,
+    240 planted questions a size, exact rank 1 each): at a fixed 256,
+    239/218/210/203 of 240 found at 10k/50k/100k/200k; the least breadth that
+    found all was at most n/12 at every size (512, 4,096, 6,144, 16,384, all
+    Arabic); the rule's breadth found 240/240 at each, p50 ~3x 256's at 100k (the
+    guide's "Meaning search at scale"). Chroma (1.5.9, measured) applies a
+    breadth when it LOADS an index, every read loads it (a `count()` and a
+    `get` too), and a loaded index keeps its breadth while the client lives
+    (Kazma's pool never evicts): so the size comes from the catalog
+    (`chroma_local.collection_size`, loads nothing) and `VectorStore._open`
+    sets the breadth before anything reads the collection (`_fit_breadth`);
+    the repair pass (`fit_search_breadth`) sets it for a collection that grew
+    while loaded and then has every index loaded again
+    (`reload_vector_indexes`: the client closed between calls, as
+    `release_dropped_vectors` does); a breadth is kept until the size falls
+    a fifth below its step (`_BREADTH_KEEP_SHARE`); a rebuilt collection is
+    made with its size's breadth. Never set a breadth only by `modify` on a
+    loaded collection and call it applied. Gate:
+    `tests/test_knowledge_search_breadth.py` (the fixed breadth, a size read
+    with `count()` and no reload as negative controls; recall on the real
+    chromadb).
 
 **G. The Knowledge store and its surfaces** (Knowledge audit 2026-10-13,
 tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
@@ -4546,7 +4618,11 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   then. `record_llm_call` and the ledger's readers are in
   `_LOOP_STALL_HELPERS`. Gate: `tests/test_llm_ledger_off_the_loop.py`
   (SQLite traced on the ledger's connection; the inline, unawaited and
-  unshielded writes as negative controls).
+  unshielded writes as negative controls). The non-stop settings the
+  failover chains and the turn's envelope read (`get_nonstop_config`:
+  kazma.yaml, then the settings store) are a loop-stall helper too; the
+  supervisor, `resilient_chat`, `run_agent_turn` and the runner await it in
+  a thread.
 
 **F. Errors do not carry internals.**
 - API handlers return `kazma_core.errors.safe_error(exc)` — a stable code
@@ -7203,7 +7279,16 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
 - **A list shows its empty state only after it has loaded.** The chat
   sidebar painted "No sessions yet" for a second on every visit (an early
   re-render replaced the "Loading…" placeholder).
-  `tests/e2e/test_session_list_loading.py`.
+  `tests/e2e/test_session_list_loading.py`. Every template empty state
+  (length vs zero, `!list.length`, `!list.some(...)`) names a flag its loader
+  sets on SUCCESS (`xLoaded`), or loading AND error flags -- `!loading` alone
+  says "none" over a failed read -- or is declared with why in
+  `tests/test_empty_states_after_load.py` (2026-10-15: Documents said "No
+  documents yet." for seconds over five, and 39 other empty states had the shape;
+  `tests/e2e/test_documents_list_loading.py`). A failed read says it failed:
+  no `catch` in a page script paints an empty list, an empty-state text or
+  made-up rows (the same gate; the Workspace showed a fake `kazma-core/`
+  listing when its file read failed).
 - **A poller reads through `window.kazmaGetJson`** (`auth-guard.js`): the
   parsed body of a 2xx JSON response, else null (an error status, a proxy's
   HTML page, no network); it never throws or logs. While the server restarts

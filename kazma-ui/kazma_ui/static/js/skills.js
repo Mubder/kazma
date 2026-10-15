@@ -15,6 +15,7 @@ function skillsApp() {
         hubResults: [],
         marketQuery: '',
         marketResults: [],
+        marketResultsLoaded: false,
         marketSearching: false,
         validatePath: '',
         validateResult: null,
@@ -129,9 +130,14 @@ function skillsApp() {
                 return;
             }
             this.marketSearching = true;
+            // "No matching skills" answers a search that came back; a failed
+            // one says nothing (tests/test_empty_states_after_load.py).
+            this.marketResultsLoaded = false;
             try {
                 var resp = await fetch('/api/skills/marketplace/search?q=' + encodeURIComponent(q));
-                this.marketResults = await resp.json();
+                var found = await resp.json();
+                this.marketResults = Array.isArray(found) ? found : [];
+                this.marketResultsLoaded = resp.ok && Array.isArray(found);
             } catch (e) {
                 console.error('Marketplace search failed:', e);
                 this.marketResults = [];

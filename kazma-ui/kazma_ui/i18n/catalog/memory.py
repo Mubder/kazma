@@ -950,6 +950,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "المُضمِّن: غير متاح",
         "en": "embedder: unavailable",
     },
+    "memory.console.embedder_not_loaded": {
+        "ar": "المُضمِّن: يُحمَّل عند أول بحث",
+        "en": "embedder: loads at the first search",
+    },
     "memory.console.reconsol_none": {
         "ar": "إعادة الدمج: –",
         "en": "reconsol: –",

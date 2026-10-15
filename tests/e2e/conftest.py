@@ -56,3 +56,26 @@ def _reseed_unified_turn_provider():
     except Exception:  # noqa: BLE001 - never block a test on seeding
         pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_real_model_or_voice_service(monkeypatch):
+    """No browser test loads the real embedder or asks Microsoft for voices.
+
+    The egress guard (``tests/_egress_guard.py``, 2026-10-15) fails a test
+    that does. ``fast_test`` skips this folder, so its tours met the guard
+    only when run by hand: six of thirteen failed. A chat turn's recall and
+    post-turn memory embedded with bge-m3, and Settings -> Voice asked
+    Microsoft's servers for edge-tts's voice list. These tests run their
+    own model server, so the registry's clients are left to them
+    (``llm=False``); recall answers from keywords, and the voice list is
+    the short one the route gives when edge-tts is missing.
+    """
+    import sys
+
+    from tests._no_models import finish_turn_memory, keep_models_out
+
+    keep_models_out(monkeypatch, llm=False)
+    monkeypatch.setitem(sys.modules, "edge_tts", None)
+    yield
+    finish_turn_memory()

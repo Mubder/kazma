@@ -177,6 +177,22 @@ def test_worker_image_is_standard_library_only() -> None:
 # ── the broker resolves the image ───────────────────────────────────────
 
 
+def _docker29_inspect(labels: dict[str, str], template: str):
+    """``docker image inspect --format`` as Docker 29 answers it: an image
+    with no labels has no ``Labels`` in ``.Config``, and a template naming
+    the missing key fails (measured on 29.0.4 and 29.8.2; 28.5.2 printed
+    ``null``)."""
+    config = {"Labels": labels} if labels else {}
+    if template == "{{json .}}":
+        body = {"Id": IMAGE_ID, "Created": "2026-10-15T00:00:00Z", "Config": config}
+        return SimpleNamespace(returncode=0, stdout=json.dumps(body) + "\n", stderr="")
+    if ".Config.Labels" in template and "Labels" not in config:
+        return SimpleNamespace(returncode=1, stdout="", stderr=(
+            'template parsing error: template: :1:20: executing "" at <.Config.Labels>: '
+            'map has no entry for key "Labels"'))
+    return SimpleNamespace(returncode=0, stdout=f"{IMAGE_ID}|{json.dumps(labels)}\n", stderr="")
+
+
 class _FakeDocker:
     """Answers the broker's docker calls from a table of local images."""
 
@@ -196,8 +212,7 @@ class _FakeDocker:
             ref = args[-1]
             if ref not in self.images:
                 return SimpleNamespace(returncode=1, stdout="", stderr="No such image")
-            labels = self.images[ref]
-            return SimpleNamespace(returncode=0, stdout=f"{IMAGE_ID}|{json.dumps(labels)}\n", stderr="")
+            return _docker29_inspect(self.images[ref], args[args.index("--format") + 1])
         if args[:2] == ("image", "ls"):
             built = [ref for ref, labels in self.images.items() if broker_module.IMAGE_SOURCE_LABEL in labels]
             return SimpleNamespace(returncode=0, stdout="\n".join(reversed(built)) + "\n", stderr="")
@@ -385,3 +400,19 @@ def test_the_build_script_tags_and_labels_the_build(tmp_path, monkeypatch):
     # Built already: nothing is rebuilt.
     built.clear()
     assert module.main(["build"]) == 0 and not built
+
+
+def test_an_image_without_labels_is_served():
+    """A plain ``docker build`` (the CI job's, the compose deployment's) has
+    no labels, and Docker 29 then refuses a template naming them: the broker
+    read every such image as missing and exited 4 (Linux run, 2026-10-15)."""
+    fake = _FakeDocker({"kazma-document-worker:ci": {}})
+    broker = _broker(fake, fallback=False, image="kazma-document-worker:ci")
+    assert broker.resolve_image() == IMAGE_ID
+
+
+def test_the_old_template_fails_on_an_image_without_labels():
+    """Negative control: the template the broker used fails there."""
+    answer = _docker29_inspect({}, "{{.Id}}|{{json .Config.Labels}}")
+    assert answer.returncode == 1 and "Labels" in answer.stderr
+    assert _docker29_inspect({"a": "b"}, "{{.Id}}|{{json .Config.Labels}}").returncode == 0

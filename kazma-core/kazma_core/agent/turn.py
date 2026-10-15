@@ -9,6 +9,7 @@ via ``stream_chat_turn`` → ``POST /api/chat/stream``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -174,7 +175,8 @@ async def run_agent_turn(
             except ImportError:
                 ns_cfg = None
             else:
-                ns_cfg = get_nonstop_config()  # never raises: defaults, feature off
+                # never raises: defaults, feature off; a settings read
+                ns_cfg = await asyncio.to_thread(get_nonstop_config)
 
         # The turn's wall-clock budget: the one rule every surface applies
         # (agent/turn_budget.py). It bounds this running segment -- recovery

@@ -1013,6 +1013,11 @@ _LOOP_STALL_HELPERS = frozenset({
     # turn's totals and the recent rows are SQLite reads of the same file.
     "record_llm_call", "_record_if_enabled", "turn_usage", "turn_totals",
     "query_recent", "turn_started_epoch",
+    # The non-stop settings (2026-10-15): kazma.yaml's section, then the
+    # settings store over it -- a Postgres round trip on a cache miss. The
+    # supervisor's and resilient_chat's failover, the turn's envelope and the
+    # runner read them on the loop at every transient failure and turn.
+    "get_nonstop_config",
     # Switching the model or provider (2026-10-01): settings and vault
     # writes, then the agent rebinds and the graph is compiled again. The
     # Settings route, the chat's provider switch, setup and the /model menu
@@ -1093,6 +1098,10 @@ _LOOP_STALL_HELPERS = frozenset({
     # it left and rebuilt when it kept deleted words, and the keyword-index
     # purge a killed delete left due (finished at open and by the pass).
     "purge_deleted_rows", "drop_deleted_rows", "finish_pending_purge",
+    # The search breadth that follows a library's size (2026-10-15): a
+    # catalog read, a change to it, and a client close that waits for the
+    # calls in flight so every index loads again.
+    "collection_size", "fit_search_breadth", "reload_vector_indexes",
 })
 
 

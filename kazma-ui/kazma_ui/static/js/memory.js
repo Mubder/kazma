@@ -157,6 +157,16 @@ function memoryPage() {
     mergeTarget: "",
     linkPredicate: "related_to",
     merges: [],
+    // Each table says "no rows" only after the server answered with none,
+    // and says "load failed" when the read failed: never an empty table with
+    // no word (tests/test_empty_states_after_load.py,
+    // tests/js/test_memory_tables_failed_read.js).
+    beliefsLoaded: false,
+    entitiesLoaded: false,
+    mergesLoaded: false,
+    beliefsFailed: false,
+    entitiesFailed: false,
+    mergesFailed: false,
     // Pagination state per collection. pageSize is the per-fetch window;
     // offset/total are (re)set by each load. loadMore appends the next window.
     entitiesPage: { offset: 0, total: 0, pageSize: 150 },
@@ -358,10 +368,24 @@ function memoryPage() {
       if (d.ok) this.summary = d;
     },
 
+    // One read of a table. A network failure marks the table failed as an
+    // error answer does, and still reaches the caller (loadAll's banner).
+    async _readTable(name, append, url) {
+      try {
+        return await api(url);
+      } catch (e) {
+        if (!append) {
+          this[name + "Loaded"] = false;
+          this[name + "Failed"] = true;
+        }
+        throw e;
+      }
+    },
+
     async loadBeliefs(append) {
       const q = encodeURIComponent(this.beliefQ || "");
       const off = append ? this.beliefsPage.offset + this.beliefsPage.pageSize : 0;
-      const d = await api(
+      const d = await this._readTable("beliefs", append,
         "/api/memory/v2/beliefs?q=" + q + "&limit=" + this.beliefsPage.pageSize + "&offset=" + off
       );
       const rows = d.beliefs || [];
@@ -371,6 +395,8 @@ function memoryPage() {
         pageSize: Number(d.limit || this.beliefsPage.pageSize),
       };
       this.beliefs = append ? this.beliefs.concat(rows) : rows;
+      if (!append) this.beliefsLoaded = !d.error;
+      if (!append) this.beliefsFailed = !!d.error;
       if (!append) this.selectedBeliefs = [];
     },
 
@@ -383,7 +409,7 @@ function memoryPage() {
         empty_only: this.emptyOnly ? "true" : "false",
         isolated_only: this.isolatedOnly ? "true" : "false",
       });
-      const d = await api("/api/memory/v2/entities?" + params.toString());
+      const d = await this._readTable("entities", append, "/api/memory/v2/entities?" + params.toString());
       const rows = d.entities || [];
       this.entitiesPage = {
         offset: Number(d.offset || off),
@@ -391,11 +417,13 @@ function memoryPage() {
         pageSize: Number(d.limit || this.entitiesPage.pageSize),
       };
       this.entities = append ? this.entities.concat(rows) : rows;
+      if (!append) this.entitiesLoaded = !d.error;
+      if (!append) this.entitiesFailed = !!d.error;
     },
 
     async loadMerges(append) {
       const off = append ? this.mergesPage.offset + this.mergesPage.pageSize : 0;
-      const d = await api(
+      const d = await this._readTable("merges", append,
         "/api/memory/v2/entity-merges?limit=" + this.mergesPage.pageSize + "&offset=" + off
       );
       const rows = d.merges || [];
@@ -405,6 +433,8 @@ function memoryPage() {
         pageSize: Number(d.limit || this.mergesPage.pageSize),
       };
       this.merges = append ? this.merges.concat(rows) : rows;
+      if (!append) this.mergesLoaded = !d.error;
+      if (!append) this.mergesFailed = !!d.error;
     },
 
     // One-line load-more wrappers for the pager buttons.

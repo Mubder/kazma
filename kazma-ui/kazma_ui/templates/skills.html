@@ -142,7 +142,7 @@
                 </div>
             </template>
         </div>
-        <div x-show="!marketSearching && marketQuery && marketResults.length === 0" class="empty-state">
+        <div x-show="marketResultsLoaded && !marketSearching && marketQuery && marketResults.length === 0" class="empty-state" x-cloak>
             <p>{{ t('skills.marketplace_empty') }}</p>
         </div>
     </div>

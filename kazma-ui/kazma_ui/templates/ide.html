@@ -331,7 +331,7 @@
             <span class="ide-tree-name" translate="no" x-text="item.name"></span>
           </button>
         </template>
-        <div x-show="tree.length === 0 && !busy" x-cloak class="ide-tree-empty">{{ t('ide.empty') }}</div>
+        <div x-show="treeLoaded && tree.length === 0 && !busy" x-cloak class="ide-tree-empty">{{ t('ide.empty') }}</div>
       </div>
     </div>
 

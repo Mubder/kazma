@@ -252,11 +252,26 @@ def build_memory_health() -> dict[str, Any]:
     emb_detail = "Embedder not initialized."
     emb_meta: dict[str, Any] = {"provider": provider, "model": model, "dim": None}
     try:
-        from kazma_core.memory.embedder import get_embedder
+        # The embedder this process holds, never a build: /api/system/status
+        # polls this, and building loads the model (2026-10-15). Not built
+        # yet is a normal state -- the first search builds it, and a build
+        # that fails then marks recall degraded.
+        from kazma_core.memory.embedder import held_embedder
 
-        emb = get_embedder()
+        emb = held_embedder()
         if emb is None:
-            emb_detail = "get_embedder() returned None — check logs."
+            emb_ok = True
+            emb_status = "ok"
+            emb_detail = f"Not loaded yet: the first search loads it (model={model})."
+            if provider in ("openai-compatible", "openai", "nim", "remote") and not (has_key and base_url):
+                # Read from the settings, no build needed: the first search
+                # will fall back to the local model.
+                emb_status = "warn"
+                emb_detail = (
+                    f"Remote provider '{provider}' has no "
+                    f"{'API key' if not has_key else 'base_url'}: the first search "
+                    f"will fall back to the local model."
+                )
         else:
             # Reuse a cached successful probe within the TTL (values are stable
             # for a given embedder) instead of calling encode() on every poll.
@@ -500,10 +515,14 @@ def build_memory_health() -> dict[str, Any]:
 
     # ── Package presence (actionable install hints) ───────────────────
     def _has_mod(name: str) -> bool:
+        # Installed, found without importing it: importing
+        # sentence_transformers loads torch (seconds, a gigabyte) on a
+        # status poll (2026-10-15).
+        import importlib.util
+
         try:
-            __import__(name)
-            return True
-        except Exception:
+            return importlib.util.find_spec(name) is not None
+        except (ImportError, ValueError):
             return False
 
     pkgs = [

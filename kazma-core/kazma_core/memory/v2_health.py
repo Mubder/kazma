@@ -243,13 +243,13 @@ def build_v2_health(
             out["last_reconsolidation"] = lr
     except Exception:
         pass
-    try:
-        from kazma_core.memory.embedder import get_embedder
+    # What this process holds, never a build: health is polled, and building
+    # the embedder loads its model (embedder_readiness).
+    from kazma_core.memory.embedder import embedder_readiness
 
-        emb = get_embedder()
-        out["embedder_ready"] = emb is not None
-    except Exception:
-        out["embedder_ready"] = False
+    readiness = embedder_readiness()
+    out["embedder_ready"] = readiness["ready"]
+    out["embedder_state"] = readiness["state"]
 
     primary_conn = None
     ops_conn = None

@@ -22,7 +22,8 @@ def test_known_initially_hidden_panels_are_cloaked() -> None:
         ),
         "ide.html": (
             'x-show="treePath" x-cloak',
-            'x-show="tree.length === 0 && !busy" x-cloak',
+            # The empty tree waits for its listing (tests/test_empty_states_after_load.py).
+            'x-show="treeLoaded && tree.length === 0 && !busy" x-cloak',
         ),
         "components/header.html": (
             'class="user-menu-dropdown" x-show="open" x-transition x-cloak',

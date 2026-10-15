@@ -125,6 +125,9 @@ function knowledgePage() {
     loading: false,
     creating: false,
     libraries: [],
+    // The tab's list as the server last gave it; "no libraries" only then
+    // (tests/test_empty_states_after_load.py).
+    librariesLoaded: false,
     viewArchived: false,   // Active (false) / Archived (true) tab state
     form: { id: "", name: "", seed_url: "" },
     activeJob: null,    // latest ProgressUpdate from /api/kb/jobs/{id}
@@ -168,6 +171,9 @@ function knowledgePage() {
 
     async load() {
       this.loading = true;
+      // A tab switch loads another list: until it answers, the old one's
+      // emptiness says nothing about it.
+      this.librariesLoaded = false;
       try {
         // Fetch active or archived depending on the current tab.
         const url = this.viewArchived
@@ -177,6 +183,7 @@ function knowledgePage() {
         const data = await r.json();
         if (!data.ok) throw new Error(errorText(data, "knowledge.ui.load_failed", "failed"));
         this.libraries = (data.libraries || []).map(withStrings);
+        this.librariesLoaded = true;
       } catch (e) {
         toast(_k("knowledge.ui.load_failed", "Failed to load libraries: {error}", { error: e.message }), "error");
       } finally {

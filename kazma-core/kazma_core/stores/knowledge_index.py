@@ -54,6 +54,7 @@ from kazma_core.memory.vector_store_global import (
     compact_vectors,
     index_reloads,
     release_dropped_vectors,
+    reload_vector_indexes,
 )
 from kazma_core.paths import vector_memory_path
 from kazma_core.stores.knowledge import (
@@ -931,7 +932,8 @@ class KnowledgeIndex:
         step = max(1, int(batch))
         report: dict[str, Any] = {"libraries": 0, "embedded": 0, "removed": 0, "missing": 0,
                                   "unavailable": False, "complete": True, "failed": {},
-                                  "coverage": {}, "identity": "", "graphs_rebuilt": 0, "text_removed": 0}
+                                  "coverage": {}, "identity": "", "graphs_rebuilt": 0, "text_removed": 0,
+                                  "breadths_changed": 0}
         stores: dict[str, VectorStore] = {}
         identities: dict[str, str] = {}
         store_ids: dict[str, str] = {}
@@ -960,6 +962,11 @@ class KnowledgeIndex:
                     vs.rebuild_collection()
                     report["graphs_rebuilt"] += int(sparse)
                     report["text_removed"] += int(text)
+                # A collection that grew (or shrank) past a step is searched
+                # wider (or narrower); an index this process already loaded
+                # takes it when the pass has the indexes loaded again.
+                if vs.fit_search_breadth():
+                    report["breadths_changed"] += 1
                 # Vectors first: a chunk ingested between the two reads is then
                 # embedded twice (harmless), never taken for a retired one.
                 tags = vs.models()
@@ -1257,6 +1264,11 @@ def run_repair_sweep(*, time_budget_s: float = 300.0) -> dict[str, Any]:
     # The vectors of collections dropped since (deleted libraries, model
     # switches, rebuilt indexes) leave the disk (KB-Q01).
     report["vector_folders"] = release_dropped_vectors(index._persist_dir)
+    # A search breadth changed for an index this process holds applies when
+    # the index is loaded again (unless the release just closed the client).
+    report["indexes_reloaded"] = bool(
+        report.get("breadths_changed") and not report["vector_folders"].get("client_closed")
+        and reload_vector_indexes(index._persist_dir))
     # Text an older build stored beside its vectors, deleted since, leaves
     # the vector catalog's free space (KB-Q01).
     report["vector_compaction"] = compact_vectors(index._persist_dir)

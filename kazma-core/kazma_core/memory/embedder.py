@@ -626,6 +626,30 @@ def embedder_health() -> dict[str, Any]:
     return breaker.state()
 
 
+def held_embedder() -> Embedder | None:
+    """The embedder this process has built, or None. Builds nothing: for a
+    reader that must not load the model (health, status)."""
+    return _embedder
+
+
+def embedder_readiness() -> dict[str, Any]:
+    """Whether meaning search can run now, from what this process already
+    holds. Builds nothing (2026-10-15): memory health and the quality score
+    called :func:`get_embedder` to answer "ready", which LOADS the model -- a
+    multi-gigabyte local one -- on a status poll. ``state`` is
+    ``not_loaded`` (the first recall builds it), ``loaded`` or ``open`` (its
+    breaker is open: recall answers from keywords); ``ready`` is ``loaded``."""
+    if _embedder is None:
+        return {"state": "not_loaded", "ready": False}
+    breaker = getattr(_embedder, "breaker", None)
+    try:
+        opened = breaker is not None and breaker.state().get("state") == "open"
+    except Exception:  # noqa: BLE001 -- a breaker that cannot answer is not "ready"
+        logger.warning("[Embedder] the breaker's state could not be read", exc_info=True)
+        return {"state": "unknown", "ready": False}
+    return {"state": "open" if opened else "loaded", "ready": not opened}
+
+
 def _model_in_hf_cache(model_name: str) -> bool:
     """Whether *model_name* resolves from the local HF cache (no network).
 

@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-12**, and the document lines on **2026-10-13**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**, and the document lines on **2026-10-15**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -79,10 +79,10 @@ Every line below describes that setup.
 |---|---|---|
 | Knowledge Library: add files, web pages or whole sites; search by keywords and by meaning; Arabic-aware | Shipped | `/knowledge` |
 | Documents: upload into quarantine with file-type checks; macro-enabled Office files and PDFs with scripts, outside actions, attachments or links to files and network shares are refused; text from PDF, Word, Excel, PowerPoint, HTML, Markdown, CSV and plain text, Arabic included (legacy .doc/.xls/.ppt through LibreOffice) | Shipped | `/documents` |
-| OCR of scanned PDFs and images; ruled tables on a scanned page read cell by cell | Partial — needs Tesseract (in the Docker image); Arabic OCR is not qualified: Tesseract does not read Arabic-Indic digits | `documents/ocr/` |
+| OCR of scanned PDFs and images, Arabic and Arabic-Indic digits included; ruled tables on a scanned page read cell by cell | Partial — Arabic is read by the neural engine (ONNX Runtime; its models installed by `scripts/ocr_models.py install`, and built into the document worker image); without them Tesseract reads, and it does not read Arabic-Indic digits. Every OCR case of Kazma's measured corpus qualifies with the neural engine; it is measured on one real scan so far | `documents/ocr/` |
 | Virus scanning of uploads | Opt-in — needs ClamAV installed; with `KAZMA_PRODUCTION=1` an upload is refused until a scan can run | `documents/malware.py` |
 | Convert, split, merge and redact documents; generate reports as Word, PDF or HTML with correct Arabic typography | Shipped — full-quality Arabic PDFs need LibreOffice; without it a limited fallback, with a warning | `/documents` |
-| Untrusted documents parsed in a separate worker with memory and CPU limits; optionally one container per job, with no network and no mounts | Partial — the default worker does not confine files or network and is not qualified for hostile documents; the container profile needs Docker and the document broker | `KAZMA_DOCUMENT_WORKER_ISOLATION`, [Document security](docs/security/document-security.md) |
+| Untrusted documents parsed in a separate worker with memory and CPU limits; optionally one container per job, with no network and no mounts | Partial — the default worker does not confine files or network and is not qualified for hostile documents; the container profile is a Settings choice that needs Docker, and the guard runs its broker | `KAZMA_DOCUMENT_WORKER_ISOLATION`, [Document security](docs/security/document-security.md) |
 | Durable document jobs: limits answered before an upload is read, outages retried, interrupted uploads rolled back after a crash, a Postgres document store backed up as one point in time | Partial — no 48–72 hour soak and no independent review yet | [Document processing](docs/ops/document-processing.md) |
 | A hard PDF sent to a third-party parser (LlamaParse, Reducto) when local extraction is weak | Opt-in — off by default; every upload is audited first | `documents.security.remote_parse` |
 | Deep web research with sources: search, read, crawl, summarize | Shipped | `/research` |

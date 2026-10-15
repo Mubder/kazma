@@ -128,19 +128,21 @@ def _parse_tsv(
     for key, word, left, top, width, height, confidence in _tsv_words(payload):
         lines[key].append((word, left, top, width, height, confidence))
 
-    from ..arabic import number_in_logical_order
+    from ..arabic import arabic_number_separators, number_in_logical_order
 
     blocks: list[DocumentBlock] = []
     all_confidences: list[float] = []
     # Text before each word in its paragraph, in reading order: a number
     # token after Arabic letters is read in drawn order ("30-09-2026" for
-    # "2026-09-30", rule W2/W4) and goes back to logical order.
+    # "2026-09-30", rule W2/W4) and goes back to logical order. Its "," or
+    # "." between Arabic-Indic digits is the nearest mark Tesseract has for
+    # the Arabic separators (``ara`` has neither ٫ nor ٬).
     before: dict[tuple[int, int], str] = defaultdict(str)
     for index, key in enumerate(sorted(lines), start=1):
         paragraph = key[:2]
         words = []
         for word in lines[key]:
-            text = number_in_logical_order(word[0], before[paragraph])
+            text = arabic_number_separators(number_in_logical_order(word[0], before[paragraph]))
             before[paragraph] = (before[paragraph] + " " + text)[-256:]
             words.append((text, *word[1:]))
         line_text = " ".join(word[0] for word in words)

@@ -373,14 +373,22 @@ class _Broker:
     def _inspect_image(self, ref: str) -> tuple[str, dict[str, str]] | None:
         """``(image id, labels)`` of a local image, or None when it is not here."""
 
-        result = self._docker("image", "inspect", "--format", "{{.Id}}|{{json .Config.Labels}}", ref)
-        image_id, _, raw_labels = result.stdout.strip().partition("|")
-        if result.returncode != 0 or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+        # The whole object, read here: Docker 29 leaves ``Labels`` out of
+        # ``.Config`` when an image has none, and a template naming it fails
+        # ("map has no entry for key"), so every unlabelled image -- a plain
+        # ``docker build``, the CI job's, the compose deployment's -- read as
+        # missing (found on Linux, 2026-10-15).
+        result = self._docker("image", "inspect", "--format", "{{json .}}", ref)
+        if result.returncode != 0:
             return None
         try:
-            labels = json.loads(raw_labels or "null")
+            data = json.loads(result.stdout)
         except json.JSONDecodeError:
-            labels = None
+            return None
+        image_id = str(data.get("Id") or "") if isinstance(data, dict) else ""
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            return None
+        labels = (data.get("Config") or {}).get("Labels") if isinstance(data.get("Config"), dict) else None
         if not isinstance(labels, dict):
             labels = {}
         return image_id, {str(key): str(value) for key, value in labels.items()}
