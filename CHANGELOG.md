@@ -141,6 +141,32 @@
   wider crop margin fixed it on English pages but added full stops to
   Arabic headings that have none, so it was not adopted.
 
+## A large Knowledge library's meaning search finds what a small one's does (2026-10-15)
+
+- **The vector search widens as a library grows.** Each library's vectors
+  were searched with the same breadth, 256 candidates, at every size. At
+  100,000 chunks that found 210 of 240 planted answers, where an exact
+  search ranks every one first, and at 200,000 it found 203.
+  - A library is now searched with one candidate for every 12 chunks,
+    rounded up to a fixed list of breadths, and never fewer than 256. A
+    library under about 3,000 chunks keeps 256.
+  - With it, every planted answer was found at 10,000, 50,000, 100,000
+    and 200,000 chunks, in English, Arabic and mixed text.
+  - The cost is search time on large libraries: about three times as long
+    at 100,000 chunks. At 10,000 chunks it is about 1 ms more.
+- **The new breadth takes effect when it is set.** Chroma applies a search
+  breadth only when it loads a library's index, and any read loads it.
+  - Kazma reads a library's size from Chroma's own records and sets the
+    breadth when it opens the library, before anything reads it.
+  - A library that grows past a step while in use gets its new breadth at
+    the next maintenance pass, which then has every index loaded again.
+  - A library keeps its breadth until it shrinks a fifth below the step,
+    so it does not change on every pass.
+- **The Knowledge soak harness measures the breadth.** The new
+  `scripts/knowledge_soak.py breadth` builds one library per size and
+  language. For each breadth it reports the planted answers found and the
+  search time. The guide's "Meaning search at scale" has the results.
+
 ## The model-call record off the event loop; tests stay off the network (2026-10-15)
 
 - **Every model call's record is written off the event loop.** The record

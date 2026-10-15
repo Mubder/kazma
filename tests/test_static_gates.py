@@ -1098,6 +1098,10 @@ _LOOP_STALL_HELPERS = frozenset({
     # it left and rebuilt when it kept deleted words, and the keyword-index
     # purge a killed delete left due (finished at open and by the pass).
     "purge_deleted_rows", "drop_deleted_rows", "finish_pending_purge",
+    # The search breadth that follows a library's size (2026-10-15): a
+    # catalog read, a change to it, and a client close that waits for the
+    # calls in flight so every index loads again.
+    "collection_size", "fit_search_breadth", "reload_vector_indexes",
 })
 
 

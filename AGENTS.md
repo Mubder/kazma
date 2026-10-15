@@ -4276,17 +4276,37 @@ module was deleted and the import's `except` said "chromadb not installed".
     library+model filter vs 4 ms without; 100k, 353 vs 6 ms (p95 442 vs 10),
     recall the same either way.
   - *The index is built for recall* (`_HNSW`: 48 neighbours, construction
-    400, search 256). Chroma's defaults (16/100/100) returned 31-39 of 40
-    planted answers at 10k chunks while exact search ranked all 40 first;
-    these return 40/40 in EN, AR and mixed in 11 of 12 harness measurements
-    (39 in one: Chroma builds in parallel) for ~1 ms more a query. An older
-    collection's search breadth is raised by `modify` (applies at the index's
-    next load) and its graph rebuilt by the repair pass from its own vectors
-    (`VectorStore.rebuild_collection`). At 100k the same settings found 32 of
-    40 planted answers with or without a filter, where exact search ranks all
-    40 first; search breadth 512/1,000/2,000 found 35/38/40 (p50 7.5/11.8/19.5
-    ms against 4.6). A breadth that grows with the collection is open (the
-    100k step).
+    400, search 256 for a small library). Chroma's defaults (16/100/100)
+    returned 31-39 of 40 planted answers at 10k chunks while exact search
+    ranked all 40 first; these return 40/40 in EN, AR and mixed in 11 of 12
+    harness measurements (39 in one: Chroma builds in parallel) for ~1 ms
+    more a query. An older collection's graph is rebuilt by the repair pass
+    from its own vectors (`VectorStore.rebuild_collection`).
+  - *The search widens as the library grows* (`vector_store_global.search_breadth`,
+    2026-10-15): one candidate for every 12 vectors, rounded up to the next
+    of `_BREADTH_GRID` (256 below 3,072 vectors ... 12,288 from 98,304,
+    24,576 from 196,608, 49,152 from 393,216: never under n/12, at most 1.5
+    times it). `scripts/knowledge_soak.py breadth` (two corpora x EN/AR/mixed,
+    240 planted questions a size, exact rank 1 each): at a fixed 256,
+    239/218/210/203 of 240 found at 10k/50k/100k/200k; the least breadth that
+    found all was at most n/12 at every size (512, 4,096, 6,144, 16,384, all
+    Arabic); the rule's breadth found 240/240 at each, p50 ~3x 256's at 100k (the
+    guide's "Meaning search at scale"). Chroma (1.5.9, measured) applies a
+    breadth when it LOADS an index, every read loads it (a `count()` and a
+    `get` too), and a loaded index keeps its breadth while the client lives
+    (Kazma's pool never evicts): so the size comes from the catalog
+    (`chroma_local.collection_size`, loads nothing) and `VectorStore._open`
+    sets the breadth before anything reads the collection (`_fit_breadth`);
+    the repair pass (`fit_search_breadth`) sets it for a collection that grew
+    while loaded and then has every index loaded again
+    (`reload_vector_indexes`: the client closed between calls, as
+    `release_dropped_vectors` does); a breadth is kept until the size falls
+    a fifth below its step (`_BREADTH_KEEP_SHARE`); a rebuilt collection is
+    made with its size's breadth. Never set a breadth only by `modify` on a
+    loaded collection and call it applied. Gate:
+    `tests/test_knowledge_search_breadth.py` (the fixed breadth, a size read
+    with `count()` and no reload as negative controls; recall on the real
+    chromadb).
 
 **G. The Knowledge store and its surfaces** (Knowledge audit 2026-10-13,
 tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).

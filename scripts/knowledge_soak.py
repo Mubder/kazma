@@ -29,6 +29,23 @@ scale
   ingesting there and says so (a declared ceiling, not a failure). A step
   that fails is recorded and the next one still runs.
 
+breadth
+  How wide the vector index must search as a library grows. For each size
+  and language, one library's collection is built through the product's
+  vector store alone (``VectorStore.index_many``: the scale step's corpus
+  and planted questions, the scale step's library name, Kazma's HNSW
+  graph), and the exact rank of every planted answer is computed over every
+  vector. Then, for each search breadth (``--breadths``; ``auto`` is the
+  breadth the product sets for the collection's size), a fresh process sets
+  it before the index loads (Chroma applies a breadth when it loads an
+  index) and asks the planted questions as a library search's meaning layer
+  does (``--top-k`` x 4 candidates): answers found, answers ranked first,
+  latency p50/p95/p99, and the load time. ``--keep-data`` keeps the stores
+  and ``--reuse-builds`` measures them again with other breadths. Sizes
+  that are multiples of 1,000 keep every process on one graph: Chroma
+  writes an index to disk every 1,000 records and inserts the rest again,
+  in parallel, at every load.
+
 soak
   Cycle after cycle, each a fresh process on the same stores (a restart):
   crawls of new libraries and refreshes of old ones through the durable
@@ -102,6 +119,8 @@ healthy, else 1.
 
 Usage (``--hardware-name`` names the machine in the report):
   python scripts/knowledge_soak.py scale --chunks 10000,100000,1000000 --report kb-scale.json
+  python scripts/knowledge_soak.py breadth --chunks 10000,50000,100000,200000 --breadths 256,1024,4096,auto \
+      --data-dir kb-breadth --keep-data --report kb-breadth.json
   python scripts/knowledge_soak.py soak --duration 259200 --report kb-soak.json
   python scripts/knowledge_soak.py soak --duration 300 --cycle-seconds 2 --switch-every 10 --report short.json
   (--tolerate-orphan-vector-folders --tolerate-vector-read-failures count those two Chroma defects instead
@@ -1109,6 +1128,153 @@ def _scale_restore(plan: dict[str, Any]) -> dict[str, Any]:
             "vector_read_failure": unreadable, "violations": violations}
 
 
+# ── the child: search breadth ───────────────────────────────────────────────
+
+
+def _breadth_build(plan: dict[str, Any]) -> dict[str, Any]:
+    """One library's collection, built through the product's vector store
+    alone (``VectorStore.index_many``: the scale step's corpus, Kazma's HNSW
+    graph), and the exact rank of each planted answer over every vector."""
+    import numpy as np
+    from kazma_core.memory import vector_store_global as vsg
+    from kazma_core.stores.knowledge_chunker import make_chunk_id
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+
+    _store, index = _open()
+    lib = plan["library"]
+    vs = index._vector_store_for(lib)
+    violations: list[str] = []
+    if not vs.available:
+        return {"violations": ["the vector store is unavailable"], "planted": [], "exact": {}}
+    identity = vs.identity
+    model = vsg.get_encoder()
+    vectors: list[list[float]] = []
+    real_batch = model.encode_batch
+
+    def recording(texts: list[str]) -> list[list[float]]:
+        out = real_batch(texts)
+        vectors.extend(out)
+        return out
+
+    model.encode_batch = recording  # index_many's own embedding call feeds the exact search
+    planted = {int(p["chunk_no"]): p["fact"] for p in plan["planted"]}
+    url = seed_url_for(lib)
+    ids: list[str] = []
+    facts: list[dict[str, Any]] = []
+    batch: list[tuple[str, str, dict[str, Any]]] = []
+    start = time.perf_counter()
+    for n in range(plan["size"]):
+        fact = planted.get(n)
+        _header, content = scale_chunk(plan["seed"], lib, plan["language"], n, fact)
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        chunk_id = make_chunk_id(lib, f"{url}c{n:07d}", digest, 0)
+        if fact is not None:
+            facts.append({**fact, "library": lib, "chunk_no": n, "chunk_id": chunk_id})
+        batch.append((chunk_id, content, KnowledgeIndex._chunk_vector_metadata(lib, {}, identity)))
+        ids.append(chunk_id)
+        if len(batch) >= plan["batch"] or n == plan["size"] - 1:
+            done = vs.index_many(batch)
+            if done != len(batch):
+                violations.append(f"build: {len(batch) - done} of a batch of {len(batch)} not stored")
+            batch = []
+    build_s = time.perf_counter() - start
+    model.encode_batch = real_batch
+    held = vs.count()
+    if held != plan["size"] or len(vectors) != len(ids):
+        violations.append(f"build: {held} vectors held, {len(vectors)} embedded, {plan['size']} published")
+    matrix = np.asarray(vectors, dtype=np.float32)
+    matrix /= np.maximum(np.linalg.norm(matrix, axis=1, keepdims=True), 1e-12)
+    row = {cid: i for i, cid in enumerate(ids)}
+    candidates = plan["top_k"] * 4  # the meaning layer's candidates (KnowledgeIndex._gather)
+    ranks = []
+    for fact in facts:
+        query = np.asarray(model.encode(fact["question"]), dtype=np.float32)
+        query /= max(float(np.linalg.norm(query)), 1e-12)
+        sims = matrix @ query
+        mine = sims[row[fact["chunk_id"]]]
+        fact["exact_rank"] = 1 + int((sims > mine).sum())
+        fact["similarity"] = round(float(mine), 4)
+        ranks.append(fact["exact_rank"])
+    return {"build": {"vectors": held, "seconds": round(build_s, 3),
+                      "vectors_per_s": round(held / build_s, 1) if build_s else None,
+                      "hnsw": vs._hnsw()},
+            "exact": {"questions": len(facts), "rank_1": sum(r == 1 for r in ranks),
+                      "in_candidates": sum(r <= candidates for r in ranks), "worst_rank": max(ranks, default=None)},
+            "planted": facts, "identity": identity, "violations": violations}
+
+
+def _set_breadth(vs: Any, breadth: int) -> None:
+    """Set the collection's search breadth in Chroma's catalog. Chroma's
+    own work on its catalog right after a start can hold it for a moment
+    ("database is locked", seen once in five runs): asked again for up to
+    ten seconds."""
+    deadline = time.monotonic() + 10.0
+    while True:
+        try:
+            vs._collection.modify(configuration={"hnsw": {"ef_search": breadth}})
+            return
+        except Exception as exc:  # noqa: BLE001 - chromadb's InternalError; anything else raises below
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
+
+
+def _breadth_search(plan: dict[str, Any]) -> dict[str, Any]:
+    """The planted questions through the meaning layer of a library search
+    (``top_k`` x 4 candidates), at one search breadth: a number set on the
+    collection before this process loads its index (Chroma applies a breadth
+    when it loads one), or ``auto``, the breadth the product sets for the
+    collection's size when it opens it."""
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+
+    _store, index = _open()
+    lib, facts = plan["library"], plan["planted"]
+    vs = index._vector_store_for(lib)
+    if not vs.available:
+        return {"violations": ["the vector store is unavailable"]}
+    breadth = plan["breadth"]
+    violations: list[str] = []
+    size = rule = None
+    if breadth != "auto":
+        _set_breadth(vs, int(breadth))
+    else:
+        # As the product opens a collection made with the base breadth (an
+        # earlier step of this run left another one in its catalog).
+        from kazma_core.memory import vector_store_global as vsg
+
+        _set_breadth(vs, vsg._HNSW["ef_search"])
+        vs._fit_breadth()
+        size = vs._size()
+        rule = vsg.search_breadth(size) if size is not None else None
+    held = vs._client.get_collection(vs._collection_name).configuration_json["hnsw"]["ef_search"]
+    if breadth == "auto" and held != rule:
+        violations.append(f"the product set a search breadth of {held} for {size} vectors, its rule says {rule}")
+    where = KnowledgeIndex._model_filter(vs, vs.identity)
+    limit = plan["top_k"] * 4
+    start = time.perf_counter()
+    vs.query(facts[0]["question"], limit=limit, where=where)  # loads the index
+    load_ms = _ms(start)
+    lat: list[float] = []
+    found = top1 = 0
+    misses: list[dict[str, Any]] = []
+    for r in range(plan["repeats"]):
+        for fact in facts:
+            start = time.perf_counter()
+            raw = vs.query(fact["question"], limit=limit, where=where)
+            lat.append(_ms(start))
+            if r:
+                continue
+            got = [cid for cid, _score in raw]
+            found += fact["chunk_id"] in got
+            top1 += bool(got) and got[0] == fact["chunk_id"]
+            if fact["chunk_id"] not in got:
+                misses.append({"token": fact["token"], "exact_rank": fact.get("exact_rank"),
+                               "similarity": fact.get("similarity"),
+                               "best_returned": round(raw[0][1], 4) if raw else None})
+    return {"breadth": breadth, "breadth_held": held, "load_ms": load_ms, "found": [found, len(facts)],
+            "top1": [top1, len(facts)], "ms": latency_summary(lat), "misses": misses, "violations": violations}
+
+
 def _varint(blob: bytes, i: int) -> tuple[int, int]:
     """SQLite's variable-length integer, as FTS5 writes it."""
     value = 0
@@ -1457,6 +1623,10 @@ def _child(plan_path: Path) -> int:
         out = _scale_build(plan)
     elif mode == "scale-restore":
         out = _scale_restore(plan)
+    elif mode == "breadth-build":
+        out = _breadth_build(plan)
+    elif mode == "breadth-search":
+        out = _breadth_search(plan)
     else:
         out = asyncio.run(_soak_cycle(plan))
     from kazma_core.memory import vector_store_global as vsg
@@ -1751,6 +1921,116 @@ def run_scale(args: argparse.Namespace) -> int:
     _write_report(args.report, report)
     print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     return 0 if report["healthy"] else 1
+
+
+# ── the parent: search breadth ──────────────────────────────────────────────
+
+
+def _breadths(text: str) -> list[int | str]:
+    out: list[int | str] = []
+    for part in (p.strip() for p in text.split(",")):
+        if part:
+            out.append("auto" if part == "auto" else int(part))
+    return out
+
+
+def run_breadth(args: argparse.Namespace) -> int:
+    """Meaning recall and latency of one library's collection at each search
+    breadth, per size and language. A build is kept (``breadth-build.json``
+    beside its store) and reused by a later run with ``--reuse-builds``."""
+    work = Path(tempfile.mkdtemp(prefix="kazma-kb-breadth-"))
+    root = Path(args.data_dir) if args.data_dir else work / "data"
+    root.mkdir(parents=True, exist_ok=True)
+    sizes = [int(s) for s in args.chunks.split(",") if s.strip()]
+    languages = [s.strip() for s in args.languages.split(",") if s.strip()]
+    breadths = _breadths(args.breadths)
+    report = _base_report("breadth", args, root)
+    report["parameters"] = {"chunks": sizes, "languages": languages, "breadths": breadths,
+                            "questions": args.questions, "search_repeats": args.search_repeats,
+                            "top_k": args.top_k, "candidates": args.top_k * 4, "seed": args.seed,
+                            "batch": args.batch, "reuse_builds": args.reuse_builds}
+    report["steps"] = []
+    started = time.monotonic()
+    embedder = {"mode": "hash", "version": 1} if args.embedder == "hash" else {"mode": "configured"}
+    for size in sizes:
+        for lang in languages:
+            lib = f"scale-{size}-{lang}"  # the scale step's library: its corpus and questions
+            step_dir = root / f"breadth-{size}-{lang}"
+            manifest = step_dir / "breadth-build.json"
+            report["current_step"] = lib
+            _write_report(args.report, report)
+            env = _env(step_dir)
+            step: dict[str, Any] = {"size": size, "language": lang, "library": lib, "breadths": {}}
+            build = None
+            if args.reuse_builds and manifest.is_file():
+                build = json.loads(manifest.read_text(encoding="utf-8"))
+                step["reused_build"] = True
+            else:
+                if step_dir.exists():
+                    shutil.rmtree(step_dir)
+                step_dir.mkdir(parents=True)
+                plan = {"mode": "breadth-build", "library": lib, "language": lang, "size": size,
+                        "seed": args.seed, "planted": _planted(args.seed, lib, lang, size, args.questions),
+                        "batch": args.batch, "top_k": args.top_k, "embedder": embedder}
+                code, _ops, build, err = _run_child(plan, env, work, None, args.child_log_level)
+                if code != 0 or build is None:
+                    step["violations"] = [f"the build child failed ({code}): {err}"]
+                    report["steps"].append(step)
+                    report["violations"] += [f"{lib}: {v}" for v in step["violations"]]
+                    continue
+                manifest.write_text(json.dumps(build, ensure_ascii=False), encoding="utf-8")
+            step.update({k: build.get(k) for k in ("build", "exact", "identity")})
+            violations = list(build.get("violations") or [])
+            for breadth in breadths:
+                plan = {"mode": "breadth-search", "library": lib, "planted": build["planted"],
+                        "breadth": breadth, "top_k": args.top_k, "repeats": args.search_repeats,
+                        "embedder": embedder}
+                code, _ops, res, err = _run_child(plan, env, work, None, args.child_log_level)
+                if code != 0 or res is None:
+                    violations.append(f"breadth {breadth}: the search child failed ({code}): {err}")
+                    continue
+                violations += [f"breadth {breadth}: {v}" for v in res.pop("violations", [])]
+                violations += [f"breadth {breadth}: network: {h}" for h in res.get("network_refused") or []]
+                step["breadths"][str(breadth)] = {k: res.get(k) for k in
+                                                  ("breadth_held", "load_ms", "found", "top1", "ms", "misses",
+                                                   "peak_rss_mib")}
+            full = [int(b) for b, r in step["breadths"].items()
+                    if b != "auto" and r["found"][0] == r["found"][1]]
+            step["least_breadth_finding_all"] = min(full) if full else None
+            step["violations"] = violations
+            report["steps"].append(step)
+            report["violations"] += [f"{lib}: {v}" for v in violations]
+            report["seconds"] = round(time.monotonic() - started, 1)
+            report["updated_at"] = utc_stamp()
+            _write_report(args.report, report)
+            if not args.keep_data:
+                shutil.rmtree(step_dir, ignore_errors=True)
+    report.pop("current_step", None)
+    report["summary"] = _breadth_summary(report["steps"])
+    report["seconds"] = round(time.monotonic() - started, 1)
+    finished(report, not report["violations"])
+    _write_report(args.report, report)
+    print(json.dumps(report["summary"], indent=2, ensure_ascii=False, default=str))
+    return 0 if report["healthy"] else 1
+
+
+def _breadth_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    """Per size and breadth: planted answers found over every language, and
+    the worst p50/p95 latency of a language."""
+    out: dict[str, Any] = {}
+    for step in steps:
+        cell = out.setdefault(str(step["size"]), {})
+        for breadth, res in (step.get("breadths") or {}).items():
+            agg = cell.setdefault(breadth, {"found": [0, 0], "p50_ms": 0.0, "p95_ms": 0.0, "held": set()})
+            agg["found"][0] += res["found"][0]
+            agg["found"][1] += res["found"][1]
+            agg["p50_ms"] = max(agg["p50_ms"], res["ms"]["p50"] or 0.0)
+            agg["p95_ms"] = max(agg["p95_ms"], res["ms"]["p95"] or 0.0)
+            agg["held"].add(res.get("breadth_held"))
+    for cell in out.values():
+        for agg in cell.values():
+            agg["held"] = sorted(h for h in agg["held"] if h is not None)
+    return out
 
 
 # ── the parent: soak planning and the expected state ────────────────────────
@@ -2554,6 +2834,18 @@ def _parser() -> argparse.ArgumentParser:
     scale.add_argument("--batch-pages", type=int, default=50, help="pages per index call")
     scale.add_argument("--max-sweep-passes", type=int, default=10000)
     scale.add_argument("--keep-data", action="store_true", help="keep each step's store after measuring it")
+    breadth = sub.add_parser("breadth", parents=[common],
+                             help="meaning recall and latency of one library's collection at each search breadth")
+    breadth.add_argument("--chunks", default="10000", help="comma-separated sizes, e.g. 10000,100000")
+    breadth.add_argument("--languages", default="en,ar,mixed")
+    breadth.add_argument("--breadths", default="256,512,1024,2048,auto",
+                         help="comma-separated search breadths; auto = the breadth the product sets")
+    breadth.add_argument("--questions", type=int, default=40, help="planted questions per step")
+    breadth.add_argument("--search-repeats", type=int, default=5)
+    breadth.add_argument("--batch", type=int, default=2000, help="vectors per index call")
+    breadth.add_argument("--keep-data", action="store_true", help="keep each step's store after measuring it")
+    breadth.add_argument("--reuse-builds", action="store_true",
+                         help="measure a kept store again instead of building it (with --data-dir)")
     soak = sub.add_parser("soak", parents=[common], help="a mixed workload, a restart every cycle")
     soak.add_argument("--duration", type=float, default=600.0, help="seconds to run")
     soak.add_argument("--cycle-seconds", type=float, default=30.0, help="pause between cycles")
@@ -2580,7 +2872,8 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["--child"]:
         return _child(Path(argv[1]))
     args = _parser().parse_args(argv)
-    return run_scale(args) if args.command == "scale" else run_soak(args)
+    runs = {"scale": run_scale, "breadth": run_breadth, "soak": run_soak}
+    return runs[args.command](args)
 
 
 if __name__ == "__main__":

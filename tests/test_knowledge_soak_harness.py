@@ -40,7 +40,7 @@ import knowledge_soak  # noqa: E402
 pytestmark = pytest.mark.timeout(300)
 
 #: Each status a reader of the report file saw, in order, during each run.
-_WRITTEN: dict[str, list[str]] = {"scale": [], "soak": []}
+_WRITTEN: dict[str, list[str]] = {"scale": [], "soak": [], "breadth": []}
 
 
 def _run(mode: str, argv: list[str], tmp_path_factory) -> tuple[int, dict, Path]:
@@ -112,6 +112,30 @@ def test_a_tiny_scale_run_measures_every_step(scale_run):
         assert step["ceilings"]["after_delete"]["knowledge_db"]["rows"]["knowledge_chunks"] == 0
     # The Arabic questions were asked: the corpus has Arabic planted answers.
     assert report["steps"][1]["search"]["questions"] == 6
+
+
+def test_a_tiny_breadth_run_measures_each_breadth_on_one_kept_build(tmp_path_factory):
+    """``breadth``: a build per language, its exact ranks, each breadth set
+    before the index loads (``auto``: the product's own), and a kept build
+    measured again with another breadth."""
+    from kazma_core.memory import vector_store_global as vsg
+
+    argv = ["--chunks", "1000", "--languages", "en,ar", "--questions", "6", "--search-repeats", "1", "--keep-data"]
+    code, report, data = _run("breadth", [*argv, "--breadths", "64,512,auto"], tmp_path_factory)
+    assert code == 0 and report["healthy"] and report["status"] == "passed", report["violations"]
+    assert [(s["size"], s["language"]) for s in report["steps"]] == [(1000, "en"), (1000, "ar")]
+    for step in report["steps"]:
+        assert step["build"]["vectors"] == 1000 and step["build"]["hnsw"]["max_neighbors"] == vsg._HNSW["max_neighbors"]
+        assert step["exact"] == {"questions": 6, "rank_1": 6, "in_candidates": 6, "worst_rank": 1}, step["exact"]
+        held = {b: r["breadth_held"] for b, r in step["breadths"].items()}
+        assert held == {"64": 64, "512": 512, "auto": vsg.search_breadth(1000)}, held
+        assert all(r["found"][1] == 6 and r["ms"]["n"] == 6 for r in step["breadths"].values())
+    assert set(report["summary"]["1000"]) == {"64", "512", "auto"}
+    again = knowledge_soak.main(["breadth", *argv, "--breadths", "128", "--reuse-builds", "--data-dir",
+                                 str(data), "--report", str(data.parent / "again.json")])
+    reused = json.loads((data.parent / "again.json").read_text(encoding="utf-8"))
+    assert again == 0 and all(s.get("reused_build") for s in reused["steps"])
+    assert [s["breadths"]["128"]["breadth_held"] for s in reused["steps"]] == [128, 128]
 
 
 def test_a_soak_run_leaves_this_process_environment_as_it_was(soak_run):

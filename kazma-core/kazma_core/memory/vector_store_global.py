@@ -38,6 +38,8 @@ __all__ = [
     "get_encoder",
     "index_reloads",
     "release_dropped_vectors",
+    "reload_vector_indexes",
+    "search_breadth",
 ]
 
 logger = logging.getLogger(__name__)
@@ -74,11 +76,60 @@ _SPACE = "cosine"
 #: the other; Chroma builds in parallel, so graphs differ a little), for
 #: about 1 ms more a query and a tenth more build time; a wider search on
 #: the default graph needed a breadth of 2,000 to reach 40. An existing
-#: collection gets the search breadth by Chroma's ``modify`` (it applies
-#: when Chroma next loads the index) and the graph by
-#: :meth:`VectorStore.rebuild_graph`, which copies its vectors -- nothing
-#: is embedded again.
+#: collection gets the graph by :meth:`VectorStore.rebuild_collection`,
+#: which copies its vectors -- nothing is embedded again. The search
+#: breadth here is a small collection's: it grows with the collection
+#: (:func:`search_breadth`).
 _HNSW: dict[str, Any] = {"space": _SPACE, "max_neighbors": 48, "ef_construction": 400, "ef_search": 256}
+
+#: The search breadth (HNSW ``ef_search``) by the collection's size: a
+#: collection of ``size`` vectors or more is searched with ``breadth``.
+#: A fixed breadth finds less as a library grows -- at 256, 239 of 240
+#: planted answers at 10,000 chunks, 210 at 100,000, 203 at 200,000, where an
+#: exact search ranks every one first -- and a wide one costs every small
+#: library time for nothing (KB-Q01's follow-up, 2026-10-15,
+#: ``scripts/knowledge_soak.py breadth``: two scale corpora in English,
+#: Arabic and mixed text, 40 planted questions each). The least breadth that
+#: found every answer was at most one candidate for every 12 vectors at every
+#: size measured (512 at 10,000, 4,096 at 50,000, 6,144 at 100,000, 16,384 at
+#: 200,000, the hardest corpus each). So: one for every 12 vectors
+#: (:data:`_VECTORS_PER_CANDIDATE`), rounded up to a breadth of
+#: :data:`_BREADTH_GRID`, each a half step (x1.5 or x1.33) above the last --
+#: never under n/12, at most 1.5 times it, up to 589,824 vectors (past the
+#: Knowledge store's quota, about 480,000 chunks; measured to 200,000). It
+#: found all 240 at every size; the cost is search time on large libraries
+#: (p50 about 3 times 256's at 100,000). Per size and breadth: the knowledge
+#: guide's "Meaning search at scale". Below the first step, :data:`_HNSW`'s.
+_VECTORS_PER_CANDIDATE = 12
+_BREADTH_GRID = (256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384, 24576, 32768,
+                 49152)
+_BREADTH_STEPS: tuple[tuple[int, int], ...] = tuple(
+    (_VECTORS_PER_CANDIDATE * below, breadth) for below, breadth in zip(_BREADTH_GRID, _BREADTH_GRID[1:]))
+#: A collection keeps a breadth while it holds at least this share of the
+#: size that set it: one that shrinks and grows around a step does not change
+#: its breadth -- and reload every index -- on every repair pass.
+_BREADTH_KEEP_SHARE = 0.8
+
+
+def search_breadth(size: int) -> int:
+    """The search breadth a collection of *size* vectors is searched with
+    (:data:`_BREADTH_STEPS`)."""
+    breadth = int(_HNSW["ef_search"])
+    for at_least, step in _BREADTH_STEPS:
+        if size >= at_least:
+            breadth = step
+    return breadth
+
+
+def _fitted_breadth(current: int, size: int) -> int:
+    """The breadth a collection searched with *current* should have at
+    *size*: :func:`search_breadth`'s, unless *current* is the breadth of a
+    size up to a fifth larger (:data:`_BREADTH_KEEP_SHARE`)."""
+    wanted = search_breadth(size)
+    kept_up_to = search_breadth(int(size / _BREADTH_KEEP_SHARE))
+    return current if wanted <= current <= kept_up_to else wanted
+
+
 #: Vectors copied per call when a collection's graph is rebuilt.
 _COPY_PAGE = 500
 
@@ -333,36 +384,76 @@ def release_dropped_vectors(persist_dir: str | None, *, timeout: float = 60.0) -
     report.update(chroma_local.remove_orphan_segment_folders(key))
     if not report["held"]:
         return report
+    with _client_closed(key, timeout, "to let go of dropped collections' files") as outcome:
+        if outcome == "busy":
+            logger.info("[VectorStore] %d dropped vector folder(s) wait for a quiet moment to go", len(report["held"]))
+        if outcome in ("none", "busy"):
+            return report
+        removed_before = report["removed"]
+        again = chroma_local.remove_orphan_segment_folders(key)
+        report.update(again, removed=removed_before + again["removed"],
+                      removed_bytes=report["removed_bytes"] + again["removed_bytes"], client_closed=True)
+    if report["held"]:
+        logger.warning("[VectorStore] %d dropped vector folder(s) are still held by another process: %s",
+                       len(report["held"]), ", ".join(report["held"][:5]))
+    return report
+
+
+@contextmanager
+def _client_closed(key: str, timeout: float, why: str) -> Iterator[str]:
+    """Close the client of *key* between Chroma calls: the calls in flight
+    finish, new ones wait until the block ends, and every store opens its
+    collection again on its next call (a new client, a new index pool).
+
+    Yields ``closed``, ``failed`` (its close raised: logged with *why*),
+    ``none`` (no client to close) or ``busy`` (still in use after
+    *timeout*); the block runs while new calls wait.
+    """
     with _CLIENTS_LOCK:
         client = _CLIENTS.get(key)
     close = getattr(client, "close", None)
     if client is None or not callable(close):
-        return report
+        yield "none"
+        return
     gate = _gate(key)
     if not gate.acquire_exclusive(timeout):
-        logger.info("[VectorStore] %d dropped vector folder(s) wait for a quiet moment to go", len(report["held"]))
-        return report
+        yield "busy"
+        return
     try:
         with _CLIENTS_LOCK:
             if _CLIENTS.get(key) is client:
                 del _CLIENTS[key]
             _GENERATIONS[key] = _GENERATIONS.get(key, 0) + 1
+        outcome = "closed"
         try:
             close()
-            report["client_closed"] = True
-        except (*_chroma_errors(), OSError, RuntimeError):  # the folders wait for the next pass
-            logger.warning("[VectorStore] could not close the vector store to let go of dropped "
-                           "collections' files", exc_info=True)
-        removed_before = report["removed"]
-        again = chroma_local.remove_orphan_segment_folders(key)
-        report.update(again, removed=removed_before + again["removed"],
-                      removed_bytes=report["removed_bytes"] + again["removed_bytes"], client_closed=True)
+        except (*_chroma_errors(), OSError, RuntimeError):  # the caller's work waits for the next pass
+            outcome = "failed"
+            logger.warning("[VectorStore] could not close the vector store %s", why, exc_info=True)
+        yield outcome
     finally:
         gate.release_exclusive()
-    if report["held"]:
-        logger.warning("[VectorStore] %d dropped vector folder(s) are still held by another process: %s",
-                       len(report["held"]), ", ".join(report["held"][:5]))
-    return report
+
+
+def reload_vector_indexes(persist_dir: str | None, *, timeout: float = 60.0) -> bool:
+    """Make every collection of *persist_dir* load its index again, with
+    the settings its catalog holds now: the client is closed between Chroma
+    calls (:func:`_client_closed`), and each collection's index is loaded
+    anew at its next use.
+
+    Chroma applies a collection's search breadth when it loads its index,
+    and Kazma's index pool keeps a loaded index for the life of the client
+    (:mod:`chroma_local`): a breadth changed for a collection this process
+    has read waits for this. True when the client was closed; a client busy
+    past *timeout* (logged) or one that fails to close is left for the next
+    pass, which finds the breadth still waiting.
+    """
+    if not persist_dir:
+        return False
+    with _client_closed(_client_key(persist_dir), timeout, "to load wider searches") as outcome:
+        if outcome == "busy":
+            logger.info("[VectorStore] a changed search breadth waits for a quiet moment to apply")
+        return outcome == "closed"
 
 
 def compact_vectors(persist_dir: str | None, *, timeout: float = 60.0) -> dict[str, Any]:
@@ -504,6 +595,10 @@ class VectorStore:
         #: The client generation the collection was last found free of text
         #: (:meth:`holds_text`); a store of this build never writes any.
         self._text_free: int | None = None
+        #: The search breadth the collection's index loads with in this
+        #: process: its catalog's when the collection was opened, before
+        #: anything read it (:meth:`_fit_breadth`). None: not reported.
+        self._breadth: int | None = None
 
     # ── Initialisation ─────────────────────────────────────────────────
 
@@ -537,7 +632,8 @@ class VectorStore:
             # needs no embedding function (Chroma would otherwise attach its
             # default model, and it is deprecating custom wrappers without a
             # config). An existing collection keeps its metadata, space and
-            # graph; its search breadth is raised here (:data:`_HNSW`).
+            # graph; its search breadth is set for its size here, before
+            # anything reads it (:meth:`_fit_breadth`).
             self._collection = self._client.get_or_create_collection(
                 name=self._collection_name,
                 metadata={"description": "Kazma global semantic memory"},
@@ -545,7 +641,9 @@ class VectorStore:
                 embedding_function=None,
             )
             self._space = _collection_space(self._collection)
-            self._widen_search()
+            self._fit_breadth()
+            breadth = self._hnsw().get("ef_search")
+            self._breadth = breadth if isinstance(breadth, int) else None
             self._generation = generation
             self._ready = True
             self._failed_at = None
@@ -591,18 +689,56 @@ class VectorStore:
         hnsw = config.get("hnsw") if isinstance(config, dict) else None
         return hnsw if isinstance(hnsw, dict) else {}
 
-    def _widen_search(self) -> None:
-        """Raise an older collection's search breadth to :data:`_HNSW`'s
-        (Chroma applies it when it next loads the index). Best effort."""
-        breadth = self._hnsw().get("ef_search")
-        if not isinstance(breadth, int) or breadth >= _HNSW["ef_search"]:
-            return
+    def _size(self) -> int | None:
+        """How many vectors the collection holds, read where reading loads
+        no index (Chroma's catalog, :func:`chroma_local.collection_size`);
+        None for an in-memory store or a catalog that cannot be read."""
+        if not self._persist_dir:
+            return None
+        return chroma_local.collection_size(self._key, self._collection_name)
+
+    def _fit_breadth(self) -> bool:
+        """Set the collection's search breadth in Chroma's catalog for the
+        size it holds (:func:`search_breadth`, kept within a fifth of a
+        step: :func:`_fitted_breadth`); True when it changed.
+
+        Chroma applies a breadth when it loads the collection's index --
+        which any read does, a count included -- and keeps that one while
+        the index stays loaded. Called when the collection is opened, before
+        anything reads it, the breadth applies at once; the repair pass
+        calls it for collections that grew while loaded and has the indexes
+        loaded again (:meth:`fit_search_breadth`). Best effort: a size that
+        cannot be read, or a change Chroma refuses, keeps the breadth.
+        """
+        current = self._hnsw().get("ef_search")
+        size = self._size()
+        if not isinstance(current, int) or size is None:
+            return False
+        wanted = _fitted_breadth(current, size)
+        if wanted == current:
+            return False
         try:
-            self._collection.modify(configuration={"hnsw": {"ef_search": _HNSW["ef_search"]}})
-            logger.info("[VectorStore] %s searches %d candidates now (was %d)", self._collection_name,
-                        _HNSW["ef_search"], breadth)
-        except (*_chroma_errors(), ValueError, TypeError) as exc:  # searches keep the old breadth
-            logger.info("[VectorStore] could not widen the search of %s: %s", self._collection_name, exc)
+            self._collection.modify(configuration={"hnsw": {"ef_search": wanted}})
+        except (*_chroma_errors(), ValueError, TypeError, AttributeError) as exc:  # the old breadth stays
+            logger.info("[VectorStore] could not set the search breadth of %s: %s", self._collection_name, exc)
+            return False
+        logger.info("[VectorStore] %s holds %d vectors: its searches consider %d candidates (were %d)",
+                    self._collection_name, size, wanted, current)
+        return True
+
+    @_gated
+    def fit_search_breadth(self) -> bool:
+        """Set the collection's search breadth for the size it holds now
+        (:meth:`_fit_breadth`). True when this process's index of it was
+        loaded with another breadth: the caller then has every index loaded
+        again (:func:`reload_vector_indexes`), the one way Chroma applies a
+        breadth to an index it holds. Reads no index (the size comes from
+        the catalog)."""
+        if not self._ensure_client():
+            return False
+        self._fit_breadth()
+        breadth = self._hnsw().get("ef_search")
+        return self._breadth is not None and isinstance(breadth, int) and breadth != self._breadth
 
     def _hnsw_read(self, call: Callable[[], _T]) -> _T:
         """A read that needs the collection's HNSW index, rebuilt once from
@@ -1036,9 +1172,15 @@ class VectorStore:
             with _unless_missing():
                 self._client.delete_collection(temp)
             old = self._collection
+            # The copy is searched as its size wants from the start: this
+            # process loads its index while copying, with the breadth it
+            # was made with (:meth:`_fit_breadth`).
+            size = self._size()
             copy = self._client.create_collection(
                 name=temp, metadata={"description": "Kazma global semantic memory"},
-                configuration={"hnsw": dict(_HNSW)}, embedding_function=None)
+                configuration={"hnsw": {**_HNSW, "ef_search": search_breadth(
+                    old.count() if size is None else size)}},
+                embedding_function=None)
             copied = offset = 0
             complete = False
             try:
