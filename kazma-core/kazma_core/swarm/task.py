@@ -126,6 +126,9 @@ class HandoffRecord(_JsonSerializable):
     to_worker: str
     context_transferred: str
     timestamp: str = field(default_factory=_utc_now_iso)
+    #: Why the worker handed off (the handoff tool's ``reason``; empty for a
+    #: fallback, which is not the worker's choice).
+    reason: str = ""
 
     @classmethod
     def from_dict(cls, data: HandoffRecord | dict[str, Any]) -> HandoffRecord:
@@ -137,6 +140,7 @@ class HandoffRecord(_JsonSerializable):
             to_worker=data.get("to_worker", ""),
             context_transferred=data.get("context_transferred", ""),
             timestamp=data.get("timestamp", _utc_now_iso()),
+            reason=data.get("reason", "") or "",
         )
 
     @classmethod

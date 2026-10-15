@@ -98,7 +98,7 @@ STRUCTURAL_BASELINE = {
     # Turn workspace entry consumes the binding resolver through its module;
     # the Scheduled soak names health.check_cron, and the Time Travel soak
     # SnapshotStore and close_shared_checkpoints.
-    "module_local_public_symbols": 538,
+    "module_local_public_symbols": 535,
     "patched_value_imports": 72,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

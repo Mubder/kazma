@@ -191,6 +191,11 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "soaks the swarm engine on a private SQLite task and settings store; an "
         "install's .env would point thousands of task writes at its databases"
     ),
+    "scripts/swarm_chaos.py": (
+        "injects faults (locks, a database taken down) into private stores and a "
+        "disposable Postgres named on its command line; an install's .env would "
+        "aim them at that install's databases"
+    ),
     "scripts/scheduled_soak.py": (
         "soaks the cron scheduler on a private temporary cron.db and a fake clock; an "
         "install's .env would point thousands of bookings at its schedule and chats"

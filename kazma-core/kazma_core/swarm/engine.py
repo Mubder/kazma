@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
+import time
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
@@ -14,7 +16,12 @@ from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.checkpoint import HITLCheckpoint, HITLCheckpointHandler
 from kazma_core.swarm.checkpoint_manager import CheckpointManager
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
-from kazma_core.swarm.handoff import HandoffRequest
+from kazma_core.swarm.handoff import (
+    MAX_HANDOFF_TARGETS,
+    HandoffOffer,
+    HandoffRequest,
+    HandoffTarget,
+)
 from kazma_core.swarm.metrics import MetricsCollector
 from kazma_core.swarm.patterns import (
     PatternExecution,
@@ -63,7 +70,7 @@ from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
 from kazma_core.swarm.task_lifecycle import list_tasks as _hist_list_tasks
 from kazma_core.swarm.task_lifecycle import record_task as _hist_record_task
 from kazma_core.swarm.task_lifecycle import update_task as _hist_update_task
-from kazma_core.metrics import record_swarm_failure
+from kazma_core.metrics import record_swarm_failure, record_swarm_handoff
 from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.tracing import TracingEmitter
 from kazma_core.swarm.worker import SwarmWorker
@@ -111,6 +118,30 @@ def _task_status_for(status: str) -> TaskStatus:
 #: How long a stop (cancel, watchdog, a caller giving up) waits for the work
 #: to end before the ending is recorded anyway, as an unknown outcome.
 _STOP_GRACE_S = 10.0
+
+#: Waits between the attempts of a task write the store refused for a reason
+#: that passes -- a lock, a busy file, a database that is away (Swarm tracker
+#: SQ04). Each attempt also waits out the store's own busy timeout (SQLite,
+#: 5 s) or connection timeout (Postgres), so the whole write gives up after
+#: about 4 x 5 s + 3.5 s.
+_WRITE_RETRY_WAITS: tuple[float, ...] = (0.5, 1.0, 2.0)
+
+#: Tasks whose newest write the store did not take, kept for the run's caller.
+_MAX_UNSAVED = 256
+
+
+def _store_error_passes(exc: BaseException) -> bool:
+    """Whether a task store error may pass if the write is tried again: a
+    locked or busy SQLite file, a Postgres server that refused or dropped
+    the connection, a pool with no connection to give. Never a refused
+    value or a programming error."""
+    import sqlite3
+
+    if isinstance(exc, (sqlite3.OperationalError, ConnectionError, TimeoutError)):
+        return True
+    if type(exc).__name__ in ("OperationalError", "InterfaceError", "PoolTimeout"):
+        return True  # psycopg's and psycopg_pool's, without importing them
+    return isinstance(exc, RuntimeError) and "pool unavailable" in str(exc).lower()
 
 
 def _new_run_id() -> str:
@@ -169,6 +200,9 @@ class SwarmEngine:
         # Each task's newest store write (SW-E07): writes run in threads,
         # each after the one before it for the same task.
         self._writes: dict[str, asyncio.Task] = {}
+        # Why a task's newest write did not land, after its retries (SQ04):
+        # the run's caller is never told the work ended as stored.
+        self._unsaved: dict[str, str] = {}
         # Strong refs for fire-and-forget alert tasks (see get_autoscaler).
         self._alert_tasks: set[asyncio.Task] = set()
         # threading.Lock: usable from both sync (_finalize_task) and async paths
@@ -443,7 +477,7 @@ class SwarmEngine:
         try:
             result = await asyncio.shield(run)
             await self._flush_writes(task.id)
-            return result
+            return self._unsaved_ending(task, result)
         except asyncio.CancelledError:
             if not run.done():
                 self._interrupts.setdefault(
@@ -454,6 +488,44 @@ class SwarmEngine:
             # The caller's own cancellation goes on (SW-E04): its deadline
             # raises TimeoutError, never reads as a user's cancel.
             raise
+
+    def _unsaved_ending(self, task: SwarmTask, result: TaskResult) -> TaskResult:
+        """*result*, unless the task store did not take the run's ending.
+
+        Then the caller is never told the work ended as stored (Swarm tracker
+        SQ04): a success or partial result is reported failed, with the
+        reason and the result it would have stored (``unsaved``,
+        ``store_error``, ``result_status``; the output is kept), and the
+        engine's own record and the task's stream say the same. The row keeps
+        its last stored state (RUNNING after an admission): the next start
+        holds it as interrupted with an unknown outcome."""
+        reason = self._unsaved.pop(task.id, None)
+        if reason is None or result is None or getattr(result, "status", "") == "running":
+            return result
+        stored_as = result.status
+        marked = TaskResult.from_dict(result.to_dict())
+        metadata = dict(marked.metadata or {})
+        metadata.setdefault("result_status", stored_as)
+        metadata.update(unsaved=True, store_error=reason)
+        marked.metadata = metadata
+        note = (f"The task store did not take this ending ({reason}): it is not in the "
+                "task history, and after a restart the task reads as interrupted.")
+        if stored_as in ("success", "partial"):
+            marked.status = "failed"
+            marked.error = note
+        else:
+            marked.error = f"{result.error} {note}" if result.error else note
+        logger.warning("[SwarmEngine] task '%s' ended %s but its ending was not saved (%s): "
+                       "reported as %s", task.id, stored_as, reason, marked.status)
+        if task.result is result:
+            task.result = marked
+            if marked.status == "failed":
+                task.status = TaskStatus.FAILED
+            _hist_record_task(self._task_history, self._task_lock, task,
+                              max_history=self._max_history)
+        if stored_as != "paused":
+            self._emit_sse(task.id, "task_completed", {"task_id": task.id, "result": marked.to_dict()})
+        return marked
 
     def _recorded_result(self, task_id: str) -> TaskResult | None:
         """The result of a task this engine already ended or paused, if any."""
@@ -517,20 +589,35 @@ class SwarmEngine:
         """Public: the admission cap when a new task would be refused now."""
         return self._at_capacity()
 
-    async def _admit_to_store(self, task: SwarmTask) -> TaskResult | None:
+    async def _admit_to_store(self, task: SwarmTask, *, must_record: bool = False) -> TaskResult | None:
         """Record *task* RUNNING at its new generation (SW-E03). None when
-        admitted; the stored outcome when another run already holds the id."""
+        admitted; the stored outcome when another run already holds the id.
+
+        A write the store refuses lets a new task run without crash evidence
+        (counted). With *must_record* -- an approval resuming a paused
+        pipeline -- it is a refusal instead (``admission_unrecorded``): an
+        approval the store never took leaves the row PAUSED, and a crash
+        would offer the checkpoint again and run its steps twice (SW-E01,
+        Swarm tracker SQ04)."""
         if self._task_store is None:
             return None
         try:
             admitted = await asyncio.to_thread(self._task_store.admit, task)
-        except Exception:
+        except Exception as exc:
             # The RUNNING row is the only crash evidence: say it is missing.
             logger.warning(
-                "[SwarmEngine] could not record task '%s' as running; it runs without crash evidence",
-                task.id, exc_info=True,
+                "[SwarmEngine] could not record task '%s' as running; %s",
+                task.id, "nothing resumes" if must_record else "it runs without crash evidence",
+                exc_info=True,
             )
             record_swarm_failure("running_row")
+            if must_record:
+                return TaskResult(
+                    task_id=task.id, status="failed",
+                    error=(f"The approval could not be recorded ({type(exc).__name__}: {exc}). "
+                           "Nothing was resumed and the checkpoint stays open: approve again."),
+                    metadata={"admission_unrecorded": True, "checkpoint_open": True},
+                )
             return None
         if admitted:
             return None
@@ -1102,6 +1189,17 @@ class SwarmEngine:
         """Return status for all registered workers."""
         return await asyncio.gather(*(worker.status() for worker in self._workers.values()))
 
+    def _resolve_worker(self, worker_name: str) -> SwarmWorker | None:
+        """One name resolution for every pattern and for a handoff (Swarm
+        audit SW-E12): a registered worker, else an instance spawned from the
+        template of that name, as "auto" does."""
+        worker = self.get_worker(worker_name)
+        if worker is None:
+            scaler = self.get_autoscaler()
+            spawn = getattr(scaler, "spawn_by_name", None)
+            worker = spawn(worker_name) if callable(spawn) else None
+        return worker
+
     async def _dispatch_worker_by_name_all(
         self,
         worker_name: str,
@@ -1115,7 +1213,7 @@ class SwarmEngine:
         _depth: int = 0,
     ) -> list[WorkerResult]:
         """Dispatch by name and return all results (including handoff chain)."""
-        worker = self.get_worker(worker_name)
+        worker = self._resolve_worker(worker_name)
         if worker is None:
             return [WorkerResult(
                 worker=worker_name,
@@ -1148,13 +1246,7 @@ class SwarmEngine:
         _visited: dict[str, int] | None = None,
         _depth: int = 0,
     ) -> WorkerResult:
-        worker = self.get_worker(worker_name)
-        if worker is None:
-            # One name resolution for every pattern (Swarm audit SW-E12): a
-            # template's name means a worker spawned from it, as "auto" does.
-            scaler = self.get_autoscaler()
-            spawn = getattr(scaler, "spawn_by_name", None)
-            worker = spawn(worker_name) if callable(spawn) else None
+        worker = self._resolve_worker(worker_name)
         if worker is None:
             return WorkerResult(
                 worker=worker_name,
@@ -1306,15 +1398,18 @@ class SwarmEngine:
         Includes cycle detection: tracks visit counts per worker. A worker
         may be revisited up to ``_MAX_VISITS`` times (allowing return
         handoffs A->B->A) before the handoff is aborted. The depth limit
-        is the hard backstop against infinite recursion.
+        is the hard backstop against infinite recursion. Visits count by
+        worker identity (:meth:`_handoff_identity`): a pool instance is its
+        template, so a hop between two templates is counted however many
+        instances it spawns.
         """
         # ── Cycle detection (handoff_guards) ─────────────────────
         if _visited is None:
             _visited = {}
-        _register_handoff_visit(_visited, source_worker.name)
+        _register_handoff_visit(_visited, self._handoff_identity(source_worker))
         guard_err = _handoff_guard_error(
             source_worker=source_worker.name,
-            target_worker=handoff_req.target_worker,
+            target_worker=self._handoff_identity_for(handoff_req.target_worker),
             visited=_visited,
             depth=_depth,
             started=started,
@@ -1329,6 +1424,11 @@ class SwarmEngine:
                                exc_info=True)
                 if hasattr(breaker, "release_probe"):
                     await asyncio.to_thread(breaker.release_probe)
+            guard_err.tokens_used = handoff_req.tokens_used
+            guard_err.cost = handoff_req.cost
+            # The source's dispatch ends here too: it stayed in flight, and
+            # the autoscaler never reaps a busy worker.
+            self._release_handoff_source(source_worker, guard_err.status)
             return [guard_err]
 
         logger.info(
@@ -1336,12 +1436,14 @@ class SwarmEngine:
             source_worker.name,
             handoff_req.target_worker,
         )
+        record_swarm_handoff()
 
-        # Emit SSE handoff event (logged for observability).
-        logger.info(
-            "[SSE] swarm.handoff.%s->%s",
-            source_worker.name,
-            handoff_req.target_worker,
+        # The Swarm page draws the chain from this event (swarm.js).
+        self._emit_sse(
+            getattr(context, "task_id", None) or "",
+            "handoff",
+            {"from": source_worker.name, "to": handoff_req.target_worker,
+             "reason": handoff_req.reason},
         )
 
         # Emit a tracing span for the handoff.
@@ -1373,19 +1475,24 @@ class SwarmEngine:
             handoff_context,
             timeout=timeout,
             validation_schema=validation_schema,
+            trace_id=trace_id,
             _visited=_visited,
             _depth=_depth,
         )
         target_result = target_results[-1]
 
-        # Record the handoff.
+        # Record the handoff, naming the worker that ran (a template's name
+        # runs on an instance spawned from it).
         handoff_record = HandoffRecord(
             from_worker=source_worker.name,
-            to_worker=handoff_req.target_worker,
+            to_worker=target_results[0].worker or handoff_req.target_worker,
             context_transferred=handoff_req.context,
+            reason=handoff_req.reason,
         )
 
-        # Build source worker result reflecting the handoff outcome.
+        # Build source worker result reflecting the handoff outcome. What the
+        # source spent before it handed off is its own (the task's totals
+        # sum every worker result).
         duration = perf_counter() - started
         if target_result.status == "success":
             source_result = WorkerResult(
@@ -1393,6 +1500,8 @@ class SwarmEngine:
                 task_id=target_result.task_id,
                 status="success",
                 output=target_result.output,
+                tokens_used=handoff_req.tokens_used,
+                cost=handoff_req.cost,
                 duration_seconds=duration,
                 handoffs=[handoff_record],
             )
@@ -1404,6 +1513,8 @@ class SwarmEngine:
                 status="error",
                 output="",
                 error=target_result.error,
+                tokens_used=handoff_req.tokens_used,
+                cost=handoff_req.cost,
                 duration_seconds=duration,
                 handoffs=[handoff_record],
             )
@@ -1429,8 +1540,81 @@ class SwarmEngine:
 
         await asyncio.to_thread(_record_source)
 
-        source_worker.mark_completed(source_result.status)
+        self._release_handoff_source(source_worker, source_result.status)
         return [source_result] + target_results
+
+    def _release_handoff_source(self, source_worker: SwarmWorker, status: str) -> None:
+        """End the handing-off worker's dispatch, whatever became of the hop.
+
+        Its dispatch handed the work on instead of returning, so
+        ``dispatch_worker`` never ends it: every ending of
+        :meth:`_handle_handoff` must, or the worker stays in flight (busy)
+        for good and the autoscaler never reaps it (SW-E12)."""
+        source_worker.mark_completed(status)
+        if self._autoscaler is not None:
+            self._autoscaler.record_activity(source_worker.name)
+
+    @staticmethod
+    def _handoff_identity(worker: Any) -> str:
+        """Who a worker is to the handoff cycle guard: a pool instance is its
+        template (a hop to a template spawns a new instance each time)."""
+        template = getattr(worker, "template_name", None)
+        return template if isinstance(template, str) and template else str(worker.name)
+
+    def _handoff_identity_for(self, name: str) -> str:
+        """The guard's identity for the worker or template a handoff names."""
+        worker = self.get_worker(name)
+        return self._handoff_identity(worker) if worker is not None else name
+
+    def _handoff_targets(self, source: SwarmWorker) -> tuple[HandoffTarget, ...]:
+        """Who *source* may hand off to: the registered workers, and each
+        template once (by its name; an instance is spawned from it), never
+        itself."""
+        seen = {self._handoff_identity(source)}
+        targets: list[HandoffTarget] = []
+        for worker in list(self._workers.values()):
+            if getattr(worker, "auto_spawned", False) is True:
+                continue  # offered as its template, below
+            if worker.name in seen:
+                continue
+            seen.add(worker.name)
+            role = worker.role or getattr(worker.capabilities, "role", "") or ""
+            targets.append(HandoffTarget(worker.name, str(role)))
+        scaler = self.get_autoscaler()
+        for template in (scaler.list_templates() if scaler is not None else []):
+            if template.name in seen:
+                continue
+            seen.add(template.name)
+            targets.append(HandoffTarget(template.name, str(template.role or "")))
+        return tuple(targets[:MAX_HANDOFF_TARGETS])
+
+    def _handoff_offer(
+        self, source: SwarmWorker, visited: dict[str, int] | None, depth: int,
+    ) -> HandoffOffer:
+        """What one dispatch of *source* is offered (Swarm audit SW-E13): the
+        workers it may hand off to, and the cycle guard as
+        :meth:`_handle_handoff` will apply it to a hop from this dispatch
+        (``dispatch_worker`` passes ``depth + 1``; *visited* is the chain's
+        live count)."""
+        identity = self._handoff_identity(source)
+
+        def _refusal(target: str) -> str | None:
+            probe = dict(visited or {})
+            _register_handoff_visit(probe, identity)
+            refused = _handoff_guard_error(
+                source_worker=source.name,
+                target_worker=self._handoff_identity_for(target),
+                visited=probe,
+                depth=depth + 1,
+                started=perf_counter(),
+            )
+            return refused.error if refused is not None else None
+
+        return HandoffOffer(
+            source=source.name,
+            targets=lambda: self._handoff_targets(source),
+            refusal=_refusal,
+        )
 
     @staticmethod
     def _aggregate_outputs(worker_results: list[WorkerResult]) -> str | None:
@@ -1564,12 +1748,32 @@ class SwarmEngine:
         store = self._task_store
 
         def _write() -> None:
-            try:
-                if not store.persist_task(snapshot):
+            # A lock or an absent database may pass: tried again, bounded
+            # (Swarm tracker SQ04). A write that never lands is recorded for
+            # the run's caller (_unsaved_ending): the work did not end as
+            # stored, whatever its own status says.
+            waits = list(_WRITE_RETRY_WAITS)
+            while True:
+                try:
+                    written = store.persist_task(snapshot)
+                except Exception as exc:
+                    if waits and _store_error_passes(exc):
+                        logger.info("[SwarmEngine] task '%s' not saved yet (%s): trying again",
+                                    snapshot.id, exc)
+                        time.sleep(waits.pop(0))
+                        continue
+                    logger.exception("[SwarmEngine] failed to persist task '%s'", snapshot.id)
+                    record_swarm_failure("task_write")
+                    if len(self._unsaved) >= _MAX_UNSAVED:
+                        # The oldest note goes (another thread may be popping one).
+                        with contextlib.suppress(RuntimeError, StopIteration):
+                            self._unsaved.pop(next(iter(self._unsaved)), None)
+                    self._unsaved[snapshot.id] = f"{type(exc).__name__}: {exc}"[:300]
+                    return
+                self._unsaved.pop(snapshot.id, None)
+                if not written:
                     self._keep_as_evidence(snapshot, status or snapshot.status.value, error)
-            except Exception:
-                logger.exception("[SwarmEngine] failed to persist task '%s'", snapshot.id)
-                record_swarm_failure("task_write")
+                return
 
         try:
             asyncio.get_running_loop()
@@ -1814,12 +2018,22 @@ class SwarmEngine:
         # PAUSED -> RUNNING at the next generation, recorded before anything
         # resumes (SW-E03, SW-E05): a second approval of this checkpoint --
         # another tab, another process -- finds the generation taken.
+        paused_as = (task.status, task.generation, task.run_id, task.started_at)
         task.status = TaskStatus.RUNNING
         task.generation = int(task.generation or 0) + 1
         task.run_id = _new_run_id()
         task.started_at = _utc_now_iso()  # the resumed run's own watchdog start
         self._active_tasks[task.id] = task
-        held = await self._admit_to_store(task)
+        held = await self._admit_to_store(task, must_record=True)
+        if held is not None and (held.metadata or {}).get("admission_unrecorded"):
+            # The store did not take the approval: nothing resumes, and the
+            # checkpoint is pending again, its auto-reject armed again.
+            task.status, task.generation, task.run_id, task.started_at = paused_as
+            entry.claim = "pending"
+            timeout = (task.metadata or {}).get("checkpoint_timeout")
+            if timeout and float(timeout) > 0:
+                self._checkpoint_mgr._arm_checkpoint_timeout(task.id, float(timeout))
+            return held
         if held is not None:
             # Another run resumed this checkpoint first: it owns the task now.
             self._active_tasks.pop(task.id, None)
@@ -1867,7 +2081,11 @@ class SwarmEngine:
         try:
             await asyncio.to_thread(self._task_store.persist_task, task)
         except Exception:
+            # The step runs: the row is RUNNING (its admission), so a crash in
+            # it is still held as unknown at the next start; only which step
+            # it stopped in is lost (SQ04: was a WARNING, never counted).
             logger.warning("[SwarmEngine] could not journal step %d of '%s'", step, task.id, exc_info=True)
+            record_swarm_failure("step_journal")
 
     async def _resume(
         self,

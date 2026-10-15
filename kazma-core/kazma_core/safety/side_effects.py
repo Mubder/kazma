@@ -227,6 +227,10 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "spawn_agent": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),
     "spawn_agents": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),
     "dispatch_swarm": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),
+    # A swarm worker hands its task to another worker (swarm/handoff.py): the
+    # same act as dispatch_swarm, so a worker scope without "delegate"
+    # refuses it.
+    "handoff_to_worker": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ("worker",)),
     "check_swarm_task": (EffectKind.READ, SemanticTier.NONE, None, ()),
     # native skills commonly loaded
     "lint_code": (EffectKind.READ, SemanticTier.NONE, None, ()),

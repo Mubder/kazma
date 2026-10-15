@@ -188,11 +188,36 @@ code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
   that handle system messages natively — do NOT hoist there.
 
 ### 4. Swarm Handoff Cycle Detection (`kazma-core/kazma_core/swarm/engine.py`)
+- **Handoff is reachable from shipped workers** (Swarm audit SW-E13, owner
+  decision D6: a product feature). The LLM worker (`InProcessWorker`) offers
+  its model `handoff_to_worker(worker, reason, task?, context?)`
+  (`swarm/handoff.py`) whenever the engine dispatches it: `dispatch_worker`
+  binds a `HandoffOffer` (the registered workers and the autoscaler's
+  templates, never the worker itself, and the cycle guard at this point of the
+  chain). The call raises `HandoffRequest` out of `dispatch()`
+  (`except HandoffRequest: raise` before its catch-all) to `_handle_handoff`.
+  The tool is the worker's, never the registry's (the main agent, the MCP
+  server and cron never see it); it has a `TOOL_TIERS` tier (`write`) and a
+  side-effect profile (`delegate`), and approves nothing: the target's tools
+  ask the bus as any worker's (§7B). A refused call (unknown worker, no
+  reason, beside other tool calls, a worker scope without `delegate`, the
+  guard) is the tool's answer and the worker finishes the task itself.
 - `_handle_handoff()` accepts `_visited: dict[str, int]` and `_depth: int`
 - These thread through `_dispatch_worker_by_name_all` -> `_dispatch_worker` -> `_handle_handoff`
-- Max depth is 5; removing the guard causes infinite recursion on A->B->A cycles
-- Workers can be revisited up to `MAX_VISITS=2` times (allows legitimate A->B->A return handoffs)
-- Visit counts are now tracked per-worker (not just a boolean set)
+- Max depth is 5 (a hop at depth 5 is refused: four hops, five runs); removing the guard causes infinite recursion on A->B->A cycles
+- Workers can be revisited up to `MAX_VISITS=2` times: each runs at most twice in a chain, so A->B->A and A->B->A->B run and B's hop back to A is refused
+- Visit counts are tracked per worker IDENTITY (`_handoff_identity`): a pool
+  instance counts as its template, since a hop to a template spawns a new
+  instance each time (counting instance names, only the depth stopped a
+  template ping-pong). A target name resolves like a pattern's
+  (`_resolve_worker`: registered, else spawned from the template).
+- Every ending of `_handle_handoff` releases the source's in-flight count
+  (`_release_handoff_source`): the guard's refusal left it busy for good.
+  The target keeps the dispatch's metadata, task id and workspace
+  (`build_handoff_context`, with or without a blackboard); the hop is the
+  task's `handoff` event (the Swarm page's chain) and `kazma_swarm_handoffs_total`.
+  Gate: `tests/test_swarm_handoff_tool.py` (a scripted model end to end; the
+  guard removed and instance counting as negative controls).
 
 ### 5. Circuit Breaker Half-Open (`kazma-core/kazma_core/swarm/reliability.py`) + ReliabilityRegistry (`reliability_registry.py`)
 - `_probe_in_flight` flag ensures only ONE dispatch passes through half-open state
@@ -442,6 +467,21 @@ compatibility. **All public API methods and constructors are unchanged.**
   journaled steps. Task writes run in threads, one task's in order
   (`_persist` / `_flush_writes`). Gates: `tests/test_swarm_owned_lifecycle.py`,
   `tests/test_swarm_interrupted_effects.py`.
+- **A store fault never becomes a stored-looking success** (Swarm tracker
+  SQ04, 2026-10-15). A task write the store refuses for a reason that passes
+  (lock, busy, database away: `_store_error_passes`) is tried again
+  (`_WRITE_RETRY_WAITS`); a run whose ending never landed is reported
+  `failed` with `unsaved`/`store_error`/`result_status` to its caller, the
+  engine's record and the stream (`_unsaved_ending`; the row stays RUNNING and
+  the next start holds it unknown). An approval whose admission write fails
+  resumes nothing (`_admit_to_store(must_record=True)`, `503
+  approval_not_recorded`): resumed, a crash would offer the checkpoint again.
+  A new task whose RUNNING row fails still runs, counted `running_row`. A
+  durable dispatch that never ran is finalized (`durable._not_run`). Lost
+  writes are counted (`task_write`, `step_journal`, `worker_metric`,
+  `breaker_read`, `breaker_persist`, `breaker_lease`). Harness:
+  `scripts/swarm_chaos.py`; gate: `tests/test_swarm_chaos.py` (each fix's old
+  code as its negative control; the Postgres cases `@pytest.mark.postgres`).
 - **Swarm failures are loud and counted** (SW-E14): lost evidence or a lost
   decision is a WARNING and `kazma_core.metrics.record_swarm_failure(site)`
   (`kazma_swarm_failures_total{site}`). A catch-all handler in `swarm/` or the
@@ -986,7 +1026,8 @@ swarm works with zero pre-registered workers.
   (user `models.defaults.<kind>` → heuristic → active). The selection never
   mutates the active profile. Env-lock (`KAZMA_MODEL`) always wins.
 - **Handoff cycle guards (§4) still apply** to auto-spawned instances — they are
-  regular `InProcessWorker`s once spawned. Idle-reap after 5 min;
+  regular `InProcessWorker`s once spawned, counted as their template, and a
+  handoff may name a template (an instance is spawned for it). Idle-reap after 5 min;
   `record_activity` refreshes the timer, and an instance with a dispatch in
   flight is never reaped (`SwarmWorker.in_flight`, SW-E12). Instances are named
   `<template>-pool-<boot tag>-<n>` (a new tag each start, so an earlier run's

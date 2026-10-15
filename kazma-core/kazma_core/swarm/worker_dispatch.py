@@ -12,7 +12,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 from kazma_core.swarm.blackboard import SwarmDispatchContext
-from kazma_core.swarm.handoff import HandoffRequest
+from kazma_core.swarm.handoff import HandoffOffer, HandoffRequest, handoff_offer
 from kazma_core.swarm.reliability import CircuitBreakerOpenError
 from kazma_core.swarm.task import WorkerResult
 from kazma_core.swarm.worker import SwarmWorker
@@ -85,6 +85,16 @@ def _end_claim(engine: SwarmEngine, worker: SwarmWorker) -> None:
     than a new instance that would dodge the breaker (``AutoScaler._take``)."""
     if engine._autoscaler is not None:
         engine._autoscaler.record_activity(worker.name)
+
+
+def _handoff_offer_for(
+    engine: SwarmEngine, worker: SwarmWorker, visited: dict[str, int] | None, depth: int,
+) -> HandoffOffer | None:
+    """The engine's handoff offer for this dispatch of *worker*, or None (an
+    engine double without one)."""
+    make = getattr(engine, "_handoff_offer", None)
+    offer = make(worker, visited, depth) if callable(make) else None
+    return offer if isinstance(offer, HandoffOffer) else None
 
 
 async def dispatch_worker(
@@ -213,6 +223,10 @@ async def dispatch_worker(
 
         _scope_token = default_worker_scope(_ws_id)
 
+    # Who this dispatch may hand off to, with the engine's cycle guard for
+    # this point of the chain (Swarm audit SW-E13): the worker's handoff tool.
+    _offer = _handoff_offer_for(engine, worker, _visited, _depth)
+
     try:
         async def _attempt() -> dict[str, Any]:
             nonlocal dispatched
@@ -243,7 +257,7 @@ async def dispatch_worker(
                 with tenant_scope(tid or "default"):
                     # Both managers no-op when their token is None, so always wrap.
                     async with workspace_scope(_ws_id), swarm_scope(_scope_token):
-                        with track_dispatch_effects(effects):
+                        with track_dispatch_effects(effects), handoff_offer(_offer):
                             return await worker.dispatch(prompt, context=context)
 
             try:

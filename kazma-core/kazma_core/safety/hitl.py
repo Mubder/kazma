@@ -258,6 +258,10 @@ TOOL_TIERS: dict[str, str] = {
     "spawn_agent": "write",
     "spawn_agents": "write",
     "dispatch_swarm": "write",
+    # A swarm worker's own tool, never in the registry (swarm/handoff.py): it
+    # hands the worker's task to another worker, whose tools then ask the bus
+    # as any worker's do. Handing off approves nothing (AGENTS.md §4, §7B).
+    "handoff_to_worker": "write",
     "run_research_pipeline": "write",
     "start_deep_research": "write",
     "cancel_research_session": "write",

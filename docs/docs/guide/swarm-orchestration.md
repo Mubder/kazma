@@ -150,6 +150,53 @@ from any other entry before admission. A full swarm answers `429
 swarm_at_capacity` with `Retry-After`. A stored result keeps each large worker
 output once, referenced from its other places.
 
+### 1.0f What a fault leaves (chaos runs)
+
+`scripts/swarm_chaos.py` injects one fault at a time into a real engine with
+scripted workers and records the ending (`tests/test_swarm_chaos.py` holds each
+one; Swarm tracker SQ04). The rules those endings follow:
+
+- **A task write a store refuses for a reason that passes** (a lock, a busy
+  file, a database that is away) **is tried again**: three more attempts,
+  0.5 s, 1 s and 2 s apart, each also waiting out the store's busy timeout
+  (SQLite 5 s) or connection timeout (Postgres).
+- **A run whose ending the store never took is not reported as stored
+  work.** The caller, the engine's own record and the task's stream get
+  `failed` with the reason (`metadata.unsaved`, `store_error`,
+  `result_status` holding what the run ended as; the output is kept). The row
+  keeps its last stored state, RUNNING after an admission, and the next start
+  holds it as interrupted with an unknown outcome.
+- **A new task whose RUNNING row cannot be written runs without that crash
+  evidence** (a WARNING, `running_row` counted). **An approval whose row
+  cannot be written resumes nothing**: the checkpoint is pending again, its
+  auto-reject re-armed, and the page answers `503 approval_not_recorded` --
+  resumed, a crash would have offered the checkpoint again and run its steps
+  twice.
+- **A durable dispatch that never ran** (Temporal required and unreachable)
+  **is finalized** as failed with the reason, freeing its row, its admission
+  slot and its stream.
+- **Every lost write is counted** in `kazma_swarm_failures_total`:
+  `running_row`, `task_write`, `step_journal`, `worker_metric`, and for shared
+  breakers `breaker_read`, `breaker_persist`, `breaker_lease`.
+
+| Fault | The caller is told | The store holds (after the next start) | Counted |
+|---|---|---|---|
+| SQLite store locked at admission, free while the task runs | success | completed | `running_row` |
+| Locked through a resumed pipeline's step journal | success (each step once) | completed | `step_journal` x2 |
+| Locked past the ending's first write attempt | success (the write tried again) | completed | `worker_metric` |
+| Locked past every attempt of the ending's write | failed, `unsaved` (ran: success) | running (failed, outcome unknown) | `task_write`, `worker_metric` |
+| Locked when a paused pipeline is approved, then free | first approval: nothing resumed, checkpoint open; second: success | completed | `running_row` |
+| Shared breakers on, settings store down; admission limit 1 | refused at capacity; trip, refusal and probe recovery on the local breaker | completed / failed as each ran | `breaker_read`, `breaker_persist`, `breaker_lease` |
+| Temporal configured, nothing listening | success (in-process fallback, a WARNING) | completed | nothing |
+| Temporal required, nothing listening | failed, naming Temporal (the worker never ran) | failed | nothing |
+| Shutdown with a pipeline, fan-out, consult and dispatch running | cancelled | cancelled, `interrupted_by: shutdown`, `unknown` + `file_write` where noted, `none_invoked` otherwise, written before `stop_all_runs` returns; nothing to recover | nothing |
+| Postgres store refusing connections at admission | success | completed | `running_row` |
+| Postgres store refusing connections at the ending | failed, `unsaved` (ran: success) | running (failed, outcome unknown) | `task_write`, `worker_metric` |
+
+Recorded on 2026-10-15 at the product's timeouts (Windows, SQLite and a
+disposable `postgres:16-alpine`). Not run: a Temporal server that accepts the
+workflow and then goes away (SQ03, decision D9).
+
 ### 1.0a Durable execution (Temporal, opt-in)
 
 Swarm **planning** stays in-process. When `KAZMA_TEMPORAL_HOST` is set,
@@ -302,21 +349,56 @@ cannot answer is a WARNING and `kazma_swarm_failures_total{site="synthesis"}`.
 
 ## 4. Handoffs & cycle detection
 
-When a worker hands off to another worker mid-task, `SwarmEngine._handle_handoff()` recurses. Infinite loops (A→B→A) are prevented by two guards in `swarm/handoff_guards.py`:
+A worker can hand the rest of its task to another worker mid-task. The shipped
+LLM worker (`InProcessWorker`) does it through a tool its model calls,
+`handoff_to_worker(worker, reason, task?, context?)` (`swarm/handoff.py`,
+Swarm audit SW-E13, owner decision D6: handoff is a product feature):
+
+- **Offered only inside the engine.** Every dispatch the engine runs binds a
+  `HandoffOffer` (`worker_dispatch.dispatch_worker`): the registered workers
+  and the autoscaler's templates the worker may hand off to (never itself; a
+  pool instance is offered as its template), and the cycle guard below. The
+  tool is the worker's own, not the tool registry's: the main agent, the MCP
+  server and scheduled tasks never see it. A worker whose `capabilities.tools`
+  is a whitelist gets it only when the whitelist names it.
+- **What the call does.** The worker raises `HandoffRequest`; the engine
+  (`SwarmEngine._handle_handoff`) dispatches the target with the original
+  prompt, the original context and the `context` the model passed (fenced,
+  §1.0d), keeps the dispatch's metadata, task id and workspace (a conditional
+  branch has no blackboard and used to lose them), and records a
+  `HandoffRecord` (from, to, context, reason) on the source's result. The
+  target's answer is the task's; the source's tokens and cost before it
+  handed off count in the task's totals. The Swarm page draws the chain from
+  the task's `handoff` event and from the stored result.
+- **Refused, the model is told.** A call naming a worker the offer does not
+  list, without a reason, beside other tool calls, under a worker scope that
+  does not allow the `delegate` act (the commitment layer, as for
+  `dispatch_swarm`), or that the cycle guard refuses, is answered as the
+  tool's result, and the worker finishes the task itself.
+- **Approves nothing.** The target's tools go through the tool registry and
+  the swarm bus as any worker's do (§1.0); `handoff_to_worker` is tier
+  `write`, effect `delegate`, never a card.
+
+Infinite loops are prevented by two guards in `swarm/handoff_guards.py`:
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `MAX_HANDOFF_DEPTH` | `5` | Max recursion depth. |
-| `MAX_VISITS` | `2` | Max times a single worker may be revisited (allows legitimate A→B→A *return* handoffs). |
+| `MAX_HANDOFF_DEPTH` | `5` | A hop at depth 5 is refused: at most four hops, five runs. |
+| `MAX_VISITS` | `2` | A worker runs at most twice in one chain: A→B→A (the return) and A→B→A→B run; B's hop back to A (A's third run) is refused. |
 
 Mechanics:
 
-1. `_visited` is a `dict[str, int]` of per-worker visit counts (not a boolean set).
+1. `_visited` is a `dict[str, int]` of per-worker visit counts (not a boolean set), keyed by **worker identity** (`SwarmEngine._handoff_identity`): a pool instance counts as its template, since a hop to a template spawns a new instance each time.
 2. `_register_handoff_visit` increments the source worker's count.
-3. `_handoff_guard_error` trips on depth > 5 or per-worker visits > 2.
-4. `_depth` is incremented inside `worker_dispatch.dispatch_worker` when it calls `engine._handle_handoff(..., _depth=_depth + 1)`.
-5. On success/failure, the source breaker's `record_success`/`record_failure` is called **with the dispatch's admission** (§5.1).
+3. `_handoff_guard_error` refuses a hop when its depth is 5 or more, or when its target has already been counted twice.
+4. `_depth` is incremented inside `worker_dispatch.dispatch_worker` when it calls `engine._handle_handoff(..., _depth=_depth + 1)`; the offer asks the same guard at the same depth before the request is raised.
+5. On success/failure, the source breaker's `record_success`/`record_failure` is called **with the dispatch's admission** (§5.1), and every ending of the hop, a refusal included, ends the source's in-flight count (`_release_handoff_source`; the refusal used to leave it busy for good).
 6. The handing-off worker's intermediate results reach the target **fenced** (§1.0d).
+7. Every hop counts in `kazma_swarm_handoffs_total`.
+
+Gates: `tests/test_swarm_handoff_tool.py` (a scripted model, end to end; the
+guard removed and instance-name counting as negative controls) and
+`tests/test_swarm_handoff.py`.
 
 > **Symbol naming note:** the engine docstring refers textually to `_MAX_VISITS`, but the exported symbol is `MAX_VISITS` (`handoff_guards.py`). Same value (2).
 
@@ -480,7 +562,7 @@ A pipeline can pause at configured steps for human approval.
 
 ### 8.2 HTTP endpoints
 
-- `POST /api/swarm/tasks/\{task_id\}/approve` (`swarm_panel/routes_tasks.py`) claims the checkpoint, records the resumed run RUNNING and answers **`202`** at once (`task_status: running`); the progress and the ending reach the page on the task stream. A checkpoint no longer pending is `409 not_pending`; a full swarm `429 swarm_at_capacity`.
+- `POST /api/swarm/tasks/\{task_id\}/approve` (`swarm_panel/routes_tasks.py`) claims the checkpoint, records the resumed run RUNNING and answers **`202`** at once (`task_status: running`); the progress and the ending reach the page on the task stream. A checkpoint no longer pending is `409 not_pending`; a full swarm `429 swarm_at_capacity`; an approval the task store could not record `503 approval_not_recorded` (nothing resumed, the checkpoint still pending: §1.0f).
 - `POST /api/swarm/tasks/\{task_id\}/reject` answers `status: ok` with the task's own status beside it (`task_status`).
 
 ---

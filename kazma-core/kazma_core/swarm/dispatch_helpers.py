@@ -98,18 +98,25 @@ def build_handoff_context(
 
     context_text = "\n\n".join(sections)
 
-    # Forward the original dispatch metadata (Phase 5: so a commitment scope-token
-    # and workspace_id survive A→B handoffs). Only the blackboard path can carry
-    # metadata; the plain-str path has none by design.
-    meta = None
+    # The target runs inside the same task: it keeps the dispatch's metadata
+    # (Phase 5: the commitment scope-token, workspace_id and tenant), its task
+    # id (the task's stream, its stop cause, its effect evidence) and task
+    # type, with or without a blackboard. Only a blackboard dispatch kept them
+    # (Swarm audit SW-E13): a handoff from a conditional branch, which has
+    # none, ran its target under the default worker scope -- wider than an
+    # explicit one -- outside the task's workspace and tenant, and invisible
+    # on the task's stream. The system prompt is not handed on: the target
+    # runs as itself.
     if isinstance(original_context, SwarmDispatchContext):
-        meta = dict(original_context.metadata or {})
-    if blackboard is not None:
         return SwarmDispatchContext(
             context_text,
             blackboard=blackboard,
-            metadata=meta,
+            metadata=dict(original_context.metadata or {}),
+            task_id=original_context.task_id,
+            task_type=original_context.task_type,
         )
+    if blackboard is not None:
+        return SwarmDispatchContext(context_text, blackboard=blackboard)
     return context_text
 
 

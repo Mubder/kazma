@@ -81,6 +81,22 @@ def test_a_tool_missing_from_the_catalog_is_caught():
     ]
 
 
+def test_every_swarm_worker_tool_is_in_the_catalog_with_a_tier():
+    """A swarm worker's own tools (``handoff_to_worker``, Swarm audit SW-E13)
+    are not in the registry, so the registry gates above cannot see them:
+    each is listed from the generator's declaration and has a tier and a
+    side-effect profile like a registered tool."""
+    from kazma_core.safety.hitl import TOOL_TIERS
+    from kazma_core.safety.side_effects import get_effect_profile
+
+    names = {t["name"] for t in _generator().extract_worker_tools()}
+    assert "handoff_to_worker" in names
+    assert not _missing_from_catalog(names, CATALOG.read_text(encoding="utf-8")), (
+        "Run: python scripts/generate_tools_catalog.py")
+    assert all(TOOL_TIERS.get(n) for n in names), names
+    assert all(get_effect_profile(n).registered for n in names), names
+
+
 def test_no_tool_is_listed_twice():
     """Native skill tools are registered in the same registry as built-ins;
     they belong in the native section only."""

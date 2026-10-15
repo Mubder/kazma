@@ -208,6 +208,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لم تعد نقطة التحقق هذه بانتظار قرار.",
         "en": "This checkpoint is no longer waiting for a decision.",
     },
+    "swarm.approval_not_recorded": {
+        "ar": "تعذّر حفظ الموافقة، فلم يُستأنف شيء. نقطة التحقق ما زالت بانتظار قرار: وافق مرة أخرى بعد قليل.",
+        "en": "The approval could not be saved, so nothing resumed. The checkpoint is still waiting: approve again shortly.",
+    },
     "swarm.approve_failed": {
         "ar": "فشلت الموافقة: {msg}",
         "en": "Approve failed: {msg}",

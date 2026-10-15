@@ -386,6 +386,10 @@ _ENDS_OUTSIDE_FINALIZE = {
         "and the caller saves the task",
     ("task_store.py", "TaskStore.requeue_orphaned_running"):
         "only 'running' rows left by a crash; a paused task never gets here",
+    ("engine.py", "SwarmEngine._unsaved_ending"):
+        "relabels an ending _finalize_task already made (checkpoint closed, panel told) "
+        "whose write the store refused: it tells the panel again and saves nothing, "
+        "since the store is what failed (Swarm tracker SQ04)",
 }
 
 

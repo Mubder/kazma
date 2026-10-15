@@ -83,6 +83,30 @@ def _sdk_available() -> bool:
         return False
 
 
+def _not_run(engine: Any, task: Any, started: float, task_span: Any, error: str) -> Any:
+    """A durable dispatch that never ran (nothing was submitted).
+
+    Called after admission (the task is in flight, its row RUNNING), it is
+    finalized like any ending: the row, the admission slot and the task's
+    stream are released (Swarm tracker SQ04). A bare result left all three
+    held until the watchdog reaped the task as a timeout -- minutes of
+    "running" later, with the wrong reason. Before admission it is a plain
+    refusal, as the capacity refusal is."""
+    from time import perf_counter
+
+    from kazma_core.swarm.task import TaskResult
+
+    if task.id not in getattr(engine, "_active_tasks", {}):
+        return TaskResult(task_id=task.id, status="failed", error=error)
+    if task_span is not None:
+        engine._tracing_emitter.end_span(task_span, status="error", status_msg=error)
+    return engine._finalize_task(
+        task, worker_results=[], status="failed", error=error,
+        duration_seconds=perf_counter() - started,
+        metadata={"durable": "temporal", "execution_outcome": "none_invoked"},
+    )
+
+
 async def run_via_durable(
     engine: Any,
     task: Any,
@@ -100,7 +124,8 @@ async def run_via_durable(
         return await engine._dispatch_inner(task, started, task_span)
     if not durable_enabled():
         if durable_required():
-            return TaskResult(task_id=task.id, status="failed", error="Required Temporal is disabled or has no host.")
+            return _not_run(engine, task, started, task_span,
+                            "Required Temporal is disabled or has no host.")
         return await engine._dispatch_inner(task, started, task_span)
 
     if not _sdk_available():
@@ -109,7 +134,7 @@ async def run_via_durable(
             f"(the durable extra: {extra_install_hint('durable')})."
         )
         if durable_required():
-            return TaskResult(task_id=task.id, status="failed", error=msg)
+            return _not_run(engine, task, started, task_span, msg)
         logger.warning("[durable] %s Falling back to in-process.", msg)
         return await engine._dispatch_inner(task, started, task_span)
 
@@ -161,11 +186,8 @@ async def run_via_durable(
             )
         if durable_required():
             logger.error("[durable] Temporal failed (required): %s", exc)
-            return TaskResult(
-                task_id=task.id,
-                status="failed",
-                error=f"Temporal durable dispatch failed: {exc}",
-            )
+            return _not_run(engine, task, started, task_span,
+                            f"Temporal durable dispatch failed: {exc}")
         logger.warning(
             "[durable] Temporal failed (%s) — in-process fallback", exc
         )

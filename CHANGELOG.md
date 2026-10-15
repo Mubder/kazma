@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Swarm: workers hand off to each other; chaos runs (2026-10-15)
+
+- A swarm worker can now pass its task to another worker. While the engine
+  runs it, an in-process worker's model is offered `handoff_to_worker`
+  (worker, reason, and optionally the task and context to hand on), naming
+  the registered workers and templates. The handoff limits still apply
+  (depth 5, two visits per worker). A refused hop is told to the model and
+  the worker finishes its own task.
+- Four handoff faults found on the way, each fixed:
+  - a refused handoff left its source worker counted as busy;
+  - visits were counted by instance name, so two pool instances of one
+    template could pass a task back and forth up to the depth limit;
+  - a template name could not be a handoff target;
+  - a handoff without a blackboard lost the task's scope, workspace and
+    tenant, and every handoff target lost the task id.
+- Chaos runs (`scripts/swarm_chaos.py`) inject faults into a real engine:
+  - a locked SQLite store, at several points of a task;
+  - Postgres going down;
+  - Temporal unreachable, or required and missing;
+  - a shutdown while every pattern is running.
+
+  Each case's outcome is recorded in the Swarm tracker. They found one fault,
+  now fixed: an approval the task store could not record resumed the
+  pipeline anyway. It now resumes nothing, leaves the checkpoint open, and
+  the Swarm page says to approve again.
+
 ## Soak harnesses for every audited area (2026-10-15)
 
 - Every soak harness rewrites its report as it runs (`"status": "running"`,

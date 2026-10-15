@@ -435,6 +435,8 @@ TOOL_WRITES: dict[str, Write] = {
     "edit_scheduled": Write(("cron.db",), ("list_scheduled",)),
     "cancel_scheduled": Write(("cron.db",), ("list_scheduled",)),
     "dispatch_swarm": Write(("swarm_tasks.db",), ("check_swarm_task",)),
+    # A swarm worker's own tool: the handoff lands on its task's result.
+    "handoff_to_worker": Write(("swarm_tasks.db",), ("check_swarm_task",)),
     "spawn_agent": Write(("none",), note="the sub-agent's answer is the tool result"),
     "spawn_agents": Write(("none",), note="the sub-agents' answers are the tool result"),
     "cancel_research_session": Write(("research_sessions.db",), ("research_session_status",)),

@@ -168,6 +168,11 @@ class MetricsCollector:
                     "[MetricsCollector] failed to flush metrics for '%s'",
                     worker,
                 )
+                # Counted with the swarm's other lost writes (Swarm tracker
+                # SQ04: a locked store lost them unseen by the counter).
+                from kazma_core.metrics import record_swarm_failure
+
+                record_swarm_failure("worker_metric")
 
     def record_worker_result(self, worker_result: Any) -> None:
         """Record metrics from a :class:`WorkerResult` object.

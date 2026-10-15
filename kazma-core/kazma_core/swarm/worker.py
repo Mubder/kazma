@@ -8,6 +8,7 @@ One concrete implementation:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -17,6 +18,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from kazma_core.swarm.blackboard import SwarmDispatchContext
+from kazma_core.swarm.handoff import (
+    HANDOFF_TOOL_NAME,
+    HandoffCall,
+    HandoffRequest,
+    HandoffTarget,
+    current_handoff_offer,
+    handoff_call,
+    handoff_policy_refusal,
+    handoff_tool_definition,
+)
 from kazma_core.swarm.middleware import TruncationMiddleware
 from kazma_core.swarm.task import WorkerCapabilities
 
@@ -199,6 +210,52 @@ class InProcessWorker(SwarmWorker):
         """Return the UI-facing worker type label."""
         return "in-process"
 
+    async def _handoff(
+        self,
+        offer: Any,
+        targets: tuple[HandoffTarget, ...],
+        call: Any,
+        calls_in_response: int,
+        *,
+        task: str,
+        tokens_used: int,
+        cost: float,
+    ) -> dict[str, Any]:
+        """Answer one ``handoff_to_worker`` call: raise the request, or return
+        the tool's refusal for the model (the worker then carries on).
+
+        A handoff is refused beside other tool calls (their results would be
+        lost with the worker), for an unknown worker, without a reason, when
+        the commitment layer's worker scope refuses the ``delegate`` act, and
+        when the engine's cycle guard refuses the hop."""
+        if calls_in_response > 1:
+            return {
+                "content": (
+                    f"Error: call {HANDOFF_TOOL_NAME} on its own, after the other tools you "
+                    "need have returned. The other calls in this response ran."
+                ),
+                "is_error": True,
+                "outcome": "policy",
+            }
+        outcome = handoff_call(offer, targets, call.arguments, task=task)
+        if isinstance(outcome, HandoffCall):
+            refused = await asyncio.to_thread(handoff_policy_refusal, dict(call.arguments or {}))
+            if refused is None:
+                logger.info(
+                    "[InProcessWorker:%s] hands off to '%s': %s",
+                    self.name, outcome.worker, outcome.reason[:120],
+                )
+                raise HandoffRequest(
+                    target_worker=outcome.worker,
+                    task=outcome.task,
+                    context=outcome.context,
+                    reason=outcome.reason,
+                    tokens_used=tokens_used,
+                    cost=cost,
+                )
+            outcome = f"Handoff refused: {refused.rstrip('.')}. Finish the task yourself."
+        return {"content": outcome, "is_error": True, "outcome": "policy"}
+
     async def dispatch(
         self,
         task: str,
@@ -210,6 +267,11 @@ class InProcessWorker(SwarmWorker):
         available tools, executes any tool calls returned, feeds the results
         back into the conversation, and repeats until the model produces a
         final text response (or the iteration limit is reached).
+
+        Dispatched by the engine, the model may also hand the task to another
+        worker (``handoff_to_worker``, Swarm audit SW-E13): the worker then
+        raises :class:`HandoffRequest` instead of returning, and the engine
+        runs the target (``SwarmEngine._handle_handoff``).
         """
         import json as _json
 
@@ -320,6 +382,17 @@ class InProcessWorker(SwarmWorker):
                     "[InProcessWorker:%s] tool registry unavailable, proceeding without tools",
                     self.name, exc_info=True,
                 )
+
+            # ── Handoff (Swarm audit SW-E13) ──────────────────────────
+            # Offered while the engine dispatches this worker and another
+            # worker could take the task on; a tool whitelist must name it.
+            handoff = current_handoff_offer()
+            handoff_targets: tuple[HandoffTarget, ...] = ()
+            whitelist = getattr(self.capabilities, "tools", None) or []
+            if handoff is not None and (not whitelist or HANDOFF_TOOL_NAME in whitelist):
+                handoff_targets = handoff.targets()
+            if handoff_targets:
+                tool_defs = [*tool_defs, handoff_tool_definition(handoff_targets)]
 
             # ── Build initial messages ─────────────────────────────────
             messages: list[dict[str, Any]] = []
@@ -476,7 +549,14 @@ class InProcessWorker(SwarmWorker):
 
                 for tc in response.tool_calls:
                     effect_state["iteration"] = iteration
-                    if _circuit_breaker_tripped:
+                    if handoff_targets and tc.name == HANDOFF_TOOL_NAME:
+                        # Not a registry tool: the worker stops here and the
+                        # engine dispatches the target (worker_dispatch).
+                        result = await self._handoff(
+                            handoff, handoff_targets, tc, len(response.tool_calls),
+                            task=task, tokens_used=total_tokens, cost=total_cost,
+                        )
+                    elif _circuit_breaker_tripped:
                         logger.warning(
                             "[InProcessWorker:%s] Circuit breaker is active! Bypassing tool execution for '%s'.",
                             self.name, tc.name
@@ -628,6 +708,8 @@ class InProcessWorker(SwarmWorker):
                 "cost": total_cost,
                 "duration_seconds": time.monotonic() - dispatch_started,
             }
+        except HandoffRequest:
+            raise  # the engine hands the task on (worker_dispatch catches it)
         except EffectUncertain as exc:
             return {
                 "worker": self.name, "task_id": task_id, "status": "error",
