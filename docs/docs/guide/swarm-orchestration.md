@@ -126,7 +126,8 @@ output), so it reaches every model as **data** inside a
 `fence_untrusted(...)` block, never as instructions: the agent's
 `check_swarm_task` result and error, the previous worker's output and the
 blackboard handed to the next pipeline step, a handoff's intermediate results,
-the synthesis prompt (`aggregator._synthesize`) and the pipeline's Refiner.
+the synthesis prompt (`aggregator._synthesize_by_model`) and the pipeline's
+Refiner (`patterns._refiner_input`: each step under its worker's name).
 `tests/test_swarm_boundaries_and_signals.py` fails on a swarm function that
 builds text from a worker's output outside a fence, unless it is declared as
 the task's stored result (which `check_swarm_task` fences where it reaches a
@@ -212,6 +213,37 @@ def __init__(
 
 `workers=["auto"]` is resolved in `dispatch_inner.py` via `engine._routing_engine.route(...)` (UnifiedRouter). Autoscaler `maybe_scale(...)` fires **only** on `NoCapableWorkersError` — never when a named worker is requested or routing succeeds.
 
+**Semantic routing** (`swarm/semantic_router.py`, Swarm audit SW-E10). The task
+and each worker's profile (its name -- an autoscaler instance's template --,
+expertise and the start of its system prompt, else its role) are embedded by
+Kazma's own embedder (`memory.embedder.get_embedder`, the model memory uses)
+and compared by cosine, exactly, in the process: no vector store, so no store's
+default embedding function. (The router used a Chroma collection that embedded
+profiles with Chroma's 384-d default model while the task used bge-m3, 1,024-d:
+every query failed on the dimensions.) A worker matches when its profile
+**stands out**: its similarity minus the mean of the other distinct profiles'
+(blended with 0.40 when fewer than three) is at least `MATCH_FLOOR` (0.045);
+instances of one template share a profile. Measured with bge-m3 on
+`tests/fixtures/swarm_routing/` (35 English and Arabic tasks, 7 workers;
+`scripts/swarm_routing_bench.py`): 19 of 24 specialist tasks routed right (21
+with the keyword fallback behind it; keywords alone 5, they read no Arabic),
+1 of 11 unrelated tasks sent to a specialist, and a lone worker takes no task
+about another (0 of 185). The nearest worker with no floor sent 7 of 11
+unrelated tasks to a specialist and never let a task reach the autoscaler.
+
+The embedding runs in a thread within `SEMANTIC_DEADLINE_S` (5 s), at most two
+at once. With no embedder, a failing, slow or busy one, the task routes by
+keywords; the routing diagnostics say why (`semantic.reason`), and the change
+is logged once at WARNING (`kazma_swarm_failures_total{site="semantic_routing"}`),
+its recovery at INFO.
+
+**The task names the workers that ran.** A DISPATCH runs the best candidate,
+so `task.workers` (and `metadata.routed_workers`) holds that one; every
+candidate, with its similarity, evidence, keyword overlap and dialect boost, is
+in `metadata.routing_diagnostics` (`candidates`, `scores`, `semantic`), written
+before a refusal too. A task the autoscaler took records it there
+(`autoscaled`: the template, the worker, whether it was reused).
+
 ### 2.2 Pipeline specifics
 
 - **Shared blackboard** — each stage sees prior stages' outputs.
@@ -219,6 +251,22 @@ def __init__(
 - **Hand-on** — the next step gets the previous worker's output and the blackboard **fenced** (§1.0d).
 - **Resume** — `patterns.resume_pipeline`, after the last journaled step (§1.0c).
 - **Post-processing** (`patterns._finalize_pipeline`) runs four hooks: LLM "Refiner" synthesis, self-improvement, pipeline logger, then returns `PatternExecution`.
+- **The Refiner** (Swarm audit SW-E15, decision D8: fixed). A pipeline that
+  succeeded -- on its first run or a resume -- is distilled by one model call
+  into a report. The report is the result's `synthesized_output` (the page's
+  synthesis); the pipeline's product, its last step's output, stays
+  `aggregated_output`, and every step's output stays in `worker_results`. Its
+  tokens and cost are added to `total_tokens` / `total_cost`, kept in
+  `metadata.refiner`, and recorded in the per-call LLM ledger with the task's id
+  as `thread_id`, as a worker's calls are. It reads the steps' outputs fenced,
+  4,000 characters in all, writes at most 2,048 tokens, and is given the step
+  deadline (at most 120 s); the watchdog's budget for a pipeline counts it as
+  one step more. A Refiner that fails, has no model or runs out of
+  time leaves the unrefined result: a WARNING and
+  `kazma_swarm_failures_total{site="refiner"}`, `metadata.refiner.status =
+  "failed"`. A failed or partial pipeline is not refined (no report over a
+  broken run). Before, its output never reached the stored result and, on
+  failure, a "raw report" stood in for it.
 
 ### 2.3 Fan-out status mapping
 
@@ -242,6 +290,13 @@ def __init__(
 | `vote` | Majority tally; ties broken by first-seen order. |
 | `synthesize` | LLM synthesis via `_SYNTHESIS_SYSTEM_PROMPT`, each worker's output fenced; deterministic fallback `_fallback_synthesis`. |
 | *(unknown)* | Raises `ValueError`. |
+
+A synthesis (here and in a consult) is the task's to account, like the
+Refiner's: its tokens and cost join the task's totals and `metadata.synthesis`,
+and the ledger has the call. Every model call the swarm makes for a task
+outside a worker goes through `swarm/task_model.call_task_model` (the agent's
+`resilient_chat`: retries, failover, the ledger row); a fallback when the model
+cannot answer is a WARNING and `kazma_swarm_failures_total{site="synthesis"}`.
 
 ---
 
@@ -448,7 +503,10 @@ Swarm bookkeeping that fails and loses evidence or a decision is a WARNING and
 counts `kazma_swarm_failures_total{site}` on `GET /metrics`: `running_row` (the
 RUNNING row), `task_write`, `orphan_evidence`, `recovery_read`, `reap`,
 `idle_reap`, `gate_register`, `gate_settle`, `checkpoint_timeout_arm`,
-`breaker_persist`, `approval_resolve`. A catch-all handler in the swarm or the
+`breaker_persist`, `approval_resolve`; and a degraded result: `refiner` (the
+unrefined result kept), `synthesis` (the deterministic fallback),
+`semantic_routing` (keywords route until the embedder is back, counted once).
+A catch-all handler in the swarm or the
 bus adapters that stays below WARNING must be declared with its reason
 (`tests/test_swarm_boundaries_and_signals.py`).
 
@@ -546,8 +604,21 @@ so the swarm works with zero pre-registered workers.
   `max_instances`, and idle-reaped after 5 min (`AutoScaler.record_activity`
   refreshes the timer on each dispatch). An instance with a dispatch in flight
   (`SwarmWorker.in_flight`) is never reaped.
+- **An idle instance takes the next task before a new one is spawned**
+  (`AutoScaler._take`, for `maybe_scale` and `spawn_by_name`): one with no
+  dispatch in flight and no task already handed to it. A handed-out instance
+  is claimed until its dispatch begins (its in-flight count covers it from
+  then) or its breaker refuses it, else for 60 s; a claimed instance is not
+  reaped. An open breaker is not dodged: its instance is handed out and
+  refuses, rather than a new instance being sent to the failing model. So a
+  run of tasks the catch-all takes uses one instance, and tasks at the same
+  time take one each, up to the bound. (Found by the SQ01 soak: the router
+  matches instances by their template's words, so a task no template's words
+  matched never reached an existing catch-all instance; each spawned a new
+  one up to the bound, then failed for capacity until the idle ones were
+  reaped.)
 - **A template name dispatches too**: a task naming `coder` with no worker of
-  that name spawns an instance from the template.
+  that name gets an idle instance of the template, or a new one.
 - **Best model for the task kind.** Template `model`/`provider` are left empty
   by default; the spawned worker then classifies its task
   (`models/router.py::classify_prompt` → `CODING`/`VISION`/`REASONING`/`GENERAL`)

@@ -424,6 +424,8 @@ compatibility. **All public API methods and constructors are unchanged.**
 | `checkpoint_manager.py` | HITL pipeline checkpoint state, timeout auto-reject, persistence | Pipeline pause/resume logic |
 | `shared_approvals.py` / `approval_card.py` | A bus approval request's one decision; the card's text | Swarm-bus HITL (§7B) |
 | `limits.py` | Input, pause and parallelism limits | A new task field or limit |
+| `task_model.py` | A task's own model call outside a worker (the Refiner, a synthesis): ledgered, accounted, bounded | A new model call in a pattern |
+| `semantic_router.py` | Semantic routing: Kazma's embedder, exact comparison, the measured floor | Routing by meaning |
 | `single_operator.py` | The multi-user refusal (decision D1) | A new swarm surface |
 
 **Rules after refactor:**
@@ -449,6 +451,38 @@ compatibility. **All public API methods and constructors are unchanged.**
 - **A worker's text reaches a model fenced** (SW-S10): `check_swarm_task`,
   pipeline and handoff hand-ons, the synthesis prompt, the Refiner. Same gate
   file (`_RESULT_TEXT_ONLY` declares the stored-result builders).
+- **The Refiner's report and every synthesis are the task's** (SW-E15,
+  decision D8: fixed, 2026-10-15). A pipeline that succeeded (first run or
+  resume) is refined by one model call: the report is the result's
+  `synthesized_output`, the last step's output stays `aggregated_output` and
+  every step's stays in `worker_results`; a failed or partial one is not
+  refined. Every model call the swarm makes for a task outside a worker -- the
+  Refiner, a fan-out or consult synthesis -- goes through
+  `swarm/task_model.call_task_model` (`resilient_chat`: retries, failover,
+  the per-call ledger with the task's id as `thread_id`; bounded output and
+  deadline; the watchdog counts the Refiner as one more pipeline step), and
+  its tokens and cost join `total_tokens` / `total_cost`
+  (`PatternExecution.synthesis_tokens` / `synthesis_cost` into
+  `_finalize_task`). A Refiner that cannot answer leaves the unrefined result
+  with a WARNING and `kazma_swarm_failures_total{site="refiner"}`, never a
+  stand-in report. Gates: `tests/test_swarm_refiner.py` (no direct `.chat(`
+  in `swarm/` outside `worker.py`, the old Refiner as its control).
+- **Semantic routing has one embedding space** (SW-E10, decision D8: fixed,
+  2026-10-15). `swarm/semantic_router.py` embeds the task and each worker
+  profile with Kazma's embedder (`memory.embedder.get_embedder`) and compares
+  them exactly in the process -- no vector store, no default embedding
+  function, no other model (gate). A profile matches only when it stands out
+  from the others (`MATCH_FLOOR`, measured with bge-m3 on
+  `tests/fixtures/swarm_routing/`, `scripts/swarm_routing_bench.py`; the
+  nearest worker with no floor is the negative control); otherwise keywords
+  route, and the autoscaler takes what nothing matched. In a thread, within
+  `routing_engine.SEMANTIC_DEADLINE_S`; an embedder that is missing, failing,
+  slow or busy routes by keywords, said once at WARNING
+  (`site="semantic_routing"`). A DISPATCH stores in `task.workers` only the
+  worker that ran; the candidates are in `metadata.routing_diagnostics`.
+  Changing a profile's text, the dataset or the embedder's model needs the
+  vectors recorded again (`scripts/swarm_routing_bench.py vectors`). Gate:
+  `tests/test_swarm_semantic_routing.py`.
 - **`/api/swarm/*` has one role table** (`kazma_ui/swarm_panel/route_roles.py`,
   SW-S07): GET is any signed-in user, everything else admin, enforced by the
   routers' `RoleCheckedRoute`. On an install with platform users every swarm
@@ -972,6 +1006,19 @@ swarm works with zero pre-registered workers.
   operator's edits are saved to `<data dir>/swarm_templates.json`, which then
   replaces the shipped list -- writing them into the tracked file left a
   modified checkout that `git pull` refuses.
+- **An idle instance takes the next task before a new one is spawned**
+  (`AutoScaler._take`, for `maybe_scale` and `spawn_by_name`, 2026-10-15): no
+  dispatch in flight and no task already handed to it. A handed-out instance
+  is claimed (`_claims`) until its dispatch begins (`record_activity`; its
+  in-flight count covers it from then) or its breaker refuses it, else for
+  `_CLAIM_S` (60 s); a claimed instance is never reaped. The router matches instances by
+  their template's words, so before this a task the catch-all took never
+  reached an existing catch-all instance: each spawned a new one up to the
+  bound, then failed "No capable workers" until the idle ones were reaped (the
+  SQ01 soak found it). Gate: `tests/test_swarm_autoscaler_reuse.py` (never
+  reuse as the negative control). An open breaker is not dodged by spawning:
+  its instance is reused and refuses, as the breaker means (a lingering claim
+  as the control).
 
 ### 15. V2 Memory Worker & Schedulers (`kazma-core/kazma_core/memory/worker_bootstrap.py`)
 

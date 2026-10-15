@@ -353,30 +353,34 @@ async def test_no_store_settings_or_breaker_io_on_the_loop(kind: str, monkeypatc
 
 
 async def test_routing_embeds_off_the_loop() -> None:
-    """The SW-E11b witness inverted."""
+    """The SW-E11b witness inverted: every embedding a route asks for (the
+    task and each profile, through Kazma's embedder since SW-E10) runs in a
+    thread."""
+    from kazma_core.swarm.config import WorkerCapabilities
+    from kazma_core.swarm.semantic_router import SemanticRouter
+
     engine = SwarmEngine(SwarmConfig(enabled=True, workers=[]))
-    engine.add_worker(WorkerConfig(name="w", type="in_process"))
+    for name in ("w", "other-a", "other-b"):
+        engine.add_worker(WorkerConfig(name=name, type="in_process",
+                                       capabilities=WorkerCapabilities(expertise=[f"{name} things"])))
     seen: list[bool] = []
 
-    class _Semantic:
-        available = True
+    class _Embedder:
+        dim = 2
 
-        def build_profiles(self, profiles):
+        def encode(self, text):
             seen.append(_on_loop())
+            return [1.0, 0.0] if ("anything" in text or "Worker: w\n" in text) else [0.0, 1.0]
 
-        def query(self, text, top_n=5):
-            seen.append(_on_loop())
-            return [("w", 0.9)]
-
-    engine._routing_engine._semantic_router = _Semantic()
+    engine._routing_engine._semantic_router = SemanticRouter(embedder_getter=lambda: _Embedder())
 
     async def w(task, context=None):
         return _ok("w")
 
     engine.get_worker("w").dispatch = w
     result = await engine.dispatch(SwarmTask(prompt="anything", workers=["auto"], timeout=0))
-    assert result.status == "success"
-    assert seen == [False, False]
+    assert result.status == "success" and engine.get_task(result.task_id).workers == ["w"]
+    assert len(seen) == 4 and not any(seen), seen  # the task and three profiles, none on the loop
 
 
 # ── SW-S12: the approval path keeps the loop free ─────────────────────────

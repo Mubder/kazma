@@ -51,6 +51,9 @@ def _no_real_llm(monkeypatch):
         "kazma_core.models.selection.select_provider_for_task",
         lambda registry, prompt: None,
     )
+    # Keyword capability routing here: no embedder for semantic routing (the
+    # real one is a 2 GB model; tests/test_swarm_semantic_routing.py has it).
+    monkeypatch.setattr("kazma_core.swarm.semantic_router._kazma_embedder", lambda: None)
     # Disable the autoscaler — it would auto-spawn a replacement for a
     # removed worker, making the not-found test succeed instead of fail.
     try:

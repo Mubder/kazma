@@ -79,6 +79,14 @@ async def _index_worker_l4_memory(
         logger.debug("[SwarmEngine] V2 swarm_result store failed for %s", name, exc_info=True)
 
 
+def _end_claim(engine: SwarmEngine, worker: SwarmWorker) -> None:
+    """A dispatch its breaker refused never began: the autoscaler's claim on
+    the instance ends here, so the next task gets it (and its breaker) rather
+    than a new instance that would dodge the breaker (``AutoScaler._take``)."""
+    if engine._autoscaler is not None:
+        engine._autoscaler.record_activity(worker.name)
+
+
 async def dispatch_worker(
     engine: SwarmEngine,
     worker: SwarmWorker,
@@ -154,6 +162,7 @@ async def dispatch_worker(
         # Counted once, by _finalize_task with the task's other results
         # (Swarm audit SW-E19: recorded here too, one refusal was two
         # failures in the worker's metrics).
+        _end_claim(engine, worker)
         return [result]
 
     # Execute with retry policy.

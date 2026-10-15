@@ -581,7 +581,6 @@ class _Soak:
         import kazma_core.swarm.patterns as patterns
         import kazma_core.swarm.reliability_registry as registry_mod
         import kazma_core.swarm.worker_dispatch as worker_dispatch
-        from kazma_core.swarm.semantic_router import get_semantic_router
 
         self.classes = _instrumented_classes(self)
 
@@ -598,10 +597,8 @@ class _Soak:
         stack.enter_context(mock.patch.object(patterns, "_synthesize_refined_output", _no_refiner))
         stack.enter_context(mock.patch.object(patterns, "_run_self_improvement", _no_self_improvement))
         stack.enter_context(mock.patch.object(registry_mod, "CircuitBreaker", self.classes["breaker"]))
+        # No embedder: semantic routing says so once and auto routes by keywords.
         stack.enter_context(mock.patch.object(embedder, "get_embedder", lambda: None))
-        router = get_semantic_router()
-        stack.enter_context(mock.patch.object(router, "_initialized", True))
-        stack.enter_context(mock.patch.object(router, "_available", False))
         stack.enter_context(mock.patch.object(autoscaler_mod, "_BOOT_TAG", autoscaler_mod._BOOT_TAG))
         self._autoscaler_mod = autoscaler_mod
 

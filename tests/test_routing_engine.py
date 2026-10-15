@@ -16,6 +16,17 @@ from kazma_core.swarm.task import SwarmTask
 from kazma_core.routing_engine import UnifiedRouter, NoCapableWorkersError
 from kazma_core.swarm.task import WorkerCapabilities
 
+
+@pytest.fixture(autouse=True)
+def _keywords_and_dialects_only(monkeypatch):
+    """These tests are the keyword and dialect strategies: no embedder (the
+    real one is a 2 GB model; semantic routing has its own tests,
+    tests/test_swarm_semantic_routing.py)."""
+    import kazma_core.swarm.semantic_router as semantic_router
+
+    monkeypatch.setattr(semantic_router, "_kazma_embedder", lambda: None)
+
+
 @pytest.mark.anyio
 async def test_unified_router_keyword_fallback() -> None:
     """Test unified router keyword-overlap routing."""

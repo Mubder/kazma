@@ -1056,6 +1056,11 @@ _LOOP_STALL_HELPERS = frozenset({
     "ensure_capacity", "set_vector_status", "vector_status", "search_sync",
     "search_all_sync", "build_knowledge_inject", "run_repair_sweep", "kb_refusal",
     "active_for_library", "purge_terminal", "copy_legacy_knowledge",
+    # Swarm semantic routing (Swarm audit SW-E10, 2026-10-15): Kazma's
+    # embedder on the task and every worker profile (a local model's first
+    # call loads it), and its configuration read. The router runs it in a
+    # thread within a deadline.
+    "semantic_scores",
 })
 
 

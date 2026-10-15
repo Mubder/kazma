@@ -769,6 +769,11 @@ class SwarmEngine:
                 step_budget = max(len(getattr(t, "workers", None) or []), 1)
                 if t.type == TaskType.CONDITIONAL:
                     step_budget = max(step_budget, 2)
+                elif t.type == TaskType.PIPELINE:
+                    # The Refiner runs after the last step, within the step
+                    # deadline (SW-E15): one step more, or a pipeline whose
+                    # steps took their time is reaped while it refines.
+                    step_budget += 1
             started_iso = getattr(t, "started_at", None)
             if not started_iso:
                 continue
@@ -1446,7 +1451,12 @@ class SwarmEngine:
         synthesized_output: str | None = None,
         error: str | None = None,
         metadata: dict[str, Any] | None = None,
+        synthesis_tokens: int = 0,
+        synthesis_cost: float = 0.0,
     ) -> TaskResult:
+        """Record a task's ending. *synthesis_tokens* / *synthesis_cost* are
+        the pattern's own model call (the Refiner, a synthesis: SW-E15),
+        added to the workers' in the task's totals."""
         # Idempotent terminal finalize (audit H7): avoid double SSE/persist
         # when cancel() and CancelledError both race.
         prior_status = getattr(task, "status", None)
@@ -1503,8 +1513,8 @@ class SwarmEngine:
             aggregated_output=aggregated_output,
             synthesized_output=synthesized_output,
             error=error,
-            total_cost=sum(item.cost for item in worker_results),
-            total_tokens=sum(item.tokens_used for item in worker_results),
+            total_cost=sum(item.cost for item in worker_results) + float(synthesis_cost or 0.0),
+            total_tokens=sum(item.tokens_used for item in worker_results) + int(synthesis_tokens or 0),
             duration_seconds=duration_seconds,
             metadata=dict(metadata or {}),
         )
@@ -1691,8 +1701,15 @@ class SwarmEngine:
         return _resolve_max_concurrent_impl(task, configured_default)
 
     def _build_available_workers_list(self) -> list[dict[str, Any]]:
-        """Build worker info dicts for the capability router."""
-        return _build_available_workers_list_impl(self._workers)
+        """Build worker info dicts for the capability router, with what
+        semantic routing describes a worker by (SW-E10): its system prompt,
+        and an autoscaler instance's template."""
+        infos = _build_available_workers_list_impl(self._workers)
+        for info in infos:
+            worker = self._workers.get(info["name"])
+            info.setdefault("system_prompt", str(getattr(worker, "system_prompt", "") or ""))
+            info.setdefault("template", str(getattr(worker, "template_name", "") or ""))
+        return infos
 
     # ------------------------------------------------------------------
     # HITL Checkpoint management — state delegated to CheckpointManager
@@ -1903,9 +1920,12 @@ class SwarmEngine:
             worker_results=pattern_result.worker_results,
             status=pattern_result.status,
             aggregated_output=pattern_result.aggregated_output,
+            synthesized_output=pattern_result.synthesized_output,
             error=pattern_result.error,
             duration_seconds=perf_counter() - started,
             metadata=pattern_result.metadata,
+            synthesis_tokens=pattern_result.synthesis_tokens,
+            synthesis_cost=pattern_result.synthesis_cost,
         )
 
     async def reject_checkpoint(

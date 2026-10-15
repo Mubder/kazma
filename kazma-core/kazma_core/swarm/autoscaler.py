@@ -49,6 +49,18 @@ _BOOT_TAG = uuid.uuid4().hex[:4]
 # different working directory (deep-audit 2026-08-19, finding #14).
 _TEMPLATES_FILE = "swarm_templates.json"
 _DEFAULT_IDLE_TTL = 300  # 5 minutes
+#: How long an instance handed to a task stays claimed if its dispatch never
+#: begins (refused before it ran); a dispatch that begins ends the claim.
+_CLAIM_S = 60.0
+
+
+def _in_flight(worker: Any) -> int:
+    """A worker's dispatches running now; one whose count cannot be read is
+    taken as busy (never handed a second task on a guess)."""
+    n = getattr(worker, "in_flight", None)
+    if isinstance(n, int) and not isinstance(n, bool):
+        return n
+    return 1
 
 
 def _default_templates_path() -> Path:
@@ -229,6 +241,11 @@ class AutoScaler:
         # Track spawned instances: name -> (template_name, spawned_at, last_active)
         self._instances: dict[str, tuple[str, float, float]] = {}
         self._counter: dict[str, int] = {}  # template_name -> next instance number
+        # Instances handed to a task whose dispatch has not begun yet: name ->
+        # until when (monotonic). Its in-flight count covers it once the
+        # dispatch begins (record_activity ends the claim); the deadline ends
+        # a claim whose dispatch never began (an open breaker refused it).
+        self._claims: dict[str, float] = {}
         # Guards _instances / _counter against concurrent maybe_scale spawns
         # (called from async dispatch) and record_activity/reap (concurrent).
         # Without it, two maybe_scale calls can both pass the capacity check
@@ -299,11 +316,21 @@ class AutoScaler:
 
     # ── Scaling logic ─────────────────────────────────────────────────
 
-    def maybe_scale(self, task_prompt: str) -> Any | None:
-        """Try to spawn a worker that matches the task prompt.
+    def maybe_scale(self, task_prompt: str, *, detail: dict[str, Any] | None = None) -> Any | None:
+        """A worker for a task no registered worker matched: an idle instance
+        of the matching template, else a new one within its bound.
 
-        Returns the spawned SwarmWorker if a matching template has
-        capacity, or ``None`` if no template matches or all are at max.
+        Templates whose words the prompt uses come first, then the catch-all
+        ones. Each candidate template's idle instance is reused before a new
+        one is spawned (``_take``): the router matches instances by their
+        template's words, so a task that matched none of them -- every task
+        the catch-all takes -- never reached an instance again, and each one
+        spawned a new instance up to the bound, then failed for capacity
+        until the idle ones were reaped (the SQ01 soak, 2026-10-15).
+
+        Returns the worker, or ``None`` if no template matches or all are at
+        their bound with every instance busy. *detail*, when given, is filled
+        with the template and whether an instance was reused.
         """
         # Opportunistically reap idle workers before considering a spawn.
         # This runs on the dispatch hot path so idle pool workers don't
@@ -318,44 +345,72 @@ class AutoScaler:
             matched = [t for t in self._templates.values() if t.matches_task(task_prompt)]
             fallback = [t for t in self._templates.values() if t.catch_all and t not in matched]
             for template in matched + fallback:
-                # Check capacity
-                active = self._count_active_instances(template.name)
-                if active >= template.max_instances:
-                    logger.debug("[AutoScaler] Template '%s' at max capacity (%d/%d)",
-                                 template.name, active, template.max_instances)
-                    continue
-
-                # Spawn an instance
-                worker = self._instantiate(template)
+                worker = self._take(template, detail)
                 if worker is not None:
-                    logger.info("[AutoScaler] Auto-spawned '%s' from template '%s' for task",
-                                worker.name, template.name)
                     return worker
 
         return None
 
-    def spawn_by_name(self, name: str) -> Any | None:
-        """Spawn a worker from a template by NAME (not prompt matching).
+    def spawn_by_name(self, name: str, *, detail: dict[str, Any] | None = None) -> Any | None:
+        """A worker from the template named *name* (not prompt matching): an
+        idle instance of it, else a new one within its bound (``_take``).
 
-        Used by the dispatch fallback when a named worker isn't registered
-        but a template with that name exists. Returns the spawned worker or
-        None if no template matches / at capacity.
+        Used when a named worker isn't registered but a template with that
+        name exists (a dispatch, a pattern step). Returns the worker, or None
+        if no template has the name or it is at its bound with every
+        instance busy.
         """
         self.reap_idle()
         with self._lock:
             template = self._templates.get(name)
             if template is None:
                 return None
+            return self._take(template, detail)
+
+    def _take(self, template: WorkerTemplate, detail: dict[str, Any] | None) -> Any | None:
+        """An idle instance of *template*, else a new one within its bound;
+        claimed until its dispatch begins. Caller holds ``_lock``."""
+        worker = self._idle_instance(template.name)
+        reused = worker is not None
+        if worker is None:
             active = self._count_active_instances(template.name)
             if active >= template.max_instances:
-                logger.debug("[AutoScaler] Template '%s' at max capacity (%d/%d)",
-                             name, active, template.max_instances)
+                logger.debug("[AutoScaler] Template '%s' at max capacity (%d/%d), every instance busy",
+                             template.name, active, template.max_instances)
                 return None
             worker = self._instantiate(template)
-            if worker is not None:
-                logger.info("[AutoScaler] Spawned '%s' by name from template '%s'",
-                            worker.name, template.name)
+            if worker is None:
+                return None
+            logger.info("[AutoScaler] Auto-spawned '%s' from template '%s'", worker.name, template.name)
+        else:
+            logger.debug("[AutoScaler] Reusing idle '%s' of template '%s'", worker.name, template.name)
+        now = time.monotonic()
+        self._claims[worker.name] = now + _CLAIM_S
+        entry = self._instances.get(worker.name)
+        if entry is not None:
+            self._instances[worker.name] = (entry[0], entry[1], now)  # the idle clock restarts
+        if detail is not None:
+            detail.update({"template": template.name, "worker": worker.name, "reused": reused})
+        return worker
+
+    def _idle_instance(self, template_name: str) -> Any | None:
+        """The first instance of *template_name* with no dispatch in flight
+        and no task claimed for it, oldest first. Caller holds ``_lock``."""
+        now = time.monotonic()
+        for name, (tmpl, _spawned, _last) in self._instances.items():
+            if tmpl != template_name or self._claims.get(name, 0.0) > now:
+                continue
+            worker = self._worker(name)
+            if worker is None:
+                continue  # removed from the engine: the reaper drops it
+            if _in_flight(worker) > 0:
+                continue
             return worker
+        return None
+
+    def _worker(self, name: str) -> Any | None:
+        getter = getattr(self._engine, "get_worker", None)
+        return getter(name) if callable(getter) else None
 
     def _instantiate(self, template: WorkerTemplate) -> Any | None:
         """Create a worker instance from a template and add it to the engine."""
@@ -394,8 +449,11 @@ class AutoScaler:
         return sum(1 for _, (tmpl, _, _) in self._instances.items() if tmpl == template_name)
 
     def record_activity(self, worker_name: str) -> None:
-        """Update last-activity timestamp for a spawned worker."""
+        """Update last-activity timestamp for a spawned worker. Called as its
+        dispatch begins (its in-flight count is up): the claim from
+        ``_take`` ends here."""
         with self._lock:
+            self._claims.pop(worker_name, None)
             if worker_name in self._instances:
                 tmpl, spawned, _ = self._instances[worker_name]
                 self._instances[worker_name] = (tmpl, spawned, time.monotonic())
@@ -418,6 +476,8 @@ class AutoScaler:
             for name, (_, _, last_active) in self._instances.items():
                 if (now - last_active) <= self._idle_ttl:
                     continue
+                if self._claims.get(name, 0.0) > now:
+                    continue  # handed to a task whose dispatch has not begun
                 worker = None
                 try:
                     getter = getattr(self._engine, "get_worker", None)
@@ -458,6 +518,7 @@ class AutoScaler:
                              name=f"swarm-forget-breaker:{name}")
         with self._lock:
             self._instances.pop(name, None)
+            self._claims.pop(name, None)
         logger.debug("[AutoScaler] Reaped idle worker: %s", name)
 
     # ── Queries ───────────────────────────────────────────────────────

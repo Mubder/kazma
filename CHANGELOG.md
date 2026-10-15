@@ -76,6 +76,18 @@
 - A Knowledge crawl seeded with a private or loopback address is refused at
   once, on every surface, before a library is made; it used to leave an empty
   library.
+- Swarm semantic routing works. It embedded tasks and worker profiles in two
+  different spaces (a vector store's default function against Kazma's
+  model), so routing by meaning never matched; it now uses Kazma's own
+  embedder off the event loop, with a relevance floor, and falls back to
+  keywords (said once in the log) when the model is unavailable. A stored
+  task names only the worker that ran.
+- The swarm pipeline's Refiner report reaches the result
+  (`synthesized_output`), and its tokens and cost are counted; it used to
+  run and be thrown away.
+- An idle autoscaler instance takes the next task its template matches
+  before a new one is started: tasks no template's words matched used to
+  start a new instance each time, then fail at the template's bound.
 - Knowledge Library scale and soak harness (`scripts/knowledge_soak.py`,
   tracker row KB-Q01): `scale` measures ingest, keyword, meaning and hybrid
   search, the repair sweep, library delete and the re-embed time after a

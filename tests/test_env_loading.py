@@ -179,6 +179,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "builds and scores the Knowledge retrieval benchmark on a private store under a "
         "temporary data directory; an install's .env would point it at the install"
     ),
+    "scripts/swarm_routing_bench.py": (
+        "scores swarm semantic routing from recorded vectors (or the configured "
+        "embedder); reads no install's secrets or databases"
+    ),
     "scripts/memory_soak.py": (
         "soaks the memory lifecycle on private temporary stores; an install's "
         ".env would point thousands of writes at its databases"

@@ -496,10 +496,11 @@ def test_reap_scales_pattern_deadline_by_step_count(empty_config):
 
     engine = SwarmEngine(empty_config)
     within_budget = (datetime.now(UTC) - timedelta(seconds=200)).isoformat()
-    past_budget = (datetime.now(UTC) - timedelta(seconds=400)).isoformat()
+    past_budget = (datetime.now(UTC) - timedelta(seconds=500)).isoformat()
 
-    # 3-step pipeline, timeout=100 per step → total budget 300s (+30 margin).
-    # elapsed=200s > 100+30 (old whole-task deadline) but < 100*3+30 → kept.
+    # 3-step pipeline, timeout=100 per step → total budget 300s, plus one
+    # step for the Refiner that runs after the last (SW-E15), +30 margin.
+    # elapsed=200s > 100+30 (old whole-task deadline) but < 100*4+30 → kept.
     pipeline = _running_task(
         TaskType.PIPELINE, ["a", "b", "c"], 100.0, within_budget
     )
@@ -522,7 +523,7 @@ def test_reap_scales_pattern_deadline_by_step_count(empty_config):
     assert conditional.id in engine._active_tasks
     assert pipeline.status == TaskStatus.RUNNING
 
-    # Past the SCALED deadline (100*3+30=330s) the pattern IS reaped —
+    # Past the SCALED deadline (100*(3+1)+30=430s) the pattern IS reaped —
     # the watchdog stays a safety net for genuinely hung patterns.
     stale_pipeline = _running_task(
         TaskType.PIPELINE, ["a", "b", "c"], 100.0, past_budget

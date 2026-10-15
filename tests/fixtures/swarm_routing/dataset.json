@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "about": "Swarm semantic routing benchmark (Swarm audit SW-E10). Workers in the router's profile shape; each task names the workers it may go to. 'none' means no specialist: the autoscaler's templates (and the catch-all) take it. The shipped generalist (catch_all) is acceptable for every 'none' task and for no specialist task. Vectors: vectors.npz, recorded with scripts/swarm_routing_bench.py vectors.",
+  "workers": [
+    {"name": "coder", "roles": ["coding"], "catch_all": false,
+     "expertise": ["coding", "programming", "refactor", "debug", "python", "javascript", "typescript", "implement", "function", "class"],
+     "system_prompt": "You are a coding specialist worker in the Kazma swarm. You write, review, refactor, and debug code precisely. Prefer minimal, correct, well-tested changes. Explain trade-offs only when asked."},
+    {"name": "researcher", "roles": ["research"], "catch_all": false,
+     "expertise": ["research", "investigate", "analyze", "summarize", "compare", "evaluate", "study", "report"],
+     "system_prompt": "You are a research specialist worker in the Kazma swarm. You investigate, analyze, and synthesize information into clear, sourced findings. Distinguish facts from inference and flag uncertainty."},
+    {"name": "generalist", "roles": ["task"], "catch_all": true,
+     "expertise": ["task", "help", "general", "draft", "write", "answer", "explain", "assist"],
+     "system_prompt": "You are a capable generalist worker in the Kazma swarm. You handle a broad range of tasks — drafting, answering, explaining, and assisting — reliably and clearly. Ask for clarification when a request is ambiguous."},
+    {"name": "translator", "roles": ["translation"], "catch_all": false,
+     "expertise": ["translate", "translation", "arabic", "english", "localization"],
+     "system_prompt": "You translate documents and messages between Arabic and English, keeping the meaning, tone and terminology of the original."},
+    {"name": "analyst", "roles": ["data analysis"], "catch_all": false,
+     "expertise": ["sql", "data", "statistics", "charts", "spreadsheet"],
+     "system_prompt": "You analyze datasets: you write SQL queries, compute statistics and build charts and tables that summarize numbers."},
+    {"name": "devops", "roles": ["operations"], "catch_all": false,
+     "expertise": ["docker", "deploy", "kubernetes", "server", "ci"],
+     "system_prompt": "You operate servers, containers and deployment pipelines, and diagnose outages in production systems."},
+    {"name": "social", "roles": ["marketing"], "catch_all": false,
+     "expertise": ["tweet", "social media", "copywriting", "marketing", "post"],
+     "system_prompt": "You write short social media posts, announcements and marketing copy in a brand's voice."}
+  ],
+  "tasks": [
+    {"prompt": "Implement a binary search over a sorted list", "lang": "en", "accept": ["coder"]},
+    {"prompt": "Why does my recursive Fibonacci blow the stack for large inputs?", "lang": "en", "accept": ["coder"]},
+    {"prompt": "Make this loop faster: it sums every pair of items in the array", "lang": "en", "accept": ["coder"]},
+    {"prompt": "Review this pull request for bugs before I merge it", "lang": "en", "accept": ["coder"]},
+    {"prompt": "اكتب دالة بلغة بايثون تحسب متوسط قائمة أرقام", "lang": "ar", "accept": ["coder"]},
+    {"prompt": "عندي خطأ في الكود، لما أشغل البرنامج يطلع استثناء", "lang": "ar", "accept": ["coder"]},
+
+    {"prompt": "Find out what caused the inflation of 2022 and summarize the evidence", "lang": "en", "accept": ["researcher"]},
+    {"prompt": "What do recent studies say about intermittent fasting and longevity?", "lang": "en", "accept": ["researcher"]},
+    {"prompt": "Look into the pros and cons of solar panels for a family home", "lang": "en", "accept": ["researcher"]},
+    {"prompt": "ابحث في أسباب انقراض الديناصورات وقدّم ملخصاً للنظريات", "lang": "ar", "accept": ["researcher"]},
+
+    {"prompt": "Translate this paragraph into Arabic: The meeting has moved to Thursday.", "lang": "en", "accept": ["translator"]},
+    {"prompt": "How would you say 'thank you for your patience' in Arabic?", "lang": "en", "accept": ["translator"]},
+    {"prompt": "Render this French menu in English for our guests", "lang": "en", "accept": ["translator"]},
+    {"prompt": "ترجم هذه الرسالة إلى الإنجليزية: نعتذر عن التأخير", "lang": "ar", "accept": ["translator"]},
+
+    {"prompt": "Which month had the highest sales in this table of orders?", "lang": "en", "accept": ["analyst"]},
+    {"prompt": "Write a query that counts the users who signed up each week", "lang": "en", "accept": ["analyst"]},
+    {"prompt": "Plot the monthly revenue as a bar chart", "lang": "en", "accept": ["analyst"]},
+    {"prompt": "احسب المتوسط والانحراف المعياري لهذه الأرقام", "lang": "ar", "accept": ["analyst"]},
+
+    {"prompt": "The container keeps restarting after the deployment, how do I find out why?", "lang": "en", "accept": ["devops"]},
+    {"prompt": "Set up a pipeline that builds and ships the app on every push", "lang": "en", "accept": ["devops"]},
+    {"prompt": "السيرفر وقف عن الاستجابة بعد التحديث، كيف أشخص المشكلة؟", "lang": "ar", "accept": ["devops"]},
+
+    {"prompt": "Write a short announcement of our new app release for Twitter", "lang": "en", "accept": ["social"]},
+    {"prompt": "Draft three catchy posts for Instagram about our summer sale", "lang": "en", "accept": ["social"]},
+    {"prompt": "اكتب تغريدة قصيرة عن إطلاق منتجنا الجديد", "lang": "ar", "accept": ["social"]},
+
+    {"prompt": "What should I cook for dinner tonight with chicken and rice?", "lang": "en", "accept": ["none"]},
+    {"prompt": "Recommend a good novel for a long flight", "lang": "en", "accept": ["none"]},
+    {"prompt": "What is the capital of Australia?", "lang": "en", "accept": ["none"]},
+    {"prompt": "How many hours of sleep does an adult need?", "lang": "en", "accept": ["none"]},
+    {"prompt": "Plan a three-day trip to Istanbul", "lang": "en", "accept": ["none"]},
+    {"prompt": "Give me a pep talk before my exam", "lang": "en", "accept": ["none"]},
+    {"prompt": "In one sentence: what is idempotency in HTTP APIs?", "lang": "en", "accept": ["none", "coder"]},
+    {"prompt": "وش أطبخ اليوم للغدا؟", "lang": "ar", "accept": ["none"]},
+    {"prompt": "اقترح علي هدية لأمي في عيد ميلادها", "lang": "ar", "accept": ["none"]},
+    {"prompt": "شلون الجو في الكويت هالأسبوع؟", "lang": "ar", "accept": ["none"]},
+    {"prompt": "كم ساعة لازم أنام في اليوم؟", "lang": "ar", "accept": ["none"]}
+  ]
+}

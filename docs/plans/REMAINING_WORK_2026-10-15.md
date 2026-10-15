@@ -19,9 +19,9 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | Two cron alert-loss windows | Scheduled soak | An alert outbox in the state change's own transaction, drained after commit; real-process kill regressions | Done: `tests/test_cron_alert_outbox.py` (real-process kills in both windows, the old order as control), AGENTS §16 E2 |
 | One snapshot step over its cap after a crash | TT-G3 soak | Insert and eviction in one transaction; the soak's allowance removed | Done: `tests/test_time_travel_capture_atomic.py` (real-process kill matrix, the old two transactions as control) |
 | AGENTS §18 B migration note | TT-09 | §18 B matches `path_rewrite` / `importer` | Done: `test_agents_18b_names_what_the_import_rewrites` |
-| Semantic routing | SW-E10, D8 | One embedding space, explicit vectors, off the loop, keyword fallback said | In progress |
-| The pipeline Refiner | SW-E15, D8 | Its output reaches the result; tokens and cost in the ledger | In progress |
-| Catch-all autoscaler instance never reused | SQ01 soak | An idle catch-all instance takes the next unmatched task | In progress |
+| Semantic routing | SW-E10, D8 | One embedding space, explicit vectors, off the loop, keyword fallback said | Done: `tests/test_swarm_semantic_routing.py` (Kazma's embedder, exact cosine, a relevance floor; 19/24 specialist tasks right vs 5 by keywords, 1/11 unrelated misrouted vs 7 with no floor) |
+| The pipeline Refiner | SW-E15, D8 | Its output reaches the result; tokens and cost in the ledger | Done: `tests/test_swarm_refiner.py` (`synthesized_output`, the ledger, fenced, bounded; fan-out and consult synthesis accounted the same way) |
+| Catch-all autoscaler instance never reused | SQ01 soak | An idle catch-all instance takes the next unmatched task | Done: `tests/test_swarm_autoscaler_reuse.py` (6 unmatched tasks run on 1 instance; never-reuse as control); the soak's spawns halved |
 | Handoff end to end | SW-E13, D6 | A shipped worker hands off through a tool; guards intact | In progress |
 | Chaos runs | SQ04 | Fault injection per case with the recorded outcome | In progress |
 | Knowledge retrieval quality | KQ01 | Versioned EN/AR benchmark, explicit search and auto-inject, ratchet | Done: `tests/test_knowledge_benchmark.py` (224 floors locked, dataset v1). It found abstention 0.00 on both paths; an evidence rule now abstains on 7 of 14 unanswerable questions and lifts precision 0.19 -> 0.71 |
