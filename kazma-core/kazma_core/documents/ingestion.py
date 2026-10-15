@@ -1567,6 +1567,11 @@ class DocumentIngestionService:
         *, permission: str = "read",
     ) -> DocumentJobRecord | None:
         tenant = _clean(tenant_id, "tenant_id")
+        # A missing caller is refused before the lookup, whether or not the
+        # job exists (Q04 defensive check C8, 2026-10-15: an unknown job
+        # answered None for a caller with no name).
+        if actor_id is not SYSTEM_ACTOR and (not isinstance(actor_id, str) or not actor_id.strip()):
+            raise DocumentAccessError("a job read must name its caller")
         job = self.jobs.get(tenant_id=tenant, job_id=JobId(job_id))
         if job is None:
             return None
@@ -1589,6 +1594,9 @@ class DocumentIngestionService:
         job = self._readable_job(tenant, job_id, actor_id)
         if job is None:
             raise JobNotFoundError("job is unavailable in this tenant")
+        # Cancelling changes the document's ingestion: write permission, as a
+        # retry needs (Q04 defensive check C8, 2026-10-15: read was enough).
+        self._authorize_job_read(tenant, job.document_id, actor_id, permission="write")
         job = self.jobs.request_cancel(tenant_id=tenant, job_id=job.id)
         self.audit.record(
             tenant_id=tenant,
@@ -2420,8 +2428,15 @@ class DocumentIngestionService:
             # Held by an owner no process can prove dead (another host, a
             # legacy row): capacity only the operator can free.
             problems.append("document_intake_reservations_stranded")
-        if isolation.get("image_code_matches") is False:
-            # The worker image runs other document code than this Kazma.
+        if (
+            isolation.get("image_code_matches") is False
+            or isolation.get("image_current") is False
+            or isolation.get("image_fallback")
+        ):
+            # The worker image runs other document code than this Kazma, is
+            # older than the tag this code builds, or is a fallback build
+            # served while that tag is missing (AGENTS.md section 19 E1; only
+            # the first was flagged until the Q04 defensive check, 2026-10-15).
             problems.append("document_worker_image_outdated")
         if problems:
             reasons = list(data.get("degraded_reasons") or [])

@@ -48,3 +48,33 @@ def test_rejected_fence_case_cannot_be_counted_as_verified_fencing(tmp_path, mon
     assert result.status == 'FAIL'
     assert 'unexpectedly rejected' in result.detail
     assert result.metrics['fenced'] == 0
+
+
+def _container_report(**overrides):
+    report = {"mode": "container", "ready": True, "image_code_matches": True,
+              "image_current": True, "image_fallback": False,
+              "hostile_document_profile": "container_broker"}
+    report.update(overrides)
+    return report
+
+
+@pytest.mark.parametrize(
+    ("overrides", "verdict"),
+    [
+        ({}, "PASS"),
+        ({"ready": False}, "FAIL"),
+        ({"image_code_matches": False}, "FAIL"),
+        # The cases the old rule passed (Q04 defensive check C7, 2026-10-15):
+        # a match not reported, an image older than its tag, a fallback build.
+        ({"image_code_matches": None}, "FAIL"),
+        ({"image_current": False}, "FAIL"),
+        ({"image_fallback": True}, "FAIL"),
+    ],
+)
+def test_the_container_profile_passes_only_with_an_image_known_to_run_this_code(
+    monkeypatch, overrides, verdict
+):
+    monkeypatch.setattr("kazma_core.documents.worker_container.isolation_report",
+                        lambda: _container_report(**overrides))
+    check, _report = cert._isolation_check()
+    assert check.status == verdict, (overrides, check)

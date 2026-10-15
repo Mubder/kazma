@@ -17,6 +17,7 @@ import json
 
 import pytest
 from fastapi import Body, FastAPI
+from pydantic import BaseModel
 from kazma_ui import documents_api
 
 CAP = documents_api._JSON_BODY_MAX_BYTES
@@ -161,3 +162,51 @@ async def test_the_delete_route_refuses_a_large_body_unread(monkeypatch):
     status, payload, read = await _call(_app(monkeypatch), "/api/documents/d1/delete", _too_big())
     assert status == 413 and payload["detail"]["code"] == "request_too_large"
     assert read == 0
+
+
+class Payload(BaseModel):
+    """A body model for the negative control (module level: this module's
+    postponed annotations resolve against its globals)."""
+
+    text: str
+
+
+def _routes_fastapi_reads_a_body_for(router) -> list[str]:
+    """Routes whose body FastAPI itself reads and parses before the handler
+    runs: a pydantic model, a dict or a Body() parameter -- what the source
+    gate above cannot see when it is a plain annotation."""
+    return sorted(
+        f"{','.join(sorted(route.methods or []))} {route.path}"
+        for route in router.routes
+        if getattr(route, "dependant", None) is not None and _body_params(route.dependant)
+    )
+
+
+def _body_params(dependant) -> list:
+    found = list(dependant.body_params)
+    for sub in dependant.dependencies:
+        found += _body_params(sub)
+    return found
+
+
+def test_fastapi_reads_no_document_route_s_body():
+    """Asked of FastAPI, not of the source: every document route's body goes
+    through the bounded readers (Q04 defensive check C9, 2026-10-15)."""
+    assert _routes_fastapi_reads_a_body_for(documents_api.create_documents_router()) == []
+
+    # Negative control: a route taking a model or a dict is seen.
+    from fastapi import APIRouter
+
+    planted = APIRouter()
+
+    @planted.post("/api/documents/planted-model")
+    async def _model(payload: Payload):  # noqa: ARG001
+        return {}
+
+    @planted.post("/api/documents/planted-dict")
+    async def _mapping(payload: dict):  # noqa: ARG001
+        return {}
+
+    assert _routes_fastapi_reads_a_body_for(planted) == [
+        "POST /api/documents/planted-dict", "POST /api/documents/planted-model",
+    ]

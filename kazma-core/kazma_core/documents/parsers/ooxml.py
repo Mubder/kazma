@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import uuid
 from dataclasses import replace
 from pathlib import Path
 
+from ..binaries import run_soffice_cli
 from ..errors import DocumentLimitError, DocumentParseError
 from ..models import BlockType, DocumentIR
 from ..sniff import sniff_document
@@ -163,9 +163,11 @@ class LegacyOfficeParser:
         run_dir = run_root / f"convert-{uuid.uuid4().hex}"
         run_dir.mkdir(parents=True, exist_ok=False)
         try:
-            process = subprocess.run(
+            # Through the bounded runner: on a timeout it kills LibreOffice's
+            # whole process tree and bounds the last wait (subprocess.run
+            # killed only the process it started; Q04 defensive check C11).
+            process = run_soffice_cli(
                 [
-                    self.executable,
                     "--headless",
                     "--convert-to",
                     output_extension.lstrip("."),
@@ -173,10 +175,8 @@ class LegacyOfficeParser:
                     str(run_dir),
                     str(path),
                 ],
-                capture_output=True,
-                check=False,
                 timeout=max(5, context.config.worker_timeout_seconds - 5),
-                text=True,
+                executable=self.executable,
             )
             converted = run_dir / f"{path.stem}{output_extension}"
             if process.returncode != 0 or not converted.is_file():

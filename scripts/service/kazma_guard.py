@@ -1985,8 +1985,17 @@ class DocumentBroker:
             return False
 
     def _ensure_token(self) -> str:
+        """The broker's token, readable by this account only -- or OSError,
+        and the broker does not start (``_start`` counts it as a failed
+        start). Until 2026-10-15 a restriction that failed only logged a
+        warning and the secret was written anyway, and a token file already
+        there was used as it was (Q04 defensive check C5)."""
         path = self.token_path
         if self._token_ok():
+            # Restricted again at every start: a file an older build left, or
+            # one whose access list changed since, must not be served from.
+            if not _restrict_to_owner(path):
+                raise OSError("the broker token file could not be restricted to this account")
             return path.read_text(encoding="utf-8").strip()
         path.parent.mkdir(parents=True, exist_ok=True)
         token = secrets.token_urlsafe(48)
@@ -1994,13 +2003,18 @@ class DocumentBroker:
         fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         os.close(fd)
         # The empty file is restricted before the secret is in it; the
-        # rename keeps its access list.
-        restricted = _restrict_to_owner(tmp)
+        # rename keeps its access list. No restriction, no secret.
+        if not _restrict_to_owner(tmp):
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise OSError("the broker token file could not be restricted to this account; "
+                          "no token was written")
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(token)
         os.replace(tmp, path)
-        self.log("info" if restricted else "warn", "broker.token_created", path=str(path),
-                 owner_only=restricted)
+        self.log("info", "broker.token_created", path=str(path), owner_only=True)
         return token
 
     def _start(self) -> None:

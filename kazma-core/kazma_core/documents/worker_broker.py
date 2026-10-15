@@ -231,7 +231,16 @@ def _check_attestation(facts: dict[str, Any], limits: BrokerLimits) -> list[str]
     status = facts.get("status") or {}
     if facts.get("uid") in (None, 0) or facts.get("gid") in (None, 0):
         problems.append("worker runs as root")
-    for key in ("CapEff", "CapPrm", "CapAmb"):
+    # The exact account the run command names, not merely "not root" (Q04
+    # defensive check C3, 2026-10-15: any non-root uid passed).
+    want_uid, want_gid = (int(part) for part in WORKER_USER.split(":"))
+    if facts.get("uid") != want_uid or facts.get("gid") != want_gid:
+        problems.append(
+            f"worker runs as {facts.get('uid')}:{facts.get('gid')}, not {WORKER_USER}"
+        )
+    # The bounding set too: with it empty and no_new_privs set, nothing the
+    # worker runs can gain a capability (CapBnd was read and never checked).
+    for key in ("CapEff", "CapPrm", "CapAmb", "CapBnd"):
         if status.get(key) not in ("0000000000000000",):
             problems.append(f"{key} is not empty ({status.get(key)!r})")
     if status.get("NoNewPrivs") != "1":

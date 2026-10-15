@@ -161,8 +161,16 @@ def maybe_salvage_extract(
     if best_score < SALVAGE_SCORE and remote_allowed:
         try:
             salvaged = try_remote_parse(path, document)
-        except Exception:
-            logger.debug("[extract] remote salvage failed", exc_info=True)
+        except Exception as exc:
+            # The operator turned remote parsing on: a refusal (no audit
+            # scope, an audit that could not be written) or a failure is said,
+            # not left at DEBUG (Q04 defensive check C10, 2026-10-15). Only
+            # the type: a provider's message may carry request details.
+            logger.warning(
+                "[extract] remote parsing did not run or failed (%s); the local reading is kept",
+                type(exc).__name__,
+            )
+            logger.debug("[extract] remote salvage failure", exc_info=True)
             salvaged = None
         if salvaged is not None:
             rescored = float(score_document_extraction(salvaged))

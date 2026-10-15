@@ -112,14 +112,18 @@ def run_soffice_cli(
     timeout: float = 30,
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
+    executable: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run LibreOffice headlessly without popping a Windows console.
 
     Prefers ``soffice.com`` on Windows, always redirects stdin from DEVNULL,
     and uses CREATE_NO_WINDOW so version probes never show
-    "Press Enter to continue...".
+    "Press Enter to continue...". *executable* is a LibreOffice the caller
+    already probed (the legacy Office parser); default: :func:`find_soffice`.
+    Every LibreOffice call in product code comes through here
+    (``tests/test_soffice_call_bounded.py``).
     """
-    executable = find_soffice()
+    executable = executable or find_soffice()
     if not executable:
         raise FileNotFoundError("soffice not found")
     cmd = [executable, *args]

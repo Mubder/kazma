@@ -92,6 +92,62 @@ def test_a_delete_that_cannot_unindex_deletes_nothing(tmp_path, monkeypatch: pyt
     assert adapter.libraries_holding(tenant_id="tenant-a", document_id=document.id) == []
 
 
+def test_a_delete_without_knowledge_keeps_an_indexed_document(tmp_path) -> None:
+    """Knowledge failed to start (no adapter): the store still says which
+    libraries the document is searchable in, so the delete refuses rather than
+    tombstoning a document chat can still quote (Q04 defensive check C14,
+    2026-10-15). The old code tombstoned it."""
+    repository, store, adapter, document = _indexed(tmp_path)
+    service = DocumentService(repository=repository, knowledge_adapter=None)
+    result = service.delete_document(
+        tenant_id="tenant-a", actor_id="owner", document_id=document.id, reason="test"
+    )
+    assert result.ok is False and result.code == "document_unindex_failed"
+    assert result.data["libraries"] == ["docs"]
+    assert repository.get_document(tenant_id="tenant-a", document_id=document.id, actor_id="owner")
+
+    # A document no library holds is deleted without the adapter, as before.
+    assert adapter.unindex_document(
+        tenant_id="tenant-a", actor_id="owner", library_id="docs", document_id=document.id
+    ).ok
+    assert service.delete_document(
+        tenant_id="tenant-a", actor_id="owner", document_id=document.id, reason="test"
+    ).ok
+
+
+def test_the_delete_holds_the_publication_lock_until_its_tombstone(tmp_path, monkeypatch) -> None:
+    """An index published between the delete's unindex and its tombstone
+    stayed searchable. The delete holds the document's publication lock (the
+    one every index holds) through the tombstone: another thread cannot take
+    it while the tombstone is written. The old code held it per unindex call
+    only, and this check fails on it."""
+    import threading
+
+    repository, store, adapter, document = _indexed(tmp_path)
+    service = DocumentService(repository=repository, knowledge_adapter=adapter)
+    lock = adapter.publication_lock("tenant-a", document.id)
+    seen: list[bool] = []
+    tombstone = repository.tombstone_document
+
+    def watched(**kw):
+        def other_thread():
+            got = lock.acquire(blocking=False)
+            if got:
+                lock.release()
+            seen.append(got)
+
+        worker = threading.Thread(target=other_thread)
+        worker.start()
+        worker.join()
+        return tombstone(**kw)
+
+    monkeypatch.setattr(repository, "tombstone_document", watched)
+    assert service.delete_document(
+        tenant_id="tenant-a", actor_id="owner", document_id=document.id, reason="test"
+    ).ok
+    assert seen == [False], "another thread could take the publication lock during the tombstone"
+
+
 def test_the_page_offers_the_way_out() -> None:
     html = (REPO / "kazma-ui/kazma_ui/templates/documents.html").read_text(encoding="utf-8")
     js = (REPO / "kazma-ui/kazma_ui/static/js/documents.js").read_text(encoding="utf-8")
