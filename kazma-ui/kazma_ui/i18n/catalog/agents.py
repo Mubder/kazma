@@ -57,6 +57,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "خامل",
         "en": "idle",
     },
+    "agents.shutting_down": {
+        "ar": "الخادم يتوقف",
+        "en": "Server shutting down",
+    },
     "agents.inferences": {
         "ar": "استدلال",
         "en": "inferences",

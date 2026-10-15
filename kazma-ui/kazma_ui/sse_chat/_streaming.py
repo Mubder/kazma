@@ -634,12 +634,16 @@ async def _stream_langgraph_events(
             # synchronously (stopping at any new interrupt), then fall through
             # to the existing post-stream logic that backfills assistant text
             # and detects chained HITL interrupts from the checkpoint.
+            from kazma_core.agent.turn_budget import TurnSegment, timed_out_reply
             from langgraph.types import Command as _Command
 
             # Initialize BEFORE the if/else so the HITL resume path doesn't hit
             # UnboundLocalError at the post-stream `if stream_error:` checks
             # (the resume branch previously never bound this name).
             stream_error: str | None = None
+            # The honest reply when the turn's time limit cut this segment
+            # (either branch); it is then the turn's answer.
+            _timed_out_reply = ""
 
             _is_resume = isinstance(input_state, _Command)
 
@@ -819,7 +823,9 @@ async def _stream_langgraph_events(
                             })
                 finally:
                     _unreg_q(thread_id)
-                await asyncio.shield(_resume_task)
+                # invoke_turn bounds the resume by the turn's time limit; cut,
+                # it hands back the state ending with the honest reply.
+                _timed_out_reply = timed_out_reply(await asyncio.shield(_resume_task))
             else:
                 # Wrap astream_events with a keepalive generator so long LLM
                 # processing (e.g. DeepSeek 30-40s on 150K-token contexts)
@@ -844,19 +850,32 @@ async def _stream_langgraph_events(
                 async def _pump_events():
                     nonlocal _stream_done
                     try:
+                        from kazma_core.agent.turn_budget import turn_segment_budget
+
                         from kazma_ui.turn_runtime import astream_events as _astream_turn
 
-                        async for ev in _astream_turn(graph, input_state, config):
-                            # Bounded queue: drop advisory stream events when
-                            # the consumer is gone/slow rather than grow the
-                            # queue unbounded for up to DETACHED_TTL_S. The
-                            # final state is backfilled from the checkpoint
-                            # anyway (audit finding).
-                            try:
-                                _event_queue.put_nowait(ev)
-                            except asyncio.QueueFull:
-                                pass
-                            _progress["last"] = time.monotonic()
+                        # The turn's wall-clock budget, the rule the chat
+                        # apps apply too (kazma_core.agent.turn_budget): it
+                        # bounds this segment, in the one task that reads
+                        # the graph, and cancels the run when it runs out.
+                        # The web had none until 2026-10-15.
+                        async with turn_segment_budget(
+                            graph, config, thread_id=thread_id, input_state=input_state,
+                        ) as _segment:
+                            async for ev in _astream_turn(graph, input_state, config):
+                                # Bounded queue: drop advisory stream events when
+                                # the consumer is gone/slow rather than grow the
+                                # queue unbounded for up to DETACHED_TTL_S. The
+                                # final state is backfilled from the checkpoint
+                                # anyway (audit finding).
+                                try:
+                                    _event_queue.put_nowait(ev)
+                                except asyncio.QueueFull:
+                                    pass
+                                _progress["last"] = time.monotonic()
+                        if _segment.expired:
+                            # Never dropped: the consumer ends the turn on it.
+                            await _event_queue.put(_segment)
                     except Exception as exc:
                         await _event_queue.put(exc)
                     finally:
@@ -966,6 +985,10 @@ async def _stream_langgraph_events(
                         if event is None:
                             _stream_completed = True
                             break  # stream finished
+                        if isinstance(event, TurnSegment):
+                            # The budget cut the run; its reply ends the turn.
+                            _timed_out_reply = event.text
+                            continue
                         if isinstance(event, Exception):
                             # Sanitize before it reaches the client — raw
                             # exceptions can leak stack traces / API bodies.
@@ -1223,10 +1246,21 @@ async def _stream_langgraph_events(
             interrupted = False
             _hitl_payload_saved: dict[str, Any] | None = None
             snapshot = None
-            try:
-                snapshot = await graph.aget_state(config)
-            except Exception as exc:
-                logger.warning("[SSE] aget_state failed after stream: %s", exc)
+            if _timed_out_reply:
+                # Cut by the turn's time limit (kazma_core.agent.turn_budget):
+                # the run is cancelled, nothing is paused, and the honest reply
+                # is the answer -- the checkpoint already ends with it, so the
+                # closer agrees. Streamed narration stays, as reasoning.
+                if content_acc.strip() and content_acc.strip() != _timed_out_reply:
+                    _narration_acc = content_acc
+                if not content_acc:
+                    yield await emit_j("token", {"content": _timed_out_reply})
+                content_acc = _timed_out_reply
+            else:
+                try:
+                    snapshot = await graph.aget_state(config)
+                except Exception as exc:
+                    logger.warning("[SSE] aget_state failed after stream: %s", exc)
 
             if snapshot is not None:
                 # Checkpoint last-hop vs streamed concat: the token stream

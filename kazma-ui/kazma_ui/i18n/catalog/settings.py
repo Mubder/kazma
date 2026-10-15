@@ -1839,6 +1839,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حفظ مدة الاحتفاظ",
         "en": "Save Retention",
     },
+    "settings.save_turn_timeout": {
+        "ar": "حفظ حد الوقت",
+        "en": "Save Time Limit",
+    },
     "settings.saved": {
         "ar": "تم الحفظ",
         "en": "Saved",
@@ -2236,6 +2240,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.turn_notify_title": {
         "ar": "إشعارات المهام",
         "en": "Task notifications",
+    },
+    "settings.turn_timeout_env": {
+        "ar": "هذه القيمة مضبوطة بالمتغير KAZMA_TURN_TIMEOUT_SECONDS في بيئة الخادم؛ غيّرها هناك.",
+        "en": "Set by KAZMA_TURN_TIMEOUT_SECONDS in the server's environment; change it there.",
+    },
+    "settings.turn_timeout_hint": {
+        "ar": "ينطبق على كل الواجهات: محادثة الويب وتطبيقات المحادثة وسطر الأوامر والمهام المجدولة. يُحسب وقت تشغيل الدور فقط، ولا يُحسب أبدًا وقت انتظار موافقتك. الدور الذي يتجاوزه يتوقف ويقول ذلك، ويصلك تنبيه. الأمر /long يرفعه عن المحادثة. القيمة 0 تعني بلا حد (الافتراضي).",
+        "en": "Every surface applies it: the web chat, the chat apps, the command line and scheduled tasks. Only the time a turn runs counts, never the time it waits for your approval. A turn that runs past it is stopped and says so, and you get an alert. /long lifts it for a chat. 0 means no limit (the default).",
+    },
+    "settings.turn_timeout_saved": {
+        "ar": "تم حفظ حد وقت الدور",
+        "en": "Turn time limit saved",
+    },
+    "settings.turn_timeout_seconds": {
+        "ar": "أوقف الدور إذا استمر أكثر من (ثانية)",
+        "en": "Stop a turn that runs longer than (seconds)",
+    },
+    "settings.turn_timeout_title": {
+        "ar": "حد وقت الدور",
+        "en": "Turn time limit",
     },
     "settings.uninstall": {
         "ar": "إزالة",

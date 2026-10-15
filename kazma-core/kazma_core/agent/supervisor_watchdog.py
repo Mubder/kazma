@@ -210,7 +210,13 @@ async def supervised_invoke(
             last_exc = stall_exc
             incident = IncidentClass.STALLED
         except asyncio.CancelledError:
-            raise  # outer cancellation (shutdown) — never swallow
+            # Outer cancellation (Stop, /abort, the turn's time limit,
+            # shutdown) — never swallow it, and never leave the graph run
+            # behind: the invoke runs in a task of its own, which this
+            # cancellation does not reach by itself (2026-10-15).
+            invoke_task.cancel()
+            await _settle(invoke_task)
+            raise
         except BaseException as exc:  # noqa: BLE001 — classification decides
             last_exc = exc
             incident = classify_incident(exc)

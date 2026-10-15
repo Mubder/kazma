@@ -243,6 +243,8 @@ def test_the_deep_pass_does_not_apply_a_turn_forgotten_during_its_model_call(mem
 #: Functions that write graph state without rewinding a chat, and why.
 NOT_A_REWIND = {
     "kazma-core/kazma_core/agent/supervisor_watchdog.py": "appends a reflection note to the running turn",
+    "kazma-core/kazma_core/agent/turn_budget.py": "ends the running turn its time limit cut with the honest reply; "
+                                                   "takes no earlier turn back",
 }
 
 

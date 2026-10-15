@@ -269,7 +269,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_TURN_DURABLE_INTERVAL_S` | `"2.0"` | `kazma_ui.sse_chat._streaming` | yes |
 | `KAZMA_TURN_LIVENESS_GRACE_S` | (none) | `kazma_ui.turn_liveness` | yes |
 | `KAZMA_TURN_LIVENESS_HEAL` | (none) | `kazma_ui.turn_liveness` | yes |
-| `KAZMA_TURN_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.turn`, `kazma_core.agent_runner` | yes |
+| `KAZMA_TURN_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.turn_budget` | yes |
 | `KAZMA_TZ` | `""` | `kazma_core.cron.scheduler` | yes |
 | `KAZMA_UNRESTRICTED_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_UPDATE_REMOTE_ALLOWLIST` | `""` | `kazma_cli.update` | yes |

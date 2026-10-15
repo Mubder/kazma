@@ -4119,6 +4119,9 @@ executing commands after a mission ended Partial) — full diagnosis in
   runs fresh").
 - `/long off` (or `/abort`) remains the immediate manual clear on any
   build.
+- An active `/long` (budget, mission or `/unrestricted`) lifts the turn's
+  wall-clock limit for its chat on every surface; a paused one does not
+  (§31, `agent/turn_budget.py`).
 - **The gateway does both through `_settle_recursion_partial`**
   (`agent_handler/graph.py`), and a failure there is a WARNING. Inline, it
   imported a name removed 2026-09-04 inside `except Exception: pass`, so
@@ -4876,6 +4879,28 @@ cost are the sum of the per-call ledger for the turn id
 the segment's calls. A new LLM call site inside a turn records into the
 ledger (the respond synthesis did not, 2026-09-26). Gate:
 `tests/test_turn_usage.py` (through the real streamer).
+
+**A turn's time limit is one rule on every surface**
+(`kazma_core/agent/turn_budget.py`, 2026-10-15; full audit 2026-09-30: the
+chat apps had `KAZMA_TURN_TIMEOUT_SECONDS`, the web none, the agent runner a
+600 s copy, an approval's resume no limit anywhere). `resolve_turn_budget` is
+the one answer: a chat with `/long` active has none (`long_task` defines no
+wall-clock budget; its step budget and the mission's hard wall still bound
+it), else the variable when set, else `agent.turn_timeout_seconds` (Settings
+-> System), else none; `0` is none. It bounds each RUNNING segment: a new
+message or an approval's resume, until it answers or pauses -- the wait for
+an approval is never counted, and the non-stop envelope's recovery runs
+inside it. Every graph run sits in `turn_segment_budget` (`run_agent_turn`,
+`turn_runtime.invoke_turn`, the SSE pump, in the task that reads the graph);
+past it the run is cancelled as Stop cancels it, the checkpoint gets the
+honest reply as the turn's last message (`turn_failed`, nothing pending, as
+`respond`), so `close_turn`, the `done` frame's `content`, the gateway's
+reply and a reload all agree, and `turn.timed_out` is paged once. Only
+`/compact` runs without it (`budget=False`, declared). Gates:
+`tests/test_turn_budget.py` (one reader of the variable and the setting;
+every graph run inside the budget; each with its negative control),
+`tests/e2e/test_turn_time_limit.py` (the real route; the old pump as the
+control).
 
 **A plan feeds only the running turn.** `_paintTextSlot` paints every turn,
 finished ones on every reload; plan ingestion there logged progress on the

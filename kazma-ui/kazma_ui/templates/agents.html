@@ -20,7 +20,7 @@
             <span style="margin:0 6px;color:var(--text-tertiary);">·</span>
             <span x-text="t('agents.state_label') + ': ' + (statusLoaded ? tOr('agents.state_' + agent.agent_state, agent.agent_state) : t('agents.unknown_status'))"></span>
             <template x-if="agent.last_activity">
-              <span style="margin-left:6px;color:var(--text-tertiary);">— <span x-text="agent.last_activity"></span></span>
+              <span style="margin-left:6px;color:var(--text-tertiary);">— <span translate="no" x-text="agent.last_activity"></span></span>
             </template>
           </div>
         </div>
@@ -77,7 +77,7 @@
         <span x-text="statusLabel()"
               :style="agent.running ? 'color:var(--success);' : 'color:var(--text-muted);'"></span>
       </div>
-      <div class="metric-sub" x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.waiting') : (statusLoaded ? tOr('agents.state_' + agent.agent_state, agent.agent_state) : t('agents.unknown_status'))) : (agent.last_activity || t('agents.idle'))"></div>
+      <div class="metric-sub" x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.waiting') : (statusLoaded ? tOr('agents.state_' + agent.agent_state, agent.agent_state) : t('agents.unknown_status'))) : t('agents.shutting_down')"></div>
     </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="brain" aria-hidden="true"></span></div>
@@ -227,7 +227,7 @@
         <span style="color:var(--text-tertiary);">{{ t('agents.total_cost') }}</span>
         <span x-text="statusLoaded ? ((agent.metrics && agent.metrics.total_cost) || '$0.0000') : '—'"></span>
         <span style="color:var(--text-tertiary);">{{ t('agents.last_activity_label') }}</span>
-        <span style="color:var(--text-muted);" x-text="agent.last_activity || '—'"></span>
+        <span style="color:var(--text-muted);" translate="no" x-text="agent.last_activity || '—'"></span>
       </div>
       <p style="margin:16px 0 0;font-size:0.75rem;color:var(--text-tertiary);line-height:1.4;">
         {{ t('agents.runtime_hint') }}

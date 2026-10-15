@@ -979,6 +979,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # Checkpoint retention (2026-09-27): SQLite files and Postgres deletes,
     # one transaction per chat; the task store's single-task delete.
     "run_checkpoint_retention", "retention_setting", "delete_task",
+    # A turn's time limit (2026-10-15): the chat's /long state and the
+    # setting, both settings reads, asked at the start of every graph run.
+    "resolve_turn_budget", "turn_timeout_setting",
     # Third pass (2026-09-30). The restic maintenance handler read its repos
     # on the loop while Postgres was away (a Docker Desktop update) and the
     # guard restarted Kazma. Beside it: the workspace ladder (the workspace

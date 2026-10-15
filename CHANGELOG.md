@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## One turn time limit on every surface (2026-10-15)
+
+- The web chat now has the same turn time limit as Telegram, Discord, Slack,
+  the CLI and reminders. Before, only the chat apps and the CLI honoured
+  `KAZMA_TURN_TIMEOUT_SECONDS`, the web had no limit, and the resume after
+  an approval had none anywhere.
+- The limit is set in Settings → System ("Turn time limit"; 0 means no
+  limit, the default). `KAZMA_TURN_TIMEOUT_SECONDS`, when set, overrides
+  it. A chat running `/long` has no limit; its step budget still applies.
+- The clock counts only while Kazma works. Time spent waiting for your
+  approval is not counted: the resume after an approval starts the clock
+  again.
+- A turn that runs out of time is stopped the way Stop stops it. It ends
+  with one honest reply that says what to change, and every surface shows
+  that reply: the chat, a reload, the chat apps and the next turn. The
+  owner is told once.
+- In Arabic, the Dashboard's recent traces showed their type and status in
+  English ("llm", "success"). They are now in Arabic. A trace's label (a
+  model, a tool, "idle → streaming") is shown as it is, as content, on the
+  Dashboard and the Agents page. The Arabic page tour now always runs with
+  traces of every kind; before, it ran with none.
+
 ## Swarm: workers hand off to each other; chaos runs (2026-10-15)
 
 - A swarm worker can now pass its task to another worker. While the engine

@@ -1186,14 +1186,10 @@ class KazmaAgent:
 
         token = set_current_thread_id(self._thread_id)
         try:
-            import os as _os_to
-
-            # Wall-clock turn budget (audit M14). Override: KAZMA_TURN_TIMEOUT_SECONDS
-            raw_to = (_os_to.environ.get("KAZMA_TURN_TIMEOUT_SECONDS") or "600").strip()
-            try:
-                turn_timeout = float(raw_to)
-            except ValueError:
-                turn_timeout = 600.0
+            # The wall-clock budget is the turn's own: run_agent_turn applies
+            # the one rule every surface does (agent/turn_budget.py). This
+            # path kept a copy of its own with a 600 s default until
+            # 2026-10-15.
 
             # Non-stop self-healing envelope (opt-in): heartbeat stall
             # detection + checkpoint rollback + reflection + bounded resume.
@@ -1212,7 +1208,6 @@ class KazmaAgent:
                 thread_id=self._thread_id,
                 state=graph_state,
                 config=config,
-                timeout=turn_timeout,
                 nonstop_config=_ns_cfg,
             )
             if _turn.text:

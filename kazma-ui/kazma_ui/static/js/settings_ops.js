@@ -616,6 +616,19 @@
             } catch (e) { /* keep defaults */ }
         },
 
+        async loadTurnTimeout() {
+            try {
+                const data = await this._fetch('/api/settings/turn-timeout');
+                if (data && typeof data.seconds === 'number') {
+                    this.turnTimeout = {
+                        seconds: data.seconds,
+                        source: data.source || 'default',
+                        max: typeof data.max === 'number' ? data.max : 86400,
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+        },
+
         async loadPackages() {
             this.pkgLoading = true;
             try {

@@ -608,6 +608,7 @@ def create_sse_chat_router(
                             session_id=getattr(session, "session_id", "") or "",
                             thread_id=thread_id,
                             persist=False,
+                            budget=False,
                         )
                         
                         session.messages = _convert_messages_to_dicts(result_state.get("messages", []))

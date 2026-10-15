@@ -332,12 +332,12 @@
     tr.innerHTML =
       '<td style="padding:10px 16px;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);white-space:nowrap;">' +
         escapeHtml(trace.time || trace.timestamp || '') + '</td>' +
-      '<td style="padding:10px 16px;"><span class="badge ' + badgeClass + '" style="font-size:0.7rem;">' +
-        escapeHtml(trace.trace_type || '') + '</span></td>' +
-      '<td style="padding:10px 16px;font-weight:500;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+      '<td style="padding:10px 16px;"><span class="badge badge-basic" style="font-size:0.7rem;">' +
+        traceWord('dashboard.trace_type_', trace.trace_type) + '</span></td>' +
+      '<td translate="no" style="padding:10px 16px;font-weight:500;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
         escapeHtml(trace.label || '') + '</td>' +
       '<td style="padding:10px 16px;"><span class="badge ' + badgeClass + '" style="font-size:0.7rem;">' +
-        escapeHtml(trace.status || '') + '</span></td>' +
+        traceWord('dashboard.trace_status_', trace.status) + '</span></td>' +
       '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' +
         escapeHtml(String(trace.duration_ms || '')) + 'ms</td>' +
       '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' +
@@ -547,6 +547,10 @@
     var text = fallback;
     for (var k in (vars || {})) text = text.split('{' + k + '}').join(String(vars[k]));
     return text;
+  }
+  function traceWord(prefix, value) {
+    if (LISTS.traceWord) return LISTS.traceWord(prefix, value);
+    return '<bdi translate="no">' + escapeHtml(String(value || '')) + '</bdi>';
   }
   function platformLabel(p) {
     return LISTS.platformLabel ? LISTS.platformLabel(p) : String(p || '');
