@@ -23,6 +23,16 @@
   read.** After a failed read (a 502 while the server restarts) the page
   dropped the chosen model from the browser's storage, as if it were no
   longer offered. Only a complete list drops one now.
+- **The document broker serves an image built without labels.** Docker 29
+  leaves `Labels` out of an image that has none, and the broker's inspect
+  template then failed, so it read a plain `docker build` (the CI job's, the
+  compose deployment's) as missing and would not start. It now reads the
+  whole inspect answer; the image script does the same. The live install's
+  images carry labels and were not affected. Found by running the CI job on
+  Linux locally.
+- **The container test job installs what its OCR test draws with.** The test
+  draws its Arabic page with PyMuPDF in the test process; the job now
+  installs it.
 - **The route gates see every route at its real path.** The helper that
   lists the app's routes dropped a prefix given when a router is included,
   so the Telegram webhook's routes were checked under the wrong paths.

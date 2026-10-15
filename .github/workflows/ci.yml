@@ -187,7 +187,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install deps
-        run: pip install -e ".[test]"
+        # pymupdf: the neural OCR test draws its Arabic page with it in the
+        # test process (a skip fails this job, below).
+        run: pip install -e ".[test]" pymupdf
       - name: Build the worker and broker images
         run: |
           docker version --format 'engine {{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'

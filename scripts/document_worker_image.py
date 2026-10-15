@@ -57,16 +57,20 @@ def _run(docker: str, *args: str, timeout: float = 60.0) -> subprocess.Completed
 
 def _image(docker: str, ref: str) -> dict | None:
     """``{id, created, labels}`` of a local image, or None."""
-    result = _run(docker, "image", "inspect", "--format",
-                  "{{.Id}}|{{.Created}}|{{json .Config.Labels}}", ref)
+    # The whole object: Docker 29 leaves ``Labels`` out of ``.Config`` for an
+    # unlabelled image, and a template naming it fails (worker_broker).
+    result = _run(docker, "image", "inspect", "--format", "{{json .}}", ref)
     if result.returncode != 0:
         return None
-    image_id, created, labels = (result.stdout.strip().split("|", 2) + ["", ""])[:3]
     try:
-        parsed = json.loads(labels or "null") or {}
+        data = json.loads(result.stdout)
     except json.JSONDecodeError:
-        parsed = {}
-    return {"id": image_id, "created": created, "labels": parsed}
+        return None
+    if not isinstance(data, dict):
+        return None
+    config = data.get("Config") if isinstance(data.get("Config"), dict) else {}
+    labels = config.get("Labels") if isinstance(config.get("Labels"), dict) else {}
+    return {"id": str(data.get("Id") or ""), "created": str(data.get("Created") or ""), "labels": labels}
 
 
 def _built(docker: str) -> list[str]:

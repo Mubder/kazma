@@ -447,7 +447,10 @@ def test_the_neural_ocr_engine_reads_inside_the_container(container_profile, tmp
     """2026-10-15 (Q02): the image carries the neural OCR engine and its
     models (no network at run time) and reads an Arabic-Indic number with it.
     Negative control: the same page with documents.ocr.engine: tesseract."""
-    import pymupdf
+    # The page is drawn here, in the test process: PyMuPDF is the documents
+    # extra's, not the test extra's (the CI job installs it; a skip there
+    # fails the job).
+    pymupdf = pytest.importorskip("pymupdf")
 
     report = container_profile.capabilities
     assert report["ocr"]["engines"]["neural"]["readiness"] == "ready", report["ocr"]["engines"]
