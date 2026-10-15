@@ -1586,11 +1586,15 @@ def test_guard_notifies_on_operator_reload() -> None:
         Path(__file__).resolve().parent.parent
         / "scripts" / "service" / "kazma_guard.py"
     ).read_text(encoding="utf-8")
-    branch = src.split("consume_reload_request()", 1)[1].split(
-        "self.restarts += 1", 1
-    )[0]
-    assert "self.notify.send(" in branch
+    # The supervision loop's reload branch, up to the crash ladder it skips.
+    branch = src.split(
+        "if reason == RELOAD_REASON or self._fresh_reload_request():", 1
+    )[1].split("self.restarts += 1", 1)[0]
+    assert "self._page(" in branch
     assert "operator reload" in branch
+    # ... and _page is what reaches the notifier.
+    page = src.split("    def _page(", 1)[1].split("\n    def ", 1)[0]
+    assert "self.notify.send(" in page
 
 
 def test_four_delivery_routes_complete_fields() -> None:

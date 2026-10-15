@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## The model-call record off the event loop; tests stay off the network (2026-10-15)
+
+- **Every model call's record is written off the event loop.** The record
+  of each model call (the ledger behind a turn's tokens and cost) was
+  written on the server's event loop for swarm workers and research calls.
+  It is now written in a background thread. The caller still waits for its
+  record, so a turn's totals include every call, in order. A cancelled call
+  still keeps its record.
+- **No test reaches the network or loads the real embedding model.** Some
+  swarm tests loaded the multi-gigabyte embedding model from this machine's
+  cache and called a real model provider. That slowed the live server
+  running beside the suite, and those tests passed or failed depending on
+  the machine. Now a test that tries either fails and names the call that
+  tried. A test that truly needs the real model or the internet says so
+  with a marker, and runs only when asked.
+- **A guard that refuses to start leaves the document broker alone.** A
+  second guard that finds Kazma already running refuses to start. Before,
+  it first rewrote the running guard's record of the document broker.
+
 ## Deleted words really leave the keyword index (2026-10-15)
 
 - **A deleted library's words now leave the keyword index file.** The

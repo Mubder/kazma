@@ -16,6 +16,18 @@ from kazma_tui.nav_rail import NAV_ITEMS, TAB_LABELS, NavRail
 from kazma_ui.i18n import TRANSLATIONS
 from textual.widgets import TabbedContent
 
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
+
 #: Tabs that keep a word of their own, and why.
 OWN_WORD = {
     "swarm": "the web UI's nav label is its one outlier; its pages say السرب (swarm.title)",

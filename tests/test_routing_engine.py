@@ -16,6 +16,8 @@ from kazma_core.swarm.task import SwarmTask
 from kazma_core.routing_engine import UnifiedRouter, NoCapableWorkersError
 from kazma_core.swarm.task import WorkerCapabilities
 
+from tests._no_models import finish_turn_memory, keep_models_out
+
 
 @pytest.fixture(autouse=True)
 def _keywords_and_dialects_only(monkeypatch):
@@ -25,6 +27,15 @@ def _keywords_and_dialects_only(monkeypatch):
     import kazma_core.swarm.semantic_router as semantic_router
 
     monkeypatch.setattr(semantic_router, "_kazma_embedder", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
 
 
 @pytest.mark.anyio

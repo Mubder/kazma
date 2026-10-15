@@ -300,6 +300,13 @@ class TestClientManagement:
 class TestModelDiscovery:
     """Tests for discover_models / discover_all / get_discovered_models."""
 
+    @pytest.fixture(autouse=True)
+    def _public_dns(self, monkeypatch):
+        """Discovery's SSRF check resolves the provider's host: answered here,
+        never by the network -- api.openai.com was looked up for real
+        (tests/_egress_guard.py, 2026-10-15)."""
+        monkeypatch.setattr("kazma_core.security.ssrf._resolve_host_ips", lambda _host: ["93.184.216.34"])
+
     @pytest.mark.asyncio
     async def test_discover_models_success(self, config_store):
         from kazma_core.model_registry import initialize_model_registry

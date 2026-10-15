@@ -111,6 +111,23 @@ _ALLOW_REAL_DB = (os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") or "").strip().lowe
 # export KAZMA_OPS_ALERTS=1 for a run.
 os.environ.setdefault("KAZMA_OPS_ALERTS", "0")
 
+# No test reaches the network or loads the real embedder (2026-10-15). Swarm
+# pipeline tests loaded bge-m3 from this machine's Hugging Face cache and
+# called a real model provider (401): a test like that passes or fails with
+# the machine it runs on, and the model load starved the live server beside
+# the suite. tests/_egress_guard.py refuses both and fails the test, with
+# @pytest.mark.real_model (skipped unless KAZMA_TEST_REAL_MODEL=1) for a test
+# that truly needs them. The Hugging Face libraries are told to stay offline
+# too, so even a deliberate real-model run never contacts the hub.
+for _offline in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
+    os.environ.setdefault(_offline, "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+# Every app a test builds pre-warmed the local embedder at boot -- the model
+# load itself. The first recall that wants it loads it instead (and a test
+# that reaches it is the guard's to report).
+os.environ.setdefault("KAZMA_EMBEDDER_PREWARM", "0")
+pytest_plugins = ["tests._egress_guard"]
+
 # Force the sqlite backend and strip every DSN variant BEFORE any kazma
 # module can read them.
 if not _ALLOW_REAL_DB:

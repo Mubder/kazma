@@ -298,9 +298,14 @@ class TestRegistryRegistration:
             assert n in names, f"{n} not registered"
 
 
+@pytest.mark.network
 @pytest.mark.asyncio
 async def test_live_install_shadcn_improve(tmp_path: Path):
-    """Integration: download real shadcn/improve from GitHub (network)."""
+    """Integration: download real shadcn/improve from GitHub (network).
+
+    Runs only with KAZMA_TEST_NETWORK=1 (tests/_egress_guard.py): the suite
+    reaches no host on the internet.
+    """
     from kazma_core.agent_skills.installer import install_from_github
 
     result = await install_from_github("shadcn/improve", target_dir=tmp_path)

@@ -753,8 +753,18 @@ def fake_ftplib(monkeypatch: pytest.MonkeyPatch):
     """Route cloud_sync's local `import ftplib` to the fake class."""
     import ftplib as real_ftplib  # nosec B402 - patched to a fake below; no network
 
+    class _NoTLS:
+        """A server that refuses AUTH TLS: _connect falls back to the fake FTP.
+        The real FTP_TLS connected to the configured host itself -- a LAN
+        address -- before the fallback these tests exercise
+        (tests/_egress_guard.py, 2026-10-15)."""
+
+        def connect(self, host: str, port: int, timeout: Any = None) -> None:
+            raise real_ftplib.error_perm("534 AUTH TLS not supported (test server)")
+
     _FakeFTP.instances.clear()
     monkeypatch.setattr(real_ftplib, "FTP", _FakeFTP)
+    monkeypatch.setattr(real_ftplib, "FTP_TLS", _NoTLS)
     return real_ftplib
 
 

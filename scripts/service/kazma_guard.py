@@ -2606,7 +2606,6 @@ class Guard:
         _update_state(guard_pid=os.getpid(), guard_started=time.time(),
                       guard_features=list(GUARD_FEATURES), pause_held=None,
                       guard_code=_file_sha(Path(__file__).resolve()))
-        self.broker.on_guard_start()
         self._beat(force=True)
 
         if self._foreign_server_present():
@@ -2620,6 +2619,9 @@ class Guard:
             self._page("error", title, detail, force=True)
             print(format_operator_card("Guard", "error", title, detail), file=sys.stderr)
             return 2
+        # Only a guard that will supervise touches the broker: a refused one
+        # rewrote the broker's record (and could reap it) on its way out.
+        self.broker.on_guard_start()
 
         first = True
         while not self._stop:

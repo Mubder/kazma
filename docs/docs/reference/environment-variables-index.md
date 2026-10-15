@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**278** variables are read by the product code; **278** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**279** variables are read by the product code; **279** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -81,6 +81,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DOCUMENT_WORKER_ISOLATION` | (none) | `kazma_core.documents.worker_container` | yes |
 | `KAZMA_E2B` | (none) | `kazma_core.sandbox.e2b` | yes |
 | `KAZMA_E2B_API_KEY` | (none) | `kazma_core.sandbox.e2b` | yes |
+| `KAZMA_EMBEDDER_PREWARM` | `""` | `kazma_ui.app` | yes |
 | `KAZMA_EMBED_ALLOW_DOWNLOAD` | `""` | `kazma_core.memory.embedder` | yes |
 | `KAZMA_EMBED_API_KEY` | (none) | `kazma_core.memory.embedder`, `kazma_core.memory.health`, `kazma_core.settings_manager` | yes |
 | `KAZMA_EMBED_BASE_URL` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |

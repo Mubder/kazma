@@ -4536,6 +4536,17 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   `loop.create_task` in product code (including `ops_alerts._dispatch`)
   is the same class of bug — prefer `spawn_background`.
 - CI: `test_no_blocking_db_driver_in_async`, `test_no_bare_create_task`.
+- **The LLM ledger row is written off the loop** (2026-10-15). Async code
+  awaits `observability.llm_ledger.arecord_llm_call`: the SQLite insert and
+  the ledger's switch (a settings read) run in a thread, the caller waits
+  for its row (a turn's totals, `turn_usage`, read after its calls returned,
+  include them, in the order made), and the write is shielded, so a
+  cancelled caller loses no row and waits for it, bounded. `resilient_chat`
+  (every swarm worker and research model call) wrote it on the loop until
+  then. `record_llm_call` and the ledger's readers are in
+  `_LOOP_STALL_HELPERS`. Gate: `tests/test_llm_ledger_off_the_loop.py`
+  (SQLite traced on the ledger's connection; the inline, unawaited and
+  unshielded writes as negative controls).
 
 **F. Errors do not carry internals.**
 - API handlers return `kazma_core.errors.safe_error(exc)` — a stable code
@@ -7312,6 +7323,27 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   (every location `paths.py` resolves, from its source). Since 2026-10-01 it
   pins `KAZMA_SKILLS_HOME` too: the skill folders in the user's home, which
   the live install, running as the same user, reads (§22H).
+- **No test reaches the network or loads the real embedder** (2026-10-15,
+  `tests/_egress_guard.py`, registered by the root `conftest.py`). Swarm
+  pipeline tests loaded bge-m3 from this machine's Hugging Face cache (it
+  starved the live server) and built real provider calls. A DNS lookup of
+  another host, a connection or UDP send to one (sync sockets and both
+  asyncio loops), and the import of the real `sentence_transformers` are
+  refused where they are made, and the test FAILS with the call site even
+  when the code under test swallowed the refusal. Loopback stays open
+  (local servers, the suite's Postgres, Playwright). A test that truly
+  needs the real model or a provider is `@pytest.mark.real_model`
+  (`KAZMA_TEST_REAL_MODEL=1` runs it), one that needs the internet
+  `@pytest.mark.network` (`KAZMA_TEST_NETWORK=1`); `KAZMA_TEST_EGRESS_GUARD=0`
+  turns the guard off for debugging. Stub instead:
+  `tests/_no_models.keep_models_out` (no embedder, the model package absent,
+  self-improvement off, a registry client that refuses like a keyless
+  provider) and `finish_turn_memory` (a turn's post-turn memory thread ends
+  inside its test), a fake LLM client, `ssrf._resolve_host_ips` answered
+  locally. The root conftest sets `KAZMA_EMBEDDER_PREWARM=0` (every app a
+  test built loaded the model at boot) and the Hugging Face offline
+  switches. Gate: `tests/test_egress_guard.py` (planted tests in a child
+  pytest as the negative control).
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
 - **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`

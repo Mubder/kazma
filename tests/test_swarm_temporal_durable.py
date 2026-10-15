@@ -52,6 +52,29 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _no_models_for_the_module():
+    """For the whole module, between its tests too: the tests share one event
+    loop and its thread pool, so a result's memory write (the swarm bridge,
+    in a pool thread) a test started can run while the next test is still
+    being set up, outside any test's own stand-ins (tests/_egress_guard.py)."""
+    with pytest.MonkeyPatch.context() as mp:
+        keep_models_out(mp, llm=False)
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
+
 #: Set by the CI job that qualifies this path: there a missing SDK or a test
 #: server that cannot start fails the run instead of skipping it.
 _REQUIRED = os.environ.get("KAZMA_TEST_TEMPORAL_REQUIRED") == "1"

@@ -1713,23 +1713,20 @@ async def supervisor_node(
         from kazma_core.retry import friendly_llm_error
 
         # Per-call ledger (observability §A): durable record of the failure.
+        # Off the loop: the ledger is a SQLite write per call, and its switch
+        # a settings read (arecord_llm_call runs both in a thread).
         try:
-            from kazma_core.agent.nonstop import get_nonstop_config
+            from kazma_core.observability.llm_ledger import arecord_llm_call
 
-            if get_nonstop_config().ledger_enabled:
-                from kazma_core.observability.llm_ledger import record_llm_call
-
-                # Off the loop: the ledger is a SQLite write per call.
-                await asyncio.to_thread(
-                    record_llm_call,
-                    thread_id=str(state.get("thread_id", "")),
-                    iteration=int(state.get("iteration", 0) or 0),
-                    provider=type(llm).__name__,
-                    model=str(routed_model or ""),
-                    duration_ms=(time.monotonic() - start) * 1000,
-                    status="error",
-                    error_kind=str(getattr(exc, "kind", "") or type(exc).__name__),
-                )
+            await arecord_llm_call(
+                thread_id=str(state.get("thread_id", "")),
+                iteration=int(state.get("iteration", 0) or 0),
+                provider=type(llm).__name__,
+                model=str(routed_model or ""),
+                duration_ms=(time.monotonic() - start) * 1000,
+                status="error",
+                error_kind=str(getattr(exc, "kind", "") or type(exc).__name__),
+            )
         except Exception:
             pass
 
@@ -1772,27 +1769,24 @@ async def supervisor_node(
 
     # Per-call ledger (observability §A): durable record of the success,
     # including failover attribution (failover_from = primary model).
+    # Off the loop: the ledger is a SQLite write per call, and its switch a
+    # settings read (arecord_llm_call runs both in a thread).
     try:
-        from kazma_core.agent.nonstop import get_nonstop_config
+        from kazma_core.observability.llm_ledger import arecord_llm_call
 
-        if get_nonstop_config().ledger_enabled:
-            from kazma_core.observability.llm_ledger import record_llm_call
-
-            _served_model = _served_by[-1] if _served_by else ""
-            # Off the loop: the ledger is a SQLite write per call.
-            await asyncio.to_thread(
-                record_llm_call,
-                thread_id=str(state.get("thread_id", "")),
-                iteration=int(state.get("iteration", 0) or 0),
-                provider=type(llm).__name__,
-                model=str(response.model or _served_model or routed_model or ""),
-                prompt_tokens=int(response.usage.get("prompt_tokens", 0) or 0),
-                completion_tokens=int(response.usage.get("completion_tokens", 0) or 0),
-                cost_usd=float(response.cost_usd or 0.0),
-                duration_ms=duration_ms,
-                status="ok",
-                failover_from=str(routed_model or "") if _served_model else "",
-            )
+        _served_model = _served_by[-1] if _served_by else ""
+        await arecord_llm_call(
+            thread_id=str(state.get("thread_id", "")),
+            iteration=int(state.get("iteration", 0) or 0),
+            provider=type(llm).__name__,
+            model=str(response.model or _served_model or routed_model or ""),
+            prompt_tokens=int(response.usage.get("prompt_tokens", 0) or 0),
+            completion_tokens=int(response.usage.get("completion_tokens", 0) or 0),
+            cost_usd=float(response.cost_usd or 0.0),
+            duration_ms=duration_ms,
+            status="ok",
+            failover_from=str(routed_model or "") if _served_model else "",
+        )
     except Exception:
         pass
 

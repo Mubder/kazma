@@ -1005,6 +1005,14 @@ _LOOP_STALL_HELPERS = frozenset({
     # profile, the window and the trim budget are settings reads, which the
     # context_info tool made on the loop.
     "thread_usage", "context_report",
+    # The per-call ledger's write (2026-10-15): a SQLite insert per model
+    # call. resilient_chat -- every swarm worker and research model call --
+    # wrote it on the loop through a private wrapper; the supervisor and the
+    # respond node threaded the write but read the ledger's switch (a
+    # settings read) on the loop. Async code awaits arecord_llm_call. The
+    # turn's totals and the recent rows are SQLite reads of the same file.
+    "record_llm_call", "_record_if_enabled", "turn_usage", "turn_totals",
+    "query_recent", "turn_started_epoch",
     # Switching the model or provider (2026-10-01): settings and vault
     # writes, then the agent rebinds and the graph is compiled again. The
     # Settings route, the chat's provider switch, setup and the /model menu
@@ -1378,6 +1386,32 @@ def test_loop_stall_gate_follows_a_private_wrapper():
     assert _loop_stall_helper_calls(ast.parse(bad)) == [(7, "_outer")]
     assert _loop_stall_helper_calls(ast.parse(good)) == []
     assert _loop_stall_helper_calls(ast.parse(public)) == []
+
+
+def test_loop_stall_gate_catches_the_old_ledger_write():
+    """Negative control: resilient_chat's ledger row before 2026-10-15 -- a
+    private sync wrapper around the SQLite write, called after every model
+    call in async code."""
+    old = (
+        "def _record(**kwargs):\n"
+        "    from kazma_core.observability.llm_ledger import record_llm_call\n"
+        "    record_llm_call(**kwargs)\n"
+        "async def resilient_chat(client, messages):\n"
+        "    response = await client.chat(messages)\n"
+        "    _record(thread_id='t', status='ok')\n"
+        "    return response\n"
+    )
+    new = (
+        "async def _record(**kwargs):\n"
+        "    from kazma_core.observability.llm_ledger import arecord_llm_call\n"
+        "    await arecord_llm_call(**kwargs)\n"
+        "async def resilient_chat(client, messages):\n"
+        "    response = await client.chat(messages)\n"
+        "    await _record(thread_id='t', status='ok')\n"
+        "    return response\n"
+    )
+    assert _loop_stall_helper_calls(ast.parse(old)) == [(6, "_record")]
+    assert _loop_stall_helper_calls(ast.parse(new)) == []
 
 
 # ── 2f'''. The settings store is never used on the event loop (2026-09-30) ──

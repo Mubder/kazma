@@ -432,9 +432,17 @@ class KazmaAppBuilder:
         # retrieval. Warming it at boot avoids a first-turn stall on the
         # MiniLM download/load. The legacy VectorMemory / 4-layer adapter /
         # integrity backfill were removed with the V1 stack.
+        # KAZMA_EMBEDDER_PREWARM=0 defers the load to the first recall: the
+        # test suite sets it, because every app a test built loaded the
+        # multi-gigabyte local model here (2026-10-15).
         _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+        _prewarm_off = os.environ.get("KAZMA_EMBEDDER_PREWARM", "").strip().lower() in (
+            "0", "false", "no", "off",
+        )
         if _demo_mode:
             logger.info("[Memory] Skipped embedder pre-warm — KAZMA_DEMO_MODE is set")
+        elif _prewarm_off:
+            logger.info("[Memory] Skipped embedder pre-warm — KAZMA_EMBEDDER_PREWARM=0")
         else:
             try:
                 from kazma_core.memory.embedder import get_embedder

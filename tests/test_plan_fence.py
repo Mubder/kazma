@@ -28,6 +28,18 @@ from kazma_core.agent.plan_fence import (
 )
 from kazma_core.agent.state import SupervisorState, initial_supervisor_state
 
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
+
 _GLUED = (
     "```plan\n"
     "- Check current stored Grok reset beliefs\n"

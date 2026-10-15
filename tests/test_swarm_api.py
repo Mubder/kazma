@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 # Activate the Jinja2 i18n globals patch so swarm.html's t(...) calls resolve.
@@ -9,6 +10,18 @@ from fastapi.testclient import TestClient
 # `t` global on every subsequent Jinja2Templates(...) — without it the template
 # raises UndefinedError → HTTP 500 (the test_swarm_panel_renders failure).
 import kazma_ui.i18n  # noqa: F401
+
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
 
 # ---------------------------------------------------------------------------
 # Test client fixture

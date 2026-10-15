@@ -33,6 +33,15 @@ from kazma_core.tools.vision_analyze import (
     analyze_image,
 )
 
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """The download's SSRF check resolves the image's host: answered here
+    (a public address), never by the network -- example.com was looked up
+    for real (tests/_egress_guard.py, 2026-10-15). The HTTP client is each
+    test's own stand-in."""
+    monkeypatch.setattr("kazma_core.security.ssrf._resolve_host_ips", lambda _host: ["93.184.216.34"])
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════

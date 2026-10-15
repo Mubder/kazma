@@ -28,13 +28,10 @@ async def _ledger_synthesis_call(
     """The final synthesis is one of the turn's LLM calls (llm_calls.db).
 
     Only the supervisor's calls were ledgered, so a turn's totals missed its
-    last and often largest call. Off the loop: the ledger is SQLite.
+    last and often largest call. Off the loop: the ledger is SQLite, and the
+    switch that turns it on a settings read (``arecord_llm_call``).
     """
-    from kazma_core.agent.nonstop import get_nonstop_config
-
-    if not get_nonstop_config().ledger_enabled:
-        return
-    from kazma_core.observability.llm_ledger import record_llm_call
+    from kazma_core.observability.llm_ledger import arecord_llm_call
 
     usage = getattr(resp, "usage", None) or {}
     try:
@@ -43,8 +40,7 @@ async def _ledger_synthesis_call(
         cost = float(getattr(resp, "cost_usd", 0.0) or 0.0)
     except (AttributeError, TypeError, ValueError):
         prompt, completion, cost = 0, 0, 0.0
-    await asyncio.to_thread(
-        record_llm_call,
+    await arecord_llm_call(
         thread_id=str(state.get("thread_id", "")),
         iteration=int(state.get("iteration", 0) or 0),
         provider=type(llm).__name__,

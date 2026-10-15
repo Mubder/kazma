@@ -243,6 +243,7 @@ test server cannot start; its CI job sets it.
 | `KAZMA_EMBED_DIM` | `1024` | No | Embedding dimension (must match the model's output). |
 | `KAZMA_EMBED_BASE_URL` | unset | Remote only | `/embeddings` endpoint base URL for `openai-compatible`. |
 | `KAZMA_EMBED_API_KEY` | unset | Remote only | API key for the remote `/embeddings` endpoint. |
+| `KAZMA_EMBEDDER_PREWARM` | unset (on) | No | `0` skips loading the embedder at boot; the first recall that needs it loads it. The test suite sets it: every app a test built loaded the local model here. |
 | `KAZMA_DEMO_MODE` | unset | **No** | Demo fixtures — never enable in real prod. |
 | `KAZMA_MEMORY_ENFORCE_TENANT` | unset | Multi-tenant only | When `1`/`true` -- and always under `KAZMA_PRODUCTION=1` or multi-user -- every `/api/memory` route scopes reads, counts, id-keyed mutations, undo tokens, hygiene and graph-clear by the request-scoped tenant (set by the auth middleware from verified JWT/opaque-session claims). Unset outside production and multi-user = single-tenant `default`. |
 | `KAZMA_MEMORY_STATE_ROLE` | unset (`mirror`) | Multi-replica only | `primary` makes the Postgres state backend the recall SoT (fail-closed if down — no silent SQLite). Dense search is pgvector fused with ILIKE. Do **not** enable until `python scripts/reconcile_memory_mirror.py --dry-run` reports no dead-in-mirror / only-in-mirror rows. |

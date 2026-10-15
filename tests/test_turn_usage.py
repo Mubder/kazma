@@ -176,9 +176,12 @@ def test_the_done_frame_reports_the_whole_turn(ledger, tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "add_usage", add_usage)
 
     async def _segment(*args, **kwargs):
-        # Segment 2's own LLM call happens inside the stream, under the turn id.
+        # Segment 2's own LLM call happens inside the stream, under the turn
+        # id, recorded the way async product code records it: off the loop,
+        # and in the ledger before the call returns (so the done frame's
+        # totals, read after it, include it).
         await asyncio.sleep(0.01)
-        llm_ledger.record_llm_call(prompt_tokens=40, completion_tokens=10, cost_usd=0.002)
+        await llm_ledger.arecord_llm_call(prompt_tokens=40, completion_tokens=10, cost_usd=0.002)
         yield {
             "event": "on_chain_end",
             "data": {"output": {"last_tokens": 50, "last_cost_usd": 0.002,
