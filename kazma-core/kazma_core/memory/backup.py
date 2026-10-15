@@ -139,6 +139,27 @@ def prune_old_backups(*, retention: int = _DEFAULT_RETENTION) -> int:
     return deleted
 
 
+def _bring_schema_up_to_date(path: Path) -> None:
+    """Give a restored copy this build's schema before anything reads it.
+
+    A backup may come from an older build, or from before a table was first
+    needed; every module that sets the schema up does it once per file per
+    process (``forget._open``, ``profile``, the Memory API), so none of them
+    looks again after the file under it is replaced. The memory soak's 420th
+    cycle restored such a copy and the forget catch-up failed on a missing
+    ``memory_forget_applied`` (2026-10-15).
+    """
+    import sqlite3
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    conn = sqlite3.connect(str(path), timeout=30)
+    try:
+        ensure_primary_schema(conn)
+    finally:
+        conn.close()
+
+
 def restore_memory_backup(src: Path, *, reconcile_budget_s: float = 120.0) -> dict[str, Any]:
     """Restore the memory database from one of these backups, and catch up.
 
@@ -163,6 +184,7 @@ def restore_memory_backup(src: Path, *, reconcile_budget_s: float = 120.0) -> di
 
     started = time.monotonic()
     snapshot_copy(Path(src), Path(primary_memory_db()))
+    _bring_schema_up_to_date(Path(primary_memory_db()))
     forgets = forget.converge()
     reconcile = run_turn_reconcile_pass(time_budget_s=reconcile_budget_s)
     return {

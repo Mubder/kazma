@@ -39,26 +39,29 @@ def protection(
     tenant_id: str | None = None,
     self_ids: Collection[str] | None = None,
 ) -> str | None:
-    """``"core"``, ``"self"`` or ``"flag"`` when *entity_id* is protected, else None.
+    """``"core"``, ``"self"`` or ``"flag"`` when *tenant_id*'s entity
+    *entity_id* is protected, else None.
 
-    The hub's names are read for *tenant_id*, else the entity row's own tenant.
-    A caller judging many entities of one tenant passes *self_ids* once. Raises
-    ``sqlite3.Error`` when the store cannot answer: each caller decides, and
-    none of them deletes on a guess.
+    Entities are keyed by ``(tenant_id, id)`` (Memory audit M21): the flag and
+    the hub's names are those of *tenant_id* (``None``: the install's own,
+    ``default``). A caller judging many entities of one tenant passes
+    *self_ids* once. Raises ``sqlite3.Error`` when the store cannot answer:
+    each caller decides, and none of them deletes on a guess.
     """
     eid = str(entity_id or "").strip()
     if not eid:
         return None
     if is_core_entity(eid):
         return "core"
+    tenant = str(tenant_id or "default")
     row = conn.execute(
-        "SELECT tenant_id, is_protected FROM entities WHERE id = ?", (eid,)
+        "SELECT is_protected FROM entities WHERE id = ? AND tenant_id = ?", (eid, tenant)
     ).fetchone()
-    row_tenant, flag = tuple(row) if row is not None else (None, 0)
+    flag = tuple(row)[0] if row is not None else 0
     if self_ids is None:
         from kazma_core.memory.self_hub import collect_self_entity_ids
 
-        self_ids = collect_self_entity_ids(conn, str(tenant_id or row_tenant or "default"))
+        self_ids = collect_self_entity_ids(conn, tenant)
     if eid in self_ids:
         return "self"
     if int(flag or 0) == 1:

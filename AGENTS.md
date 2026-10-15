@@ -1817,7 +1817,10 @@ drawing, the rest by extraction.
   facts superseded each other, and later non-Latin objects were rewritten to
   `entity`. ASCII ids are unchanged. Spellings that differ by vowel marks or
   letter forms meet in the alias hash (`documents.arabic.fold_for_search`),
-  never in the id. Service names (`current_facts`) and the same-words key
+  never in the id. An id is a tenant's: the key is `(tenant_id, id)` (M21,
+  §16's multi-tenant note), and a redirect (`canonical_entity_id`), a
+  protection (`entity_protection`), a count and a retire read the tenant's
+  own row. Service names (`current_facts`) and the same-words key
   (`graph_hygiene`) use it too. Rows the old rule wrote: `entity_repair`
   (`scripts/memory_entity_repair.py size`, then `apply` on a copy) quarantines
   each collapsed fact and queues its turn for the deep pass -- nothing is
@@ -2179,18 +2182,35 @@ id reads as not found (`memory_api._row_tenant_ok`,
 binding) is the install's view (`_tenant_clause`). Gate:
 `tests/test_memory_routes_tenant_scope.py` -- every route, enumerated from the
 app, called as one tenant with another's ids; nothing of the other shown or
-changed, and the caller's own rows shown. Note: `entities.id` is a global PK,
-not per-tenant -- so the boundary is held by rules (Memory audit M21,
-2026-10-13): entity creation never appends to another tenant's row
-(`entity_resolution._create_entity`), the hub sync (`self_hub.ensure_user_hub`)
-writes only the caller's own `user` row (the install's tenant may write any),
-rename promotes only a node of the caller's own facts (an id another tenant
-holds and an unused one both answer not_found), and the agent merge tool asks
-the routes' tenant rule. Gate: `tests/test_memory_entity_tenancy.py` (the four
-witnesses inverted; every agent tool taking an id, as another tenant, leaves
-beta's rows unchanged; the install's tenant as negative control). Keying
-entities by `(tenant_id, id)` -- every entity statement and a migration of
-non-default tenants' rows -- is not built.
+changed, and the caller's own rows shown. **Entities are keyed by
+`(tenant_id, id)`** (Memory audit M21, 2026-10-15, `memory/entity_key.py`):
+each tenant holds its own row of an id -- its own `kazma`, its own `user` hub
+(`self_hub.ensure_user_hub` writes the caller's) -- and `entity_merges` names
+its entities by the pair (composite foreign keys). Every statement on
+`entities`, `entity_merges` or `entity_merges_archive` names its tenant, and
+one that picks a row by id names it in that WHERE; a statement that reads
+across tenants on purpose is declared with why. Which row a request means is
+one answer, `entity_key.entity_owner`: a tenant's own; the install's view
+(`default`) its own first, else the one tenant holding the id (several, and
+none of the install's: not found). A merge keeps to the source's tenant (a
+target of another tenant is not found), and the belief rewire and the ledger
+row are that tenant's. A store made before then keeps the `id` key until the
+operator runs `scripts/memory_entity_key.py` (`size` reads only; `apply --db
+--yes` copies to `<db>.pre_entity_key` first, then rebuilds both tables in one
+transaction -- every row, id, tenant and rowid kept, the search index rebuilt
+-- idempotent); every statement works on both keys (on the old one the
+2026-10-13 rules hold the boundary: creation never writes another tenant's
+row, rename promotes only a node of the caller's own facts, an id another
+tenant holds and an unused one both answer not_found), and memory health says
+which key the store has (`entity_key`). The Postgres mirror holds facts and
+memories, never entities. Gates: `tests/test_memory_entity_key.py` (the source
+gate, planted old statements as its control; two tenants holding one id
+through every memory route, enumerated from the app, and every agent memory
+tool, from the registry, with an owner lookup answering the other tenant and
+the old key as negative controls; the migration on a copy of a store the
+product's writers seeded under the old key, then recall, the graph and a
+merge; the script), `tests/test_memory_entity_tenancy.py` (the four witnesses
+inverted).
 
 ### 17. Lifecycle Status Notifier (`kazma-core/kazma_core/lifecycle_notifier.py`)
 
@@ -3039,7 +3059,16 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   corrects their own facts. Gate: `tests/test_memory_provenance.py` (the
   R02 witnesses inverted, EN/AR remember requests, the injection corpus,
   the same-turn rule, the old gate as negative control, every product site
-  writing `user_explicit` declared as a user channel).
+  writing `user_explicit` declared as a user channel). The rows the old tools
+  wrote are relabelled by `scripts/memory_relabel_provenance.py`
+  (`memory/provenance_relabel.py`, 2026-10-15; `size` names ids, never
+  values; `apply --db --yes` copies to `<db>.pre_relabel` first): a
+  `user_explicit` fact a memory tool's note names (or, before notes named
+  their chat, holds its value within seconds) or that names a chat turn
+  becomes `agent_asserted`, unless the Memory page edited it, an operator
+  action named it, or its turn asked to remember those words (today's rule);
+  the page's links and the V1 backfill are left. One audit row per fact; the
+  live run is the owner's. Gate: `tests/test_memory_relabel_provenance.py`.
 - **Rewrite-on-allow**: the gate's fire_at wins over the model's args — do not
   let the original (possibly wrong) `timing` reach the scheduler for remind.
   The fire_at is one instant in the operator's zone, and a recurrence is kept

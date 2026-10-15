@@ -767,7 +767,7 @@ def register_memory_routes(self: Any) -> None:
         """Approve or reject a pending entity merge. Body: {action: approve|reject}."""
 
         from kazma_core.memory.entity_resolution import decide_entity_merge
-        from kazma_ui.memory_api import _row_tenant_ok
+        from kazma_ui.memory_api import _memory_tenant_id, _row_tenant_ok
 
         body = await _json_object(request)
         action = str(body.get("action") or "approve").strip().lower()
@@ -779,9 +779,12 @@ def register_memory_routes(self: Any) -> None:
             try:
                 conn = open_memory_db()
                 if not _row_tenant_ok(conn, "entity_merges", merge_id):
-                    # Another tenant's merge: ids are global, rows are not.
+                    # Another tenant's merge reads as not found.
                     return {"ok": False, "error": "not_found_or_resolved"}
-                return decide_entity_merge(conn, merge_id, approve=approve)
+                tid = _memory_tenant_id()
+                return decide_entity_merge(
+                    conn, merge_id, approve=approve, tenant_id=None if tid == "default" else tid
+                )
             except Exception as exc:
                 logger.exception("[memory] entity merge decision failed")
                 return {"ok": False, "error": safe_error(exc)}
@@ -1350,7 +1353,7 @@ def register_memory_routes(self: Any) -> None:
             # the cap above dropped them first and every subject they anchor
             # floated away from the hub. Load the hub links of every endpoint
             # the capped query returned, whatever their rank.
-            hub_ids = sorted(collect_self_entity_ids(conn) | {HUB_ID})
+            hub_ids = sorted(collect_self_entity_ids(conn, _gtid) | {HUB_ID})
             endpoints = sorted(
                 {str(b["subject"]) for b in brows} | {str(b["object"]) for b in brows if b["object"]}
             )
@@ -1378,13 +1381,15 @@ def register_memory_routes(self: Any) -> None:
                         obj_belief_count.get(b["object"], 0) + 1
                     )
 
-            self_ids = collect_self_entity_ids(conn)
-            hub_name = resolve_hub_display_name(conn)
+            # The caller's own hub and names: each tenant has its own ``user``
+            # (entities keyed by (tenant_id, id), Memory audit M21).
+            self_ids = collect_self_entity_ids(conn, _gtid)
+            hub_name = resolve_hub_display_name(conn, tenant_id=_gtid)
             # Heal: if a person shell was renamed (User→Mubder) but entities.user
             # still missing/generic, upsert the hub so the label sticks.
             try:
                 hub_row = conn.execute(
-                    "SELECT name FROM entities WHERE id=?", (HUB_ID,)
+                    "SELECT name FROM entities WHERE id=? AND tenant_id=?", (HUB_ID, _gtid)
                 ).fetchone()
                 hub_row_name = str(hub_row["name"] if hub_row else "") or ""
                 if hub_name and hub_name != "You" and (
@@ -1393,8 +1398,8 @@ def register_memory_routes(self: Any) -> None:
                     # Only the caller's own hub (Memory audit M21).
                     ensure_user_hub(conn, hub_name, tenant_id=_gtid)
                     conn.commit()
-                    self_ids = collect_self_entity_ids(conn)
-                    hub_name = resolve_hub_display_name(conn)
+                    self_ids = collect_self_entity_ids(conn, _gtid)
+                    hub_name = resolve_hub_display_name(conn, tenant_id=_gtid)
             except Exception:
                 logger.debug("[memory] user hub heal failed", exc_info=True)
 
@@ -1411,9 +1416,13 @@ def register_memory_routes(self: Any) -> None:
             ent_lookup: dict[str, dict] = {}
             if lookup_ids:
                 placeholders = ",".join("?" * len(lookup_ids))
+                # A tenant reads its own rows; the install's view every
+                # tenant's, its own row winning an id two tenants hold (last).
+                only = None if _gtid == "default" else _gtid
                 erows = conn.execute(
-                    f"SELECT id, name, type, is_high_stakes, is_major FROM entities WHERE id IN ({placeholders})",
-                    tuple(lookup_ids),
+                    "SELECT id, name, type, is_high_stakes, is_major FROM entities "
+                    f"WHERE (? IS NULL OR tenant_id = ?) AND id IN ({placeholders}) ORDER BY tenant_id = ?",
+                    (only, only, *lookup_ids, _gtid),
                 ).fetchall()
                 ent_lookup = {r["id"]: dict(r) for r in erows}
             for oid in obj_texts:

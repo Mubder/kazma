@@ -85,7 +85,7 @@ def entity_degree_sql() -> str:
             AND other_id != e.id
             AND other_id != e.name
             AND other_id NOT IN ('', 'true', 'false', 'null')
-            AND EXISTS (SELECT 1 FROM entities oe WHERE oe.id = other_id)
+            AND EXISTS (SELECT 1 FROM entities oe WHERE oe.tenant_id = e.tenant_id AND oe.id = other_id)
         )
     """
 
@@ -106,7 +106,8 @@ def recompute_entity_counts(
                      write helpers in this package.
         entity_ids:  Entity ids whose counts may have changed. De-duplicated
                      internally; empties/None are skipped.
-        tenant_id:   Tenant scope fallback when the entity row lacks one.
+        tenant_id:   The tenant whose rows these are: entities are keyed by
+                     ``(tenant_id, id)`` (Memory audit M21).
         neighbours:  Also recompute every entity sharing a live fact with
                      these (a merge: the source's neighbours now link to the
                      target, and one that linked to both lost a neighbour).
@@ -131,29 +132,30 @@ def recompute_entity_counts(
             ids.append(s)
     if not ids:
         return 0
+    tenant = str(tenant_id or "default")
     if neighbours:
-        for other in _neighbours(conn, ids):
+        for other in _neighbours(conn, ids, tenant):
             if other not in seen:
                 seen.add(other)
                 ids.append(other)
 
     sql = (
         f"SELECT {belief_count_sql()} AS cnt, {entity_degree_sql()} AS deg "
-        "FROM entities e WHERE e.id = ?"
+        "FROM entities e WHERE e.id = ? AND e.tenant_id = ?"
     )
 
     updated = 0
     for eid in ids:
         try:
-            row = conn.execute(sql, (eid,)).fetchone()
+            row = conn.execute(sql, (eid, tenant)).fetchone()
             if row is None:
                 continue
             cnt = int(row[0] or 0)
             deg = int(row[1] or 0)
             cur = conn.execute(
                 "UPDATE entities SET belief_count = ?, graph_degree = ? "
-                "WHERE id = ?",
-                (cnt, deg, eid),
+                "WHERE id = ? AND tenant_id = ?",
+                (cnt, deg, eid, tenant),
             )
             updated += int(cur.rowcount or 0)
         except Exception:
@@ -161,16 +163,16 @@ def recompute_entity_counts(
     return updated
 
 
-def _neighbours(conn: Any, entity_ids: list[str]) -> list[str]:
-    """Entity ids that share a live fact with any of *entity_ids*."""
+def _neighbours(conn: Any, entity_ids: list[str], tenant_id: str) -> list[str]:
+    """Entity ids that share one of *tenant_id*'s live facts with any of *entity_ids*."""
     marks = ",".join("?" for _ in entity_ids)
     try:
         rows = conn.execute(
             "SELECT DISTINCT CASE WHEN b.subject IN (" + marks + ") THEN b.object "
             "ELSE b.subject END FROM beliefs b "
-            "WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL "
+            "WHERE b.tenant_id = ? AND b.valid_until IS NULL AND b.invalidated_at IS NULL "
             "AND (b.subject IN (" + marks + ") OR b.object IN (" + marks + "))",
-            (*entity_ids, *entity_ids, *entity_ids),
+            (*entity_ids, tenant_id, *entity_ids, *entity_ids),
         ).fetchall()
     except sqlite3.Error:
         logger.warning("[entity_counts] neighbours of %d entities unreadable", len(entity_ids), exc_info=True)
@@ -186,12 +188,18 @@ def repair_entity_counts(conn: Any, *, limit: int = 500) -> list[str]:
     2,249 facts on the live install.
     """
     rows = conn.execute(
-        f"SELECT e.id FROM entities e WHERE e.belief_count != {belief_count_sql()} "
-        f"OR e.graph_degree != {entity_degree_sql()} ORDER BY e.id LIMIT ?",
+        f"SELECT e.tenant_id, e.id FROM entities e WHERE e.belief_count != {belief_count_sql()} "
+        f"OR e.graph_degree != {entity_degree_sql()} ORDER BY e.id, e.tenant_id LIMIT ?",
         (int(limit),),
     ).fetchall()
-    ids = [str(r[0]) for r in rows if r[0]]
+    by_tenant: dict[str, list[str]] = {}
+    ids: list[str] = []
+    for tenant, eid in (tuple(r) for r in rows):
+        if eid:
+            by_tenant.setdefault(str(tenant or "default"), []).append(str(eid))
+            ids.append(str(eid))
+    for tenant, tenant_ids in by_tenant.items():
+        recompute_entity_counts(conn, tenant_ids, tenant_id=tenant)
     if ids:
-        recompute_entity_counts(conn, ids)
         logger.info("[entity_counts] repaired the counts of %d entit(ies): %s", len(ids), ids[:10])
     return ids

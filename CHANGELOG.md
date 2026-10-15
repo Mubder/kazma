@@ -53,6 +53,19 @@
   that step (and at every start); a crash right after the step used to lose
   it. A crash between raising and recording can repeat one alert, never
   lose it.
+- Memory entities are keyed by tenant and id. Two tenants can each hold an
+  entity of the same name without touching each other's, every entity
+  statement names its tenant, and each tenant has its own "user" hub;
+  `scripts/memory_entity_key.py` converts an existing store (copy first,
+  idempotent, `size` to look before). A store not yet converted keeps
+  working under the rules of 2026-10-13.
+- `scripts/memory_relabel_provenance.py` relabels facts a memory tool wrote
+  under the user's own label before 2026-10-13 as the agent's, unless the
+  user confirmed them (a Memory page edit, an operator action, or a turn that
+  asked to remember those words).
+- A memory backup taken before one of the store's tables existed (an older
+  build's, for example) can be restored again: the restore brings the copy's
+  schema up to date before it reads it. It failed on the missing table.
 - Knowledge Library scale and soak harness (`scripts/knowledge_soak.py`,
   tracker row KB-Q01): `scale` measures ingest, keyword, meaning and hybrid
   search, the repair sweep, library delete and the re-embed time after a

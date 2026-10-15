@@ -168,20 +168,19 @@ def ensure_user_hub(
     extra_aliases: list[str] | None = None,
     tenant_id: str = "default",
 ) -> dict[str, Any]:
-    """Upsert ``entities.id=user`` with display name + aliases. Does not commit.
+    """Upsert *tenant_id*'s ``user`` hub with display name + aliases. Does not commit.
 
-    The hub row belongs to one tenant: a tenant other than the install's own
-    (``"default"``) never writes another tenant's hub (Memory audit M21 --
-    renaming one's own "You" rewrote the global ``user`` row, whoever owned
-    it); the result says ``skipped``."""
+    Each tenant has its own hub: entities are keyed by ``(tenant_id, id)``
+    (Memory audit M21 -- renaming one's own "You" rewrote the global ``user``
+    row, whoever owned it, and any tenant could create ``user`` first). On a
+    store still keyed by ``id`` alone, a hub another tenant holds is never
+    written; the result says ``skipped``."""
     name = (display_name or "").strip() or "You"
     aliases: list[str] = []
-    row = conn.execute(
-        "SELECT name, aliases_json, tenant_id FROM entities WHERE id=?", (HUB_ID,)
-    ).fetchone()
     caller = tenant_id or "default"
-    if row and caller != "default" and str(row["tenant_id"] or "default") != caller:
-        return {"id": HUB_ID, "name": name, "aliases": [], "skipped": "another tenant's hub"}
+    row = conn.execute(
+        "SELECT name, aliases_json FROM entities WHERE id=? AND tenant_id=?", (HUB_ID, caller)
+    ).fetchone()
     if row:
         aliases = parse_aliases(row["aliases_json"])
         old = str(row["name"] or "")
@@ -196,16 +195,16 @@ def ensure_user_hub(
     if row:
         conn.execute(
             "UPDATE entities SET name=?, aliases_json=?, type='person', is_high_stakes=1 "
-            "WHERE id=?",
-            (name, aj, HUB_ID),
+            "WHERE id=? AND tenant_id=?",
+            (name, aj, HUB_ID, caller),
         )
-    else:
-        conn.execute(
-            """INSERT INTO entities
-               (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
-               VALUES (?, ?, 'person', ?, ?, 1, '{}')""",
-            (HUB_ID, tenant_id, name, aj),
-        )
+    elif not conn.execute(
+        """INSERT OR IGNORE INTO entities
+           (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
+           VALUES (?, ?, 'person', ?, ?, 1, '{}')""",
+        (HUB_ID, caller, name, aj),
+    ).rowcount:
+        return {"id": HUB_ID, "name": name, "aliases": [], "skipped": "another tenant's hub"}
     return {"id": HUB_ID, "name": name, "aliases": aliases}
 
 

@@ -248,29 +248,30 @@ def register_memory_tools(registry: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
+            # The routes' rule (memory/entity_key.entity_owner): a tenant acts on
+            # its own entities, the install's own tenant on the one tenant's
+            # that holds the id -- this tool read both rows without asking
+            # (Memory audit M21). Source and target are one tenant's: entities
+            # are keyed by (tenant_id, id).
+            from kazma_core.memory.entity_key import entity_owner
+            from kazma_core.memory.entity_protection import merge_refusal
+            from kazma_core.safety.hitl import get_current_tenant_id
+
+            caller = get_current_tenant_id() or "default"
+            tenant = entity_owner(conn, src_id, caller)
             # The page's rule (memory/entity_protection.py): the hub, the
             # agent, the owner's own names (which may go INTO the hub) and the
             # operator's flag. This tool kept a list of its own, user and
             # assistant only.
-            from kazma_core.memory.entity_protection import merge_refusal
-
-            if merge_refusal(conn, src_id, tgt_id):
+            if merge_refusal(conn, src_id, tgt_id, tenant_id=tenant or caller):
                 conn.close()
                 return f"Error: cannot merge protected source {src_id}"
-            # The routes' rule (memory_api._entity_tenant_ok): the install's
-            # own tenant may act on any entity, another only on its own --
-            # this tool read both rows without asking (Memory audit M21).
-            from kazma_core.safety.hitl import get_current_tenant_id
-
-            caller = get_current_tenant_id() or "default"
-            scope = "" if caller == "default" else " AND tenant_id = ?"
-            extra = () if caller == "default" else (caller,)
             src = conn.execute(
-                "SELECT id, name, aliases_json FROM entities WHERE id=?" + scope, (src_id, *extra)
-            ).fetchone()
+                "SELECT id, name, aliases_json FROM entities WHERE id=? AND tenant_id=?", (src_id, tenant)
+            ).fetchone() if tenant else None
             tgt = conn.execute(
-                "SELECT id, name, aliases_json FROM entities WHERE id=?" + scope, (tgt_id, *extra)
-            ).fetchone()
+                "SELECT id, name, aliases_json FROM entities WHERE id=? AND tenant_id=?", (tgt_id, tenant)
+            ).fetchone() if tenant else None
             if not src or not tgt:
                 conn.close()
                 return json.dumps(
@@ -293,18 +294,13 @@ def register_memory_tools(registry: Any) -> None:
                 if a and a not in tgt_aliases:
                     tgt_aliases.append(a)
             conn.execute(
-                "UPDATE entities SET aliases_json=? WHERE id=?",
-                (_json.dumps(tgt_aliases, ensure_ascii=False), tgt_id),
+                "UPDATE entities SET aliases_json=? WHERE id=? AND tenant_id=?",
+                (_json.dumps(tgt_aliases, ensure_ascii=False), tgt_id, tenant),
             )
-            # Resolve the request-scoped tenant (matching the sibling
-            # memory helpers). ``entities.id`` is a GLOBAL primary key
-            # (AGENTS.md §16), so the belief redirects below MUST be scoped
-            # to this tenant — otherwise they rewrite every tenant's beliefs
-            # pointing at the entity, and the merge audit row was previously
-            # misattributed to the 'default' tenant (audit finding).
-            from kazma_core.safety.hitl import get_current_tenant_id
-
-            tenant = get_current_tenant_id()
+            # The belief redirects below are the entities' tenant's: unscoped,
+            # they rewrote every tenant's beliefs naming the id, and the merge
+            # audit row was misattributed to the 'default' tenant (audit
+            # finding).
             for old in {src_id, src["name"]}:
                 if not old:
                     continue
@@ -322,8 +318,8 @@ def register_memory_tools(registry: Any) -> None:
                      COALESCE(NULLIF(metadata_json,''), '{}'),
                      '$.merged_into', ?
                    )
-                   WHERE id = ?""",
-                (tgt_id, src_id),
+                   WHERE id = ? AND tenant_id = ?""",
+                (tgt_id, src_id, tenant),
             )
             mid = "m_" + _uuid.uuid4().hex[:16]
             now = _time.time()
@@ -403,7 +399,7 @@ def register_memory_tools(registry: Any) -> None:
                 if eid.lower() == "user":
                     etype = "person"
                 row = primary.execute(
-                    "SELECT id FROM entities WHERE id=?", (eid,)
+                    "SELECT id FROM entities WHERE id=? AND tenant_id=?", (eid, tenant)
                 ).fetchone()
                 if not row:
                     primary.execute(
@@ -482,12 +478,12 @@ def register_memory_tools(registry: Any) -> None:
             try:
                 from kazma_core.memory.entity_resolution import preserve_merge_ledger
 
-                preserve_merge_ledger(conn, eid, reason="entity_delete")
+                preserve_merge_ledger(conn, eid, tenant_id=tenant, reason="entity_delete")
             except Exception:
                 logger.debug("[memory_delete_entity] merge-ledger archive skipped", exc_info=True)
             conn.execute(
-                "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
-                (eid, eid),
+                "DELETE FROM entity_merges WHERE tenant_id=? AND (source_entity_id=? OR target_entity_id=?)",
+                (tenant, eid, eid),
             )
             conn.execute(
                 "DELETE FROM entities WHERE id=? AND tenant_id=?",
@@ -535,7 +531,7 @@ def register_memory_tools(registry: Any) -> None:
                     {**dict(r), "belief_count": 0}
                     for eid in ids
                     for r in conn.execute(
-                        "SELECT id, type, name FROM entities WHERE id=?", (eid,)
+                        "SELECT id, type, name FROM entities WHERE id=? AND tenant_id=?", (eid, tenant)
                     ).fetchall()
                 ]
                 conn.close()

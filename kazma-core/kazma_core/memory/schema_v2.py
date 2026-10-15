@@ -6,7 +6,8 @@ writes never cause WAL contention with live chat reads:
 * **Primary** (:func:`kazma_core.paths.primary_memory_db`) → ``memory_state.db``
   - ``beliefs``          — bi-temporal knowledge graph (functional/set/state)
   - ``episodes``         — 4-tier episodic memory (working/episodic/recall/archived)
-  - ``entities``         — canonical entity registry + aliases
+  - ``entities``         — canonical entity registry + aliases, keyed by
+    ``(tenant_id, id)`` (Memory audit M21, ``memory/entity_key.py``)
   - ``entity_merges``    — quarantine merge ledger (3-tier resolution audit trail)
   - ``entity_merges_archive`` — preserved merge rows after entity DELETE (M-14)
   - ``procedural_dags``  — parametric action skills (Laplace-smoothed confidence)
@@ -40,6 +41,10 @@ from typing import Any
 from kazma_core.db.sqlite_columns import add_missing_columns
 
 __all__ = [
+    "ENTITIES_INDEX_DDL",
+    "ENTITIES_TABLE_DDL",
+    "ENTITY_MERGES_INDEX_DDL",
+    "ENTITY_MERGES_TABLE_DDL",
     "PRIMARY_DDL",
     "OPS_DDL",
     "RECONCILE_STATE_DDL",
@@ -70,6 +75,55 @@ CREATE TABLE IF NOT EXISTS memory_reconcile_state (
   updated_at  REAL NOT NULL
 );
 """
+
+#: The canonical entity registry, keyed by ``(tenant_id, id)`` (Memory audit
+#: M21, memory/entity_key.py): each tenant holds its own ``kazma`` and its own
+#: ``user`` hub. A store made before then keeps ``id`` as its key until
+#: ``scripts/memory_entity_key.py`` migrates it; every statement works on both.
+ENTITIES_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS entities (
+  id              TEXT NOT NULL,                             -- canonical slug (entity_resolution.slug)
+  tenant_id       TEXT NOT NULL DEFAULT 'default',
+  type            TEXT NOT NULL,                             -- person|project|tool|concept|location
+  name            TEXT NOT NULL,                             -- display label
+  aliases_json    TEXT DEFAULT '[]',
+  is_high_stakes  INTEGER DEFAULT 0,                         -- 1 = quarantine before merge
+  is_protected    INTEGER DEFAULT 0,                         -- 1 = operator-marked undeletable/unmergeable (F3)
+  is_major        INTEGER DEFAULT 0,                         -- 1 = operator-marked major node (bigger + distinct color)
+  metadata_json   TEXT DEFAULT '{}',
+  PRIMARY KEY (tenant_id, id)
+)"""
+
+ENTITIES_INDEX_DDL = (
+    "CREATE INDEX IF NOT EXISTS idx_entities_tenant_type ON entities(tenant_id, type)",
+    # Name lookup for entity search (Phase 3 perf -- LIKE fallback path).
+    "CREATE INDEX IF NOT EXISTS idx_entities_tenant_name ON entities(tenant_id, name)",
+    # An id across tenants (the install's view, entity_key.entity_owner): the
+    # key leads with the tenant.
+    "CREATE INDEX IF NOT EXISTS idx_entities_id ON entities(id)",
+)
+
+#: Quarantine merge ledger -- full audit trail of every identity decision. Its
+#: entities are its own tenant's: the key above.
+ENTITY_MERGES_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS entity_merges (
+  id                TEXT PRIMARY KEY,
+  tenant_id         TEXT NOT NULL DEFAULT 'default',
+  source_entity_id  TEXT NOT NULL,
+  target_entity_id  TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'pending',         -- pending|approved|rejected|auto_merged
+  merge_tier        TEXT NOT NULL,                           -- tier1_exact|tier2_vector|tier3_llm
+  confidence        REAL NOT NULL,
+  requested_at      REAL NOT NULL,
+  resolved_at       REAL,
+  metadata_json     TEXT DEFAULT '{}',
+  FOREIGN KEY (tenant_id, source_entity_id) REFERENCES entities(tenant_id, id),
+  FOREIGN KEY (tenant_id, target_entity_id) REFERENCES entities(tenant_id, id)
+)"""
+
+ENTITY_MERGES_INDEX_DDL = (
+    "CREATE INDEX IF NOT EXISTS idx_entity_merges_status ON entity_merges(tenant_id, status)",
+)
 
 PRIMARY_DDL = """
 -- Bi-temporal belief graph.
@@ -158,45 +212,8 @@ CREATE INDEX IF NOT EXISTS idx_episodes_tier_expires
 CREATE INDEX IF NOT EXISTS idx_episodes_session_turn
   ON episodes(session_id, turn_number);
 
--- Canonical entity registry.
-CREATE TABLE IF NOT EXISTS entities (
-  id              TEXT PRIMARY KEY,                          -- canonical slug
-  tenant_id       TEXT NOT NULL DEFAULT 'default',
-  type            TEXT NOT NULL,                             -- person|project|tool|concept|location
-  name            TEXT NOT NULL,                             -- display label
-  aliases_json    TEXT DEFAULT '[]',
-  is_high_stakes  INTEGER DEFAULT 0,                         -- 1 = quarantine before merge
-  is_protected    INTEGER DEFAULT 0,                         -- 1 = operator-marked undeletable/unmergeable (F3)
-  is_major        INTEGER DEFAULT 0,                         -- 1 = operator-marked major node (bigger + distinct color)
-  metadata_json   TEXT DEFAULT '{}'
-);
-
-CREATE INDEX IF NOT EXISTS idx_entities_tenant_type
-  ON entities(tenant_id, type);
-
--- Name lookup for entity search (Phase 3 perf — LIKE fallback path).
-CREATE INDEX IF NOT EXISTS idx_entities_tenant_name
-  ON entities(tenant_id, name);
-
--- Quarantine merge ledger — full audit trail of every identity decision.
-CREATE TABLE IF NOT EXISTS entity_merges (
-  id                TEXT PRIMARY KEY,
-  tenant_id         TEXT NOT NULL DEFAULT 'default',
-  source_entity_id  TEXT NOT NULL,
-  target_entity_id  TEXT NOT NULL,
-  status            TEXT NOT NULL DEFAULT 'pending',         -- pending|approved|rejected|auto_merged
-  merge_tier        TEXT NOT NULL,                           -- tier1_exact|tier2_vector|tier3_llm
-  confidence        REAL NOT NULL,
-  requested_at      REAL NOT NULL,
-  resolved_at       REAL,
-  metadata_json     TEXT DEFAULT '{}',
-  FOREIGN KEY (source_entity_id) REFERENCES entities(id),
-  FOREIGN KEY (target_entity_id) REFERENCES entities(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_entity_merges_status
-  ON entity_merges(tenant_id, status);
-
+%s
+%s
 -- Quarantine ledger archive — entity DELETE used to DROP merge rows (FK),
 -- wiping the identity-decision trail. Rows land here first (M-14).
 CREATE TABLE IF NOT EXISTS entity_merges_archive (
@@ -362,7 +379,12 @@ CREATE TABLE IF NOT EXISTS beliefs_archive (
 
 CREATE INDEX IF NOT EXISTS idx_beliefs_archive_tenant
   ON beliefs_archive(tenant_id, archived_at);
-""" % (_DEFAULT_EMBEDDING_MODEL, _DEFAULT_EMBEDDING_MODEL)
+""" % (
+    _DEFAULT_EMBEDDING_MODEL,
+    _DEFAULT_EMBEDDING_MODEL,
+    ENTITIES_TABLE_DDL + ";\n" + ";\n".join(ENTITIES_INDEX_DDL) + ";\n",
+    ENTITY_MERGES_TABLE_DDL + ";\n" + ";\n".join(ENTITY_MERGES_INDEX_DDL) + ";\n",
+)
 
 
 # ── Operational DDL (memory_ops.db) ───────────────────────────────────────
@@ -552,13 +574,15 @@ def _backfill_entity_counts(conn: Any) -> None:
         logger.info("[schema_v2] backfilling %d stale entity counts", stale)
         from kazma_core.memory.entity_counts import recompute_entity_counts
 
-        stale_ids = [
-            str(r[0])
-            for r in conn.execute("SELECT id FROM entities WHERE belief_count = -1 LIMIT 5000").fetchall()
-        ]
+        stale: dict[str, list[str]] = {}
+        for tenant, eid in conn.execute(
+            "SELECT tenant_id, id FROM entities WHERE belief_count = -1 LIMIT 5000"
+        ).fetchall():
+            stale.setdefault(str(tenant or "default"), []).append(str(eid))
         # Recompute in batches to bound transaction size on large memories.
-        for i in range(0, len(stale_ids), 500):
-            recompute_entity_counts(conn, stale_ids[i : i + 500])
+        for tenant, stale_ids in stale.items():
+            for i in range(0, len(stale_ids), 500):
+                recompute_entity_counts(conn, stale_ids[i : i + 500], tenant_id=tenant)
         conn.commit()
     except Exception:
         logger.debug("[schema_v2] entity count backfill skipped", exc_info=True)

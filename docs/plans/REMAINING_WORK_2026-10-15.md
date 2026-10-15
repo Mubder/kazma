@@ -32,13 +32,15 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | A deleted library's words stay in the FTS index | KB-Q01 harness | Purged after a library delete | In progress |
 | Coverage reported before a restored store has vectors | KB-Q01 harness | Health says unknown/rebuilding until measured | In progress |
 | Meaning recall at default HNSW settings | KB-Q01 harness | Tuned HNSW parameters, measured | In progress |
-| Entities keyed by (tenant_id, id) | M21 | Composite key, every statement, a migration | In progress |
-| Tool-written facts still labelled the user's | M03 | Relabel tool; run on live after review | In progress |
-| Held-out abstention 0/8 | M24 | One principled signal measured under the trade rule, or the attempt recorded | In progress |
+| Entities keyed by (tenant_id, id) | M21 | Composite key, every statement, a migration | Done in code: `tests/test_memory_entity_key.py` (70 tests, a source gate over every entity statement, two tenants through every route and tool, the migration on an old-key copy); the live migration is queued |
+| Tool-written facts still labelled the user's | M03 | Relabel tool; run on live after review | Tool done (`scripts/memory_relabel_provenance.py`, `tests/test_memory_relabel_provenance.py`); the live run is queued |
+| Held-out abstention 0/8 | M24 | One principled signal measured under the trade rule, or the attempt recorded | Measured, not adopted: an unknown-word signal raises held-out abstention to 4/8 but breaks the trade rule (paraphrase, Arabic, noise, update answers lost; MRR 0.844 -> 0.774); every variant inside the rule leaves it at 0. Recorded in the guide's benchmark report and M24 |
 | Arabic-Indic digits under OCR | Q02, D2 | The best local engine measured and integrated, Tesseract as fallback | In progress |
 | Web chat has no wall-clock turn budget | Full audit 2026-09-30 | The web honours the same budget setting as the chat apps | Queued |
 | Temporal durable path | SQ03, SW-E16, D9 | Time-skipping test server (download approved), Temporal timeouts | Queued (after the handoff/chaos merge) |
+| A memory backup older than a table could not be restored | Memory soak, cycle 420 | The restore brings the copy's schema up to date before it reads it | Done: `test_a_backup_from_before_a_table_restores_and_keeps_its_forgets` (the old restore as control) |
 | Model-pass extraction recording | M24 | `scripts/memory_bench.py extraction --record`, then `lock` | Queued (after the Memory merge) |
+| A daily job fired twice on one local day | Scheduled 28-day soak on c4e8f51c: 2 of 67k occurrences, 224 restarts | The cause found from the ledger; a product fix or a precise check fix, the 28-day soak passing | In progress |
 
 ## Measurements (soaks)
 
@@ -47,9 +49,11 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | Memory (72 h) | 2026-10-14 20:22 UTC | 2026-10-17 | `C:\Users\balfa\kazma-soak\2026-10-14\memory\report.json` |
 | Documents Q03 (48 h) | 2026-10-14 20:22 UTC | 2026-10-16 | `...\2026-10-14\documents\report.json` |
 | Swarm SQ01 (24 h) | 2026-10-14 21:36 UTC | 2026-10-15 | `...\2026-10-15\swarm\run\report.json` |
-| Scheduled Stage 5 (7 fake days) | 2026-10-14 | passed | `...\2026-10-15\scheduled\run\report.json` |
-| Scheduled (28 fake days, 8,000 jobs) | 2026-10-14 | running | `...\2026-10-15\scheduled-28d\run\report.json` |
-| Time Travel TT-G3 (72 h) | 2026-10-14 22:08 UTC | 2026-10-17 | `...\2026-10-15\time-travel\run\report.json` |
+| Scheduled Stage 5 (7 fake days) on c4e8f51c | 2026-10-14 | passed | `...\2026-10-15\scheduled\run\report.json` |
+| Scheduled (28 fake days, 8,000 jobs) on c4e8f51c | 2026-10-14 | failed: 2 double fires, being investigated | `...\2026-10-15\scheduled-28d\run\report.json` |
+| Scheduled Stage 5 on b52b2fab (the alert outbox) | 2026-10-15 | passed: 5,228 occurrences each ended once, 260 alerts = 257 expected + 3 recorded redeliveries, 0 violations | `...\2026-10-15\scheduled-b52b2fab\run\report.json` |
+| Time Travel TT-G3 on 680c5367 | 2026-10-14 22:08 UTC | stopped after 258 clean cycles (the code changed) | `...\2026-10-15\time-travel\run\report-old-code-680c5367.json` |
+| Time Travel TT-G3 (72 h) on 87b0cea8 | 2026-10-15 | 2026-10-18 | `...\2026-10-15\time-travel-87b0cea8\run\report.json` |
 | Knowledge KB-Q01 (100k, 1M, multi-day) | after its defects are fixed | | |
 
 SQ05 (published limits) is tied to the Swarm soak's numbers when it ends.

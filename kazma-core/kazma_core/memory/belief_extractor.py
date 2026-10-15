@@ -50,11 +50,12 @@ _CONSERVATIVE_CONF_THRESHOLD = 0.7
 _RESOLVED_ONTO_EXISTING = frozenset({"exact_match", "auto_merge", "llm_merge"})
 
 
-def _names_an_entity(conn: Any, text: str) -> bool:
-    """True when an entity's id or display name is exactly *text*."""
+def _names_an_entity(conn: Any, text: str, *, tenant_id: str = "default") -> bool:
+    """True when one of *tenant_id*'s entities has *text* as its id or display name."""
     try:
         return conn.execute(
-            "SELECT 1 FROM entities WHERE id = ? OR name = ? LIMIT 1", (text, text)
+            "SELECT 1 FROM entities WHERE tenant_id = ? AND (id = ? OR name = ?) LIMIT 1",
+            (tenant_id or "default", text, text),
         ).fetchone() is not None
     except sqlite3.Error:
         logger.warning("[belief_extract] entity name lookup failed", exc_info=True)
@@ -631,7 +632,7 @@ def _apply_beliefs_to_v2(
                 and clean["object"]
                 and clean["object"] != "user"
                 and object_should_mint_entity(
-                    primary_conn, clean["object"], predicate=clean["predicate"]
+                    primary_conn, clean["object"], predicate=clean["predicate"], tenant_id=tenant_id
                 )
             ):
                 obj_vec = _embed(clean["object"])
@@ -644,7 +645,7 @@ def _apply_beliefs_to_v2(
                 if (
                     obj_res.get("action") in _RESOLVED_ONTO_EXISTING
                     and merged_onto
-                    and not _names_an_entity(primary_conn, clean["object"])
+                    and not _names_an_entity(primary_conn, clean["object"], tenant_id=tenant_id)
                 ):
                     # Only a name no entity carries is replaced: an object that
                     # already names its entity keeps the user's wording.
@@ -686,7 +687,7 @@ def _apply_beliefs_to_v2(
                 anchor = anchor_leaf_subject(
                     primary_conn,
                     canonical_entity_id(
-                        primary_conn, subject_id or _belief_slug(clean["subject"])
+                        primary_conn, subject_id or _belief_slug(clean["subject"]), tenant_id=tenant_id
                     ),
                     tenant_id=tenant_id,
                     cfg=cfg,

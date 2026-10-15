@@ -104,8 +104,10 @@ def object_should_mint_entity(
     obj: str,
     *,
     predicate: str = "",
+    tenant_id: str = "default",
 ) -> bool:
-    """True when the belief *object* should become a concept entity.
+    """True when the belief *object* should become one of *tenant_id*'s
+    concept entities.
 
     Payload literals (status strings, paths, junk) must not be minted —
     minting them made write-time :func:`is_payload_object` return False
@@ -125,7 +127,8 @@ def object_should_mint_entity(
         return False
     try:
         row = conn.execute(
-            "SELECT 1 FROM entities WHERE id = ? OR name = ? LIMIT 1", (s, s)
+            "SELECT 1 FROM entities WHERE tenant_id = ? AND (id = ? OR name = ?) LIMIT 1",
+            (tenant_id or "default", s, s),
         ).fetchone()
         if row is not None:
             return True
@@ -179,7 +182,9 @@ def subject_should_mint_entity(subject: str) -> bool:
     return len(words) <= _MAX_SUBJECT_WORDS
 
 
-def is_payload_object(conn: sqlite3.Connection, obj: str, *, predicate: str = "") -> bool:
+def is_payload_object(
+    conn: sqlite3.Connection, obj: str, *, predicate: str = "", tenant_id: str = "default"
+) -> bool:
     """True when *obj* is a literal value rather than an entity node.
 
     Empty/junk tokens are NOT payloads — they are rejected upstream entirely
@@ -195,7 +200,7 @@ def is_payload_object(conn: sqlite3.Connection, obj: str, *, predicate: str = ""
             return False
     except Exception:
         logger.debug("[ego_anchor] hygiene import failed", exc_info=True)
-    return not object_should_mint_entity(conn, s, predicate=predicate)
+    return not object_should_mint_entity(conn, s, predicate=predicate, tenant_id=tenant_id)
 
 
 def subject_reaches_hub(

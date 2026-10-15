@@ -368,8 +368,10 @@ A fork starts a new chat and leaves the original's memory as it is.
 they are replaced: the memory backups (ten, one every six hours), Kazma's
 full backups (seven), the offsite backups (up to twelve monthly), the
 memory export written every six hours, the copy kept before an embedding
-rebuild, and space the database has freed but not yet reused. The Forget
-dialog says so too.
+rebuild, the copies the operator's repair scripts keep before they change the
+database (`memory_state.db.pre_entity_key`, `memory_state.db.pre_relabel`,
+until removed), and space the database has freed but not yet reused. The
+Forget dialog says so too.
 
 ## About me
 
@@ -401,6 +403,24 @@ remembers. When you ask Kazma to remember something ("remember that ...",
 like instructions to Kazma is refused; anything a page or an email slips past
 that check is still never treated as your own words.
 
+Facts Kazma's memory tools stored before 2026-10-13 were all labelled as
+yours. They can be relabelled as Kazma's own. Size it first (this only reads,
+and lists facts by id, never by what they say):
+
+```bash
+python scripts/memory_relabel_provenance.py size
+```
+
+Then, when Kazma is idle, `apply --db <path to memory_state.db> --yes`: the
+file is copied to `memory_state.db.pre_relabel` first. A fact changes only
+when what the memory recorded shows a memory tool wrote it -- a note the tool
+saved names it, or the fact names the chat turn the tool ran in -- and keeps
+your label when you edited it on the Memory page, acted on it there, or the
+turn asked Kazma to remember those words. Facts nothing shows the origin of
+(the Memory page's own links, the one-off import from the earlier memory
+system) are left as they are. Each change is written to the memory audit log; running it again
+changes nothing.
+
 ## Names in any language
 
 A person, a company or a place Kazma learns about keeps its name in the
@@ -424,6 +444,23 @@ database (`apply --db <path> --yes`). Each collapsed fact is set aside --
 kept, no longer used -- and the turn it came from is read again by Kazma's
 memory worker, which files its facts under their real names. A fact whose
 turn is gone stays set aside; nothing is guessed.
+
+On an install with several users, each user's people, places and things are
+their own: two users can each have a "Kazma" or a "Noor", and each has their
+own "You" at the centre of their graph. Until 2026-10-15 a name was one entry
+for the whole install, held by whoever used it first. A memory database made
+before then keeps that shared entry until it is changed over; size it first
+(this only reads), then, when Kazma is idle, apply it:
+
+```bash
+python scripts/memory_entity_key.py size
+python scripts/memory_entity_key.py apply --db <path to memory_state.db> --yes
+```
+
+The file is copied to `memory_state.db.pre_entity_key` first; every entry
+keeps its name, and running it again changes nothing. Memory health shows
+which form the database has (`entity_key`). A single-user install loses
+nothing by waiting: it has one user.
 
 ## Weekly summaries
 
@@ -478,7 +515,7 @@ the changes requested per action (`kazma_memory_operator_actions_total`).
 | **Undo** | action toast | Invalidate-batch, link, edit, delete-entity return a receipt + a 60s single-use undo token; the toast has an **[Undo]** button. Merge shows a "N beliefs rewired" receipt (not undoable — restore from backup). |
 | **Single belief edit** | belief row **Edit** | One modal form (subject/predicate/object), not a multi-step prompt. |
 | **Single ops bar** | graph Ops bar | The duplicate Link/merge slots card was removed — graph Ops bar is the one source of truth; row **Src**/**Tgt** buttons + Shift-click sync to it. |
-| **Multi-tenant** | env flag + posture | Tenants are enforced with `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with multi-user on. Then every `/api/memory` route reads, counts and changes only the request tenant's rows -- another tenant's id reads as not found -- including health, quality, hygiene, undo tokens and **graph-clear**; the engine's task queue, reconsolidation and golden eval are admin-only. A user bound to no tenant sees the install (single-tenant `default`). There is no all-tenants wipe. Note: `entities.id` is a global PK, not per-tenant. |
+| **Multi-tenant** | env flag + posture | Tenants are enforced with `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with multi-user on. Then every `/api/memory` route reads, counts and changes only the request tenant's rows -- another tenant's id reads as not found -- including health, quality, hygiene, undo tokens and **graph-clear**; the engine's task queue, reconsolidation and golden eval are admin-only. A user bound to no tenant sees the install (single-tenant `default`). There is no all-tenants wipe. Entities are keyed by tenant and id (2026-10-15): each tenant has its own row of a name and its own hub; a database made earlier keeps one shared key until `scripts/memory_entity_key.py apply` changes it over (health: `entity_key`). |
 | **Group / Move / Tier / Ungroup** | graph inspect | View-only clustering (`POST/DELETE /api/memory/v2/graph/groups*`). Does not mutate beliefs. **Group under→** on a node that already has a parent moves it (`…/member/{id}/move`: the old parent goes and the nodes below shift with it); **Tier…** sets a grouped node's tier, 0 to 4 (`…/node/{id}/tier`). The 30s canvas poll uses groups already on `GET /api/memory/v2/graph` (no extra fetch). |
 
 **Performance:** entity `belief_count` / `graph_degree` are materialized columns
@@ -633,6 +670,23 @@ ones, on both paths (vectors replayed from bge-m3):
   "Noor's school" needs a signal of what is asked about, not a higher floor.
   Most of what is shown for them is marked "(possibly related)" to the
   model.
+- **A signal of what is asked about, measured, not adopted** (2026-10-15):
+  a question naming a word no memory holds ("colour", "salary",
+  "cholesterol", "anniversary") asks about something unremembered, so only
+  strong matches are shown for it. It reaches the target -- abstention 0.28
+  to 0.67 on the tuning set, 0 to 0.50 (4 of 8) held out -- but the true
+  answers it removes look the same: weak matches of a paraphrase ("who looks
+  after my teeth"), an Arabic question whose word carries a suffix the
+  memory does not ("قهوتي"), a question naming a category its answer is an
+  instance of ("which company is it at"), with the same evidence as the near misses
+  (meaning lift 0.01-0.09 against 0.04-0.09). Paraphrase hit rate falls 1.0
+  to 0.88, Arabic 1.0 to 0.75, "noise" 1.0 to 0.67, updates 1.0 to 0.86,
+  overall MRR 0.84 to 0.77: past the trade rule, in each variant tried on the
+  tuning set (summaries left out; only when nothing strong is shown). Asked
+  only when most of the question's words are known, it still loses an update
+  ("which company is it at now": no memory says "company"; at three fifths
+  known, held out 1 of 8) or Arabic answers (at half); the one setting inside
+  the rule (two thirds known) leaves held-out abstention at 0.
 
 Extraction (`python scripts/memory_bench.py extraction`): 30 single turns
 in English, Arabic and both, scored on what a reader would keep from each.

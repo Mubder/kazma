@@ -142,8 +142,9 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
     ],
     ("POST", "/api/memory/v2/entities/link"): [
         ("/api/memory/v2/entities/link", {"subject": "alice", "predicate": "knows", "object": "Carol"}),
-        # Entity ids are global (AGENTS §16): alpha may point at beta's node
-        # id, and gets an edge of its own -- beta's rows stay as they were.
+        # Alpha may name an id beta holds: entities are keyed by (tenant, id)
+        # (AGENTS §16), so alpha gets an edge and a node of its own -- beta's
+        # rows stay as they were.
         ("/api/memory/v2/entities/link", {"subject": "alice", "predicate": "knows", "object": "beta9_bob"}),
     ],
     ("POST", "/api/memory/v2/entities/unlink"): [
@@ -325,7 +326,7 @@ def _seed(root: Path) -> None:
         "label, created_at) VALUES (?, 'beta', ?, ?, ?, ?, ?)",
         [
             ("beta9_g1", "beta9_bob", "beta9_ann", 2, "BETA9 team", now),
-            # beta grouped alpha's entity: ids are global, rows are not
+            # beta grouped a node id alpha's entity also has: the grouping is beta's
             ("beta9_g2", "beta9_bob", "alice", 2, "BETA9 contacts", now),
         ],
     )
