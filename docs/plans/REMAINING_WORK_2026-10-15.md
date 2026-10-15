@@ -91,12 +91,23 @@ SQ05 (published limits) is tied to the Swarm soak's numbers when it ends.
 
 | Item | Why it is the owner's |
 |---|---|
-| Q04 independent security review | The owner reviews it later (decided 2026-10-15) |
+| Q04 independent security review | The review is someone else's by definition (D4). The pack a reviewer needs is ready: `docs/audits/Q04_DOCUMENTS_SECURITY_REVIEW_PACK_2026-10-15.md` (scope, 14 claims with their tests, setup, where the risk is, what to deliver). The owner names the reviewer |
 | GitHub Actions billing lock | The account's payment; no CI runs until it is fixed |
 | Cloudflare Web Analytics switch | The site allows it and the policy says so (kazma.ai `f2d7564`, served 2026-10-15 with a clean console in EN and AR), but Cloudflare injects no beacon today: Web Analytics is off for the project. Turning it on (Cloudflare dashboard: Web Analytics, automatic setup for kazma.ai) is the owner's |
 
 ## Done today
 
+- The owner's approvals (evening): the M24 extraction recording (deepseek-flash,
+  60 calls in two recordings: the first found Arabic values translated into
+  English, fixed in the extraction prompt, `feb0c406`; locked in `83a89b4f`);
+  the Docker document job made a required check (21 now); a 30-minute turn
+  time limit on live (Settings, `agent.turn_timeout_seconds` = 1800, read
+  back after the reload); the Q04 review pack written; finished soak runs,
+  the OCR comparison's environments and models (about 5 GB) and the
+  August 14 memory database copy on live deleted (today's two migration
+  copies kept). M02's live sizing found nothing to repair. Live reloaded on
+  `daa12c5f` (the new extraction prompt) with the worker image for that code
+  (`src-d1dc114948caa417`, current, no fallback); no warnings since.
 - kazma.ai allows Cloudflare Web Analytics; the privacy policy (EN, AR) says
   what it collects (`Mubder/KazmaAI` `f2d7564`).
 - The pre-deploy backup copy (176 MB, with a vault copy) moved to the
