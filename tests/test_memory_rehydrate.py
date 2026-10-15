@@ -28,6 +28,18 @@ from kazma_core.memory.dual_write import _episode_id
 from kazma_core.memory.rehydrate import erased_counts
 from kazma_core.memory.schema_v2 import ensure_primary_schema
 
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
+
 #: The archive statement until 2026-09-26, verbatim.
 OLD_ARCHIVE_SQL = (
     "UPDATE episodes SET tier='archived', "

@@ -39,6 +39,20 @@ JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "Jso
 T = TypeVar("T")
 
 
+class InvalidIdError(ValueError):
+    """An id that is not one of Kazma's: not a canonical UUID.
+
+    A ``ValueError``, so callers that already catch one keep working. The
+    Web API answers it as it answers an id nobody holds (a document or a job
+    that does not exist), never as a fault of the server: a request names
+    ids, and a wrong one is not an error worth a WARNING. ``kind`` is the id
+    type (``DocumentId``, ``JobId``...)."""
+
+    def __init__(self, kind: str, message: str) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
 class _OpaqueUuid(str):
     """Canonical UUID string with a domain-specific runtime type."""
 
@@ -47,10 +61,10 @@ class _OpaqueUuid(str):
         try:
             parsed = uuid.UUID(text)
         except (AttributeError, TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid {cls.__name__}: {value!r}") from exc
+            raise InvalidIdError(cls.__name__, f"Invalid {cls.__name__}: {value!r}") from exc
         canonical = str(parsed)
         if text != canonical:
-            raise ValueError(f"{cls.__name__} must be a canonical lowercase UUID")
+            raise InvalidIdError(cls.__name__, f"{cls.__name__} must be a canonical lowercase UUID")
         return str.__new__(cls, canonical)
 
     @classmethod

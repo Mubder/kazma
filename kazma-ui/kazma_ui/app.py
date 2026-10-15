@@ -432,9 +432,17 @@ class KazmaAppBuilder:
         # retrieval. Warming it at boot avoids a first-turn stall on the
         # MiniLM download/load. The legacy VectorMemory / 4-layer adapter /
         # integrity backfill were removed with the V1 stack.
+        # KAZMA_EMBEDDER_PREWARM=0 defers the load to the first recall: the
+        # test suite sets it, because every app a test built loaded the
+        # multi-gigabyte local model here (2026-10-15).
         _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+        _prewarm_off = os.environ.get("KAZMA_EMBEDDER_PREWARM", "").strip().lower() in (
+            "0", "false", "no", "off",
+        )
         if _demo_mode:
             logger.info("[Memory] Skipped embedder pre-warm — KAZMA_DEMO_MODE is set")
+        elif _prewarm_off:
+            logger.info("[Memory] Skipped embedder pre-warm — KAZMA_EMBEDDER_PREWARM=0")
         else:
             try:
                 from kazma_core.memory.embedder import get_embedder
@@ -1869,6 +1877,14 @@ class KazmaAppBuilder:
 
             spawn_background(_aio.to_thread(report_unmet_requirements), name="install-requirements")
 
+            # ── The document worker broker the guard runs ───────────
+            # Tell the guard now whether documents need it (it then starts
+            # while the rest of Kazma boots), and again whenever the profile
+            # setting changes. Nothing to do without a guard that runs one.
+            from kazma_core.documents.broker_supervision import start_broker_requests
+
+            spawn_background(_aio.to_thread(start_broker_requests), name="document-broker-request")
+
             from kazma_ui.dashboard import set_dashboard_context
 
             set_dashboard_context(checkpoint_manager=self._checkpointer)
@@ -2421,6 +2437,15 @@ class KazmaAppBuilder:
                 logger.info("[app] Swarm engine drained")
         except Exception as e:
             logger.warning("[app] swarm drain failed: %s", e)
+        # The Temporal workers stop after the engine stopped its runs, so a
+        # durable run ends as the shutdown the engine recorded (a no-op
+        # without Temporal).
+        try:
+            from kazma_core.swarm.durable import stop_temporal_worker
+
+            await stop_temporal_worker()
+        except Exception as e:
+            logger.warning("[app] Temporal worker stop failed: %s", e)
 
         # 3) Shut down the agent (closes MCP processes, LLM clients)
         if self.agent is not None:

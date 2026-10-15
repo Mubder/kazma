@@ -428,33 +428,35 @@ async def test_a_retried_dispatch_is_one_in_flight_count(monkeypatch) -> None:
 # ── SW-E14: lost evidence is loud; one refusal is one failure ────────────────
 
 
-async def test_a_failed_running_row_is_a_warning_and_counted(tmp_path, caplog) -> None:
-    """The SW-E17 witness (engine file) inverted."""
+async def test_a_failed_running_row_is_a_warning_and_counted(tmp_path, caplog, monkeypatch) -> None:
+    """The SW-E17 witness (engine file) inverted: a RUNNING row the store
+    never takes (every attempt locked) is a WARNING and counted -- and since
+    2026-10-15 (SQ04) the task is not run."""
+    import kazma_core.swarm.engine as engine_module
 
-    class FlakyStore(TaskStore):
-        fail_running = True
-
+    class LockedStore(TaskStore):
         def admit(self, task):
-            if self.fail_running:
-                self.fail_running = False
-                raise sqlite3.OperationalError("database is locked")
-            return super().admit(task)
+            raise sqlite3.OperationalError("database is locked")
 
-    store = FlakyStore(db_path=str(tmp_path / "t.db"))
+    monkeypatch.setattr(engine_module, "_WRITE_RETRY_WAITS", (0.01, 0.01, 0.01))
+    store = LockedStore(db_path=str(tmp_path / "t.db"))
     try:
         engine = _engine(store, "w")
+        ran = []
 
         async def w(task, context=None):
+            ran.append(task)
             return _ok("w")
 
         engine.get_worker("w").dispatch = w
         before = _counter("running_row")
         caplog.set_level(logging.DEBUG, logger="kazma_core.swarm.engine")
-        await engine.dispatch(SwarmTask(prompt="p", workers=["w"], timeout=0))
+        result = await engine.dispatch(SwarmTask(prompt="p", workers=["w"], timeout=0))
         recs = [r for r in caplog.records if r.name == "kazma_core.swarm.engine"
-                and "without crash evidence" in r.getMessage()]
+                and "as running; it is not run" in r.getMessage()]
         assert recs and all(r.levelno == logging.WARNING for r in recs)
         assert _counter("running_row") == before + 1
+        assert result.metadata["code"] == "task_store_unavailable" and ran == []
     finally:
         store.close()
 
@@ -512,7 +514,6 @@ _QUIET_HANDLERS = {
     "swarm/autoscaler.py::reap_idle": "a worker that cannot be looked up is treated as gone",
     "swarm/autoscaler.py::save_templates": "removing a temp file while the save re-raises",
     "swarm/bus.py::request_approval": "an unreadable timeout setting: the default timeout",
-    "swarm/durable.py::run_via_durable": "start answered 'already started': read the original run",
     "swarm/memory/pipeline_logger.py::close_pipeline_logger": "closing a log at shutdown (2)",
     "swarm/patterns.py::_finalize_pipeline": "an optional logging hook",
     "swarm/registry.py::_legacy_registry_paths": "no install root: no legacy file to move",

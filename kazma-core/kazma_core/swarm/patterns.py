@@ -382,6 +382,7 @@ async def execute_pipeline(
     task: SwarmTask,
     *,
     dispatch_worker_by_name: DispatchWorkerByName,
+    on_step: Callable[[SwarmTask, int, str], Awaitable[None]] | None = None,
 ) -> PatternExecution:
     """Execute a task through workers sequentially, sharing one blackboard.
 
@@ -390,6 +391,12 @@ async def execute_pipeline(
     returns a ``PatternExecution`` with ``status="paused"`` and checkpoint
     metadata.  The engine is responsible for storing the paused state and
     resuming later via :func:`resume_pipeline`.
+
+    *on_step* is awaited with ``"begun"`` before each step's worker runs and
+    ``"committed"`` once its result is in, as on a resume (Swarm tracker
+    SQ03, 2026-10-15): a first run that dies mid-step is held at the next
+    start as an unknown outcome naming the step it stopped in, and the
+    steps committed before it are not run again.
     """
     if not task.workers:
         raise PipelineConfigurationError("Pipeline requires at least one worker.")
@@ -417,6 +424,8 @@ async def execute_pipeline(
             context_text=context_text,
         )
 
+        if on_step is not None:
+            await on_step(task, step_index, "begun")
         step_effects = DispatchEffects()
         try:
             with track_effects(step_effects):
@@ -440,6 +449,8 @@ async def execute_pipeline(
         if not worker_result.task_id:
             worker_result.task_id = task.id
         worker_results.append(worker_result)
+        if on_step is not None:
+            await on_step(task, step_index, "committed")
 
         if worker_result.status != "success":
             return await _finalize_pipeline(

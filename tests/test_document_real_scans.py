@@ -14,6 +14,11 @@ page, and the floors this build reached. Set ``KAZMA_TEST_REAL_SCANS_MANIFEST``
 to it; without it the test SKIPS, and a skip is not evidence.
 ``KAZMA_REAL_SCANS_REPORT`` writes the measurement; raising a manifest's
 floors from it is the operator's edit, never automatic.
+
+2026-10-15: each OCR engine (``documents.ocr.engine``: Tesseract and the
+neural engine) reads the scan and is held to its own floors, the manifest's
+``floors_by_engine.<engine>`` (``floors`` alone are Tesseract's). An engine
+not installed here is skipped; a run that another engine read fails.
 """
 
 from __future__ import annotations
@@ -85,7 +90,7 @@ class _NoVector:
     available = False
 
 
-def _service(root: Path):
+def _service(root: Path, engine: str):
     from kazma_core.documents.config import DocumentConfig
     from kazma_core.documents.ingestion import DocumentIngestionService
     from kazma_core.documents.knowledge import DocumentKnowledgeAdapter
@@ -99,7 +104,10 @@ def _service(root: Path):
         store.create_library("scans", "Scans")
     finally:
         reset_current_tenant_id(token)
-    svc = DocumentIngestionService(config=DocumentConfig(storage_root=root / "content", security_malware_scan="off"))
+    # The engine is measured, not the worker's time limit: a long limit keeps
+    # every page with the engine asked for (documents.ocr.engine).
+    svc = DocumentIngestionService(config=DocumentConfig(storage_root=root / "content", security_malware_scan="off",
+                                                         ocr_engine=engine, worker_timeout_seconds=1800))
     index = KnowledgeIndex(store=store)
     index._vector_stores["scans"] = _NoVector()
     adapter = DocumentKnowledgeAdapter(repository=svc.repository, knowledge_store=store, knowledge_index=index,
@@ -120,7 +128,7 @@ async def _drive(svc) -> None:
         await worker._process_claimed(claimed, "real-scans")
 
 
-def measure_document(entry: dict, work: Path) -> dict:
+def measure_document(entry: dict, work: Path, engine: str = "tesseract") -> dict:
     from kazma_core.documents.ingestion import SYSTEM_ACTOR
     from kazma_core.documents.models import DocumentIR
 
@@ -128,7 +136,7 @@ def measure_document(entry: dict, work: Path) -> dict:
     assert hashlib.sha256(source.read_bytes()).hexdigest() == entry["sha256"], "the scan is not the one measured"
     page_map = sorted(int(p) for p in entry["pages"])
     pdf = _subset(source, page_map, work / "subset.pdf")
-    svc = _service(work)
+    svc = _service(work, engine)
     try:
         result = svc.ingest_stream(io.BytesIO(pdf.read_bytes()), filename="scan.pdf", tenant_id=TENANT,
                                    actor_id="operator", workspace_id="w")
@@ -149,22 +157,40 @@ def measure_document(entry: dict, work: Path) -> dict:
                 query, tenant_id=TENANT, library_id="scans", document_id=str(result.document_id), top_k=3)
             pages_hit = [page_map[int((h.metadata or {}).get("page_start") or 1) - 1] for h in hits]
             searches.append({"expected": int(expected), "top": pages_hit[0] if pages_hit else None})
-        return {"state": state, "pages": pages, "searches": searches}
+        read_by = (ir.metadata.get("ocr") or {}).get("engine")
+        page_engines = {str(page_map[p.page_number - 1]): (p.metadata.get("ocr") or {}).get("engine") for p in ir.pages}
+        return {"state": state, "pages": pages, "searches": searches, "engine": read_by, "page_engines": page_engines}
     finally:
         svc.close()
 
 
-def test_real_scans_hold_their_floors(tmp_path):
+def _floors(entry: dict, engine: str) -> dict:
+    by_engine = entry.get("floors_by_engine") or {}
+    if engine in by_engine:
+        return by_engine[engine]
+    return (entry.get("floors") or {}) if engine == "tesseract" else {}
+
+
+@pytest.mark.parametrize("engine", ["tesseract", "neural"])
+def test_real_scans_hold_their_floors(engine, tmp_path):
     manifest = _manifest()
+    from kazma_core.documents import fidelity
+
+    missing = fidelity.engine_available(engine)
+    if missing:
+        pytest.skip(missing)
     report, failures = {}, []
     for index, entry in enumerate(manifest["documents"]):
         work = tmp_path / f"doc-{index}"
         work.mkdir()
-        measured = measure_document(entry, work)
+        measured = measure_document(entry, work, engine)
         report[entry["id"]] = measured
         if measured["state"] != "ready":
             failures.append(f"{entry['id']}: ended {measured['state']}")
-        for page, floors in (entry.get("floors") or {}).items():
+        others = {page: used for page, used in measured["page_engines"].items() if used != engine}
+        if measured["engine"] != engine or others:
+            failures.append(f"{entry['id']}: {engine} was asked for; other engines read {others or measured['engine']}")
+        for page, floors in _floors(entry, engine).items():
             for metric, floor in floors.items():
                 got = measured["pages"].get(page, {}).get(metric)
                 if got is None or got < floor:
@@ -174,5 +200,6 @@ def test_real_scans_hold_their_floors(tmp_path):
                 failures.append(f"{entry['id']}: a search found page {search['top']}, not {search['expected']}")
     out = os.environ.get("KAZMA_REAL_SCANS_REPORT")
     if out:
-        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        Path(out.replace("{engine}", engine)).write_text(json.dumps(report, ensure_ascii=False, indent=1),
+                                                          encoding="utf-8")
     assert not failures, failures

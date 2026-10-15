@@ -28,6 +28,7 @@ from .knowledge import DocumentIndexResult, DocumentKnowledgeAdapter, DocumentSe
 from .models import DocumentIR, DocumentResult
 from .mutation import get_mutation_registry
 from .ocr import OcrHealth, get_ocr_health
+from .ocr.neural_models import model_directory
 from .operations import DocumentOperations, OperationScope
 from .parsers.common import sha256_path
 from .policy import DocumentPolicy, policy_operation
@@ -603,7 +604,7 @@ class DocumentService:
     def ocr_health(self) -> OcrHealth:
         """Return live engine/language/rasterizer/image readiness."""
 
-        return get_ocr_health(self.config.ocr_languages)
+        return get_ocr_health(self.config.ocr_languages, engine=self.config.ocr_engine)
 
     @policy_operation
     def health(self) -> dict[str, object]:
@@ -1148,6 +1149,10 @@ class DocumentService:
                 "force": force_ocr,
                 "language": ocr_language,
                 "pages": list(ocr_pages) if ocr_pages is not None else None,
+                # The neural engine's models: the worker's environment is
+                # scrubbed, so it is told where they are (a container run
+                # reads the image's own copy instead).
+                "models": str(model_directory()),
             },
         }
         request_path.write_text(

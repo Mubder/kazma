@@ -37,6 +37,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from kazma_core.db.fts5_purge import purge_deleted_rows
 from kazma_core.memory.memory_stores import MEMORY_TABLES
 
 logger = logging.getLogger(__name__)
@@ -726,12 +727,15 @@ def purge_search_index(conn: sqlite3.Connection) -> None:
     FTS5 records a removed row as a delete marker in a new segment; the old
     segment, the forgotten words in it, stays in ``*_fts_data`` until a merge
     happens to reach it (Memory audit M01, 2026-10-13). ``optimize`` merges
-    the whole index into one segment, which drops them. It runs in the
-    caller's transaction.
+    the whole index into one segment, which drops them -- except when every
+    segment sat on one level below the top, where FTS5 keeps every marker,
+    word included: then the index is rebuilt from its table
+    (:func:`kazma_core.db.fts5_purge.purge_deleted_rows`, found by the
+    Knowledge soak, KB-Q01, 2026-10-15). It runs in the caller's transaction.
     """
     for name in _FTS_INDEXES:
         try:
-            conn.execute(f"INSERT INTO {name}({name}) VALUES('optimize')")
+            purge_deleted_rows(conn, name)
         except sqlite3.OperationalError as exc:
             if "no such table" not in str(exc):
                 raise

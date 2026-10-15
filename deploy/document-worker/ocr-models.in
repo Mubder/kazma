@@ -1,0 +1,16 @@
+# The ocr-models build stage of the document worker image (and nothing else):
+# what scripts/ocr_models.py needs to convert EasyOCR's PyTorch recognizers to
+# ONNX and check them. None of it reaches the final image. torch is the CPU
+# build (no CUDA download); every other package comes from PyPI at the version
+# pinned here, and ocr-models.txt holds every hash.
+# Regenerate ocr-models.txt after a change:
+#   uv pip compile deploy/document-worker/ocr-models.in --python-version 3.11 \
+#     --python-platform x86_64-manylinux_2_28 --generate-hashes \
+#     --index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
+#     --emit-index-url -o deploy/document-worker/ocr-models.txt
+numpy==2.4.6
+onnx==1.23.2
+onnxruntime==1.31.0
+# Above the setuptools advisories the CPU index's own copy (78.1.0) carries.
+setuptools==83.0.0
+torch==2.14.1+cpu

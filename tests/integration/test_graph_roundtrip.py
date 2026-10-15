@@ -17,6 +17,7 @@ with a stub LLM (no network), backed by a real AsyncSqliteSaver, and assert:
 from __future__ import annotations
 
 import aiosqlite
+import pytest
 from kazma_core.agent.graph_builder import build_supervisor_graph
 from kazma_core.agent.state import initial_supervisor_state
 from kazma_core.agent.tool_registry import LocalToolRegistry
@@ -25,6 +26,17 @@ from kazma_core.cost_breaker import create_cost_breaker
 from kazma_core.llm_provider import LLMResponse, ToolCall
 from kazma_core.tracing import KazmaTracer
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
 
 
 class StubLLM:

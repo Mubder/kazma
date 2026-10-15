@@ -88,6 +88,8 @@
             intake_max_files: 10,
             ocr_enabled: true,
             ocr_tables: true,
+            ocr_engine: 'auto',
+            ocr_engine_health: null,
             worker_timeout_seconds: 300,
             worker_memory_mb: 1024,
             capacity_storage_free_floor_bytes: 536870912,
@@ -96,6 +98,10 @@
             gc_enabled: true,
             indexing_enabled: true,
             malware_probe: { available: false },
+            // Where untrusted documents run (security.execution.document_worker_isolation):
+            // what the server reports, and the page's choice.
+            worker_isolation: null,
+            worker_profile_choice: 'process',
         },
         documentsSaving: false,
         documentsStatus: '',
@@ -759,6 +765,7 @@
                 const docSettings = await this._fetch('/api/settings/documents');
                 if (docSettings && !docSettings.error) {
                     Object.assign(this.documents, docSettings);
+                    this._syncWorkerProfileChoice();
                 }
             } catch (e) {
                 console.error('[Settings] Failed to load document config:', e);

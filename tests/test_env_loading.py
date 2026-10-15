@@ -211,6 +211,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "switches at the install's library and vectors"
     ),
     "scripts/shipped_defaults.py": "compares kazma.yaml with its committed snapshot; reads no install",
+    "scripts/document_worker_image.py": (
+        "builds the document worker image from the checkout's files with the docker CLI; "
+        "it reads no install setting, and no secret may reach the image"
+    ),
 }
 
 #: Scripts that load a `.env` their own way, on purpose, and why.

@@ -473,8 +473,17 @@ def _hardware(path: Path, name: str | None) -> dict[str, Any]:
         chroma = str(chromadb.__version__)
     except ImportError:
         chroma = "not installed"
+    # The index pool Kazma starts Chroma with, sized from the open-file
+    # limit this machine gives a process (a build from before 2026-10-15
+    # left Chroma's own).
+    from kazma_core.memory import chroma_local
+
+    pool_size = getattr(chroma_local, "index_pool_size", None)
+    ceiling = getattr(chroma_local, "library_ceiling", None)
     return {
         "name": name or "unnamed (pass --hardware-name)",
+        "vector_index_pool": pool_size() if pool_size else "chroma's default",
+        "library_ceiling": ceiling() if ceiling else None,
         "cpu": _cpu_model(),
         "cores_physical": psutil.cpu_count(logical=False),
         "cores_logical": psutil.cpu_count(logical=True),
@@ -721,11 +730,18 @@ _VECTOR_LOG: list[str] = []
 
 
 def _meaning_query(vs: Any, question: str, lib: str, top_k: int) -> tuple[list[tuple[str, float]], float, str | None]:
-    """The meaning layer as ``search_sync`` queries it: (results, ms, the
-    failure the product logged, if any)."""
+    """The meaning layer as ``search_sync`` queries it -- with the filter on
+    the embedder's tag only while the collection holds another embedder's
+    vectors (``KnowledgeIndex._model_filter``): (results, ms, the failure
+    the product logged, if any)."""
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+
     _VECTOR_LOG.clear()
     start = time.perf_counter()
-    raw = vs.query(question, limit=top_k * 4, where={"$and": [{"library_id": lib}, {"model": vs.identity}]})
+    model_filter = getattr(KnowledgeIndex, "_model_filter", None)  # a build from before 2026-10-15 has none
+    where = (model_filter(vs, vs.identity) if model_filter is not None
+             else {"$and": [{"library_id": lib}, {"model": vs.identity}]})
+    raw = vs.query(question, limit=top_k * 4, where=where)
     elapsed = _ms(start)
     failure = next((m for m in _VECTOR_LOG if "Query failed" in m), None)
     return raw, elapsed, failure[:300] if failure else None
@@ -1093,21 +1109,71 @@ def _scale_restore(plan: dict[str, Any]) -> dict[str, Any]:
             "vector_read_failure": unreadable, "violations": violations}
 
 
-def _tail(token: str) -> bytes:
-    """The end of a planted token, as the keyword index's segments store it
-    (a term is kept after the prefix it shares with the term before it)."""
-    return token[-6:].encode() if token.isascii() else token[-4:].encode()
+def _varint(blob: bytes, i: int) -> tuple[int, int]:
+    """SQLite's variable-length integer, as FTS5 writes it."""
+    value = 0
+    for k in range(8):
+        byte = blob[i + k]
+        value = (value << 7) | (byte & 0x7F)
+        if not byte & 0x80:
+            return value, i + k + 1
+    return (value << 8) | blob[i + 8], i + 9
+
+
+def _leaf_terms(page: bytes) -> list[bytes]:
+    """The words of one leaf page of an FTS5 segment: the page footer gives
+    each word's offset; the first is stored whole, each next one after the
+    prefix it shares with the word before it."""
+    footer = int.from_bytes(page[2:4], "big")
+    offsets, i, at = [], footer, 0
+    while i < len(page):
+        delta, i = _varint(page, i)
+        at += delta
+        offsets.append(at)
+    terms: list[bytes] = []
+    previous = b""
+    for n, offset in enumerate(offsets):
+        if n == 0:
+            size, j = _varint(page, offset)
+            term = page[j:j + size]
+        else:
+            shared, j = _varint(page, offset)
+            size, j = _varint(page, j)
+            term = previous[:shared] + page[j:j + size]
+        terms.append(term)
+        previous = term
+    return terms
+
+
+def _segment_terms(conn: sqlite3.Connection) -> set[str]:
+    """Every word the keyword index's segments hold, read from their leaf
+    pages: a deleted row's words too, until a merge drops them."""
+    out: set[str] = set()
+    for rowid, block in conn.execute("SELECT id, block FROM knowledge_chunks_fts_data WHERE id > 10"):
+        # b-tree node or doclist index (height, flag), a tombstone segment, an empty block
+        if (rowid >> 31) & 0x3F or rowid >> 37 >= 1 << 16 or not block:
+            continue
+        out.update(t[1:].decode("utf-8", "replace") for t in _leaf_terms(bytes(block)) if t[:1] == b"0")
+    return out
 
 
 def _segment_residue(conn: sqlite3.Connection, tokens: list[str]) -> int:
-    """How many *tokens* the keyword index's segments still hold, at least.
+    """How many *tokens* the keyword index's segments hold as words no live
+    row holds.
 
     FTS5 deletes by writing a delete marker; the deleted row's words stay in
     the segment blobs (``knowledge_chunks_fts_data``) until a merge rewrites
-    them -- unsearchable, but on disk.
+    them -- unsearchable, but on disk. Read word by word: the test this
+    replaced looked for each token's last 4 (Arabic) or 6 (English) letters
+    anywhere in the blobs, and another word holding those letters counted --
+    6 of 20,000 random Arabic tokens in the store the first multi-day run
+    stopped on, a leak that is not there for a run checking every cycle.
     """
-    blob = b"".join(bytes(r[0]) for r in conn.execute("SELECT block FROM knowledge_chunks_fts_data") if r[0])
-    return sum(1 for t in tokens if _tail(t) in blob)
+    conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS temp.kb_soak_vocab "
+                 "USING fts5vocab(main, knowledge_chunks_fts, 'row')")
+    live = {str(r[0]) for r in conn.execute("SELECT term FROM temp.kb_soak_vocab")}
+    held = _segment_terms(conn) - live
+    return sum(1 for t in tokens if t in held)
 
 
 def _after_delete(store: Any, index: Any, lib: str, tokens: list[str]) -> dict[str, Any]:
@@ -1652,13 +1718,19 @@ def run_scale(args: argparse.Namespace) -> int:
                         f"{record.get('sqlite_chunks')} chunks covered while no vector existed")
                 residue, planted = restored["delete"]["after"]["keyword_segment_residue"]
                 if residue:
-                    violations.append(f"keyword index after the delete: its segments still hold at least {residue} "
+                    violations.append(f"keyword index after the delete: its segments still hold {residue} "
                                       f"of the deleted library's {planted} planted words")
                 for when, child in (("after ingest", build), ("in the restore", restored)):
                     _reload_finding(report, f"{lib} {when}", child.get("index_reloads"))
                 orphans = _orphan_vector_folders(step_dir / "vector_memory")
                 step["delete"]["vector_folders"] = orphans
                 violations += _orphan_outcome(report, f"{lib} after the delete", orphans, args.tolerate_orphan_vector_folders)
+                tokens = [f["token"] for f in build.get("planted") or [] if f.get("token")]
+                catalog_text = _vector_catalog_text(step_dir / "vector_memory", tokens)
+                step["delete"]["vector_catalog_text"] = catalog_text
+                if catalog_text.get("text_rows") or catalog_text.get("deleted_words"):
+                    violations.append(f"vector catalog after the delete: {catalog_text['text_rows']} row(s) of text, "
+                                      f"{catalog_text['deleted_words']} of {len(tokens)} planted words left")
                 step["ceilings"]["after_delete"] = {"knowledge_db": _db_ceilings(step_dir / "knowledge.db"),
                                                     "vector_dir_bytes": _files_bytes(step_dir / "vector_memory")}
             leftovers = _unified_items(step_dir)
@@ -2010,7 +2082,7 @@ def check_stores(data_dir: Path, state: dict[str, Any], seed: int, *, tolerate_o
     finally:
         conn.close()
     if residue:
-        problems.append(f"keyword index: its segments still hold at least {residue} of {len(gone_tokens)} planted "
+        problems.append(f"keyword index: its segments still hold {residue} of {len(gone_tokens)} planted "
                         "words of deleted libraries")
     live = set(state["libs"])
     if libraries != live:
@@ -2099,6 +2171,15 @@ def check_stores(data_dir: Path, state: dict[str, Any], seed: int, *, tolerate_o
         problems += _orphan_outcome(report, "vector store", orphans, tolerate_orphans)
     elif orphans.get("orphans") and not tolerate_orphans:
         problems.append(f"vector store: {orphans['orphans']} vector folder(s) no collection owns")
+    catalog_text = _vector_catalog_text(vector_dir, gone_tokens)
+    if catalog_text.get("error"):
+        problems.append(f"vector store: its catalog could not be read for text: {catalog_text['error']}")
+    if catalog_text.get("text_rows"):
+        problems.append(f"vector store: {catalog_text['text_rows']} catalog row(s) hold text beside a vector "
+                        "(a document or metadata Kazma never reads)")
+    if catalog_text.get("deleted_words"):
+        problems.append(f"vector store: chroma.sqlite3 still holds {catalog_text['deleted_words']} of "
+                        f"{len(gone_tokens)} planted words of deleted libraries")
     sample = {
         "libraries": len(libraries), "active_chunks": len(rows) - inactive, "inactive_chunks": inactive,
         "keyword_rows": keyword_rows, "deleted_words_in_keyword_segments": residue,
@@ -2110,8 +2191,32 @@ def check_stores(data_dir: Path, state: dict[str, Any], seed: int, *, tolerate_o
         "chroma_sqlite_bytes": _files_bytes(vector_dir / "chroma.sqlite3"),
         "vector_folders": orphans.get("folders"), "orphan_vector_folders": orphans.get("orphans"),
         "orphan_vector_bytes": orphans.get("orphan_bytes"),
+        "vector_catalog_text_rows": catalog_text.get("text_rows"),
+        "deleted_words_in_vector_catalog": catalog_text.get("deleted_words"),
     }
     return problems, sample
+
+
+def _vector_catalog_text(vector_dir: Path, tokens: list[str]) -> dict[str, Any]:
+    """What text Chroma's catalog holds: rows beside a vector that are not
+    the metadata Kazma reads (``text_rows``), and how many of *tokens* --
+    planted words of deleted libraries -- any byte of ``chroma.sqlite3`` or
+    its journal still holds (``deleted_words``: free pages included)."""
+    from kazma_core.memory import chroma_local
+    from kazma_core.memory.vector_store_global import KEPT_METADATA
+
+    out: dict[str, Any] = {"text_rows": 0, "deleted_words": 0}
+    files = [p for p in (vector_dir / "chroma.sqlite3", vector_dir / "chroma.sqlite3-journal",
+                         vector_dir / "chroma.sqlite3-wal") if p.is_file()]
+    if not files:
+        return out
+    try:
+        out["text_rows"] = sum(chroma_local.catalog_text_rows(vector_dir, KEPT_METADATA).values())
+    except sqlite3.Error as exc:
+        out["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    raw = b"".join(p.read_bytes() for p in files)
+    out["deleted_words"] = sum(1 for t in tokens if t.encode() in raw)
+    return out
 
 
 def check_facts(plan: dict[str, Any], facts: dict[str, Any], *,

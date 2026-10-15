@@ -40,7 +40,7 @@ DocumentService  ◄── single *execution* boundary (sniff / parse / OCR / re
     │                 (process or container profile)
     ├─ Sniff (MIME, OOXML defenses, PDF active-content policy)
     ├─ Parse (one parser per format)
-    ├─ OCR  (per-page quality routing, Tesseract, ruled tables cell by cell)
+    ├─ OCR  (per-page quality routing, the neural engine or Tesseract, ruled tables cell by cell)
     ├─ Index (structural chunking → Knowledge library — explicit action)
     ├─ Generate / Convert (render workers)
     └─ Mutate / Redact (verified redaction pipeline)
@@ -211,7 +211,28 @@ citations. In the `container` profile there is no Docling tier.
 
 - **Per-page quality routing:** Pages with high text density can skip OCR
   (native text preserved); image-heavy / text-poor pages, high presentation-form
-  / CID-mangled layers, and empty text layers route to Tesseract.
+  / CID-mangled layers, and empty text layers route to OCR.
+- **Two engines** (`documents.ocr.engine`, Settings → Documents):
+  - `auto` (default) reads with the **neural engine** when its packages and
+    models are installed, else with Tesseract; `neural` does the same and says
+    on the document when Tesseract had to read it; `tesseract` uses Tesseract
+    only.
+  - The **neural engine** (`documents/ocr/neural.py`) is the one that measured
+    best on Arabic and Arabic-Indic digits (2026-10-15): PaddleOCR PP-OCRv5
+    text detection, EasyOCR's Arabic recognizer (`arabic_g1`: Arabic and Latin
+    letters, both digit sets) with `english_g2` for lines without Arabic, and a
+    vote on letters with PaddleOCR's PP-OCRv5 Arabic recognizer and
+    Tesseract's words (two readers agreeing, or a confident PaddleOCR word,
+    replace EasyOCR's; a number is always EasyOCR's). All four models run on
+    ONNX Runtime inside the document worker; a drawn line is put in logical
+    order with the PDF reader's rule, never a recognizer's own. All the models
+    are Apache-2.0.
+  - **Cost:** about 15 s for an Arabic text page and 30–45 s for a page with
+    ruled tables on one core (the document worker's limit), against 2–8 s with
+    Tesseract; about 800 MB of memory in the worker (inside its 1 GiB). Near
+    the worker's time limit (`documents.workers.timeout_seconds`, 300 s) the
+    remaining pages are read by Tesseract and the document says from which
+    page; raise the limit to keep long scans on the neural engine.
 - **Language selection:** Configurable language pack list (default includes
   English + Arabic when installed). Auto order is **`ara+eng`** when both are
   configured — `eng+ara` often misreads pure-Arabic scans as Latin gibberish.
@@ -236,10 +257,16 @@ citations. In the `container` profile there is no Docling tier.
   time: on the 300 dpi scan measured on 2026-10-13 a page took about 8 s
   instead of 2.
 - **Arabic word order:** a number OCR reads from an Arabic line is put back in
-  logical order with the same rule as PDF text (`arabic.number_in_logical_order`).
-- **Not qualified:** Arabic OCR. Tesseract's `ara` model misreads Arabic-Indic
-  digits (in plain text and in table cells) and skips some lines; numbers read
-  from degraded scans are not qualified either. See
+  logical order with the same rule as PDF text (`arabic.number_in_logical_order`
+  for Tesseract's words, `parsers.pdf_rtl.logical_line` for the neural engine's
+  lines).
+- **Qualified with the neural engine:** Arabic OCR of a clean page (`ar-ocr`:
+  every word and number, CER 0). With Tesseract Arabic OCR is not qualified:
+  `ara` does not read Arabic-Indic digits in any font or model measured and
+  skips some lines. Not qualified with either: the Arabic page with a ruled
+  table (one word misread by the neural engine), numbers read from degraded
+  scans, Arabic decimals and dates written with the Arabic separators (the
+  recognizer has no `٫` and rarely reads `/` between Arabic-Indic digits). See
   [What is not qualified](#not-qualified).
 
 
@@ -538,10 +565,15 @@ with Kazma's own engines — English, Arabic and bilingual DOCX, PDF and HTML,
 long documents, two columns from another producer, wide tables, OCR pages
 (plain, ruled table, degraded scan) — measured on the real parser for word,
 segment, number and table-cell recall, reading order, page honesty, alignment
-and OCR CER/WER. Corpus version 3 has 19 cases; **16** meet the release
-targets. Not qualified: `ar-ocr` and `ar-ocr-table` (Tesseract `ara` misreads
-Arabic-Indic digits and drops lines) and `en-ocr-degraded` (a decimal point
-read as a colon). `python scripts/document_fidelity.py` measures it again.
+and OCR CER/WER. Corpus version 4 has 19 cases (the OCR reference now holds
+all the text a page shows, its footer included). The five OCR cases are
+measured with each engine against its own floors: with the neural engine
+**17** of 19 meet the release targets (`ar-ocr` among them); with Tesseract
+16. Not qualified: `ar-ocr-table` with the neural engine (one word,
+`ريالاً`, misread; every number and cell right) and with Tesseract (Arabic-Indic
+digits not read), `ar-ocr` with Tesseract, and `en-ocr-degraded` with both (a
+decimal point read as a comma or a colon). `python scripts/document_fidelity.py`
+measures it again with every engine installed here.
 
 **Note:** Architecture, a11y, and full crash-matrix gates live in
 `tests/test_document_certification_phase10.py`. Process-death recovery,
@@ -593,6 +625,11 @@ pip install -e ".[document]"
 # Full platform engines (OCR helpers, WeasyPrint, PyMuPDF, pypdfium2 bake-off)
 pip install -e ".[document-platform]"
 
+# The neural OCR engine: its packages (part of the ocr extra, which
+# document-platform includes), then its models, once
+pip install -e ".[ocr]"
+python scripts/ocr_models.py install
+
 # Everything
 pip install -e ".[all]"
 ```
@@ -601,13 +638,30 @@ pip install -e ".[all]"
 
 | Package | Purpose |
 |---|---|
-| **Tesseract** + language packs (`eng`, `ara`, …) | OCR (scanned / bad text layer; `ara` required for Arabic scans; `eng` also serves the digits-only pass of table cells) |
+| **Tesseract** + language packs (`eng`, `ara`, …) | OCR (scanned / bad text layer; `ara` required for Arabic scans; `eng` also serves the digits-only pass of table cells); also the third reader of the neural engine's letter vote |
 | **ClamAV** (`clamscan` / `clamdscan` on PATH) | Malware scan on intake |
 | **LibreOffice** | Legacy `.doc` / `.xls` / `.ppt` parsing, some format conversions, and the PDF *generation* route for documents containing Arabic |
 | OS fonts | WeasyPrint HTML→PDF (IBM Plex Sans Arabic and Amiri ship with Kazma for generated documents) |
 
 In the `container` profile these come from the worker image
-(`deploy/document-worker/Dockerfile`), not from the host.
+(`deploy/document-worker/Dockerfile`), not from the host -- the neural OCR
+engine and its models included (an `ocr-models` build stage downloads and
+converts them; the worker has no network).
+
+### The neural OCR engine's models
+
+`python scripts/ocr_models.py install` downloads four files pinned by URL,
+size and SHA-256 in `documents/ocr/neural_models.py` (PaddleOCR's PP-OCRv5
+detection and Arabic recognition as RapidAI's ONNX conversions, EasyOCR's
+`arabic_g1` and `english_g2`), converts the two EasyOCR models from PyTorch to
+ONNX and checks the conversion against PyTorch on fixed inputs, and writes
+them with a `manifest.json` into `KAZMA_OCR_MODEL_DIR` (default
+`<data dir>/models/ocr`, about 240 MB, not backed up or carried in a bundle:
+it is re-installed). The conversion needs PyTorch once: when the interpreter
+has none, the script runs it in a throwaway environment through `uv`, and
+nothing is added to Kazma's own environment. `python scripts/ocr_models.py
+verify` checks an installed set. The document worker uses the models only when
+every file matches the manifest, and never downloads anything.
 
 ### First operator walkthrough
 
@@ -700,11 +754,12 @@ More ops detail: [Document processing](../ops/document-processing.md).
 | Concurrent Web uploads | 4 per process | `documents.capacity.max_concurrent_uploads` |
 | Intake lease | 300 s | `documents.intake.lease_seconds` |
 | Table cells read per scanned page | 600 cells / 120 s | fixed (`documents/ocr/pipeline.py`) |
+| OCR engine | `auto` | `documents.ocr.engine` (`auto`, `neural`, `tesseract`) |
 | JSON request body | 2 MiB | fixed (`documents_api.py`) |
 | Generation payload | 1 MiB | fixed (`ingestion.py`) |
 | Remote-parse answer | 32 MiB | fixed (`extract_salvage.py`) |
 
-Full field list: `kazma_core.documents.config.DocumentConfig` (74 fields).
+Full field list: `kazma_core.documents.config.DocumentConfig` (75 fields).
 
 ## What is not qualified {#not-qualified}
 
@@ -714,9 +769,13 @@ the fidelity corpus — not plans:
 - **Hostile documents on the default `process` profile.** It bounds memory, CPU
   and time but does not confine the filesystem or the network. Only the
   `container` profile does, and its containers share the host kernel.
-- **Arabic OCR**, including Arabic-Indic digits in plain text and in table
-  cells (`ar-ocr`, `ar-ocr-table` below the release targets), and numbers read
-  from degraded scans (`en-ocr-degraded`). Tables without ruling lines and
+- **Arabic OCR with Tesseract** (`ar-ocr`, `ar-ocr-table` below the release
+  targets: Arabic-Indic digits are not read). With the neural engine, the
+  Arabic page with a ruled table (`ar-ocr-table`, one word misread), Arabic
+  decimals and dates written with the Arabic separators, and real scans at the
+  release targets (measured on one real scan only, where it beat Tesseract on
+  most pages and lost on some words). Numbers read from degraded scans
+  (`en-ocr-degraded`) with either engine. Tables without ruling lines and
   merged cells are not read cell by cell.
 - **Multi-replica operation** (the certifier's `postgres_multi_replica` and
   `metadata_multi_replica` are NOT RUN).

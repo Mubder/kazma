@@ -476,9 +476,12 @@ def register_system_routes(self: Any) -> None:
                 "priority": 5,
                 "description": _i18n(
                     "packages.extra.ocr.desc",
-                    "Tesseract OCR for scanned documents. Also install system tesseract-ocr.",
+                    "Tesseract OCR for scanned documents, and the neural OCR engine for Arabic and "
+                    "Arabic-Indic digits (then: python scripts/ocr_models.py install). Also install "
+                    "system tesseract-ocr.",
                 ),
-                "packages": ["pytesseract", "pdf2image", "pillow"],
+                "packages": ["pytesseract", "pdf2image", "pillow", "onnxruntime", "opencv-python-headless",
+                             "pyclipper", "numpy"],
                 "install_cmd": 'uv pip install -e ".[ocr]"   # plus OS Tesseract',
             },
             "convert": {
@@ -543,6 +546,10 @@ def register_system_routes(self: Any) -> None:
             "pywebpush": "Web Push (VAPID) for turn-complete",
             "pytesseract": "Tesseract Python bindings",
             "pdf2image": "PDF page rasterizer for OCR",
+            "onnxruntime": "Runs the neural OCR engine's models",
+            "opencv-python-headless": "Image operations of the neural OCR engine",
+            "pyclipper": "Text-box geometry of the neural OCR engine",
+            "numpy": "Arrays for the neural OCR engine",
             "pillow": "Image I/O for OCR / documents",
             "weasyprint": "HTML/Markdown to PDF",
             "pymupdf": "MuPDF parser (import fitz)",

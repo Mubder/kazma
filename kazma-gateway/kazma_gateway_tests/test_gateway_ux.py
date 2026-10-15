@@ -145,6 +145,10 @@ class TestTypingIndicator:
         adapter = TelegramAdapter(token="test:token")
         adapter._http = AsyncMock()
         adapter._http.post = AsyncMock()
+        # An AsyncMock's is_closed is truthy: _ensure_http took the stand-in
+        # for a closed client and sent through a real one to api.telegram.org
+        # (tests/_egress_guard.py, 2026-10-15).
+        adapter._http.is_closed = False
 
         outbound = OutboundMessage(
             target_id="telegram:123456",

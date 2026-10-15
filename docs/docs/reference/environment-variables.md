@@ -63,9 +63,10 @@ soak size: `KAZMA_DOCUMENT_SOAK_ITERATIONS` (used by
 | `KAZMA_DOCUMENTS_METADATA_BACKEND` | unset (`auto`) | `sqlite` / `postgres` (also `postgresql`, `pg`) / `auto` (unset or `auto`: follow the jobs backend); any other value means SQLite. Postgres metadata enables multi-replica CRUD; GC mark/sweep is backend-agnostic (`repository.gc_mark`) |
 | `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Repetitions of the extended repeated-parse smoke of `certify_documents.py --soak`. It is not, and is not reported as, a multi-day soak. |
 | `KAZMA_DOCUMENT_FONT_DIR` | vendored `documents/assets/fonts/` | Font directory for generated PDF/DOCX/HTML. A path that is not a directory is ignored with a warning, and the vendored IBM Plex Sans Arabic is used. Fonts are still chosen by verified glyph coverage. |
-| `KAZMA_DOCUMENT_WORKER_ISOLATION` | `process` | Where the parser, mutation and renderer workers run. `process`: a local child process with time/output/resource limits and **no filesystem or network isolation** (readiness reports `hostile_document_profile: unqualified`); refused when `security.execution.container_required` is on. `container`: every run goes to the document worker broker, which runs it in a fresh attested container with no network and no mounts, and the engines Kazma reports are the ones the worker image reports; an unreachable, unattested or full broker refuses the run (`worker_isolation_unavailable`, retried; no fallback to `process`). Any other value refuses every run (`worker_isolation_invalid`). |
-| `KAZMA_DOCUMENT_BROKER_URL` | unset | The broker for `container` isolation: `unix:///path/to/broker.sock` or `tcp://host:port`. Without it `container` refuses every run. TCP belongs on a private network: the token is the only authentication. |
-| `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` | unset | File holding the shared broker token (at least 32 characters; the broker is started with the same file). Read per run, so a rotated token takes effect without a restart. |
+| `KAZMA_DOCUMENT_WORKER_ISOLATION` | unset (the admin's setting, else `process`) | Where the parser, mutation and renderer workers run, when set: it wins over the admin's setting `security.execution.document_worker_isolation` (Settings → Documents), which decides otherwise. `process`: a local child process with time/output/resource limits and **no filesystem or network isolation** (readiness reports `hostile_document_profile: unqualified`); refused when `security.execution.container_required` is on. `container`: every run goes to the document worker broker, which runs it in a fresh attested container with no network and no mounts, and the engines Kazma reports are the ones the worker image reports; an unreachable, unattested or full broker refuses the run (`worker_isolation_unavailable`, retried; no fallback to `process`). Any other value refuses every run (`worker_isolation_invalid`). |
+| `KAZMA_OCR_MODEL_DIR` | unset (the data dir's `models/ocr`) | Where the neural OCR engine's models are (`documents.ocr.engine`: `neural` or `auto`). `python scripts/ocr_models.py install` writes them there with a `manifest.json`; the document worker uses them only when every file matches its SHA-256 in that manifest, else Tesseract reads the pages. The worker image sets it to its own read-only copy (`/opt/kazma/ocr-models`). |
+| `KAZMA_DOCUMENT_BROKER_URL` | set by the guard | The broker for `container` isolation: `unix:///path/to/broker.sock` or `tcp://host:port`. The guard hands the server it spawns its own broker's loopback address; a value from `.env` wins (another broker: compose, or one run by hand), and the guard then runs none. Without it `container` refuses every run. TCP belongs on a private network: the token is the only authentication. |
+| `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` | set by the guard | File holding the shared broker token (at least 32 characters; the broker is started with the same file). The guard's is `.kazma/document_broker.token`, made once and readable by the guard's account only. Read per run, so a rotated token takes effect without a restart. |
 
 Test-only, opt-in qualification runs (each test skips without its variable;
 the [document processing](../ops/document-processing.md) page says how to run
@@ -190,13 +191,18 @@ and extras `kazma[sandbox]` / `kazma[durable]`.
 | `KAZMA_HOST_SHELL` | unset | Escape hatch | Production, multi-user and forced Docker profiles deny host shell by default. `1` explicitly grants it after HITL; this restores host capability, not isolation. Policy lookup failures deny it. |
 | `KAZMA_CODE_EXEC_IMAGE` | `python:3.12-slim` | No | Image for the Docker jail that runs `python_exec` / `code_exec` (no network, read-only work mount, tmpfs `/tmp`, memory cap). |
 | `KAZMA_LIVE_EVAL` | unset | No | `1` runs the opt-in live-model eval (`tests/test_hands_live.py`). CI skips. |
-| `KAZMA_TEMPORAL_HOST` / `TEMPORAL_ADDRESS` | unset | Multi-hour swarm | Temporal frontend (`localhost:7233`). Wraps swarm `_dispatch_inner`. |
+| `KAZMA_TEMPORAL_HOST` / `TEMPORAL_ADDRESS` | unset | Multi-hour swarm | Temporal frontend (`localhost:7233`). Each admitted swarm task runs through a Temporal workflow whose activity runs the engine's own run in this process ([swarm guide §1.0a](../guide/swarm-orchestration.md#10a-durable-execution-temporal-opt-in)). |
 | `KAZMA_TEMPORAL` | auto if host set | No | `0` keeps in-process swarm. |
-| `KAZMA_TEMPORAL_REQUIRED` | unset | Required durable execution | `1` = fail the task if Temporal/SDK is disabled or down; readiness also requires the running worker. After submission, no profile permits local fallback. Whole-task activities do not retry arbitrary effects. |
+| `KAZMA_TEMPORAL_REQUIRED` | unset | Required durable execution | `1` = fail the task if Temporal/SDK is disabled or down, or this process's worker is not running; an approval is then deferred with its checkpoint left open. Readiness also requires the running worker. After submission, no profile permits local fallback. Temporal never retries a task's activity. |
 | `KAZMA_TEMPORAL_NAMESPACE` | `default` | No | Temporal namespace. |
-| `KAZMA_TEMPORAL_QUEUE` | `kazma-swarm` | No | Task queue for the in-process Temporal worker. |
+| `KAZMA_TEMPORAL_QUEUE` | `kazma-swarm` | No | The workflows' task queue. Each process's activities use `<queue>-run-<tag>`, a queue only that process polls (the tag is drawn at start). |
 | `KAZMA_CODE_INDEX` | on | No | `0` disables the workspace symbol index + `codebase_search`. |
 | `KAZMA_IDE_LSP` | on | No | `0` disables the `/api/ide/lsp` backend. The Web `/ide` editor is CodeMirror 5 (syntax only); hover/complete UI is not bound. |
+
+Test-only: `KAZMA_TEST_TEMPORAL_REQUIRED=1` makes the durable path's
+qualification (`tests/test_swarm_temporal_durable.py`, on Temporal's
+time-skipping test server) fail instead of skip when the SDK is missing or the
+test server cannot start; its CI job sets it.
 
 ---
 
@@ -237,6 +243,7 @@ and extras `kazma[sandbox]` / `kazma[durable]`.
 | `KAZMA_EMBED_DIM` | `1024` | No | Embedding dimension (must match the model's output). |
 | `KAZMA_EMBED_BASE_URL` | unset | Remote only | `/embeddings` endpoint base URL for `openai-compatible`. |
 | `KAZMA_EMBED_API_KEY` | unset | Remote only | API key for the remote `/embeddings` endpoint. |
+| `KAZMA_EMBEDDER_PREWARM` | unset (on) | No | `0` skips loading the embedder at boot; the first recall that needs it loads it. The test suite sets it: every app a test built loaded the local model here. |
 | `KAZMA_DEMO_MODE` | unset | **No** | Demo fixtures — never enable in real prod. |
 | `KAZMA_MEMORY_ENFORCE_TENANT` | unset | Multi-tenant only | When `1`/`true` -- and always under `KAZMA_PRODUCTION=1` or multi-user -- every `/api/memory` route scopes reads, counts, id-keyed mutations, undo tokens, hygiene and graph-clear by the request-scoped tenant (set by the auth middleware from verified JWT/opaque-session claims). Unset outside production and multi-user = single-tenant `default`. |
 | `KAZMA_MEMORY_STATE_ROLE` | unset (`mirror`) | Multi-replica only | `primary` makes the Postgres state backend the recall SoT (fail-closed if down — no silent SQLite). Dense search is pgvector fused with ILIKE. Do **not** enable until `python scripts/reconcile_memory_mirror.py --dry-run` reports no dead-in-mirror / only-in-mirror rows. |
@@ -596,7 +603,12 @@ Which remotes `kazma update` trusts at all is `KAZMA_UPDATE_REMOTE_ALLOWLIST`, i
 | `KAZMA_GUARD_GRACEFUL_STOP_S` | `60` | Seconds a deliberate stop (reload, maintenance pause, guard shutdown) waits for the server to shut itself down before it is killed. |
 | `KAZMA_GUARD_LOG` / `KAZMA_GUARD_STATE` | `<install>/.kazma/` | Guard log, and the state file: child PID, the guard's heartbeat, reload acknowledgements. |
 | `KAZMA_GUARD_RELOAD_FILE` / `KAZMA_GUARD_PAUSE_FILE` | `<install>/.kazma/` | The `--reload` request and the `--pause` flag. |
-| `KAZMA_GUARD_STATE_FILE` | set by the guard | Given to the server the guard spawns: the path of the guard's state file. The server's supervisor watch reads the guard's heartbeat there and pages when it stops. |
+| `KAZMA_GUARD_STATE_FILE` | set by the guard | Given to the server the guard spawns: the path of the guard's state file. The server's supervisor watch reads the guard's heartbeat there and pages when it stops; document readiness reads the guard's record of the document broker there. |
+| `KAZMA_GUARD_BROKER_REQUEST_FILE` | set by the guard | Given to the server the guard spawns: where the server asks for the document worker broker (`.kazma/document_broker.request.json`). The server writes whether it needs one (the container profile) at boot, on a profile change and every maintenance pass; the guard starts or stops the broker within a second. |
+| `KAZMA_GUARD_DOCUMENT_BROKER` | `auto` | Whether the guard runs the document worker broker beside Kazma. `auto`: when Kazma asks for it (the container profile). `on`: always. `off`: never, and the server is handed no broker address. An unknown value means `auto`. Set in the guard's environment (the `KazmaAgent` task's), not `.env`. |
+| `KAZMA_GUARD_BROKER_PORT` | chosen once | The loopback port of the guard's broker. Unset, the guard keeps the port it used before, else takes the first free of 64 derived from the install folder, between 20000 and 29999 (below the ephemeral ranges). |
+| `KAZMA_GUARD_BROKER_IMAGE` | the build for the code on disk | Pin the worker image the guard's broker serves. Unset, it asks for `kazma-document-worker:src-<16 hex>` (`scripts/document_worker_image.py build`) and serves the newest build while that one is missing; pinned, it serves exactly this one. |
+| `KAZMA_GUARD_BROKER_SCRIPT` | `kazma_core/documents/worker_broker.py` | The broker program the guard runs (the guard's tests run a stand-in). |
 | `KAZMA_PROCESS_PRIORITY` | `normal` | Windows: the server and the guard raise themselves, never lower, to an interactive program's priority as they start (CPU class, memory priority, I/O priority). A Scheduled Task registered without a priority starts them below every normal program. `keep` leaves both as they were started; `scripts/fast_test.py` sets it for the test processes it deliberately lowers. |
 | `KAZMA_GUARD_TELEGRAM_TOKEN` / `KAZMA_GUARD_TELEGRAM_CHAT` | vault / `SWARM_*` | Direct Telegram paging, independent of the app. |
 

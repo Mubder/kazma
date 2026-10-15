@@ -486,12 +486,59 @@ compatibility. **All public API methods and constructors are unchanged.**
   the next start holds it unknown). An approval whose admission write fails
   resumes nothing (`_admit_to_store(must_record=True)`, `503
   approval_not_recorded`): resumed, a crash would offer the checkpoint again.
-  A new task whose RUNNING row fails still runs, counted `running_row`. A
-  durable dispatch that never ran is finalized (`durable._not_run`). Lost
-  writes are counted (`task_write`, `step_journal`, `worker_metric`,
-  `breaker_read`, `breaker_persist`, `breaker_lease`). Harness:
-  `scripts/swarm_chaos.py`; gate: `tests/test_swarm_chaos.py` (each fix's old
-  code as its negative control; the Postgres cases `@pytest.mark.postgres`).
+  **A new task runs only with its RUNNING row** (2026-10-15): the admission
+  write is tried again the same way, and one that still fails refuses the
+  task, nothing run (`_store_refused`: `task_store_unavailable`, retryable,
+  the slot freed, counted `running_row`; the dispatch route answers 503 with
+  Retry-After, the Swarm page words it in its language). It used to run with
+  no RUNNING row, so a crash in it left effects no recovery could see. The
+  refusal is the task's ending in this process only (history and stream, so a
+  background dispatch's page hears it); dispatching the same task again runs
+  it. A refused attempt whose write landed before its connection was lost is
+  our own row (same `run_id` and generation): admitted. A durable dispatch
+  that never ran is finalized (`durable._not_run`). Lost writes are counted
+  (`task_write`, `step_journal`, `worker_metric`, `breaker_read`,
+  `breaker_persist`, `breaker_lease`). Harness: `scripts/swarm_chaos.py`;
+  gate: `tests/test_swarm_chaos.py` (each fix's old code as its negative
+  control, the run-anyway admission included; the Postgres cases
+  `@pytest.mark.postgres`).
+- **A shared breaker never takes an older state** (SQ01 soak, 2026-10-15):
+  an outcome changes the breaker under its lock and shares it in a second
+  step, so a refresh between the two read the generation before;
+  `refresh_from_shared` takes a NEWER generation's state only, and from the
+  same generation only its counters and settings (never its state or open
+  time). The soak harness test failed 2 runs in 10 on it. Gate:
+  `tests/test_swarm_breaker_shared_refresh.py` (the old refresh as control).
+- **The durable path (Temporal) runs the engine's own run, where it was
+  admitted** (Swarm tracker SQ03, SW-E16, 2026-10-15; rules in
+  `swarm/durable.py`'s docstring). One workflow per run (`kazma-swarm-<id>`,
+  `-g<generation>` for an approved resume, which takes the durable path too);
+  its one activity is scheduled on a queue only the admitting process polls
+  (`activity_queue`) and runs only for a run registered and waiting there,
+  in the run's own context, the body being `SwarmEngine._run_admitted` (or
+  `_resume`) -- the same deadline, watchdog and endings as in process (one
+  deadline owner). Temporal's limits come from the same budget
+  (`engine.task_budget`, `durable.activity_timeouts`) and sit after the
+  engine's own end of the run; one Temporal does fire, or a cancel or
+  terminate made through it, is settled in the run (`durable._settle`:
+  `deadline`, `worker_lost` or `temporal_cancel`, with `execution_outcome`).
+  Never retried (`maximum_attempts=1`: the worker's own retries run inside,
+  under §30 G). A stop stops the work here first, then cancels the
+  workflow. A heartbeat every `HEARTBEAT_EVERY_S` lets Temporal call a dead
+  process's worker lost; the workflow worker keeps no cache (no sticky
+  queue), so a restarted Kazma settles that workflow at once; the activity
+  uses TRY_CANCEL (the SDK cannot evict a workflow waiting on a cancel).
+  The workflow's result is a summary (no prompt or output); the task store
+  holds the result, and a run whose work ended does not wait past
+  `WORKFLOW_CLOSE_WAIT_S` for Temporal (counted `durable_workflow`). A first
+  run of a pipeline journals its steps too, so a killed process's task is
+  held unknown naming the step it stopped in. Gate:
+  `tests/test_swarm_temporal_durable.py` on Temporal's time-skipping test
+  server (a real child process killed mid-step; the old activity body, the
+  old ending, the worker's own context, the in-process resume and no
+  heartbeat/journal as controls). The test server does
+  not skip time while an activity is scheduled or running: those limits run
+  short and real there.
 - **Swarm failures are loud and counted** (SW-E14): lost evidence or a lost
   decision is a WARNING and `kazma_core.metrics.record_swarm_failure(site)`
   (`kazma_swarm_failures_total{site}`). A catch-all handler in `swarm/` or the
@@ -554,7 +601,9 @@ compatibility. **All public API methods and constructors are unchanged.**
   then left the next boot to record a failure of unknown outcome; it now
   waits for them, bounded (`_flush_stopped_writes`, a WARNING and
   `site="shutdown_write"` when one is left), and the soak counts one left as
-  a violation.
+  a violation. `--duration` is seconds of LOAD: the time a restart takes is
+  added (one that waits out the stop grace for a task ignoring its stop took
+  12 s of the test's 24 s run and left the breaker no window to recover in).
 - `engine.py` public methods are thin delegates — the real logic lives in the extracted modules.
 - The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
 - Constructor signature is unchanged — test fixtures work without modification.
@@ -1624,7 +1673,9 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   180-day sweep), `memory_audit_log` (now redacted to a hash, the event
   kept), a queued turn's payload, the legacy tables, the full-text index
   segments (`purge_search_index`: FTS5 keeps a deleted row's words until a
-  merge) and `unified_items`, a copy of every fact and Knowledge chunk with
+  merge, and a merge on one level below the top keeps them too, so it
+  goes through `db/fts5_purge.purge_deleted_rows`, §24 G) and
+  `unified_items`, a copy of every fact and Knowledge chunk with
   no delete path that federated search served -- retired, dropped by
   `ensure_ops_schema`. A tool record keeps argument NAMES, never values
   (`procedural.strip_argument_values` rewrites older ones). What Forget
@@ -2749,9 +2800,17 @@ broker that is not ready answers the retryable `worker_isolation_unavailable`
 (a full one `worker_isolation_busy`), never a permanent engine error. The
 image reports a fingerprint of its document code: readiness says
 `image_code_matches: false` and `document_worker_image_outdated` when the
-image was built from other code than Kazma runs (rebuild it and restart the
-broker). The image carries no Docling and no httpx: local salvage is not part
+image was built from other code than Kazma runs (rebuild it:
+`scripts/document_worker_image.py build`; the guard's broker switches by
+itself, E1). The image carries no Docling and no httpx: local salvage is not part
 of the container profile, and remote parsing stays in the Kazma process (K).
+It carries the neural OCR engine (G4) and its models: the `ocr-models` build
+stage (hash-locked `deploy/document-worker/ocr-models.txt`, CPU PyTorch) runs
+`scripts/ocr_models.py install`, only `/models` reaches the final image
+(`KAZMA_OCR_MODEL_DIR=/opt/kazma/ocr-models`, read-only, verified at build),
+and `parser_container_request` points the parse at that copy -- the host's
+model directory is never sent. The capability report names both OCR engines
+(`ocr.engines`); an older image's report without them reads neural as absent.
 `security.execution.container_required` refuses the `process` profile
 (`worker_isolation_required`; unreadable policy refuses too) -- checked where
 Kazma starts a worker, never inside one. Gates:
@@ -2767,6 +2826,66 @@ made through `binaries.run_soffice_cli` kills the whole process tree on
 timeout and bounds the last wait: `subprocess.run(timeout=)` waited without a
 limit for the pipes soffice.bin still held and hung the certification
 (`tests/test_soffice_call_bounded.py`, the old call as its control).
+
+**E1. Which profile runs is the admin's setting; the guard runs the broker**
+(2026-10-15). Live that day: the install required containers, documents ran
+in `process`, no broker ran -- the container profile needed three `.env`
+lines and a hand-run process -- and every document was refused.
+- **One answer for the profile** (`worker_container.worker_isolation_mode` /
+  `isolation_selection`): `KAZMA_DOCUMENT_WORKER_ISOLATION` wins when set
+  (the environment's floor); else the setting
+  `security.execution.document_worker_isolation` (`process`/`container`,
+  Settings -> Documents, `PUT /api/settings/documents` `worker_isolation`,
+  validated by `settings_validation`); none saved is `process`. Under
+  `security.` so `config_save` refuses it, and a restore never changes it
+  (`KEY_RULES` credential class: an older backup must not move documents out
+  of containers). An unreadable setting refuses (`document_policy_unavailable`),
+  never guesses `process`.
+- **A worker never reads settings**: every worker entry point (`main` of the
+  parser, mutation and renderer workers, and `worker_entry`) calls
+  `worker_process.mark()` first, and the profile is then `process` (its own
+  engines). The local profile scrubs the worker's environment, so a settings
+  read there would open the default data folder's store. A new worker entry
+  point marks itself (`test_every_worker_entry_point_marks_itself_first`).
+- **Kazma asks the guard** (`documents/broker_supervision.py`): it writes
+  `want` and the broker URL it uses to `KAZMA_GUARD_BROKER_REQUEST_FILE` --
+  at boot (`start_broker_requests`, in a thread), on a profile change (a
+  ConfigStore change listener that publishes on a retained thread of its own,
+  `_drain_publishes`) and on the maintenance sweep "document worker broker";
+  only when the decision changed. An unreadable profile leaves the request
+  standing. A URL that is not the guard's (a `.env` broker) means the guard
+  runs none. Readiness reads the guard's record back (`supervisor_report`:
+  `guard`, `old_guard` -- `document_broker` missing from `guard_features` --,
+  `external`, `none`).
+- **One step that fixes it**: `worker_isolation.action` (`isolation_action`)
+  is a `code` the pages word from the catalog (`documents.isolation_action.*`),
+  an English `message` and the `command` to run; the Documents page shows it,
+  Settings -> Documents offers *Use the container profile* when the install
+  requires containers. Never tell the owner to edit `.env` for what a setting
+  decides.
+- **The image is named by its build inputs** (`documents/worker_image.py`,
+  stdlib-only, loaded by the guard by path): the Dockerfile, its
+  `.dockerignore`, the requirements and every file of `kazma_core` the build
+  context sends, CRLF-insensitive -> `kazma-document-worker:src-<16 hex>`.
+  `test_the_tag_covers_exactly_what_the_build_sends` holds the walk to the
+  `.dockerignore`. `scripts/document_worker_image.py build` builds and labels
+  it (`io.kazma.document-worker-image.source` / `.documents-code`); never make
+  a boot build an image. The broker serves the newest labelled build while
+  the tag asked for is missing (`--fallback-to-newest-built`, status
+  `image_fallback`/`image_source`) and exits 6 to switch, idle, once it
+  appears. Readiness: `image_current: false` or `image_fallback` is
+  `document_worker_image_outdated`; one ops alert per build
+  (`documents.worker_image_outdated`, stamped
+  `system.documents.worker_image_alerted`).
+- **Broker exit codes** are the guard's vocabulary: 2 cannot start, 3 policy or
+  no engines, 4 no image (`_NoWorkerImageError`), 5 no Docker engine
+  (`_DockerEngineUnavailableError`, `check_engine` first), 6 newer image. The
+  broker handles the guard's CTRL_BREAK (SIGBREAK) and SIGTERM, also while it
+  attests, and removes its job containers on the way out.
+Gates: `tests/test_document_worker_profile.py`, `tests/test_document_worker_image.py`
+(the CTRL_BREAK stop with an unhandled one as control),
+`tests/test_guard_document_broker.py`; real Docker (opt-in
+`KAZMA_TEST_DOCUMENT_WORKER_IMAGE`): `tests/test_document_broker_guard_docker.py`.
 
 **E2. A deleted document is never still searchable** (2026-09-28).
 `DocumentService.delete_document` takes the document out of every library
@@ -2898,13 +3017,21 @@ words come back together (`_SPAN_SLACK`): words in order but interleaved with
 another column are not. Alignment judges every line that shows its side
 against its segment's direction by `arabic.direction_of`, the engines' own
 per-block rule. Version 3 adds `*-ocr-table`, an OCR page with its ruled
-table; the OCR reference text is the whole page, table included. Not
-qualified, each with its reason in the thresholds file: `ar-ocr` and
-`ar-ocr-table` (Tesseract does not read Arabic-Indic digits, and its layout
-analysis drops lines of the Arabic page) and `en-ocr-degraded` (3.75 read as
-3:75). A re-lock keeps the file's `notes` and `measured_on`. Certification
-runs the corpus and reports the actual isolation profile and backends (F10).
-Gate: `tests/test_document_fidelity.py`.
+table; the OCR reference text is the whole page, table included. Version 4
+(2026-10-15) puts the page furniture the renderer drew (the Arabic route's
+brand footer, read from the rendered PDF: `_drawn_furniture`) into the OCR
+reference: without it a perfect reading scored CER 0.114 on `ar-ocr`. The OCR
+cases are measured per engine (`fidelity.OCR_ENGINES`: `tesseract`,
+`neural`), each with its own floors and `qualified` list under
+`ocr_engines.<engine>`; a case another engine read (a fallback) fails the
+test and is refused by `--lock`, and a lock keeps the floors of an engine not
+installed where it runs. Not qualified, each with its reason in the
+thresholds file: with Tesseract `ar-ocr`, `ar-ocr-table` (no Arabic-Indic
+digits, lines dropped) and `en-ocr-degraded` (3.75 read as 3:75); with the
+neural engine `ar-ocr-table` (one word misread) and `en-ocr-degraded` (3,75).
+A re-lock keeps the file's `notes` and `measured_on`. Certification runs the
+corpus and reports the actual isolation profile and backends (F10). Gate:
+`tests/test_document_fidelity.py`.
 
 **G3. Scanned pages: tables cell by cell; real scans measured opt-in**
 (2026-10-13, from a real 300 dpi copier scan of an Arabic booklet).
@@ -2927,14 +3054,57 @@ table pass for that page (`documents.ocr.tables`, default on, Settings →
 Documents). Measured on the scan: a contents table's numbers 22 % -> 91 %,
 its rows kept together 3 % -> 56 % complete, 6 of 6 searches on the right
 page. Tesseract did not read Arabic-Indic digits in any font measured (fast or
-best `ara` model, any segmentation mode); a different engine is the owner's
-decision. Gates: `tests/test_document_ocr_tables.py`,
+best `ara` model, `script/Arabic` fast or best, any segmentation mode): the
+neural engine (G4) does. Gates: `tests/test_document_ocr_tables.py`,
 `tests/test_document_ocr_phase5.py` (the quote with the old quoting as
 control), `test_ocr_without_the_table_pass_fails_the_floor`, and the opt-in
 `tests/test_document_real_scans.py` (`KAZMA_TEST_REAL_SCANS_MANIFEST`: a
 manifest outside the repository names each scan by path and SHA-256, the
 pages, the numbers, symbols and single terms each holds -- never page text --
-the searches and the floors; without it the test skips).
+the searches and the floors; without it the test skips). Since 2026-10-15
+each engine is held to its own floors there (`floors_by_engine`), with a long
+worker time limit so every page stays with the engine asked for.
+
+**G4. The neural OCR engine** (2026-10-15, Q02: Arabic and Arabic-Indic
+digits). `documents.ocr.engine`: `auto` (default; the neural engine when its
+packages and models are installed where documents are parsed, else
+Tesseract), `neural` (the same, with a document warning when Tesseract read
+it), `tesseract`. Validated on every write (`settings_validation`, and the
+Documents settings route asks it): an engine the policy cannot read would
+stop every document job. `ocr/pipeline.select_ocr_provider` is the one
+choice. `ocr/neural.py` runs four models on ONNX Runtime in the document
+worker, never in the Kazma process: PP-OCRv5 detection; boxes of one line
+joined (gap <= 1 line height: per-word crops gave stray characters), cut to
+their ink; EasyOCR `arabic_g1` reads each line (`english_g2` a line without
+Arabic, and English-only pages); each word without a digit is voted on with
+PaddleOCR's PP-OCRv5 Arabic recognizer and Tesseract's words on the page --
+the two agreeing, or PaddleOCR at >= 0.9 alone, replace EasyOCR's word; a
+number is always EasyOCR's. A drawn line goes to logical order by
+`parsers.pdf_rtl.logical_line`, never a recognizer's `get_display` (which
+leaves "30-09-2026" reversed). The page pass skips the lines inside ruled
+tables (`skips_table_regions`; `tables.table_regions` is `read_tables`' own
+grid finder) and the page is read again in full when a table was not read
+cell by cell. Near the worker's time limit (`apply_ocr(deadline=)`, 0.8 of
+`documents.workers.timeout_seconds` from the parser worker's start) the
+remaining pages go to Tesseract, said on the document (`tesseract_from_page`):
+one core makes it ~15 s an Arabic text page, 30-45 s with ruled tables. The
+digits-only cell pass keeps an English reading only at EasyOCR's own score >=
+0.75 (an English reading of an Arabic-Indic number is confident by character).
+Models (`ocr/neural_models.py`): every source pinned by URL, size and SHA-256
+(Apache-2.0), installed by `scripts/ocr_models.py install` (EasyOCR's PyTorch
+weights converted to ONNX and checked against PyTorch; without torch it
+converts in a `uv run --isolated` environment) into `KAZMA_OCR_MODEL_DIR` or
+`<data dir>/models/ocr` (`store_registry`: `models`, rebuilt, not backed up)
+with a `manifest.json`; the worker uses them only when every file matches it.
+The service tells the worker where they are (its environment is scrubbed).
+Runtime packages are the `ocr` extra (onnxruntime, opencv-python-headless,
+pyclipper, numpy). Measured against Tesseract, PaddleOCR (native and ONNX),
+EasyOCR alone, tessdata_best and the 2-reader combinations:
+`docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md` (Q02). Gates:
+`tests/test_document_ocr_neural.py` (each rule with its control; the
+end-to-end readings need the models and skip without them),
+`tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
+the image `test_the_neural_ocr_engine_reads_inside_the_container`.
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
 `documents/arabic.py` is the ONLY home for Arabic text policy. Do not
@@ -3987,7 +4157,8 @@ module was deleted and the import's `except` said "chromadb not installed".
   `knowledge_index_for` constructs an index in product code (gate in
   `tests/test_knowledge_vectors.py`).
 - **Chroma's local store, kept honest** (`memory/chroma_local.py`, KB-Q01,
-  2026-10-15; chromadb 1.5.9, the newest release that day, has all three):
+  2026-10-15; chromadb 1.5.9, the newest release that day, has every defect
+  below):
   - *Dropped vectors leave the disk.* `delete_collection` removes the catalog
     rows and keeps the segment folder (~40 MB per 10k chunks): 17 folders in a
     4-minute soak. `remove_orphan_segment_folders` removes the UUID-named
@@ -4005,26 +4176,73 @@ module was deleted and the import's `except` said "chromadb not installed".
     in flight and holds new ones -- removes the folders and bumps the
     client's generation; every store re-opens on its next call. `atexit`
     does the same.
-  - *An evicted index is not lost.* Chroma's HNSW pool holds
-    `max_file_handles // 5` indexes over 64 shards (102 on Windows: one or two
-    a shard) and writes an index to disk only every `sync_threshold` (1,000)
-    records; two collections in one shard evict each other, an evicted small
-    index existed only in memory, and the process had already replayed that
-    collection's log -- every read failed "Nothing found on disk" until a
-    restart (5 of 20 short soaks). `raise_stream_limits` raises what Chroma
-    sizes the pool from before the first client (Windows: msvcrt 2,048 ->
-    pool 409, ucrtbase 8,192 for the index files' streams; POSIX: soft
-    NOFILE to 10,240 under the hard limit; never lowers). A read that still
-    finds an index lost (`VectorStore._hnsw_read`) deletes the id
-    `kazma:reload-index`: the push makes Chroma rebuild the index from its
-    write log before the read is asked again (WARNING,
-    `kazma_kb_vector_index_reloads_total`). A newer chromadb, or
-    `hnsw:sync_threshold`, does not fix it: none is newer, and the threshold's
-    minimum is 2 (a one-chunk library stays memory-only). Left: past 6
-    indexes in one shard (on Windows, likely only from about 100 libraries)
-    an evicted index of 1,000+ records reloads from disk without its records
-    since the last persist until the collection's next write replays its
-    log -- no error to catch.
+  - *No index is evicted.* Chroma's HNSW pool is split over 64 shards
+    (`POOL_SHARDS`), sized by default as `max_file_handles // 5` (102 on
+    Windows: one or two a shard), and writes an index to disk only every
+    `sync_threshold` (1,000) records; two collections in one full shard
+    evict each other after the process replayed their logs. An evicted index
+    under 1,000 records failed every read ("Nothing found on disk", 5 of 20
+    short soaks); one of 1,000+ reloaded from its last disk write WITHOUT
+    the records since -- no error, the search just missed them -- until the
+    collection's next write (reproduced:
+    `tests/test_knowledge_vector_text_and_pool.py`, a pool of 64 drops 150
+    of 1,180 records). `chroma_local.start_system` starts Chroma's system
+    for the directory with Kazma's pool before `PersistentClient` finds it
+    (`hnsw_cache_size` is read only at `system.start()`): `index_pool_size`
+    = 64 x (`library_ceiling()` + `SPARE_COLLECTIONS`), so a shard holds
+    every collection a process can load, whichever shards they hash to.
+    `LIBRARY_CEILING` is 500 libraries, lowered when the process cannot keep
+    every index's 4 files open (`FILES_PER_INDEX`; Windows: ucrtbase streams
+    raised to 8,192 -- lowered to 40, a process loads 9 indexes; msvcrt is
+    only what Chroma's default pool reads; POSIX: soft NOFILE to 10,240
+    under the hard limit). `KnowledgeStore.create_library` counts every
+    library (archived too) in its `BEGIN IMMEDIATE` and raises
+    `KnowledgeLibraryLimit` (a `KnowledgeStorageFull`, so every surface that
+    refuses at the quota refuses it); `ensure_capacity(library_id)` asks
+    before a crawl or page fetch; the Web API answers 409
+    `kb_library_limit` (EN/AR). A read that still finds an index lost
+    (`VectorStore._hnsw_read`) deletes the id `kazma:reload-index`: the push
+    makes Chroma rebuild it from its write log before the read is asked
+    again (WARNING, `kazma_kb_vector_index_reloads_total`).
+    `hnsw:sync_threshold` does not fix it (minimum 2, and a persist rewrites
+    the whole index).
+  - *No text beside a vector.* An older build stored each chunk's first
+    2,000 characters as the Chroma document and its title, heading, address
+    and hash as metadata -- read by nothing -- and SQLite keeps a deleted
+    row's bytes in free pages and in pages' free space (`secure_delete` off,
+    Chroma's own connection): a dropped 3,000-row collection's words had
+    9,429 copies in the file. Chroma keeps a document in
+    `embedding_metadata`, its trigram full-text index and its write log
+    (until the next 1,000-record disk write). Every write keeps only
+    `KEPT_METADATA` (`model`, `library_id`, `document_id`, `tenant_id`,
+    `source`) and no document (gate: no `documents=` in a Chroma write in
+    product code). A collection holding anything else (`holds_text`: a
+    read-only catalog query on the metadata segment AND the write log,
+    once per collection and process) is rebuilt by the repair pass
+    (`VectorStore.rebuild_collection`, which replaced `rebuild_graph`: copy
+    to `<name>.rebuild` with vectors and kept keys, counts compared, old
+    dropped, copy renamed; nothing embedded again, 12 s for 10k at 1,024
+    dimensions). Note: an upsert without documents KEEPS a record's old
+    document and merges its metadata, so only the rebuild clears it.
+  - *Deleted text leaves the catalog.* A deletion of rows that may hold
+    text (`_note_deleting`: drops, `delete`, `delete_many`, unless the
+    collection was found text-free) writes `vector_memory/
+    kazma_compaction_due`; at the end of each repair pass `compact_vectors`
+    takes the client's gate exclusive (calls in flight finish, new ones wait,
+    the client stays open) and `compact_catalog` runs FTS5 `optimize` on
+    Chroma's full-text index (rebuilt when the merge kept deleted words:
+    `fts5_purge.purge_deleted_rows`, G below), then `VACUUM` (Chroma's own `chroma utils
+    vacuum`), and clears the marker. 10k chunks: 41.0 -> 3.2 MB in 0.3 s; a
+    text-free catalog 0.13 s. A failure keeps the marker (WARNING);
+    `kazma_kb_vector_compaction_pending`.
+  - *A search filters only when it must.* A collection holds one library,
+    so `KnowledgeIndex._model_filter` asks Chroma no filter while
+    `VectorStore.only_model(identity)` holds (one `$ne` read per collection
+    and process; a write of another tag ends it; a mixed collection is
+    re-asked after 60 s), else `{"model": identity}`. Chroma's metadata
+    filter cost more than the search: 10k vectors, p50 40 ms with the
+    library+model filter vs 4 ms without; 100k, 353 vs 6 ms (p95 442 vs 10),
+    recall the same either way.
   - *The index is built for recall* (`_HNSW`: 48 neighbours, construction
     400, search 256). Chroma's defaults (16/100/100) returned 31-39 of 40
     planted answers at 10k chunks while exact search ranked all 40 first;
@@ -4032,8 +4250,11 @@ module was deleted and the import's `except` said "chromadb not installed".
     (39 in one: Chroma builds in parallel) for ~1 ms more a query. An older
     collection's search breadth is raised by `modify` (applies at the index's
     next load) and its graph rebuilt by the repair pass from its own vectors
-    (`VectorStore.rebuild_graph`: copy to `<name>.rebuild`, counts compared,
-    old dropped, copy renamed; nothing embedded again).
+    (`VectorStore.rebuild_collection`). At 100k the same settings found 32 of
+    40 planted answers with or without a filter, where exact search ranks all
+    40 first; search breadth 512/1,000/2,000 found 35/38/40 (p50 7.5/11.8/19.5
+    ms against 4.6). A breadth that grows with the collection is open (the
+    100k step).
 
 **G. The Knowledge store and its surfaces** (Knowledge audit 2026-10-13,
 tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
@@ -4062,6 +4283,31 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   released between steps). A replaced page or document version keeps its old
   words until FTS5's own merges (unsearchable; a full rewrite per page would
   cost the whole index each time). `tests/test_knowledge_store.py`.
+  **A merge is not proof** (the multi-day soak, 2026-10-15: 8 words of the
+  library deleted at cycle 76 left after the purge). FTS5 drops a delete
+  marker -- which carries the word -- only when the merge writes the
+  index's OLDEST segment, judged by place (the only segment on the
+  structure's last level); every full merge adds two levels and a larger
+  new segment pulls older ones down, and with every segment on one level
+  below the top `merge -N` and `optimize` merge it one level up and keep
+  every marker. So the purge's last transaction reads the structure record
+  (`db/fts5_purge.drop_deleted_rows`; an unreadable record counts as
+  unchecked) and rebuilds the index (FTS5 `rebuild`) unless it is one
+  segment on the last level. Every FTS5 `optimize`/`merge` in product code
+  goes through `fts5_purge` or ends with that check -- memory's Forget
+  purge and the vector catalog's compaction too (gate:
+  `tests/test_fts5_purge.py`, the plain `optimize` as negative control).
+  **The purge outlives the process:** each delete batch writes
+  `knowledge_meta.keyword_purge_due` (a counter) in its own transaction;
+  the purge clears it only if unchanged; every store open and the repair
+  pass (`finish_pending_purge`) finish a purge a killed delete left, and a
+  delete that finds no chunk still purges when it is set. Gate: a real
+  child killed after a batch, after the library row, between two merge
+  steps and inside the rebuild (`tests/test_knowledge_store.py`, the store
+  without the mark as negative control). The soak's check reads whole words
+  from the leaf pages and leaves out words a live row holds
+  (`knowledge_soak._segment_residue`): its old test of a word's last 4-6
+  letters anywhere in the blobs hit 6 of 20,000 random Arabic tokens.
 - **A coverage record names the vector store it measured** (KB-Q01): the
   record is in knowledge.db (backed up), the vectors are not, and a restored
   database reported "ok, 10,000 of 10,000" before the first pass with no
@@ -4290,6 +4536,17 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   `loop.create_task` in product code (including `ops_alerts._dispatch`)
   is the same class of bug — prefer `spawn_background`.
 - CI: `test_no_blocking_db_driver_in_async`, `test_no_bare_create_task`.
+- **The LLM ledger row is written off the loop** (2026-10-15). Async code
+  awaits `observability.llm_ledger.arecord_llm_call`: the SQLite insert and
+  the ledger's switch (a settings read) run in a thread, the caller waits
+  for its row (a turn's totals, `turn_usage`, read after its calls returned,
+  include them, in the order made), and the write is shielded, so a
+  cancelled caller loses no row and waits for it, bounded. `resilient_chat`
+  (every swarm worker and research model call) wrote it on the loop until
+  then. `record_llm_call` and the ledger's readers are in
+  `_LOOP_STALL_HELPERS`. Gate: `tests/test_llm_ledger_off_the_loop.py`
+  (SQLite traced on the ledger's connection; the inline, unawaited and
+  unshielded writes as negative controls).
 
 **F. Errors do not carry internals.**
 - API handlers return `kazma_core.errors.safe_error(exc)` — a stable code
@@ -5864,6 +6121,32 @@ code) and Kazma ran with nobody supervising it.
   (`stderr_tail`) and the page. `serve.py` enables `faulthandler` and prints
   a failure's whole traceback there: on 2026-09-25 "process exited (code 1)"
   left no trace anywhere (the message went to stdout, nothing kept it).
+- **The guard runs the document worker broker** (`DocumentBroker`,
+  2026-10-15; the Kazma side is §19 E1). Same loop, same thread: `tick()` runs
+  in every wait (`_sleep`, `_wait_ready`) and never raises into the guard
+  (`broker.internal_error`). It runs the broker when Kazma's request asks
+  (`KAZMA_GUARD_DOCUMENT_BROKER=auto`; `on` always, `off` never) and starts
+  it BEFORE spawning Kazma when the persisted request wants one; restarts it
+  on exit (5 s .. 5 min), after three missed status probes, and at a spawn
+  when its script, image or token changed (`broker.code_changed`); retries a
+  missing image (exit 4) or a silent Docker engine (exit 5) every 30 s,
+  logging it once; pages once after three failed starts (`broker.failed`) or
+  ten minutes without Docker, and once on recovery; stops it gracefully
+  (CTRL_BREAK / SIGTERM, 45 s, then the tree) at a pause, when no longer
+  wanted, at guard shutdown, `--once` and a guard crash; reaps a broker an
+  earlier guard left (`broker.orphan_reaped`). Its environment is scrubbed
+  (`_BROKER_ENV_KEEP`: the guard's Telegram token never reaches the Docker
+  holder). The loopback port is kept for the install
+  (`KAZMA_GUARD_BROKER_PORT`, else the recorded one, else derived from the
+  install folder below the ephemeral ranges). The token
+  `.kazma/document_broker.token` is made once, restricted to the guard's
+  account (`icacls /inheritance:r` + its SID) before the secret is written,
+  never logged. The server gets URL, token file and request file through
+  `spawn()`'s env, like the state and reload files. The state file's
+  `document_broker` is what readiness reads; `guard_features` lists
+  `document_broker`, and `guard_code` lets `--status` say the running guard
+  is older than its file -- a reload restarts Kazma, never the guard, so a
+  guard change needs the task restarted once (ops doc, "Restart the guard").
 - **Settings' "Restart server" asks the guard.** A server the guard started
   writes the guard's reload request (`supervisor_watch.request_guard_reload`;
   the guard hands the path over in `KAZMA_GUARD_RELOAD_FILE`, an older guard
@@ -5879,7 +6162,11 @@ graceful reload, an ignored stop, a leftover request, the heartbeat, a
 dependency outage ridden out and one past its runway, a crash's stderr kept,
 the server's own reload request), `tests/test_idle_reload.py`,
 `tests/test_settings_restart_via_guard.py`,
-`tests/js/test_settings_restart_reload.js`.
+`tests/js/test_settings_restart_reload.js`, `tests/test_guard_document_broker.py`
+(the supervisor on a fake clock with the old no-broker guard as control; the
+real guard with a stand-in broker: before Kazma, the handed address, a killed
+broker restarted, a failing one paged once, the request deciding, `--once`
+stopping it, an orphan reaped).
 
 ### 40. One checkpoint serializer, strict (`kazma_core/checkpoint_serde.py`)
 
@@ -7036,6 +7323,27 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   (every location `paths.py` resolves, from its source). Since 2026-10-01 it
   pins `KAZMA_SKILLS_HOME` too: the skill folders in the user's home, which
   the live install, running as the same user, reads (§22H).
+- **No test reaches the network or loads the real embedder** (2026-10-15,
+  `tests/_egress_guard.py`, registered by the root `conftest.py`). Swarm
+  pipeline tests loaded bge-m3 from this machine's Hugging Face cache (it
+  starved the live server) and built real provider calls. A DNS lookup of
+  another host, a connection or UDP send to one (sync sockets and both
+  asyncio loops), and the import of the real `sentence_transformers` are
+  refused where they are made, and the test FAILS with the call site even
+  when the code under test swallowed the refusal. Loopback stays open
+  (local servers, the suite's Postgres, Playwright). A test that truly
+  needs the real model or a provider is `@pytest.mark.real_model`
+  (`KAZMA_TEST_REAL_MODEL=1` runs it), one that needs the internet
+  `@pytest.mark.network` (`KAZMA_TEST_NETWORK=1`); `KAZMA_TEST_EGRESS_GUARD=0`
+  turns the guard off for debugging. Stub instead:
+  `tests/_no_models.keep_models_out` (no embedder, the model package absent,
+  self-improvement off, a registry client that refuses like a keyless
+  provider) and `finish_turn_memory` (a turn's post-turn memory thread ends
+  inside its test), a fake LLM client, `ssrf._resolve_host_ips` answered
+  locally. The root conftest sets `KAZMA_EMBEDDER_PREWARM=0` (every app a
+  test built loaded the model at boot) and the Hugging Face offline
+  switches. Gate: `tests/test_egress_guard.py` (planted tests in a child
+  pytest as the negative control).
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
 - **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`

@@ -17,6 +17,7 @@ from kazma_gateway.telegram_format import (
     tg_heading,
     HEADING_RULE,
 )
+from kazma_core.swarm.engine import STORE_UNAVAILABLE
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.services import SWARM_CORE_MISSING, get_swarm_service
 
@@ -324,6 +325,22 @@ def register_tasks_routes(
             headers={"Retry-After": "30"},
         )
 
+    def _store_refusal(result: Any) -> JSONResponse:
+        """The task store would not record the task as running: nothing ran,
+        and trying again shortly may work (HTTP 503 with Retry-After). The
+        page words the code in its own language."""
+        return JSONResponse(
+            {
+                "status": "error",
+                "code": STORE_UNAVAILABLE,
+                "message": result.error,
+                "task_id": result.task_id,
+                "retryable": True,
+            },
+            status_code=503,
+            headers={"Retry-After": "15"},
+        )
+
     @router.post("/api/swarm/dispatch", dependencies=[Depends(rate_limit("swarm_dispatch", 20))])
     async def swarm_dispatch(payload: dict[str, Any]) -> JSONResponse:
         """Dispatch a task to one or more workers."""
@@ -546,6 +563,8 @@ def register_tasks_routes(
                 int((task_result.metadata or {}).get("max_concurrent_tasks") or 0),
                 task_result.error,
             )
+        if task_result is not None and (task_result.metadata or {}).get("code") == STORE_UNAVAILABLE:
+            return _store_refusal(task_result)
         results = [item.to_dict() for item in task_result.worker_results]
 
         # Include checkpoint info for HITL paused pipelines.
@@ -793,6 +812,15 @@ def register_tasks_routes(
                  "task_status": "paused", "message": result.error,
                  "max_concurrent_tasks": (result.metadata or {}).get("max_concurrent_tasks")},
                 status_code=429,
+                headers={"Retry-After": "30"},
+            )
+        if (result.metadata or {}).get("code") == "temporal_unavailable":
+            # Temporal is required and not available here: nothing was
+            # claimed or resumed, the checkpoint is still pending (SW-E16).
+            return JSONResponse(
+                {"status": "error", "code": "temporal_unavailable", "task_id": task_id,
+                 "task_status": "paused", "message": result.error},
+                status_code=503,
                 headers={"Retry-After": "30"},
             )
         if (result.metadata or {}).get("admission_unrecorded"):

@@ -9,17 +9,31 @@ usage, cost, latency, status, error kind, and whether the call was served by
 a failover model. SQLite WAL (``kazma-data/llm_calls.db``), module singleton,
 thread-safe, and strictly best-effort — a ledger failure must never affect
 the turn it describes.
+
+Async code records through :func:`arecord_llm_call`, never
+:func:`record_llm_call` itself: the write is SQLite, and on the event loop it
+stalls every chat stream -- on a busy disk for the whole busy timeout
+(AGENTS §26 E, §35). ``resilient_chat`` (swarm workers, research) wrote its
+rows on the loop until 2026-10-15.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 import threading
 from datetime import UTC, datetime
 from typing import Any
 
-__all__ = ["close_llm_ledger", "query_recent", "record_llm_call", "thread_usage", "turn_usage"]
+__all__ = [
+    "arecord_llm_call",
+    "close_llm_ledger",
+    "query_recent",
+    "record_llm_call",
+    "thread_usage",
+    "turn_usage",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +151,60 @@ def record_llm_call(
                 )
     except Exception as exc:  # noqa: BLE001 — observability must be invisible
         logger.debug("[llm-ledger] record failed (non-fatal): %s", exc)
+
+
+def _record_if_enabled(**fields: Any) -> None:
+    """:func:`record_llm_call`, when the ledger is switched on.
+
+    ``agent.nonstop.ledger.enabled`` is a settings read (a Postgres round trip
+    on a cache miss), so the check runs where the write runs: in a worker
+    thread, never on the loop. Never raises: neither does the switch's
+    reader (``get_nonstop_config``) nor the write.
+    """
+    from kazma_core.agent.nonstop import get_nonstop_config
+
+    if get_nonstop_config().ledger_enabled:
+        record_llm_call(**fields)
+
+
+#: How long a cancelled caller waits for its row before its cancellation goes
+#: on. The write normally takes milliseconds; this bounds a locked disk.
+_CANCEL_JOIN_SECONDS = 10.0
+
+
+async def arecord_llm_call(**fields: Any) -> None:
+    """Record one LLM call from async code, off the event loop.
+
+    The write -- and the setting that switches the ledger on -- runs in a
+    worker thread (``asyncio.to_thread``, which carries the caller's
+    ContextVars). The caller awaits it, so its row is in the ledger before
+    the caller goes on: a turn's calls are written in the order they were
+    made, and a turn's totals (:func:`turn_usage`), read after its calls
+    returned, include every one of them. The turn id is read here, from the
+    caller's own context.
+
+    A cancelled caller does not lose its row: the write is shielded (a write
+    still queued for a thread would otherwise be dropped with the
+    cancellation), and the cancellation waits for it, bounded, before it
+    goes on. Never raises, except the caller's own cancellation.
+    """
+    if fields.get("turn_id") is None:
+        from kazma_core.observability.correlation import current_turn_id
+
+        fields["turn_id"] = current_turn_id()
+    from kazma_core.background import spawn_background
+
+    write = spawn_background(asyncio.to_thread(_record_if_enabled, **fields), name="llm-ledger-write")
+    try:
+        await asyncio.shield(write)
+    except asyncio.CancelledError:
+        try:
+            await asyncio.wait({write}, timeout=_CANCEL_JOIN_SECONDS)
+        except asyncio.CancelledError:
+            pass  # cancelled again: stop waiting; the thread still writes the row
+        raise
+    except RuntimeError as exc:  # the thread pool is shut down (interpreter exit)
+        logger.debug("[llm-ledger] record not written (non-fatal): %s", exc)
 
 
 def query_recent(limit: int = 100, thread_id: str | None = None) -> list[dict[str, Any]]:

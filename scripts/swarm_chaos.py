@@ -7,7 +7,9 @@ recorded outcome per case: a task store database locked or down, Temporal
 unreachable, a shutdown in the middle of a pattern. Each case here drives a
 real ``SwarmEngine`` over private stores in a temporary directory (``--data-dir``
 keeps them), with scripted workers -- no model, no network but a local port
-nothing listens on (Temporal) and, with ``--postgres-dsn``, a DISPOSABLE
+nothing listens on (Temporal), Temporal's time-skipping test server started
+on this machine (``temporal_lost_mid_run``, which shuts it down mid-run; the
+SDK downloads it on first use) and, with ``--postgres-dsn``, a DISPOSABLE
 Postgres server: a database of its own is created there and dropped after, and
 the case takes it down by refusing its connections and ending its sessions.
 Never point it at a server that holds anything.
@@ -290,7 +292,7 @@ async def _read_when_back(store: Any, task_id: str, seconds: float = 20.0) -> di
 
 def _returned(result: Any) -> dict[str, Any]:
     meta = dict(getattr(result, "metadata", None) or {})
-    keep = ("unsaved", "result_status", "admission_unrecorded", "checkpoint_open",
+    keep = ("unsaved", "result_status", "admission_unrecorded", "checkpoint_open", "code",
             "admission_denied", "durable", "execution_outcome", "interrupted_by")
     return {
         "status": getattr(result, "status", None),
@@ -340,33 +342,80 @@ async def _recover(store_factory: Callable[[], Any], task_id: str) -> dict[str, 
 
 
 async def case_sqlite_locked_admission(workdir: Path, timing: Timing) -> Outcome:
-    """The store is locked when the task is admitted; free again while it runs."""
+    """The store stays locked through every attempt of the admission write."""
     from kazma_core.swarm.task import SwarmTask
 
     out = Outcome("sqlite_locked_admission", "another connection holds the task store's write lock "
-                  "(BEGIN IMMEDIATE) from before the dispatch until the worker starts",
-                  "the task runs without a RUNNING row (counted running_row); its ending is stored")
+                  "(BEGIN IMMEDIATE) from before the dispatch until after it has returned (past every "
+                  "retry of the RUNNING row's write)",
+                  "the task is refused, not run: task_store_unavailable (retryable), counted running_row; "
+                  "no row, the admission slot free")
     store = _sqlite_store(workdir, timing)
     lock = _SqliteLock(workdir / TASK_DB)
     engine = _engine(store, "w")
+    ran: list[str] = []
 
     async def worker(task: str, context: Any = None) -> dict[str, Any]:
-        lock.release()
+        ran.append("w")
         return _ok("w", "done")
 
     engine.get_worker("w").dispatch = worker
     task = SwarmTask(prompt="p", id=_task_id(out.case), workers=["w"], timeout=60)
     lock.take()
-    try:
-        result = await engine.dispatch(task)
-    finally:
-        lock.close()
+    with _engine_lines("not admitted yet") as retries:
+        try:
+            result = await engine.dispatch(task)
+        finally:
+            lock.close()
     out.returned = _returned(result)
     out.stored = await asyncio.to_thread(_read, store, task.id)
     store.close()
     out.recovered = await _recover(lambda: _sqlite_store(workdir, timing), task.id)
+    out.notes.append(f"the admission was tried again {len(retries)} time(s); worker runs: {len(ran)}; "
+                     f"in flight after: {len(engine.list_active_tasks())}")
+    _expect(out, out.returned["status"] == "failed" and out.returned.get("code") == "task_store_unavailable",
+            f"expected a refusal (task_store_unavailable): {out.returned}")
+    _expect(out, not ran, "the task ran without its RUNNING row")
+    _expect(out, out.stored["status"] == "absent", f"expected no row: {out.stored}")
+    _expect(out, not engine.list_active_tasks(), "the refused task holds a slot")
+    _expect(out, len(retries) >= 1, "the admission was never tried again")
+    return out
+
+
+async def case_sqlite_locked_admission_briefly(workdir: Path, timing: Timing) -> Outcome:
+    """The admission's first write meets the lock; it goes before the retries run out."""
+    from kazma_core.swarm.task import SwarmTask
+
+    out = Outcome("sqlite_locked_admission_briefly", "the store is locked from before the dispatch until "
+                  "the RUNNING row's first write has waited out its busy timeout and failed",
+                  "the admission is tried again and lands: the task runs once; a stored success; nothing "
+                  "counted")
+    store = _sqlite_store(workdir, timing)
+    lock = _SqliteLock(workdir / TASK_DB)
+    engine = _engine(store, "w")
+    ran: list[str] = []
+
+    async def worker(task: str, context: Any = None) -> dict[str, Any]:
+        ran.append("w")
+        return _ok("w", "done")
+
+    engine.get_worker("w").dispatch = worker
+    task = SwarmTask(prompt="p", id=_task_id(out.case), workers=["w"], timeout=60)
+    lock.take()
+    with _engine_lines("not admitted yet", on_line=lock.release) as retries:
+        try:
+            result = await engine.dispatch(task)
+        finally:
+            lock.close()
+    out.returned = _returned(result)
+    out.stored = await asyncio.to_thread(_read, store, task.id)
+    store.close()
+    out.recovered = await _recover(lambda: _sqlite_store(workdir, timing), task.id)
+    out.notes.append(f"the admission was tried again {len(retries)} time(s); worker runs: {len(ran)}")
     _expect(out, out.returned["status"] == "success" and out.stored["status"] == "completed",
             f"expected a stored success, got {out.returned} / {out.stored}")
+    _expect(out, ran == ["w"], f"the task runs once: {ran}")
+    _expect(out, len(retries) >= 1, "the admission was never tried again")
     return out
 
 
@@ -671,6 +720,61 @@ async def case_temporal_unreachable_required(workdir: Path, timing: Timing) -> O
     return await _temporal_case(workdir, timing, required=True)
 
 
+async def case_temporal_lost_mid_run(workdir: Path, timing: Timing) -> Outcome:
+    """Temporal accepts the workflow, then goes away while the work runs."""
+    from kazma_core.swarm import durable
+    from kazma_core.swarm.task import SwarmTask
+
+    out = Outcome("temporal_lost_mid_run", "KAZMA_TEMPORAL_REQUIRED=1 against Temporal's time-skipping test "
+                  "server, shut down while the task's worker runs; the worker then finishes",
+                  "the work goes on in Kazma and its own ending is the record: told success, stored completed")
+    try:
+        from temporalio.testing import WorkflowEnvironment
+    except ImportError:
+        out.skipped = "temporalio is not installed (the durable extra)"
+        return out
+    try:
+        env = await WorkflowEnvironment.start_time_skipping()
+    except Exception as exc:  # the test server is downloaded on first use
+        out.skipped = f"Temporal's time-skipping test server could not start: {type(exc).__name__}: {exc}"
+        return out
+    store = _sqlite_store(workdir, timing)
+    engine = _engine(store, "w")
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def worker(task: str, context: Any = None) -> dict[str, Any]:
+        started.set()
+        await release.wait()
+        return _ok("w", "done")
+
+    engine.get_worker("w").dispatch = worker
+    task = SwarmTask(prompt="p", id=_task_id(out.case), workers=["w"], timeout=600)
+    t0 = time.monotonic()
+    with _env(KAZMA_TEMPORAL="1", KAZMA_TEMPORAL_HOST=env.client.service_client.config.target_host,
+              KAZMA_TEMPORAL_REQUIRED="1", KAZMA_TEMPORAL_QUEUE=f"kazma-chaos-{uuid.uuid4().hex[:8]}"):
+        try:
+            await durable.start_temporal_worker()
+            if not durable.worker_running():
+                out.skipped = "the Temporal workers did not start"
+                return out
+            run = asyncio.ensure_future(engine.dispatch(task))
+            await asyncio.wait_for(started.wait(), 30)
+            await env.shutdown()  # Temporal goes away
+            release.set()
+            result = await asyncio.wait_for(run, 120)
+        finally:
+            release.set()
+            await durable.stop_temporal_worker(timeout=5.0)
+    out.notes.append(f"settled {time.monotonic() - t0:.1f}s after the dispatch")
+    out.returned = _returned(result)
+    out.stored = await asyncio.to_thread(_read, store, task.id)
+    store.close()
+    out.recovered = await _recover(lambda: _sqlite_store(workdir, timing), task.id)
+    _expect(out, out.returned["status"] == "success" and out.stored["status"] == "completed",
+            f"expected a stored success: {out.returned} / {out.stored}")
+    return out
+
+
 async def case_shutdown_mid_patterns(workdir: Path, timing: Timing) -> Outcome:
     """Kazma stops with a pipeline, a fan-out, a consult and a dispatch running."""
     from kazma_core.agent.dispatch_effects import note_effect_invocation
@@ -810,8 +914,9 @@ async def _postgres_case(workdir: Path, timing: Timing, dsn: str | None, *, at: 
     name = f"postgres_down_at_{at}"
     if at == "admission":
         fault = ("the Postgres task store's database refuses connections (its sessions ended) from "
-                 "before the dispatch until the worker starts")
-        expected = "the task runs without a RUNNING row (counted running_row); its ending is stored"
+                 "before the dispatch until the RUNNING row's first write has failed")
+        expected = ("the admission is tried again and lands once the database is back: the task runs "
+                    "once; a stored success")
     else:
         fault = ("the Postgres task store's database refuses connections from the worker's start until "
                  "after the dispatch has returned")
@@ -830,18 +935,26 @@ async def _postgres_case(workdir: Path, timing: Timing, dsn: str | None, *, at: 
                 return out
             engine = _engine(store, "w")
 
+            ran: list[str] = []
+
             async def worker(task: str, context: Any = None) -> dict[str, Any]:
-                await asyncio.to_thread(db.up if at == "admission" else db.down)
+                ran.append("w")
+                if at != "admission":
+                    await asyncio.to_thread(db.down)
                 return _ok("w", "done")
 
             engine.get_worker("w").dispatch = worker
             task = SwarmTask(prompt="p", id=_task_id(name), workers=["w"], timeout=120)
             if at == "admission":
                 await asyncio.to_thread(db.down)
-            try:
-                result = await engine.dispatch(task)
-            finally:
-                await asyncio.to_thread(db.up)
+            # At admission the database comes back when the first attempt has
+            # failed (the retry's log line, in the writing thread).
+            with _engine_lines("not admitted yet", on_line=db.up if at == "admission" else None) as retries:
+                try:
+                    result = await engine.dispatch(task)
+                finally:
+                    await asyncio.to_thread(db.up)
+            out.notes.append(f"the admission was tried again {len(retries)} time(s); worker runs: {len(ran)}")
             out.returned = _returned(result)
             out.stored = await _read_when_back(store, task.id)
             await asyncio.to_thread(store.requeue_orphaned_running)
@@ -851,6 +964,7 @@ async def _postgres_case(workdir: Path, timing: Timing, dsn: str | None, *, at: 
     if at == "admission":
         _expect(out, out.returned["status"] == "success" and out.stored["status"] == "completed",
                 f"expected a stored success: {out.returned} / {out.stored}")
+        _expect(out, ran == ["w"] and len(retries) >= 1, f"one run after a retried admission: {ran}, {retries}")
     else:
         _expect(out, out.returned["status"] == "failed" and out.returned.get("unsaved") is True,
                 f"expected a failed, unsaved report: {out.returned}")
@@ -872,6 +986,7 @@ async def case_postgres_down_at_finalize(workdir: Path, timing: Timing, dsn: str
 
 CASES: dict[str, Callable[..., Awaitable[Outcome]]] = {
     "sqlite_locked_admission": case_sqlite_locked_admission,
+    "sqlite_locked_admission_briefly": case_sqlite_locked_admission_briefly,
     "sqlite_locked_step_journal": case_sqlite_locked_step_journal,
     "sqlite_locked_finalize_briefly": case_sqlite_locked_finalize_briefly,
     "sqlite_locked_finalize": case_sqlite_locked_finalize,
@@ -879,6 +994,7 @@ CASES: dict[str, Callable[..., Awaitable[Outcome]]] = {
     "breaker_store_down": case_breaker_store_down,
     "temporal_unreachable": case_temporal_unreachable,
     "temporal_unreachable_required": case_temporal_unreachable_required,
+    "temporal_lost_mid_run": case_temporal_lost_mid_run,
     "shutdown_mid_patterns": case_shutdown_mid_patterns,
     "postgres_down_at_admission": case_postgres_down_at_admission,
     "postgres_down_at_finalize": case_postgres_down_at_finalize,

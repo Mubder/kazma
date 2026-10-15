@@ -10,6 +10,17 @@ from kazma_core.agent.semantic_compact import inject_summary_of_dropped
 from kazma_core.compaction import CompactionEngine
 from kazma_core.llm_provider import LLMError, LLMResponse
 
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
 
 @pytest.mark.asyncio
 async def test_inject_summary_of_dropped_inserts_note() -> None:

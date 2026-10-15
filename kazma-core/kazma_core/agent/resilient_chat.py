@@ -104,17 +104,14 @@ async def _maybe_inject(gate: Any) -> None:
     await _chaos._apply_injection(injection)
 
 
-def _record(**kwargs: Any) -> None:
-    try:
-        from kazma_core.agent.nonstop import get_nonstop_config
+async def _record(**kwargs: Any) -> None:
+    """The call's ledger row, written off the loop and awaited (the ledger is
+    SQLite, and the switch that turns it on a settings read). It was written
+    on the loop until 2026-10-15, once per worker and research model call.
+    Never raises but the caller's own cancellation (``arecord_llm_call``)."""
+    from kazma_core.observability.llm_ledger import arecord_llm_call
 
-        if not get_nonstop_config().ledger_enabled:
-            return
-        from kazma_core.observability.llm_ledger import record_llm_call
-
-        record_llm_call(**kwargs)
-    except Exception:
-        pass
+    await arecord_llm_call(**kwargs)
 
 
 def _primary_name(client: Any, model: str | None) -> str:
@@ -174,7 +171,7 @@ async def resilient_chat(
                 **chat_kwargs,
             )
             usage = getattr(response, "usage", {}) or {}
-            _record(
+            await _record(
                 thread_id=thread_id,
                 iteration=iteration,
                 provider=type(client).__name__,
@@ -255,7 +252,7 @@ async def resilient_chat(
                         **chat_kwargs,
                     )
                     usage = getattr(response, "usage", {}) or {}
-                    _record(
+                    await _record(
                         thread_id=thread_id,
                         iteration=iteration,
                         provider=type(fb_client).__name__,
@@ -284,7 +281,7 @@ async def resilient_chat(
                         cooldown_seconds,
                     )
 
-    _record(
+    await _record(
         thread_id=thread_id,
         iteration=iteration,
         provider=type(client).__name__,

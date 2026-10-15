@@ -8,7 +8,8 @@ of mixed tasks; this is the harness for it, not the result. It drives a real
 ``ReliabilityRegistry`` and admission limit, and an ``AutoScaler`` loaded from
 a templates file -- in a PRIVATE data directory (a temporary one unless
 ``--data-dir`` names one; never an install's, never a database server, no
-network), on the event loop the server uses, for ``--duration`` seconds:
+network), on the event loop the server uses, for ``--duration`` seconds of
+load (the time its restarts take is added to the run):
 
 * tasks at ``--rate`` a second, and ``--burst-size`` at once every
   ``--burst-every`` seconds (so the admission limit is reached at the
@@ -1094,6 +1095,12 @@ class _Soak:
                 # running task, so there is something to interrupt.
                 if now >= next_restart and (self.anything_running() or now >= next_restart + 5.0):
                     await self.restart()
+                    # The run is ``--duration`` seconds of LOAD: a restart is
+                    # not load. One that waits out the engine's stop grace (a
+                    # task ignoring its stop, by design) took 12 s of a 24 s
+                    # test run, and the flaky worker's breaker never had a
+                    # healthy window left to recover in (2 runs of 10).
+                    deadline += self.restart_seconds[-1]
                     next_restart = time.monotonic() + args.restart_every
                     next_submit = time.monotonic()
                 if now >= next_cycle:
@@ -1330,14 +1337,19 @@ def _instrumented_classes(soak: _Soak) -> dict[str, Any]:
 
         def refresh_from_shared(self, worker_name: str) -> None:
             with self._lock:
+                # The state at one instant: ``state`` applies the cooldown
+                # (open -> half-open) as it reads, so a second read could
+                # see time pass, not the refresh. After the refresh the
+                # stored state is compared, as the refresh left it.
                 before, generation = self.state, self.generation
                 super().refresh_from_shared(worker_name)
-                if self.state != before and self.generation <= generation:
+                after = self._state
+                if after != before and self.generation <= generation:
                     # The shared copy changed the state without a newer
                     # generation: an older state put back over this one.
                     soak.breaker_event(worker_name, "refresh_regressions")
                     soak.violation(f"breaker {worker_name}: a refresh from the shared store moved "
-                                   f"it from {before.value} to {self.state.value} at generation "
+                                   f"it from {before.value} to {after.value} at generation "
                                    f"{generation} (no newer generation)")
 
     class SoakScaler(AutoScaler):
@@ -1366,7 +1378,8 @@ def _loop_factory() -> Any:
 
 def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--duration", type=float, default=600.0, help="seconds of load")
+    parser.add_argument("--duration", type=float, default=600.0,
+                        help="seconds of load (the time restarts take is added)")
     parser.add_argument("--rate", type=float, default=5.0, help="tasks submitted a second")
     parser.add_argument("--burst-every", type=float, default=30.0,
                         help="seconds between bursts of --burst-size tasks at once (0: none)")

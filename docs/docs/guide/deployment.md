@@ -154,6 +154,10 @@ from `deploy/document-broker/Dockerfile` and sets
 serve until it has attested its container policy from inside the worker
 image; check `GET /api/documents/ops/readiness` → `worker_isolation.ready`.
 Rebuild the worker image and restart `document-broker` after every update.
+On a native install the guard runs the broker instead: build the image with
+`python scripts/document_worker_image.py build` and choose the container
+profile in Settings → Documents (Document processing operations, "Native
+install").
 Checks, failure codes, sizing and qualification:
 [Document processing → Isolated document workers](../ops/document-processing#isolated-document-workers-container-profile).
 

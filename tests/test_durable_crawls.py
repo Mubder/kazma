@@ -179,7 +179,7 @@ async def test_public_crawl_resume_skips_completed_and_ambiguous_pages_and_reset
 
     class _Library:  # the Knowledge store: the library exists and has room
         def library_exists(self, library_id): return True
-        def ensure_capacity(self): return None
+        def ensure_capacity(self, library_id=None): return None
         def count_chunks(self, library_id): return 0
         def set_chunk_count(self, library_id, count): return None
     monkeypatch.setattr(ki,'get_knowledge_store',_Library)

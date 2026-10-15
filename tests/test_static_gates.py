@@ -895,6 +895,13 @@ _LOOP_STALL_HELPERS = frozenset({
     # (the worker deadline plus start and removal); the readiness report
     # reads the broker's status over a socket.
     "run_container_worker", "isolation_report",
+    # Which document worker profile runs: a settings read (2026-10-15). The
+    # guard's broker request: that read and a file write; the outdated-image
+    # alert: the broker's status, settings and an ops alert; the build
+    # fingerprint: a hash of every file the worker image is built from.
+    "worker_isolation_mode", "isolation_selection", "_publish_broker_request",
+    "start_broker_requests", "_report_outdated_image", "document_broker_sweep",
+    "local_build_fingerprint",
     # Document engine readiness: local binary probes (subprocess), or the
     # broker's capability report over a socket in the container profile.
     "get_parser_registry", "get_renderer_registry", "get_mutation_registry",
@@ -998,6 +1005,14 @@ _LOOP_STALL_HELPERS = frozenset({
     # profile, the window and the trim budget are settings reads, which the
     # context_info tool made on the loop.
     "thread_usage", "context_report",
+    # The per-call ledger's write (2026-10-15): a SQLite insert per model
+    # call. resilient_chat -- every swarm worker and research model call --
+    # wrote it on the loop through a private wrapper; the supervisor and the
+    # respond node threaded the write but read the ledger's switch (a
+    # settings read) on the loop. Async code awaits arecord_llm_call. The
+    # turn's totals and the recent rows are SQLite reads of the same file.
+    "record_llm_call", "_record_if_enabled", "turn_usage", "turn_totals",
+    "query_recent", "turn_started_epoch",
     # Switching the model or provider (2026-10-01): settings and vault
     # writes, then the agent rebinds and the graph is compiled again. The
     # Settings route, the chat's provider switch, setup and the /model menu
@@ -1069,7 +1084,15 @@ _LOOP_STALL_HELPERS = frozenset({
     # read, a client close that waits for calls in flight), and an index
     # rebuilt by copying its vectors.
     "purge_search_index", "release_dropped_vectors", "remove_orphan_segment_folders",
-    "rebuild_graph",
+    "rebuild_collection",
+    # KB-Q01 follow-up (2026-10-15): the vector catalog's rewrite after a
+    # deletion of text (a VACUUM under the client's gate), what a collection
+    # holds (catalog reads) and the start of Chroma's system.
+    "compact_vectors", "compact_catalog", "holds_text", "only_model", "start_system",
+    # KB-Q01's multi-day soak (2026-10-15): an FTS5 merge checked by the shape
+    # it left and rebuilt when it kept deleted words, and the keyword-index
+    # purge a killed delete left due (finished at open and by the pass).
+    "purge_deleted_rows", "drop_deleted_rows", "finish_pending_purge",
 })
 
 
@@ -1363,6 +1386,32 @@ def test_loop_stall_gate_follows_a_private_wrapper():
     assert _loop_stall_helper_calls(ast.parse(bad)) == [(7, "_outer")]
     assert _loop_stall_helper_calls(ast.parse(good)) == []
     assert _loop_stall_helper_calls(ast.parse(public)) == []
+
+
+def test_loop_stall_gate_catches_the_old_ledger_write():
+    """Negative control: resilient_chat's ledger row before 2026-10-15 -- a
+    private sync wrapper around the SQLite write, called after every model
+    call in async code."""
+    old = (
+        "def _record(**kwargs):\n"
+        "    from kazma_core.observability.llm_ledger import record_llm_call\n"
+        "    record_llm_call(**kwargs)\n"
+        "async def resilient_chat(client, messages):\n"
+        "    response = await client.chat(messages)\n"
+        "    _record(thread_id='t', status='ok')\n"
+        "    return response\n"
+    )
+    new = (
+        "async def _record(**kwargs):\n"
+        "    from kazma_core.observability.llm_ledger import arecord_llm_call\n"
+        "    await arecord_llm_call(**kwargs)\n"
+        "async def resilient_chat(client, messages):\n"
+        "    response = await client.chat(messages)\n"
+        "    await _record(thread_id='t', status='ok')\n"
+        "    return response\n"
+    )
+    assert _loop_stall_helper_calls(ast.parse(old)) == [(6, "_record")]
+    assert _loop_stall_helper_calls(ast.parse(new)) == []
 
 
 # ── 2f'''. The settings store is never used on the event loop (2026-09-30) ──

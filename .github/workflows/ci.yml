@@ -657,8 +657,16 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install -e ".[test,durable]"
-      - name: Exercise lost acknowledgements against a disposable Temporal server
-        run: python -m pytest tests/test_temporal_local_drill.py -q --timeout=180 --junitxml=temporal-results.xml
+      # The durable swarm path qualified on Temporal's time-skipping test
+      # server (Swarm tracker SQ03; downloaded by the SDK on first use): runs,
+      # deadlines, cancels, a resume, lost acknowledgements and a worker
+      # process killed mid-step, each with its negative control.
+      - name: Qualify the durable swarm path on Temporal's time-skipping server
+        env:
+          KAZMA_TEST_TEMPORAL_REQUIRED: "1"  # a server that cannot start fails the job, never skips
+        run: >-
+          python -m pytest tests/test_swarm_temporal_durable.py tests/test_temporal_execution_recovery.py
+          tests/test_e2b_temporal.py -q --timeout=300 --junitxml=temporal-results.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:

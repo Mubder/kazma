@@ -17,7 +17,7 @@ must not become permanent tests that require those defects to remain.
 | ID | Required result | Evidence required | State |
 |---|---|---|---|
 | F01 | One bounded, fail-closed PDF active-content policy on intake and mutation | Real inert nested/indirect/chained PDF fixtures, valid navigation controls, traversal budgets | Implemented 2026-10-13 — one policy in the worker on intake, every mutation input/output (redaction bypass closed) and every rendered PDF; XFA, remote/submit/import/rendition/media actions, untyped embedded files and non-web links refused; no PDF opened outside the worker (class gate). Independent review and a broader real-world PDF corpus remain under Q02/Q04 |
-| F02 | Structural preflight and local salvage execute inside enforced worker containment; credentialed remote egress is separate | OS-specific CPU/memory/process/output/time, filesystem/network, cancellation and cleanup tests | In progress — Docker profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container`, broker-owned attested per-job containers) qualified on Docker Desktop 29.8.2 / Windows 11: no network/mounts, memory/PID/CPU/scratch/deadline/output limits, disconnect cancellation, descendant cleanup, stale sweep, compose-shaped topology. Default `process` profile: Windows Job Object caps and Unix rlimits only, no filesystem/network jail (reported unqualified). Engine readiness now comes from the image; `security.execution.container_required` refuses the `process` profile. A Linux Docker Engine run is pending the new CI job's first run; rootless/Kubernetes, gVisor/Kata, native OS jails and the Unix process cap open |
+| F02 | Structural preflight and local salvage execute inside enforced worker containment; credentialed remote egress is separate | OS-specific CPU/memory/process/output/time, filesystem/network, cancellation and cleanup tests | In progress — Docker profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container`, broker-owned attested per-job containers) qualified on Docker Desktop 29.8.2 / Windows 11: no network/mounts, memory/PID/CPU/scratch/deadline/output limits, disconnect cancellation, descendant cleanup, stale sweep, compose-shaped topology. Default `process` profile: Windows Job Object caps and Unix rlimits only, no filesystem/network jail (reported unqualified). Engine readiness now comes from the image; `security.execution.container_required` refuses the `process` profile. A Linux Docker Engine run is pending the new CI job's first run; rootless/Kubernetes, gVisor/Kata, native OS jails and the Unix process cap open. 2026-10-15: on a native install the guard runs the broker (no hand-run process, no `.env` lines), the profile is the admin's protected setting, and the worker image is named by its build inputs and built by one command (see the 2026-10-15 entry) |
 | F03 | Effective settings match saved policy; security revocation applies immediately before egress | Existing-service, queued/in-flight revocation, coherent policy revision/readiness tests | Implemented — coherent operation snapshots and readiness (earlier); live revocation rechecked before EACH provider, including after a failed provider, on SQLite and on a real PostgreSQL settings store (2026-10-13). Representative deployment qualification and independent review open (Q03/Q04) |
 | F04 | Every remote attempt carries correct immutable tenant/actor/document/version/job identity and durable intent | Concurrent/multiple-service, attachment, failed-upload and audit-outage tests | Implemented — identity, failure phases, transient-read refusal and audit-outage refusal pass on SQLite and on real PostgreSQL 16.15 metadata/jobs/audit/settings (2026-10-13); provider fallback actually runs, each attempt audited; provider transport ignores ambient proxies, refuses redirects and caps responses |
 | F05 | Idempotency is authorized and request-bound; all job-read surfaces enforce document ACL | Actor/workspace/payload conflicts, concurrent replay, API/tool/gateway/TUI matrix | Implemented 2026-10-13 — durable request reservation and real PostgreSQL admission races (earlier); every job read (`job_status`, `job_events`, `jobs_for_document`, `cancel_job`, `retry_job`) now requires a named actor (`SYSTEM_ACTOR` only for code that authorized the read; a missing actor is refused — it meant "no check"); an unreadable job answers exactly like an unknown one on the Web routes, the agent tools and the gateway (identical 404, replay by another actor = `idempotency_conflict`); the agent cancel tool checks access (it cancelled any job in the tenant); `/ops/audit` is admin-only. Matrix `tests/test_document_job_read_matrix.py` (signature gate + control). Chat surfaces act as the single `agent` principal by design; per-chat-user identity mapping not built; TUI reads via the Web API |
@@ -27,7 +27,7 @@ must not become permanent tests that require those defects to remain.
 | F09 | Source reading order and provenance survive extraction | Labeled EN/AR/bilingual structural corpus, no invented physical-page citations | Implemented 2026-10-13 — versioned corpus `documents/fidelity.py` (EN/AR/bilingual × DOCX/PDF/HTML, EN/AR OCR) with declared floors and release targets; fixed Arabic PDF extraction (numbers, ligatures and table cells reversed by PyMuPDF; `parsers/pdf_rtl.py`) and fused HTML table cells. Same day, continued: the "reversed date" was the extraction's error, not the renderer's — after Arabic letters digits are Arabic numbers to the bidi algorithm and "-" does not join them, so `2026-09-30` is DRAWN `30-09-2026`; each number cluster's reading is now the one python-bidi draws as the page shows (round trips through the real algorithm; control without the check), a table row's numbers come back in column order, cells on one baseline are separate words, a misread zero-advance mark is dropped; OCR words get the same number rule. Corpus v2 adds long EN/AR documents, two columns from another producer, wide wrapping tables and a degraded scan; segment recall now requires the words together (control: reading across columns fails). **15/17** cases meet release targets (`ar-pdf` now qualified). Not qualified: `ar-ocr` (Tesseract `ara`: digits of this font misread and two lines dropped by its layout analysis; CER 0.23; 3/4/6/11/12 segmentation, rule removal, grayscale, 2× upscale measured, none qualifies) and `en-ocr-degraded` (3.75 read as 3:75). Corpus v3 (before the commit): OCR pages with a ruled table, read cell by cell -- **16/19** qualified (`en-ocr-table` yes, `ar-ocr-table` no: Arabic-Indic digits) |
 | F10 | Certification reports actual performed qualification and effective deployment | Backend/engine/profile/version evidence, worker-tree/native resources, no false soak success | Implemented 2026-10-13 — the report names the configured isolation profile, worker image and metadata/jobs backends; a `process` profile is CONDITIONAL and never reported as confined; `extraction_fidelity` and `backup_restore_sqlite` are real runs; soak and external review stay NOT RUN |
 | Q01 | Recovery survives process death at every publication stage | Intake/parse/manifest/index/verify crash matrix, lease loss, DB/disk/scanner faults, shutdown bounds | Implemented 2026-10-13 for single-host recovery — real child processes killed after each of 7 intake stages (keyed/unkeyed) and inside 4 job stages, on SQLite and real PostgreSQL 16.15 (44 cases): reservations released, partial publications rolled back, leases recovered, every job ready once; scanner/disk/DB faults and a bounded shutdown with a stuck stage. Same day, continued: cross-host takeover with fencing — an owner that cannot be proven dead renews a lease (`documents.intake.lease_seconds`, stored on the row); once lapsed it is taken over and rolled back, and the stale owner is fenced (its job is created only while the reservation is still its own, serialized with the takeover; a claim refuses a published intake); it removes its own token rows, and the sweep removes what it left for a day. Drilled with a real child on "another host", paused, taken over and resumed, on SQLite and PostgreSQL 16.15 (8+8 cases; controls: without the fence it publishes over the takeover, without the sweep its rows stay). Legacy rows without a lease are still never taken over. Same day, before the commit: the stale owner in a REAL other container (own hostname, data dir, install id; today's kazma_core mounted) sharing a disposable PostgreSQL with the recoverer here -- frozen with `docker pause` until its lease really lapsed on the database's clock, or cut off the network -- is taken over and fenced when it returns; with its renewals blind the fence alone refuses it; blind and unfenced it publishes (control). `tests/test_document_intake_lease_containers.py` **4 passed**, opt-in, removes everything it starts |
-| Q02 | Document fidelity has declared release thresholds | Versioned corpus; OCR CER/WER, tables/numbers, order, omission, citation and rendered-layout measurements | In progress — release thresholds declared for corpus v3 (F09): long, two-column (another producer), wide-table, degraded-scan and OCR ruled-table cases, **16/19** qualified. Real scans measured opt-in through the real intake, OCR and search (`tests/test_document_real_scans.py`, manifest outside the repo): the first (a 300 dpi copier scan of an Arabic booklet, 5 pages) found and fixed the OCR TSV quote defect and ruled-table loss. Open: more real scans (handwriting, forms, merged cells, other producers), Arabic-Indic digits under OCR (Tesseract fast and best models measured; an engine choice for the owner) |
+| Q02 | Document fidelity has declared release thresholds | Versioned corpus; OCR CER/WER, tables/numbers, order, omission, citation and rendered-layout measurements | In progress — release thresholds declared for corpus v4 (F09; v4, 2026-10-15: the OCR reference holds the page furniture the renderer drew) with the OCR cases held per engine: **17/19** qualified with the neural OCR engine (`ar-ocr` now qualified: every word and number, CER 0), 16/19 with Tesseract. Arabic and Arabic-Indic digits under OCR: done 2026-10-15 — seven candidates measured (below), the neural engine adopted behind `documents.ocr.engine` (default `auto`), in the document worker on both profiles, Tesseract the fallback. Real scans measured opt-in through the real intake, OCR and search (`tests/test_document_real_scans.py`, manifest outside the repo, floors per engine): the first (a 300 dpi copier scan of an Arabic booklet, 5 pages) found and fixed the OCR TSV quote defect and ruled-table loss. Open: `ar-ocr-table` (one Arabic word) and `en-ocr-degraded` (a decimal point) with either engine; Arabic decimal/date separators; more real scans (handwriting, forms, merged cells, other producers) |
 | Q03 | Sustained operation is measured on supported profiles | Actual 48–72 h mixed-load soak with restarts/faults; p95/p99/throughput/resource evidence | Open |
 | Q04 | Independent review supports the claimed industrial security profile | External review with scope/results/remediation evidence; never substitute self-review | Open |
 | Q05 | Product, ops and certification documentation matches verified behavior | Updated architecture/security/ops/gates and regression checks, explicit limitations | Done 2026-10-13 — the full documentation review ran (5 reviewers, every Documents page); its corrections and the 12 code defects it found (DOC-A1..A13, below) landed with gates; the docs gates pass |
@@ -509,3 +509,126 @@ run of each fresh process and 1.03-1.15 afterwards; after the fix the first
 runs used 1.17-1.30. A memory hog allocated 768 MiB under a 256 MiB job with
 the old launch and a late assignment; it is refused now.
 
+## 2026-10-15: Arabic and Arabic-Indic digits under OCR (Q02)
+
+The owner approved the downloads and asked for the best engine, replacing the
+dependency if needed. Every candidate ran CPU-only through Kazma's own OCR
+pipeline (`apply_ocr` and the ruled-table pass), wrapped as an OCR provider,
+in a separate virtual environment (`C:\Users\balfa\kazma-soak\ocr-eval`,
+outside the repository: scripts and JSON results, no page text). Three
+measurements: the corpus v4 OCR cases (`fidelity.measure_case`); a digit set
+of generated text (12 fonts -- IBM Plex Sans Arabic, Amiri, Noto Naskh, Kufi
+and Sans Arabic, Arial, Tahoma, Times New Roman, Simplified Arabic,
+Traditional Arabic, Sakkal Majalla, Arabic Typesetting -- each 10 Arabic lines
+with one number: three in four Arabic-Indic, a fifth decimals, a fifth dates;
+clean at 300 dpi and as a poor 200 dpi scan, tilted, blurred, speckled and
+JPEG-compressed); and the real scan's five measured pages
+(`tests/test_document_real_scans.py`'s checks). Four threads; the peak is the
+whole process tree's resident memory.
+
+| Engine | `ar-ocr` tokens / numbers / CER | `ar-ocr-table` tokens / numbers / cells / CER | `en-ocr-degraded` numbers | `en-ocr`, `en-ocr-table` | Digit set, numbers exact clean / scan | s per `ar-ocr` page | Peak MiB |
+|---|---|---|---|---|---|---|---|
+| Tesseract 5 `ara` (installed, fast) | 0.66 / 0.33 / 0.242 | 0.66 / 0.14 / 0.56 / 0.247 | 0.75 | both clean | 0.28 / 0.28 | 0.5 | 216 |
+| Tesseract `script/Arabic` (installed, fast) | 0.62 / 0.33 / 0.242 | 0.62 / 0.14 / 0.56 / 0.247 | 0.75 | both clean | 0.39 / 0.32 | 0.5 | 222 |
+| tessdata_best `ara` | 0.66 / 0.33 / 0.239 | 0.66 / 0.14 / 0.56 / 0.236 | 0.75 | both clean | 0.27 / 0.27 | 0.6 | 215 |
+| tessdata_best `script/Arabic` | 0.66 / 0.33 / 0.212 | 0.66 / 0.14 / 0.56 / 0.210 | 0.75 | both clean | 0.39 / 0.34 | 0.6 | 231 |
+| PaddleOCR PP-OCRv5 Arabic (RapidOCR 3.10, ONNX) | 0.84 / 0.00 / 0.106 | 0.85 / 0.14 / 0.67 / 0.125 | 1.00 | 0.99 / CER 0.016; 1.00 / 0.010 | 0.12 / 0.03 | 1.6 | 652 |
+| EasyOCR 1.7.2 (`ar`+`en`, CRAFT, PyTorch) | 0.96 / 1.00 / 0.014 | 0.97 / 0.57 / 0.67 / 0.017 | 0.75 | both clean | 0.62 / 0.59 | 16.0 | 4,358 |
+| **Kazma neural engine** (adopted) | **1.00 / 1.00 / 0.000** | **0.98 / 1.00 / 1.00 / 0.003** | 0.75 | both clean | **0.65 / 0.63** | 4.8 | 917 |
+
+- **Not adopted, measured:** native PaddleOCR 3.7 (PP-OCRv5 server detection,
+  PaddlePaddle): 167-244 s a page and a 43.8 GB peak -- out on cost alone (its
+  Arabic numbers in the harness were invalid, a harness defect; the same
+  models were measured through RapidOCR's ONNX conversion instead). Tesseract
+  in every model and segmentation: no Arabic-Indic digits in any of the 12
+  fonts. PaddleOCR alone: the best letters of the candidates, but its Arabic
+  recognizer has no Arabic-Indic digits (0.00 on `ar-ocr`'s numbers). EasyOCR
+  alone: the digits, but CRAFT detection costs 12 s and 4.3 GB a page.
+- **Not measured:** Surya (GPL-3.0 code, model weights under a license that
+  restricts commercial use: excluded by license); vision-language OCR models
+  (QARI-OCR and the like: billions of parameters, far outside the worker's
+  one core and 1 GiB).
+- **The adopted engine** combines what measured best, all Apache-2.0 models on
+  ONNX Runtime (MIT): PP-OCRv5 mobile detection (RapidAI's ONNX), EasyOCR's
+  `arabic_g1` recognizer (the only one that read Arabic-Indic digits) on each
+  line, `english_g2` on lines without Arabic, and a vote on letters with
+  PaddleOCR's PP-OCRv5 Arabic recognizer and Tesseract's words (two agreeing,
+  or PaddleOCR at >= 0.9 alone; a number is always EasyOCR's). EasyOCR's two
+  PyTorch recognizers are converted to ONNX at install, checked against
+  PyTorch; no PyTorch at run time. Runtime packages: the `ocr` extra
+  (onnxruntime, opencv-python-headless, pyclipper, numpy; all permissive).
+  Models: about 240 MB (`scripts/ocr_models.py install`, every source pinned
+  by URL, size and SHA-256); the worker image grows from 1.27 to 2.16 GB.
+- **In the real worker** (one core, 1 GiB, `worker_memory_mb` 1024):
+  `ar-ocr` 17.7 s (Tesseract 5.5 s), `ar-ocr-table` 37.4 s (6.2 s), English
+  pages 4.7-5.7 s (2.2-3.3 s); peak inside the 1 GiB limit (~800 MB). Near the
+  worker's time limit the remaining pages go to Tesseract, said on the
+  document.
+- **Real scan** (5 measured pages, both engines through the real intake with
+  a long worker time limit; every page read by the engine asked for):
+
+| Page | Check | Tesseract | Neural |
+|---|---|---|---|
+| 1 (cover) | terms | 0.30 | 0.90 |
+| 2 (contents table) | terms / page numbers / rows' numbers on one line / complete rows | 0.57 / 0.91 / 0.91 / 0.56 | 0.86 / 1.00 / 1.00 / 0.75 |
+| 3 (lesson, tables) | terms / numbers (1) | 0.85 / 1.00 | 0.80 / 0.00 |
+| 30 | terms / numbers | 1.00 / 0.00 | 0.94 / 0.50 |
+| 48 | terms / numbers / symbols | 0.86 / 0.67 / 0.80 | 0.71 / 0.83 / 0.60 |
+
+  The six searches land on the right page with either engine. The neural
+  engine wins on the cover and the contents table and on the numbers of pages
+  30 and 48, and loses terms on three text pages (a ligature "الم" read short)
+  and page 3's one number. Floors per engine, each 0.02 under its measurement,
+  are in the manifest (`floors_by_engine`, outside the repository).
+- **Corpus v4 locked per engine** (`tests/fixtures/documents/fidelity_thresholds.json`,
+  `ocr_engines`): neural qualified `ar-ocr`, `en-ocr`, `en-ocr-table`;
+  Tesseract `en-ocr`, `en-ocr-table`. Not qualified, with reasons in the file:
+  neural `ar-ocr-table` ("ريالاً" read with ب for ي; every number and cell
+  right) and `en-ocr-degraded` (3.75 read 3,75); Tesseract `ar-ocr`,
+  `ar-ocr-table` (no Arabic-Indic digits, lines dropped) and
+  `en-ocr-degraded` (3:75).
+- **Integration**: `documents.ocr.engine` (`auto` default, `neural`,
+  `tesseract`), validated on every write and shown in Settings -> Documents in
+  English and Arabic, with whether the neural engine is ready and why not.
+  The engine runs only in the document worker; the container image carries it
+  and its models (`ocr-models` build stage, hash-locked), and its capability
+  report names both engines. Gates: `tests/test_document_ocr_neural.py` (each
+  rule with its control), `tests/test_document_fidelity.py` (per engine),
+  `tests/test_document_real_scans.py` (per engine, opt-in),
+  `tests/test_document_worker_container_docker.py` (the image reads
+  Arabic-Indic digits; control: Tesseract in the same image does not).
+- **Open:** Arabic decimals and dates with the Arabic separators (`arabic_g1`
+  has no "٫" and rarely reads "/" between Arabic-Indic digits); the "الم"
+  ligature on real scans; a second real scan; speed (one core) -- the
+  per-document time limit decides how many pages stay on the neural engine.
+
+## 2026-10-15: documents refused on a strict install (no broker)
+
+Found on the live install: `GET /api/documents/ops/readiness` answered
+`degraded`, `worker_isolation.reason` "This install requires container
+isolation ... set KAZMA_DOCUMENT_WORKER_ISOLATION=container with a document
+worker broker". The owner had turned on `security.execution.container_required`,
+documents ran in `process`, and no broker ran: the container profile needed
+three `.env` lines, a worker image built by hand and a broker process run and
+kept alive by hand. Every document was refused.
+
+Done in the working tree (uncommitted), each with a behavioural test and a
+negative control (AGENTS.md §19 E1, §39):
+
+| Part | Now | Gate |
+|---|---|---|
+| The profile | `security.execution.document_worker_isolation` (Settings → Documents, admin; protected from `config_save`; never restored); the environment still wins; an unreadable setting refuses; a worker process never reads settings (`worker_process.mark()`) | `tests/test_document_worker_profile.py` (the env-only resolver as control) |
+| Kazma asks the guard | `broker_supervision._publish_broker_request` at boot, on a change (store listener, own thread), every maintenance pass | same (no listener as control) |
+| The guard runs the broker | `DocumentBroker` in `kazma_guard.py`: before Kazma, restart with backoff, health probes, quiet retry for a missing image / silent Docker, one page per failure episode and one on recovery, graceful stop at pause/shutdown/`--once`/crash, orphan reaped, scrubbed environment, owner-only token, state in the state file | `tests/test_guard_document_broker.py` (fake clock; real guard with a stand-in broker; the no-broker guard as control) |
+| The image | `worker_image.py`: tag from every build input; `scripts/document_worker_image.py build/status/prune`; the broker serves the newest build while the tag is missing and switches by itself (exit 6) | `tests/test_document_worker_image.py` (the walk held to the `.dockerignore`; a dropped-fonts ignore list as control) |
+| Readiness and pages | `worker_isolation.selection`, `.supervisor`, `.action` (code, message, command), `image_current`, `image_fallback`; the Documents page and Settings show them in English and Arabic; one ops alert per outdated build | `tests/test_document_worker_profile.py`, `tests/js/test_settings_document_profile.js` |
+| Broker exit codes and stop | 2/3/4/5/6; SIGBREAK handled on Windows (the guard's CTRL_BREAK), also while attesting | `tests/test_document_worker_image.py` (the unhandled CTRL_BREAK as control) |
+
+Measured on this machine (Docker Desktop 29.8.2, Windows 11), real guard, fake
+Kazma server, real broker and worker image
+(`tests/test_document_broker_guard_docker.py`): image build 37 s the first time on this engine (the engines' layers were cached from earlier builds; a build with nothing cached takes minutes), 4.2 s after a code change; the guard's broker ready **5.2 s** after it was started (attestation and engine report included); a real PDF parsed through the container in **1.25 s**; the broker killed, restarted by the guard and ready again in **9.3 s** (5 s of that is the first backoff); the next parse 1.30 s; Kazma not restarted; no container left behind. The broker's own qualification suite passed on the same image (22 tests). The image the guard found by itself for this checkout: `kazma-document-worker:src-2a009799cc0ce433`
+
+Open: the live switch is the owner's (build, Settings, restart the guard once:
+`docs/docs/ops/document-processing.md`, "Switch an install to the container
+profile"); a Linux/systemd run of the guard's broker supervision (the POSIX
+paths are written and unit-tested, not run on Linux here).

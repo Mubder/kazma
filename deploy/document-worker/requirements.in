@@ -11,7 +11,14 @@ arabic-reshaper==3.0.1
 defusedxml==0.7.1
 lxml==6.1.1
 markdown==3.10.2
+# The neural OCR engine (documents.ocr.engine): ONNX Runtime, OpenCV's image
+# operations, polygon offsetting. Its models are baked in by the ocr-models
+# build stage (deploy/document-worker/Dockerfile).
+numpy==2.4.6
+onnxruntime==1.31.0
+opencv-python-headless==5.0.0.93
 openpyxl==3.1.5
+pyclipper==1.4.0
 pdfplumber==0.11.10
 pillow==12.3.0
 prometheus-client==0.25.0

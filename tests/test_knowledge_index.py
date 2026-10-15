@@ -13,13 +13,26 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
 
 # The auto-inject getter reaches into the store singleton, so the temp DB
 # must be wired into BOTH the local store and the singleton.  We do that by
 # importing the singleton module globals and pointing them at our temp store.
 import kazma_core.stores.knowledge as _kb_module
-import pytest  # noqa: E402
 from kazma_core.stores.knowledge import (
     KnowledgeStore,
     reset_knowledge_store,
@@ -156,9 +169,14 @@ def test_search_all_fuses_libraries_into_one_ranking(monkeypatch):
     store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     _ingest(index, "lib_b", INSTAGRAM_DOC, "https://x/ig")
-    hits = asyncio.run(index.search_all("api endpoint post", ["lib_a", "lib_b"], top_k=5))
+    # Words both documents hold: with no meaning vectors (this file has no
+    # embedder, as on CI) a hit needs half the question's words (KQ01).
+    # "api endpoint post" was found only by meaning -- the real model,
+    # loaded from this machine's cache (tests/_egress_guard.py).
+    hits = asyncio.run(index.search_all("api post", ["lib_a", "lib_b"], top_k=5))
     assert isinstance(hits, list)
     assert len(hits) > 0
+    assert {h.library_id for h in hits} == {"lib_a", "lib_b"}, "one ranking across both libraries"
     # Provenance preserved.
     lib_ids = {h.library_id for h in hits}
     assert lib_ids.issubset({"lib_a", "lib_b"})

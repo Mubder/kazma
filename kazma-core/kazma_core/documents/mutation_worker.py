@@ -439,6 +439,9 @@ def execute(request_path: Path, result_path: Path) -> int:
 
 
 def main() -> int:
+    from .worker_process import mark
+
+    mark()  # a worker: its own engines, never Kazma's settings
     if len(sys.argv) != 3:
         return 2
     return execute(Path(sys.argv[1]), Path(sys.argv[2]))

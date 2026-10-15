@@ -756,8 +756,21 @@ class TestSettingsAPI:
         assert isinstance(data["stt"], list)
         assert isinstance(data["tts"], list)
 
-    def test_voice_voices_get(self, client):
+    def test_voice_voices_get(self, client, monkeypatch):
         """GET /api/voice/voices returns voice list for a provider."""
+        import sys
+        import types
+
+        # Edge TTS lists its voices from Microsoft's service: a stand-in here,
+        # never the network (tests/_egress_guard.py, 2026-10-15).
+        class _Voices:
+            voices = [{"ShortName": "en-US-AriaNeural"}, {"ShortName": "ar-EG-SalmaNeural"}]
+
+            @classmethod
+            async def create(cls):
+                return cls()
+
+        monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(VoicesManager=_Voices))
         # 1. Test OpenAI
         resp = client.get("/api/voice/voices?provider=openai")
         assert resp.status_code == 200
@@ -775,8 +788,7 @@ class TestSettingsAPI:
         resp = client.get("/api/voice/voices?provider=edgetts")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) > 0
-        assert "default" in data
+        assert data == ["default", "ar-EG-SalmaNeural", "en-US-AriaNeural"]
 
     def test_voice_stt_models_get(self, client):
         """GET /api/voice/stt-models returns transcription models for a provider."""

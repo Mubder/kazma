@@ -77,9 +77,10 @@ fails closed.
 The strict container profile requires Docker for `python_exec`, skips E2B,
 disables `shell_exec`, and forbids local fallback even when legacy environment
 flags allow it. It also refuses the local `process` profile for document
-parsing, OCR, conversion and PDF mutation (`worker_isolation_required`): set
-`KAZMA_DOCUMENT_WORKER_ISOLATION=container` with the document worker broker
-(see Document processing, "Isolated document workers"). Native file and Git tools retain their approval gates. Check
+parsing, OCR, conversion and PDF mutation (`worker_isolation_required`):
+choose the container profile in Settings → Documents (on a native install the
+guard runs the document worker broker; see Document processing, "Isolated
+document workers"). Native file and Git tools retain their approval gates. Check
 the actual Docker daemon and run an approved disposable snippet before
 qualifying execution; daemon readiness alone does not verify the image or
 mount permissions. The strict profile makes `code_execution` a required

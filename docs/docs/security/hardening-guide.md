@@ -7,8 +7,9 @@ sidebar_position: 3
 **Document Intelligence:** treat every upload as hostile. The default `process`
 worker profile bounds time, memory and output but confines neither the file
 system nor the network; for documents you do not trust run the attested
-`container` profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container` with the
-document worker broker) and set `security.execution.container_required` so the
+`container` profile (Settings → Documents, or
+`KAZMA_DOCUMENT_WORKER_ISOLATION=container`, with the document worker broker the
+guard runs) and set `security.execution.container_required` so the
 `process` profile is refused. Enable ClamAV for production intake
 (`documents.security.malware_scan=on` when `clamscan`/`clamdscan` is on PATH, or
 `documents.security.malware_fail_closed=true`, the default under

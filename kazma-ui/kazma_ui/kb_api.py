@@ -77,7 +77,7 @@ _BODY_MAX_BYTES = 64 * 1024
 #: entry in English and Arabic (tests/test_kb_api_contract.py).
 KB_ERROR_CODES = (
     "kb_single_operator", "invalid_request", "invalid_json", "request_too_large",
-    "not_found", "library_exists", "url_refused", "kb_storage_full", "library_busy",
+    "not_found", "library_exists", "url_refused", "kb_storage_full", "kb_library_limit", "library_busy",
     "crawl_owns_library", "documents_unavailable", "page_not_ingested", "no_seed",
     "resume_refused", "internal_error",
 )
@@ -133,6 +133,18 @@ def _acquisition_failure(exc: AcquisitionError) -> JSONResponse:
         status, level = _ACQUISITION_STATUS.get(code, (409, logging.INFO))
     logger.log(level, "[kb_api] refused (%s): %s", code, exc)
     return _fail(code, str(exc), status, transient=bool(exc.transient))
+
+
+def _capacity_refusal(lib_id: str, exc: Exception) -> JSONResponse:
+    """A store at its quota (507 ``kb_storage_full``), or an install at its
+    library ceiling (409 ``kb_library_limit``, KB-Q01), as a stable code."""
+    from kazma_core.stores.knowledge import KnowledgeLibraryLimit
+
+    if isinstance(exc, KnowledgeLibraryLimit):
+        logger.info("[kb_api] library %s refused: %s", lib_id, exc)
+        return _fail("kb_library_limit", str(exc), 409, limit=exc.ceiling)
+    logger.warning("[kb_api] work on %s refused: %s", lib_id, exc)
+    return _fail("kb_storage_full", str(exc), 507)
 
 
 class _Body(BaseModel):
@@ -251,7 +263,7 @@ def create_kb_router() -> APIRouter:
         return await asyncio.to_thread(_create, data)
 
     def _create(data: _CreateBody) -> Any:
-        from kazma_core.stores.knowledge import KnowledgeUrlRefused, slugify_library_id
+        from kazma_core.stores.knowledge import KnowledgeStorageFull, KnowledgeUrlRefused, slugify_library_id
 
         lib_id = slugify_library_id(data.id)
         try:
@@ -260,6 +272,8 @@ def create_kb_router() -> APIRouter:
             lib = _store().create_library(lib_id, name=data.name or data.id,
                                           description=data.description, seed_url=data.seed_url)
             return {"ok": True, "library": lib}
+        except KnowledgeStorageFull as exc:  # the library ceiling (KB-Q01)
+            return _capacity_refusal(lib_id, exc)
         except KnowledgeUrlRefused as exc:
             return _fail("url_refused", str(exc), 422)
         except ValueError as exc:
@@ -405,8 +419,13 @@ def create_kb_router() -> APIRouter:
         """One page now. ``ok`` is the page's outcome (KB-S13): a page that
         was not stored answers 422 ``page_not_ingested`` with its reasons,
         and the library is created only once the page was fetched (KB-S09)."""
+        from kazma_core.stores.knowledge import KnowledgeStorageFull
         from kazma_core.stores.knowledge_ingest import ingest_url
 
+        try:
+            await asyncio.to_thread(_store().ensure_capacity, lib_id)
+        except KnowledgeStorageFull as exc:
+            return _capacity_refusal(lib_id, exc)
         try:
             result = await ingest_url(lib_id, url, name=name)
         except Exception as exc:
@@ -445,8 +464,7 @@ def create_kb_router() -> APIRouter:
         except AcquisitionError as exc:
             return _acquisition_failure(exc)
         except KnowledgeStorageFull as exc:
-            logger.warning("[kb_api] crawl of %s refused: %s", lib_id, exc)
-            return _fail("kb_storage_full", str(exc), 507)
+            return _capacity_refusal(lib_id, exc)
         dispatched = False
         try:
             await call(prepared[0].update, lambda row: row.update(kind=kind))
@@ -484,6 +502,8 @@ def create_kb_router() -> APIRouter:
             spawn_background(_run(), name=f"kb-crawl:{job_id}")
             dispatched = True
             return {"ok": True, "mode": "site", "job_id": job_id}
+        except KnowledgeStorageFull as exc:  # another library took the last place meanwhile
+            return _capacity_refusal(lib_id, exc)
         except Exception as exc:
             logger.exception("[kb_api] crawl %s could not start", job_id)
             return _fail("internal_error", safe_error(exc), 500)

@@ -49,6 +49,17 @@ from tests._module_stubs import stub_modules
 # ── A small chromadb ──────────────────────────────────────────────────────
 
 
+def _matches(meta: dict, cond: dict | None) -> bool:
+    """Chroma's metadata filter: equality, ``$and``, and ``$ne`` (which also
+    matches a row without the key)."""
+    if not cond:
+        return True
+    if "$and" in cond:
+        return all(_matches(meta, c) for c in cond["$and"])
+    return all(meta.get(k) != v["$ne"] if isinstance(v, dict) and "$ne" in v else meta.get(k) == v
+               for k, v in cond.items())
+
+
 class _Collection:
     def __init__(self, name: str, metadata: dict | None = None, configuration: dict | None = None) -> None:
         self.name = name
@@ -61,7 +72,9 @@ class _Collection:
         hnsw = getattr(self, "configuration_json", {}).get("hnsw") or {}
         return hnsw.get("space") or self.metadata.get("hnsw:space", "l2")
 
-    def upsert(self, ids, embeddings, documents, metadatas):
+    def upsert(self, ids, embeddings, documents=None, metadatas=None):
+        documents = documents if documents is not None else [None] * len(ids)
+        metadatas = metadatas if metadatas is not None else [{}] * len(ids)
         for meta in metadatas:
             for key, value in meta.items():
                 if value is None:  # what Chroma does with a None value
@@ -74,8 +87,9 @@ class _Collection:
         for i, e, d, m in zip(ids, embeddings, documents, metadatas):
             self.rows[i] = (list(e), d, dict(m))
 
-    def get(self, ids=None, include=None, limit=None, offset=None):
+    def get(self, ids=None, include=None, limit=None, offset=None, where=None):
         keys = list(self.rows) if ids is None else [i for i in ids if i in self.rows]
+        keys = [k for k in keys if _matches(self.rows[k][2], where)]
         keys = keys[offset or 0:][:limit] if limit is not None else keys[offset or 0:]
         out = {"ids": keys, "documents": [self.rows[k][1] for k in keys]}
         if include and "metadatas" in include:
@@ -94,13 +108,7 @@ class _Collection:
     def query(self, query_embeddings, n_results, where=None):
         q = query_embeddings[0]
         space = self._space()
-
-        def matches(meta, cond):
-            if not cond:
-                return True
-            if "$and" in cond:
-                return all(matches(meta, c) for c in cond["$and"])
-            return all(meta.get(k) == v for k, v in cond.items())
+        matches = _matches
 
         def distance(v):
             if space == "l2":  # Chroma's default: squared euclidean

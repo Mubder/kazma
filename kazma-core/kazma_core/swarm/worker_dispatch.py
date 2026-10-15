@@ -444,12 +444,13 @@ async def dispatch_worker(
             # breaker's lock orders it with any other outcome (SW-E07).
             from kazma_core.background import spawn_background
 
-            # A stop the user asked for (or a shutdown) says nothing about the
-            # worker: no breaker failure (SW-E11). A deadline does.
+            # A stop the user asked for (or a shutdown, or a cancel made
+            # through Temporal) says nothing about the worker: no breaker
+            # failure (SW-E11). A deadline does.
             cause = engine._interrupt_cause(getattr(context, "task_id", None) or "") \
                 if hasattr(engine, "_interrupt_cause") else None
             if isinstance(exc, asyncio.CancelledError) and cause in (
-                    "cancelled_by_user", "caller_stopped", "shutdown"):
+                    "cancelled_by_user", "caller_stopped", "shutdown", "temporal_cancel"):
                 spawn_background(asyncio.to_thread(breaker.release_probe),
                                  name=f"swarm-breaker-release:{worker.name}")
             else:

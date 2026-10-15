@@ -4,11 +4,23 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
 from kazma_core.memory.global_reconsolidation import (
     run_global_reconsolidation,
     subject_partition_index,
 )
 from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
 
 
 def test_subject_partition_stable():

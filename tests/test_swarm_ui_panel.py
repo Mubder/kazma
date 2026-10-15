@@ -29,9 +29,22 @@ Covers:
 from __future__ import annotations
 
 import kazma_ui.i18n  # noqa: F401,E402 — patches Jinja2Templates with i18n globals
+import pytest
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
+
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
 
 # ---------------------------------------------------------------------------
 # Helpers

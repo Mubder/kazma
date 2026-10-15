@@ -170,6 +170,10 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("self_improvement.pending_evolution", RUNTIME, "Soul changes waiting for review"),
     # ── Credentials: not in a backup, never restored ──────────────────────
     KeyRule("security.", CREDENTIAL, "the sign-in secret and the disclosure key"),
+    KeyRule("security.execution.document_worker_isolation", CREDENTIAL,
+            "where untrusted documents run (process or container): part of the execution "
+            "policy, which a restore never changes -- an older backup must not move "
+            "documents out of their containers"),
     KeyRule("account.", CREDENTIAL, "the owner's sign-in: name, password, API tokens"),
     KeyRule("web_session.", CREDENTIAL, "signed-in browsers: a restore must never bring back "
             "a session that was signed out"),

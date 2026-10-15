@@ -153,6 +153,17 @@ def _tenant_mode(value: Any) -> Any:
     return mode
 
 
+def _ocr_engine(value: Any) -> Any:
+    # An engine the document policy cannot read would make every document
+    # job refuse to run (an invalid stored policy fails closed).
+    from kazma_core.documents.config import OCR_ENGINES, ocr_engine_choice
+
+    try:
+        return ocr_engine_choice(value)
+    except ValueError:
+        raise SettingRejected(f"The OCR engine is one of: {', '.join(OCR_ENGINES)}.") from None
+
+
 @functools.cache
 def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     """key -> (normalize, category the key is stored under or None).
@@ -163,11 +174,13 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.agent.turn_budget import TURN_TIMEOUT_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
+    from kazma_core.documents.config import OCR_ENGINE_KEY
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
     return {
+        OCR_ENGINE_KEY: (_ocr_engine, "documents"),
         "cron.timezone": (_timezone, None),
         # The scheduler's bounds (Scheduled audit SCH-E06, E14, S05).
         **{key: (_cron_bound(key), None) for key in SETTING_BOUNDS},
@@ -186,8 +199,12 @@ def validate_setting(key: str, value: Any) -> tuple[Any, str | None]:
     Raises :class:`SettingRejected` for a value the setting cannot hold. A
     key with no rule passes unchanged."""
     from kazma_core.safety.deployment_policy import (
-        CONTAINER_REQUIRED_KEY, WORKSPACE_ROOTS_KEY,
-        normalize_container_required, normalize_workspace_roots,
+        CONTAINER_REQUIRED_KEY,
+        DOCUMENT_WORKER_ISOLATION_KEY,
+        WORKSPACE_ROOTS_KEY,
+        normalize_container_required,
+        normalize_document_worker_isolation,
+        normalize_workspace_roots,
     )
 
     name = base_key(key)
@@ -196,12 +213,20 @@ def validate_setting(key: str, value: Any) -> tuple[Any, str | None]:
             return normalize_workspace_roots(value), "security"
         if name == CONTAINER_REQUIRED_KEY:
             return normalize_container_required(value), "security"
+        if name == DOCUMENT_WORKER_ISOLATION_KEY:
+            return normalize_document_worker_isolation(value), "security"
         # A parent mapping save or backup restore must enforce the same rules.
         if name in ("security", "security.execution") and isinstance(value, dict):
             return {child: validate_setting(name + "." + child, item)[0]
                     for child, item in value.items()}, "security"
         if name == "memory" and isinstance(value, dict) and "tenant_mode" in value:
             return {**value, "tenant_mode": _tenant_mode(value["tenant_mode"])}, "memory"
+        if name == "documents.ocr" and isinstance(value, dict) and "engine" in value:
+            return {**value, "engine": _ocr_engine(value["engine"])}, "documents"
+        if (name == "documents" and isinstance(value, dict) and isinstance(value.get("ocr"), dict)
+                and "engine" in value["ocr"]):
+            ocr = {**value["ocr"], "engine": _ocr_engine(value["ocr"]["engine"])}
+            return {**value, "ocr": ocr}, "documents"
     except ValueError as exc:
         raise SettingRejected(str(exc)) from None
     rule = _rules().get(name)

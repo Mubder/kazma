@@ -567,6 +567,14 @@ def test_refusal_alerts_and_exits_nonzero(monkeypatch, tmp_path):
         "send": lambda self, t: sent.append(t),
         "configured": True,
     })()
+    # A refused guard supervises nothing: it must leave the document broker
+    # (and the running guard's record of it) alone.
+    broker_calls: list[str] = []
+    g.broker = type("B", (), {
+        "__getattr__": lambda self, name: (
+            lambda *a, **k: broker_calls.append(name)
+        ),
+    })()
 
     monkeypatch.setattr(guard, "probe", lambda url, t: (True, "ready"))
     monkeypatch.setattr(guard.Guard, "_install_signals", lambda self: None)
@@ -574,6 +582,7 @@ def test_refusal_alerts_and_exits_nonzero(monkeypatch, tmp_path):
     rc = guard.Guard.run(g)
     assert rc == 2, "must not exit 0 and look like a success"
     assert sent and "already serving" in sent[0]
+    assert broker_calls == [], f"a refused guard touched the broker: {broker_calls}"
 
 
 # ── orphan reaping (live incident 2026-08-28 12:26) ───────────────────

@@ -22,7 +22,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests._no_models import finish_turn_memory, keep_models_out
 from tests.test_api_route_callers import _all_routes
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's memory and swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch, llm=False)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
 
 #: GET routes this walk does not call, each with why.
 NOT_WALKED: dict[str, str] = {}
@@ -85,6 +96,10 @@ def walk_app(app: FastAPI, skip: dict[str, str] | None = None) -> dict[str, list
     from kazma_core.security import hardening
 
     mp.setattr(hardening.SecurityHardeningRunner, "_product_files", lambda _self: [])
+    # The walk runs in a module fixture, before the per-test _no_models: the
+    # memory health and recall routes reached the real embedder and imported
+    # the model package (tests/_egress_guard.py, 2026-10-15).
+    keep_models_out(mp, llm=False)
 
     real_create = socket.create_connection
     real_getaddrinfo = socket.getaddrinfo

@@ -106,9 +106,11 @@ column the catalog says is missing (`kazma_core/db/pg_schema.py`), so a start
 does not wait behind a running backup's dump or deadlock with another start.
 
 The update does **not** rebuild the document worker image. With the container
-profile (`KAZMA_DOCUMENT_WORKER_ISOLATION=container`), rebuild the image from
-`deploy/document-worker/Dockerfile` and restart `document-broker` after every
-update: the broker pins the image it started with. Until then readiness
+profile on a native install, run `python scripts/document_worker_image.py
+build` after the update (Kazma raises an ops alert naming it once per build);
+the guard's broker serves the older image until then and switches by itself.
+Under docker compose, rebuild the image from `deploy/document-worker/Dockerfile`
+and restart `document-broker`: the broker pins the image it started with. Until then readiness
 reports `worker_isolation.image_code_matches: false` and
 `document_worker_image_outdated` when the document code changed (the check
 covers `kazma_core/documents` only, while the image holds all of

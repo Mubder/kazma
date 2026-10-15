@@ -279,7 +279,48 @@ def test_the_check_sees_a_deleted_librarys_words_left_in_the_keyword_index(tmp_p
     state["deleted"][lib] = {"lang": lang, "seed_url": seed_url, "stored": {"1": 1}, "docs": {}}
     problems, sample = knowledge_soak.check_stores(data, state, seed)
     assert sample["deleted_words_in_keyword_segments"] == 1
-    assert any(p.startswith("keyword index: its segments still hold at least 1") for p in problems), problems
+    assert any(p.startswith("keyword index: its segments still hold 1 of 1 planted") for p in problems), problems
+
+
+def _tail_count(conn: sqlite3.Connection, tokens: list[str]) -> int:
+    """The check of 01cba7cb: the end of each word anywhere in the blobs."""
+    blob = b"".join(bytes(r[0]) for r in conn.execute("SELECT block FROM knowledge_chunks_fts_data") if r[0])
+    return sum(1 for t in tokens if (t[-6:] if t.isascii() else t[-4:]).encode() in blob)
+
+
+def test_the_check_counts_only_whole_words_no_live_row_holds(tmp_path, monkeypatch):
+    """The check reads the segments word by word. The test it replaced looked
+    for the last four letters of an Arabic word (six of an English one)
+    anywhere in the segment blobs, so another word holding those letters
+    was counted as a leak: 6 of 20,000 random Arabic tokens hit the store
+    the multi-day run stopped on, and a multi-day run checks thousands of
+    times. A word a live row holds is not left by a delete either. A real
+    leak stays caught (the test above, and the last lines here)."""
+    from kazma_core.stores.knowledge import KnowledgeStore
+
+    never_written = "ثخذضظغق"  # a deleted library's word that is not on disk
+    shared = "بتثجحخد"  # a deleted library's word a live library also holds
+    leaked = "رزسشصضط"  # a deleted library's word left on disk
+    db = tmp_path / "knowledge.db"
+    store = KnowledgeStore(db_path=str(db))
+    try:
+        store.create_library("live", "live")
+        store.publish_page("live", "https://live.example.test/p1", [
+            {"content": f"قسم فيه ببضظغقن و {shared} و نص", "chunk_index": 0}])  # holds never_written's end
+        store.create_library("gone", "gone")
+        store.publish_page("gone", "https://gone.example.test/p1", [
+            {"content": f"قسم فيه {leaked} و نص", "chunk_index": 0}])
+        monkeypatch.setattr(KnowledgeStore, "purge_search_index", lambda self: {})  # no purge: a real leak
+        store.delete_library("gone")
+    finally:
+        store.close()
+    conn = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    try:
+        assert _tail_count(conn, [never_written, shared]) == 2  # negative control: two leaks that are not there
+        assert knowledge_soak._segment_residue(conn, [never_written, shared]) == 0
+        assert knowledge_soak._segment_residue(conn, [never_written, shared, leaked]) == 1
+    finally:
+        conn.close()
 
 
 def test_the_check_sees_a_vector_folder_no_collection_owns(tmp_path, monkeypatch):
@@ -304,6 +345,42 @@ def test_the_check_sees_a_vector_folder_no_collection_owns(tmp_path, monkeypatch
     report = {"findings": []}
     problems, _ = knowledge_soak.check_stores(data, state, seed, tolerate_orphans=True, report=report)
     assert problems == [] and report["findings"] and "vector store:" in report["findings"][0], report
+
+
+def test_the_check_sees_text_in_the_vector_catalog(tmp_path, monkeypatch):
+    """Negative control of the vector catalog's check (KB-Q01 follow-up): a
+    row of text beside a vector, and a deleted library's word left in the
+    catalog's bytes, as builds before 2026-10-15 left them."""
+    data, state, seed = _stores(tmp_path, monkeypatch)
+    lib = "gone-en"
+    state["deleted"][lib] = {"lang": "en", "seed_url": knowledge_soak.seed_url_for(lib), "stored": {"1": 1},
+                             "docs": {}}
+    token = knowledge_soak._page_fact(seed, lib, state["deleted"][lib], 1, 1)["token"]
+    vectors = data / "vector_memory"
+    vectors.mkdir()
+    conn = sqlite3.connect(str(vectors / "chroma.sqlite3"))
+    try:
+        conn.execute("CREATE TABLE segments (id TEXT PRIMARY KEY, type TEXT, scope TEXT, collection TEXT)")
+        conn.execute("CREATE TABLE embedding_metadata (id INTEGER, key TEXT NOT NULL, string_value TEXT, "
+                     "int_value INTEGER, float_value REAL, bool_value INTEGER, PRIMARY KEY (id, key))")
+        conn.execute("INSERT INTO embedding_metadata (id, key, string_value) VALUES (1, 'model', 'm')")
+        conn.commit()
+    finally:
+        conn.close()
+    problems, sample = knowledge_soak.check_stores(data, state, seed)
+    assert sample["vector_catalog_text_rows"] == 0 and sample["deleted_words_in_vector_catalog"] == 0
+    assert not any(p.startswith("vector store: chroma.sqlite3") or "hold text" in p for p in problems), problems
+    conn = sqlite3.connect(str(vectors / "chroma.sqlite3"))
+    try:
+        conn.execute("INSERT INTO embedding_metadata (id, key, string_value) VALUES (1, 'chroma:document', ?)",
+                     (f"a preview holding {token}",))
+        conn.commit()
+    finally:
+        conn.close()
+    problems, sample = knowledge_soak.check_stores(data, state, seed)
+    assert sample["vector_catalog_text_rows"] == 1 and sample["deleted_words_in_vector_catalog"] == 1
+    assert any("1 catalog row(s) hold text beside a vector" in p for p in problems), problems
+    assert any(p.startswith("vector store: chroma.sqlite3 still holds 1 of") for p in problems), problems
 
 
 def test_the_check_sees_a_crawl_journal_past_its_bound(tmp_path, monkeypatch):

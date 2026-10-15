@@ -461,9 +461,11 @@ def _check_temporal_runtime() -> dict[str, Any]:
     """Inspect the existing worker; never construct a worker during a probe."""
     from kazma_core.swarm import durable
 
-    worker = durable._worker_task
-    running = durable.durable_enabled() and worker is not None and not worker.done()
-    return {"status": "ok" if running else "not_initialized", "component": "temporal"}
+    running, problem = durable.durable_ready()
+    out: dict[str, Any] = {"status": "ok" if running else "not_initialized", "component": "temporal"}
+    if not running:
+        out["detail"] = problem
+    return out
 
 
 #: How long a Docker daemon that answered stays trusted while a later probe

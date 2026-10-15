@@ -11,8 +11,13 @@ disk while it runs (``running``) and ``passed`` at the end. And its checks
 report what they exist for (negative controls): a task row moved out of its
 terminal status, more tasks running at once than the limit (in the store and
 in a sample), a dispatch stopped with no ending recorded, a breaker outcome
-from an older generation applied, an autoscaler bound passed and an instance
-reaped mid-dispatch.
+from an older generation applied, an older breaker state put back by a
+refresh (the race this test caught in 2 runs of 10 on 2026-10-15), an
+autoscaler bound passed and an instance reaped mid-dispatch.
+
+The short run's ``--duration`` is seconds of load: a restart that waits out
+the engine's stop grace (a task ignoring its stop) no longer eats the run in
+which the breaker must trip and recover.
 """
 
 from __future__ import annotations
@@ -214,6 +219,50 @@ def test_the_breaker_check_sees_an_older_generation_outcome_applied(monkeypatch,
     monkeypatch.setattr(CircuitBreaker, "_stale", lambda self, token: False)
     breaker.record_failure(early)
     assert any("an outcome admitted in generation 0" in v for v in soak.violations), soak.violations
+
+
+def test_the_breaker_check_sees_an_older_state_put_back_by_a_refresh(monkeypatch, tmp_path):
+    """The violation the harness test reported in 2 runs of 10 (2026-10-15):
+    a refresh laid the shared copy of the generation before over a newer
+    state. With the product's refresh (a newer generation only) nothing is
+    reported; with the old refresh (the negative control) the check names it."""
+    from kazma_core.swarm.reliability import CircuitBreaker
+
+    store: dict = {}
+
+    class _Settings:
+        def get(self, key, default=None):
+            return store.get(key, default)
+
+        def set(self, key, value, category="general"):
+            store[key] = value
+
+        def atomic_update(self, key, fn, category="general"):
+            store[key] = fn(store.get(key))
+            return store[key]
+
+        def delete(self, key):
+            return store.pop(key, None) is not None
+
+    def _old_refresh(self, worker_name):
+        shared = type(self).load_shared(worker_name)
+        if shared is None:
+            return
+        self.consecutive_failures = shared.consecutive_failures
+        self._state, self._opened_at = shared._state, shared._opened_at
+        self.generation = max(self.generation, shared.generation)
+
+    monkeypatch.setenv("KAZMA_SHARED_BREAKERS", "1")
+    monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda: _Settings())
+    soak, classes = _soak(tmp_path)
+    breaker = classes["breaker"](failure_threshold=1, cooldown_seconds=3600)
+    breaker.persist_shared("w")  # closed, generation 0
+    breaker.record_failure(breaker.admit("w"))  # open, generation 1, not shared yet
+    breaker.refresh_from_shared("w")
+    assert soak.violations == [] and breaker.generation == 1
+    monkeypatch.setattr(CircuitBreaker, "refresh_from_shared", _old_refresh)
+    breaker.refresh_from_shared("w")
+    assert any("moved it from open to closed at generation 1" in v for v in soak.violations), soak.violations
 
 
 def test_the_autoscaler_check_sees_a_bound_passed_and_a_busy_reap(monkeypatch, tmp_path):

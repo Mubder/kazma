@@ -1,5 +1,125 @@
 # CHANGELOG
 
+## The model-call record off the event loop; tests stay off the network (2026-10-15)
+
+- **Every model call's record is written off the event loop.** The record
+  of each model call (the ledger behind a turn's tokens and cost) was
+  written on the server's event loop for swarm workers and research calls.
+  It is now written in a background thread. The caller still waits for its
+  record, so a turn's totals include every call, in order. A cancelled call
+  still keeps its record.
+- **No test reaches the network or loads the real embedding model.** Some
+  swarm tests loaded the multi-gigabyte embedding model from this machine's
+  cache and called a real model provider. That slowed the live server
+  running beside the suite, and those tests passed or failed depending on
+  the machine. Now a test that tries either fails and names the call that
+  tried. A test that truly needs the real model or the internet says so
+  with a marker, and runs only when asked.
+- **A guard that refuses to start leaves the document broker alone.** A
+  second guard that finds Kazma already running refuses to start. Before,
+  it first rewrote the running guard's record of the document broker.
+
+## Deleted words really leave the keyword index (2026-10-15)
+
+- **A deleted library's words now leave the keyword index file.** The
+  72-hour Knowledge soak found 8 words of a deleted library still in the
+  index file. The cause was SQLite's full-text index (FTS5). It drops a
+  deleted word only when a merge rewrites the index's oldest segment, and
+  after many merges a plain "optimize" can leave every deleted word
+  behind.
+  - Kazma now checks the index's structure after a purge. When the deleted
+    words could remain, it rebuilds the index. This takes 0.35 s at 10,000
+    chunks.
+  - Memory's Forget and the vector catalog's cleanup had the same flaw.
+    They now use the same check.
+- **A purge cut short is finished later.** A delete marks a purge as due in
+  its own transaction. The next start or repair pass finishes the purge.
+  Tests kill the process at four points between a delete and the end of
+  its purge, and the words are gone after the next start.
+- **A malformed document id now reads like an unknown one.** It gets the
+  same 404 "Document is unavailable" an unknown id gets. Before, it got a
+  vague 400 and a warning in the log.
+
+## Swarm: the Temporal path qualified; no task runs without its record (2026-10-15)
+
+- **The Temporal durable path is tested against Temporal's own test
+  server.** Each task runs as one workflow with explicit time limits and no
+  retries, so Temporal never re-runs a step whose effect is uncertain. The
+  swarm engine keeps the only deadline; Temporal's own limits sit behind
+  it, as a backstop.
+  - A Temporal timeout, cancel or shutdown ends the task with the same
+    record the engine writes in-process: what interrupted it, and whether
+    anything ran.
+  - A worker process killed in the middle of a pipeline never re-runs a
+    step that had finished. A step whose effect is unknown is held as
+    unknown.
+  - When Temporal is required and down, an approval leaves its checkpoint
+    open, and the Swarm page says why.
+- **A task whose "running" record cannot be written is refused.** Before,
+  it ran anyway, and a crash in the middle left no trace of what it had
+  done. The write is now retried. If it still fails, the task is refused
+  with a clear, retryable message (HTTP 503 `task_store_unavailable`), and
+  nothing runs.
+- **A race in the shared circuit breaker is fixed.** A refresh could put an
+  older shared state over a newer local one. It was found by the swarm
+  soak's own test, which failed 2 runs in 10 and now passes every run.
+
+## Documents: an OCR engine that reads Arabic and Arabic-Indic digits (2026-10-15)
+
+- Scanned Arabic now reads far better. A new on-device OCR engine reads
+  Arabic letters and Arabic-Indic digits (١٢٣٤٥٦٧), which Tesseract could
+  not:
+  - On the Arabic test page it read every word and every number. Tesseract
+    read 66% of the words and 33% of the numbers.
+  - On a real scanned booklet, more of each page's terms and numbers were
+    found.
+- How it reads:
+  - PaddleOCR finds the text lines.
+  - EasyOCR's Arabic model reads them.
+  - A second reader votes on letters, never on numbers.
+  - Everything runs on ONNX Runtime, on the CPU, inside the document
+    worker. Nothing leaves the machine.
+- It costs about 5 seconds and 900 MB a page, against half a second for
+  Tesseract.
+  - Ruled tables are read cell by cell.
+  - Near the worker's time limit, the remaining pages go to Tesseract, and
+    the document says so.
+- Settings → Documents chooses the engine: `auto` (the default), `neural`
+  or `tesseract`. It also shows whether the neural engine is ready, and
+  why not.
+- The models are fetched once by `python scripts/ocr_models.py install`.
+  Each file is pinned by URL, size and SHA-256. The document worker image
+  carries them already. Until they are installed, `auto` reads with
+  Tesseract.
+
+## Documents in containers without a hand-run broker (2026-10-15)
+
+On the live install every document was refused. The owner had turned on the
+strict execution profile, which allows untrusted documents to run only in a
+container. The container profile needed three `.env` lines, a worker image
+built by hand and a broker process kept running by hand, and nothing did
+that.
+
+- **The profile is a setting.** Settings → Documents → *Where untrusted
+  documents run*: a local process or a container per job. Only an admin can
+  change it; the agent's config tools cannot, and a settings restore never
+  does. `KAZMA_DOCUMENT_WORKER_ISOLATION` still wins when it is set. When the
+  install requires containers, the page says so and offers *Use the
+  container profile*.
+- **The guard runs the broker.** When Kazma needs it, the guard starts the
+  document worker broker beside Kazma, hands Kazma its address and token,
+  restarts it when it dies or stops answering, and pages once when it cannot
+  keep it running. `.env` needs nothing.
+- **One command builds the image for the code.** `python
+  scripts/document_worker_image.py build`. The image's tag comes from
+  everything it is built from. While the image for the current code is not
+  built, the broker serves the newest one built, and it switches by itself
+  once the new one exists. After an update, Kazma sends one alert naming the
+  command.
+- **Readiness says what to do.** The Documents page shows which profile runs,
+  the broker's state, and the one step that fixes what is not right, with
+  its command, in English and Arabic.
+
 ## Three faults seen on the live install (2026-10-15)
 
 - **A slow Docker answer no longer pages you.** Readiness checks the
@@ -21,6 +141,29 @@
 - Time Travel's maintenance no longer counts SQLite's 32 KB shared-memory
   file as disk use. Counting it, a prune reported the store growing while
   the file shrank.
+
+## Knowledge Library: no text beside the vectors, no lost records, faster searches (2026-10-15)
+
+Three things the first round of vector-store fixes left open:
+
+- **The vector store keeps no copy of your text.** Each vector used to be
+  stored with the first 2,000 characters of its chunk and the chunk's title,
+  heading and address, which nothing read. After a delete the text stayed
+  readable in the vector database file. Vectors are now stored with only
+  the embedder's tag and the library and document ids. The repair pass
+  removes the text an older version stored (it rebuilds each such
+  collection from its own vectors; nothing is embedded again), and after a
+  deletion it rewrites the file so no deleted text stays in it.
+- **A search no longer misses records it should find.** With many
+  libraries, Chroma could unload a library's index and load it back without
+  the records added since its last save, with no error. Kazma now starts
+  Chroma with an index pool large enough that no index is unloaded, and an
+  install holds at most 500 libraries (a new one past that is refused, with
+  a message in English and Arabic).
+- **Meaning search is faster.** Searches filtered on the library and the
+  embedder, which Chroma does slowly: 40 ms a search at 10,000 chunks and
+  353 ms at 100,000. A search now asks no filter unless the library still
+  holds vectors of an older embedder: 4 ms and 6 ms.
 
 ## Knowledge Library: vectors that leave, indexes that are not lost (2026-10-15)
 
