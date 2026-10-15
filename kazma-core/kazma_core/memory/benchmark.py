@@ -402,7 +402,7 @@ class ReplayEmbedder:
 # (``documents.arabic.fold_for_search``, digits included) and contained
 # either way. The model's pass replays recorded replies
 # (``tests/fixtures/memory_bench/extraction_llm.json``, recorded with
-# ``scripts/memory_bench.py extraction --record`` on the configured model):
+# ``scripts/memory_extraction_record.py`` on the configured model):
 # without them it is reported as not recorded, never guessed.
 
 
@@ -474,7 +474,7 @@ class _ReplayClient:
     async def chat(self, messages: list[dict[str, Any]], **_kw: Any) -> str:
         key = _text_key(messages[-1]["content"])
         if key not in self._replies:
-            raise KeyError("no recorded reply for this turn: python scripts/memory_bench.py extraction --record")
+            raise KeyError("no recorded reply for this turn: python scripts/memory_extraction_record.py --out <fixture>")
         return self._replies[key]
 
 
@@ -503,7 +503,7 @@ def run_extraction_benchmark(
     if missing:
         # Checked here: the extractor reads any failed call as "the model is
         # down", which would score a stale recording as an outage.
-        raise KeyError(f"no recorded reply for {missing}: python scripts/memory_bench.py extraction --record")
+        raise KeyError(f"no recorded reply for {missing}: python scripts/memory_extraction_record.py --out <fixture>")
 
     async def ask_all() -> dict[str, list[dict[str, Any]]]:
         got = {}
@@ -534,7 +534,7 @@ def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
 
 async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[str, Any]:
     """Ask the configured model the extraction prompt for every turn and
-    return its raw replies (``scripts/memory_bench.py extraction --record``;
+    return its raw replies (``scripts/memory_extraction_record.py``;
     costs one call a turn)."""
     from kazma_core.model_registry import get_model_registry
 

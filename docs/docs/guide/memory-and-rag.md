@@ -706,8 +706,9 @@ grammar, so it keeps nothing from a negation ("ما أحب"), an instruction to
 Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن في دبي") or a
 field of work ("أشتغل في المبيعات", like "I work in sales"). What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
-replies (`extraction --record`, one model call per turn); until they are
-recorded the report says "not recorded" and nothing is assumed.
+replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
+install's own Python, one model call per turn); until they are recorded the
+report says "not recorded" and nothing is assumed.
 
 ### Measured limits
 

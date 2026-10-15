@@ -5,7 +5,8 @@
   python scripts/memory_bench.py run [--real]      # score recall(); --real loads the model
   python scripts/memory_bench.py lock              # raise the CI ratchet to today's scores
   python scripts/memory_bench.py lock --trade "why"  # a reviewed trade (see TRADE_RULE)
-  python scripts/memory_bench.py extraction [--record]  # extraction scores; --record asks the model
+  python scripts/memory_bench.py extraction           # extraction scores from the recorded replies
+                                                    # (recorded by scripts/memory_extraction_record.py)
 
 The dataset is a persona's life told across dated chat sessions -- facts the
 user states, facts only the assistant said, facts that change, codes and
@@ -23,7 +24,6 @@ Reads no install: the benchmark writes its own temp database.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import os
 import random
@@ -1101,13 +1101,11 @@ def _extraction_floor(old: dict[str, Any]) -> dict[str, Any]:
             "scores": {k: max(v, was.get(k, -1.0)) for k, v in sorted(now.items())}}
 
 
-def _cmd_extraction(record: bool) -> int:
-    from kazma_core.memory.benchmark import record_llm_extraction, run_extraction_benchmark
+def _cmd_extraction() -> int:
+    from kazma_core.memory.benchmark import run_extraction_benchmark
 
-    if record:
-        replies = asyncio.run(record_llm_extraction())
-        LLM_REPLIES.write_text(json.dumps(replies, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-        print(f"{LLM_REPLIES}: {len(replies['replies'])} replies from {replies['model']}")
+    # The replies are recorded by scripts/memory_extraction_record.py, which
+    # loads an install's .env to reach its model; this script stays env-free.
     replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8")) if LLM_REPLIES.is_file() else None
     print(json.dumps(run_extraction_benchmark(llm_replies=replies), ensure_ascii=False, indent=1))
     return 0
@@ -1123,9 +1121,7 @@ def main(argv: list[str] | None = None) -> int:
                       help="a new dataset version: its first scores become the ratchet")
     lock.add_argument("--trade", metavar="REASON",
                       help="lower some scores for a larger gain elsewhere, under TRADE_RULE; recorded")
-    ext = sub.add_parser("extraction")
-    ext.add_argument("--record", action="store_true",
-                     help="ask the configured model for each turn and save its replies (costs tokens)")
+    sub.add_parser("extraction")
     run = sub.add_parser("run")
     run.add_argument("--real", action="store_true", help="load the real embedder")
     run.add_argument("--json", action="store_true")
@@ -1138,7 +1134,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "lock":
         return _cmd_lock(args.rebaseline, args.trade)
     if args.cmd == "extraction":
-        return _cmd_extraction(args.record)
+        return _cmd_extraction()
     return _cmd_run(args.real, args.json, args.details)
 
 

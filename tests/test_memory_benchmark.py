@@ -243,5 +243,5 @@ def test_the_models_pass_replays_recorded_replies():
     assert report["llm"]["ar"]["recall"] == 1.0 and report["llm"]["ar"]["precision"] == 1.0
     assert report["heuristic"]["ar"]["recall"] == 1.0  # the quick pass reads Arabic (arabic_facts)
     other = {"version": data["version"], "turns": [next(t for t in data["turns"] if t["id"] == "e01")]}
-    with pytest.raises(KeyError, match="extraction --record"):
+    with pytest.raises(KeyError, match="memory_extraction_record"):
         benchmark.run_extraction_benchmark(other, llm_replies=replies)

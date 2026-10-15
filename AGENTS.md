@@ -1557,8 +1557,9 @@ four injected were noise.
   EN/AR/mixed, recall, precision and "quiet" per language; the heuristic
   pass in CI, the model's deep pass from recorded replies,
   `tests/fixtures/memory_bench/extraction_llm.json`, recorded with
-  `extraction --record` on the configured model -- the owner's to run, it
-  costs a call a turn; a turn with no recording is an error, never "the
+  `scripts/memory_extraction_record.py --out <fixture>` run by an install's
+  own Python (it loads that install's `.env`; `memory_bench.py` stays
+  env-free) -- it costs a call a turn; a turn with no recording is an error, never "the
   model was down"); explicit abstention targets (`TARGETS`, 0.6, goals not
   gates); a reviewed trade (`lock --trade "why"`, `trade_problems`: no
   score falls more than 0.05, one rises 0.05 or more, abstention never
@@ -5173,8 +5174,8 @@ last second DOM writer plus release evidence (P5).
 RED from Phase 3 to Phase 5 and nobody noticed, because every phase report
 was written from Windows runs by hand (`_PHASE5.md` §6). Since 2026-09-27
 `main` is protected by the ruleset `KazmaLatestRule`
-(`docs/docs/ops/branch-protection.md`): all eleven CI jobs, this one
-included, are required checks, deletions and force pushes are blocked, and
+(`docs/docs/ops/branch-protection.md`): every CI job, this one included, is
+a required check (21 checks since 2026-10-15), deletions and force pushes are blocked, and
 the repository admin bypasses -- the owner's direct pushes, and the
 agent's with the owner's credentials, still land. So a red required check
 on `main` is not a blocked push: it is a failing build, fixed at once. The
