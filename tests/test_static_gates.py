@@ -1013,6 +1013,11 @@ _LOOP_STALL_HELPERS = frozenset({
     # turn's totals and the recent rows are SQLite reads of the same file.
     "record_llm_call", "_record_if_enabled", "turn_usage", "turn_totals",
     "query_recent", "turn_started_epoch",
+    # The non-stop settings (2026-10-15): kazma.yaml's section, then the
+    # settings store over it -- a Postgres round trip on a cache miss. The
+    # supervisor's and resilient_chat's failover, the turn's envelope and the
+    # runner read them on the loop at every transient failure and turn.
+    "get_nonstop_config",
     # Switching the model or provider (2026-10-01): settings and vault
     # writes, then the agent rebinds and the graph is compiled again. The
     # Settings route, the chat's provider switch, setup and the /model menu

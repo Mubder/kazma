@@ -1197,7 +1197,7 @@ class KazmaAgent:
             try:
                 from kazma_core.agent.nonstop import get_nonstop_config
 
-                _ns_cfg = get_nonstop_config(self.config.raw)
+                _ns_cfg = await asyncio.to_thread(get_nonstop_config, self.config.raw)
             except Exception:
                 _ns_cfg = None
 

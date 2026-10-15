@@ -1620,7 +1620,7 @@ async def supervisor_node(
             try:
                 from kazma_core.agent.nonstop import get_nonstop_config
 
-                ns = get_nonstop_config()
+                ns = await asyncio.to_thread(get_nonstop_config)
             except Exception:
                 return None
             if not ns.failover.enabled or not ns.failover.chain:

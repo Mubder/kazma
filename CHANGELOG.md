@@ -8,6 +8,10 @@
   It is now written in a background thread. The caller still waits for its
   record, so a turn's totals include every call, in order. A cancelled call
   still keeps its record.
+- **The non-stop settings are read off the event loop too.** Every turn,
+  and every model call that failed and looked for a fallback model, read
+  them from the settings store on the event loop. That is a database round
+  trip on Postgres. They are now read in a background thread.
 - **No test reaches the network or loads the real embedding model.** Some
   swarm tests loaded the multi-gigabyte embedding model from this machine's
   cache and called a real model provider. That slowed the live server

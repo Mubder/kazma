@@ -4546,7 +4546,11 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   then. `record_llm_call` and the ledger's readers are in
   `_LOOP_STALL_HELPERS`. Gate: `tests/test_llm_ledger_off_the_loop.py`
   (SQLite traced on the ledger's connection; the inline, unawaited and
-  unshielded writes as negative controls).
+  unshielded writes as negative controls). The non-stop settings the
+  failover chains and the turn's envelope read (`get_nonstop_config`:
+  kazma.yaml, then the settings store) are a loop-stall helper too; the
+  supervisor, `resilient_chat`, `run_agent_turn` and the runner await it in
+  a thread.
 
 **F. Errors do not carry internals.**
 - API handlers return `kazma_core.errors.safe_error(exc)` — a stable code
