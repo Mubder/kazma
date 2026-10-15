@@ -22,6 +22,29 @@
   file as disk use. Counting it, a prune reported the store growing while
   the file shrank.
 
+## Knowledge Library: no text beside the vectors, no lost records, faster searches (2026-10-15)
+
+Three things the first round of vector-store fixes left open:
+
+- **The vector store keeps no copy of your text.** Each vector used to be
+  stored with the first 2,000 characters of its chunk and the chunk's title,
+  heading and address, which nothing read. After a delete the text stayed
+  readable in the vector database file. Vectors are now stored with only
+  the embedder's tag and the library and document ids. The repair pass
+  removes the text an older version stored (it rebuilds each such
+  collection from its own vectors; nothing is embedded again), and after a
+  deletion it rewrites the file so no deleted text stays in it.
+- **A search no longer misses records it should find.** With many
+  libraries, Chroma could unload a library's index and load it back without
+  the records added since its last save, with no error. Kazma now starts
+  Chroma with an index pool large enough that no index is unloaded, and an
+  install holds at most 500 libraries (a new one past that is refused, with
+  a message in English and Arabic).
+- **Meaning search is faster.** Searches filtered on the library and the
+  embedder, which Chroma does slowly: 40 ms a search at 10,000 chunks and
+  353 ms at 100,000. A search now asks no filter unless the library still
+  holds vectors of an older embedder: 4 ms and 6 ms.
+
 ## Knowledge Library: vectors that leave, indexes that are not lost (2026-10-15)
 
 The Knowledge scale and soak harness found five faults in how the library

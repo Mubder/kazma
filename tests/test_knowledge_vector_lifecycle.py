@@ -119,14 +119,13 @@ def test_the_store_id_is_written_once_and_read_without_creating(tmp_path):
     assert first and chroma_local.vector_store_id(root, create=True) == first == chroma_local.vector_store_id(root)
 
 
-def test_the_stream_limits_chroma_sizes_its_pool_from_are_raised():
-    """Chroma sizes its index pool as ``max_file_handles // 5`` over 64
-    shards; at Windows' default 512 that is 102, one or two a shard."""
+def test_the_open_file_limit_loaded_indexes_use_is_raised():
+    """A loaded index holds four files open (C runtime streams on Windows,
+    512 by default): every library's index must fit."""
     chroma_local.raise_stream_limits()
     if sys.platform == "win32":
         import ctypes
 
-        assert ctypes.windll.msvcrt._getmaxstdio() // 5 >= 409  # Chroma's own reading
         assert ctypes.CDLL("ucrtbase")._getmaxstdio() >= 8192   # what the index files use
     else:
         import resource
@@ -134,6 +133,27 @@ def test_the_stream_limits_chroma_sizes_its_pool_from_are_raised():
         soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
         target = 10240 if hard == resource.RLIM_INFINITY else min(hard, 10240)
         assert soft == resource.RLIM_INFINITY or soft >= target
+
+
+def test_the_pool_holds_every_library_in_any_one_shard():
+    """The pool Kazma gives Chroma: each of its 64 shards holds as many
+    indexes as there may be libraries, plus the spares."""
+    ceiling = chroma_local.library_ceiling()
+    budget = chroma_local._file_budget()
+    by_files = (budget - 128) // chroma_local.FILES_PER_INDEX - chroma_local.SPARE_COLLECTIONS
+    assert ceiling == min(chroma_local.LIBRARY_CEILING, by_files)
+    if sys.platform == "win32":  # 8,192 streams: room for every library
+        assert ceiling == chroma_local.LIBRARY_CEILING
+    assert chroma_local.index_pool_size() // chroma_local.POOL_SHARDS >= ceiling + chroma_local.SPARE_COLLECTIONS
+    assert (ceiling + chroma_local.SPARE_COLLECTIONS) * chroma_local.FILES_PER_INDEX < budget
+
+
+def test_a_process_that_opens_few_files_holds_fewer_libraries(monkeypatch):
+    """At the default 512 streams the ceiling drops to what fits."""
+    monkeypatch.setattr(chroma_local, "_file_budget", lambda: 512)
+    assert chroma_local.library_ceiling() == (512 - 128) // 4 - chroma_local.SPARE_COLLECTIONS
+    monkeypatch.setattr(chroma_local, "_file_budget", lambda: 20)
+    assert chroma_local.library_ceiling() == 1
 
 
 def test_the_gate_waits_for_calls_in_flight_and_holds_new_ones():
@@ -214,7 +234,7 @@ def test_every_collection_drop_goes_through_the_one_path_that_cleans_up():
     sources = {rel: (REPO / rel).read_text(encoding="utf-8") for rel in files if (REPO / rel).exists()}
     assert _drop_sites(sources) == [
         "kazma-core/kazma_core/memory/vector_store_global.py:_drop_collection",
-        "kazma-core/kazma_core/memory/vector_store_global.py:rebuild_graph",
+        "kazma-core/kazma_core/memory/vector_store_global.py:rebuild_collection",
     ]
 
 
@@ -354,15 +374,7 @@ def _small_collections(kb, n: int) -> list[str]:
 
 def _tiny_pool(monkeypatch) -> None:
     """Chroma's pool at 64 entries: one index a shard, as at Windows' 102."""
-    import chromadb.api.rust as rust
-
-    real_init = rust.RustBindingsAPI.__init__
-
-    def init(self, system):
-        real_init(self, system)
-        self.hnsw_cache_size = 64
-
-    monkeypatch.setattr(rust.RustBindingsAPI, "__init__", init)
+    monkeypatch.setattr(chroma_local, "index_pool_size", lambda: 64)
 
 
 def test_an_index_chroma_lost_is_rebuilt_from_its_log(real, monkeypatch):

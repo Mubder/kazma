@@ -474,6 +474,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The Knowledge Library is at its storage quota. Delete libraries you no longer need to make room.",
         "ar": "بلغت مكتبة المعرفة حد التخزين. احذف المكتبات التي لم تعد تحتاجها لإفساح المجال.",
     },
+    "knowledge.err.kb_library_limit": {
+        "en": "Kazma holds as many libraries as it can. Delete a library you no longer need to add another.",
+        "ar": "بلغ كازما الحد الأقصى لعدد المكتبات. احذف مكتبة لم تعد تحتاجها لتضيف أخرى.",
+    },
     "knowledge.err.library_busy": {
         "en": "A crawl of this library is already running; wait for it to finish.",
         "ar": "يجري زحف لهذه المكتبة بالفعل؛ انتظر حتى ينتهي.",

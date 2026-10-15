@@ -3987,7 +3987,8 @@ module was deleted and the import's `except` said "chromadb not installed".
   `knowledge_index_for` constructs an index in product code (gate in
   `tests/test_knowledge_vectors.py`).
 - **Chroma's local store, kept honest** (`memory/chroma_local.py`, KB-Q01,
-  2026-10-15; chromadb 1.5.9, the newest release that day, has all three):
+  2026-10-15; chromadb 1.5.9, the newest release that day, has every defect
+  below):
   - *Dropped vectors leave the disk.* `delete_collection` removes the catalog
     rows and keeps the segment folder (~40 MB per 10k chunks): 17 folders in a
     4-minute soak. `remove_orphan_segment_folders` removes the UUID-named
@@ -4005,26 +4006,72 @@ module was deleted and the import's `except` said "chromadb not installed".
     in flight and holds new ones -- removes the folders and bumps the
     client's generation; every store re-opens on its next call. `atexit`
     does the same.
-  - *An evicted index is not lost.* Chroma's HNSW pool holds
-    `max_file_handles // 5` indexes over 64 shards (102 on Windows: one or two
-    a shard) and writes an index to disk only every `sync_threshold` (1,000)
-    records; two collections in one shard evict each other, an evicted small
-    index existed only in memory, and the process had already replayed that
-    collection's log -- every read failed "Nothing found on disk" until a
-    restart (5 of 20 short soaks). `raise_stream_limits` raises what Chroma
-    sizes the pool from before the first client (Windows: msvcrt 2,048 ->
-    pool 409, ucrtbase 8,192 for the index files' streams; POSIX: soft
-    NOFILE to 10,240 under the hard limit; never lowers). A read that still
-    finds an index lost (`VectorStore._hnsw_read`) deletes the id
-    `kazma:reload-index`: the push makes Chroma rebuild the index from its
-    write log before the read is asked again (WARNING,
-    `kazma_kb_vector_index_reloads_total`). A newer chromadb, or
-    `hnsw:sync_threshold`, does not fix it: none is newer, and the threshold's
-    minimum is 2 (a one-chunk library stays memory-only). Left: past 6
-    indexes in one shard (on Windows, likely only from about 100 libraries)
-    an evicted index of 1,000+ records reloads from disk without its records
-    since the last persist until the collection's next write replays its
-    log -- no error to catch.
+  - *No index is evicted.* Chroma's HNSW pool is split over 64 shards
+    (`POOL_SHARDS`), sized by default as `max_file_handles // 5` (102 on
+    Windows: one or two a shard), and writes an index to disk only every
+    `sync_threshold` (1,000) records; two collections in one full shard
+    evict each other after the process replayed their logs. An evicted index
+    under 1,000 records failed every read ("Nothing found on disk", 5 of 20
+    short soaks); one of 1,000+ reloaded from its last disk write WITHOUT
+    the records since -- no error, the search just missed them -- until the
+    collection's next write (reproduced:
+    `tests/test_knowledge_vector_text_and_pool.py`, a pool of 64 drops 150
+    of 1,180 records). `chroma_local.start_system` starts Chroma's system
+    for the directory with Kazma's pool before `PersistentClient` finds it
+    (`hnsw_cache_size` is read only at `system.start()`): `index_pool_size`
+    = 64 x (`library_ceiling()` + `SPARE_COLLECTIONS`), so a shard holds
+    every collection a process can load, whichever shards they hash to.
+    `LIBRARY_CEILING` is 500 libraries, lowered when the process cannot keep
+    every index's 4 files open (`FILES_PER_INDEX`; Windows: ucrtbase streams
+    raised to 8,192 -- lowered to 40, a process loads 9 indexes; msvcrt is
+    only what Chroma's default pool reads; POSIX: soft NOFILE to 10,240
+    under the hard limit). `KnowledgeStore.create_library` counts every
+    library (archived too) in its `BEGIN IMMEDIATE` and raises
+    `KnowledgeLibraryLimit` (a `KnowledgeStorageFull`, so every surface that
+    refuses at the quota refuses it); `ensure_capacity(library_id)` asks
+    before a crawl or page fetch; the Web API answers 409
+    `kb_library_limit` (EN/AR). A read that still finds an index lost
+    (`VectorStore._hnsw_read`) deletes the id `kazma:reload-index`: the push
+    makes Chroma rebuild it from its write log before the read is asked
+    again (WARNING, `kazma_kb_vector_index_reloads_total`).
+    `hnsw:sync_threshold` does not fix it (minimum 2, and a persist rewrites
+    the whole index).
+  - *No text beside a vector.* An older build stored each chunk's first
+    2,000 characters as the Chroma document and its title, heading, address
+    and hash as metadata -- read by nothing -- and SQLite keeps a deleted
+    row's bytes in free pages and in pages' free space (`secure_delete` off,
+    Chroma's own connection): a dropped 3,000-row collection's words had
+    9,429 copies in the file. Chroma keeps a document in
+    `embedding_metadata`, its trigram full-text index and its write log
+    (until the next 1,000-record disk write). Every write keeps only
+    `KEPT_METADATA` (`model`, `library_id`, `document_id`, `tenant_id`,
+    `source`) and no document (gate: no `documents=` in a Chroma write in
+    product code). A collection holding anything else (`holds_text`: a
+    read-only catalog query on the metadata segment AND the write log,
+    once per collection and process) is rebuilt by the repair pass
+    (`VectorStore.rebuild_collection`, which replaced `rebuild_graph`: copy
+    to `<name>.rebuild` with vectors and kept keys, counts compared, old
+    dropped, copy renamed; nothing embedded again, 12 s for 10k at 1,024
+    dimensions). Note: an upsert without documents KEEPS a record's old
+    document and merges its metadata, so only the rebuild clears it.
+  - *Deleted text leaves the catalog.* A deletion of rows that may hold
+    text (`_note_deleting`: drops, `delete`, `delete_many`, unless the
+    collection was found text-free) writes `vector_memory/
+    kazma_compaction_due`; at the end of each repair pass `compact_vectors`
+    takes the client's gate exclusive (calls in flight finish, new ones wait,
+    the client stays open) and `compact_catalog` runs FTS5 `optimize` on
+    Chroma's full-text index, then `VACUUM` (Chroma's own `chroma utils
+    vacuum`), and clears the marker. 10k chunks: 41.0 -> 3.2 MB in 0.3 s; a
+    text-free catalog 0.13 s. A failure keeps the marker (WARNING);
+    `kazma_kb_vector_compaction_pending`.
+  - *A search filters only when it must.* A collection holds one library,
+    so `KnowledgeIndex._model_filter` asks Chroma no filter while
+    `VectorStore.only_model(identity)` holds (one `$ne` read per collection
+    and process; a write of another tag ends it; a mixed collection is
+    re-asked after 60 s), else `{"model": identity}`. Chroma's metadata
+    filter cost more than the search: 10k vectors, p50 40 ms with the
+    library+model filter vs 4 ms without; 100k, 353 vs 6 ms (p95 442 vs 10),
+    recall the same either way.
   - *The index is built for recall* (`_HNSW`: 48 neighbours, construction
     400, search 256). Chroma's defaults (16/100/100) returned 31-39 of 40
     planted answers at 10k chunks while exact search ranked all 40 first;
@@ -4032,8 +4079,11 @@ module was deleted and the import's `except` said "chromadb not installed".
     (39 in one: Chroma builds in parallel) for ~1 ms more a query. An older
     collection's search breadth is raised by `modify` (applies at the index's
     next load) and its graph rebuilt by the repair pass from its own vectors
-    (`VectorStore.rebuild_graph`: copy to `<name>.rebuild`, counts compared,
-    old dropped, copy renamed; nothing embedded again).
+    (`VectorStore.rebuild_collection`). At 100k the same settings found 32 of
+    40 planted answers with or without a filter, where exact search ranks all
+    40 first; search breadth 512/1,000/2,000 found 35/38/40 (p50 7.5/11.8/19.5
+    ms against 4.6). A breadth that grows with the collection is open (the
+    100k step).
 
 **G. The Knowledge store and its surfaces** (Knowledge audit 2026-10-13,
 tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).

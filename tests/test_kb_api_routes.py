@@ -102,7 +102,7 @@ class _Store:
         self.seen("store.library_document_ids")
         return []
 
-    def ensure_capacity(self):
+    def ensure_capacity(self, library_id=None):
         self.seen("store.ensure_capacity")
 
     def set_chunk_count(self, lib_id, count):

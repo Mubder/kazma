@@ -1327,7 +1327,7 @@ async def ingest_url(
         return result
     store = await asyncio.to_thread(get_knowledge_store)
     try:
-        await asyncio.to_thread(store.ensure_capacity)
+        await asyncio.to_thread(store.ensure_capacity, library_id)
     except KnowledgeStorageFull as exc:
         result.errors.append(str(exc))
         result.failed_urls.append(url)
@@ -1465,7 +1465,7 @@ async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=N
     except KnowledgeUrlRefused as exc:
         raise AcquisitionError(FetchErrorCode.INVALID_URL, str(exc)) from None
     store = await asyncio.to_thread(get_knowledge_store)
-    await asyncio.to_thread(store.ensure_capacity)  # KnowledgeStorageFull, typed
+    await asyncio.to_thread(store.ensure_capacity, library_id)  # KnowledgeStorageFull, typed
     policy = acquisition_policy()
     with crawl_policy(purpose="kb") as robots:
         respect = robots.enforce()

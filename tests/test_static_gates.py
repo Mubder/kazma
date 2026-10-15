@@ -1069,7 +1069,11 @@ _LOOP_STALL_HELPERS = frozenset({
     # read, a client close that waits for calls in flight), and an index
     # rebuilt by copying its vectors.
     "purge_search_index", "release_dropped_vectors", "remove_orphan_segment_folders",
-    "rebuild_graph",
+    "rebuild_collection",
+    # KB-Q01 follow-up (2026-10-15): the vector catalog's rewrite after a
+    # deletion of text (a VACUUM under the client's gate), what a collection
+    # holds (catalog reads) and the start of Chroma's system.
+    "compact_vectors", "compact_catalog", "holds_text", "only_model", "start_system",
 })
 
 

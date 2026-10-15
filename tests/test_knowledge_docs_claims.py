@@ -140,6 +140,50 @@ def _delete_purges_words() -> bool:
     return "self.purge_search_index()" in inspect.getsource(KnowledgeStore.delete_library)
 
 
+def _no_text_beside_vectors() -> bool:
+    from kazma_core.memory.vector_store_global import KEPT_METADATA, VectorStore
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+
+    meta = KnowledgeIndex._chunk_vector_metadata("lib", {"document_title": "t", "section_header": "h",
+                                                         "source_url": "https://u", "document_id": "d"}, "m")
+    return set(meta) <= KEPT_METADATA and all(
+        "documents=" not in inspect.getsource(f)
+        for f in (VectorStore.index, VectorStore.index_many, VectorStore.rebuild_collection))
+
+
+def _deleted_text_compacted() -> bool:
+    from kazma_core.memory import chroma_local
+    from kazma_core.stores.knowledge_index import run_repair_sweep
+
+    return ("compact_vectors(" in inspect.getsource(run_repair_sweep)
+            and "VACUUM" in inspect.getsource(chroma_local.compact_catalog))
+
+
+def _library_ceiling() -> bool:
+    from kazma_core.memory import chroma_local
+    from kazma_core.stores.knowledge import KnowledgeStore
+
+    return (chroma_local.LIBRARY_CEILING == 500
+            and "KnowledgeLibraryLimit" in inspect.getsource(KnowledgeStore.create_library)
+            and (512 - chroma_local._FILE_RESERVE) // chroma_local.FILES_PER_INDEX
+            - chroma_local.SPARE_COLLECTIONS == 92)
+
+
+def _no_eviction() -> bool:
+    from kazma_core.memory import chroma_local
+    from kazma_core.memory import vector_store_global as vsg
+
+    per_shard = chroma_local.index_pool_size() // chroma_local.POOL_SHARDS
+    return ("start_system(" in inspect.getsource(vsg._shared_client)
+            and per_shard >= chroma_local.library_ceiling() + chroma_local.SPARE_COLLECTIONS)
+
+
+def _filter_only_when_mixed() -> bool:
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+
+    return "only_model(" in inspect.getsource(KnowledgeIndex._model_filter)
+
+
 @dataclass(frozen=True)
 class Claim:
     topic: str
@@ -184,6 +228,13 @@ CLAIMS = [
           "48 neighbours a vector, a construction breadth of 400 and a search breadth of 256", _hnsw_settings),
     Claim("deleted words", None,
           "which leaves none of the library's words in the file", _delete_purges_words),
+    # KB-Q01's follow-up (2026-10-15): the vector catalog's text, the pool, the filter.
+    Claim("vector text", None, "**No text is stored beside a vector.**", _no_text_beside_vectors),
+    Claim("deleted vector text", None, "**Deleted text leaves the vector catalog.**", _deleted_text_compacted),
+    Claim("library ceiling", None, "An install holds at most 500 libraries", _library_ceiling),
+    Claim("index pool", "Kazma raises the limits Chroma sizes the pool from before the first client starts",
+          "**No index is evicted.**", _no_eviction),
+    Claim("search filter", None, "**A search asks no metadata filter when it needs none.**", _filter_only_when_mixed),
 ]
 
 
@@ -231,6 +282,21 @@ def test_the_guide_before_kq01_fails_the_new_rows():
     problems = claim_problems(old.stdout)
     for topic in ("relevance", "benchmark report", "private crawl seed"):
         assert any(p.startswith(topic + ":") for p in problems), topic
+
+
+def test_the_guide_before_the_kb_q01_follow_up_fails_its_rows():
+    """Negative control: the guide as committed in 01cba7cb, when every
+    vector kept a preview of its chunk and the index pool was Chroma's."""
+    old = subprocess.run(["git", "show", "01cba7cb:docs/docs/guide/knowledge-library.md"], cwd=REPO,
+                         capture_output=True, text=True, encoding="utf-8")
+    if old.returncode != 0:  # a shallow clone without that commit
+        import pytest
+
+        pytest.skip("the guide of 01cba7cb is not in this clone")
+    problems = claim_problems(old.stdout)
+    for topic in ("vector text", "deleted vector text", "library ceiling", "index pool", "search filter"):
+        assert any(p.startswith(topic + ":") for p in problems), topic
+    assert any(p.startswith("index pool: the guide still says") for p in problems)
 
 
 def test_a_stale_claim_is_caught():

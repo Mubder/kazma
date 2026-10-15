@@ -473,8 +473,17 @@ def _hardware(path: Path, name: str | None) -> dict[str, Any]:
         chroma = str(chromadb.__version__)
     except ImportError:
         chroma = "not installed"
+    # The index pool Kazma starts Chroma with, sized from the open-file
+    # limit this machine gives a process (a build from before 2026-10-15
+    # left Chroma's own).
+    from kazma_core.memory import chroma_local
+
+    pool_size = getattr(chroma_local, "index_pool_size", None)
+    ceiling = getattr(chroma_local, "library_ceiling", None)
     return {
         "name": name or "unnamed (pass --hardware-name)",
+        "vector_index_pool": pool_size() if pool_size else "chroma's default",
+        "library_ceiling": ceiling() if ceiling else None,
         "cpu": _cpu_model(),
         "cores_physical": psutil.cpu_count(logical=False),
         "cores_logical": psutil.cpu_count(logical=True),
@@ -721,11 +730,18 @@ _VECTOR_LOG: list[str] = []
 
 
 def _meaning_query(vs: Any, question: str, lib: str, top_k: int) -> tuple[list[tuple[str, float]], float, str | None]:
-    """The meaning layer as ``search_sync`` queries it: (results, ms, the
-    failure the product logged, if any)."""
+    """The meaning layer as ``search_sync`` queries it -- with the filter on
+    the embedder's tag only while the collection holds another embedder's
+    vectors (``KnowledgeIndex._model_filter``): (results, ms, the failure
+    the product logged, if any)."""
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+
     _VECTOR_LOG.clear()
     start = time.perf_counter()
-    raw = vs.query(question, limit=top_k * 4, where={"$and": [{"library_id": lib}, {"model": vs.identity}]})
+    model_filter = getattr(KnowledgeIndex, "_model_filter", None)  # a build from before 2026-10-15 has none
+    where = (model_filter(vs, vs.identity) if model_filter is not None
+             else {"$and": [{"library_id": lib}, {"model": vs.identity}]})
+    raw = vs.query(question, limit=top_k * 4, where=where)
     elapsed = _ms(start)
     failure = next((m for m in _VECTOR_LOG if "Query failed" in m), None)
     return raw, elapsed, failure[:300] if failure else None
@@ -1659,6 +1675,12 @@ def run_scale(args: argparse.Namespace) -> int:
                 orphans = _orphan_vector_folders(step_dir / "vector_memory")
                 step["delete"]["vector_folders"] = orphans
                 violations += _orphan_outcome(report, f"{lib} after the delete", orphans, args.tolerate_orphan_vector_folders)
+                tokens = [f["token"] for f in build.get("planted") or [] if f.get("token")]
+                catalog_text = _vector_catalog_text(step_dir / "vector_memory", tokens)
+                step["delete"]["vector_catalog_text"] = catalog_text
+                if catalog_text.get("text_rows") or catalog_text.get("deleted_words"):
+                    violations.append(f"vector catalog after the delete: {catalog_text['text_rows']} row(s) of text, "
+                                      f"{catalog_text['deleted_words']} of {len(tokens)} planted words left")
                 step["ceilings"]["after_delete"] = {"knowledge_db": _db_ceilings(step_dir / "knowledge.db"),
                                                     "vector_dir_bytes": _files_bytes(step_dir / "vector_memory")}
             leftovers = _unified_items(step_dir)
@@ -2099,6 +2121,15 @@ def check_stores(data_dir: Path, state: dict[str, Any], seed: int, *, tolerate_o
         problems += _orphan_outcome(report, "vector store", orphans, tolerate_orphans)
     elif orphans.get("orphans") and not tolerate_orphans:
         problems.append(f"vector store: {orphans['orphans']} vector folder(s) no collection owns")
+    catalog_text = _vector_catalog_text(vector_dir, gone_tokens)
+    if catalog_text.get("error"):
+        problems.append(f"vector store: its catalog could not be read for text: {catalog_text['error']}")
+    if catalog_text.get("text_rows"):
+        problems.append(f"vector store: {catalog_text['text_rows']} catalog row(s) hold text beside a vector "
+                        "(a document or metadata Kazma never reads)")
+    if catalog_text.get("deleted_words"):
+        problems.append(f"vector store: chroma.sqlite3 still holds {catalog_text['deleted_words']} of "
+                        f"{len(gone_tokens)} planted words of deleted libraries")
     sample = {
         "libraries": len(libraries), "active_chunks": len(rows) - inactive, "inactive_chunks": inactive,
         "keyword_rows": keyword_rows, "deleted_words_in_keyword_segments": residue,
@@ -2110,8 +2141,32 @@ def check_stores(data_dir: Path, state: dict[str, Any], seed: int, *, tolerate_o
         "chroma_sqlite_bytes": _files_bytes(vector_dir / "chroma.sqlite3"),
         "vector_folders": orphans.get("folders"), "orphan_vector_folders": orphans.get("orphans"),
         "orphan_vector_bytes": orphans.get("orphan_bytes"),
+        "vector_catalog_text_rows": catalog_text.get("text_rows"),
+        "deleted_words_in_vector_catalog": catalog_text.get("deleted_words"),
     }
     return problems, sample
+
+
+def _vector_catalog_text(vector_dir: Path, tokens: list[str]) -> dict[str, Any]:
+    """What text Chroma's catalog holds: rows beside a vector that are not
+    the metadata Kazma reads (``text_rows``), and how many of *tokens* --
+    planted words of deleted libraries -- any byte of ``chroma.sqlite3`` or
+    its journal still holds (``deleted_words``: free pages included)."""
+    from kazma_core.memory import chroma_local
+    from kazma_core.memory.vector_store_global import KEPT_METADATA
+
+    out: dict[str, Any] = {"text_rows": 0, "deleted_words": 0}
+    files = [p for p in (vector_dir / "chroma.sqlite3", vector_dir / "chroma.sqlite3-journal",
+                         vector_dir / "chroma.sqlite3-wal") if p.is_file()]
+    if not files:
+        return out
+    try:
+        out["text_rows"] = sum(chroma_local.catalog_text_rows(vector_dir, KEPT_METADATA).values())
+    except sqlite3.Error as exc:
+        out["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    raw = b"".join(p.read_bytes() for p in files)
+    out["deleted_words"] = sum(1 for t in tokens if t.encode() in raw)
+    return out
 
 
 def check_facts(plan: dict[str, Any], facts: dict[str, Any], *,

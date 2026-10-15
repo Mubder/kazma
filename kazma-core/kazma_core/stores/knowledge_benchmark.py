@@ -112,9 +112,11 @@ class _ExactCollection:
         if name and name != self.name and self._client is not None:
             self._client._rename(self, name)
 
-    def upsert(self, ids, embeddings, documents, metadatas) -> None:
+    def upsert(self, ids, embeddings, documents=None, metadatas=None) -> None:
+        documents = documents if documents is not None else [None] * len(ids)
+        metadatas = metadatas if metadatas is not None else [None] * len(ids)
         for doc_id, vec, doc, meta in zip(ids, embeddings, documents, metadatas):
-            self._rows[str(doc_id)] = ([float(x) for x in vec], doc, dict(meta))
+            self._rows[str(doc_id)] = ([float(x) for x in vec], doc, dict(meta or {}))
 
     def count(self) -> int:
         return len(self._rows)
@@ -143,7 +145,9 @@ class _ExactCollection:
             return True
         if "$and" in cond:
             return all(cls._matches(meta, c) for c in cond["$and"])
-        return all(meta.get(k) == v for k, v in cond.items())
+        # Chroma's ``$ne`` also matches a row without the key.
+        return all(meta.get(k) != v["$ne"] if isinstance(v, dict) and "$ne" in v else meta.get(k) == v
+                   for k, v in cond.items())
 
     def query(self, query_embeddings, n_results, where=None) -> dict[str, Any]:
         import numpy as np

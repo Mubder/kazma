@@ -306,6 +306,42 @@ def test_the_check_sees_a_vector_folder_no_collection_owns(tmp_path, monkeypatch
     assert problems == [] and report["findings"] and "vector store:" in report["findings"][0], report
 
 
+def test_the_check_sees_text_in_the_vector_catalog(tmp_path, monkeypatch):
+    """Negative control of the vector catalog's check (KB-Q01 follow-up): a
+    row of text beside a vector, and a deleted library's word left in the
+    catalog's bytes, as builds before 2026-10-15 left them."""
+    data, state, seed = _stores(tmp_path, monkeypatch)
+    lib = "gone-en"
+    state["deleted"][lib] = {"lang": "en", "seed_url": knowledge_soak.seed_url_for(lib), "stored": {"1": 1},
+                             "docs": {}}
+    token = knowledge_soak._page_fact(seed, lib, state["deleted"][lib], 1, 1)["token"]
+    vectors = data / "vector_memory"
+    vectors.mkdir()
+    conn = sqlite3.connect(str(vectors / "chroma.sqlite3"))
+    try:
+        conn.execute("CREATE TABLE segments (id TEXT PRIMARY KEY, type TEXT, scope TEXT, collection TEXT)")
+        conn.execute("CREATE TABLE embedding_metadata (id INTEGER, key TEXT NOT NULL, string_value TEXT, "
+                     "int_value INTEGER, float_value REAL, bool_value INTEGER, PRIMARY KEY (id, key))")
+        conn.execute("INSERT INTO embedding_metadata (id, key, string_value) VALUES (1, 'model', 'm')")
+        conn.commit()
+    finally:
+        conn.close()
+    problems, sample = knowledge_soak.check_stores(data, state, seed)
+    assert sample["vector_catalog_text_rows"] == 0 and sample["deleted_words_in_vector_catalog"] == 0
+    assert not any(p.startswith("vector store: chroma.sqlite3") or "hold text" in p for p in problems), problems
+    conn = sqlite3.connect(str(vectors / "chroma.sqlite3"))
+    try:
+        conn.execute("INSERT INTO embedding_metadata (id, key, string_value) VALUES (1, 'chroma:document', ?)",
+                     (f"a preview holding {token}",))
+        conn.commit()
+    finally:
+        conn.close()
+    problems, sample = knowledge_soak.check_stores(data, state, seed)
+    assert sample["vector_catalog_text_rows"] == 1 and sample["deleted_words_in_vector_catalog"] == 1
+    assert any("1 catalog row(s) hold text beside a vector" in p for p in problems), problems
+    assert any(p.startswith("vector store: chroma.sqlite3 still holds 1 of") for p in problems), problems
+
+
 def test_the_check_sees_a_crawl_journal_past_its_bound(tmp_path, monkeypatch):
     data, state, seed = _stores(tmp_path, monkeypatch)
     conn = sqlite3.connect(str(data / "settings.db"))

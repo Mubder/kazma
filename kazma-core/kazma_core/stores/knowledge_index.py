@@ -17,8 +17,9 @@ Retrieval gathers two layers and judges what they found:
                                  ├─► RRF (k=60) ─► join SQLite ─► judged on evidence ─► KnowledgeHit[]
 
 The :class:`~kazma_core.stores.knowledge.KnowledgeStore` (SQLite) is the
-source of truth for full content; ChromaDB holds the vector + a ≤2000-char
-preview, and FTS5 holds a tokenized copy.  At retrieval time the RRF
+source of truth for full content; ChromaDB holds the vector, the tag of
+the embedder that made it and the library and document ids -- no text
+(KB-Q01) -- and FTS5 holds a tokenized copy.  At retrieval time the RRF
 blender gathers the candidates, we join back to SQLite for the full content
 and provenance, and :func:`_judge` keeps only those about the question,
 best first (KQ01: the fusion always had something to show).  Retrieval
@@ -47,7 +48,12 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.memory import chroma_local
-from kazma_core.memory.vector_store_global import VectorStore, index_reloads, release_dropped_vectors
+from kazma_core.memory.vector_store_global import (
+    VectorStore,
+    compact_vectors,
+    index_reloads,
+    release_dropped_vectors,
+)
 from kazma_core.paths import vector_memory_path
 from kazma_core.stores.knowledge import (
     KnowledgeLibraryGone,
@@ -647,7 +653,7 @@ class KnowledgeIndex:
                     # and answers nothing (the candidates keep their words).
                     semantic = vs.query(
                         query, limit=limit * _CANDIDATES_PER_HIT, embedding=qvec,
-                        where={"$and": [{"library_id": lib_id}, {"model": identity}]})
+                        where=self._model_filter(vs, identity))
                     held = {chunk_id for chunk_id, _score in semantic}
                     missing = [chunk_id for chunk_id, _score in lexical if chunk_id not in held]
                     sims.update(vs.similarities(qvec, missing, model=identity) if missing else {})
@@ -731,16 +737,32 @@ class KnowledgeIndex:
         semantic: list[tuple[str, float]] = []
         vs = self._vector_store_for(library_id)
         if vs.available:
-            conditions: list[dict[str, Any]] = [{"library_id": library_id}, {"model": vs.identity}]
+            conditions = [c for c in (self._model_filter(vs, vs.identity),) if c]
             if document_id is not None:
                 conditions.append({"document_id": document_id})
+            where = conditions[0] if len(conditions) == 1 else {"$and": conditions} if conditions else None
             # VectorStore.query never raises: a failing collection is
             # logged there and answers nothing.
-            semantic = list(vs.query(query, limit=limit * 4, where={"$and": conditions}))
+            semantic = list(vs.query(query, limit=limit * 4, where=where))
         lexical = self._store.fts_search(
             query, library_id, limit=limit * 4, document_id=document_id
         )
         return semantic, lexical
+
+    @staticmethod
+    def _model_filter(vs: VectorStore, identity: str) -> dict[str, Any] | None:
+        """The filter a library's meaning search needs: none when every
+        vector of its collection is the active embedder's (the collection
+        holds that library alone), else the embedder's tag (KB-E03).
+
+        Chroma's metadata filter costs more than the search it narrows
+        (KB-Q01, 10,000 vectors: 40 ms a query with the library and model
+        filter, 30 ms with the model alone, 4 ms with none; 40 of 40 planted
+        answers found each way), so it is asked only while another
+        embedder's vectors are still there (:meth:`VectorStore.only_model`,
+        which answers False -- the filter -- when it cannot tell).
+        """
+        return None if vs.only_model(identity) else {"model": identity}
 
     def _hydrate(self, blended: list[tuple[str, float]]) -> list[KnowledgeHit]:
         """Join RRF-ranked chunk IDs back to full content + provenance."""
@@ -908,7 +930,7 @@ class KnowledgeIndex:
         step = max(1, int(batch))
         report: dict[str, Any] = {"libraries": 0, "embedded": 0, "removed": 0, "missing": 0,
                                   "unavailable": False, "complete": True, "failed": {},
-                                  "coverage": {}, "identity": "", "graphs_rebuilt": 0}
+                                  "coverage": {}, "identity": "", "graphs_rebuilt": 0, "text_removed": 0}
         stores: dict[str, VectorStore] = {}
         identities: dict[str, str] = {}
         store_ids: dict[str, str] = {}
@@ -929,11 +951,14 @@ class KnowledgeIndex:
                 identity = vs.identity
                 report["identity"] = identity
                 report["libraries"] += 1
-                # An index made with Chroma's sparser defaults is rebuilt
-                # from its own vectors, once (KB-Q01).
-                if vs.graph_outdated():
-                    vs.rebuild_graph()
-                    report["graphs_rebuilt"] += 1
+                # A collection made with Chroma's sparser defaults, or one
+                # an older build stored text in, is rebuilt from its own
+                # vectors, once (KB-Q01).
+                sparse, text = vs.graph_outdated(), vs.holds_text()
+                if sparse or text:
+                    vs.rebuild_collection()
+                    report["graphs_rebuilt"] += int(sparse)
+                    report["text_removed"] += int(text)
                 # Vectors first: a chunk ingested between the two reads is then
                 # embedded twice (harmless), never taken for a retired one.
                 tags = vs.models()
@@ -1019,26 +1044,17 @@ class KnowledgeIndex:
         """What the vector store keeps beside a chunk; Chroma refuses None values.
 
         Every write goes through here -- ingest, document publish, the repair
-        -- so search can filter any vector by library, document and the
-        identity of the embedder that made it (``model``, KB-E03).
+        -- so search can tell the embedder that made a vector (``model``,
+        KB-E03) and narrow a document-scoped search (``document_id``). No
+        text: the chunk's title, heading, address and content stay in the
+        Knowledge store, which every hit is read from (KB-Q01: a vector's
+        metadata stayed readable in the vector catalog after a delete).
         """
         meta = {
             "model": identity,
             "library_id": library_id,
-            "source_url": chunk.get("source_url"),
-            "section_header": chunk.get("section_header"),
-            "document_title": chunk.get("document_title"),
-            "chunk_index": int(chunk.get("chunk_index") or 0),
-            "content_hash": chunk.get("content_hash"),
             "document_id": chunk.get("document_id"),
-            "version_id": chunk.get("version_id"),
         }
-        extra = chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {}
-        for key in ("page_start", "page_end"):
-            if extra.get(key) is not None:
-                meta[key] = int(extra[key])
-        if extra.get("citation_label"):
-            meta["citation_label"] = str(extra["citation_label"])
         return {k: v for k, v in meta.items() if v is not None and v != ""}
 
 
@@ -1110,6 +1126,7 @@ def repair_metric_lines() -> list[str]:
     report = _last_repair_report()
     if report is None:
         return []
+    compaction = report.get("vector_compaction") or {}
     lines = [
         "# HELP kazma_kb_vector_store_unavailable 1 when the last knowledge vector repair "
         "found the vector store unavailable",
@@ -1140,6 +1157,10 @@ def repair_metric_lines() -> list[str]:
         "after Chroma lost them",
         "# TYPE kazma_kb_vector_index_reloads_total counter",
         f"kazma_kb_vector_index_reloads_total {sum((report.get('index_reloads') or {}).values())}",
+        "# HELP kazma_kb_vector_compaction_pending 1 when deleted text is still waiting to leave the "
+        "vector catalog after the last repair pass",
+        "# TYPE kazma_kb_vector_compaction_pending gauge",
+        f"kazma_kb_vector_compaction_pending {int(bool(compaction.get('due') and not compaction.get('compacted')))}",
     ]
     coverage = report.get("coverage") or {}
     if coverage:
@@ -1226,6 +1247,9 @@ def run_repair_sweep(*, time_budget_s: float = 300.0) -> dict[str, Any]:
     # The vectors of collections dropped since (deleted libraries, model
     # switches, rebuilt indexes) leave the disk (KB-Q01).
     report["vector_folders"] = release_dropped_vectors(index._persist_dir)
+    # Text an older build stored beside its vectors, deleted since, leaves
+    # the vector catalog's free space (KB-Q01).
+    report["vector_compaction"] = compact_vectors(index._persist_dir)
     report["index_reloads"] = index_reloads()
     bad = bool(report["unavailable"] or report["failed"])
     with _SWEEP_LOCK:

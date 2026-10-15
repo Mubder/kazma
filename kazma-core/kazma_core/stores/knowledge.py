@@ -63,10 +63,12 @@ from kazma_core.config_store import apply_sqlite_pragmas
 __all__ = [
     "KB_FOLD_VERSION",
     "KnowledgeLibraryGone",
+    "KnowledgeLibraryLimit",
     "KnowledgeStorageFull",
     "KnowledgeStore",
     "KnowledgeUrlRefused",
     "get_knowledge_store",
+    "library_ceiling",
     "reset_knowledge_store",
     "slugify_library_id",
     "validate_web_url",
@@ -97,6 +99,32 @@ class KnowledgeLibraryGone(LookupError):
 
 class KnowledgeStorageFull(RuntimeError):
     """The Knowledge database reached its quota (KB-E10)."""
+
+
+class KnowledgeLibraryLimit(KnowledgeStorageFull):
+    """The install holds as many libraries as it may (KB-Q01): a new one is
+    refused. A kind of :class:`KnowledgeStorageFull`, so every surface that
+    refuses new work at the quota refuses a new library here too; the Web
+    API names it ``kb_library_limit``."""
+
+    def __init__(self, ceiling: int) -> None:
+        self.ceiling = ceiling
+        super().__init__(
+            f"The Knowledge Library holds its limit of {ceiling} libraries; delete a library you "
+            "no longer need to add another."
+        )
+
+
+def library_ceiling() -> int:
+    """The most libraries an install may hold. Each library is one vector
+    collection whose index stays loaded once used, and Chroma's index pool
+    is sized so that every shard of it holds that many
+    (:func:`kazma_core.memory.chroma_local.library_ceiling`): past it, two
+    libraries in one shard would evict each other's index and a search
+    could miss what was added since the index was last written."""
+    from kazma_core.memory.chroma_local import library_ceiling as ceiling
+
+    return ceiling()
 
 
 def slugify_library_id(raw: str) -> str:
@@ -607,7 +635,9 @@ class KnowledgeStore:
         """Create a new library row. Raises ``sqlite3.IntegrityError`` if the
         id already exists — callers should use :meth:`get_library` first or
         switch to upsert semantics. A seed that is not an http(s) URL raises
-        :class:`KnowledgeUrlRefused` (KB-S09)."""
+        :class:`KnowledgeUrlRefused` (KB-S09); a library past
+        :func:`library_ceiling`, counted in the same write transaction,
+        raises :class:`KnowledgeLibraryLimit` (KB-Q01)."""
         now = _now_iso()
         # Library IDs become ChromaDB collection names + URL path segments,
         # so they must be slugs (lowercase [a-z0-9_-]).  Slugify whatever
@@ -620,10 +650,14 @@ class KnowledgeStore:
         display = self._checked_text(name, "name") or lib_id
         about = self._checked_text(description, "description")
         tenant_id = self._current_tenant()
+        ceiling = library_ceiling()
         with self._lock:
             conn = self._get_conn()
             try:
-                conn.execute("BEGIN")
+                conn.execute("BEGIN IMMEDIATE")
+                held = conn.execute("SELECT COUNT(*) FROM knowledge_libraries").fetchone()[0]
+                if held >= ceiling:
+                    raise KnowledgeLibraryLimit(ceiling)
                 conn.execute(
                     """INSERT INTO knowledge_libraries
                        (id, name, description, seed_url, auto_inject,
@@ -1673,15 +1707,29 @@ class KnowledgeStore:
         return {"used_bytes": used, "file_bytes": pages * page_size, "free_bytes": free * page_size,
                 "quota_bytes": _MAX_KNOWLEDGE_BYTES, "full": used + headroom > _MAX_KNOWLEDGE_BYTES}
 
-    def ensure_capacity(self) -> None:
+    def ensure_capacity(self, library_id: str | None = None) -> None:
         """Refuse new work when the store is at its quota (raises
-        :class:`KnowledgeStorageFull`): asked before anything is fetched."""
+        :class:`KnowledgeStorageFull`), or when *library_id* names a library
+        that does not exist yet and the install holds its
+        :func:`library_ceiling` (raises :class:`KnowledgeLibraryLimit`):
+        asked before anything is fetched. :meth:`create_library` counts
+        again when it writes."""
         status = self.storage_status()
         if status["full"]:
             raise KnowledgeStorageFull(
                 "The Knowledge Library is at its storage quota; delete libraries you no "
                 "longer need to make room."
             )
+        if library_id is None:
+            return
+        lib_id = slugify_library_id(library_id)
+        with self._lock:
+            conn = self._get_conn()
+            exists = conn.execute("SELECT 1 FROM knowledge_libraries WHERE id = ?", (lib_id,)).fetchone()
+            held = conn.execute("SELECT COUNT(*) FROM knowledge_libraries").fetchone()[0]
+        ceiling = library_ceiling()
+        if exists is None and held >= ceiling:
+            raise KnowledgeLibraryLimit(ceiling)
 
     def compact(self) -> dict[str, Any]:
         """Return freed pages to the file system (incremental vacuum).
