@@ -56,6 +56,9 @@ class ConsultationExecution:
     synthesized_output: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: What the synthesis's model call cost (SW-E15): the task's.
+    synthesis_tokens: int = 0
+    synthesis_cost: float = 0.0
 
 
 def _join_errors(worker_results: list[WorkerResult]) -> str | None:
@@ -245,15 +248,20 @@ async def execute_consult(
             metadata=metadata,
         )
 
+    synthesis_tokens, synthesis_cost = 0, 0.0
     if len(individual_opinions) == 1:
         synthesized_output = individual_opinions[0].output
     else:
-        synthesized_output = await aggregator.synthesize(
+        synthesis = await aggregator.synthesize_with_usage(
             task,
             individual_opinions,
             system_prompt=_CONSULT_SYNTHESIS_SYSTEM_PROMPT,
             final_instruction=_CONSULT_SYNTHESIS_INSTRUCTION,
         )
+        synthesized_output = synthesis.text
+        synthesis_tokens, synthesis_cost = synthesis.tokens, synthesis.cost
+        if synthesis.record:
+            metadata["synthesis"] = synthesis.record
 
     return ConsultationExecution(
         worker_results=worker_results,
@@ -263,4 +271,6 @@ async def execute_consult(
         synthesized_output=synthesized_output,
         error=None if status == "success" else error,
         metadata=metadata,
+        synthesis_tokens=synthesis_tokens,
+        synthesis_cost=synthesis_cost,
     )

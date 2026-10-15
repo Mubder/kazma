@@ -1,5 +1,110 @@
 # CHANGELOG
 
+## Three faults seen on the live install (2026-10-15)
+
+- **A slow Docker answer no longer pages you.** Readiness checks the
+  Docker daemon that runs code in its jail. When the machine was busy,
+  `docker info` took more than its 2-second limit three times in a row.
+  Readiness went to "not ready" for 90 seconds, and the owner was paged
+  about a daemon that was running. A slow answer now counts as ready for 5
+  minutes after the daemon last answered. A daemon that answers with an
+  error still fails at once.
+- **Backups no longer try to copy the server's lock file.** Every backup
+  logged "Permission denied" on `.runtime-writer.lock`, the file the running
+  server holds locked. A copy would restore nothing, so the backup now
+  leaves it out.
+- **WeasyPrint's warnings about its own stylesheet are dropped.** Every
+  process that renders HTML logged three warnings about selectors in
+  WeasyPrint's built-in stylesheet, a file Kazma neither ships nor
+  controls. Only those three are dropped. A selector WeasyPrint refuses in
+  any other stylesheet is still logged.
+- Time Travel's maintenance no longer counts SQLite's 32 KB shared-memory
+  file as disk use. Counting it, a prune reported the store growing while
+  the file shrank.
+
+## Knowledge Library: vectors that leave, indexes that are not lost (2026-10-15)
+
+The Knowledge scale and soak harness found five faults in how the library
+keeps its meaning vectors. All five are fixed:
+
+- **Deleted vectors now leave the disk.** Deleting a library, or changing
+  the embedding model, left the old vectors' folder behind (about 40 MB per
+  10,000 chunks). These folders are now removed at start, right after a
+  drop, and on each repair pass.
+- **A library is no longer unsearchable until a restart.** With many
+  libraries, Chroma could drop a small library's index from memory before
+  saving it. Every meaning search of that library then failed until the next
+  restart. Kazma now raises the limits Chroma sizes its index pool from, and
+  rebuilds an index Chroma lost from Chroma's own log.
+- **A deleted library's words are gone from the keyword index.** They
+  stayed in the index file until a merge reached them; deleting a library
+  now ends with that merge.
+- **A restored database no longer reports coverage it lacks.** It said
+  "fully covered" while no vector was there. Coverage is now shown only for
+  the vector store it was measured on, and as unknown otherwise.
+- **Meaning search finds more.** At 10,000 chunks, Chroma's default index
+  settings missed up to 9 of 40 planted answers. The new settings found
+  40 of 40 in English, Arabic and mixed text, for about 1 ms more a search.
+  Older libraries get the new settings at the next repair pass, rebuilt from
+  their own vectors without embedding anything again.
+
+chromadb 1.5.9 is now the minimum version.
+
+## One turn time limit on every surface (2026-10-15)
+
+- The web chat now has the same turn time limit as Telegram, Discord, Slack,
+  the CLI and reminders. Before, only the chat apps and the CLI honoured
+  `KAZMA_TURN_TIMEOUT_SECONDS`, the web had no limit, and the resume after
+  an approval had none anywhere.
+- The limit is set in Settings → System ("Turn time limit"; 0 means no
+  limit, the default). `KAZMA_TURN_TIMEOUT_SECONDS`, when set, overrides
+  it. A chat running `/long` has no limit; its step budget still applies.
+- The clock counts only while Kazma works. Time spent waiting for your
+  approval is not counted: the resume after an approval starts the clock
+  again.
+- A turn that runs out of time is stopped the way Stop stops it. It ends
+  with one honest reply that says what to change, and every surface shows
+  that reply: the chat, a reload, the chat apps and the next turn. The
+  owner is told once.
+- In Arabic, the Dashboard's recent traces showed their type and status in
+  English ("llm", "success"). They are now in Arabic. A trace's label (a
+  model, a tool, "idle → streaming") is shown as it is, as content, on the
+  Dashboard and the Agents page. The Arabic page tour now always runs with
+  traces of every kind; before, it ran with none.
+
+## Swarm: workers hand off to each other; chaos runs (2026-10-15)
+
+- A swarm worker can now pass its task to another worker. While the engine
+  runs it, an in-process worker's model is offered `handoff_to_worker`
+  (worker, reason, and optionally the task and context to hand on), naming
+  the registered workers and templates. The handoff limits still apply
+  (depth 5, two visits per worker). A refused hop is told to the model and
+  the worker finishes its own task.
+- Four handoff faults found on the way, each fixed:
+  - a refused handoff left its source worker counted as busy;
+  - visits were counted by instance name, so two pool instances of one
+    template could pass a task back and forth up to the depth limit;
+  - a template name could not be a handoff target;
+  - a handoff without a blackboard lost the task's scope, workspace and
+    tenant, and every handoff target lost the task id.
+- Chaos runs (`scripts/swarm_chaos.py`) inject faults into a real engine:
+  - a locked SQLite store, at several points of a task;
+  - Postgres going down;
+  - Temporal unreachable, or required and missing;
+  - a shutdown while every pattern is running.
+
+  Each case's outcome is recorded in the Swarm tracker. They found one fault,
+  now fixed: an approval the task store could not record resumed the
+  pipeline anyway. It now resumes nothing, leaves the checkpoint open, and
+  the Swarm page says to approve again.
+- The 24-hour swarm soak found a fault at its 53rd restart. A task stopped
+  while its "running" record was being written (by a shutdown, a cancel, or a
+  caller that stopped waiting) was left half-started: it kept its place in
+  the queue and its running record until the next start, which then
+  recorded it as a failure of unknown outcome. The stop is now recorded as
+  the task's cancellation, and nothing ran. An approval stopped the same way
+  opens its checkpoint again, so it can be approved again.
+
 ## Soak harnesses for every audited area (2026-10-15)
 
 - Every soak harness rewrites its report as it runs (`"status": "running"`,
@@ -44,6 +149,58 @@
   the size of the rewritten file, so the disk use rose while the clean-up
   reported space reclaimed. It now truncates that log after the VACUUM, and
   reports the sizes of the file and its log together.
+- A Time Travel step and the eviction that keeps its chat within budget are
+  written in one transaction: a crash between the two used to leave a turn
+  one step over its cap until it was captured again.
+- No scheduler alert is lost to a crash. A failed task, an undeliverable
+  message or a send of unknown outcome now queues its alert in the same
+  database step that records the failure, and the scheduler raises it after
+  that step (and at every start); a crash right after the step used to lose
+  it. A crash between raising and recording can repeat one alert, never
+  lose it.
+- Memory entities are keyed by tenant and id. Two tenants can each hold an
+  entity of the same name without touching each other's, every entity
+  statement names its tenant, and each tenant has its own "user" hub;
+  `scripts/memory_entity_key.py` converts an existing store (copy first,
+  idempotent, `size` to look before). A store not yet converted keeps
+  working under the rules of 2026-10-13.
+- `scripts/memory_relabel_provenance.py` relabels facts a memory tool wrote
+  under the user's own label before 2026-10-13 as the agent's, unless the
+  user confirmed them (a Memory page edit, an operator action, or a turn that
+  asked to remember those words).
+- A memory backup taken before one of the store's tables existed (an older
+  build's, for example) can be restored again: the restore brings the copy's
+  schema up to date before it reads it. It failed on the missing table.
+- Knowledge Library search now leaves out what is not about the question.
+  A versioned English/Arabic retrieval benchmark (explicit search and the
+  library text injected into a turn) found that every question got hits,
+  even ones nothing in the libraries answers; an evidence rule like memory's
+  now answers 7 of 14 such questions with nothing, lifts precision from 0.19
+  to 0.71 and cross-language answers from 2 of 6 to 5 of 6. Its scores are
+  locked so they cannot fall unnoticed.
+- A Knowledge crawl seeded with a private or loopback address is refused at
+  once, on every surface, before a library is made; it used to leave an empty
+  library.
+- Swarm semantic routing works. It embedded tasks and worker profiles in two
+  different spaces (a vector store's default function against Kazma's
+  model), so routing by meaning never matched; it now uses Kazma's own
+  embedder off the event loop, with a relevance floor, and falls back to
+  keywords (said once in the log) when the model is unavailable. A stored
+  task names only the worker that ran.
+- The swarm pipeline's Refiner report reaches the result
+  (`synthesized_output`), and its tokens and cost are counted; it used to
+  run and be thrown away.
+- An idle autoscaler instance takes the next task its template matches
+  before a new one is started: tasks no template's words matched used to
+  start a new instance each time, then fail at the template's bound.
+- Knowledge Library scale and soak harness (`scripts/knowledge_soak.py`,
+  tracker row KB-Q01): `scale` measures ingest, keyword, meaning and hybrid
+  search, the repair sweep, library delete and the re-embed time after a
+  restore at 10k, 100k and 1M chunks in English, Arabic and mixed text, and
+  names the machine; `soak` runs crawls, refreshes, document publications,
+  deletes, model switches and restarts, checking after every cycle that
+  nothing published is lost or doubled, the keyword index matches, meaning
+  search converges, and a deleted library leaves nothing behind.
 
 ## Swarm approvals on the web; Knowledge outcomes checked in a browser (2026-10-14)
 

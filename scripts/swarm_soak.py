@@ -48,8 +48,10 @@ after every restart and at the end; the run stops at the first violation:
   status or generation in the write's own transaction; the checks read that
   whole history (no change after a terminal status, no write of an older
   generation applied), and compare each row with the status its task
-  settled at. The result its caller got is the stored one; no row was never
-  submitted; nothing ran more often than its workers allow;
+  settled at. Every dispatch's caller gets a result, and it is the stored
+  one (nothing here cancels a dispatch: a cancellation out of the engine is
+  a run stopped with no ending recorded); no row was never submitted;
+  nothing ran more often than its workers allow;
 * an interrupted task records ``interrupted_by`` and ``execution_outcome``
   (``unknown``, naming ``file_write``, when its worker had noted that write);
 * the in-flight count never exceeds the admission limit: sampled from the
@@ -528,6 +530,7 @@ class _Soak:
         self.scaler: Any = None
         self.epoch = 0
         self.stopping = False
+        self.closing = False  # the run is over: the runner cancels what is left
         self.classes: dict[str, Any] = {}
         self._dispatches: dict[asyncio.Task[Any], int] = {}  # dispatch task -> its epoch
         self._helpers: set[asyncio.Task[Any]] = set()
@@ -581,7 +584,6 @@ class _Soak:
         import kazma_core.swarm.patterns as patterns
         import kazma_core.swarm.reliability_registry as registry_mod
         import kazma_core.swarm.worker_dispatch as worker_dispatch
-        from kazma_core.swarm.semantic_router import get_semantic_router
 
         self.classes = _instrumented_classes(self)
 
@@ -598,10 +600,8 @@ class _Soak:
         stack.enter_context(mock.patch.object(patterns, "_synthesize_refined_output", _no_refiner))
         stack.enter_context(mock.patch.object(patterns, "_run_self_improvement", _no_self_improvement))
         stack.enter_context(mock.patch.object(registry_mod, "CircuitBreaker", self.classes["breaker"]))
+        # No embedder: semantic routing says so once and auto routes by keywords.
         stack.enter_context(mock.patch.object(embedder, "get_embedder", lambda: None))
-        router = get_semantic_router()
-        stack.enter_context(mock.patch.object(router, "_initialized", True))
-        stack.enter_context(mock.patch.object(router, "_available", False))
         stack.enter_context(mock.patch.object(autoscaler_mod, "_BOOT_TAG", autoscaler_mod._BOOT_TAG))
         self._autoscaler_mod = autoscaler_mod
 
@@ -750,6 +750,15 @@ class _Soak:
         outcome = "raised"
         try:
             result = await engine.dispatch(task)
+        except asyncio.CancelledError:
+            if self.closing:
+                raise
+            # Nothing here cancels a dispatch: the engine stopped the run and
+            # raised instead of recording its ending (the SQ01 24-hour run:
+            # five tasks stopped while their RUNNING rows were written).
+            self.violation(f"dispatch of {spec.id} was stopped with no ending recorded "
+                           f"(its caller got a cancellation, not a result)")
+            outcome = "stopped-without-ending"
         except Exception as exc:  # noqa: BLE001 - a soak records every failure
             self.violation(f"dispatch of {spec.id} raised {type(exc).__name__}: {exc}")
         else:
@@ -1103,6 +1112,7 @@ class _Soak:
                     break
             await self.check(full=True, final=True)
         finally:
+            self.closing = True
             for task in monitors:
                 task.cancel()
             if heartbeat is not None:

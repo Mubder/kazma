@@ -350,7 +350,9 @@ class Neo4jGraphBackend:
                 from kazma_core.paths import primary_memory_db
 
                 c = _sq.connect(primary_memory_db(), check_same_thread=False)
-                for er in c.execute("SELECT id, type FROM entities").fetchall():
+                for er in c.execute(
+                    "SELECT id, type FROM entities WHERE tenant_id = ?", (tenant_id,)
+                ).fetchall():
                     ent_types[str(er[0])] = str(er[1] or "concept")
                 c.close()
             except Exception:

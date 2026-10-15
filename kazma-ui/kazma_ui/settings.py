@@ -494,6 +494,23 @@ class SettingsRouterBuilder:
                 "idle_keep": CHECKPOINT_INACTIVE_KEEP,
             }
 
+        @router.get("/api/settings/turn-timeout")
+        def api_get_turn_timeout() -> dict[str, Any]:
+            """How long a running turn may take on every surface (0 = no
+            limit), where that comes from (``env`` overrides the setting),
+            and the most the setting takes (kazma_core.agent.turn_budget)."""
+            from kazma_core.agent.turn_budget import (
+                MAX_TURN_TIMEOUT_SECONDS,
+                turn_timeout_setting,
+            )
+
+            current = turn_timeout_setting(config_store)
+            return {
+                "seconds": current["seconds"],
+                "source": current["source"],
+                "max": MAX_TURN_TIMEOUT_SECONDS,
+            }
+
         @router.get("/api/settings/cron-timezone")
         def api_get_cron_timezone() -> dict[str, str]:
             """Current operator timezone for scheduled tasks (name + source).

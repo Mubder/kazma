@@ -61,9 +61,9 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `context_info` | diagnostics | safe/read | Show context window usage (token count, percentage, summarization threshold) plus the active workspace root, model, and provider. Use details=true for a per-role token breakdown. |
 | `computer_use` | browser | **danger** | Use the computer (screenshot → click/type/key loop) to accomplish a goal in the browser. Prefer browser_navigate/click when you already know CSS selectors. HITL danger-tier. Optional url= to open first. max_steps default 8 (hard cap 15). Kill-switch: KAZMA_COMPUTER_USE=0. |
 | `knowledge_list_libraries` | knowledge | safe/read | List Knowledge Libraries (documentation corpora) available for knowledge_search. Shows id, name, chunk_count, seed_url. |
-| `knowledge_create_library` | knowledge | safe/read | Create a Knowledge Library (empty corpus) for documentation RAG. library_id should be a short slug (e.g. smoke_realwork_kb). Then call knowledge_ingest_url to add pages. Search with knowledge_search. |
-| `knowledge_ingest_url` | knowledge | safe/read | Ingest a single documentation page URL into a Knowledge Library (fetch → chunk → index). Creates the library if missing. For multi-page trees prefer knowledge_ingest_site with a small max_pages. Then knowledge_search to retrieve. SSRF-safe (blocks private IPs). |
-| `knowledge_ingest_site` | knowledge | safe/read | Ingest a small documentation site tree into a Knowledge Library (sitemap/BFS discover + fetch + chunk + index). Caps max_pages (default 5, hard max 15) so agent turns stay bounded. Creates the library if missing. Prefer knowledge_ingest_url for one page. |
+| `knowledge_create_library` | knowledge | safe/read | Create a Knowledge Library (empty corpus) for documentation RAG. library_id should be a short slug (e.g. smoke_realwork_kb). seed_url, when given, must be an http(s) URL. Then call knowledge_ingest_url to add pages. Search with knowledge_search. |
+| `knowledge_ingest_url` | knowledge | safe/read | Ingest a single documentation page URL into a Knowledge Library (fetch → chunk → index). Creates the library once the page was fetched. For multi-page trees prefer knowledge_ingest_site with a small max_pages. Then knowledge_search to retrieve. SSRF-safe (blocks private IPs); http(s) only. |
+| `knowledge_ingest_site` | knowledge | safe/read | Ingest a small documentation site tree into a Knowledge Library (sitemap/BFS discover + fetch + chunk + index). Caps max_pages (default 5, hard max 15) so agent turns stay bounded. Creates the library once the crawl was admitted. Prefer knowledge_ingest_url for one page. |
 | `knowledge_search` | knowledge | safe/read | Search an ingested Knowledge Library (documentation corpus) for technical reference material — API endpoints, parameters, error codes, configuration, examples. Use this when the user asks about a documented system (e.g. the WhatsApp Cloud API) and you need authoritative info with sources. Each hit… |
 | `plan_research_queries` | research | safe/read | Plan a research task: produces sub-questions, concrete web search queries, and success criteria for a topic. Use before running run_research_pipeline when you want to inspect or adjust the plan. |
 | `critique_synthesis_gaps` | research | safe/read | Critique a research synthesis for unsupported claims and missing angles; returns follow-up search suggestions. Use after drafting an answer from multiple sources to check coverage. |
@@ -99,6 +99,14 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `list_proposals` | memory | safe/read | Read your SAVED outbound drafts (from save_proposal): each draft's item id, whether it is unused / posted / scheduled (with the tweet or booking id), and its exact stored text. Use this for 'list/show my drafts', 'what is left to post', 'show proposal X' — never query Kazma's databases or data file… |
 | `discard_proposal` | memory | safe/read | Retire saved drafts that should not be posted (superseded copies, tests, rejected versions) so they stop appearing as unused in list_proposals. Posted/scheduled drafts are never touched. Reversible: restore=True brings discarded drafts back. Args: proposal_id (a set id or one item id), restore=Fals… |
 | `task_ledger_update` | memory | safe/read | Update the DURABLE TASK LEDGER — the structured task state (goal, plan steps, declared next action, findings) that the user's short continuation replies ('proceed', 'next', 'continue') resolve against. Maintaining it is how you make 'next' unambiguous. Set goal when the mission is defined, next_act… |
+
+## Swarm worker tools
+
+A swarm worker offers these to its model itself, only while the swarm engine dispatches it; they are not in the registry, so the main agent, the MCP server and scheduled tasks never see them. The tools a worker reaches through them keep their own approval rules. See [Swarm orchestration](../guide/swarm-orchestration).
+
+| Tool | Category | Danger (typical) | Description |
+|------|----------|------------------|-------------|
+| `handoff_to_worker` | swarm | safe/read | Hand the rest of this task to another swarm worker whose role or tools fit it better. You stop when you call this: the worker you name continues the task with what you pass in `context`, and its answer becomes the result. Call it on its own, not together with other tools. |
 
 ### Related tool modules (`kazma_core/tools/`)
 

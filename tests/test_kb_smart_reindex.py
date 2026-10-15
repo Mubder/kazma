@@ -278,7 +278,14 @@ def test_index_search_facades_run_off_the_event_loop(kb, monkeypatch: pytest.Mon
         calls.append(_on_loop())
         return [], []
 
+    def gather(*a, **k):
+        calls.append(_on_loop())
+        return {}, {}, []
+
+    # The document search reads its raw layers; the library searches gather
+    # every library's candidates for the relevance rule (KQ01).
     monkeypatch.setattr(index, "_raw_layers", raw_layers)
+    monkeypatch.setattr(index, "_gather", gather)
 
     async def _go():
         await index.search("q", "lib")

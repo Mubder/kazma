@@ -54,6 +54,13 @@ class SSRFError(ValueError):
     """Raised when a URL resolves to a disallowed (private/internal) host."""
 
 
+class UnresolvedHostError(SSRFError):
+    """The host resolved to no address (``block_unresolved``): a name that
+    does not exist, or a resolver that did not answer -- not a private
+    network. A caller that words the refusal (the Knowledge crawl admission)
+    tells the two apart by this class."""
+
+
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     """Return *True* if *ip* is private, loopback, link-local, reserved, or unspecified.
 
@@ -178,7 +185,7 @@ def validate_url(url: str, *, block_unresolved: bool = False, allow_private: boo
     resolved_ips = _resolve_host_ips(host)
     if not resolved_ips:
         if block_unresolved:
-            raise SSRFError(
+            raise UnresolvedHostError(
                 f"Blocked URL '{url}': hostname '{host}' could not be resolved."
             )
         # Allow the request to proceed; the HTTP client will fail with a
@@ -355,6 +362,7 @@ async def resolve_redirects(
 
 __all__: list[str] = [
     "SSRFError",
+    "UnresolvedHostError",
     "validate_url",
     "is_url_safe",
     "resolve_redirects",

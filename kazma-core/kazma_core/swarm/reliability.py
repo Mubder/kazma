@@ -594,7 +594,12 @@ class CircuitBreaker:
                 return True
             return False
         except Exception as exc:
+            # Another replica may probe at the same time: a decision taken
+            # without its lease, counted (Swarm tracker SQ04).
             logger.warning("[CircuitBreaker] probe lease acquire failed (probing without it): %s", exc)
+            from kazma_core.metrics import record_swarm_failure
+
+            record_swarm_failure("breaker_lease")
             self._probe_lease_worker = worker_name
             self._probe_lease_holder = self._new_probe_holder()
             return True
@@ -659,7 +664,12 @@ class CircuitBreaker:
             if isinstance(raw, dict) and raw:
                 return cls.from_dict(raw)
         except Exception as exc:
+            # This process decides on its own breaker alone: another
+            # replica's trip is not seen (counted: Swarm tracker SQ04).
             logger.warning("[CircuitBreaker] load_shared failed: %s", exc)
+            from kazma_core.metrics import record_swarm_failure
+
+            record_swarm_failure("breaker_read")
         return None
 
     @staticmethod

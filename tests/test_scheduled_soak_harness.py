@@ -11,8 +11,14 @@ in three ways.
   York clock change crossed, and a dead loop seen by readiness.
 * The report is on disk, whole, while the run goes.
 * The run's own check reports a planted violation: a message delivered
-  twice, an occurrence that never fired and was not recorded missed, and a
-  non-delivered job nobody was told about. These are the negative controls.
+  twice, an occurrence that never fired and was not recorded missed, a
+  non-delivered job nobody was told about, and an alert raised twice with no
+  kill recorded between raising it and marking it sent (or a recorded one
+  that was not raised again). These are the negative controls.
+* The check does not misjudge a legitimate case: a daily job edited to a
+  later time on a day it already fired fires again that day (the 28-day
+  soak's two false violations, 2026-10-15), while a series that fires twice
+  in one day, and an old series firing after the edit, are still caught.
 """
 
 from __future__ import annotations
@@ -99,12 +105,18 @@ def test_the_run_did_the_work_it_reports(run):
     alerts = report["alerts"]["by_key"]
     for key in ("cron.job_failure", "cron.job_failed", "cron.delivery_failed", "cron.delivery_unknown"):
         assert alerts.get(key), (key, alerts)
-    assert report["alerts"]["total"] == report["alerts_expected"]
+    # Killed around an alert both ways: after the change that queued it
+    # committed (still exactly one), and after it was raised, before its mark
+    # (raised once more, recorded): the only duplicates, and each was raised.
+    assert injected.get("alert_kill_after_commit") and injected.get("alert_kill_before_mark"), injected
+    assert report["alerts_redelivered_after_kill"] == len(ledger["alert_redelivered"]) >= 1
+    assert report["alerts"]["total"] == report["alerts_expected"] + report["alerts_redelivered_after_kill"]
     # A broken series ran out of its failure budget and stopped, with its alert.
     assert any(f["status"] == "failed" and f["failures"] >= ledger["budget"] for f in ledger["fires"])
     # Restarts of every kind, and the long downtime missed jobs with one notice each.
     restarts = report["restarts"]["by_kind"]
-    for kind in ("graceful", "abrupt_mid_turn", "abrupt_mid_send", "gap", "after_dead_loop"):
+    for kind in ("graceful", "abrupt_mid_turn", "abrupt_mid_send", "abrupt_after_alert_commit",
+                 "abrupt_before_alert_mark", "gap", "after_dead_loop"):
         assert restarts.get(kind), (kind, restarts)
     assert report["fires"]["run_again_after_interruption"] >= 1
     assert ledger["missed"]
@@ -167,3 +179,95 @@ def test_the_check_sees_a_failure_nobody_was_told_about(run):
         planted["alerts"].remove(alert)
         problems, _ = scheduled_soak.analyse(planted)
         assert any(alert["job"] in p and key in p and "expected" in p for p in problems), (key, problems)
+
+
+def test_the_check_tells_a_recorded_redelivery_from_any_other_duplicate(run):
+    """Negative controls: an alert raised twice with no kill recorded is a
+    violation; so is a recorded kill whose alert was not raised again."""
+    _, _, ledger = run
+    planted = copy.deepcopy(ledger)
+    alert = next(a for a in planted["alerts"] if a["key"] == "cron.delivery_failed"
+                 and not any(r["job"] == a["job"] for r in planted["alert_redelivered"]))
+    planted["alerts"].append(dict(alert))
+    problems, _ = scheduled_soak.analyse(planted)
+    assert any(alert["job"] in p and "cron.delivery_failed alert(s)" in p and "expected" in p
+               and "raised again" not in p for p in problems), problems
+    # Recorded, so allowed -- but only when the second alert was raised.
+    planted["alert_redelivered"].append({"row": 0, "job": alert["job"], "key": alert["key"], "at": ""})
+    assert scheduled_soak.analyse(planted)[0] == []
+    planted["alerts"].remove(alert)
+    problems, _ = scheduled_soak.analyse(planted)
+    assert any(alert["job"] in p and "raised again after a kill" in p for p in problems), problems
+
+
+# ── once per local day, per series ───────────────────────────────────────
+
+
+def _one_job_ledger(segments: list[dict], dues: list[str], *, until: str) -> dict:
+    """A whole, healthy ledger of one New York daily job: *segments* (its
+    timing between edits), a delivered fire at each of *dues*; the run ends
+    at *until*."""
+    end = scheduled_soak._dt(until).timestamp()
+    fires, deliveries = [], {}
+    for n, due in enumerate(dues, start=1):
+        at = scheduled_soak._dt(due).timestamp() + 5
+        fires.append({"job": "cron-0000000000aa", "due": due, "outcome": scheduled_soak.SUCCESS,
+                      "status": "pending", "delivery": n, "failures": 0, "lateness": 5.0,
+                      "claimed_at": at, "at": at, "seq": n})
+        deliveries[str(n)] = {"state": "delivered", "accepted": 1, "attempts": 1, "job": "cron-0000000000aa",
+                              "purpose": "result", "due": due, "created": at}
+    return {
+        "version": 1, "seed": 1, "t0": end - 5 * 86400, "run_end": end, "drain_end": end, "poll_s": 30.0,
+        "turn_s": 20.0, "default_window_s": 3600, "budget": 3, "operator_zone": scheduled_soak.OPERATOR_ZONE,
+        "change_at": "2026-11-01T06:00:00+00:00", "up": [[end - 5 * 86400, None]],
+        "jobs": {"cron-0000000000aa": {"key": "j00001", "kind": "reminder", "catchup_s": 0,
+                                       "segments": segments, "cancel_ok": []}},
+        "fires": fires, "missed": [], "deliveries": deliveries, "alerts": [], "alert_redelivered": [],
+        "visibility": [], "dead_loop": {}, "dead_loop_planned": False,
+    }
+
+
+def _daily(h: int, m: int, text: str, first: str, end: str | None) -> dict:
+    return {"spec": {"type": "daily", "days": [], "h": h, "m": m, "zone": scheduled_soak.OPERATOR_ZONE,
+                     "count": None, "until": None}, "text": text, "first": first, "end": end}
+
+
+#: j04319 of the 28-day soak: daily at 07:49, fired 2026-11-02 07:49 local,
+#: edited at 13:31 local that day to 20:37, fired 20:37 the same day.
+_MOVED_LATER = [_daily(7, 49, "daily at 07:49", "2026-11-01T12:49:00+00:00", "2026-11-02T18:31:12+00:00"),
+                _daily(20, 37, "every day at 20:37", "2026-11-03T01:37:00+00:00", None)]
+_MOVED_LATER_DUES = ["2026-11-01T12:49:00+00:00", "2026-11-02T12:49:00+00:00", "2026-11-03T01:37:00+00:00"]
+
+
+def test_an_edit_that_moves_a_daily_time_later_the_same_day_is_not_a_double_fire():
+    ledger = _one_job_ledger(_MOVED_LATER, _MOVED_LATER_DUES, until="2026-11-03T12:00:00+00:00")
+    assert scheduled_soak.analyse(ledger)[0] == []
+    # What the check counted until 2026-10-15: every fire of the job by local
+    # day, across its edits -- two on 2026-11-02, the false violation.
+    zone = scheduled_soak.ZoneInfo(scheduled_soak.OPERATOR_ZONE)
+    days = [scheduled_soak._dt(d).astimezone(zone).date().isoformat() for d in _MOVED_LATER_DUES]
+    assert days.count("2026-11-02") == 2
+
+
+def test_negative_control_a_series_that_fires_twice_in_one_day_is_still_caught():
+    """Daily at 01:30 on the New York fall-back day: fired at 01:30 EDT and
+    again at 01:30 EST -- one series, twice on one local day."""
+    segments = [_daily(1, 30, "daily at 01:30", "2026-11-01T05:30:00+00:00", None)]
+    ledger = _one_job_ledger(segments, ["2026-11-01T05:30:00+00:00", "2026-11-01T06:30:00+00:00"],
+                             until="2026-11-01T20:00:00+00:00")
+    problems, _ = scheduled_soak.analyse(ledger)
+    assert any("fired 2 times on local day 2026-11-01" in p for p in problems), problems
+    assert any("2026-11-01T06:30:00+00:00, a time it was not due" in p for p in problems), problems
+
+
+def test_negative_control_the_old_series_firing_after_the_edit_is_still_caught():
+    """Edited at 05:00 local, before that day's 07:49: the old series firing
+    at 07:49 anyway, then the new one at 20:37 -- two fires, two series, and
+    the first a time the job was no longer due."""
+    segments = [_daily(7, 49, "daily at 07:49", "2026-11-01T12:49:00+00:00", "2026-11-02T10:00:00+00:00"),
+                _daily(20, 37, "every day at 20:37", "2026-11-03T01:37:00+00:00", None)]
+    ledger = _one_job_ledger(segments, _MOVED_LATER_DUES, until="2026-11-03T12:00:00+00:00")
+    problems, _ = scheduled_soak.analyse(ledger)
+    assert any("fired at 2026-11-02T12:49:00+00:00, a time it was not due" in p for p in problems), problems
+    # It counts against the series in force at its time: twice on that day.
+    assert any("fired 2 times on local day 2026-11-02" in p for p in problems), problems

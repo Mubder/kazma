@@ -157,6 +157,9 @@ def _weasyprint_health() -> tuple[RendererReadiness, str | None]:
     loads Pango, so a host without it reads unavailable here, not at render.
     """
 
+    from kazma_core.documents.weasyprint_log import quiet_own_stylesheet_warnings
+
+    quiet_own_stylesheet_warnings()
     try:
         from weasyprint import HTML  # noqa: F401
         from weasyprint.urls import FatalURLFetchingError, URLFetcher  # noqa: F401

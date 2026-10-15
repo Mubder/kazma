@@ -345,7 +345,7 @@ def mutate_belief(
     # entity ids). Best-effort; on any failure the id is unchanged.
     try:
         from kazma_core.memory.entity_resolution import canonical_entity_id
-        sub = canonical_entity_id(primary_conn, sub)
+        sub = canonical_entity_id(primary_conn, sub, tenant_id=tenant_id)
     except Exception:
         pass
     # Also follow merged_into for the object when it's an entity id. Objects
@@ -353,7 +353,7 @@ def mutate_belief(
     # otherwise leave a dangling edge to a merged-away node.
     try:
         from kazma_core.memory.entity_resolution import canonical_entity_id
-        obj = canonical_entity_id(primary_conn, obj)
+        obj = canonical_entity_id(primary_conn, obj, tenant_id=tenant_id)
     except Exception:
         pass
     pred = (predicate or "").strip().lower().replace(" ", "_") or "related"

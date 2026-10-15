@@ -44,13 +44,24 @@ class _ScoredWorker:
     score: int
 
 
+#: How long a route waits for the embedder before it answers by keywords
+#: (a cold local model loads for longer; the next route finds it ready).
+SEMANTIC_DEADLINE_S = 5.0
+
+
 class UnifiedRouter:
     """Matches task requirements to worker capabilities using multiple strategies.
 
     Strategies applied sequentially (with dialect boosting):
-    1. Semantic Routing (if chromadb is available and task provides enough context)
-    2. Dialect Boosting (if Arabic dialects detected, boost matching workers)
-    3. Keyword Fallback (if no semantic matches, overlap task text and capabilities)
+    1. Semantic routing: the workers whose profile the task is about, by
+       Kazma's embedder (``swarm/semantic_router.py``, Swarm audit SW-E10),
+       in a thread, within :data:`SEMANTIC_DEADLINE_S`.
+    2. Keyword fallback when no profile stands out, or the embedder is
+       unavailable (said in the routing diagnostics and logged once).
+    3. Dialect boosting (Arabic dialects detected: matching workers first).
+
+    The candidates are kept in ``task.metadata["routing_diagnostics"]``; the
+    engine stores in ``task.workers`` only the workers that run.
 
     Usage::
 
@@ -60,11 +71,29 @@ class UnifiedRouter:
 
     DEFAULT_TOP_N: int = 5
 
-    def __init__(self) -> None:
+    def __init__(self, semantic_router: Any = None) -> None:
         from kazma_core.swarm.semantic_router import get_semantic_router
 
-        self._semantic_router = get_semantic_router()
+        self._semantic_router = semantic_router if semantic_router is not None else get_semantic_router()
         self._dialect_router = DialectRouter()
+
+    async def _semantic(self, prompt: str, profiles: list[dict[str, Any]]) -> Any:
+        """The embedder's verdict, off the loop and within the deadline; a
+        reason to route by keywords otherwise. Never raises."""
+        import asyncio
+
+        from kazma_core.swarm.semantic_router import SemanticUnavailable, note_outcome
+
+        try:
+            outcome = await asyncio.wait_for(
+                asyncio.to_thread(self._semantic_router.semantic_scores, prompt, profiles),
+                timeout=SEMANTIC_DEADLINE_S)
+        except TimeoutError:
+            outcome = SemanticUnavailable("timeout", f"no answer within {SEMANTIC_DEADLINE_S:g} s")
+        except Exception as exc:  # a router that is not the product's (tests, embedders)
+            outcome = SemanticUnavailable("error", f"{type(exc).__name__}: {exc}"[:300])
+        note_outcome(outcome)
+        return outcome
 
     async def route(
         self,
@@ -93,13 +122,13 @@ class UnifiedRouter:
         if not available_workers:
             raise NoCapableWorkersError("No capable workers available for auto-routing.")
 
+        from kazma_core.swarm.semantic_router import SemanticScores
+
         top_n = self._resolve_top_n(task)
 
         # Build consistent profiles for semantic & dialect routing
         worker_profiles = self._build_worker_profiles(available_workers)
 
-        scored_names: list[str] = []
-        semantic_scores: dict[str, float] = {}
         dialect_detected = None
         dialect_confidence = 0.0
 
@@ -114,25 +143,13 @@ class UnifiedRouter:
 
         dialect_boosts = self._calculate_dialect_boosts(task.prompt, worker_profiles)
 
-        # ── 2. Semantic Routing ──
-        if self._semantic_router.available:
-            logger.info("[UnifiedRouter] Attempting Semantic routing.")
-            try:
-                # Embedding work: in a thread, never on the loop (SW-E07).
-                def _semantic() -> list:
-                    self._semantic_router.build_profiles(worker_profiles)
-                    return self._semantic_router.query(task.prompt, top_n=top_n * 2)
-
-                import asyncio as _asyncio
-
-                scored = await _asyncio.to_thread(_semantic)
-                if scored:
-                    logger.info("[UnifiedRouter] Semantic query yielded: %s", scored)
-                    scored_names = [name for name, _score in scored]
-                    for name, sim in scored:
-                        semantic_scores[name] = float(sim)
-            except Exception as exc:
-                logger.warning("[UnifiedRouter] Semantic router failed, falling back to keyword: %s", exc)
+        # ── 2. Semantic routing: Kazma's embedder, off the loop (SW-E07, SW-E10) ──
+        semantic = await self._semantic(task.prompt, worker_profiles)
+        semantic_ok = isinstance(semantic, SemanticScores)
+        semantic_scores: dict[str, float] = dict(semantic.similarities) if semantic_ok else {}
+        semantic_evidence: dict[str, float] = dict(semantic.evidence) if semantic_ok else {}
+        scored_names: list[str] = list(semantic.matches) if semantic_ok else []
+        strategy = "semantic" if scored_names else "keyword"
 
         # Calculate keyword overlaps for ALL workers for routing diagnostics
         keyword_overlaps: dict[str, int] = {}
@@ -143,9 +160,8 @@ class UnifiedRouter:
             overlap = self._score_worker(requirements_tokens, capabilities)
             keyword_overlaps[name] = int(overlap)
 
-        # ── 3. Keyword Fallback Routing ──
+        # ── 3. Keyword fallback: no profile stands out, or no embedder ──
         if not scored_names:
-            logger.info("[UnifiedRouter] Falling back to Keyword capability routing.")
             scored_workers = [_ScoredWorker(name=name, score=score) for name, score in keyword_overlaps.items() if score > 0]
             scored_workers.sort(key=lambda item: item.score, reverse=True)
             scored_names = [item.name for item in scored_workers]
@@ -156,36 +172,32 @@ class UnifiedRouter:
                 if name not in scored_names:
                     scored_names.append(name)
 
-        if not scored_names:
-            logger.warning(
-                "[RoutingEngine] No capable workers matched. Task prompt: '%s'; available workers: %s",
-                task.prompt[:100],
-                [w['name'] for w in available_workers],
-            )
-            raise NoCapableWorkersError(
-                "No capable workers matched the task requirements. "
-                "Please check worker capabilities and try again."
-            )
-
         # ── 4. Apply Dialect Boosts & Final Sort ──
         base_score_map = {name: (len(scored_names) - i) * 10 for i, name in enumerate(scored_names)}
-        
+
         if dialect_boosts:
             logger.info("[UnifiedRouter] Applying dialect boosts: %s", dialect_boosts)
-            
+
             final_scored = []
             for name in scored_names:
                 boost = dialect_boosts.get(name, 0)
                 final_scored.append(_ScoredWorker(name=name, score=base_score_map[name] + boost))
-            
+
             final_scored.sort(key=lambda x: x.score, reverse=True)
             scored_names = [item.name for item in final_scored]
 
         selected_names = scored_names[:top_n]
 
-        # ── 5. Record Routing Diagnostics ──
-        diagnostics = {
-            "strategy_used": "semantic" if (self._semantic_router.available and semantic_scores) else "keyword",
+        # ── 5. Routing diagnostics: every candidate and why (SW-E10) ──
+        # Written before a refusal too: why a task went to the autoscaler is
+        # read here. The engine names in task.workers only what runs.
+        diagnostics: dict[str, Any] = {
+            "strategy_used": strategy,
+            "candidates": list(selected_names),
+            "semantic": ({"available": True, "model": semantic.model, "matches": list(semantic.matches),
+                          "unprofiled": list(semantic.unprofiled)}
+                         if semantic_ok else
+                         {"available": False, "reason": semantic.reason, "detail": semantic.detail}),
             "dialect_detected": dialect_detected if (dialect_detected in ("kw", "msa") and dialect_confidence >= 0.3) else None,
             "dialect_confidence": dialect_confidence if (dialect_detected in ("kw", "msa") and dialect_confidence >= 0.3) else 0.0,
             "scores": {}
@@ -193,18 +205,28 @@ class UnifiedRouter:
         for worker_info in available_workers:
             name = worker_info["name"]
             diagnostics["scores"][name] = {
-                "semantic_similarity": float(semantic_scores.get(name, 0.0)),
+                "semantic_similarity": round(float(semantic_scores.get(name, 0.0)), 4),
+                "semantic_evidence": round(float(semantic_evidence.get(name, 0.0)), 4),
                 "keyword_overlap": int(keyword_overlaps.get(name, 0)),
                 "dialect_boost": int(dialect_boosts.get(name, 0)),
-                "final_score": int(base_score_map.get(name, 0) + dialect_boosts.get(name, 0) if dialect_boosts else (semantic_scores.get(name, 0.0) * 100 if semantic_scores else keyword_overlaps.get(name, 0)))
+                "final_score": int(base_score_map.get(name, 0) + dialect_boosts.get(name, 0)),
             }
-        
-        task.metadata["routed_workers"] = selected_names
         task.metadata["routing_diagnostics"] = diagnostics
-        
+
+        if not selected_names:
+            logger.warning(
+                "[RoutingEngine] No capable workers matched (%s). Task prompt: '%s'; available workers: %s",
+                strategy, task.prompt[:100], [w['name'] for w in available_workers],
+            )
+            raise NoCapableWorkersError(
+                "No capable workers matched the task requirements. "
+                "Please check worker capabilities and try again."
+            )
+
         logger.info(
-            "[UnifiedRouter] auto-routed task '%s' to %s",
+            "[UnifiedRouter] auto-routed task '%s' (%s) to %s",
             task.id,
+            strategy,
             selected_names,
         )
 
@@ -232,18 +254,25 @@ class UnifiedRouter:
 
     @staticmethod
     def _build_worker_profiles(available_workers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Translate worker info dicts into profiles for Semantic/Dialect logic."""
+        """Translate worker info dicts into profiles for Semantic/Dialect logic.
+
+        The engine's list carries each worker's system prompt and, for an
+        autoscaler instance, its template (``SwarmEngine.
+        _build_available_workers_list``): what semantic routing describes a
+        worker by (``semantic_router.profile_text``)."""
         profiles = []
         for w in available_workers:
             caps = w.get("capabilities")
             expertise = []
             roles = []
             system_prompt = ""
-            
+
             if caps:
                 expertise = getattr(caps, "expertise", [])
-                roles = [getattr(caps, "role", "")] if getattr(caps, "role", None) else []
-                system_prompt = getattr(caps, "system_prompt", "") or getattr(caps, "role", "")
+                role = getattr(caps, "role", "") or w.get("role", "")
+                roles = [role] if role else []
+                system_prompt = (w.get("system_prompt", "") or getattr(caps, "system_prompt", "")
+                                 or role)
             else:
                 expertise = w.get("expertise", [])
                 roles = w.get("roles", []) or ([w.get("role")] if w.get("role") else [])
@@ -251,6 +280,7 @@ class UnifiedRouter:
 
             profiles.append({
                 "name": w["name"],
+                "template": w.get("template") or "",
                 "expertise": expertise,
                 "roles": roles,
                 "system_prompt": system_prompt,

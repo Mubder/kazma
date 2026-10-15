@@ -78,11 +78,12 @@ def _is_plain_empty_shell(
         return False
     held = conn.execute(
         "SELECT 1 FROM graph_associations WHERE tenant_id = ? AND (member = ? OR group_root = ?) "
-        "UNION ALL SELECT 1 FROM entity_merges WHERE source_entity_id = ? OR target_entity_id = ? "
-        "UNION ALL SELECT 1 FROM entities WHERE CASE WHEN json_valid(metadata_json) "
+        "UNION ALL SELECT 1 FROM entity_merges WHERE tenant_id = ? "
+        "AND (source_entity_id = ? OR target_entity_id = ?) "
+        "UNION ALL SELECT 1 FROM entities WHERE tenant_id = ? AND CASE WHEN json_valid(metadata_json) "
         "THEN json_extract(metadata_json, '$.merged_into') END = ? "
         "LIMIT 1",
-        (tenant_id, eid, eid, eid, eid, eid),
+        (tenant_id, eid, eid, tenant_id, eid, eid, tenant_id, eid),
     ).fetchone()
     return held is None
 

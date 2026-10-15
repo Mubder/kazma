@@ -978,4 +978,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "هذه الأداة تتطلب الموافقة دائمًا — لا يستطيع YOLO تخطّيها.",
         "en": "This tool always requires approval — YOLO cannot skip it.",
     },
+    # A trace's type and status (dashboard and its cards); a value with no
+    # key is shown as it is, marked as content.
+    "dashboard.trace_type_llm": {
+        "ar": "استدعاء النموذج",
+        "en": "Model call",
+    },
+    "dashboard.trace_type_tool": {
+        "ar": "أداة",
+        "en": "Tool",
+    },
+    "dashboard.trace_type_state": {
+        "ar": "تغيّر الحالة",
+        "en": "State change",
+    },
+    "dashboard.trace_type_compaction": {
+        "ar": "ضغط السياق",
+        "en": "Compaction",
+    },
+    "dashboard.trace_status_success": {
+        "ar": "نجح",
+        "en": "Success",
+    },
+    "dashboard.trace_status_error": {
+        "ar": "خطأ",
+        "en": "Error",
+    },
+    "dashboard.trace_status_warning": {
+        "ar": "تحذير",
+        "en": "Warning",
+    },
 }

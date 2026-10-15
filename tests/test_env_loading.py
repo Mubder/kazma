@@ -175,6 +175,14 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "scripts/verify_docx_rtl.py": "renders built-in RTL samples",
     "scripts/smoke_topic_shift_p0.py": "pure intent-policy smoke; no server, no settings",
     "scripts/memory_bench.py": "builds and scores the retrieval benchmark on a temp database",
+    "scripts/knowledge_bench.py": (
+        "builds and scores the Knowledge retrieval benchmark on a private store under a "
+        "temporary data directory; an install's .env would point it at the install"
+    ),
+    "scripts/swarm_routing_bench.py": (
+        "scores swarm semantic routing from recorded vectors (or the configured "
+        "embedder); reads no install's secrets or databases"
+    ),
     "scripts/memory_soak.py": (
         "soaks the memory lifecycle on private temporary stores; an install's "
         ".env would point thousands of writes at its databases"
@@ -182,6 +190,11 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "scripts/swarm_soak.py": (
         "soaks the swarm engine on a private SQLite task and settings store; an "
         "install's .env would point thousands of task writes at its databases"
+    ),
+    "scripts/swarm_chaos.py": (
+        "injects faults (locks, a database taken down) into private stores and a "
+        "disposable Postgres named on its command line; an install's .env would "
+        "aim them at that install's databases"
     ),
     "scripts/scheduled_soak.py": (
         "soaks the cron scheduler on a private temporary cron.db and a fake clock; an "
@@ -191,6 +204,11 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "soaks Time Travel on private temporary stores, forced to SQLite; an "
         "install's .env would point its captures, restores, forgets and "
         "injected faults at that install's databases"
+    ),
+    "scripts/knowledge_soak.py": (
+        "measures and soaks the Knowledge Library on private temporary SQLite "
+        "stores; an install's .env would point its crawls, deletes and model "
+        "switches at the install's library and vectors"
     ),
     "scripts/shipped_defaults.py": "compares kazma.yaml with its committed snapshot; reads no install",
 }

@@ -9,9 +9,7 @@ via ``stream_chat_turn`` → ``POST /api/chat/stream``.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -97,24 +95,6 @@ async def _ainvoke(graph: Any, state: Any, cfg: dict[str, Any]) -> Any:
         return await graph.ainvoke(prepared, cfg)
 
 
-def _report_turn_timeout(timeout_s: float, thread_id: str) -> None:
-    """Page the owner: a turn hit its wall-clock budget (usually a runaway
-    tool loop). The alert lived in the WebSocket graph client, which ran no
-    turns; it moved here with that client's removal (2026-09-30, AUD-026),
-    beside the budget itself. Never raises."""
-    try:
-        from kazma_core.observability.ops_alerts import alert
-
-        alert(
-            "turn.timed_out",
-            f"A turn hit the {int(timeout_s)}s wall-clock limit and was cut off.",
-            f"thread={thread_id[:12]}. Usually a runaway tool loop.",
-            severity="warn",
-        )
-    except Exception:
-        logger.debug("[turn] timeout alert failed", exc_info=True)
-
-
 async def _close_if_ui(
     graph: Any,
     cfg: dict[str, Any],
@@ -146,7 +126,6 @@ async def run_agent_turn(
     thread_id: str,
     state: Any,
     config: dict[str, Any] | None = None,
-    timeout: float | None = None,
     nonstop_config: Any = None,
     persist: bool = True,
 ) -> TurnResult:
@@ -159,6 +138,9 @@ async def run_agent_turn(
     ``close_turn`` is attempted in ``finally`` so a headless finish
     (HITL pause, auto-deny, timeout) still writes the session when the
     UI package is loaded. Missing UI is fail-open.
+
+    The wall-clock budget is the turn's own (``agent/turn_budget.py``: the
+    variable, the setting, ``/long``); no caller passes one.
     """
     if not thread_id:
         return TurnResult(thread_id="", error="missing thread_id")
@@ -189,57 +171,49 @@ async def run_agent_turn(
         if ns_cfg is None:
             try:
                 from kazma_core.agent.nonstop import get_nonstop_config
-
-                ns_cfg = get_nonstop_config()
-            except Exception:
+            except ImportError:
                 ns_cfg = None
+            else:
+                ns_cfg = get_nonstop_config()  # never raises: defaults, feature off
 
-        if timeout is None:
-            raw_to = (os.environ.get("KAZMA_TURN_TIMEOUT_SECONDS") or "").strip()
-            if raw_to:
+        # The turn's wall-clock budget: the one rule every surface applies
+        # (agent/turn_budget.py). It bounds this running segment -- recovery
+        # attempts of the non-stop envelope included -- and never the wait
+        # for an approval, which ends the segment.
+        from kazma_core.agent.turn_budget import turn_segment_budget
+
+        async with turn_segment_budget(
+            graph, cfg, thread_id=thread_id, input_state=state,
+        ) as segment:
+            if ns_cfg is not None and getattr(ns_cfg, "enabled", False):
+                from kazma_core.agent.supervisor_watchdog import (
+                    reset_heartbeat,
+                    supervised_invoke,
+                )
+
                 try:
-                    timeout = float(raw_to)
-                except ValueError:
-                    timeout = None
-
-        if ns_cfg is not None and getattr(ns_cfg, "enabled", False):
-            from kazma_core.agent.supervisor_watchdog import (
-                reset_heartbeat,
-                supervised_invoke,
+                    raw = await supervised_invoke(
+                        graph,
+                        state,
+                        cfg,
+                        nonstop_config=ns_cfg,
+                        turn_timeout=0,
+                        invoke_fn=_ainvoke,
+                    )
+                finally:
+                    reset_heartbeat(thread_id)
+            else:
+                raw = await _ainvoke(graph, state, cfg)
+        if segment.expired:
+            # Cut by the budget: the checkpoint already ends with this reply.
+            text = segment.text
+            return TurnResult(
+                thread_id=thread_id,
+                text=text,
+                state=segment.state,
+                error=text,
+                turn_failed=True,
             )
-
-            try:
-                raw = await supervised_invoke(
-                    graph,
-                    state,
-                    cfg,
-                    nonstop_config=ns_cfg,
-                    turn_timeout=float(timeout or 0),
-                    invoke_fn=_ainvoke,
-                )
-            except TimeoutError:
-                _report_turn_timeout(float(timeout or 0), thread_id)
-                raise
-            finally:
-                reset_heartbeat(thread_id)
-        elif timeout is not None and timeout > 0:
-            try:
-                raw = await asyncio.wait_for(_ainvoke(graph, state, cfg), timeout=timeout)
-            except TimeoutError:
-                logger.error(
-                    "[turn] timed out after %.0fs (thread=%s)",
-                    timeout,
-                    thread_id,
-                )
-                _report_turn_timeout(float(timeout), thread_id)
-                err = (
-                    f"⚠️ Turn timed out after {int(timeout)}s. "
-                    "Try a shorter request or raise KAZMA_TURN_TIMEOUT_SECONDS."
-                )
-                text = err
-                return TurnResult(thread_id=thread_id, error=err, state=dict(state or {}))
-        else:
-            raw = await _ainvoke(graph, state, cfg)
 
         if not isinstance(raw, dict):
             result_state = {"messages": getattr(raw, "messages", [])}

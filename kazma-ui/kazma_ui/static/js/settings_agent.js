@@ -452,6 +452,25 @@
             this.checkpointRetentionSaving = false;
         },
 
+        async saveTurnTimeout() {
+            this.turnTimeoutSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        key: 'agent.turn_timeout_seconds',
+                        value: this.turnTimeout.seconds,
+                        category: 'agent',
+                    }),
+                });
+                showToast(_k('settings.turn_timeout_saved', 'Turn time limit saved'), 'success');
+            } catch (e) {
+                showToast(e.message || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
+            }
+            this.turnTimeoutSaving = false;
+        },
+
         async loadProxy() {
             try {
                 const data = await this._fetch('/api/settings/proxy');

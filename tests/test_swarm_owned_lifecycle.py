@@ -393,6 +393,9 @@ _STARTS = {"RUNNING", "PAUSED", "PENDING"}
 _STARTS_DECLARED = {
     ("engine.py", "SwarmEngine._dispatch"): "admission compare-and-set (TaskStore.admit) before any work",
     ("engine.py", "SwarmEngine.approve_checkpoint"): "PAUSED -> RUNNING by TaskStore.admit before the resume",
+    ("engine.py", "SwarmEngine._approval_stopped_at_admission"):
+        "back to PAUSED only when the store holds this approval's own RUNNING row (same run_id), "
+        "written after the admission; nothing resumed",
     ("checkpoint_manager.py", "CheckpointManager.handle_pipeline_checkpoint"):
         "the pause; persist_task's guard refuses it over a finished row",
 }

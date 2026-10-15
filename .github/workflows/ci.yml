@@ -453,6 +453,12 @@ jobs:
         run: python -m pytest tests/e2e/test_unified_turn_recovery.py -q --timeout=900
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Turn time limit (the web chat's turn is cut and says so)
+        # The web chat had no wall-clock limit while the chat apps had one
+        # (full audit 2026-09-30); a cut turn ends with one honest reply.
+        run: python -m pytest tests/e2e/test_turn_time_limit.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Turn notes (each turn's notes once, workspace switch, IDE context)
         # Four turns through the real route: the fourth used to carry
         # sixteen system notes and the old workspace (2026-09-29).

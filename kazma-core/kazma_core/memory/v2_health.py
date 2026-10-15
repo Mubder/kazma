@@ -151,6 +151,7 @@ def build_v2_health(
           "beliefs": {"active": int, "superseded": int, "archived": int},
           "episodes": {"working": int, "episodic": int, "recall": int, "archived": int},
           "entities": int,
+          "entity_key": "tenant_and_id" | "id",   # memory/entity_key.py (M21)
           "procedural_dags": {"active": int, "quarantine": int},
           "queue": {"pending": int, "processing": int, "failed": int},
           "recent_audits": int,
@@ -319,9 +320,18 @@ def build_v2_health(
             logger.warning("[v2_health] graph hygiene counts unreadable", exc_info=True)
 
         # Entities + procedural DAGs
+        only = tenant_id if scoped else None
         out["entities"] = _safe_count(
-            primary_conn, "SELECT COUNT(*) FROM entities WHERE 1=1" + tsql, tparams
+            primary_conn, "SELECT COUNT(*) FROM entities WHERE (? IS NULL OR tenant_id = ?)", (only, only)
         )
+        # Which key the store has (memory/entity_key.py, Memory audit M21):
+        # "id" until the operator migrates a store made before 2026-10-15.
+        try:
+            from kazma_core.memory.entity_key import tenant_keyed
+
+            out["entity_key"] = "tenant_and_id" if tenant_keyed(primary_conn) else "id"
+        except sqlite3.Error:
+            logger.warning("[v2_health] entity key unreadable", exc_info=True)
         out["procedural_dags"]["active"] = _safe_count(
             primary_conn,
             "SELECT COUNT(*) FROM procedural_dags WHERE status='active'" + tsql,

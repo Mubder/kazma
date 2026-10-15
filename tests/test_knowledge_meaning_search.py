@@ -50,10 +50,16 @@ from tests._module_stubs import stub_modules
 
 
 class _Collection:
-    def __init__(self, name: str, metadata: dict | None = None) -> None:
+    def __init__(self, name: str, metadata: dict | None = None, configuration: dict | None = None) -> None:
         self.name = name
         self.metadata = dict(metadata or {})
+        if configuration:  # as Chroma reports it; an older collection was made without
+            self.configuration_json = {"hnsw": dict(configuration.get("hnsw") or {})}
         self.rows: dict[str, tuple[list[float], str, dict]] = {}
+
+    def _space(self) -> str:
+        hnsw = getattr(self, "configuration_json", {}).get("hnsw") or {}
+        return hnsw.get("space") or self.metadata.get("hnsw:space", "l2")
 
     def upsert(self, ids, embeddings, documents, metadatas):
         for meta in metadatas:
@@ -87,7 +93,7 @@ class _Collection:
 
     def query(self, query_embeddings, n_results, where=None):
         q = query_embeddings[0]
-        space = self.metadata.get("hnsw:space", "l2")
+        space = self._space()
 
         def matches(meta, cond):
             if not cond:
@@ -118,10 +124,10 @@ class _Client:
         _Client.settings_seen.append(settings)
         self.collections: dict[str, _Collection] = {}
 
-    def get_or_create_collection(self, name, metadata=None, embedding_function=None):
+    def get_or_create_collection(self, name, metadata=None, configuration=None, embedding_function=None):
         assert embedding_function is None  # the store passes its own vectors
-        if name not in self.collections:  # an existing one keeps its metadata
-            self.collections[name] = _Collection(name, metadata)
+        if name not in self.collections:  # an existing one keeps its metadata and settings
+            self.collections[name] = _Collection(name, metadata, configuration)
         return self.collections[name]
 
     def delete_collection(self, name):
@@ -392,9 +398,19 @@ def test_the_backfill_stops_at_its_budget_and_the_next_pass_continues(kb, monkey
     assert part["embedded"] + rest["embedded"] == 10 and rest["complete"] is True
 
 
+#: Chunks about other things. A search shows what is about the question
+#: ABOVE what unrelated chunks reach for it (KQ01, ``knowledge_index._judge``):
+#: a library of two chunks has no such background, and the prior that stands
+#: in for it is bge-m3's level, which this toy embedder's similarities sit
+#: below. These give it one, as any real library does.
+_UNRELATED = ["Upload a profile photo", "Rotate the signing key monthly", "Pick a colour theme",
+              "Export invoices as spreadsheet files", "Archive old projects", "Delete unused buckets",
+              "Choose the billing currency", "Print the quarterly report"]
+
+
 def test_meaning_search_finds_what_shares_no_word_with_the_question(kb):
     """The point of the vector: no keyword of the question is in the answer."""
-    _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool"])
+    _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool", *_UNRELATED])
     question = "how many attempts are made to resend callbacks"
     assert kb.store.fts_search(question, "api", limit=5) == []  # words alone: nothing
 
@@ -495,8 +511,8 @@ def test_with_the_real_chromadb(tmp_path, monkeypatch):
     store = KnowledgeStore(db_path=str(tmp_path / "settings.db"))
     try:
         kb = types.SimpleNamespace(store=store, index=KnowledgeIndex(store))
-        _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool"])
-        assert kb.index.backfill_vectors(time_budget_s=60)["embedded"] == 2
+        _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool", *_UNRELATED])
+        assert kb.index.backfill_vectors(time_budget_s=60)["embedded"] == 2 + len(_UNRELATED)
         question = "how many attempts are made to resend callbacks"
         hits = kb.index.search_sync(question, "api")
         assert hits and hits[0].chunk_id == "api-0"

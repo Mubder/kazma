@@ -466,11 +466,19 @@ async def invoke_turn(
     activity: list[dict[str, Any]] | None = None,
     persist: bool = True,
     register: bool = True,
+    budget: bool = True,
 ) -> Any:
     """``graph.ainvoke`` plus mandatory closer. The only UI/gateway invoke.
 
     ``persist=False`` is for ``/compact``, which rewrites history itself
     rather than producing a chat reply.
+
+    The run is one segment of a turn -- an approval's resume, a hard steer,
+    an auto-deny, on the web and in the chat apps alike -- and has the turn's
+    wall-clock budget (``turn_budget.resolve_turn_budget``, the one rule
+    every surface asks). Cut by it, this returns the state ending with the
+    honest reply (``timed_out_reply`` reads it). ``budget=False`` is for
+    ``/compact`` only (maintenance, not a turn).
     """
     thread_id = _thread_id_of(config, thread_id)
     if not session_id:
@@ -494,10 +502,17 @@ async def invoke_turn(
             task = None
 
     try:
+        from kazma_core.agent.turn_budget import turn_segment_budget
         from kazma_core.agent.turn_workspace import turn_workspace
 
-        async with turn_workspace(graph, input_state, config) as prepared:
-            return await graph.ainvoke(prepared, config)
+        async with turn_segment_budget(
+            graph, config, thread_id=thread_id, input_state=input_state, enforce=budget,
+        ) as segment:
+            async with turn_workspace(graph, input_state, config) as prepared:
+                return await graph.ainvoke(prepared, config)
+        # Only when the budget cut the run: the checkpoint ends with the
+        # honest reply, which close_turn below projects.
+        return segment.state
     finally:
         try:
             if persist:
@@ -536,6 +551,11 @@ async def astream_events(
     The live pump already persists via ``close_turn`` (detached callback).
     This wrapper exists so ``graph.astream_events`` is not a second
     untracked entry in UI code.
+
+    The turn's wall-clock budget is its consumer's: the SSE pump reads this
+    inside ``turn_segment_budget`` in the one task that iterates it (a
+    timeout scope must not span a generator's yields to another task).
+    ``tests/test_turn_budget.py`` holds every consumer to it.
     """
     kwargs.setdefault("version", "v2")
     from kazma_core.agent.turn_workspace import turn_workspace

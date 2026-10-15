@@ -1,300 +1,277 @@
-"""Semantic capability router for the swarm engine.
+"""Semantic capability routing for the swarm: one embedding space, compared exactly.
 
-Replaces keyword-only matching with local semantic similarity using
-sentence-transformers embeddings stored in ChromaDB.  Falls back to
-keyword matching when the embedding model is unavailable (e.g., on
-machines without the `rag` extra).
+Swarm audit SW-E10 (decision D8: fixed, not removed). The router kept worker
+profiles in a Chroma collection created with no embedding function, so Chroma
+embedded them with its own default model (a 384-dimension MiniLM fetched on
+first use), while the task was embedded with Kazma's encoder (bge-m3, 1,024
+dimensions). Every semantic query failed on the dimensions and fell back to
+keywords with a WARNING, after loading both models (the routing tests did it
+too, reaching the HF Hub).
 
-Architecture:
-    Registry → build profiles → ChromaDB collection
-    Task query → embed → ChromaDB cosine similarity → ranked workers
+Now the task and every profile are embedded by Kazma's own embedder
+(:func:`kazma_core.memory.embedder.get_embedder`, the one memory uses), the
+vectors are explicit, and they are compared here by cosine, exactly, as
+memory compares by meaning (AGENTS §15F/G). There is no vector store: a swarm
+has tens of workers, and a store's default embedding function is how the two
+spaces were mixed. A profile's vector is kept per embedder INSTANCE
+(``embedder_identity``) and text, so a model switch re-embeds it.
+
+What counts as "about" a worker follows memory's lesson (AGENTS §15G): an
+absolute cosine cannot tell "about this" from "near this" (bge-m3 puts a task
+0.25-0.55 from every profile). A profile matches when it stands out: its
+similarity minus the mean of the OTHER distinct profiles' -- blended with
+:data:`_BACKGROUND_PRIOR` when there are fewer than :data:`_BACKGROUND_MIN`
+of them -- is at least :data:`MATCH_FLOOR`. Instances of one template share
+one profile, so they never hide each other. Measured with bge-m3 on
+``tests/fixtures/swarm_routing/`` (``scripts/swarm_routing_bench.py``; CI
+replays the recorded vectors): see ``tests/test_swarm_semantic_routing.py``.
+The nearest worker with no floor -- what the router meant to do -- sent every
+unrelated task to some specialist, so none reached the autoscaler.
+
+When the embedder is missing, failing, slow or busy, :meth:`semantic_scores`
+says why (:class:`SemanticUnavailable`) and the caller routes by keywords;
+the change of state is a WARNING (and ``kazma_swarm_failures_total{site=
+"semantic_routing"}``) once, its recovery an INFO line.
+
+Blocking (an embedding, a settings read): callers run :meth:`semantic_scores`
+in a thread; it is in ``_LOOP_STALL_HELPERS``.
 """
 
 from __future__ import annotations
 
 import logging
-import re
+import math
 import threading
+from collections import OrderedDict
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["SemanticRouter", "SemanticRoutingUnavailableError", "get_semantic_router"]
+__all__ = [
+    "MATCH_FLOOR",
+    "SemanticRouter",
+    "SemanticScores",
+    "SemanticUnavailable",
+    "evidence",
+    "get_semantic_router",
+    "note_outcome",
+    "profile_text",
+]
 
 logger = logging.getLogger(__name__)
 
-# ── Constants ────────────────────────────────────────────────────────────
+#: How far a profile must stand out from the others (bge-m3, measured).
+MATCH_FLOOR = 0.045
+#: What an unrelated profile reaches for a task with bge-m3; stands in for
+#: missing others below :data:`_BACKGROUND_MIN` (one instance registered).
+_BACKGROUND_PRIOR = 0.40
+_BACKGROUND_MIN = 3
 
-_DEFAULT_MODEL = "BAAI/bge-m3"
-_DEFAULT_COLLECTION = "swarm_worker_profiles"
-
-
-def _embedding_dim() -> int:
-    """Read the embedding dimension from config (default 1024)."""
-    try:
-        from kazma_core.memory.embedder import get_embedding_dim
-
-        return get_embedding_dim()
-    except Exception:
-        return 1024
-
-
-class SemanticRoutingUnavailableError(RuntimeError):
-    """Raised when semantic routing is requested but embeddings are unavailable."""
-
-
-def _tokenize(text: str) -> set[str]:
-    """Lowercase and split text into word tokens, normalizing underscores/hyphens."""
-    normalized = text.lower().replace("_", " ").replace("-", " ")
-    return set(re.findall(r"[a-z0-9]+", normalized))
+#: The task text compared: its start and its end (memory's rule for a long
+#: paste, ``recall._bounded_question``).
+_QUERY_MAX_CHARS = 2000
+#: How much of a worker's system prompt describes it.
+_PROFILE_PROMPT_CHARS = 200
+#: Profile vectors kept (embedder identity and text): far more than a swarm
+#: has workers.
+_PROFILE_CACHE = 512
+#: Embedding calls at once; past this a route answers by keywords.
+_EMBED_IN_FLIGHT = 2
 
 
+def profile_text(profile: dict[str, Any]) -> str:
+    """The text a worker is embedded as: its name, expertise and the start of
+    its system prompt (else its role). An autoscaler instance is named by its
+    template (``template``), so every instance of one shares one profile.
+    Empty when the worker declares neither expertise nor a description."""
+    name = str(profile.get("template") or profile.get("name") or "").strip()
+    expertise = ", ".join(str(e).strip() for e in (profile.get("expertise") or []) if str(e).strip())
+    description = str(profile.get("system_prompt") or "").strip()
+    if not description:
+        description = ", ".join(str(r).strip() for r in (profile.get("roles") or []) if str(r).strip())
+    if not expertise and not description:
+        return ""
+    text = f"Worker: {name}\nExpertise: {expertise}\n"
+    if description:
+        text += f"Description: {description[:_PROFILE_PROMPT_CHARS]}\n"
+    return text
 
 
+def _query_text(prompt: str) -> str:
+    """The task as it is embedded: at most ``_QUERY_MAX_CHARS``, its start
+    and its end."""
+    q = str(prompt or "")
+    if len(q) <= _QUERY_MAX_CHARS:
+        return q
+    head = _QUERY_MAX_CHARS // 4
+    return q[:head] + " " + q[-(_QUERY_MAX_CHARS - head):]
 
-# ── Semantic routing ──────────────────────────────────────────────────────
+
+def _cosine(a: list[float], b: list[float]) -> float | None:
+    if not a or not b or len(a) != len(b):
+        return None
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if not na or not nb:
+        return None
+    return dot / (na * nb)
+
+
+def evidence(similarities: dict[str, float]) -> dict[str, float]:
+    """For each distinct profile (text -> similarity), how far it stands out:
+    its similarity minus the mean of the others', blended with the prior when
+    there are fewer than ``_BACKGROUND_MIN`` others. Pure."""
+    out: dict[str, float] = {}
+    total = sum(similarities.values())
+    n = len(similarities)
+    for text, sim in similarities.items():
+        others = n - 1
+        missing = max(0, _BACKGROUND_MIN - others)
+        background = (total - sim + _BACKGROUND_PRIOR * missing) / (others + missing)
+        out[text] = sim - background
+    return out
+
+
+@dataclass(frozen=True)
+class SemanticScores:
+    """What the embedder said about one task."""
+
+    #: worker -> cosine with its profile.
+    similarities: dict[str, float]
+    #: worker -> how far its profile stands out (see :func:`evidence`).
+    evidence: dict[str, float]
+    #: The workers the task is about, best first (empty: none is).
+    matches: list[str]
+    model: str
+    #: Workers with no profile to compare (no expertise, prompt or role).
+    unprofiled: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SemanticUnavailable:
+    """Why this task is routed by keywords."""
+
+    reason: str  # no_embedder | embed_failed | busy | timeout | no_profiles | error
+    detail: str = ""
+
+
+def _kazma_embedder() -> Any:
+    """Kazma's shared embedder (memory's), or None."""
+    from kazma_core.memory.embedder import get_embedder
+
+    return get_embedder()
 
 
 class SemanticRouter:
-    """Routes tasks to workers using semantic similarity.
+    """Scores a task against worker profiles with Kazma's embedder.
 
-    Stores worker expertise profiles as embeddings in a ChromaDB
-    collection.  Queries embed the task description and rank workers
-    by cosine similarity.
-
-    Falls back to keyword matching when sentence-transformers or
-    ChromaDB are unavailable.
+    ``embedder_getter`` defaults to Kazma's shared embedder, looked up on
+    every call (a configuration change or a test replaces it).
     """
 
-    def __init__(
-        self,
-        model_name: str = _DEFAULT_MODEL,
-        collection_name: str = _DEFAULT_COLLECTION,
-        persist_dir: str | None = None,
-    ) -> None:
-        self._model_name = model_name
-        self._collection_name = collection_name
-        self._persist_dir = persist_dir
-        self._model: Any = None
-        self._collection: Any = None
-        self._available: bool = False
-        self._initialized: bool = False
-        # Guard profile rebuilds so concurrent route() calls (e.g. from
-        # multiple threads) cannot interleave delete/add and corrupt the
-        # collection.  ``_profile_sig`` caches the worker-set signature
-        # so we only rebuild when the profiles actually change.
-        self._profile_lock = threading.Lock()
-        self._profile_sig: tuple[tuple[str, str], ...] = ()
+    def __init__(self, embedder_getter: Callable[[], Any] | None = None) -> None:
+        self._embedder_getter = embedder_getter
+        self._lock = threading.Lock()
+        self._vectors: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
+        self._in_flight = threading.BoundedSemaphore(_EMBED_IN_FLIGHT)
 
-    # ── Lazy initialization ────────────────────────────────────────────
+    def _embedder(self) -> Any:
+        getter = self._embedder_getter or _kazma_embedder
+        return getter()
 
-    def _ensure_model(self) -> bool:
-        """Lazy-load the sentence-transformers model via shared singleton.
+    def _vector(self, embedder: Any, identity: str, text: str) -> list[float]:
+        key = (identity, text)
+        with self._lock:
+            hit = self._vectors.get(key)
+            if hit is not None:
+                self._vectors.move_to_end(key)
+                return hit
+        vec = [float(x) for x in (embedder.encode(text) or [])]
+        if vec:
+            with self._lock:
+                self._vectors[key] = vec
+                while len(self._vectors) > _PROFILE_CACHE:
+                    self._vectors.popitem(last=False)
+        return vec
 
-        Uses ``get_encoder()`` from ``swarm.memory.vector`` so the model
-        is never double-loaded across the system.
-        """
-        if self._model is not None:
-            return True
+    def semantic_scores(self, prompt: str, profiles: list[dict[str, Any]]) -> SemanticScores | SemanticUnavailable:
+        """Score *prompt* against every profile. Blocking: run it in a thread.
+
+        Never raises: a reason to route by keywords instead is returned (and
+        :func:`note_outcome` says it)."""
+        if not self._in_flight.acquire(blocking=False):
+            return SemanticUnavailable("busy", f"{_EMBED_IN_FLIGHT} embeddings already running")
         try:
-            from kazma_core.memory.vector_store_global import get_encoder
+            return self._scores(prompt, profiles)
+        except Exception as exc:  # any embedder's failure: the answer, said by note_outcome
+            return SemanticUnavailable("error", f"{type(exc).__name__}: {exc}"[:300])
+        finally:
+            self._in_flight.release()
 
-            self._model = get_encoder(self._model_name)
-            if self._model is not None:
-                logger.info("[SemanticRouter] Using shared encoder: %s", self._model_name)
-                return True
-            return False
-        except Exception as exc:
-            logger.warning("[SemanticRouter] Shared encoder unavailable: %s", exc)
-            return False
+    def _scores(self, prompt: str, profiles: list[dict[str, Any]]) -> SemanticScores | SemanticUnavailable:
+        texts = {str(p.get("name", "")): profile_text(p) for p in profiles if p.get("name")}
+        unprofiled = sorted(name for name, text in texts.items() if not text)
+        texts = {name: text for name, text in texts.items() if text}
+        if not texts:
+            return SemanticUnavailable("no_profiles", "no worker declares expertise or a description")
+        embedder = self._embedder()
+        if embedder is None:
+            return SemanticUnavailable("no_embedder", "no embedder is configured")
+        from kazma_core.memory.vector_store_global import embedder_identity
 
-    def _ensure_collection(self) -> bool:
-        """Lazy-load the ChromaDB collection.  Returns True on success."""
-        if self._collection is not None:
-            return True
-        try:
-            import chromadb
-            from chromadb.config import Settings
+        identity = embedder_identity(embedder)
+        query = [float(x) for x in (embedder.encode(_query_text(prompt)) or [])]
+        if not query:
+            return SemanticUnavailable("embed_failed", _embedder_problem(embedder))
+        by_text: dict[str, float] = {}
+        for text in sorted(set(texts.values())):
+            sim = _cosine(query, self._vector(embedder, identity, text))
+            if sim is None:
+                return SemanticUnavailable("embed_failed", _embedder_problem(embedder))
+            by_text[text] = sim
+        stands_out = evidence(by_text)
+        similarities = {name: by_text[text] for name, text in texts.items()}
+        worker_evidence = {name: stands_out[text] for name, text in texts.items()}
+        matches = sorted((name for name, ev in worker_evidence.items() if ev >= MATCH_FLOOR),
+                         key=lambda name: (-similarities[name], name))
+        return SemanticScores(similarities=similarities, evidence=worker_evidence, matches=matches,
+                              model=identity, unprofiled=unprofiled)
 
-            client_kwargs: dict[str, Any] = {}
-            if self._persist_dir:
-                client_kwargs["settings"] = Settings(
-                    persist_directory=self._persist_dir,
-                    anonymized_telemetry=False,
-                )
-            client = chromadb.Client(
-                chromadb.config.Settings(
-                    anonymized_telemetry=False,
-                    **(client_kwargs.get("settings", {}).__dict__ if "settings" in client_kwargs else {}),
-                )
-            ) if not self._persist_dir else chromadb.PersistentClient(path=self._persist_dir)
 
-            # Get or create the collection
-            try:
-                self._collection = client.get_collection(self._collection_name)
-            except Exception:
-                # hnsw:space=cosine so distances are cosine distances — the
-                # scoring path (1.0 - dist) assumes cosine, not the default L2.
-                self._collection = client.create_collection(
-                    name=self._collection_name,
-                    metadata={
-                        "description": "Swarm worker expertise profiles",
-                        "hnsw:space": "cosine",
-                    },
-                )
-            logger.info("[SemanticRouter] ChromaDB collection ready: %s", self._collection_name)
-            return True
-        except ImportError:
-            logger.warning(
-                "[SemanticRouter] chromadb not installed — keyword fallback active"
-            )
-            return False
-        except Exception as exc:
-            logger.warning("[SemanticRouter] ChromaDB init failed: %s", exc)
-            return False
+def _embedder_problem(embedder: Any) -> str:
+    """What the embedder's own breaker says (Memory audit M16), if anything."""
+    breaker = getattr(embedder, "breaker", None)
+    state = breaker.state() if breaker is not None and hasattr(breaker, "state") else {}
+    return str(state.get("last_error") or "the embedder returned no vector")[:300]
 
-    @property
-    def available(self) -> bool:
-        """Whether semantic routing is available."""
-        if self._initialized:
-            return self._available
-        self._initialized = True
-        self._available = self._ensure_model() and self._ensure_collection()
-        return self._available
 
-    # ── Profile building ────────────────────────────────────────────────
+# ── Reporting: a change of state is said once ─────────────────────────────
 
-    def build_profiles(self, workers: list[dict[str, Any]]) -> None:
-        """Build/update ChromaDB profiles from a list of worker dicts.
+#: Not a change of state: another route is embedding, or no worker has a
+#: profile to compare.
+_TRANSIENT = frozenset({"busy", "no_profiles"})
+_state_lock = threading.Lock()
+_semantic_up: bool | None = None
 
-        Each dict should have keys: name, expertise (list of str),
-        system_prompt (str), and optionally roles (list of str).
 
-        This clears the existing collection and rebuilds it.
-        """
-        if not self.available:
-            return
+def note_outcome(outcome: SemanticScores | SemanticUnavailable) -> None:
+    """Say when semantic routing stops (WARNING, counted) and when it is back
+    (INFO). A route that found it busy, or had no profile, changes nothing."""
+    global _semantic_up
+    if isinstance(outcome, SemanticUnavailable) and outcome.reason in _TRANSIENT:
+        return
+    up = isinstance(outcome, SemanticScores)
+    with _state_lock:
+        before, _semantic_up = _semantic_up, up
+    if up and before is False:
+        logger.info("[SemanticRouter] semantic routing is back (%s)", outcome.model)
+    elif not up and before is not False:
+        logger.warning("[SemanticRouter] semantic routing unavailable (%s: %s): routing by keywords",
+                       outcome.reason, outcome.detail)
+        from kazma_core.metrics import record_swarm_failure
 
-        if not workers:
-            return
-
-        # Content signature: rebuild only when the worker profiles change,
-        # not on every route() call.  Sorted for stable comparison.
-        sig = tuple(sorted(
-            (str(w.get("name", "")), ",".join(sorted(w.get("expertise", []))))
-            for w in workers
-        ))
-        with self._profile_lock:
-            if sig == self._profile_sig and self._collection.count() == len(workers):
-                return  # already up to date
-            self._profile_sig = sig
-
-            # Build text profiles for embedding
-            ids: list[str] = []
-            documents: list[str] = []
-            metadatas: list[dict[str, Any]] = []
-
-            for w in workers:
-                wid = w.get("name", "")
-                expertise = w.get("expertise", [])
-                system_prompt = w.get("system_prompt", "")
-                roles = w.get("roles", [])
-
-                # Build a rich text profile for embedding
-                profile_text = f"Worker: {wid}\nExpertise: {', '.join(expertise)}\n"
-                if system_prompt:
-                    profile_text += f"Description: {system_prompt[:200]}\n"
-
-                ids.append(wid)
-                documents.append(profile_text)
-                metadatas.append({
-                    "name": wid,
-                    "expertise": ",".join(expertise),
-                    "roles": ",".join(roles),
-                })
-
-            try:
-                # Clear and rebuild
-                existing = self._collection.get()
-                if existing and existing.get("ids"):
-                    self._collection.delete(ids=existing["ids"])
-                self._collection.add(
-                    ids=ids,
-                    documents=documents,
-                    metadatas=metadatas,
-                )
-                logger.info("[SemanticRouter] Built profiles for %d workers", len(workers))
-            except Exception as exc:
-                logger.warning("[SemanticRouter] Profile build failed: %s", exc)
-                # Invalidate the cache so the next call retries.
-                self._profile_sig = ()
-
-    def _embed(self, text: str) -> list[float] | None:
-        """Embed a query text.  Returns None on failure."""
-        if not self.available or self._model is None:
-            return None
-        try:
-            # _model is an Embedder (via get_encoder → get_embedder).
-            return self._model.encode(text)
-        except Exception as exc:
-            logger.warning("[SemanticRouter] Embedding failed: %s", exc)
-            return None
-
-    def query(
-        self,
-        task_description: str,
-        top_n: int = 5,
-    ) -> list[tuple[str, float]]:
-        """Query workers by semantic similarity.
-
-        Returns a list of (worker_name, similarity_score) tuples,
-        sorted by highest similarity first.
-        """
-        if not self.available:
-            return []
-
-        embedding = self._embed(task_description)
-        if embedding is None:
-            return []
-
-        try:
-            results = self._collection.query(
-                query_embeddings=[embedding],
-                n_results=min(top_n, self._collection.count()),
-            )
-            if not results or not results.get("ids") or not results["ids"][0]:
-                return []
-
-            scored: list[tuple[str, float]] = []
-            ids_list = results["ids"][0]
-            distances = results.get("distances", [[0.0] * len(ids_list)])[0]
-            for i, wid in enumerate(ids_list):
-                dist = distances[i] if i < len(distances) else 0.0
-                scored.append((wid, 1.0 - float(dist)))
-            scored.sort(key=lambda x: x[1], reverse=True)
-            return scored
-        except Exception as exc:
-            logger.warning("[SemanticRouter] Query failed: %s — falling back", exc)
-            return []
-
-    # ── High-level routing (semantic → keyword fallback) ──────────────────
-
-    def route(
-        self,
-        task_description: str,
-        workers: list[dict[str, Any]],
-        top_n: int = 5,
-    ) -> list[str]:
-        """Route a task to the best workers using semantic similarity.
-
-        1. Try semantic similarity via ChromaDB.
-        2. Return worker names sorted by relevance, or empty list if unavailable.
-        """
-        if self.available:
-            self.build_profiles(workers)
-            scored = self.query(task_description, top_n=top_n)
-            if scored:
-                return [name for name, _score in scored]
-
-        return []
+        record_swarm_failure("semantic_routing")
 
 
 # ── Module-level singleton ────────────────────────────────────────────────
@@ -302,9 +279,9 @@ class SemanticRouter:
 _semantic_router: SemanticRouter | None = None
 
 
-def get_semantic_router(model_name: str = _DEFAULT_MODEL) -> SemanticRouter:
-    """Return the shared SemanticRouter instance."""
+def get_semantic_router() -> SemanticRouter:
+    """The process's router (its profile vectors are shared)."""
     global _semantic_router
     if _semantic_router is None:
-        _semantic_router = SemanticRouter(model_name=model_name)
+        _semantic_router = SemanticRouter()
     return _semantic_router

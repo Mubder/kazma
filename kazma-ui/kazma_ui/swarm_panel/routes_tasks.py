@@ -795,6 +795,15 @@ def register_tasks_routes(
                 status_code=429,
                 headers={"Retry-After": "30"},
             )
+        if (result.metadata or {}).get("admission_unrecorded"):
+            # The task store did not take the approval: nothing resumed and
+            # the checkpoint is pending again (Swarm tracker SQ04).
+            return JSONResponse(
+                {"status": "error", "code": "approval_not_recorded", "task_id": task_id,
+                 "task_status": "paused", "message": result.error},
+                status_code=503,
+                headers={"Retry-After": "10"},
+            )
         if result.status != "running":
             # Already ended (a stale card): nothing was resumed.
             return JSONResponse(

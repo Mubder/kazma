@@ -313,6 +313,10 @@ A job is one of two kinds, chosen when it is booked:
   when the job is booked wins over the setting.
 - An interrupted fire runs again after a restart. A reload with
   `--when-idle` waits for a fire that is running.
+- No restart loses one of these alerts. Each is recorded together with the
+  failure it reports, and raised after that. If Kazma stops after raising an
+  alert but before recording that it did, the alert is raised once more when
+  Kazma starts.
 
 ### Times
 

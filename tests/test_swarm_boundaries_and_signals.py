@@ -523,8 +523,9 @@ _QUIET_HANDLERS = {
     "swarm/reliability.py::execute_with_retry": "the error is the attempt's result, retried or returned",
     "swarm/safety.py::_allowed_without_asking": "a setting that cannot be read: the stricter default (3)",
     "swarm/safety.py::approval_timeout": "an unreadable timeout setting: the default timeout",
-    "swarm/semantic_router.py::_embedding_dim": "an unknown model: the default size",
-    "swarm/semantic_router.py::_ensure_collection": "the collection is created when it is missing",
+    "swarm/semantic_router.py::semantic_scores": (
+        "an embedder's failure is the returned reason to route by keywords; "
+        "note_outcome logs it at WARNING and counts it once"),
     "swarm/sse_bridge.py::emit": "the stream ends from the stored result (AGENTS §14)",
     "swarm/task_store.py::_j": "a malformed JSON column reads as its default",
     "swarm/tracing.py::_flush": "telemetry export",

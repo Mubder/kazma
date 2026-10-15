@@ -287,6 +287,8 @@ ERASURE_HORIZON: tuple[tuple[str, str], ...] = (
     ("offsite restic snapshots", "up to 12 monthly"),
     ("nightly memory exports (exports/)", "replaced every 6 hours"),
     ("the copy kept before an embedding rebuild (memory_state.db.pre_reembed)", "until the next rebuild"),
+    ("the copies the operator's repair scripts keep before changing the database "
+     "(memory_state.db.pre_entity_key, memory_state.db.pre_relabel)", "until the operator removes them"),
     ("space SQLite freed in the memory databases and their write-ahead logs", "until SQLite reuses it"),
 )
 

@@ -202,16 +202,19 @@ def _handle_entity_merge_sync(payload: dict[str, Any]) -> bool:
         conn.row_factory = sqlite3.Row
         try:
             ensure_primary_schema(conn)
+            # The tenant the quarantine named when it queued the merge (None:
+            # an older queue row, the install's own view).
+            tenant = payload.get("tenant_id") or None
             row = conn.execute(
-                "SELECT * FROM entity_merges WHERE id=? AND status='pending'",
-                (merge_id,),
+                "SELECT * FROM entity_merges WHERE id=? AND status='pending' AND (? IS NULL OR tenant_id = ?)",
+                (merge_id, tenant, tenant),
             ).fetchone()
             if not row:
                 return True  # already resolved / gone
             conf = float(row["confidence"])
             tier = row["merge_tier"]
             if tier == "tier1_exact" or (tier == "tier2_vector" and conf >= 0.85):
-                result = decide_entity_merge(conn, merge_id, approve=True)
+                result = decide_entity_merge(conn, merge_id, approve=True, tenant_id=tenant)
                 logger.info(
                     "[memory_worker] auto-approved merge %s (conf=%.2f ok=%s)",
                     merge_id, conf, result.get("ok"),

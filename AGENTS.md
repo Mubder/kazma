@@ -188,11 +188,36 @@ code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
   that handle system messages natively — do NOT hoist there.
 
 ### 4. Swarm Handoff Cycle Detection (`kazma-core/kazma_core/swarm/engine.py`)
+- **Handoff is reachable from shipped workers** (Swarm audit SW-E13, owner
+  decision D6: a product feature). The LLM worker (`InProcessWorker`) offers
+  its model `handoff_to_worker(worker, reason, task?, context?)`
+  (`swarm/handoff.py`) whenever the engine dispatches it: `dispatch_worker`
+  binds a `HandoffOffer` (the registered workers and the autoscaler's
+  templates, never the worker itself, and the cycle guard at this point of the
+  chain). The call raises `HandoffRequest` out of `dispatch()`
+  (`except HandoffRequest: raise` before its catch-all) to `_handle_handoff`.
+  The tool is the worker's, never the registry's (the main agent, the MCP
+  server and cron never see it); it has a `TOOL_TIERS` tier (`write`) and a
+  side-effect profile (`delegate`), and approves nothing: the target's tools
+  ask the bus as any worker's (§7B). A refused call (unknown worker, no
+  reason, beside other tool calls, a worker scope without `delegate`, the
+  guard) is the tool's answer and the worker finishes the task itself.
 - `_handle_handoff()` accepts `_visited: dict[str, int]` and `_depth: int`
 - These thread through `_dispatch_worker_by_name_all` -> `_dispatch_worker` -> `_handle_handoff`
-- Max depth is 5; removing the guard causes infinite recursion on A->B->A cycles
-- Workers can be revisited up to `MAX_VISITS=2` times (allows legitimate A->B->A return handoffs)
-- Visit counts are now tracked per-worker (not just a boolean set)
+- Max depth is 5 (a hop at depth 5 is refused: four hops, five runs); removing the guard causes infinite recursion on A->B->A cycles
+- Workers can be revisited up to `MAX_VISITS=2` times: each runs at most twice in a chain, so A->B->A and A->B->A->B run and B's hop back to A is refused
+- Visit counts are tracked per worker IDENTITY (`_handoff_identity`): a pool
+  instance counts as its template, since a hop to a template spawns a new
+  instance each time (counting instance names, only the depth stopped a
+  template ping-pong). A target name resolves like a pattern's
+  (`_resolve_worker`: registered, else spawned from the template).
+- Every ending of `_handle_handoff` releases the source's in-flight count
+  (`_release_handoff_source`): the guard's refusal left it busy for good.
+  The target keeps the dispatch's metadata, task id and workspace
+  (`build_handoff_context`, with or without a blackboard); the hop is the
+  task's `handoff` event (the Swarm page's chain) and `kazma_swarm_handoffs_total`.
+  Gate: `tests/test_swarm_handoff_tool.py` (a scripted model end to end; the
+  guard removed and instance counting as negative controls).
 
 ### 5. Circuit Breaker Half-Open (`kazma-core/kazma_core/swarm/reliability.py`) + ReliabilityRegistry (`reliability_registry.py`)
 - `_probe_in_flight` flag ensures only ONE dispatch passes through half-open state
@@ -424,6 +449,8 @@ compatibility. **All public API methods and constructors are unchanged.**
 | `checkpoint_manager.py` | HITL pipeline checkpoint state, timeout auto-reject, persistence | Pipeline pause/resume logic |
 | `shared_approvals.py` / `approval_card.py` | A bus approval request's one decision; the card's text | Swarm-bus HITL (§7B) |
 | `limits.py` | Input, pause and parallelism limits | A new task field or limit |
+| `task_model.py` | A task's own model call outside a worker (the Refiner, a synthesis): ledgered, accounted, bounded | A new model call in a pattern |
+| `semantic_router.py` | Semantic routing: Kazma's embedder, exact comparison, the measured floor | Routing by meaning |
 | `single_operator.py` | The multi-user refusal (decision D1) | A new swarm surface |
 
 **Rules after refactor:**
@@ -438,8 +465,33 @@ compatibility. **All public API methods and constructors are unchanged.**
   its effect tracker; an uncertain result is stored `failed`; retrying an
   unknown outcome needs `acknowledge_unknown`; a resumed pipeline skips its
   journaled steps. Task writes run in threads, one task's in order
-  (`_persist` / `_flush_writes`). Gates: `tests/test_swarm_owned_lifecycle.py`,
-  `tests/test_swarm_interrupted_effects.py`.
+  (`_persist` / `_flush_writes`); the admission write is the first of them,
+  and a stop that lands during it is the run's interruption like any other
+  (`_stopped_at_admission`, 2026-10-15: the SQ01 24-hour soak found a
+  shutdown leaving five tasks admitted, with RUNNING rows, and never ended).
+  An approval stopped during its admission write has resumed nothing: the
+  checkpoint is offered again and its auto-reject armed again
+  (`_approval_stopped_at_admission`, decided by the write's own outcome:
+  admitted, its RUNNING row goes back to PAUSED; failed, the PAUSED row
+  stays; refused, another run's task is left to that run; an outcome not
+  known in time keeps the claim, and the next start decides from the row).
+  Gates: `tests/test_swarm_owned_lifecycle.py`,
+  `tests/test_swarm_interrupted_effects.py`, `tests/test_swarm_stop_at_admission.py`.
+- **A store fault never becomes a stored-looking success** (Swarm tracker
+  SQ04, 2026-10-15). A task write the store refuses for a reason that passes
+  (lock, busy, database away: `_store_error_passes`) is tried again
+  (`_WRITE_RETRY_WAITS`); a run whose ending never landed is reported
+  `failed` with `unsaved`/`store_error`/`result_status` to its caller, the
+  engine's record and the stream (`_unsaved_ending`; the row stays RUNNING and
+  the next start holds it unknown). An approval whose admission write fails
+  resumes nothing (`_admit_to_store(must_record=True)`, `503
+  approval_not_recorded`): resumed, a crash would offer the checkpoint again.
+  A new task whose RUNNING row fails still runs, counted `running_row`. A
+  durable dispatch that never ran is finalized (`durable._not_run`). Lost
+  writes are counted (`task_write`, `step_journal`, `worker_metric`,
+  `breaker_read`, `breaker_persist`, `breaker_lease`). Harness:
+  `scripts/swarm_chaos.py`; gate: `tests/test_swarm_chaos.py` (each fix's old
+  code as its negative control; the Postgres cases `@pytest.mark.postgres`).
 - **Swarm failures are loud and counted** (SW-E14): lost evidence or a lost
   decision is a WARNING and `kazma_core.metrics.record_swarm_failure(site)`
   (`kazma_swarm_failures_total{site}`). A catch-all handler in `swarm/` or the
@@ -449,6 +501,38 @@ compatibility. **All public API methods and constructors are unchanged.**
 - **A worker's text reaches a model fenced** (SW-S10): `check_swarm_task`,
   pipeline and handoff hand-ons, the synthesis prompt, the Refiner. Same gate
   file (`_RESULT_TEXT_ONLY` declares the stored-result builders).
+- **The Refiner's report and every synthesis are the task's** (SW-E15,
+  decision D8: fixed, 2026-10-15). A pipeline that succeeded (first run or
+  resume) is refined by one model call: the report is the result's
+  `synthesized_output`, the last step's output stays `aggregated_output` and
+  every step's stays in `worker_results`; a failed or partial one is not
+  refined. Every model call the swarm makes for a task outside a worker -- the
+  Refiner, a fan-out or consult synthesis -- goes through
+  `swarm/task_model.call_task_model` (`resilient_chat`: retries, failover,
+  the per-call ledger with the task's id as `thread_id`; bounded output and
+  deadline; the watchdog counts the Refiner as one more pipeline step), and
+  its tokens and cost join `total_tokens` / `total_cost`
+  (`PatternExecution.synthesis_tokens` / `synthesis_cost` into
+  `_finalize_task`). A Refiner that cannot answer leaves the unrefined result
+  with a WARNING and `kazma_swarm_failures_total{site="refiner"}`, never a
+  stand-in report. Gates: `tests/test_swarm_refiner.py` (no direct `.chat(`
+  in `swarm/` outside `worker.py`, the old Refiner as its control).
+- **Semantic routing has one embedding space** (SW-E10, decision D8: fixed,
+  2026-10-15). `swarm/semantic_router.py` embeds the task and each worker
+  profile with Kazma's embedder (`memory.embedder.get_embedder`) and compares
+  them exactly in the process -- no vector store, no default embedding
+  function, no other model (gate). A profile matches only when it stands out
+  from the others (`MATCH_FLOOR`, measured with bge-m3 on
+  `tests/fixtures/swarm_routing/`, `scripts/swarm_routing_bench.py`; the
+  nearest worker with no floor is the negative control); otherwise keywords
+  route, and the autoscaler takes what nothing matched. In a thread, within
+  `routing_engine.SEMANTIC_DEADLINE_S`; an embedder that is missing, failing,
+  slow or busy routes by keywords, said once at WARNING
+  (`site="semantic_routing"`). A DISPATCH stores in `task.workers` only the
+  worker that ran; the candidates are in `metadata.routing_diagnostics`.
+  Changing a profile's text, the dataset or the embedder's model needs the
+  vectors recorded again (`scripts/swarm_routing_bench.py vectors`). Gate:
+  `tests/test_swarm_semantic_routing.py`.
 - **`/api/swarm/*` has one role table** (`kazma_ui/swarm_panel/route_roles.py`,
   SW-S07): GET is any signed-in user, everything else admin, enforced by the
   routers' `RoleCheckedRoute`. On an install with platform users every swarm
@@ -735,8 +819,18 @@ its first 8+ characters, `resolve_ref`); listings group turns then steps
 same path): off the loop, never failing the turn, thinned in a long turn
 (`_capture_due`: every step to 20, every 10th after, always the last), and
 stamping `snapshot_id` only when the durable write succeeded (`capture`
-returns None on failure; `kazma_time_travel_capture_total{result}`). Budgets
-are enforced in SQLite on every save, oldest first: per step
+returns None on failure; `kazma_time_travel_capture_total{result}`). The
+step's insert and its eviction are ONE write transaction
+(`SnapshotStore.enforce_bounds(record, insert=True)`, the only call
+`capture` makes): a crash or an error leaves the step stored with its
+eviction, or not at all, and None means nothing was stored. As two
+transactions (`save`, then `enforce_bounds`) a kill between them left the
+turn one step over its cap until its next capture (31 of 30, found by the
+TT-G3 soak, 2026-10-15); `save` alone is for seeding a store in tests.
+Gate: `tests/test_time_travel_capture_atomic.py` (a real child killed inside
+and after the transaction; the two transactions as the negative control; no
+product code writes a step any other way). Budgets
+are enforced in SQLite on every capture, oldest first: per step
 (`max_snapshot_bytes`, 2 MB: a larger state is stored cut with
 `_time_travel_truncated` and can be read, never restored or forked), per turn
 (`max_per_turn`, first and newest), per chat (`max_snapshots`,
@@ -942,7 +1036,8 @@ swarm works with zero pre-registered workers.
   (user `models.defaults.<kind>` → heuristic → active). The selection never
   mutates the active profile. Env-lock (`KAZMA_MODEL`) always wins.
 - **Handoff cycle guards (§4) still apply** to auto-spawned instances — they are
-  regular `InProcessWorker`s once spawned. Idle-reap after 5 min;
+  regular `InProcessWorker`s once spawned, counted as their template, and a
+  handoff may name a template (an instance is spawned for it). Idle-reap after 5 min;
   `record_activity` refreshes the timer, and an instance with a dispatch in
   flight is never reaped (`SwarmWorker.in_flight`, SW-E12). Instances are named
   `<template>-pool-<boot tag>-<n>` (a new tag each start, so an earlier run's
@@ -962,6 +1057,19 @@ swarm works with zero pre-registered workers.
   operator's edits are saved to `<data dir>/swarm_templates.json`, which then
   replaces the shipped list -- writing them into the tracked file left a
   modified checkout that `git pull` refuses.
+- **An idle instance takes the next task before a new one is spawned**
+  (`AutoScaler._take`, for `maybe_scale` and `spawn_by_name`, 2026-10-15): no
+  dispatch in flight and no task already handed to it. A handed-out instance
+  is claimed (`_claims`) until its dispatch begins (`record_activity`; its
+  in-flight count covers it from then) or its breaker refuses it, else for
+  `_CLAIM_S` (60 s); a claimed instance is never reaped. The router matches instances by
+  their template's words, so before this a task the catch-all took never
+  reached an existing catch-all instance: each spawned a new one up to the
+  bound, then failed "No capable workers" until the idle ones were reaped (the
+  SQ01 soak found it). Gate: `tests/test_swarm_autoscaler_reuse.py` (never
+  reuse as the negative control). An open breaker is not dodged by spawning:
+  its instance is reused and refuses, as the breaker means (a lingering claim
+  as the control).
 
 ### 15. V2 Memory Worker & Schedulers (`kazma-core/kazma_core/memory/worker_bootstrap.py`)
 
@@ -1807,7 +1915,10 @@ drawing, the rest by extraction.
   facts superseded each other, and later non-Latin objects were rewritten to
   `entity`. ASCII ids are unchanged. Spellings that differ by vowel marks or
   letter forms meet in the alias hash (`documents.arabic.fold_for_search`),
-  never in the id. Service names (`current_facts`) and the same-words key
+  never in the id. An id is a tenant's: the key is `(tenant_id, id)` (M21,
+  §16's multi-tenant note), and a redirect (`canonical_entity_id`), a
+  protection (`entity_protection`), a count and a retire read the tenant's
+  own row. Service names (`current_facts`) and the same-words key
   (`graph_hygiene`) use it too. Rows the old rule wrote: `entity_repair`
   (`scripts/memory_entity_repair.py size`, then `apply` on a copy) quarantines
   each collapsed fact and queues its turn for the deep pass -- nothing is
@@ -2040,6 +2151,31 @@ sender died mid-send ends `unknown` (`delivery_unknown` on the job, alert
 daily digest show the outcome. Gate: `tests/test_cron_delivery_outbox.py`
 (the old deliver-then-finalize order is the negative control).
 
+**E2. Alerts go through an outbox too** (2026-10-15, found by the Stage 5
+soak). A change that needs an ops alert writes its `cron_alerts` row in its
+OWN transaction (`SQLiteCronStore._enqueue_alert`, called only inside
+`self._tx()`): a failed fire or a budget run out in `finish_fire`
+(`cron.job_failure` / `cron.job_failed`), a message ended undeliverable in
+`finish_delivery` (`cron.delivery_failed`), a send recovered `unknown` in
+`recover_deliveries` (`cron.delivery_unknown`). The scheduler drains it after
+the commit -- after a fire, after a delivery pass, at each poll and at start
+(`CronScheduler._drain_alerts`) -- into `ops_alerts.alert` (§33: no fourth
+notifier), and marks a row sent only after `alert` returned. A crash after the
+commit loses nothing; a crash between the alert and its mark raises it once
+more, the only duplicate. One pass at a time, a row whose mark failed is
+marked next pass without being raised again, and `stop()` waits for a pass in
+progress before it cancels. A row `ops_alerts` cannot raise stays queued with
+a WARNING and a backoff (`kazma_cron_alerts_pending` on /metrics,
+`alerts_pending` in readiness). Raised rows follow the job retention; one not
+yet raised is kept. A missed occurrence alerts only through its notice's
+delivery. Until then a delivery's alert was marked before it was raised and a
+fire's was raised after its commit: a crash in either window lost it. Gate:
+`tests/test_cron_alert_outbox.py` (a real child killed in each window of each
+gap, the old order as the negative control; the cron engine names
+`ops_alerts.alert` only in `CronScheduler._raise_alert`; no alert row outside
+its change's transaction). The soak kills in both windows and counts the
+recorded duplicates (`scripts/scheduled_soak.py`, `alert_redelivered`).
+
 **F. Missed is missed** (SCH-E06). A job due longer ago than its catch-up
 window does not run. The window is `cron.catchup_minutes` (default 60), or
 `KAZMA_CRON_STALE_HOURS` when that is unset; a window given at booking wins
@@ -2144,18 +2280,35 @@ id reads as not found (`memory_api._row_tenant_ok`,
 binding) is the install's view (`_tenant_clause`). Gate:
 `tests/test_memory_routes_tenant_scope.py` -- every route, enumerated from the
 app, called as one tenant with another's ids; nothing of the other shown or
-changed, and the caller's own rows shown. Note: `entities.id` is a global PK,
-not per-tenant -- so the boundary is held by rules (Memory audit M21,
-2026-10-13): entity creation never appends to another tenant's row
-(`entity_resolution._create_entity`), the hub sync (`self_hub.ensure_user_hub`)
-writes only the caller's own `user` row (the install's tenant may write any),
-rename promotes only a node of the caller's own facts (an id another tenant
-holds and an unused one both answer not_found), and the agent merge tool asks
-the routes' tenant rule. Gate: `tests/test_memory_entity_tenancy.py` (the four
-witnesses inverted; every agent tool taking an id, as another tenant, leaves
-beta's rows unchanged; the install's tenant as negative control). Keying
-entities by `(tenant_id, id)` -- every entity statement and a migration of
-non-default tenants' rows -- is not built.
+changed, and the caller's own rows shown. **Entities are keyed by
+`(tenant_id, id)`** (Memory audit M21, 2026-10-15, `memory/entity_key.py`):
+each tenant holds its own row of an id -- its own `kazma`, its own `user` hub
+(`self_hub.ensure_user_hub` writes the caller's) -- and `entity_merges` names
+its entities by the pair (composite foreign keys). Every statement on
+`entities`, `entity_merges` or `entity_merges_archive` names its tenant, and
+one that picks a row by id names it in that WHERE; a statement that reads
+across tenants on purpose is declared with why. Which row a request means is
+one answer, `entity_key.entity_owner`: a tenant's own; the install's view
+(`default`) its own first, else the one tenant holding the id (several, and
+none of the install's: not found). A merge keeps to the source's tenant (a
+target of another tenant is not found), and the belief rewire and the ledger
+row are that tenant's. A store made before then keeps the `id` key until the
+operator runs `scripts/memory_entity_key.py` (`size` reads only; `apply --db
+--yes` copies to `<db>.pre_entity_key` first, then rebuilds both tables in one
+transaction -- every row, id, tenant and rowid kept, the search index rebuilt
+-- idempotent); every statement works on both keys (on the old one the
+2026-10-13 rules hold the boundary: creation never writes another tenant's
+row, rename promotes only a node of the caller's own facts, an id another
+tenant holds and an unused one both answer not_found), and memory health says
+which key the store has (`entity_key`). The Postgres mirror holds facts and
+memories, never entities. Gates: `tests/test_memory_entity_key.py` (the source
+gate, planted old statements as its control; two tenants holding one id
+through every memory route, enumerated from the app, and every agent memory
+tool, from the registry, with an owner lookup answering the other tenant and
+the old key as negative controls; the migration on a copy of a store the
+product's writers seeded under the old key, then recall, the graph and a
+merge; the script), `tests/test_memory_entity_tenancy.py` (the four witnesses
+inverted).
 
 ### 17. Lifecycle Status Notifier (`kazma-core/kazma_core/lifecycle_notifier.py`)
 
@@ -2244,22 +2397,44 @@ first, then overwrites the key). This is the #1 silent-breakage mode of a
 copy-paste migration.
 
 **B. Embedded absolute paths are rewritten to the target root.** A Linux
-source (`/home/user/kazma`) has its workspace root baked into
-`workspaces.root_path`, `chat_sessions.messages`, memory entities/episodes,
-cron prompts. The importer rewrites them all to the target path across OS
-separator conventions (`migration/path_rewrite.py`). Time-travel snapshots
-(`snapshots.db`) are no longer carried at all (2026-10-14, Time Travel audit
-TT-05: a copy elsewhere would bring back chats the owner deleted or forgot;
-§12, `store_registry`: `machine`). Three correctness properties: (1)
-`PathMap` is ordered **longest-source-first** so `/home/u/kazma` doesn't
-partially rewrite `/home/u/kazma-repos/ShipX`; (2) substitution is
-byte-level substring on the column text (NOT a JSON parse -- paths appear
-anywhere), with forward-slash, backslash AND the JSON-escaped Windows form
-(`C:\\Users\\...`, every backslash doubled inside a JSON column; TT-09: a
-Windows-source migration left those paths on the old machine) handled. No
-false positives (e.g. `barcode` ≠ `code`); (3) a JSON column whose rewritten
-text would no longer parse keeps its original text (`_parses`). Workspace
-root rewrite also fires `notify_root_changed()` so MCP rebinds.
+source (`/home/user/kazma`) has its workspace root and data dir baked into
+stored text. Before the swap the importer rewrites them, in the staged
+copies, to the target's (`build_path_map`: the source workspace root and the
+source data dir, each to the target's; `migration/path_rewrite.py`), in
+exactly these columns (`importer._PATH_REWRITE_TARGETS`):
+`workspaces.root_path` (exported as `workspaces.db`, merged into
+`settings.db` after the swap); `sessions.messages` (`chat_sessions.db`) and
+`spool.payload` (`chat_sessions_spool.db`); in `memory_state.db`
+`entities.metadata_json`, `episodes.user_text`, `episodes.assistant_text`,
+`episodes.summary_text`, `episodes.metadata_json`, `beliefs.object`,
+`beliefs.metadata_json`, `procedural_dags.preconditions_json`,
+`procedural_dags.dag_steps_json`, `procedural_dags.postconditions_json`; in
+`memory_ops.db` `memory_audit_log.reason`,
+`memory_audit_log.state_before_json`, `memory_audit_log.state_after_json`;
+`cron_jobs.prompt` (`cron.db`); `agent_artifacts.value`
+(`agent_artifacts.db`); `task_ledgers.goal`, `task_ledgers.next_action`,
+`task_ledgers.steps`, `task_ledgers.findings` (`task_ledgers.db`). The
+import report counts the rows changed per database (`rows_rewritten`).
+Nothing else is rewritten: `config.yaml` is imported as exported, the
+document store holds no paths, and time-travel snapshots (`snapshots.db`)
+are not carried at all, so none of their columns is rewritten (2026-10-14,
+Time Travel audit TT-05: a copy elsewhere would bring back chats the owner
+deleted or forgot; §12, `store_registry`: `machine`). Three correctness
+properties: (1) `PathMap` is ordered **longest-source-first** so
+`/home/u/kazma` doesn't partially rewrite `/home/u/kazma-repos/ShipX`; (2)
+substitution is byte-level substring on the column text (NOT a JSON parse --
+paths appear anywhere), of the forward-slash form, the backslash form AND
+the JSON-escaped Windows form (`C:\\Users\\...`, every backslash doubled
+inside a JSON column; TT-09: a Windows-source migration left those paths on
+the old machine), whose rest is written in the target's separators (`/` for
+a POSIX target, still escaped for a Windows one); a match is anchored at
+path boundaries, so no false positives (`/home/u/kazma-backup` is not
+`/home/u/kazma`, `barcode` ≠ `code`); (3) a row that parsed as JSON and
+whose rewritten text would not keeps its original text and is counted in a
+WARNING (`_parses`). Gates: `tests/test_path_rewrite.py`,
+`tests/test_time_travel_bounds.py` (both directions with the old rewrite as
+the control; this list against the importer's). Workspace root rewrite also
+fires `notify_root_changed()` so MCP rebinds.
 
 **C. Import is atomic — never corrupt the target mid-flight.** The importer
 (`migration/importer.py:import_bundle`) stages to `kazma-data/.migrate-staging-<ts>/`,
@@ -2270,8 +2445,8 @@ staging dir is preserved on failure. `verify` runs as a dry-run inside every
 import and is available standalone.
 
 **Scope — SQLite + Postgres (v2).** The bundle always carries the SQLite
-files (vault, memory, snapshots, cron — these are SQLite even under a
-Postgres backend). When the source is Postgres, it ALSO carries a
+files (vault, memory, cron and the other stores `store_registry` carries —
+these are SQLite even under a Postgres backend). When the source is Postgres, it ALSO carries a
 ``data/postgres.dump`` produced by ``pg_dump -Fc`` containing the
 shared-state tables (settings, chat sessions, checkpoints, swarm tasks).
 The exporter reads via the backend-agnostic data-access layer for the
@@ -2288,7 +2463,7 @@ clear install hint. Override the container name with ``KAZMA_DB_CONTAINER``.
 backend: if Postgres, it ``pg_restore`` the dump (``--clean --if-exists``
 idempotent; schema self-recreates, target DB can be empty) into
 ``KAZMA_DATABASE_URL``, then proceeds with the SQLite-file restore +
-path-rewrite for vault/memory/snapshots. If the target is SQLite but the
+path-rewrite of the staged SQLite stores (B). If the target is SQLite but the
 bundle has a Postgres dump, it **aborts with a clear error** rather than
 silently importing partial data (the SQLite files alone lack chat history,
 settings, checkpoints that live in Postgres). No SQLite↔Postgres content
@@ -2298,7 +2473,9 @@ translation is attempted — the bundle is source-backend-shaped.
 vault-key fingerprint, table counts, source workspace root), `meta.env`
 (vault key + public url), `config.yaml` (ConfigStore.export_yaml — secrets
 are `vault://` refs, not plaintext), `vault.db` (encrypted, under `data/`),
-the 13 data SQLite files under `data/`, `data/postgres.dump` (only when the
+every other SQLite store `store_registry` says a bundle carries, under
+`data/` (`bundle_store_names`, plus the `checkpoints_<tenant>.db` family
+members present), `data/postgres.dump` (only when the
 source was Postgres — custom format, restored via pg_restore), `pathmap.json`,
 and verbatim `assets/`: every other entry of the data dir that
 `store_registry.carried_in_bundle` says travels (2026-10-01) -- the swarm's
@@ -2980,7 +3157,16 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   corrects their own facts. Gate: `tests/test_memory_provenance.py` (the
   R02 witnesses inverted, EN/AR remember requests, the injection corpus,
   the same-turn rule, the old gate as negative control, every product site
-  writing `user_explicit` declared as a user channel).
+  writing `user_explicit` declared as a user channel). The rows the old tools
+  wrote are relabelled by `scripts/memory_relabel_provenance.py`
+  (`memory/provenance_relabel.py`, 2026-10-15; `size` names ids, never
+  values; `apply --db --yes` copies to `<db>.pre_relabel` first): a
+  `user_explicit` fact a memory tool's note names (or, before notes named
+  their chat, holds its value within seconds) or that names a chat turn
+  becomes `agent_asserted`, unless the Memory page edited it, an operator
+  action named it, or its turn asked to remember those words (today's rule);
+  the page's links and the V1 backfill are left. One audit row per fact; the
+  live run is the owner's. Gate: `tests/test_memory_relabel_provenance.py`.
 - **Rewrite-on-allow**: the gate's fire_at wins over the model's args — do not
   let the original (possibly wrong) `timing` reach the scheduler for remind.
   The fire_at is one instant in the operator's zone, and a recurrence is kept
@@ -3800,6 +3986,54 @@ module was deleted and the import's `except` said "chromadb not installed".
   by name and the call retried once (`VectorStore._reopen_if_missing`). Only
   `knowledge_index_for` constructs an index in product code (gate in
   `tests/test_knowledge_vectors.py`).
+- **Chroma's local store, kept honest** (`memory/chroma_local.py`, KB-Q01,
+  2026-10-15; chromadb 1.5.9, the newest release that day, has all three):
+  - *Dropped vectors leave the disk.* `delete_collection` removes the catalog
+    rows and keeps the segment folder (~40 MB per 10k chunks): 17 folders in a
+    4-minute soak. `remove_orphan_segment_folders` removes the UUID-named
+    folders no row of `chroma.sqlite3`'s `segments` owns (folders listed
+    BEFORE the catalog is read; an unreadable catalog removes nothing; a
+    non-UUID folder is never touched) -- at client start, before any
+    collection opens (`_shared_client`), after every drop
+    (`VectorStore._drop_collection`, the ONE drop path: gate in
+    `tests/test_knowledge_vector_lifecycle.py`), and at the end of each
+    repair pass (`release_dropped_vectors`). On Windows a folder whose index
+    this process loaded is held open until the client is closed: the pass
+    then closes it -- a `_Gate` per client: every Chroma call of a
+    `VectorStore` holds it shared (an embedding runs before it, so a model
+    call never holds up a close), the close exclusive, so it waits for calls
+    in flight and holds new ones -- removes the folders and bumps the
+    client's generation; every store re-opens on its next call. `atexit`
+    does the same.
+  - *An evicted index is not lost.* Chroma's HNSW pool holds
+    `max_file_handles // 5` indexes over 64 shards (102 on Windows: one or two
+    a shard) and writes an index to disk only every `sync_threshold` (1,000)
+    records; two collections in one shard evict each other, an evicted small
+    index existed only in memory, and the process had already replayed that
+    collection's log -- every read failed "Nothing found on disk" until a
+    restart (5 of 20 short soaks). `raise_stream_limits` raises what Chroma
+    sizes the pool from before the first client (Windows: msvcrt 2,048 ->
+    pool 409, ucrtbase 8,192 for the index files' streams; POSIX: soft
+    NOFILE to 10,240 under the hard limit; never lowers). A read that still
+    finds an index lost (`VectorStore._hnsw_read`) deletes the id
+    `kazma:reload-index`: the push makes Chroma rebuild the index from its
+    write log before the read is asked again (WARNING,
+    `kazma_kb_vector_index_reloads_total`). A newer chromadb, or
+    `hnsw:sync_threshold`, does not fix it: none is newer, and the threshold's
+    minimum is 2 (a one-chunk library stays memory-only). Left: past 6
+    indexes in one shard (on Windows, likely only from about 100 libraries)
+    an evicted index of 1,000+ records reloads from disk without its records
+    since the last persist until the collection's next write replays its
+    log -- no error to catch.
+  - *The index is built for recall* (`_HNSW`: 48 neighbours, construction
+    400, search 256). Chroma's defaults (16/100/100) returned 31-39 of 40
+    planted answers at 10k chunks while exact search ranked all 40 first;
+    these return 40/40 in EN, AR and mixed in 11 of 12 harness measurements
+    (39 in one: Chroma builds in parallel) for ~1 ms more a query. An older
+    collection's search breadth is raised by `modify` (applies at the index's
+    next load) and its graph rebuilt by the repair pass from its own vectors
+    (`VectorStore.rebuild_graph`: copy to `<name>.rebuild`, counts compared,
+    old dropped, copy renamed; nothing embedded again).
 
 **G. The Knowledge store and its surfaces** (Knowledge audit 2026-10-13,
 tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
@@ -3819,6 +4053,24 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   ends `partial`. Chunk ids carry the position (`make_chunk_id`, KB-E05). The
   FTS is keyed by rowid and deleted by `rowid AND chunk_id` (KB-E06); library
   deletes run in 500-row batches with the lock released between them.
+- **A deleted library's words leave the index file** (KB-Q01, 2026-10-15):
+  FTS5 keeps a deleted row's words in its older segments until a merge
+  reaches them -- every planted word of a deleted 10k library was still in
+  `knowledge_chunks_fts_data`. `delete_library` ends with
+  `purge_search_index`: an FTS5 `merge` of every segment (memory's M01
+  purge, bounded: `_PURGE_STEP_PAGES` = 1,000 pages a transaction, the lock
+  released between steps). A replaced page or document version keeps its old
+  words until FTS5's own merges (unsearchable; a full rewrite per page would
+  cost the whole index each time). `tests/test_knowledge_store.py`.
+- **A coverage record names the vector store it measured** (KB-Q01): the
+  record is in knowledge.db (backed up), the vectors are not, and a restored
+  database reported "ok, 10,000 of 10,000" before the first pass with no
+  vector there. `knowledge_vector_status.store_id` is the id the sweep read
+  from `vector_memory/kazma_vector_store_id` (`chroma_local.vector_store_id`,
+  written at the directory's first client start); `KnowledgeIndex.health`
+  shows an ok/rebuilding record of another store, or of none (a row from
+  before the column), as `unknown` -- read from that file, no client, no
+  model (KB-S15). `tests/test_knowledge_vectors.py`.
 - **Delete goes through `knowledge_lifecycle.delete_library`** (KB-E08): 409
   while a crawl owns the library, the documents it holds unindexed through
   the Documents service first, then vectors, chunks and the fetched pages
@@ -3828,9 +4080,55 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   turn's note at iteration 0; the transports inject nothing. The "Memory
   used" record lists exactly the injected chunks (KB-S02), even with recall
   suppressed. `knowledge_search` keeps its scaffolding outside the fence and
-  the page's text inside (KB-S01). Federated search ranks each store on its
+  the page's text inside (KB-S01); so does the turn note since 2026-10-15
+  (`KnowledgeInject.block` fenced, then `.footer` -- the library footer and
+  the instruction to cite it -- after the fence: inside, the fence told the
+  model to obey none of it; the note still opens with the fence, its
+  `turn_notes` kind). Federated search ranks each store on its
   own budget. Stored URLs are http(s) only (`validate_web_url`, every
   writer), rendered through `safeHref` (KB-S09).
+- **A search shows only what is about the question** (KQ01, 2026-10-15,
+  `knowledge_index._judge`): the tool, `/kb search`, the page's test search
+  and auto-inject all rank on memory's EVIDENCE rule -- meaning similarity
+  above the question's background (meaning ranks 4-15) plus content-word
+  coverage (`memory/query_terms`) -- with a floor (0.08), a gap (0.15) and
+  memory's words-only rule when no vector judges; `score` is that evidence
+  and `strength` "weak" is shown as possibly related. The fusion ranked by
+  position and always showed something: five hits and three injected chunks
+  for every question nothing answers. A keyword-only candidate is measured
+  by its stored vector (`VectorStore.similarities`); the question is
+  embedded once per search. A document-scoped search is not judged.
+- **Retrieval quality is measured and ratcheted** (KQ01):
+  `stores/knowledge_benchmark.py` publishes a versioned EN/AR/mixed corpus
+  (`knowledge_benchmark_data/dataset.json`, built by
+  `scripts/knowledge_bench.py build`) into a PRIVATE store through the
+  product's publication path and asks every question through
+  `search_all_sync` (the tool) and `build_knowledge_inject(store=)` (the turn
+  note), with meaning (`hybrid`) and without (`keyword`), tuning and held-out
+  questions apart. CI replays bge-m3's recorded vectors
+  (`tests/fixtures/knowledge_bench/vectors.npz`) through an exact in-process
+  client registered for the private vector folder only
+  (`vector_store_global.directory_client`; `run --chroma` gave the same
+  scores on chromadb 1.5.9, `run --real` on the live model). The scores are a
+  ratchet stamped with the dataset version (`thresholds.json`; `lock` raises
+  and refuses to lower, `lock --rebaseline` for a new version only). Gate:
+  `tests/test_knowledge_benchmark.py` (the pre-KQ01 fusion order and a search
+  that shows nothing as negative controls). Measured numbers: the guide's
+  "Benchmark report".
+- **A crawl seeded on a private network is refused at admission**
+  (2026-10-15, `knowledge_ingest._admit_public_seed`, last check of
+  `_prepare_ingest_site`, before the journal row; every caller creates the
+  library only after it returns): the check acquisition makes
+  (`dns_worker.validate_public_url`, never `to_thread(validate_url)`),
+  `security_blocked` for a private, loopback or link-local address,
+  `connect_error` (transient) for a name that resolves to nothing
+  (`ssrf.UnresolvedHostError`). Until then the seed was admitted, the crawl
+  refused it before discovery and the library stayed empty with no refusal
+  shown. Gate: `tests/test_knowledge_crawl_admission.py` (every surface --
+  Web crawl and refresh, `/kb crawl|refresh|add`, both agent tools, a page
+  ingest -- and `STARTERS`, the class gate: a new crawl starter must be
+  declared and admitted before its library exists; the old admission as the
+  negative control), `tests/e2e/test_knowledge_outcomes_browser.py` (EN/AR).
 - **Surfaces**: `/api/kb/*` refuses with stable codes (`KB_ERROR_CODES`,
   `knowledge.err.<code>` EN+AR; KB-S05) and reads bodies under 64 KiB with
   bounded models (KB-S13); every KB surface refuses an install with platform
@@ -3846,6 +4144,17 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   its negative control.
 - Gate: `tests/test_knowledge_meaning_search.py` (a fake chromadb in CI, the
   real one where the `rag` extra is installed).
+- KB-Q01's harness is `scripts/knowledge_soak.py` (`scale`: ingest, search,
+  idle-sweep, restore re-embed and delete measured per size and language on
+  named hardware; `soak`: crawls, refreshes, documents, deletes, model
+  switches, crashes, a restart every cycle, checked from the stores), held by
+  `tests/test_knowledge_soak_harness.py` (its runs need the real chromadb;
+  the negative controls run everywhere). It runs strict since the KB-Q01
+  fixes: a dropped collection's folder, a deleted library's words in the
+  keyword index, a restored coverage record claiming lost vectors and a
+  collection a process cannot read are violations (`--tolerate-*` exists
+  only to measure an older build); an index Chroma lost and the product
+  rebuilt is a counted finding.
 
 ### 25. Long-Task Continue Protocol & Partial Pause (`agent/long_task.py`)
 
@@ -3881,6 +4190,9 @@ executing commands after a mission ended Partial) — full diagnosis in
   runs fresh").
 - `/long off` (or `/abort`) remains the immediate manual clear on any
   build.
+- An active `/long` (budget, mission or `/unrestricted`) lifts the turn's
+  wall-clock limit for its chat on every surface; a paused one does not
+  (§31, `agent/turn_budget.py`).
 - **The gateway does both through `_settle_recursion_partial`**
   (`agent_handler/graph.py`), and a failure there is a WARNING. Inline, it
   imported a name removed 2026-09-04 inside `except Exception: pass`, so
@@ -4638,6 +4950,28 @@ cost are the sum of the per-call ledger for the turn id
 the segment's calls. A new LLM call site inside a turn records into the
 ledger (the respond synthesis did not, 2026-09-26). Gate:
 `tests/test_turn_usage.py` (through the real streamer).
+
+**A turn's time limit is one rule on every surface**
+(`kazma_core/agent/turn_budget.py`, 2026-10-15; full audit 2026-09-30: the
+chat apps had `KAZMA_TURN_TIMEOUT_SECONDS`, the web none, the agent runner a
+600 s copy, an approval's resume no limit anywhere). `resolve_turn_budget` is
+the one answer: a chat with `/long` active has none (`long_task` defines no
+wall-clock budget; its step budget and the mission's hard wall still bound
+it), else the variable when set, else `agent.turn_timeout_seconds` (Settings
+-> System), else none; `0` is none. It bounds each RUNNING segment: a new
+message or an approval's resume, until it answers or pauses -- the wait for
+an approval is never counted, and the non-stop envelope's recovery runs
+inside it. Every graph run sits in `turn_segment_budget` (`run_agent_turn`,
+`turn_runtime.invoke_turn`, the SSE pump, in the task that reads the graph);
+past it the run is cancelled as Stop cancels it, the checkpoint gets the
+honest reply as the turn's last message (`turn_failed`, nothing pending, as
+`respond`), so `close_turn`, the `done` frame's `content`, the gateway's
+reply and a reload all agree, and `turn.timed_out` is paged once. Only
+`/compact` runs without it (`budget=False`, declared). Gates:
+`tests/test_turn_budget.py` (one reader of the variable and the setting;
+every graph run inside the budget; each with its negative control),
+`tests/e2e/test_turn_time_limit.py` (the real route; the old pump as the
+control).
 
 **A plan feeds only the running turn.** `_paintTextSlot` paints every turn,
 finished ones on every reload; plan ingestion there logged progress on the

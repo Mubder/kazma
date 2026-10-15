@@ -74,8 +74,9 @@ def slug(text: str) -> str:
     return s
 
 
-def canonical_entity_id(conn, eid: str, *, _max_chain: int = 8) -> str:
-    """Follow ``metadata_json.merged_into`` to the terminal canonical id.
+def canonical_entity_id(conn, eid: str, *, tenant_id: str = "default", _max_chain: int = 8) -> str:
+    """Follow ``metadata_json.merged_into`` to the terminal canonical id, among
+    *tenant_id*'s entities (keyed by ``(tenant_id, id)``, Memory audit M21).
 
     Merges soft-retire the source entity by writing ``merged_into`` into its
     metadata. Nothing used to READ this, so extraction kept minting beliefs
@@ -98,7 +99,7 @@ def canonical_entity_id(conn, eid: str, *, _max_chain: int = 8) -> str:
         seen.add(cur)
         try:
             row = conn.execute(
-                "SELECT metadata_json FROM entities WHERE id=?", (cur,)
+                "SELECT metadata_json FROM entities WHERE id=? AND tenant_id=?", (cur, tenant_id or "default")
             ).fetchone()
         except Exception:
             break
@@ -400,18 +401,19 @@ def _create_entity(
     vector: bytes | None = None,
 ) -> None:
     aliases = [name]
+    tenant = tenant_id or "default"
     cur = conn.execute(
         """INSERT OR IGNORE INTO entities
            (id, tenant_id, type, name, aliases_json, is_high_stakes)
            VALUES (?, ?, ?, ?, ?, ?)""",
-        (canonical, tenant_id, entity_type, name, json.dumps(aliases), is_high_stakes),
+        (canonical, tenant, entity_type, name, json.dumps(aliases), is_high_stakes),
     )
     if cur.rowcount == 1:
         # Fresh row — seed aliases with name + alias hash so tier-1 matches
         # find it.
         conn.execute(
-            "UPDATE entities SET aliases_json=? WHERE id=?",
-            (json.dumps([name, ahash]), canonical),
+            "UPDATE entities SET aliases_json=? WHERE id=? AND tenant_id=?",
+            (json.dumps([name, ahash]), canonical, tenant),
         )
     else:
         # Entity already existed — APPEND the alias hash if absent instead of
@@ -419,17 +421,18 @@ def _create_entity(
         # clobbered any prior aliases with [name, ahash] whenever ahash was
         # absent (audit finding).
         row = conn.execute(
-            "SELECT aliases_json, tenant_id FROM entities WHERE id=?", (canonical,)
+            "SELECT aliases_json FROM entities WHERE id=? AND tenant_id=?", (canonical, tenant)
         ).fetchone()
-        if row is not None and str(row["tenant_id"] or "default") != (tenant_id or "default"):
-            # Entity ids are global, rows are not: another tenant holds this
-            # id, and nothing of this tenant's is written into its row (Memory
-            # audit M21 -- the alias hash used to be appended to it). This
-            # tenant's facts keep the id; its graph shows the node from them.
+        if row is None:
+            # A store still keyed by id alone (memory/entity_key.py), where
+            # another tenant holds this id: nothing of this tenant's is written
+            # into its row (Memory audit M21 -- the alias hash used to be
+            # appended to it). The tenant's facts keep the id; the migration
+            # lets the next fact that names it create the tenant's own row.
             conn.commit()
             return
         try:
-            existing = json.loads((row["aliases_json"] if row else None) or "[]")
+            existing = json.loads(row["aliases_json"] or "[]")
         except Exception:
             existing = []
         if not isinstance(existing, list):
@@ -437,8 +440,8 @@ def _create_entity(
         if ahash not in existing:
             existing.append(ahash)
             conn.execute(
-                "UPDATE entities SET aliases_json=? WHERE id=?",
-                (json.dumps(existing), canonical),
+                "UPDATE entities SET aliases_json=? WHERE id=? AND tenant_id=?",
+                (json.dumps(existing), canonical, tenant),
             )
     if vector:
         from kazma_core.memory.embedder import get_embedding_model_name
@@ -446,7 +449,7 @@ def _create_entity(
         conn.execute(
             "UPDATE entities SET embedding = ?, embedding_model_version = ? "
             "WHERE id = ? AND tenant_id = ? AND embedding IS NULL",
-            (vector, get_embedding_model_name() or "", canonical, tenant_id or "default"),
+            (vector, get_embedding_model_name() or "", canonical, tenant),
         )
     conn.commit()
 
@@ -479,7 +482,9 @@ def _auto_merge(
         (target_id, tenant_id, entity_type, target_id),
     )
     # Append the new alias
-    row = conn.execute("SELECT aliases_json FROM entities WHERE id=?", (target_id,)).fetchone()
+    row = conn.execute(
+        "SELECT aliases_json FROM entities WHERE id=? AND tenant_id=?", (target_id, tenant_id)
+    ).fetchone()
     try:
         aliases = json.loads(row["aliases_json"] if row else "[]")
     except Exception:
@@ -488,8 +493,8 @@ def _auto_merge(
         if alias and alias not in aliases:
             aliases.append(alias)
     conn.execute(
-        "UPDATE entities SET aliases_json=? WHERE id=?",
-        (json.dumps(aliases), target_id),
+        "UPDATE entities SET aliases_json=? WHERE id=? AND tenant_id=?",
+        (json.dumps(aliases), target_id, tenant_id),
     )
     if new_id and new_id != target_id:
         conn.execute(
@@ -571,30 +576,18 @@ def list_pending_merges(
     off = max(0, int(offset or 0))
     lim = max(1, min(limit, 200))
     try:
-        if tenant_id:
-            rows = conn.execute(
-                """
-                SELECT id, tenant_id, source_entity_id, target_entity_id,
-                       status, merge_tier, confidence, requested_at, metadata_json
-                FROM entity_merges
-                WHERE status = 'pending' AND tenant_id = ?
-                ORDER BY requested_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (tenant_id, lim, off),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT id, tenant_id, source_entity_id, target_entity_id,
-                       status, merge_tier, confidence, requested_at, metadata_json
-                FROM entity_merges
-                WHERE status = 'pending'
-                ORDER BY requested_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (lim, off),
-            ).fetchall()
+        # ``tenant_id`` None: every tenant's (the install's own view).
+        rows = conn.execute(
+            """
+            SELECT id, tenant_id, source_entity_id, target_entity_id,
+                   status, merge_tier, confidence, requested_at, metadata_json
+            FROM entity_merges
+            WHERE status = 'pending' AND (? IS NULL OR tenant_id = ?)
+            ORDER BY requested_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (tenant_id or None, tenant_id or None, lim, off),
+        ).fetchall()
         return [dict(r) for r in rows]
     except Exception:
         logger.debug("[entity_resolve] list_pending failed", exc_info=True)
@@ -608,15 +601,10 @@ def count_pending_merges(
 ) -> int:
     """Total pending merge count (for the pager's 'of N')."""
     try:
-        if tenant_id:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM entity_merges WHERE status = 'pending' AND tenant_id = ?",
-                (tenant_id,),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM entity_merges WHERE status = 'pending'"
-            ).fetchone()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM entity_merges WHERE status = 'pending' AND (? IS NULL OR tenant_id = ?)",
+            (tenant_id or None, tenant_id or None),
+        ).fetchone()
         return int(row[0]) if row else 0
     except Exception:
         logger.debug("[entity_resolve] count_pending failed", exc_info=True)
@@ -628,21 +616,28 @@ def decide_entity_merge(
     merge_id: str,
     *,
     approve: bool,
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
-    """Approve or reject a pending entity merge. Returns status dict."""
+    """Approve or reject a pending entity merge. Returns status dict.
+
+    The merge row names its tenant, and every entity it touches is that
+    tenant's (entities are keyed by ``(tenant_id, id)``, Memory audit M21).
+    *tenant_id*, when given, is the caller's: another tenant's row reads as
+    not found. ``None``: the install's own view (the memory worker)."""
     try:
         row = conn.execute(
-            "SELECT * FROM entity_merges WHERE id=? AND status='pending'",
-            (merge_id,),
+            "SELECT * FROM entity_merges WHERE id=? AND status='pending' AND (? IS NULL OR tenant_id = ?)",
+            (merge_id, tenant_id or None, tenant_id or None),
         ).fetchone()
         if not row:
             return {"ok": False, "error": "not_found_or_resolved"}
+        merge_tenant = str(row["tenant_id"] or "default")
         # M-13: explicit self-merge guard (API/tool layers had one; this
         # decision path did not).
         if str(row["source_entity_id"] or "") == str(row["target_entity_id"] or ""):
             conn.execute(
-                "UPDATE entity_merges SET status='rejected', resolved_at=? WHERE id=?",
-                (time.time(), merge_id),
+                "UPDATE entity_merges SET status='rejected', resolved_at=? WHERE id=? AND tenant_id=?",
+                (time.time(), merge_id, merge_tenant),
             )
             conn.commit()
             return {"ok": False, "error": "self_merge_refused", "merge_id": merge_id}
@@ -652,10 +647,10 @@ def decide_entity_merge(
             target_id = row["target_entity_id"]
             # Merge aliases + redirect beliefs (same as worker path)
             src = conn.execute(
-                "SELECT aliases_json, name FROM entities WHERE id=?", (source_id,)
+                "SELECT aliases_json, name FROM entities WHERE id=? AND tenant_id=?", (source_id, merge_tenant)
             ).fetchone()
             tgt = conn.execute(
-                "SELECT aliases_json FROM entities WHERE id=?", (target_id,)
+                "SELECT aliases_json FROM entities WHERE id=? AND tenant_id=?", (target_id, merge_tenant)
             ).fetchone()
             if src and tgt:
                 try:
@@ -672,22 +667,19 @@ def decide_entity_merge(
                 if src["name"] and src["name"] not in tgt_aliases:
                     tgt_aliases.append(src["name"])
                 conn.execute(
-                    "UPDATE entities SET aliases_json=? WHERE id=?",
-                    (json.dumps(tgt_aliases), target_id),
+                    "UPDATE entities SET aliases_json=? WHERE id=? AND tenant_id=?",
+                    (json.dumps(tgt_aliases), target_id, merge_tenant),
                 )
-                # Scope redirects to THIS merge's tenant. ``entities.id`` is a
-                # GLOBAL primary key (AGENTS.md §16), so an unscoped
-                # ``UPDATE beliefs SET subject=? WHERE subject=?`` rewrites EVERY
-                # tenant's beliefs pointing at this entity — irreversible
-                # cross-tenant graph corruption (audit finding).
-                _merge_tenant = row["tenant_id"]
+                # Every redirect is THIS merge's tenant's: an unscoped
+                # ``UPDATE beliefs SET subject=? WHERE subject=?`` rewrote
+                # every tenant's beliefs naming the id (audit finding).
                 conn.execute(
                     "UPDATE beliefs SET subject=? WHERE subject=? AND tenant_id=?",
-                    (target_id, source_id, _merge_tenant),
+                    (target_id, source_id, merge_tenant),
                 )
                 conn.execute(
                     "UPDATE beliefs SET object=? WHERE object=? AND tenant_id=?",
-                    (target_id, source_id, _merge_tenant),
+                    (target_id, source_id, merge_tenant),
                 )
                 # Soft-retire source (keep row — entity_merges FKs still reference it)
                 conn.execute(
@@ -696,8 +688,8 @@ def decide_entity_merge(
                          COALESCE(NULLIF(metadata_json,''), '{}'),
                          '$.merged_into', ?
                        )
-                       WHERE id = ?""",
-                    (target_id, source_id),
+                       WHERE id = ? AND tenant_id = ?""",
+                    (target_id, source_id, merge_tenant),
                 )
                 # M-06: the rewire moved N beliefs between source and target —
                 # refresh both entities' materialized counts (they are sticky
@@ -706,19 +698,19 @@ def decide_entity_merge(
                     from kazma_core.memory.entity_counts import recompute_entity_counts
 
                     recompute_entity_counts(
-                        conn, [source_id, target_id], tenant_id=_merge_tenant, neighbours=True
+                        conn, [source_id, target_id], tenant_id=merge_tenant, neighbours=True
                     )
                 except Exception:
                     logger.debug("[entity_resolve] merge count recompute skipped", exc_info=True)
             conn.execute(
-                "UPDATE entity_merges SET status='approved', resolved_at=? WHERE id=?",
-                (now, merge_id),
+                "UPDATE entity_merges SET status='approved', resolved_at=? WHERE id=? AND tenant_id=?",
+                (now, merge_id, merge_tenant),
             )
             conn.commit()
             return {"ok": True, "status": "approved", "merge_id": merge_id}
         conn.execute(
-            "UPDATE entity_merges SET status='rejected', resolved_at=? WHERE id=?",
-            (now, merge_id),
+            "UPDATE entity_merges SET status='rejected', resolved_at=? WHERE id=? AND tenant_id=?",
+            (now, merge_id, merge_tenant),
         )
         conn.commit()
         return {"ok": True, "status": "rejected", "merge_id": merge_id}
@@ -731,12 +723,14 @@ def preserve_merge_ledger(
     conn: sqlite3.Connection,
     entity_id: str,
     *,
+    tenant_id: str = "default",
     reason: str = "entity_delete",
 ) -> int:
-    """Copy ``entity_merges`` rows for ``entity_id`` into the archive table.
+    """Copy *tenant_id*'s ``entity_merges`` rows for ``entity_id`` into the
+    archive table.
 
-    Entity DELETE has to drop live ledger rows (SQLite FK to ``entities.id``).
-    Archiving first keeps the quarantine audit trail (M-14). Returns the
+    Entity DELETE has to drop live ledger rows (SQLite FK to the entity's
+    key). Archiving first keeps the quarantine audit trail (M-14). Returns the
     number of rows copied. Caller still DELETEs from ``entity_merges``.
     """
     eid = (entity_id or "").strip()
@@ -754,9 +748,9 @@ def preserve_merge_ledger(
                    merge_tier, confidence, requested_at, resolved_at, metadata_json,
                    ?, ?
             FROM entity_merges
-            WHERE source_entity_id=? OR target_entity_id=?
+            WHERE tenant_id=? AND (source_entity_id=? OR target_entity_id=?)
             """,
-            (now, reason, eid, eid),
+            (now, reason, tenant_id or "default", eid, eid),
         )
         return int(cur.rowcount or 0)
     except Exception:

@@ -187,10 +187,19 @@ two pure closures lifted out); it stays on a new ratchet,
   send path, and the push client spent its one try before the permission
   check (`tests/js/test_push_arming.js`, the old modules fail it).
 - The `turn.timed_out` alert lived only in the dead path; it moved to
-  `agent/turn.py`, beside the wall-clock budget. The web chat has no
-  wall-clock budget — its turns are bounded by the step budget and tool
-  timeouts, and `/long` missions run long on purpose — and that stays the
-  owner's call.
+  `agent/turn.py`, beside the wall-clock budget. The web chat had no
+  wall-clock budget, left open as the owner's call. **Closed 2026-10-15**
+  (the owner asked for one rule on every surface):
+  `kazma_core/agent/turn_budget.py` resolves the budget once (a chat with
+  `/long` active has none; else `KAZMA_TURN_TIMEOUT_SECONDS`, else the new
+  setting `agent.turn_timeout_seconds` in Settings → System; none by
+  default) and every graph run sits inside it — the chat apps' and the web's
+  turns, the resume after an approval (unbounded everywhere before) and the
+  agent runner (which had its own 600 s copy). It bounds each running
+  stretch, never the wait for an approval; past it the run is cancelled, the
+  checkpoint ends with an honest `⚠️ Turn timed out` reply that `close_turn`
+  and the web's `done` frame carry, and the alert moved into that module.
+  Gates: `tests/test_turn_budget.py`, `tests/e2e/test_turn_time_limit.py`.
 - A socket frame that parsed as JSON but was not an object (`123`) ended the
   connection with a traceback.
 Gate: `tests/test_ws_chat_is_telemetry_only.py`. Fifteen source locks that

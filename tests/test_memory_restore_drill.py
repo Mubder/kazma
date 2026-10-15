@@ -197,3 +197,43 @@ def test_an_upgraded_database_goes_on_from_the_old_facts_cursor(drill, monkeypat
     get_config_store().set(turn_reconcile.STATE_KEY, {"facts_after": 99}, category="memory")
     assert turn_reconcile.read_state(None)["facts_after"] == 3  # never past this database
     get_config_store().delete(turn_reconcile.STATE_KEY)
+
+
+def _restore_a_backup_older_than_a_table(drill, monkeypatch, *, ensure_schema: bool) -> dict:
+    """A backup lacking a table this build has (taken by an older build, or
+    before the table was first needed), a forget made after it, then the
+    restore the Memory page runs."""
+    from kazma_core.memory import backup as memory_backup
+    from kazma_core.memory import forget
+    from kazma_core.memory.backup import perform_native_backups, restore_memory_backup
+
+    base = time.time() - 30 * DAY
+    _save(drill, "chat-a", [m for i in range(4) for m in _turn(i, base + i * 60)])
+    assert _reconcile(drill)["turns_written"] == 4
+    backup = next(p for p in perform_native_backups() if p.name.startswith("memory_state_"))
+    old = sqlite3.connect(str(backup))
+    old.execute("DROP TABLE memory_forget_applied")
+    old.commit()
+    old.close()
+    db = sqlite3.connect(str(drill.dir / "memory_state.db"))
+    eid = db.execute("SELECT id FROM episodes WHERE user_text LIKE 'drill question 1 %'").fetchone()[0]
+    db.close()
+    assert forget.forget_episode(eid, tenant_id="default")["ok"]
+    if not ensure_schema:  # negative control: the restore as it was
+        monkeypatch.setattr(memory_backup, "_bring_schema_up_to_date", lambda _path: None)
+    return restore_memory_backup(backup)
+
+
+def test_a_backup_from_before_a_table_restores_and_keeps_its_forgets(drill, monkeypatch):
+    """The memory soak's 420th cycle (2026-10-15): the restored copy had no
+    memory_forget_applied, every schema cache had already marked the file
+    ready, and the forget catch-up failed."""
+    caught_up = _restore_a_backup_older_than_a_table(drill, monkeypatch, ensure_schema=True)
+    assert caught_up["forgets_applied"] >= 1
+    assert not any(q.startswith("drill question 1 ") for q in _questions(drill)), "the forget stands"
+
+
+def test_without_the_schema_step_the_restore_fails_on_the_missing_table(drill, monkeypatch):
+    """Negative control: the same restore without bringing the copy's schema up."""
+    with pytest.raises(sqlite3.OperationalError, match="memory_forget_applied"):
+        _restore_a_backup_older_than_a_table(drill, monkeypatch, ensure_schema=False)

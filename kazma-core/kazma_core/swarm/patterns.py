@@ -43,6 +43,10 @@ class PatternExecution:
     synthesized_output: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: What the pattern's own model call (the Refiner, a synthesis) cost: the
+    #: engine adds it to the task's totals (Swarm audit SW-E15).
+    synthesis_tokens: int = 0
+    synthesis_cost: float = 0.0
 
 
 def _last_success_output(worker_results: list[WorkerResult]) -> str | None:
@@ -103,50 +107,115 @@ import time as _time
 
 __all__ = ["ConditionalConfigurationError", "FanOutConfigurationError", "PatternExecution", "PipelineConfigurationError", "execute_conditional", "execute_fan_out", "execute_pipeline", "resume_pipeline"]
 
+#: What the Refiner reads of the steps' outputs, all steps together, and the
+#: most it may write (Swarm audit SW-E15).
+_REFINER_INPUT_CHARS = 4000
+_REFINER_MAX_TOKENS = 2048
+#: Its deadline when the task's step deadline is longer, or none.
+_REFINER_MAX_S = 120.0
+_REFINER_SYSTEM = ("You are a Refiner. Distill worker outputs into key findings, code, and next "
+                   "actions. Output in Markdown.")
+
+
+def _refiner_client() -> Any | None:
+    """The model the Refiner asks: the active one (settings keys live under
+    tenant 'default' when no tenant is bound)."""
+    from kazma_core.model_registry import get_model_registry
+    from kazma_core.tenant_context import get_current_tenant_id, tenant_scope
+
+    registry = get_model_registry()
+    if get_current_tenant_id():
+        return registry.get_client()
+    with tenant_scope("default"):
+        return registry.get_client()
+
+
+def _refiner_input(worker_results: list[WorkerResult]) -> tuple[str, bool]:
+    """The steps' outputs as the Refiner reads them: each fenced as data
+    under its worker's name (SW-S10), all within ``_REFINER_INPUT_CHARS``.
+    Returns the text and whether any output was cut."""
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    budget, cut, parts = _REFINER_INPUT_CHARS, False, []
+    for result in worker_results:
+        text = (result.output or "").strip() if result.status == "success" else ""
+        if not text:
+            continue
+        if budget <= 0:
+            cut = True
+            break
+        if len(text) > budget:
+            text, cut = text[:budget], True
+        budget -= len(text)
+        parts.append(f"{result.worker}:\n" + fence_untrusted(text, source=f"swarm_worker:{result.worker}"))
+    return ("\n---\n".join(parts) or "No output"), cut
+
+
 async def _synthesize_refined_output(
-    task: str,
+    task: SwarmTask,
     worker_results: list[WorkerResult],
     overall_status: str,
     total_ms: float,
-) -> str:
-    """Synthesize pipeline outputs via LLM Refiner."""
-    from kazma_core.safety.prompt_fence import fence_untrusted
+) -> Any:
+    """The Refiner: one model call that distills a finished pipeline's step
+    outputs into a report (``task_model.call_task_model``: ledgered, its
+    usage returned, bounded). Raises when it cannot answer; the caller keeps
+    the unrefined result. Returns a ``TaskModelAnswer`` (a stand-in may
+    return the text alone)."""
+    from kazma_core.swarm.task_model import call_task_model
 
-    all_outputs = [r.output for r in worker_results if r.status == "success" and r.output]
-    combined = "\n---\n".join(o.strip() for o in all_outputs if o.strip()) or "No output"
-    combined = fence_untrusted(combined[:4000], source="swarm_workers")  # SW-S10
+    combined, cut = _refiner_input(worker_results)
+    user_prompt = (f"Task: {task.prompt[:300]}\nStatus: {overall_status}\nDuration: {total_ms:.0f}ms\n\n"
+                   f"Raw worker outputs{' (cut to the first characters)' if cut else ''}:\n{combined}")
+    messages = [{"role": "system", "content": _REFINER_SYSTEM}, {"role": "user", "content": user_prompt}]
+    step = wait_timeout(task.timeout)
+    return await call_task_model(_refiner_client(), messages, task_id=task.id, label="swarm-refiner",
+                                 max_tokens=_REFINER_MAX_TOKENS,
+                                 deadline=min(step, _REFINER_MAX_S) if step else _REFINER_MAX_S)
 
-    user_prompt = f"Task: {task[:300]}\nStatus: {overall_status}\nDuration: {total_ms:.0f}ms\n\nRaw worker outputs:\n{combined}"
 
+async def _refine(
+    task: SwarmTask,
+    worker_results: list[WorkerResult],
+    status: str,
+    total_ms: float,
+) -> tuple[str | None, int, float, dict[str, Any]]:
+    """The refined report of a finished pipeline, its tokens and cost, and
+    what the task's metadata keeps of the call (``refiner``). A Refiner that
+    fails leaves the unrefined result: a WARNING and a counted failure, never
+    a silent stand-in (it used to return a 'raw report' as if refined)."""
+    from kazma_core.swarm.task_model import TaskModelAnswer
+
+    started = _time.perf_counter()
     try:
-        from kazma_core.model_registry import get_model_registry
-        from kazma_core.tenant_context import get_current_tenant_id, tenant_scope
-
-        registry = get_model_registry()
-        if not get_current_tenant_id():
-            with tenant_scope("default"):
-                provider = registry.get_client()
-        else:
-            provider = registry.get_client()
-        if provider is not None:
-            messages = [
-                {"role": "system", "content": "You are a Refiner. Distill worker outputs into key findings, code, and next actions. Output in Markdown."},
-                {"role": "user", "content": user_prompt},
-            ]
-            response = await provider.chat(messages)
-            return response.content
+        answer = await _synthesize_refined_output(task, worker_results, status, total_ms)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
-        logger.warning("[Refiner] LLM call failed, using raw output: %s", exc)
+        logger.warning("[Refiner] pipeline '%s' keeps its unrefined result: the Refiner failed (%s: %s)",
+                       task.id, type(exc).__name__, exc)
+        return _refiner_failed("TimeoutError" if isinstance(exc, TimeoutError) else type(exc).__name__)
+    if isinstance(answer, str):
+        answer = TaskModelAnswer(text=answer)  # a stand-in that returns the text alone
+    text = (getattr(answer, "text", "") or "").strip()
+    if not text:
+        logger.warning("[Refiner] pipeline '%s' keeps its unrefined result: the Refiner answered nothing",
+                       task.id)
+        return _refiner_failed("EmptyAnswer")
+    record = {"status": "refined", **answer.record(),
+              "duration_ms": round((_time.perf_counter() - started) * 1000, 1),
+              "steps": len(worker_results)}
+    return text, answer.tokens, answer.cost_usd, record
 
-    lines: list[str] = []
-    lines.append("## Swarm Report (raw)")
-    lines.append("")
-    lines.append(f"**Task:** {task[:200]}")
-    lines.append(f"**Status:** {overall_status}")
-    lines.append(f"**Duration:** {total_ms:.0f}ms")
-    lines.append("")
-    lines.append(combined[:2000])
-    return "\n".join(lines)
+
+def _refiner_failed(error: str) -> tuple[None, int, float, dict[str, Any]]:
+    """A failed Refiner, counted (``kazma_swarm_failures_total{site="refiner"}``);
+    the caller logged the WARNING. *error* is a name, never the exception's
+    text (AGENTS §26F: the page shows it)."""
+    from kazma_core.metrics import record_swarm_failure
+
+    record_swarm_failure("refiner")
+    return None, 0, 0.0, {"status": "failed", "error": error}
 
 
 async def _run_self_improvement(
@@ -223,11 +292,22 @@ async def _finalize_pipeline(
     started_ms: float,
 ) -> PatternExecution:
     total_ms = (_time.perf_counter() * 1000) - started_ms
+    # The pipeline's product: its last step's output, unrefined, as the
+    # steps' outputs stay in worker_results.
     aggregated_output = _last_success_output(worker_results)
-    
-    # 1. Synthesize Output
-    refined_output = await _synthesize_refined_output(task.prompt, worker_results, status, total_ms)
-    
+    metadata = await _build_blackboard_metadata(blackboard)
+
+    # 1. The Refiner's report (Swarm audit SW-E15, decision D8: fixed). It is
+    # the result's synthesized_output -- what the Swarm page shows as the
+    # synthesis -- and its tokens and cost are the task's. Only a pipeline
+    # that succeeded is refined: a report over a failed or partial run would
+    # read as an answer to it (AGENTS §3: never synthesize over a broken turn).
+    refined_output: str | None = None
+    refiner_tokens, refiner_cost = 0, 0.0
+    if status == "success":
+        refined_output, refiner_tokens, refiner_cost, metadata["refiner"] = await _refine(
+            task, worker_results, status, total_ms)
+
     # 2. Self-Improvement Hook
     await _run_self_improvement(task, worker_results, status)
         
@@ -254,7 +334,9 @@ async def _finalize_pipeline(
         aggregated_output=aggregated_output,
         synthesized_output=refined_output,
         error=worker_results[-1].error if status != "success" else None,
-        metadata=await _build_blackboard_metadata(blackboard),
+        metadata=metadata,
+        synthesis_tokens=refiner_tokens,
+        synthesis_cost=refiner_cost,
     )
 
 
@@ -820,4 +902,7 @@ async def execute_fan_out(
             **aggregation_result.metadata,
             "max_concurrent": max_concurrent,
         },
+        # A synthesis's model call is the task's to account (SW-E15).
+        synthesis_tokens=int(getattr(aggregation_result, "synthesis_tokens", 0) or 0),
+        synthesis_cost=float(getattr(aggregation_result, "synthesis_cost", 0.0) or 0.0),
     )

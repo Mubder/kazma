@@ -156,6 +156,8 @@ AppData/
 pytest-of-*/
 *pytest-tmp-hook/
 *.pre_reembed
+*.pre_entity_key
+*.pre_relabel
 
 # Playwright evidence from the unified-turn browser suite: traces and
 # screenshots on failure, plus the four-gate recording that is the

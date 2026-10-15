@@ -257,3 +257,78 @@ def test_delete_library_cascades_to_chunks_and_fts():
     assert s.count_chunks("lib") == 0
     # FTS5 row gone too — search returns nothing.
     assert s.fts_search("alpha", "lib") == []
+
+
+# ── A deleted library's words leave the keyword index (KB-Q01) ──────────────
+#
+# FTS5 records a deleted row as a delete marker; its words stay in the index's
+# older segments until a merge reaches them. The soak harness found every
+# planted word of a deleted 10,000-chunk library still in
+# ``knowledge_chunks_fts_data`` after the delete -- unsearchable, but on disk.
+
+_GONE = ("qsecretterm", "ثخذضظغق")  # English, Arabic
+_KEPT = ("zkeptterm", "بتثجحخد")
+
+
+def _two_libraries(pages: int = 30) -> KnowledgeStore:
+    s = _fresh_store()
+    for lib, words in (("gone", _GONE), ("kept", _KEPT)):
+        s.create_library(lib, lib)
+        for page in range(pages):
+            s.publish_page(lib, f"https://{lib}.example.test/p{page}", [
+                {"content": f"Section {i} mentions {words[i % 2]}{page} and other words alpha beta",
+                 "chunk_index": i} for i in range(10)])
+    return s
+
+
+def _held_in_index(s: KnowledgeStore, word: str) -> bool:
+    """The word's bytes in the index's segments. A term is stored after the
+    prefix it shares with the term before it, which for these words is at
+    most their first letter: the rest is always there in full."""
+    conn = s._get_conn()
+    blob = b"".join(bytes(r[0]) for r in conn.execute("SELECT block FROM knowledge_chunks_fts_data") if r[0])
+    return word[1:].encode() in blob
+
+
+def test_a_deleted_librarys_words_leave_the_keyword_index():
+    s = _two_libraries()
+    try:
+        assert all(_held_in_index(s, w) for w in _GONE)
+        assert s.delete_library("gone") is True
+        assert not any(_held_in_index(s, w) for w in _GONE)
+        # The other library is whole and searchable, in both languages.
+        assert all(_held_in_index(s, w) for w in _KEPT)
+        assert s.fts_search("zkeptterm3", "kept") and s.fts_search(f"{_KEPT[1]}3", "kept")
+        assert s.fts_coverage()["ok"] is True
+    finally:
+        s.close()
+
+
+def test_the_purge_runs_in_bounded_steps(monkeypatch):
+    """Each step is its own transaction; the store lock is free between them."""
+    from kazma_core.stores import knowledge as km
+
+    monkeypatch.setattr(km, "_PURGE_STEP_PAGES", 2)
+    s = _two_libraries(pages=60)
+    try:
+        steps: list[dict] = []
+        real = s.purge_search_index
+        monkeypatch.setattr(s, "purge_search_index", lambda: steps.append(real()) or steps[-1])
+        s.delete_library("gone")
+        assert steps and steps[0]["steps"] > 2, steps
+        assert not any(_held_in_index(s, w) for w in _GONE)
+        assert s.fts_search("zkeptterm7", "kept")
+    finally:
+        s.close()
+
+
+def test_without_the_purge_a_deleted_librarys_words_stay(monkeypatch):
+    """Negative control: the delete as it was -- rows and markers only."""
+    monkeypatch.setattr(KnowledgeStore, "purge_search_index", lambda self: {"steps": 0, "seconds": 0.0})
+    s = _two_libraries()
+    try:
+        s.delete_library("gone")
+        assert s.fts_search("qsecretterm3", "gone") == []  # unsearchable ...
+        assert all(_held_in_index(s, w) for w in _GONE)  # ... and still on disk
+    finally:
+        s.close()

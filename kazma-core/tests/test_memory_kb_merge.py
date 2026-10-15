@@ -22,9 +22,14 @@ def test_format_kb_hits_for_prompt():
         {"store": "memory", "content": "should skip"},
     ]
     md = format_kb_hits_for_prompt(hits)
-    assert "Knowledge Library" in md
-    assert "Bearer" in md
-    assert "not user identity" in md.lower() or "documentation" in md.lower()
+    assert "Bearer" in md and "https://docs.example/auth" in md and "Auth" in md
+    assert "should skip" not in md
+    # Re-pointed 2026-10-15 (Knowledge audit KB-S01): the block holds what the
+    # pages wrote and is fenced whole; Kazma's own lines -- the header, the
+    # "documentation, not the user's facts" note, the library footer -- follow
+    # the fence (``KnowledgeInject.footer``,
+    # tests/test_knowledge_model_boundary.py), so none of them is here.
+    assert "Knowledge Library" not in md and "documentation" not in md.lower()
 
 
 def test_format_kb_empty():

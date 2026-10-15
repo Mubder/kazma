@@ -165,6 +165,8 @@ def test_handoff_record_contains_all_required_fields() -> None:
         "to_worker": "beta",
         "context_transferred": "Carry forward prior findings",
         "timestamp": "2026-06-28T12:00:00+00:00",
+        # Why the worker handed off (the handoff tool's reason, SW-E13).
+        "reason": "",
     }
 
 

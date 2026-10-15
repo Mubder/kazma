@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
@@ -10,9 +11,12 @@ from typing import Any
 
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
-__all__ = ["AggregationResult", "ResultAggregator"]
+__all__ = ["AggregationResult", "ResultAggregator", "Synthesis"]
 
 logger = logging.getLogger(__name__)
+
+#: The most a synthesis may write.
+_SYNTHESIS_MAX_TOKENS = 4096
 
 SynthesisCallable = Callable[
     [SwarmTask, list[WorkerResult]],
@@ -35,6 +39,20 @@ class AggregationResult:
     aggregated_output: str | None = None
     synthesized_output: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: What the synthesis's model call cost (SW-E15): the task's.
+    synthesis_tokens: int = 0
+    synthesis_cost: float = 0.0
+
+
+@dataclass
+class Synthesis:
+    """A synthesized answer and what its model call cost (zero for a
+    caller-supplied synthesizer or the fallback when the model is down)."""
+
+    text: str
+    tokens: int = 0
+    cost: float = 0.0
+    record: dict[str, Any] = field(default_factory=dict)
 
 
 class ResultAggregator:
@@ -112,12 +130,16 @@ class ResultAggregator:
             )
 
         if strategy == "synthesize":
-            synthesized_output = await self.synthesize(task, successful_results)
+            synthesis = await self.synthesize_with_usage(task, successful_results)
             metadata["synthesized"] = True
+            if synthesis.record:
+                metadata["synthesis"] = synthesis.record
             return AggregationResult(
-                aggregated_output=synthesized_output,
-                synthesized_output=synthesized_output,
+                aggregated_output=synthesis.text,
+                synthesized_output=synthesis.text,
                 metadata=metadata,
+                synthesis_tokens=synthesis.tokens,
+                synthesis_cost=synthesis.cost,
             )
 
         raise ValueError(f"Unknown aggregation strategy: '{task.aggregation}'")
@@ -131,7 +153,28 @@ class ResultAggregator:
         final_instruction: str | None = None,
     ) -> str:
         """Generate a synthesized answer from successful worker results."""
-        return await self._synthesize(
+        return (await self.synthesize_with_usage(
+            task,
+            successful_results,
+            system_prompt=system_prompt,
+            final_instruction=final_instruction,
+        )).text
+
+    async def synthesize_with_usage(
+        self,
+        task: SwarmTask,
+        successful_results: list[WorkerResult],
+        *,
+        system_prompt: str | None = None,
+        final_instruction: str | None = None,
+    ) -> Synthesis:
+        """:meth:`synthesize` with what its model call cost (SW-E15)."""
+        if self._synthesizer is not None:
+            synthesized = self._synthesizer(task, successful_results)
+            if inspect.isawaitable(synthesized):
+                synthesized = await synthesized
+            return Synthesis(text=synthesized)
+        return await self._synthesize_by_model(
             task,
             successful_results,
             system_prompt=system_prompt,
@@ -147,12 +190,21 @@ class ResultAggregator:
         final_instruction: str | None = None,
     ) -> str:
         """Generate a consolidated answer from successful worker results."""
-        if self._synthesizer is not None:
-            synthesized = self._synthesizer(task, successful_results)
-            if inspect.isawaitable(synthesized):
-                return await synthesized
-            return synthesized
+        return (await self.synthesize_with_usage(
+            task, successful_results, system_prompt=system_prompt, final_instruction=final_instruction,
+        )).text
 
+    async def _synthesize_by_model(
+        self,
+        task: SwarmTask,
+        successful_results: list[WorkerResult],
+        *,
+        system_prompt: str | None = None,
+        final_instruction: str | None = None,
+    ) -> Synthesis:
+        """The model's consolidated answer (``task_model.call_task_model``:
+        ledgered, its usage returned); the deterministic fallback, a WARNING
+        and a counted failure when the model cannot answer."""
         prompt_sections = [f"Task:\n{task.prompt}"]
         if task.context.strip():
             prompt_sections.append(f"Context:\n{task.context.strip()}")
@@ -173,31 +225,30 @@ class ResultAggregator:
         )
         prompt = "\n\n".join(prompt_sections)
 
-        provider = None
+        # The shared provider client is never closed here: the main agent
+        # still needs it (closing it closed the process-wide httpx pool).
+        from kazma_core.swarm.dispatch_helpers import wait_timeout
+        from kazma_core.swarm.task_model import call_task_model
+
         try:
-            provider = _get_llm_provider()
-            if provider is None:
-                raise RuntimeError("LLM provider unavailable.")
-            response = await provider.chat(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt or _SYNTHESIS_SYSTEM_PROMPT,
-                    },
-                    {"role": "user", "content": prompt},
-                ]
+            answer = await call_task_model(
+                _get_llm_provider(),
+                [{"role": "system", "content": system_prompt or _SYNTHESIS_SYSTEM_PROMPT},
+                 {"role": "user", "content": prompt}],
+                task_id=task.id, label="swarm-synthesis", max_tokens=_SYNTHESIS_MAX_TOKENS,
+                deadline=wait_timeout(task.timeout),
             )
-            content = (response.content or "").strip()
-            if content:
-                return content
-            raise RuntimeError("LLM returned an empty synthesis.")
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            logger.warning("[ResultAggregator] synthesis fallback used: %s", exc)
-            return self._fallback_synthesis(task, successful_results)
-        finally:
-            if provider is not None:
-                # Do NOT close the shared provider client — the main agent may still need it
-                pass  # await provider.close() was closing the process-wide httpx pool
+            logger.warning("[ResultAggregator] synthesis fallback used for task '%s': %s", task.id, exc)
+            from kazma_core.metrics import record_swarm_failure
+
+            record_swarm_failure("synthesis")
+            return Synthesis(text=self._fallback_synthesis(task, successful_results),
+                             record={"status": "fallback", "error": type(exc).__name__})
+        return Synthesis(text=answer.text, tokens=answer.tokens, cost=answer.cost_usd,
+                         record={"status": "synthesized", **answer.record()})
 
     @staticmethod
     def _fallback_synthesis(

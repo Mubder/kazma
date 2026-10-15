@@ -180,12 +180,12 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
     agent_state = _derive_agent_state(running, recent_traces)
 
     # Build a human-readable description of the last activity (if any)
+    # A trace's label (data, shown as it is); the page says itself, in its
+    # language, that the server is stopping.
     last_activity = ""
     if recent_traces:
         latest = recent_traces[-1]
-        last_activity = latest.label or latest.trace_type or "activity"
-    elif not running:
-        last_activity = "Server shutting down"
+        last_activity = latest.label or latest.trace_type or ""
 
     # Session count from trace stats (proxied by total traces)
     session_count = stats["total_traces"]

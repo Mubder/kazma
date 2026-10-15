@@ -175,13 +175,25 @@ def _violations(source: str, label: str) -> list[str]:
     return found
 
 
+#: Functions that delete a folder named like the store and are not the
+#: store, each with why.
+_DECLARED = {
+    ("scripts/knowledge_soak.py", "run_scale"):
+        "the KB-Q01 harness 'loses the machine' of its own step directory (<data dir>/scale-<size>-<lang>, "
+        "a private temporary folder unless --data-dir names one) to time the re-embed after a restore; it "
+        "never opens an install's vector store",
+}
+
+
 def test_nothing_deletes_the_knowledge_vector_store():
     files = _python_files()
     assert any(p.name == "reembed.py" and p.parent.name == "scripts" for p in files)  # the gate sees scripts/
     assert any(p.name == "universal.py" for p in files)  # ...and the packages
     found = []
     for path in files:
-        found += _violations(path.read_text(encoding="utf-8"), str(path.relative_to(REPO_ROOT)))
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        found += [v for v in _violations(path.read_text(encoding="utf-8"), rel)
+                  if (rel, v.rsplit(" ", 1)[-1]) not in _DECLARED]
     assert not found, (
         "A function deletes a folder tree and names the Knowledge Library's vector store "
         "(paths.vector_memory_path / vector_memory). That folder is the live Chroma store; a "
@@ -193,4 +205,11 @@ def test_nothing_deletes_the_knowledge_vector_store():
 def test_the_gate_flags_the_old_step():
     """Negative control of the gate."""
     assert _violations(OLD_STEP, "old_step.py") == ["old_step.py:5 clear_vector_store"]
+
+
+def test_every_declared_exemption_is_still_a_tree_delete():
+    """A declaration that no longer matches its function is stale."""
+    for (rel, name), _why in _DECLARED.items():
+        found = _violations((REPO_ROOT / rel).read_text(encoding="utf-8"), rel)
+        assert any(v.endswith(f" {name}") for v in found), (rel, name)
 

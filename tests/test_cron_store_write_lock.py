@@ -63,7 +63,8 @@ def _cases(store: SQLiteCronStore) -> list[tuple[str, str, object]]:
 
     The durable fire record (Scheduled audit SCH-E04, 2026-10-14) added the
     claim/finish/release methods, the delivery outbox and the event log; each
-    is a group of writes in one BEGIN IMMEDIATE, and each is called here.
+    is a group of writes in one BEGIN IMMEDIATE, and each is called here. The
+    alert outbox (2026-10-15) added its reads and marks.
     """
     from kazma_core.cron.store import FireResult
 
@@ -85,12 +86,19 @@ def _cases(store: SQLiteCronStore) -> list[tuple[str, str, object]]:
         ("finish_fire", "with a delivery", lambda: store.finish_fire(
             "a", owner="o1", advance=_never,
             result=FireResult(success=True, outcome="delivering", body="hi", target="telegram:1"))),
+        ("insert", "a third job", lambda: store.insert(_job("c"))),
+        ("claim_job", "its fire", lambda: store.claim_job("c", owner="o1")),
+        ("finish_fire", "a failure, its alert queued with it", lambda: store.finish_fire(
+            "c", owner="o1", advance=_never, result=FireResult(success=False, outcome="error", result_text="x"))),
         ("claim_delivery", "", lambda: store.claim_delivery(owner="o1")),
         ("finish_delivery", "refused, retried", lambda: store.finish_delivery(1, owner="o1", delivered=False,
                                                                                 error="Error: no")),
         ("recover_deliveries", "", lambda: store.recover_deliveries(owner="o1")),
-        ("unalerted_failures", "", lambda: store.unalerted_failures()),
-        ("mark_alerted", "", lambda: store.mark_alerted(1)),
+        ("pending_alerts", "", lambda: store.pending_alerts()),
+        ("alert_failed", "the alert could not be raised", lambda: store.alert_failed(1, error="Error: no")),
+        ("mark_alert_sent", "", lambda: store.mark_alert_sent(1)),
+        ("mark_alert_sent", "already marked", lambda: store.mark_alert_sent(1)),
+        ("pending_alert_count", "", lambda: store.pending_alert_count()),
         ("deliveries_for", "", lambda: store.deliveries_for("a")),
         ("pending_delivery_count", "", lambda: store.pending_delivery_count()),
         ("outcome_counts", "", lambda: store.outcome_counts(since=0.0)),

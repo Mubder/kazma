@@ -28,6 +28,16 @@
     return text;
   }
 
+  // A trace's type or status as HTML: the catalog's word, else the value as
+  // it is, marked as content (a value the catalog does not know is data).
+  function traceWord(prefix, value) {
+    var v = String(value || "");
+    var key = prefix + v;
+    var text = typeof root.t === "function" ? root.t(key) : key;
+    if (v && text && text !== key) return escapeHtml(text);
+    return '<bdi translate="no">' + escapeHtml(v) + "</bdi>";
+  }
+
   var PLATFORM_NAMES = { telegram: "Telegram", discord: "Discord", slack: "Slack" };
 
   /* A chat's platform as the page says it: names stay names, "web" and
@@ -73,16 +83,16 @@
     return (
       '<article class="dash-mobile-card">' +
         '<div class="dash-mobile-card-top">' +
-          '<span class="badge badge-basic" translate="no">' + escapeHtml(t.trace_type || t.type || "") + "</span>" +
+          '<span class="badge badge-basic">' + traceWord("dashboard.trace_type_", t.trace_type || t.type) + "</span>" +
           '<span class="badge ' + escapeHtml(t.badge_class || "") + '">' +
-            escapeHtml(t.status || "") + "</span>" +
+            traceWord("dashboard.trace_status_", t.status) + "</span>" +
         "</div>" +
         '<div class="dash-mobile-card-name" translate="no">' + escapeHtml(t.label || "") + "</div>" +
         '<div class="dash-mobile-card-meta">' +
           escapeHtml(t.time || "") + " · " +
           escapeHtml(String(t.duration_ms != null ? t.duration_ms + "ms" : "")) +
           " · " + escapeHtml(String(t.tokens != null ? t.tokens : "")) +
-          " tok · " + escapeHtml(String(t.cost || "")) +
+          " " + escapeHtml(tr("chat.tok_unit", "tok")) + " · " + escapeHtml(String(t.cost || "")) +
         "</div>" +
       "</article>"
     );
@@ -92,6 +102,7 @@
     escapeHtml: escapeHtml,
     formatWhen: formatWhen,
     tr: tr,
+    traceWord: traceWord,
     platformLabel: platformLabel,
     buildSessionCard: buildSessionCard,
     buildTraceCard: buildTraceCard,

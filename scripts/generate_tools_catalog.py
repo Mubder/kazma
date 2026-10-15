@@ -16,6 +16,8 @@ decorators; that module had been split into a package that registers with
 ``register_function(...)``, so the scan found 1 built-in tool and a run would
 have deleted ~70 rows. Native skill tools, which the same registry holds,
 are listed once — in their manifest section, with the skill they belong to.
+A swarm worker's own tools (``handoff_to_worker``), which are not in the
+registry, come from their declaration in ``kazma_core.swarm.handoff``.
 """
 from __future__ import annotations
 
@@ -98,6 +100,16 @@ def extract_builtin() -> list[dict]:
     return rows
 
 
+def extract_worker_tools() -> list[dict]:
+    """Tools a swarm worker offers its model itself, never through the
+    registry: the main agent, the MCP server and scheduled tasks never see
+    them (``kazma_core.swarm.handoff``)."""
+    from kazma_core.swarm.handoff import HANDOFF_TOOL_DESCRIPTION, HANDOFF_TOOL_NAME
+
+    return [{"name": HANDOFF_TOOL_NAME, "category": "swarm",
+             "description": _one_line(HANDOFF_TOOL_DESCRIPTION)}]
+
+
 def extract_modules() -> list[str]:
     d = ROOT / "kazma-core/kazma_core/tools"
     return sorted(p.stem for p in d.glob("*.py") if p.stem != "__init__")
@@ -140,7 +152,8 @@ def extract_native() -> list[dict]:
     return native
 
 
-def render(builtin: list[dict], modules: list[str], native: list[dict]) -> str:
+def render(builtin: list[dict], modules: list[str], native: list[dict],
+           worker: list[dict] | None = None) -> str:
     lines: list[str] = [
         "---",
         "id: tools-catalog",
@@ -177,6 +190,25 @@ def render(builtin: list[dict], modules: list[str], native: list[dict]) -> str:
         desc = _cell(t.get("description"))
         lines.append(
             f"| `{t['name']}` | {t.get('category') or '—'} | {danger_label(t['name'])} | {desc} |"
+        )
+
+    lines += [
+        "",
+        "## Swarm worker tools",
+        "",
+        "A swarm worker offers these to its model itself, only while the swarm engine "
+        "dispatches it; they are not in the registry, so the main agent, the MCP server "
+        "and scheduled tasks never see them. The tools a worker reaches through them "
+        "keep their own approval rules. See "
+        "[Swarm orchestration](../guide/swarm-orchestration).",
+        "",
+        "| Tool | Category | Danger (typical) | Description |",
+        "|------|----------|------------------|-------------|",
+    ]
+    for t in worker or []:
+        lines.append(
+            f"| `{t['name']}` | {t.get('category') or '—'} | {danger_label(t['name'])} | "
+            f"{_cell(t.get('description'))} |"
         )
 
     lines += [
@@ -239,8 +271,9 @@ def main() -> int:
     builtin = extract_builtin()
     modules = extract_modules()
     native = extract_native()
+    worker = extract_worker_tools()
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(render(builtin, modules, native), encoding="utf-8")
+    OUT.write_text(render(builtin, modules, native, worker), encoding="utf-8")
     print(f"Wrote {OUT.relative_to(ROOT)} ({len(builtin)} builtin, {len(native)} native)")
     return 0
 

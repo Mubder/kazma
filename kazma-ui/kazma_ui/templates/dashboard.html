@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% set active_page = "dashboard" %}
+{#- A trace's type or status: the catalog's word, else the value as it is,
+    marked as content (a value the catalog does not know is data). -#}
+{% macro trace_word(prefix, value) -%}
+{%- set key = prefix ~ value -%}
+{%- set text = t(key) -%}
+{%- if text != key -%}{{ text }}{%- else -%}<bdi translate="no">{{ value }}</bdi>{%- endif -%}
+{%- endmacro %}
 {% block title %}Kazma — {{ t('dashboard.title') }}{% endblock %}
 {% block page_title %}{{ t('dashboard.title') }}{% endblock %}
 
@@ -254,10 +261,10 @@
       {% for trace in traces %}
       <article class="dash-mobile-card">
         <div class="dash-mobile-card-top">
-          <span class="badge badge-basic">{{ trace.trace_type }}</span>
-          <span class="badge {{ trace.badge_class }}">{{ trace.status }}</span>
+          <span class="badge badge-basic">{{ trace_word('dashboard.trace_type_', trace.trace_type) }}</span>
+          <span class="badge {{ trace.badge_class }}">{{ trace_word('dashboard.trace_status_', trace.status) }}</span>
         </div>
-        <div class="dash-mobile-card-name">{{ trace.label }}</div>
+        <div class="dash-mobile-card-name" translate="no">{{ trace.label }}</div>
         <div class="dash-mobile-card-meta">{{ trace.time }} · {{ trace.duration_ms }}ms · {{ trace.tokens }} {{ t('chat.tok_unit') }} · {{ trace.cost }}</div>
       </article>
       {% endfor %}
@@ -279,9 +286,9 @@
           {% for trace in traces %}
           <tr class="trace-row" style="border-bottom:1px solid var(--border-subtle);transition:background 0.15s;">
             <td style="padding:10px 16px;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);white-space:nowrap;">{{ trace.time }}</td>
-            <td style="padding:10px 16px;"><span class="badge badge-basic" style="font-size:0.7rem;">{{ trace.trace_type }}</span></td>
-            <td style="padding:10px 16px;font-weight:500;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ trace.label }}</td>
-            <td style="padding:10px 16px;"><span class="badge {{ trace.badge_class }}" style="font-size:0.7rem;">{{ trace.status }}</span></td>
+            <td style="padding:10px 16px;"><span class="badge badge-basic" style="font-size:0.7rem;">{{ trace_word('dashboard.trace_type_', trace.trace_type) }}</span></td>
+            <td translate="no" style="padding:10px 16px;font-weight:500;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ trace.label }}</td>
+            <td style="padding:10px 16px;"><span class="badge {{ trace.badge_class }}" style="font-size:0.7rem;">{{ trace_word('dashboard.trace_status_', trace.status) }}</span></td>
             <td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">{{ trace.duration_ms }}ms</td>
             <td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">{{ trace.tokens }}</td>
             <td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-tertiary);">{{ trace.cost }}</td>

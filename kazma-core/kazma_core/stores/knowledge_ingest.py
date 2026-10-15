@@ -1424,10 +1424,38 @@ def _refresh_chunk_count(store: Any, library_id: str) -> None:
         logger.warning("[kb_ingest] the chunk count of %s was not refreshed: %s", library_id, exc)
 
 
+async def _admit_public_seed(seed_url: str) -> None:
+    """Refuse a crawl seed acquisition would refuse, before anything exists.
+
+    The same check the crawl makes of its seed before discovery
+    (``web_acquire.dns_worker.validate_public_url``: every address the host
+    resolves to, in the owned resolver child; never ``to_thread``), made at
+    admission. Until 2026-10-15 a seed on a private, loopback or link-local
+    address was admitted: its library and journal row were created, the
+    crawl then failed on the seed, and the library stayed empty with no
+    refusal shown. A private address is ``security_blocked``; a host that
+    resolves to nothing is ``connect_error`` (transient: the resolver may be
+    down).
+    """
+    from kazma_core.security.ssrf import UnresolvedHostError, validate_url
+    from kazma_core.web_acquire.dns_worker import validate_public_url
+    from kazma_core.web_acquire.trace import classify_failure
+
+    try:
+        await validate_public_url(seed_url, validator=validate_url)
+    except UnresolvedHostError as exc:
+        raise AcquisitionError(FetchErrorCode.CONNECT, f"crawl seed refused: {exc}",
+                               transient=True) from None
+    except ValueError as exc:  # SSRFError is one: what validate_url refuses with
+        code, transient = classify_failure(exc)
+        raise AcquisitionError(code, f"crawl seed refused: {exc}", transient=transient) from None
+
+
 async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=None, resume=False):
-    """Admit a crawl: a refused seed (not http(s), KB-S09) or a store at its
-    quota (KB-E10) is refused here, before anything is fetched; the journal
-    refuses a second crawl of the same library (KB-E14)."""
+    """Admit a crawl: a refused seed (not http(s), KB-S09; on a private
+    network or not resolving, :func:`_admit_public_seed`) or a store at its
+    quota (KB-E10) is refused here, before anything is fetched or created;
+    the journal refuses a second crawl of the same library (KB-E14)."""
     from kazma_core.stores.knowledge import KnowledgeUrlRefused, validate_web_url
     from kazma_core.web_acquire import crawl_jobs
     from kazma_core.web_acquire.policy import acquisition_policy
@@ -1450,6 +1478,10 @@ async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=N
         raise AcquisitionError(FetchErrorCode.POLICY, 'max_pages must be an integer; crawl admission refused.') from None
     snapshot = dict(mode=policy.mode, providers=sorted(policy.providers), robots=respect,
         scope=_kb_scope_mode(), max_pages=page_cap, max_depth=_kb_max_depth(), delay_ms=_kb_delay_ms())
+    # Last of the checks (it starts a resolver child), and before the
+    # journal row: a refused seed leaves no job and, its callers creating
+    # the library only after this returns, no library.
+    await _admit_public_seed(seed_url)
     job = await crawl_jobs.call(crawl_jobs.start, library_id, seed_url, snapshot, job_id=job_id,
         resume=resume, on_cancel=lambda created: created.finish('interrupted'))
     return job, policy, respect, page_cap

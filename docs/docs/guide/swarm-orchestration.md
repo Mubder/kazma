@@ -126,7 +126,8 @@ output), so it reaches every model as **data** inside a
 `fence_untrusted(...)` block, never as instructions: the agent's
 `check_swarm_task` result and error, the previous worker's output and the
 blackboard handed to the next pipeline step, a handoff's intermediate results,
-the synthesis prompt (`aggregator._synthesize`) and the pipeline's Refiner.
+the synthesis prompt (`aggregator._synthesize_by_model`) and the pipeline's
+Refiner (`patterns._refiner_input`: each step under its worker's name).
 `tests/test_swarm_boundaries_and_signals.py` fails on a swarm function that
 builds text from a worker's output outside a fence, unless it is declared as
 the task's stored result (which `check_swarm_task` fences where it reaches a
@@ -148,6 +149,53 @@ The Web API refuses an out-of-range request with `422`; the engine refuses one
 from any other entry before admission. A full swarm answers `429
 swarm_at_capacity` with `Retry-After`. A stored result keeps each large worker
 output once, referenced from its other places.
+
+### 1.0f What a fault leaves (chaos runs)
+
+`scripts/swarm_chaos.py` injects one fault at a time into a real engine with
+scripted workers and records the ending (`tests/test_swarm_chaos.py` holds each
+one; Swarm tracker SQ04). The rules those endings follow:
+
+- **A task write a store refuses for a reason that passes** (a lock, a busy
+  file, a database that is away) **is tried again**: three more attempts,
+  0.5 s, 1 s and 2 s apart, each also waiting out the store's busy timeout
+  (SQLite 5 s) or connection timeout (Postgres).
+- **A run whose ending the store never took is not reported as stored
+  work.** The caller, the engine's own record and the task's stream get
+  `failed` with the reason (`metadata.unsaved`, `store_error`,
+  `result_status` holding what the run ended as; the output is kept). The row
+  keeps its last stored state, RUNNING after an admission, and the next start
+  holds it as interrupted with an unknown outcome.
+- **A new task whose RUNNING row cannot be written runs without that crash
+  evidence** (a WARNING, `running_row` counted). **An approval whose row
+  cannot be written resumes nothing**: the checkpoint is pending again, its
+  auto-reject re-armed, and the page answers `503 approval_not_recorded` --
+  resumed, a crash would have offered the checkpoint again and run its steps
+  twice.
+- **A durable dispatch that never ran** (Temporal required and unreachable)
+  **is finalized** as failed with the reason, freeing its row, its admission
+  slot and its stream.
+- **Every lost write is counted** in `kazma_swarm_failures_total`:
+  `running_row`, `task_write`, `step_journal`, `worker_metric`, and for shared
+  breakers `breaker_read`, `breaker_persist`, `breaker_lease`.
+
+| Fault | The caller is told | The store holds (after the next start) | Counted |
+|---|---|---|---|
+| SQLite store locked at admission, free while the task runs | success | completed | `running_row` |
+| Locked through a resumed pipeline's step journal | success (each step once) | completed | `step_journal` x2 |
+| Locked past the ending's first write attempt | success (the write tried again) | completed | `worker_metric` |
+| Locked past every attempt of the ending's write | failed, `unsaved` (ran: success) | running (failed, outcome unknown) | `task_write`, `worker_metric` |
+| Locked when a paused pipeline is approved, then free | first approval: nothing resumed, checkpoint open; second: success | completed | `running_row` |
+| Shared breakers on, settings store down; admission limit 1 | refused at capacity; trip, refusal and probe recovery on the local breaker | completed / failed as each ran | `breaker_read`, `breaker_persist`, `breaker_lease` |
+| Temporal configured, nothing listening | success (in-process fallback, a WARNING) | completed | nothing |
+| Temporal required, nothing listening | failed, naming Temporal (the worker never ran) | failed | nothing |
+| Shutdown with a pipeline, fan-out, consult and dispatch running | cancelled | cancelled, `interrupted_by: shutdown`, `unknown` + `file_write` where noted, `none_invoked` otherwise, written before `stop_all_runs` returns; nothing to recover | nothing |
+| Postgres store refusing connections at admission | success | completed | `running_row` |
+| Postgres store refusing connections at the ending | failed, `unsaved` (ran: success) | running (failed, outcome unknown) | `task_write`, `worker_metric` |
+
+Recorded on 2026-10-15 at the product's timeouts (Windows, SQLite and a
+disposable `postgres:16-alpine`). Not run: a Temporal server that accepts the
+workflow and then goes away (SQ03, decision D9).
 
 ### 1.0a Durable execution (Temporal, opt-in)
 
@@ -212,6 +260,37 @@ def __init__(
 
 `workers=["auto"]` is resolved in `dispatch_inner.py` via `engine._routing_engine.route(...)` (UnifiedRouter). Autoscaler `maybe_scale(...)` fires **only** on `NoCapableWorkersError` — never when a named worker is requested or routing succeeds.
 
+**Semantic routing** (`swarm/semantic_router.py`, Swarm audit SW-E10). The task
+and each worker's profile (its name -- an autoscaler instance's template --,
+expertise and the start of its system prompt, else its role) are embedded by
+Kazma's own embedder (`memory.embedder.get_embedder`, the model memory uses)
+and compared by cosine, exactly, in the process: no vector store, so no store's
+default embedding function. (The router used a Chroma collection that embedded
+profiles with Chroma's 384-d default model while the task used bge-m3, 1,024-d:
+every query failed on the dimensions.) A worker matches when its profile
+**stands out**: its similarity minus the mean of the other distinct profiles'
+(blended with 0.40 when fewer than three) is at least `MATCH_FLOOR` (0.045);
+instances of one template share a profile. Measured with bge-m3 on
+`tests/fixtures/swarm_routing/` (35 English and Arabic tasks, 7 workers;
+`scripts/swarm_routing_bench.py`): 19 of 24 specialist tasks routed right (21
+with the keyword fallback behind it; keywords alone 5, they read no Arabic),
+1 of 11 unrelated tasks sent to a specialist, and a lone worker takes no task
+about another (0 of 185). The nearest worker with no floor sent 7 of 11
+unrelated tasks to a specialist and never let a task reach the autoscaler.
+
+The embedding runs in a thread within `SEMANTIC_DEADLINE_S` (5 s), at most two
+at once. With no embedder, a failing, slow or busy one, the task routes by
+keywords; the routing diagnostics say why (`semantic.reason`), and the change
+is logged once at WARNING (`kazma_swarm_failures_total{site="semantic_routing"}`),
+its recovery at INFO.
+
+**The task names the workers that ran.** A DISPATCH runs the best candidate,
+so `task.workers` (and `metadata.routed_workers`) holds that one; every
+candidate, with its similarity, evidence, keyword overlap and dialect boost, is
+in `metadata.routing_diagnostics` (`candidates`, `scores`, `semantic`), written
+before a refusal too. A task the autoscaler took records it there
+(`autoscaled`: the template, the worker, whether it was reused).
+
 ### 2.2 Pipeline specifics
 
 - **Shared blackboard** — each stage sees prior stages' outputs.
@@ -219,6 +298,22 @@ def __init__(
 - **Hand-on** — the next step gets the previous worker's output and the blackboard **fenced** (§1.0d).
 - **Resume** — `patterns.resume_pipeline`, after the last journaled step (§1.0c).
 - **Post-processing** (`patterns._finalize_pipeline`) runs four hooks: LLM "Refiner" synthesis, self-improvement, pipeline logger, then returns `PatternExecution`.
+- **The Refiner** (Swarm audit SW-E15, decision D8: fixed). A pipeline that
+  succeeded -- on its first run or a resume -- is distilled by one model call
+  into a report. The report is the result's `synthesized_output` (the page's
+  synthesis); the pipeline's product, its last step's output, stays
+  `aggregated_output`, and every step's output stays in `worker_results`. Its
+  tokens and cost are added to `total_tokens` / `total_cost`, kept in
+  `metadata.refiner`, and recorded in the per-call LLM ledger with the task's id
+  as `thread_id`, as a worker's calls are. It reads the steps' outputs fenced,
+  4,000 characters in all, writes at most 2,048 tokens, and is given the step
+  deadline (at most 120 s); the watchdog's budget for a pipeline counts it as
+  one step more. A Refiner that fails, has no model or runs out of
+  time leaves the unrefined result: a WARNING and
+  `kazma_swarm_failures_total{site="refiner"}`, `metadata.refiner.status =
+  "failed"`. A failed or partial pipeline is not refined (no report over a
+  broken run). Before, its output never reached the stored result and, on
+  failure, a "raw report" stood in for it.
 
 ### 2.3 Fan-out status mapping
 
@@ -243,25 +338,67 @@ def __init__(
 | `synthesize` | LLM synthesis via `_SYNTHESIS_SYSTEM_PROMPT`, each worker's output fenced; deterministic fallback `_fallback_synthesis`. |
 | *(unknown)* | Raises `ValueError`. |
 
+A synthesis (here and in a consult) is the task's to account, like the
+Refiner's: its tokens and cost join the task's totals and `metadata.synthesis`,
+and the ledger has the call. Every model call the swarm makes for a task
+outside a worker goes through `swarm/task_model.call_task_model` (the agent's
+`resilient_chat`: retries, failover, the ledger row); a fallback when the model
+cannot answer is a WARNING and `kazma_swarm_failures_total{site="synthesis"}`.
+
 ---
 
 ## 4. Handoffs & cycle detection
 
-When a worker hands off to another worker mid-task, `SwarmEngine._handle_handoff()` recurses. Infinite loops (A→B→A) are prevented by two guards in `swarm/handoff_guards.py`:
+A worker can hand the rest of its task to another worker mid-task. The shipped
+LLM worker (`InProcessWorker`) does it through a tool its model calls,
+`handoff_to_worker(worker, reason, task?, context?)` (`swarm/handoff.py`,
+Swarm audit SW-E13, owner decision D6: handoff is a product feature):
+
+- **Offered only inside the engine.** Every dispatch the engine runs binds a
+  `HandoffOffer` (`worker_dispatch.dispatch_worker`): the registered workers
+  and the autoscaler's templates the worker may hand off to (never itself; a
+  pool instance is offered as its template), and the cycle guard below. The
+  tool is the worker's own, not the tool registry's: the main agent, the MCP
+  server and scheduled tasks never see it. A worker whose `capabilities.tools`
+  is a whitelist gets it only when the whitelist names it.
+- **What the call does.** The worker raises `HandoffRequest`; the engine
+  (`SwarmEngine._handle_handoff`) dispatches the target with the original
+  prompt, the original context and the `context` the model passed (fenced,
+  §1.0d), keeps the dispatch's metadata, task id and workspace (a conditional
+  branch has no blackboard and used to lose them), and records a
+  `HandoffRecord` (from, to, context, reason) on the source's result. The
+  target's answer is the task's; the source's tokens and cost before it
+  handed off count in the task's totals. The Swarm page draws the chain from
+  the task's `handoff` event and from the stored result.
+- **Refused, the model is told.** A call naming a worker the offer does not
+  list, without a reason, beside other tool calls, under a worker scope that
+  does not allow the `delegate` act (the commitment layer, as for
+  `dispatch_swarm`), or that the cycle guard refuses, is answered as the
+  tool's result, and the worker finishes the task itself.
+- **Approves nothing.** The target's tools go through the tool registry and
+  the swarm bus as any worker's do (§1.0); `handoff_to_worker` is tier
+  `write`, effect `delegate`, never a card.
+
+Infinite loops are prevented by two guards in `swarm/handoff_guards.py`:
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `MAX_HANDOFF_DEPTH` | `5` | Max recursion depth. |
-| `MAX_VISITS` | `2` | Max times a single worker may be revisited (allows legitimate A→B→A *return* handoffs). |
+| `MAX_HANDOFF_DEPTH` | `5` | A hop at depth 5 is refused: at most four hops, five runs. |
+| `MAX_VISITS` | `2` | A worker runs at most twice in one chain: A→B→A (the return) and A→B→A→B run; B's hop back to A (A's third run) is refused. |
 
 Mechanics:
 
-1. `_visited` is a `dict[str, int]` of per-worker visit counts (not a boolean set).
+1. `_visited` is a `dict[str, int]` of per-worker visit counts (not a boolean set), keyed by **worker identity** (`SwarmEngine._handoff_identity`): a pool instance counts as its template, since a hop to a template spawns a new instance each time.
 2. `_register_handoff_visit` increments the source worker's count.
-3. `_handoff_guard_error` trips on depth > 5 or per-worker visits > 2.
-4. `_depth` is incremented inside `worker_dispatch.dispatch_worker` when it calls `engine._handle_handoff(..., _depth=_depth + 1)`.
-5. On success/failure, the source breaker's `record_success`/`record_failure` is called **with the dispatch's admission** (§5.1).
+3. `_handoff_guard_error` refuses a hop when its depth is 5 or more, or when its target has already been counted twice.
+4. `_depth` is incremented inside `worker_dispatch.dispatch_worker` when it calls `engine._handle_handoff(..., _depth=_depth + 1)`; the offer asks the same guard at the same depth before the request is raised.
+5. On success/failure, the source breaker's `record_success`/`record_failure` is called **with the dispatch's admission** (§5.1), and every ending of the hop, a refusal included, ends the source's in-flight count (`_release_handoff_source`; the refusal used to leave it busy for good).
 6. The handing-off worker's intermediate results reach the target **fenced** (§1.0d).
+7. Every hop counts in `kazma_swarm_handoffs_total`.
+
+Gates: `tests/test_swarm_handoff_tool.py` (a scripted model, end to end; the
+guard removed and instance-name counting as negative controls) and
+`tests/test_swarm_handoff.py`.
 
 > **Symbol naming note:** the engine docstring refers textually to `_MAX_VISITS`, but the exported symbol is `MAX_VISITS` (`handoff_guards.py`). Same value (2).
 
@@ -425,7 +562,7 @@ A pipeline can pause at configured steps for human approval.
 
 ### 8.2 HTTP endpoints
 
-- `POST /api/swarm/tasks/\{task_id\}/approve` (`swarm_panel/routes_tasks.py`) claims the checkpoint, records the resumed run RUNNING and answers **`202`** at once (`task_status: running`); the progress and the ending reach the page on the task stream. A checkpoint no longer pending is `409 not_pending`; a full swarm `429 swarm_at_capacity`.
+- `POST /api/swarm/tasks/\{task_id\}/approve` (`swarm_panel/routes_tasks.py`) claims the checkpoint, records the resumed run RUNNING and answers **`202`** at once (`task_status: running`); the progress and the ending reach the page on the task stream. A checkpoint no longer pending is `409 not_pending`; a full swarm `429 swarm_at_capacity`; an approval the task store could not record `503 approval_not_recorded` (nothing resumed, the checkpoint still pending: §1.0f).
 - `POST /api/swarm/tasks/\{task_id\}/reject` answers `status: ok` with the task's own status beside it (`task_status`).
 
 ---
@@ -448,7 +585,10 @@ Swarm bookkeeping that fails and loses evidence or a decision is a WARNING and
 counts `kazma_swarm_failures_total{site}` on `GET /metrics`: `running_row` (the
 RUNNING row), `task_write`, `orphan_evidence`, `recovery_read`, `reap`,
 `idle_reap`, `gate_register`, `gate_settle`, `checkpoint_timeout_arm`,
-`breaker_persist`, `approval_resolve`. A catch-all handler in the swarm or the
+`breaker_persist`, `approval_resolve`; and a degraded result: `refiner` (the
+unrefined result kept), `synthesis` (the deterministic fallback),
+`semantic_routing` (keywords route until the embedder is back, counted once).
+A catch-all handler in the swarm or the
 bus adapters that stays below WARNING must be declared with its reason
 (`tests/test_swarm_boundaries_and_signals.py`).
 
@@ -546,8 +686,21 @@ so the swarm works with zero pre-registered workers.
   `max_instances`, and idle-reaped after 5 min (`AutoScaler.record_activity`
   refreshes the timer on each dispatch). An instance with a dispatch in flight
   (`SwarmWorker.in_flight`) is never reaped.
+- **An idle instance takes the next task before a new one is spawned**
+  (`AutoScaler._take`, for `maybe_scale` and `spawn_by_name`): one with no
+  dispatch in flight and no task already handed to it. A handed-out instance
+  is claimed until its dispatch begins (its in-flight count covers it from
+  then) or its breaker refuses it, else for 60 s; a claimed instance is not
+  reaped. An open breaker is not dodged: its instance is handed out and
+  refuses, rather than a new instance being sent to the failing model. So a
+  run of tasks the catch-all takes uses one instance, and tasks at the same
+  time take one each, up to the bound. (Found by the SQ01 soak: the router
+  matches instances by their template's words, so a task no template's words
+  matched never reached an existing catch-all instance; each spawned a new
+  one up to the bound, then failed for capacity until the idle ones were
+  reaped.)
 - **A template name dispatches too**: a task naming `coder` with no worker of
-  that name spawns an instance from the template.
+  that name gets an idle instance of the template, or a new one.
 - **Best model for the task kind.** Template `model`/`provider` are left empty
   by default; the spawned worker then classifies its task
   (`models/router.py::classify_prompt` → `CODING`/`VISION`/`REASONING`/`GENERAL`)

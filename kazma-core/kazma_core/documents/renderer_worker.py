@@ -450,6 +450,9 @@ def _weasy_pdf(output: Path, source: str, assets: Path) -> None:
     from urllib.parse import urlparse
     from urllib.request import url2pathname
 
+    from kazma_core.documents.weasyprint_log import quiet_own_stylesheet_warnings
+
+    quiet_own_stylesheet_warnings()  # before the import: it parses its own stylesheet
     from weasyprint import HTML
     from weasyprint.urls import FatalURLFetchingError, URLFetcher
 

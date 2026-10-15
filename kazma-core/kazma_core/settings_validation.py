@@ -79,6 +79,20 @@ def _checkpoint_retention(value: Any) -> Any:
     return days
 
 
+def _turn_timeout(value: Any) -> Any:
+    # The limit every surface applies to a running turn (agent/turn_budget.py);
+    # a value it cannot read would be ignored there with only a warning.
+    from kazma_core.agent.turn_budget import MAX_TURN_TIMEOUT_SECONDS, parse_turn_timeout
+
+    seconds = parse_turn_timeout(value)
+    if seconds is None:
+        raise SettingRejected(
+            "The turn time limit is a whole number of seconds "
+            f"from 0 (no limit) to {MAX_TURN_TIMEOUT_SECONDS}."
+        )
+    return seconds
+
+
 def _lifecycle_events(value: Any) -> Any:
     # Only events Kazma sends: a name it does not know would switch that
     # message off at the next boot without a word.
@@ -146,6 +160,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     Built on first use: the key names are the owning modules' own constants,
     and importing those modules here at import time would load the swarm
     package for every settings read."""
+    from kazma_core.agent.turn_budget import TURN_TIMEOUT_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
     from kazma_core.lifecycle_notifier import EVENTS_KEY
@@ -160,6 +175,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         TENANT_MODE_KEY: (_tenant_mode, "memory"),
         TASK_RETENTION_KEY: (_task_retention, "swarm"),
         RETENTION_KEY: (_checkpoint_retention, "system"),
+        TURN_TIMEOUT_KEY: (_turn_timeout, "agent"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
     }
 

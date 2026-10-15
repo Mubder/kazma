@@ -979,6 +979,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # Checkpoint retention (2026-09-27): SQLite files and Postgres deletes,
     # one transaction per chat; the task store's single-task delete.
     "run_checkpoint_retention", "retention_setting", "delete_task",
+    # A turn's time limit (2026-10-15): the chat's /long state and the
+    # setting, both settings reads, asked at the start of every graph run.
+    "resolve_turn_budget", "turn_timeout_setting",
     # Third pass (2026-09-30). The restic maintenance handler read its repos
     # on the loop while Postgres was away (a Docker Desktop update) and the
     # guard restarted Kazma. Beside it: the workspace ladder (the workspace
@@ -1056,6 +1059,17 @@ _LOOP_STALL_HELPERS = frozenset({
     "ensure_capacity", "set_vector_status", "vector_status", "search_sync",
     "search_all_sync", "build_knowledge_inject", "run_repair_sweep", "kb_refusal",
     "active_for_library", "purge_terminal", "copy_legacy_knowledge",
+    # Swarm semantic routing (Swarm audit SW-E10, 2026-10-15): Kazma's
+    # embedder on the task and every worker profile (a local model's first
+    # call loads it), and its configuration read. The router runs it in a
+    # thread within a deadline.
+    "semantic_scores",
+    # KB-Q01 (2026-10-15): the keyword index's merge after a delete, the
+    # vector folders of dropped collections (a directory walk, a catalog
+    # read, a client close that waits for calls in flight), and an index
+    # rebuilt by copying its vectors.
+    "purge_search_index", "release_dropped_vectors", "remove_orphan_segment_folders",
+    "rebuild_graph",
 })
 
 

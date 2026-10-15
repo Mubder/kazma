@@ -210,7 +210,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
 | `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
-| `KAZMA_PUBLIC_URL` | `""` | `kazma_core.ide.env_context`, `kazma_core.migration.exporter`, `kazma_core.security.hardening` +5 | yes |
+| `KAZMA_PUBLIC_URL` | `""` | `kazma_core.ide.env_context`, `kazma_core.migration.exporter`, `kazma_core.security.hardening` +6 | yes |
 | `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |
 | `KAZMA_REMOTE_DAY_REQUESTS` | `"1024"` | `kazma_core.web_acquire.accounting` | yes |
@@ -269,7 +269,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_TURN_DURABLE_INTERVAL_S` | `"2.0"` | `kazma_ui.sse_chat._streaming` | yes |
 | `KAZMA_TURN_LIVENESS_GRACE_S` | (none) | `kazma_ui.turn_liveness` | yes |
 | `KAZMA_TURN_LIVENESS_HEAL` | (none) | `kazma_ui.turn_liveness` | yes |
-| `KAZMA_TURN_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.turn`, `kazma_core.agent_runner` | yes |
+| `KAZMA_TURN_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.turn_budget` | yes |
 | `KAZMA_TZ` | `""` | `kazma_core.cron.scheduler` | yes |
 | `KAZMA_UNRESTRICTED_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_UPDATE_REMOTE_ALLOWLIST` | `""` | `kazma_cli.update` | yes |

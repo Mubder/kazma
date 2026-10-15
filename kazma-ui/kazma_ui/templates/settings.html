@@ -2171,6 +2171,18 @@
             <button class="btn btn-primary" @click="saveCheckpointRetention()" :disabled="checkpointRetentionSaving || checkpointRetention.source === 'env'">{{ t('settings.save_checkpoint_retention') }}</button>
         </div>
 
+        <!-- Turn time limit (kazma_core.agent.turn_budget: every surface) -->
+        <div class="settings-group" id="turn-timeout-section">
+            <h3>{{ t('settings.turn_timeout_title') }}</h3>
+            <div class="form-group">
+                <label for="turn-timeout-seconds">{{ t('settings.turn_timeout_seconds') }}</label>
+                <input id="turn-timeout-seconds" type="number" class="form-input" x-model.number="turnTimeout.seconds" min="0" :max="turnTimeout.max" step="1" style="max-width:200px" :disabled="turnTimeout.source === 'env'">
+                <div class="form-hint">{{ t('settings.turn_timeout_hint') }}</div>
+                <div class="form-hint" x-show="turnTimeout.source === 'env'" x-cloak>{{ t('settings.turn_timeout_env') }}</div>
+            </div>
+            <button class="btn btn-primary" @click="saveTurnTimeout()" :disabled="turnTimeoutSaving || turnTimeout.source === 'env'">{{ t('settings.save_turn_timeout') }}</button>
+        </div>
+
         <!-- Proxy Provider -->
         <div class="settings-group">
             <h3>{{ t('settings.proxy_title') }}</h3>

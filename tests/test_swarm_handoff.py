@@ -370,21 +370,17 @@ class TestHandoffOrchestration:
 
     @pytest.mark.asyncio
     async def test_handoff_emits_sse_event_logged(self, three_worker_engine: SwarmEngine):
-        """SSE event swarm.handoff.{from}->{to} is logged."""
+        """The ``handoff`` event reaches the task's stream (the Swarm page
+        draws the chain from it, swarm.js). It used to be a log line only:
+        the page's listener never fired (Swarm audit SW-E13)."""
         engine = three_worker_engine
-        log_messages: list[str] = []
+        events: list[tuple[str, str, dict]] = []
 
-        import logging
+        class Bus:
+            def emit(self, task_id: str, event: str, data: dict) -> None:
+                events.append((task_id, event, data))
 
-        class LogCapture(logging.Handler):
-            def emit(self, record: logging.LogRecord) -> None:
-                log_messages.append(record.getMessage())
-
-        handler = LogCapture()
-        engine_logger = logging.getLogger("kazma_core.swarm.engine")
-        prev_level = engine_logger.level
-        engine_logger.setLevel(logging.DEBUG)
-        engine_logger.addHandler(handler)
+        engine.set_sse_bus(Bus())
 
         async def alpha_dispatch(task: str, context: str = "") -> dict:
             request_handoff("beta", "go", "ctx")
@@ -396,15 +392,14 @@ class TestHandoffOrchestration:
         engine.get_worker("alpha").dispatch = alpha_dispatch  # type: ignore[assignment]
         engine.get_worker("beta").dispatch = beta_dispatch  # type: ignore[assignment]
 
-        await engine.dispatch(SwarmTask(prompt="p", workers=["alpha"]))
+        task = SwarmTask(prompt="p", workers=["alpha"])
+        await engine.dispatch(task)
 
-        engine_logger.removeHandler(handler)
-        engine_logger.setLevel(prev_level)
-
-        sse_events = [m for m in log_messages if "swarm.handoff" in m]
-        assert len(sse_events) >= 1
-        assert "alpha" in sse_events[0]
-        assert "beta" in sse_events[0]
+        handoffs = [(tid, data) for tid, event, data in events if event == "handoff"]
+        assert handoffs and handoffs[0][0] == task.id, events
+        assert handoffs[0][1]["from"] == "alpha" and handoffs[0][1]["to"] == "beta"
+        # The target's own events reach the same task's stream.
+        assert (task.id, "worker_started", {"worker": "beta", "step": 0}) in events
 
     @pytest.mark.asyncio
     async def test_handoff_target_receives_accumulated_context(self, three_worker_engine: SwarmEngine):

@@ -61,13 +61,13 @@ def graph_hygiene_report(conn: sqlite3.Connection, *, tenant_id: str | None = No
     scoped = tenant_id not in (None, "", "default")
     empty = [eid for _tenant, eid in plain_empty_shells(conn, tenant_id=tenant_id if scoped else None)]
     # A merged-away entity is a redirect (metadata.merged_into), not clutter.
+    only = tenant_id if scoped else None
     rows = conn.execute(
         "SELECT id, belief_count, graph_degree FROM entities "
         "WHERE COALESCE(json_extract(CASE WHEN json_valid(metadata_json) "
-        "THEN metadata_json END, '$.merged_into'), '') = ''"
-        + (" AND tenant_id = ?" if scoped else "")
-        + " ORDER BY id",
-        (tenant_id,) if scoped else (),
+        "THEN metadata_json END, '$.merged_into'), '') = '' "
+        "AND (? IS NULL OR tenant_id = ?) ORDER BY id",
+        (only, only),
     ).fetchall()
 
     isolated: list[str] = []

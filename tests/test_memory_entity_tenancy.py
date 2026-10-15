@@ -12,9 +12,11 @@ Here: the four witnesses inverted, and the agent memory tools that take an
 entity or belief id run as tenant alpha against beta's ids: refused, and
 beta's rows unchanged (the install's own tenant may, the negative control).
 
-The entity KEY is still global: keying entities by ``(tenant_id, id)`` rewrites
-every entity statement (about ninety) and needs a migration of non-default
-tenants' rows; until then these rules hold the boundary.
+Entities are keyed by ``(tenant_id, id)`` since 2026-10-15
+(``memory/entity_key.py``): each tenant holds its own row of an id, its own
+``user`` hub included. ``tests/test_memory_entity_key.py`` holds every entity
+statement to the key and runs every route and tool with an id two tenants
+hold; the migration of a store made under the old key is there too.
 """
 
 from __future__ import annotations
@@ -79,24 +81,33 @@ def test_r15_a_second_tenant_never_writes_into_the_firsts_row(mem):
     from kazma_core.memory.entity_resolution import alias_hash, resolve_entity
 
     resolve_entity(mem.db, "Acme Corp", tenant_id="a")
-    before = mem.db.execute("SELECT aliases_json FROM entities WHERE id = 'acme_corp'").fetchone()[0]
+    before = mem.db.execute(
+        "SELECT aliases_json FROM entities WHERE id = 'acme_corp' AND tenant_id = 'a'").fetchone()[0]
     resolve_entity(mem.db, "ACME corp!", tenant_id="b")
-    row = mem.db.execute("SELECT tenant_id, aliases_json FROM entities WHERE id = 'acme_corp'").fetchone()
-    assert row["tenant_id"] == "a" and row["aliases_json"] == before
+    row = mem.db.execute(
+        "SELECT tenant_id, aliases_json FROM entities WHERE id = 'acme_corp' AND tenant_id = 'a'").fetchone()
+    assert row["aliases_json"] == before
     assert alias_hash("ACME corp!") not in json.loads(row["aliases_json"]) or \
         alias_hash("ACME corp!") == alias_hash("Acme Corp")  # the same name folds alike
+    # And b has an entity of its own (the key is the pair).
+    assert {r[0] for r in mem.db.execute("SELECT tenant_id FROM entities WHERE id = 'acme_corp'")} == {"a", "b"}
 
 
 def test_s04_renaming_your_own_self_entity_leaves_another_tenants_hub(mem):
+    """Alpha's rename syncs alpha's own hub (each tenant has one, keyed by
+    the pair); beta's is untouched."""
     from kazma_ui import memory_api
 
     mem.mp.setenv("KAZMA_MEMORY_ENFORCE_TENANT", "1")
     _two_tenants(mem)
     with _Tenant("alpha"):
         out = memory_api._rename_entity_sync("alpha_me", {"name": "ALPHA-PRIVATE-NAME"})
-    assert out["ok"] and out["hub_synced"] is False
-    hub = mem.db.execute("SELECT tenant_id, name, aliases_json FROM entities WHERE id='user'").fetchone()
-    assert (hub["tenant_id"], hub["name"]) == ("beta", "Beta Owner") and "alpha_me" not in hub["aliases_json"]
+    assert out["ok"] and out["hub_synced"] is True
+    hub = mem.db.execute(
+        "SELECT name, aliases_json FROM entities WHERE id='user' AND tenant_id='beta'").fetchone()
+    assert hub["name"] == "Beta Owner" and "alpha_me" not in hub["aliases_json"]
+    own = mem.db.execute("SELECT name FROM entities WHERE id='user' AND tenant_id='alpha'").fetchone()
+    assert own["name"] == "ALPHA-PRIVATE-NAME"
 
 
 def test_s04_the_agent_merge_tool_keeps_to_its_tenant(mem):
@@ -104,8 +115,8 @@ def test_s04_the_agent_merge_tool_keeps_to_its_tenant(mem):
     tools = _memory_tools()
     out = json.loads(_as_tenant("alpha", tools["memory_merge_entities"], "beta_proj", "alpha_proj"))
     assert out == {"ok": False, "error": "source or target not found"}
-    src = mem.db.execute("SELECT metadata_json FROM entities WHERE id='beta_proj'").fetchone()
-    tgt = mem.db.execute("SELECT aliases_json FROM entities WHERE id='alpha_proj'").fetchone()
+    src = mem.db.execute("SELECT metadata_json FROM entities WHERE id='beta_proj' AND tenant_id='beta'").fetchone()
+    tgt = mem.db.execute("SELECT aliases_json FROM entities WHERE id='alpha_proj' AND tenant_id='alpha'").fetchone()
     assert "merged_into" not in src[0] and "Beta secret project" not in tgt[0]
 
 

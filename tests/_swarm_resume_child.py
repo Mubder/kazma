@@ -85,7 +85,7 @@ async def main(argv: list[str]) -> int:
 
     engine.restore_paused_tasks()
     if control:
-        async def _skip_admission(task):
+        async def _skip_admission(task, **_kwargs):
             return None  # the old order: nothing recorded before resuming
 
         async def _no_journal(task, step, state):
@@ -96,8 +96,8 @@ async def main(argv: list[str]) -> int:
     if kill_at == "after_admit":
         admit = engine._admit_to_store
 
-        async def _admit_then_die(task):
-            held = await admit(task)
+        async def _admit_then_die(task, **kwargs):
+            held = await admit(task, **kwargs)
             os._exit(9)
             return held
 

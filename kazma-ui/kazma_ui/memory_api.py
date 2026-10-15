@@ -26,9 +26,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["memory-admin"])
 
 
-def _protection(conn: sqlite3.Connection, eid: str) -> str | None:
-    """Why `eid` may not be deleted (``memory/entity_protection.py``: the hub,
-    the agent, the owner's own names, or the operator's flag), else None.
+def _protection(conn: sqlite3.Connection, eid: str, tenant: str) -> str | None:
+    """Why *tenant*'s entity `eid` may not be deleted
+    (``memory/entity_protection.py``: the hub, the agent, the owner's own
+    names, or the operator's flag), else None.
 
     A store that cannot answer refuses (``"unknown"``): this used to answer
     "not protected" on any read error.
@@ -36,19 +37,19 @@ def _protection(conn: sqlite3.Connection, eid: str) -> str | None:
     from kazma_core.memory.entity_protection import protection
 
     try:
-        return protection(conn, eid)
+        return protection(conn, eid, tenant_id=tenant)
     except sqlite3.Error:
         logger.warning("[memory_api] protection check failed for %r", str(eid)[:60], exc_info=True)
         return "unknown"
 
 
-def _merge_refusal(conn: sqlite3.Connection, source_id: str, target_id: str) -> str | None:
-    """Why `source_id` may not be merged into `target_id`, else None (refuses
-    when the store cannot answer, like :func:`_protection`)."""
+def _merge_refusal(conn: sqlite3.Connection, source_id: str, target_id: str, tenant: str) -> str | None:
+    """Why *tenant*'s `source_id` may not be merged into `target_id`, else
+    None (refuses when the store cannot answer, like :func:`_protection`)."""
     from kazma_core.memory.entity_protection import merge_refusal
 
     try:
-        return merge_refusal(conn, source_id, target_id)
+        return merge_refusal(conn, source_id, target_id, tenant_id=tenant)
     except sqlite3.Error:
         logger.warning("[memory_api] merge protection check failed for %r", str(source_id)[:60], exc_info=True)
         return "unknown"
@@ -292,10 +293,10 @@ def _memory_tenant_id() -> str:
     return "default"
 
 
-#: The id-keyed memory tables a route may be handed an id for, and the query
-#: that names the row's tenant.
+#: The memory tables keyed by an id of their own a route may be handed one
+#: for, and the query that names the row's tenant. Entities are keyed by
+#: ``(tenant_id, id)`` (Memory audit M21): :func:`_entity_owner` answers for them.
 _OWNER_SQL = {
-    "entities": "SELECT tenant_id FROM entities WHERE id=?",
     "beliefs": "SELECT tenant_id FROM beliefs WHERE id=?",
     "entity_merges": "SELECT tenant_id FROM entity_merges WHERE id=?",
     "graph_associations": "SELECT tenant_id FROM graph_associations WHERE id=?",
@@ -307,7 +308,7 @@ def _row_tenant_ok(conn: sqlite3.Connection, table: str, row_id: str) -> bool:
 
     The install's own tenant ('default') always passes -- single-user
     behaviour. Under enforcement, a row of another tenant, a missing row and a
-    failed lookup all read as not found: ids are global, rows are not.
+    failed lookup all read as not found.
     ``tests/test_memory_routes_tenant_scope.py`` calls every memory route with
     another tenant's ids.
     """
@@ -321,9 +322,29 @@ def _row_tenant_ok(conn: sqlite3.Connection, table: str, row_id: str) -> bool:
     return bool(row) and str(row[0] or "default") == tid
 
 
+def _entity_owner(conn: sqlite3.Connection, eid: str) -> str | None:
+    """The tenant whose entity *eid* this request acts on, or None (not found).
+
+    Entities are keyed by ``(tenant_id, id)`` (Memory audit M21,
+    ``memory/entity_key.entity_owner``): a tenant's own row; the install's own
+    view (``default``) its own row first, else the one tenant that holds the
+    id. Every entity statement a route then runs names that tenant. A failed
+    lookup reads as not found."""
+    from kazma_core.memory.entity_key import entity_owner
+
+    try:
+        return entity_owner(conn, eid, _memory_tenant_id())
+    except sqlite3.Error:
+        logger.warning("[memory_api] entity owner lookup failed for %r", str(eid)[:60], exc_info=True)
+        return None
+
+
 def _entity_tenant_ok(conn: sqlite3.Connection, eid: str) -> bool:
-    """:func:`_row_tenant_ok` for an entity id."""
-    return _row_tenant_ok(conn, "entities", eid)
+    """May this request name graph node *eid* in its own rows (a grouping)?
+    The install's own view any node, a virtual fact node with no entity row
+    included; a tenant caller only an entity of its own."""
+    tid = _memory_tenant_id()
+    return tid == "default" or _entity_owner(conn, eid) == tid
 
 
 def _belief_tenant_ok(conn: sqlite3.Connection, bid: str) -> bool:
@@ -419,7 +440,8 @@ def _memory_vocab_sync() -> dict[str, Any]:
                 f"""SELECT e.id, e.name, e.type,
                            COALESCE(e.belief_count,
                              (SELECT COUNT(*) FROM beliefs b
-                              WHERE b.invalidated_at IS NULL AND b.valid_until IS NULL
+                              WHERE b.tenant_id = e.tenant_id
+                                AND b.invalidated_at IS NULL AND b.valid_until IS NULL
                                 AND (b.subject=e.id OR b.object=e.id))
                            ) AS belief_count
                     FROM entities e
@@ -452,14 +474,16 @@ def _memory_admin_summary_sync() -> dict[str, Any]:
         scoped = tid != "default"
         tfilter = " AND tenant_id = ?" if scoped else ""
         tparam: tuple = (tid,) if scoped else ()
+        # The entity counts' own form: None is the install's view, every tenant.
+        only = (tid if scoped else None,) * 2
 
         # Phase 3: prefer the materialized columns for the empty/isolated
         # counts when no entity is stale; fall back to the live correlated
         # subqueries otherwise (correctness over speed).
         try:
             stale_n = conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE belief_count = -1" + tfilter,
-                tparam,
+                "SELECT COUNT(*) FROM entities WHERE belief_count = -1 AND (? IS NULL OR tenant_id = ?)",
+                only,
             ).fetchone()[0]
         except Exception:
             stale_n = 1
@@ -475,7 +499,7 @@ def _memory_admin_summary_sync() -> dict[str, Any]:
             tparam,
         ).fetchone()[0]
         ents = conn.execute(
-            "SELECT COUNT(*) FROM entities WHERE 1=1" + tfilter, tparam
+            "SELECT COUNT(*) FROM entities WHERE (? IS NULL OR tenant_id = ?)", only
         ).fetchone()[0]
         # "Empty" is what the Hygiene purge takes (entity_retire): it
         # counted every entity with no facts, merge redirects included, so
@@ -484,11 +508,10 @@ def _memory_admin_summary_sync() -> dict[str, Any]:
 
         empty = len(plain_empty_shells(conn, tenant_id=tid if scoped else None))
         isolated = conn.execute(
-            "SELECT COUNT(*) FROM entities e "
-            "WHERE " + count_expr + " > 0 AND " + degree_expr + " = 0 "
-            "AND LOWER(e.id) NOT IN ('user','assistant')"
-            + tfilter,
-            tparam,
+            "SELECT COUNT(*) FROM entities e WHERE (? IS NULL OR e.tenant_id = ?) AND "
+            + count_expr + " > 0 AND " + degree_expr + " = 0 "
+            "AND LOWER(e.id) NOT IN ('user','assistant')",
+            only,
         ).fetchone()[0]
         # Memories recall can show: not forgotten tombstones, not retired
         # copies (Memory audit M32 -- "Episodes: 1" after the only memory was
@@ -577,9 +600,15 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
         # upgrade, or after a bulk clear/delete), fall back to the live
         # correlated subqueries for correctness. The backfill + write-path
         # hooks keep stale rows rare in steady state.
+        # Phase 4: scope by tenant when enforcement is on (None: the install's
+        # own view, every tenant). The base WHERE carries the filter;
+        # FTS/LIKE/empty/isolated clauses append to it.
+        tid = _memory_tenant_id()
+        only = tid if tid != "default" else None
         try:
             stale_n = conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE belief_count = -1"
+                "SELECT COUNT(*) FROM entities WHERE belief_count = -1 AND (? IS NULL OR tenant_id = ?)",
+                (only, only),
             ).fetchone()[0]
         except Exception:
             stale_n = 1  # column missing → treat as stale (use live subquery)
@@ -589,14 +618,8 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
         else:
             count_expr = _belief_count_sql()
             degree_expr = _entity_degree_sql()
-        # Phase 4: scope by tenant when enforcement is on. The base WHERE
-        # carries the filter; FTS/LIKE/empty/isolated clauses append to it.
-        tid = _memory_tenant_id()
-        where = " FROM entities e WHERE 1=1"
-        params: list[Any] = []
-        if tid != "default":
-            where += " AND e.tenant_id = ?"
-            params.append(tid)
+        where = " FROM entities e WHERE (? IS NULL OR e.tenant_id = ?)"
+        params: list[Any] = [only, only]
         matched_via: str | None = None
         query = (q or "").strip()
         if query:
@@ -613,10 +636,8 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                     fts_rows = conn.execute(
                         "SELECT e.rowid FROM entities_fts "
                         "JOIN entities e ON e.rowid = entities_fts.rowid "
-                        "WHERE entities_fts MATCH ?"
-                        + (" AND e.tenant_id = ?" if tid != "default" else "")
-                        + " LIMIT 2000",
-                        (match_q, tid) if tid != "default" else (match_q,),
+                        "WHERE entities_fts MATCH ? AND (? IS NULL OR e.tenant_id = ?) LIMIT 2000",
+                        (match_q, only, only),
                     ).fetchall()
                     fts_rowids = [int(r["rowid"]) for r in fts_rows]
                 except Exception:
@@ -761,16 +782,15 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
         )
 
         conn = _conn()
-        row = conn.execute(
-            "SELECT id, type, name, aliases_json FROM entities WHERE id=?",
-            (eid,),
-        ).fetchone()
-        if row and not _entity_tenant_ok(conn, eid):
-            # Another tenant's entity: ids are global, rows are not.
-            conn.close()
-            return {"ok": False, "error": "not_found"}
-        created = False
         tid = _memory_tenant_id()
+        # Entities are keyed by (tenant_id, id) (Memory audit M21): the row
+        # this request may rename, or none.
+        owner = _entity_owner(conn, eid)
+        row = conn.execute(
+            "SELECT id, type, name, aliases_json FROM entities WHERE id=? AND tenant_id=?",
+            (eid, owner),
+        ).fetchone() if owner else None
+        created = False
         if not row and tid != "default" and not conn.execute(
             "SELECT 1 FROM beliefs WHERE tenant_id = ? AND (subject = ? OR object = ?) LIMIT 1",
             (tid, eid, eid),
@@ -782,15 +802,20 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
             conn.close()
             return {"ok": False, "error": "not_found"}
         if not row:
-            # Promote a graph node / hub id into a real entity so the
-            # display name survives reloads (virtual facts, user hub).
+            # Promote a graph node / hub id into a real entity -- the
+            # caller's own -- so the display name survives reloads (virtual
+            # facts, user hub).
+            owner = tid
             etype = "person" if eid.lower() in ("user", "you", "assistant") else "concept"
-            conn.execute(
-                """INSERT INTO entities
+            if not conn.execute(
+                """INSERT OR IGNORE INTO entities
                    (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
                    VALUES (?, ?, ?, ?, '[]', ?, '{}')""",
-                (eid, _memory_tenant_id(), etype, new_name, 1 if etype == "person" else 0),
-            )
+                (eid, owner, etype, new_name, 1 if etype == "person" else 0),
+            ).rowcount:
+                # A store still keyed by id alone, where another tenant holds it.
+                conn.close()
+                return {"ok": False, "error": "not_found"}
             created = True
             old_name = eid
             aliases: list[Any] = []
@@ -809,8 +834,8 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
             aliases = aliases[-40:]
 
         conn.execute(
-            "UPDATE entities SET name=?, aliases_json=? WHERE id=?",
-            (new_name, json.dumps(aliases, ensure_ascii=False), eid),
+            "UPDATE entities SET name=?, aliases_json=? WHERE id=? AND tenant_id=?",
+            (new_name, json.dumps(aliases, ensure_ascii=False), eid, owner),
         )
 
         # Self person shells (User / You / ent_* backfill) drive the canvas hub
@@ -829,14 +854,16 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
                 if keep not in aliases:
                     aliases.append(keep)
             conn.execute(
-                "UPDATE entities SET aliases_json=? WHERE id=?",
-                (json.dumps(aliases, ensure_ascii=False), eid),
+                "UPDATE entities SET aliases_json=? WHERE id=? AND tenant_id=?",
+                (json.dumps(aliases, ensure_ascii=False), eid, owner),
             )
+            # The hub of the tenant whose entity this is (each tenant has its
+            # own ``user``, Memory audit M21).
             hub = ensure_user_hub(
                 conn,
                 new_name,
                 extra_aliases=list(aliases) + [eid, old_name],
-                tenant_id=tid,
+                tenant_id=owner,
             )
             hub_synced = not hub.get("skipped")
 
@@ -887,21 +914,16 @@ def _protect_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
         return {"ok": False, "error": f"cannot unprotect core entity: {eid}"}
     try:
         conn = _conn()
-        if not _entity_tenant_ok(conn, eid):
-            conn.close()
-            return {"ok": False, "error": "not_found"}
-        row = conn.execute(
-            "SELECT id, is_protected FROM entities WHERE id=?", (eid,)
-        ).fetchone()
-        if not row:
+        owner = _entity_owner(conn, eid)
+        if owner is None:
             conn.close()
             return {"ok": False, "error": "not_found"}
         # The owner's own names are the hub's data, protected whatever the flag.
-        if not want and _protection(conn, eid) == "self":
+        if not want and _protection(conn, eid, owner) == "self":
             conn.close()
             return {"ok": False, "error": f"cannot unprotect the hub's own entity: {eid}"}
         conn.execute(
-            "UPDATE entities SET is_protected=? WHERE id=?", (1 if want else 0, eid)
+            "UPDATE entities SET is_protected=? WHERE id=? AND tenant_id=?", (1 if want else 0, eid, owner)
         )
         conn.commit()
         conn.close()
@@ -932,14 +954,11 @@ def _set_major_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
     want = bool(body.get("major"))
     try:
         conn = _conn()
-        if not _entity_tenant_ok(conn, eid):
+        owner = _entity_owner(conn, eid)
+        if owner is None:
             conn.close()
             return {"ok": False, "error": "not_found"}
-        row = conn.execute("SELECT id FROM entities WHERE id=?", (eid,)).fetchone()
-        if not row:
-            conn.close()
-            return {"ok": False, "error": "not_found"}
-        conn.execute("UPDATE entities SET is_major=? WHERE id=?", (1 if want else 0, eid))
+        conn.execute("UPDATE entities SET is_major=? WHERE id=? AND tenant_id=?", (1 if want else 0, eid, owner))
         conn.commit()
         conn.close()
         return {"ok": True, "id": eid, "major": want}
@@ -962,18 +981,21 @@ def _delete_entity_sync(entity_id: str) -> dict[str, Any]:
     # Protection: the hub, the agent, the owner's own names and the per-row
     # flag (entity_protection). Resolved against a connection: the hub's
     # aliases and the flag are data.
-    if not _entity_tenant_ok(conn, eid):
-        conn.close()
-        return {"ok": False, "error": "not_found"}
-    kind = _protection(conn, eid)
+    owner = _entity_owner(conn, eid)
+    # The core ids are policy (no row needed); the hub's names and the flag
+    # are the owner's data, else the caller's own.
+    kind = _protection(conn, eid, owner or _memory_tenant_id())
     if kind:
         conn.close()
         return {"ok": False, "error": "protected", "code": "protected", "id": eid, "protected": kind}
+    if owner is None:
+        conn.close()
+        return {"ok": False, "error": "not_found"}
     try:
         row = conn.execute(
             "SELECT id, type, name, aliases_json, metadata_json, is_high_stakes, is_protected "
-            "FROM entities WHERE id=?",
-            (eid,),
+            "FROM entities WHERE id=? AND tenant_id=?",
+            (eid, owner),
         ).fetchone()
         if not row:
             conn.close()
@@ -991,12 +1013,12 @@ def _delete_entity_sync(entity_id: str) -> dict[str, Any]:
         try:
             from kazma_core.memory.entity_resolution import preserve_merge_ledger
 
-            preserve_merge_ledger(conn, eid, reason="entity_delete")
+            preserve_merge_ledger(conn, eid, tenant_id=owner, reason="entity_delete")
         except Exception:
             logger.debug("[memory_api] merge-ledger archive skipped", exc_info=True)
         conn.execute(
-            "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
-            (eid, eid),
+            "DELETE FROM entity_merges WHERE tenant_id=? AND (source_entity_id=? OR target_entity_id=?)",
+            (owner, eid, eid),
         )
         # Phase 3: entities that co-occurred with this one lose a degree once
         # it's gone. Mark them stale (-1) so the read path recomputes them on
@@ -1007,20 +1029,20 @@ def _delete_entity_sync(entity_id: str) -> dict[str, Any]:
             ename = row["name"]
             co = conn.execute(
                 "SELECT DISTINCT CASE WHEN subject=? THEN object ELSE subject END AS other "
-                "FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL "
+                "FROM beliefs WHERE tenant_id=? AND valid_until IS NULL AND invalidated_at IS NULL "
                 "AND (subject=? OR object=? OR subject=? OR object=?)",
-                (eid, eid, eid, ename, ename),
+                (eid, owner, eid, eid, ename, ename),
             ).fetchall()
             other_ids = [str(r["other"]) for r in co if r["other"]]
             if other_ids:
                 placeholders = ",".join("?" for _ in other_ids)
                 conn.execute(
-                    f"UPDATE entities SET belief_count=-1 WHERE id IN ({placeholders})",
-                    other_ids,
+                    f"UPDATE entities SET belief_count=-1 WHERE tenant_id=? AND id IN ({placeholders})",
+                    [owner, *other_ids],
                 )
         except Exception:
             logger.debug("[memory_api] delete co-occur stale-mark failed", exc_info=True)
-        conn.execute("DELETE FROM entities WHERE id=?", (eid,))
+        conn.execute("DELETE FROM entities WHERE id=? AND tenant_id=?", (eid, owner))
         conn.commit()
         conn.close()
 
@@ -1032,7 +1054,7 @@ def _delete_entity_sync(entity_id: str) -> dict[str, Any]:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     snap["id"],
-                    _memory_tenant_id(),
+                    owner,
                     snap["type"],
                     snap["name"],
                     snap["aliases_json"],
@@ -1083,29 +1105,27 @@ def _merge_entities_sync(payload: Any) -> dict[str, Any]:
     if source_id == target_id:
         return {"ok": False, "error": "source and target must differ"}
     conn = _conn()
+    # Both entities are one tenant's (keyed by (tenant_id, id), Memory audit
+    # M21): the source's owner, and the target must be that tenant's too --
+    # a merge across tenants is refused, and so is one into another tenant's
+    # entity of the same id.
+    src_tid = _entity_owner(conn, source_id)
     # Protection (entity_protection): the hub, the agent, the owner's own
     # names -- which may still go INTO the hub -- and the per-row flag.
-    kind = _merge_refusal(conn, source_id, target_id)
+    kind = _merge_refusal(conn, source_id, target_id, src_tid or _memory_tenant_id())
     if kind:
         conn.close()
         return {"ok": False, "error": f"cannot merge protected source {source_id}", "protected": kind}
     try:
         src = conn.execute(
-            "SELECT id, tenant_id, name, aliases_json FROM entities WHERE id=?", (source_id,)
-        ).fetchone()
+            "SELECT id, tenant_id, name, aliases_json FROM entities WHERE id=? AND tenant_id=?",
+            (source_id, src_tid),
+        ).fetchone() if src_tid else None
         tgt = conn.execute(
-            "SELECT id, tenant_id, name, aliases_json FROM entities WHERE id=?", (target_id,)
-        ).fetchone()
+            "SELECT id, tenant_id, name, aliases_json FROM entities WHERE id=? AND tenant_id=?",
+            (target_id, src_tid),
+        ).fetchone() if src_tid else None
         if not src or not tgt:
-            conn.close()
-            return {"ok": False, "error": "source or target not found"}
-        # M-05/M-07: cross-tenant merges are refused; the belief rewire below
-        # is scoped to the source entity's tenant so it can never touch
-        # another tenant's rows.
-        src_tid = str(src["tenant_id"] or "default")
-        tgt_tid = str(tgt["tenant_id"] or "default")
-        active_tid = _memory_tenant_id()
-        if active_tid != "default" and (src_tid != active_tid or tgt_tid != active_tid):
             conn.close()
             return {"ok": False, "error": "source or target not found"}
 
@@ -1121,8 +1141,8 @@ def _merge_entities_sync(payload: Any) -> dict[str, Any]:
             if a and a not in tgt_aliases:
                 tgt_aliases.append(a)
         conn.execute(
-            "UPDATE entities SET aliases_json=? WHERE id=?",
-            (json.dumps(tgt_aliases, ensure_ascii=False), target_id),
+            "UPDATE entities SET aliases_json=? WHERE id=? AND tenant_id=?",
+            (json.dumps(tgt_aliases, ensure_ascii=False), target_id, src_tid),
         )
         # Rewire beliefs (slug + display name) and count how many moved so the
         # receipt can show "N beliefs rewired" (undo is intentionally NOT
@@ -1148,8 +1168,8 @@ def _merge_entities_sync(payload: Any) -> dict[str, Any]:
                  COALESCE(NULLIF(metadata_json,''), '{}'),
                  '$.merged_into', ?
                )
-               WHERE id = ?""",
-            (target_id, source_id),
+               WHERE id = ? AND tenant_id = ?""",
+            (target_id, source_id, src_tid),
         )
         mid = "m_" + uuid.uuid4().hex[:16]
         now = time.time()
@@ -1160,7 +1180,7 @@ def _merge_entities_sync(payload: Any) -> dict[str, Any]:
                VALUES (?, ?, ?, ?, 'approved', 'ui_manual', 1.0, ?, ?, ?)""",
             (
                 mid,
-                _memory_tenant_id(),
+                src_tid,
                 source_id,
                 target_id,
                 now,
@@ -1175,7 +1195,7 @@ def _merge_entities_sync(payload: Any) -> dict[str, Any]:
         try:
             from kazma_core.memory.entity_counts import recompute_entity_counts
 
-            recompute_entity_counts(conn, [source_id, target_id], neighbours=True)
+            recompute_entity_counts(conn, [source_id, target_id], tenant_id=src_tid, neighbours=True)
         except Exception:
             logger.debug("[memory_api] merge count recompute failed", exc_info=True)
         conn.commit()
@@ -1209,10 +1229,14 @@ def _entity_slug(text: str) -> str:
 
 
 def _ensure_entity_row(conn: sqlite3.Connection, eid: str, *, name: str | None = None) -> None:
+    """The caller's own entity row *eid*, made when it has none (entities are
+    keyed by ``(tenant_id, id)``, Memory audit M21: another tenant's row of the
+    same id is that tenant's)."""
     eid = (eid or "").strip()
     if not eid or len(eid) > 200:
         return
-    row = conn.execute("SELECT id FROM entities WHERE id=?", (eid,)).fetchone()
+    tid = _memory_tenant_id()
+    row = conn.execute("SELECT id FROM entities WHERE id=? AND tenant_id=?", (eid, tid)).fetchone()
     if row:
         return
     display = (name or eid).replace("_", " ").strip() or eid
@@ -1220,7 +1244,7 @@ def _ensure_entity_row(conn: sqlite3.Connection, eid: str, *, name: str | None =
         """INSERT OR IGNORE INTO entities
            (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
            VALUES (?, ?, 'concept', ?, '[]', 0, '{}')""",
-        (eid, _memory_tenant_id(), display[:120]),
+        (eid, tid, display[:120]),
     )
 
 
@@ -1268,13 +1292,18 @@ def _link_entities_sync(body: Any) -> dict[str, Any]:
         primary = _conn()
         ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
         ensure_ops_schema(ops)
+        # A node of the caller's own graph (its entity, or an endpoint of its
+        # facts): another tenant's is never probed.
+        caller = _memory_tenant_id()
         subject_is_node = bool(
             primary.execute(
-                "SELECT 1 FROM entities WHERE id=? "
-                "UNION SELECT 1 FROM beliefs WHERE subject=? AND invalidated_at IS NULL AND valid_until IS NULL "
-                "UNION SELECT 1 FROM beliefs WHERE object=? AND invalidated_at IS NULL AND valid_until IS NULL "
+                "SELECT 1 FROM entities WHERE id=? AND tenant_id=? "
+                "UNION SELECT 1 FROM beliefs WHERE subject=? AND tenant_id=? "
+                "AND invalidated_at IS NULL AND valid_until IS NULL "
+                "UNION SELECT 1 FROM beliefs WHERE object=? AND tenant_id=? "
+                "AND invalidated_at IS NULL AND valid_until IS NULL "
                 "LIMIT 1",
-                (subject, subject, subject),
+                (subject, caller, subject, caller, subject, caller),
             ).fetchone()
         )
         if subject_is_node and len(subject) <= 200:
@@ -1526,7 +1555,7 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
             conn.close()
             return {"ok": False, "error": "not_found"}
         row = conn.execute(
-            "SELECT id, subject, predicate, predicate_type, object, "
+            "SELECT id, tenant_id, subject, predicate, predicate_type, object, "
             "valid_until, invalidated_at, metadata_json "
             "FROM beliefs WHERE id=?",
             (bid,),
@@ -1608,7 +1637,9 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
                 str(row["subject"]), str(row["object"]),
                 str(subject), str(obj),
             }
-            recompute_entity_counts(conn, [a for a in affected if a])
+            recompute_entity_counts(
+                conn, [a for a in affected if a], tenant_id=str(row["tenant_id"] or "default")
+            )
         except Exception:
             logger.debug("[memory_api] edit count recompute failed", exc_info=True)
         conn.commit()
@@ -2018,8 +2049,8 @@ def _graph_groups_delete_sync(group_id: str) -> dict[str, Any]:
         row = conn.execute(
             "SELECT member, tenant_id FROM graph_associations WHERE id=?", (gid,)
         ).fetchone()
-        # The grouping's own tenant decides -- not its member's: another
-        # tenant may group this tenant's node (ids are global, rows are not).
+        # The grouping's own tenant decides -- not its member's: a node id
+        # may be one another tenant also holds.
         if not row or not _row_tenant_ok(conn, "graph_associations", gid):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -2176,15 +2207,17 @@ def hygiene_preview() -> dict[str, Any]:
 
     tid = _memory_tenant_id()
     scoped = tid != "default"
-    e_scope = " AND e.tenant_id = ?" if scoped else ""
+    only = tid if scoped else None  # None: the install's view, every tenant
     b_scope = " AND tenant_id = ?" if scoped else ""
     tparams: tuple = (tid,) if scoped else ()
     conn = None
     try:
         conn = _conn()
         empty = []
-        for _tenant, eid in plain_empty_shells(conn, tenant_id=tid if scoped else None, limit=200):
-            row = conn.execute("SELECT id, type, name FROM entities WHERE id = ?", (eid,)).fetchone()
+        for tenant, eid in plain_empty_shells(conn, tenant_id=tid if scoped else None, limit=200):
+            row = conn.execute(
+                "SELECT id, type, name FROM entities WHERE id = ? AND tenant_id = ?", (eid, tenant)
+            ).fetchone()
             if row is not None:
                 empty.append({**dict(row), "belief_count": 0})
         isolated = [
@@ -2195,13 +2228,14 @@ def hygiene_preview() -> dict[str, Any]:
                        {_belief_count_sql()} AS belief_count,
                        {_entity_degree_sql()} AS linked_others
                 FROM entities e
-                WHERE {_belief_count_sql()} > 0
+                WHERE (? IS NULL OR e.tenant_id = ?)
+                  AND {_belief_count_sql()} > 0
                   AND {_entity_degree_sql()} = 0
-                  AND LOWER(e.id) NOT IN ('user','assistant'){e_scope}
+                  AND LOWER(e.id) NOT IN ('user','assistant')
                 ORDER BY belief_count DESC
                 LIMIT 100
                 """,
-                tparams,
+                (only, only),
             ).fetchall()
         ]
         # Near-dup noted (same first 160 normalized chars)

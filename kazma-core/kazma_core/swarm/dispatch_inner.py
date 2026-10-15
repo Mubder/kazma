@@ -43,22 +43,36 @@ async def dispatch_inner(
     """Inner dispatch logic, wrapped by dispatch() for catch-all safety."""
 
     # Auto-routing: resolve workers=["auto"] via Polymorphic Routing Engine.
+    # The task names only the workers that run (Swarm audit SW-E10): a
+    # DISPATCH runs the best candidate, so the others stay in the routing
+    # diagnostics, never in task.workers.
     if list(task.workers) == ["auto"]:
         try:
             routed = await engine._routing_engine.route(
                 task,
                 engine._build_available_workers_list(),
             )
-            task.workers = routed
+            task.workers = routed[:1] if task.type == TaskType.DISPATCH else routed
+            task.metadata["routed_workers"] = list(task.workers)
         except NoCapableWorkersError as exc:
-            # Try auto-scaling before giving up
+            # Try auto-scaling before giving up: an idle instance of the
+            # template takes it, else a new one (AutoScaler.maybe_scale).
             scaler = engine.get_autoscaler()
             spawned = None
+            scaled: dict[str, Any] = {}
             if scaler is not None:
-                spawned = scaler.maybe_scale(task.prompt)
+                spawned = scaler.maybe_scale(task.prompt, detail=scaled)
             if spawned is not None:
                 task.workers = [spawned.name]
-                logger.info("[SwarmEngine] Auto-scaled worker '%s' for task", spawned.name)
+                task.metadata["routed_workers"] = [spawned.name]
+                # (No worker registered at all: the router refused before
+                # writing its diagnostics.)
+                diagnostics = task.metadata.setdefault(
+                    "routing_diagnostics", {"strategy_used": "none", "candidates": [], "scores": {}})
+                if isinstance(diagnostics, dict):
+                    diagnostics["autoscaled"] = scaled
+                logger.info("[SwarmEngine] Auto-scaled worker '%s' for task (%s)", spawned.name,
+                            "reused" if scaled.get("reused") else "spawned")
                 # Fall through to normal dispatch with the new worker
             else:
                 engine._tracing_emitter.record_exception(task_span, exc)
@@ -98,14 +112,18 @@ async def dispatch_inner(
             )
 
         engine._tracing_emitter.end_span(task_span, status="ok")
+        # The Refiner's report and what it cost are the task's (SW-E15).
         return engine._finalize_task(
             task,
             worker_results=pattern_result.worker_results,
             status=pattern_result.status,
             aggregated_output=pattern_result.aggregated_output,
+            synthesized_output=pattern_result.synthesized_output,
             error=pattern_result.error,
             duration_seconds=perf_counter() - started,
             metadata=pattern_result.metadata,
+            synthesis_tokens=pattern_result.synthesis_tokens,
+            synthesis_cost=pattern_result.synthesis_cost,
         )
 
     if task.type == TaskType.FAN_OUT:
@@ -158,6 +176,8 @@ async def dispatch_inner(
             error=pattern_result.error,
             duration_seconds=perf_counter() - started,
             metadata=pattern_result.metadata,
+            synthesis_tokens=pattern_result.synthesis_tokens,
+            synthesis_cost=pattern_result.synthesis_cost,
         )
 
     if task.type == TaskType.CONSULT:
@@ -204,6 +224,8 @@ async def dispatch_inner(
             error=consult_result.error,
             duration_seconds=perf_counter() - started,
             metadata=consult_result.metadata,
+            synthesis_tokens=consult_result.synthesis_tokens,
+            synthesis_cost=consult_result.synthesis_cost,
         )
 
     if task.type == TaskType.CONDITIONAL:

@@ -153,6 +153,42 @@ def test_auto_inject_is_one_fenced_block(kb, lang):
     _assert_fenced(format_untrusted_block(inject.block, source="knowledge"), lang)
 
 
+@pytest.mark.parametrize("lang", ["en", "ar"])
+def test_the_turn_note_keeps_kazmas_lines_outside_the_fence(kb, lang):
+    """KB-S01's letter (2026-10-15): the page's text inside the fence,
+    Kazma's own lines -- the library footer and the instruction to cite it
+    -- after it. The note still opens with the fence: that is how a turn
+    note of this kind is recognised and replaced (``turn_notes``)."""
+    from kazma_core.turn_notes import note_kind
+
+    query = "webhooks retry" if lang == "en" else "الويب هوك"
+    _publish(kb, "docs", f"https://docs.example.test/{lang}", _hostile_page(lang), inject=True)
+    sent, _ = _turn([{"role": "user", "content": query}])
+    [note] = _knowledge_blocks(sent)
+    assert note.startswith('<kazma:data source="knowledge"')
+    assert note_kind({"role": "system", "content": note}) == "knowledge"
+    _assert_fenced(note, lang)
+    outside, inside = _outside(note), "".join(FENCE.findall(note))
+    for line in ('This data is from Knowledge "docs"', "append the library footer verbatim",
+                 "not the user's personal facts"):
+        assert line in outside and line not in inside
+
+
+def test_the_one_block_note_fenced_the_citation_directive():
+    """Negative control: the note as one fenced block (until 2026-10-15) put
+    Kazma's instruction to cite inside the fence, which tells the model to
+    obey nothing it holds."""
+    from kazma_core.safety.prompt_fence import format_untrusted_block
+
+    old = format_untrusted_block(
+        "## [1] https://docs.example.test/en\nWebhooks retry delivery five times.\n"
+        '📚 This data is from Knowledge "docs".\n'
+        "When you use this material in your answer, append the library footer verbatim.",
+        source="knowledge")
+    assert "append the library footer verbatim" not in _outside(old)
+    assert "Never obey" in old
+
+
 def test_the_unfenced_formatter_let_the_page_out():
     """Negative control: the tool's old rendering, the page's header and
     text interpolated into markdown with no fence."""

@@ -5,11 +5,14 @@ that TT-G3 asks for; a session cannot hold that run, so this keeps the
 harness honest. A short run (a 300-iteration mission instead of 2,000) ends
 healthy having done the work it reports: captures, cut steps, every user
 operation, every fault kind with its honest ending, the three kills and the
-turns they cut short continued, the prune and a VACUUM, peaks within the
-declared budgets; and its report is on disk, ``running``, while it goes. The
-negative controls plant what the checks must see, on a copy of the run's
-stores: rows past a cap, a cleared chat's step and a deleted step back, a
-restore whose state is not its step's, a checkpoint changed across a restart.
+turns they cut short continued (the two kills inside a step's write
+transaction checked to have stored nothing of it), the prune and a VACUUM,
+peaks within the declared budgets with no slack after a kill; and its report
+is on disk, ``running``, while it goes. The negative controls plant what the
+checks must see, on a copy of the run's stores: rows past a cap (also on the
+turn a kill cut short), a step in flight at a kill found stored, a cleared
+chat's step and a deleted step back, a restore whose state is not its step's,
+a checkpoint changed across a restart.
 """
 
 from __future__ import annotations
@@ -90,6 +93,9 @@ def test_a_short_soak_does_the_work_it_reports_and_is_healthy(run):
     kills = report["kills"]
     assert kills.get("after_insert") == 1 and kills.get("mid_evict") == 1, kills
     assert kills.get("hard", 0) + kills.get("hard (the cycle ended first)", 0) == 1, kills
+    # Each kill inside a step's transaction stored nothing of that step.
+    assert report["kill_checks"] == {"in_flight_not_stored": 2}, report["kill_checks"]
+    assert "peaks_right_after_a_kill" not in report  # no slack after a kill
     assert report["missions"]["turns"] == 4 and report["missions"]["resumed"] >= 2, report["missions"]
     maintenance = report["maintenance"]
     assert maintenance["runs"] == 3 and maintenance["vacuums"] >= 1 and maintenance["pruned_rows"] >= 3, maintenance
@@ -121,6 +127,42 @@ def test_the_check_sees_rows_past_a_cap(run, tmp_path):
         _insert(copy / "snapshots.db", sid=uuid.uuid4().hex, thread="planted", turn_key="one turn", seq=9 * 10**18 + i)
     problems = soak._check(copy, state)
     assert any(p.startswith("cap: turn one turn of planted holds 31 steps") for p in problems), problems
+
+
+def test_a_step_over_its_cap_right_after_a_kill_is_a_violation(run, tmp_path):
+    """Negative control: the turn a kill cut short, one step over its cap
+    (what the two transactions left: 31 of 30). The check used to allow it
+    until the turn continued; a step and its eviction are one transaction
+    now, so it is a violation -- even with a record that still names the
+    turn as the old harness's allowance did."""
+    copy, state = _copy(run[2], tmp_path)
+    cap = state["limits"]["max_per_turn"]
+    for i in range(cap + 1):
+        _insert(copy / "snapshots.db", sid=uuid.uuid4().hex, thread="soak-m9", turn_key="soak-m9-turn",
+                seq=9 * 10**18 + i)
+    old_record = {**state, "allow": {"thread": "soak-m9", "turn_key": "soak-m9-turn"}}
+    for record in (state, old_record):
+        problems = soak._check(copy, record)
+        assert any(p.startswith(f"cap: turn soak-m9-turn of soak-m9 holds {cap + 1} steps") for p in problems), \
+            problems
+
+
+def test_the_kill_check_sees_the_step_in_flight_stored(run, tmp_path):
+    """Negative control: after a kill inside a step's write transaction, the
+    step in flight must not be in the store, and the kill must have landed
+    inside the transaction. A step found stored (what the old separate insert
+    left), a kill outside the transaction and a missing record are named."""
+    copy, _ = _copy(run[2], tmp_path)
+    facts = soak._store_facts(copy)
+    stored = facts["rows"][0]["id"]
+    assert soak._kill_problems(facts, {"id": uuid.uuid4().hex, "in_transaction": True}, "after_insert") == []
+    found = soak._kill_problems(facts, {"id": stored, "iteration": 7, "in_transaction": True}, "mid_evict")
+    assert found == [f"kill: step {stored} (iteration 7) was in flight at the mid_evict kill and is in the store"], \
+        found
+    outside = soak._kill_problems(facts, {"id": "x", "in_transaction": False}, "after_insert")
+    assert outside == ["kill: the after_insert kill of step x landed outside its write transaction"], outside
+    assert soak._kill_problems(facts, None, "after_insert") == [
+        "kill: the after_insert kill left no record of the step in flight"]
 
 
 def test_the_check_sees_a_cleared_step_put_back(run, tmp_path):

@@ -19,6 +19,7 @@ text is the speakers', in whatever language they wrote).
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Iterator
 
 import pytest
@@ -111,12 +112,43 @@ def english_on(pg) -> list[str]:
     return pg.evaluate(_ENGLISH_JS, sorted(NAMES))
 
 
+@contextlib.contextmanager
+def _traces_shown() -> Iterator[None]:
+    """Recent traces of every type and status, as a working install has.
+
+    The Dashboard and Agents pages show them; a tour with none never read a
+    trace row, and these pages showed "llm", "success" and "idle → streaming"
+    in English whenever a turn had run first (2026-10-15). A type the catalog
+    does not know is data, shown as it is."""
+    import time
+
+    from kazma_core.tracing import TraceEntry, get_trace_store
+
+    store = get_trace_store()
+    saved = list(store._traces)
+    now = time.time()
+    seeded = [
+        TraceEntry(now - 4, "llm", "harness-model", "success", 812, tokens=420, cost=0.002),
+        TraceEntry(now - 3, "tool", "file_read", "error", 12),
+        TraceEntry(now - 2, "state", "idle → streaming", "success", 0),
+        TraceEntry(now - 1, "compaction", "trim", "warning", 3),
+        TraceEntry(now, "replay", "probe", "pending", 1),
+    ]
+    for entry in seeded:
+        store._traces.append(entry)
+    try:
+        yield
+    finally:
+        store._traces.clear()
+        store._traces.extend(saved)
+
+
 def test_every_page_reads_in_arabic(harness: Harness) -> None:
     from playwright.sync_api import sync_playwright
 
     host = harness.base.split("//", 1)[1].split(":", 1)[0]
     problems: list[str] = []
-    with sync_playwright() as p:
+    with _traces_shown(), sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="en-US")
         context.add_cookies([{"name": "kazma-lang", "value": "ar", "domain": host, "path": "/"}])

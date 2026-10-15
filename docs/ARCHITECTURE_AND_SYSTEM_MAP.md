@@ -470,7 +470,7 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | `KAZMA_CORS_ORIGINS` | localhost list | Prod: your origin | CORS allowlist |
 | `KAZMA_OPAQUE_SESSIONS` | `1` | Keep on | Opaque browser sessions |
 | `KAZMA_SESSION_TTL_SECONDS` | 14d | No | Session cookie TTL |
-| `KAZMA_TURN_TIMEOUT_SECONDS` | 600 | No | Graph wall timeout |
+| `KAZMA_TURN_TIMEOUT_SECONDS` | unset (no limit) | No | A turn's wall-clock budget on every surface; wins over `agent.turn_timeout_seconds` (`agent/turn_budget.py`) |
 | `KAZMA_MCP_SAFE_ALLOWLIST` | empty | Optional | MCP tools skip HITL (prod) |
 | `KAZMA_ALLOW_PRIVATE_LLM` | unset | No | Private URL discovery opt-in |
 | `KAZMA_MULTI_USER` | unset | SaaS | Force multi-user mode |

@@ -447,6 +447,40 @@ def test_a_rewrite_that_would_break_the_json_is_not_written(tmp_path, monkeypatc
     assert path_rewrite.rewrite_paths_in_sqlite(str(db), [("t", "v")], pm) == 0
 
 
+def _agents_18b_problems(section: str) -> list[str]:
+    """What AGENTS §18 B says that the import does not do, or leaves out."""
+    from kazma_core.migration.importer import _PATH_REWRITE_TARGETS
+
+    text = " ".join(section.split())
+    problems = [f"does not name {t}.{c}" for _, cols in _PATH_REWRITE_TARGETS for t, c in cols
+                if f"`{t}.{c}`" not in text]
+    if "snapshots.state_json" in text or "chat_sessions.messages" in text:
+        problems.append("names a column the import does not rewrite")
+    for claim in ("JSON-escaped Windows form", "`_parses`", "`config.yaml` is imported as exported",
+                  "are not carried at all"):
+        if claim not in text:
+            problems.append(f"does not say: {claim}")
+    return problems
+
+
+def test_agents_18b_names_what_the_import_rewrites():
+    """TT-09's last part: AGENTS §18 B named ``snapshots.state_json`` as a
+    rewritten column, a store no bundle carries since TT-05, and named the
+    rest loosely. It now lists exactly the importer's columns."""
+    agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
+    start = agents.index("**B. Embedded absolute paths are rewritten to the target root.**")
+    section = agents[start:agents.index("**C. Import is atomic", start)]
+    assert _agents_18b_problems(section) == []
+    # Negative control: the section as the audit found it.
+    old = ("**B. Embedded absolute paths are rewritten to the target root.** A Linux source "
+           "(`/home/user/kazma`) has its workspace root baked into `workspaces.root_path`, "
+           "`chat_sessions.messages`, `snapshots.state_json`, memory entities/episodes, cron prompts. "
+           "The importer rewrites them all to the target path across OS separator conventions.")
+    problems = _agents_18b_problems(old)
+    assert "names a column the import does not rewrite" in problems
+    assert "does not name sessions.messages" in problems and "does not say: `_parses`" in problems
+
+
 # ── TT-10: the docs and the page say what the code does ───────────────────
 
 
@@ -485,15 +519,20 @@ def test_a_failed_write_is_not_announced(tmp_path, monkeypatch):
     seen: list[str] = []
     monkeypatch.setattr(metrics, "record_time_travel_capture", lambda result: seen.append(result))
     rec = _recorder(tmp_path)
+    store = rec._get_store()
 
     def _locked(record):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(rec._get_store(), "save", _locked)
+    # The step's insert, inside the capture's one write transaction (it was
+    # ``save``, a transaction of its own, before TT-G3's fix).
+    monkeypatch.setattr(store, "_insert", _locked)
     result = tt.run(capture_after_supervisor(
         rec, {"thread_id": "T", "iteration": 0, "created_at": "x", "messages": []},
         {"iteration": 1, "next_node": "respond"}))
     assert "snapshot_id" not in result and seen == ["failed"]
+    # Nothing stored, and the transaction rolled back (the write lock is free).
+    assert rec.totals() == (0, 0) and not store._conn.in_transaction
 
 
 def test_a_corrupt_store_is_said_on_every_surface(tmp_path, monkeypatch):

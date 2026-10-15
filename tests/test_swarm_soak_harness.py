@@ -10,12 +10,14 @@ interrupted running work, admission refused at its limit. Its report is on
 disk while it runs (``running``) and ``passed`` at the end. And its checks
 report what they exist for (negative controls): a task row moved out of its
 terminal status, more tasks running at once than the limit (in the store and
-in a sample), a breaker outcome from an older generation applied, an
-autoscaler bound passed and an instance reaped mid-dispatch.
+in a sample), a dispatch stopped with no ending recorded, a breaker outcome
+from an older generation applied, an autoscaler bound passed and an instance
+reaped mid-dispatch.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import sqlite3
@@ -159,6 +161,41 @@ def test_the_check_sees_more_tasks_running_at_once_than_the_limit(run, tmp_path)
 def _soak(tmp_path: Path):
     soak = swarm_soak._Soak(swarm_soak._parse([]), tmp_path, swarm_soak._CountingHandler())
     return soak, swarm_soak._instrumented_classes(soak)
+
+
+async def test_the_soak_sees_a_dispatch_stopped_with_no_ending(tmp_path):
+    """The engine's defect the 24-hour run found: a run stopped while its
+    RUNNING row was written raised a cancellation at its caller instead of an
+    ending. The harness names it; a recorded ending (the control) is not
+    one, and the runner's own cancellation at the end is let through."""
+    from kazma_core.swarm.task import TaskResult
+
+    class _Stopped:
+        async def dispatch(self, task):
+            raise asyncio.CancelledError
+
+    class _Ended:
+        async def dispatch(self, task):
+            return TaskResult(task_id=task.id, status="cancelled",
+                              metadata={"interrupted_by": "shutdown", "execution_outcome": "none_invoked"})
+
+    soak = swarm_soak._Soak(swarm_soak._parse([]), tmp_path, swarm_soak._CountingHandler())
+
+    async def _one(engine, tid):
+        spec = swarm_soak._Spec(id=tid, kind="ok", task_type="dispatch", workers=["steady-1"],
+                                prompt=f"soak:ok:{tid} x", timeout=30.0, fallback=[], work_s=0.01)
+        rec = soak.recs[tid] = swarm_soak._Rec(spec)
+        rec.submissions = rec.pending = 1
+        soak.engine = engine
+        await soak._dispatch(spec, rec, engine, False)
+        return rec
+
+    assert (await _one(_Ended(), "ended")).outcomes == ["cancelled"] and soak.violations == []
+    assert (await _one(_Stopped(), "stopped")).outcomes == ["stopped-without-ending"]
+    assert any("stopped with no ending recorded" in v for v in soak.violations), soak.violations
+    soak.closing = True
+    with pytest.raises(asyncio.CancelledError):
+        await _one(_Stopped(), "at-the-end")
 
 
 def test_the_breaker_check_sees_an_older_generation_outcome_applied(monkeypatch, tmp_path):

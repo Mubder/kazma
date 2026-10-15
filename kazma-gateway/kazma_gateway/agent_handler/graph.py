@@ -979,6 +979,7 @@ def create_graph_handler(
                             config,
                             thread_id=thread_id,
                             persist=False,
+                            budget=False,
                         )
                         reply_msg = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
                     else:
