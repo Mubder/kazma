@@ -71,7 +71,10 @@ platform took:
 * A missed occurrence was due while the scheduler was down for longer than
   its window.
 * A series across the clock change fires once per local day, at the
-  intended local time.
+  intended local time. A series is the job's timing between two timing
+  edits, and every fire counts against the series in force at its time: an
+  edit that moves a daily job later on a day it already fired fires again
+  that day, as asked.
 * p95 fire lateness is at most one poll interval plus the scripted turn
   time. It is measured in fake seconds, on fires that were due while the
   scheduler was up.
@@ -1385,6 +1388,18 @@ def _up_through(up: list[list[float | None]], start: float, end: float) -> bool:
     return any(a is not None and a <= start and (b is None or b >= end) for a, b in up)
 
 
+def _series_at(segments: list[dict[str, Any]], due: str) -> int:
+    """The index of the segment (the job's timing between two timing edits)
+    in force at *due*: the last one whose edit came at or before it. A
+    segment's end is the edit that started the next."""
+    at = _dt(due)
+    index = 0
+    for i in range(1, len(segments)):
+        if segments[i - 1].get("end") and _dt(segments[i - 1]["end"]) <= at:
+            index = i
+    return index
+
+
 #: A message created this close to the end may still be retrying (its six
 #: attempts span 15.5 minutes): it is reported in flight, not unsettled.
 _IN_FLIGHT_GRACE_S = 1200.0
@@ -1491,14 +1506,25 @@ def analyse(ledger: dict[str, Any], *, horizon: float | None = None) -> tuple[li
                     expected_alerts[(job_id, "cron.job_failed")] += 1
                 elif streak == 1 or f["status"] == "failed":
                     expected_alerts[(job_id, "cron.job_failure")] += 1
-        # The clock change: once per local day, at the intended wall time.
-        local_series = [s["spec"] for s in job["segments"]
-                        if s["spec"]["type"] != "once" and s["spec"]["zone"] == zone_name]
-        if local_series:
-            dues = sorted(d for d in ends if seg_of.get(d, {}).get("spec") in local_series)
-            for day, n in Counter(_dt(d).astimezone(zone).date() for d in dues).items():
-                if n > 1:
+        # The clock change: each series fires once per local day, at its wall
+        # time. A series is the job's timing between two timing edits, and
+        # every end of the job -- due or not -- counts against the series in
+        # force at its due time. Not per job: an edit that moves a daily job
+        # later in the day ends one series after that day's fire and starts
+        # another whose first fire is later the same day -- two fires, one per
+        # series, as the operator asked (the 28-day soak's only two
+        # "violations", 2026-10-15). An old series firing after the edit
+        # counts against the new one, and a series firing twice in a day
+        # (both instants of a fall-back fold) against itself: both caught.
+        local_index = {i for i, s in enumerate(job["segments"])
+                       if s["spec"]["type"] != "once" and s["spec"]["zone"] == zone_name}
+        local_series = [job["segments"][i]["spec"] for i in sorted(local_index)]
+        if local_index:
+            per_day = Counter((_series_at(job["segments"], d), _dt(d).astimezone(zone).date()) for d in ends)
+            for (series, day), n in sorted(per_day.items()):
+                if n > 1 and series in local_index:
                     v.append(f"{name} fired {n} times on local day {day}")
+            dues = sorted(d for d in ends if seg_of.get(d, {}).get("spec") in local_series)
             for d in dues:
                 spec = seg_of[d]["spec"]
                 local = _dt(d).astimezone(zone)

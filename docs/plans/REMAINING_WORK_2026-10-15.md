@@ -42,7 +42,7 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | Model-pass extraction recording | M24 | `scripts/memory_bench.py extraction --record`, then `lock` | Queued (after the Memory merge) |
 | The LLM ledger row is written on the event loop | Swarm routing agent | Every ledger write from async code off the loop, a static gate | In progress |
 | Tests that load the real embedder or reach a real provider | Swarm routing agent | Stubbed, and a permanent guard (no non-loopback socket, no real model, unless marked) | In progress |
-| A daily job fired twice on one local day | Scheduled 28-day soak on c4e8f51c: 2 of 67k occurrences, 224 restarts | The cause found from the ledger; a product fix or a precise check fix, the 28-day soak passing | In progress |
+| A daily job fired twice on one local day | Scheduled 28-day soak on c4e8f51c: 2 of 67k occurrences, 224 restarts | The cause found from the ledger; a product fix or a precise check fix, the 28-day soak passing | Done: not a product defect. Both jobs were edited to a later time the same day and fired as asked; the check counted a job's fires per day across timings. It now counts per series (timing between edits), with controls that a real double fire is still caught; the 28-day soak passed (68,397 occurrences, 251 restarts, 0 violations) |
 
 ## Measurements (soaks)
 

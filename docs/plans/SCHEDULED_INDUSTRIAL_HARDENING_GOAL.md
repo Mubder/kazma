@@ -167,7 +167,8 @@ when its gate passes on current evidence.
      due;
    - a missed occurrence was really due while the scheduler was down;
    - a series across the clock change fires once per local day, at its
-     wall time;
+     wall time (a series is the job's timing between two timing edits;
+     every fire counts against the series in force at its time);
    - p95 lateness (claim to due, on fires due while the scheduler was up)
      is at most one poll interval plus the turn time;
    - readiness is degraded within one interval of the dead loop.
@@ -303,6 +304,33 @@ when its gate passes on current evidence.
       lateness 26 s while up (bound 50 s); readiness degraded at once on
       the dead loop; 176 series across the New York fall-back.
   - Still not the qualification run (D3, owner).
+- 2026-10-15: A 28-day run (8,000 jobs, seed 20261028, on c4e8f51c) failed
+  with two violations, "fired 2 times on local day", both the harness's check
+  misjudging an edit. j04319 (daily 07:49) fired 07:49 on 2026-11-02 and was
+  edited at 13:31 to "every day at 20:37", whose first fire is 20:37 the same
+  day; j04955 (daily 01:45) fired 01:45 on 2026-11-21, was edited at 04:19 to
+  12:29pm and fired 12:29 that day. Each fire was due, ended once and was
+  delivered once -- what the edits asked for. The check counted a job's fires
+  per local day across its edits. It now counts per series (the timing
+  between two edits), with every end of the job against the series in force
+  at its time. It counted only ends already in the harness's own list, so a
+  series that fired twice in a day was caught only as "a time it was not
+  due"; now it is caught here too, as is an old series firing after the edit.
+  Evidence: the failed run's own ledger re-checks clean (the old check gives
+  exactly the two); `tests/test_scheduled_soak_harness.py` (the j04319 shape
+  passes; negative controls: both instants of a fall-back fold, and the old
+  series firing after an edit, each reported).
+  - **The same 28-day run on b52b2fab plus this check** passed in 1,572 s:
+    68,397 due occurrences, each ended exactly once (64,681 delivered, 79
+    missed with one notice each, 2,278 failed, 787 undeliverable, 55
+    delivery unknown, 517 not due after their budget); 251 restarts (111
+    graceful, 56 mid-turn, 55 mid-send, 13 after an alert's commit, 14
+    between an alert and its mark, a gap, the dead loop); 2,969 alerts =
+    2,955 expected + 14 recorded redeliveries; 28 lock holds (33 writes
+    failed, 22 a fire's own finish); p95 lateness 28 s (bound 50 s); 847
+    series across the fall-back. j04319 and j04955 repeated their edits and
+    passed.
+  - The 7-day defaults gave the same report as the run above (160 s).
 
 ## Start here
 
