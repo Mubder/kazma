@@ -707,8 +707,22 @@ Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن 
 field of work ("أشتغل في المبيعات", like "I work in sales"). What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
 replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
-install's own Python, one model call per turn); until they are recorded the
-report says "not recorded" and nothing is assumed.
+install's own Python, one model call per turn); a turn with no recorded reply
+is an error, never a guess. Recorded 2026-10-15 with DeepSeek's
+`deepseek-flash`:
+
+| Model's pass | Recall | Precision | Turns with nothing to keep that kept nothing |
+|---|---|---|---|
+| English (12 turns) | 0.77 | 0.79 | 3 of 3 |
+| Arabic (10 turns) | 0.91 | 0.91 | 2 of 2 |
+| Mixed (8 turns) | 0.70 | 0.58 | 1 of 1 |
+
+The first recording found the deep pass translating what Arabic speakers
+said into English slugs ("ليلى" kept as `layla`, "دبي" as `dubai`): the
+facts were there, the user's own words were not (Arabic recall 0.09). Its
+prompt now keeps every subject and value in the language and script the user
+wrote it in; predicates stay English. A slugged value is compared as the
+words it stands for (`kuwait_city` is "Kuwait City"), as search reads it.
 
 ### Measured limits
 

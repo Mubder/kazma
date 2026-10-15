@@ -96,7 +96,16 @@
    "heuristic.en.recall": 0.4615,
    "heuristic.mixed.precision": 1.0,
    "heuristic.mixed.quiet": 1.0,
-   "heuristic.mixed.recall": 0.6
+   "heuristic.mixed.recall": 0.6,
+   "llm.ar.precision": 0.9091,
+   "llm.ar.quiet": 1.0,
+   "llm.ar.recall": 0.9091,
+   "llm.en.precision": 0.7857,
+   "llm.en.quiet": 1.0,
+   "llm.en.recall": 0.7692,
+   "llm.mixed.precision": 0.5833,
+   "llm.mixed.quiet": 1.0,
+   "llm.mixed.recall": 0.7
   }
  },
  "postgres_primary": {
