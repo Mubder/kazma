@@ -50,10 +50,16 @@ from tests._module_stubs import stub_modules
 
 
 class _Collection:
-    def __init__(self, name: str, metadata: dict | None = None) -> None:
+    def __init__(self, name: str, metadata: dict | None = None, configuration: dict | None = None) -> None:
         self.name = name
         self.metadata = dict(metadata or {})
+        if configuration:  # as Chroma reports it; an older collection was made without
+            self.configuration_json = {"hnsw": dict(configuration.get("hnsw") or {})}
         self.rows: dict[str, tuple[list[float], str, dict]] = {}
+
+    def _space(self) -> str:
+        hnsw = getattr(self, "configuration_json", {}).get("hnsw") or {}
+        return hnsw.get("space") or self.metadata.get("hnsw:space", "l2")
 
     def upsert(self, ids, embeddings, documents, metadatas):
         for meta in metadatas:
@@ -87,7 +93,7 @@ class _Collection:
 
     def query(self, query_embeddings, n_results, where=None):
         q = query_embeddings[0]
-        space = self.metadata.get("hnsw:space", "l2")
+        space = self._space()
 
         def matches(meta, cond):
             if not cond:
@@ -118,10 +124,10 @@ class _Client:
         _Client.settings_seen.append(settings)
         self.collections: dict[str, _Collection] = {}
 
-    def get_or_create_collection(self, name, metadata=None, embedding_function=None):
+    def get_or_create_collection(self, name, metadata=None, configuration=None, embedding_function=None):
         assert embedding_function is None  # the store passes its own vectors
-        if name not in self.collections:  # an existing one keeps its metadata
-            self.collections[name] = _Collection(name, metadata)
+        if name not in self.collections:  # an existing one keeps its metadata and settings
+            self.collections[name] = _Collection(name, metadata, configuration)
         return self.collections[name]
 
     def delete_collection(self, name):

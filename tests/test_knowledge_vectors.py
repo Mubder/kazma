@@ -161,6 +161,62 @@ def test_a_query_of_another_size_waits_quietly_for_the_repair(kb, monkeypatch, c
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
+# ── KB-Q01: a coverage record is shown only for the store it measured ─────
+#
+# The record lives in knowledge.db, which is backed up; the vectors are not.
+# A knowledge.db restored onto a machine without them reported every library
+# "ok, 10,000 of 10,000" before the first repair pass, with no vector there.
+
+
+def _lose_the_vectors(kb, monkeypatch) -> None:
+    """The machine is lost: the vector store goes, knowledge.db is restored."""
+    import shutil
+    from pathlib import Path
+
+    shutil.rmtree(Path(kb.index._persist_dir), ignore_errors=True)
+    monkeypatch.setattr(vsg, "_CLIENTS", {})  # a new process: a new, empty store
+
+
+def test_a_restored_database_does_not_claim_vectors_it_lost(kb, monkeypatch):
+    _seed(kb, "api", TEXTS)
+    kb.index.backfill_vectors(time_budget_s=30)
+    assert kb.index.health("api")["state"] == "ok" and kb.index.health("api")["vector_chunks"] == 3
+
+    _lose_the_vectors(kb, monkeypatch)
+    restored = ki.KnowledgeIndex(kb.store)
+    health = restored.health("api")
+    assert (health["state"], health["vector_chunks"], health["vector_available"]) == ("unknown", 0, False)
+    assert health["checked_at"] is None and health["sqlite_chunks"] == 3
+    # The first pass measures the store that is there now, and says so.
+    assert restored.backfill_vectors(time_budget_s=30)["embedded"] == 3
+    assert restored.health("api")["state"] == "ok" and restored.health("api")["vector_chunks"] == 3
+
+
+def test_the_old_record_claimed_the_lost_vectors(kb, monkeypatch):
+    """Negative control: the record read as it was, without asking which
+    store it measured."""
+    _seed(kb, "api", TEXTS)
+    kb.index.backfill_vectors(time_budget_s=30)
+    _lose_the_vectors(kb, monkeypatch)
+    restored = ki.KnowledgeIndex(kb.store)
+    monkeypatch.setattr(restored, "_measured_here", lambda status: True)
+    assert restored.health("api")["state"] == "ok" and restored.health("api")["vector_chunks"] == 3
+
+
+def test_a_record_of_another_store_or_of_none_is_not_checked(kb):
+    _seed(kb, "api", TEXTS)
+    kb.index.backfill_vectors(time_budget_s=30)
+    status = kb.store.vector_status("api")
+    assert status["store_id"] and status["store_id"] == kb.index._vector_store_for("api").store_id
+    for store_id in ("", "another-store"):  # a record from before 2026-10-15; another machine's
+        kb.store.set_vector_status("api", identity=status["identity"], chunks=3, covered=3, state="ok",
+                                   store_id=store_id)
+        assert kb.index.health("api")["state"] == "unknown"
+    # A failure the sweep recorded is still shown: it claims no vectors.
+    kb.store.set_vector_status("api", identity="", chunks=3, covered=0, state="failed", error="boom")
+    assert kb.index.health("api")["state"] == "failed"
+
+
 # ── KB-E11: one library cannot stop the others; the report is seen ─────────
 
 
@@ -348,9 +404,9 @@ class _MissingAware(_Collection):
 
 
 def _dropping_client(monkeypatch):
-    def get_or_create(self, name, metadata=None, embedding_function=None):
+    def get_or_create(self, name, metadata=None, configuration=None, embedding_function=None):
         if name not in self.collections:
-            self.collections[name] = _MissingAware(name, metadata)
+            self.collections[name] = _MissingAware(name, metadata, configuration)
         return self.collections[name]
 
     def delete(self, name):

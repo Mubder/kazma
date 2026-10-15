@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Knowledge Library: vectors that leave, indexes that are not lost (2026-10-15)
+
+The Knowledge scale and soak harness found five faults in how the library
+keeps its meaning vectors. All five are fixed:
+
+- **Deleted vectors now leave the disk.** Deleting a library, or changing
+  the embedding model, left the old vectors' folder behind (about 40 MB per
+  10,000 chunks). These folders are now removed at start, right after a
+  drop, and on each repair pass.
+- **A library is no longer unsearchable until a restart.** With many
+  libraries, Chroma could drop a small library's index from memory before
+  saving it. Every meaning search of that library then failed until the next
+  restart. Kazma now raises the limits Chroma sizes its index pool from, and
+  rebuilds an index Chroma lost from Chroma's own log.
+- **A deleted library's words are gone from the keyword index.** They
+  stayed in the index file until a merge reached them; deleting a library
+  now ends with that merge.
+- **A restored database no longer reports coverage it lacks.** It said
+  "fully covered" while no vector was there. Coverage is now shown only for
+  the vector store it was measured on, and as unknown otherwise.
+- **Meaning search finds more.** At 10,000 chunks, Chroma's default index
+  settings missed up to 9 of 40 planted answers. The new settings found
+  40 of 40 in English, Arabic and mixed text, for about 1 ms more a search.
+  Older libraries get the new settings at the next repair pass, rebuilt from
+  their own vectors without embedding anything again.
+
+chromadb 1.5.9 is now the minimum version.
+
 ## One turn time limit on every surface (2026-10-15)
 
 - The web chat now has the same turn time limit as Telegram, Discord, Slack,

@@ -1064,6 +1064,12 @@ _LOOP_STALL_HELPERS = frozenset({
     # call loads it), and its configuration read. The router runs it in a
     # thread within a deadline.
     "semantic_scores",
+    # KB-Q01 (2026-10-15): the keyword index's merge after a delete, the
+    # vector folders of dropped collections (a directory walk, a catalog
+    # read, a client close that waits for calls in flight), and an index
+    # rebuilt by copying its vectors.
+    "purge_search_index", "release_dropped_vectors", "remove_orphan_segment_folders",
+    "rebuild_graph",
 })
 
 

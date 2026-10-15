@@ -92,10 +92,25 @@ def load_dataset(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
 class _ExactCollection:
     """The part of a Chroma collection ``VectorStore`` uses, exact cosine."""
 
-    def __init__(self, name: str, metadata: dict[str, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[str, Any] | None = None,
+                 configuration: dict[str, Any] | None = None) -> None:
         self.name = name
         self.metadata = dict(metadata or {})
+        # Chroma's own shape: the HNSW settings the collection was made with
+        # (the space among them, which ``VectorStore`` reads).
+        self.configuration_json: dict[str, Any] = {"hnsw": dict((configuration or {}).get("hnsw") or {})}
         self._rows: dict[str, tuple[list[float], str, dict[str, Any]]] = {}
+        self._client: _ExactVectorClient | None = None
+
+    def modify(self, name: str | None = None, configuration: dict[str, Any] | None = None,
+               metadata: dict[str, Any] | None = None) -> None:
+        """Rename, or change settings (exact search has no index to tune)."""
+        if configuration:
+            self.configuration_json["hnsw"].update((configuration or {}).get("hnsw") or {})
+        if metadata is not None:
+            self.metadata = dict(metadata)
+        if name and name != self.name and self._client is not None:
+            self._client._rename(self, name)
 
     def upsert(self, ids, embeddings, documents, metadatas) -> None:
         for doc_id, vec, doc, meta in zip(ids, embeddings, documents, metadatas):
@@ -153,13 +168,28 @@ class _ExactVectorClient:
     def __init__(self) -> None:
         self._collections: dict[str, _ExactCollection] = {}
 
-    def get_or_create_collection(self, name, metadata=None, embedding_function=None) -> _ExactCollection:
+    def get_or_create_collection(self, name, metadata=None, configuration=None,
+                                 embedding_function=None) -> _ExactCollection:
         if name not in self._collections:
-            self._collections[name] = _ExactCollection(name, metadata)
+            return self.create_collection(name, metadata=metadata, configuration=configuration)
         return self._collections[name]
+
+    def create_collection(self, name, metadata=None, configuration=None,
+                          embedding_function=None) -> _ExactCollection:
+        if name in self._collections:
+            raise ValueError(f"collection {name} already exists")
+        collection = _ExactCollection(name, metadata, configuration)
+        collection._client = self
+        self._collections[name] = collection
+        return collection
 
     def delete_collection(self, name) -> None:
         self._collections.pop(name, None)
+
+    def _rename(self, collection: _ExactCollection, name: str) -> None:
+        self._collections.pop(collection.name, None)
+        collection.name = name
+        self._collections[name] = collection
 
 
 # ── Seeding and scoring ────────────────────────────────────────────────────

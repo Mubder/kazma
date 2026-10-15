@@ -1,0 +1,872 @@
+{
+  "data_dir": "C:\\Users\\balfa\\AppData\\Local\\Temp\\claude\\G--GitHubRepos-kazma\\c75c9857-d78d-49a2-bf68-a72de0bb2a45\\scratchpad\\kb-q01-fix-reports\\scale-data",
+  "embedder": {
+    "mode": "hash",
+    "note": "SoakHashEmbedder: a deterministic local embedder of hashed words (1,024 dimensions, 768 for every second model switch; a 32-dimension topic part and a lexical part): the numbers measure the store and the vector index, not an embedding model"
+  },
+  "findings": [],
+  "hardware": {
+    "chromadb": "1.5.9",
+    "cores_logical": 32,
+    "cores_physical": 24,
+    "cpu": "Intel(R) Core(TM) i9-14900K",
+    "disk": {
+      "bus": "NVMe",
+      "data_dir": "C:\\Users\\balfa\\AppData\\Local\\Temp\\claude\\G--GitHubRepos-kazma\\c75c9857-d78d-49a2-bf68-a72de0bb2a45\\scratchpad\\kb-q01-fix-reports\\scale-data",
+      "filesystem": "NTFS",
+      "free_gib": 264.8,
+      "media": "SSD",
+      "model": "KINGSTON SFYRS1000G",
+      "total_gib": 930.6
+    },
+    "name": "Kazma live-host workstation",
+    "os": "Windows-11-10.0.26300-SP0",
+    "python": "CPython 3.12.9",
+    "ram_gib": 63.8,
+    "sqlite": "3.47.1"
+  },
+  "harness": "scripts/knowledge_soak.py",
+  "healthy": true,
+  "mode": "scale",
+  "parameters": {
+    "batch_pages": 50,
+    "cadence_s": 900.0,
+    "chunks": [
+      10000
+    ],
+    "languages": [
+      "en",
+      "ar",
+      "mixed"
+    ],
+    "page_chunks": 20,
+    "questions": 40,
+    "search_repeats": 5,
+    "seed": 20261015,
+    "sweep_budget_s": 300.0,
+    "tolerate_orphan_vector_folders": false,
+    "tolerate_vector_read_failures": false,
+    "top_k": 5
+  },
+  "seconds": 273.8,
+  "started_at": "2026-10-14T23:34:28Z",
+  "status": "passed",
+  "steps": [
+    {
+      "backup": {
+        "bytes": 22011904,
+        "seconds": 0.192
+      },
+      "build_child": {
+        "peak_rss_mib": 313.9,
+        "process": {
+          "handles": 420,
+          "processes": 1,
+          "rss_mib": 231.6
+        }
+      },
+      "ceilings": {
+        "after_delete": {
+          "knowledge_db": {
+            "bytes": 22011904,
+            "rows": {
+              "knowledge_chunks": 0,
+              "knowledge_chunks_fts": 0,
+              "knowledge_chunks_fts_config": 1,
+              "knowledge_chunks_fts_content": 0,
+              "knowledge_chunks_fts_data": 2,
+              "knowledge_chunks_fts_docsize": 0,
+              "knowledge_chunks_fts_idx": 0,
+              "knowledge_libraries": 0,
+              "knowledge_meta": 2,
+              "knowledge_vector_status": 0
+            }
+          },
+          "vector_dir_bytes": 41308192
+        },
+        "after_ingest": {
+          "knowledge_db": {
+            "bytes": 22011904,
+            "rows": {
+              "knowledge_chunks": 10000,
+              "knowledge_chunks_fts": 10000,
+              "knowledge_chunks_fts_config": 1,
+              "knowledge_chunks_fts_content": 10000,
+              "knowledge_chunks_fts_data": 654,
+              "knowledge_chunks_fts_docsize": 10000,
+              "knowledge_chunks_fts_idx": 489,
+              "knowledge_libraries": 1,
+              "knowledge_meta": 2,
+              "knowledge_vector_status": 1
+            }
+          },
+          "settings_db_bytes": 57344,
+          "vector_dir_bytes": 87729476
+        }
+      },
+      "delete": {
+        "after": {
+          "chunk_rows": 0,
+          "collection": false,
+          "coverage_rows": 0,
+          "keyword_rows": 0,
+          "keyword_segment_residue": [
+            0,
+            40
+          ],
+          "library_rows": 0,
+          "problems": [],
+          "provenance_dir": false,
+          "running_crawls": 0
+        },
+        "collection": "kazma_kb_scale-10000-en",
+        "result": {
+          "deleted": true,
+          "documents": 0,
+          "provenance_removed": true
+        },
+        "seconds": 1.086,
+        "vector_folders": {
+          "folders": 0,
+          "orphan_bytes": 0,
+          "orphans": 0
+        }
+      },
+      "identity": "SoakHashEmbedder|kazma-soak-hash-v1|1024|local",
+      "ingest": {
+        "capped": null,
+        "chunks": 10000,
+        "chunks_per_s": 558.8,
+        "pages": 500,
+        "publish_seconds": 3.69,
+        "seconds": 17.896,
+        "vector_and_other_seconds": 14.205
+      },
+      "language": "en",
+      "library": "scale-10000-en",
+      "planted_lost_to_cap": 0,
+      "restore": {
+        "copy_seconds": 0.091,
+        "coverage_record_before_sweep": {
+          "sqlite_chunks": 10000,
+          "state": "unknown",
+          "vector_chunks": 0
+        },
+        "keyword_before_sweep": {
+          "found": [
+            40,
+            40
+          ],
+          "ms": {
+            "max": 1.382,
+            "n": 40,
+            "p50": 0.389,
+            "p95": 0.469,
+            "p99": 1.382
+          }
+        },
+        "keyword_rto_seconds": 0.1,
+        "open_seconds": 0.009,
+        "reembed_rto_at_cadence_seconds": 38.312,
+        "reembed_rto_seconds": 38.312,
+        "search_after": {
+          "found": {
+            "hybrid": [
+              40,
+              40
+            ],
+            "keyword": [
+              40,
+              40
+            ],
+            "meaning": [
+              40,
+              40
+            ]
+          },
+          "hybrid_ms": {
+            "max": 76.83,
+            "n": 40,
+            "p50": 51.261,
+            "p95": 65.288,
+            "p99": 76.83
+          },
+          "keyword_ms": {
+            "max": 0.996,
+            "n": 40,
+            "p50": 0.49,
+            "p95": 0.805,
+            "p99": 0.996
+          },
+          "meaning_index_misses": [],
+          "meaning_ms": {
+            "max": 60.005,
+            "n": 40,
+            "p50": 44.538,
+            "p95": 57.882,
+            "p99": 60.005
+          },
+          "meaning_transient_failure_last": null,
+          "meaning_transient_failures": 0,
+          "questions": 40,
+          "repeats": 1,
+          "vector_read_failure": null
+        },
+        "sweep": {
+          "error": null,
+          "passes": [
+            {
+              "complete": true,
+              "embedded": 10000,
+              "missing": 0,
+              "removed": 0,
+              "seconds": 38.212
+            }
+          ],
+          "seconds": 38.212
+        },
+        "vectors_after": {
+          "active": 10000,
+          "available": true,
+          "current": 10000,
+          "foreign": 0,
+          "health_chunks": 10000,
+          "health_state": "ok",
+          "health_vectors": 10000,
+          "identity": "SoakHashEmbedder|kazma-soak-hash-v1|1024|local",
+          "missing": 0,
+          "orphans": 0
+        }
+      },
+      "restore_child": {
+        "peak_rss_mib": 226.9,
+        "process": {
+          "handles": 439,
+          "processes": 1,
+          "rss_mib": 215.5
+        }
+      },
+      "search": {
+        "found": {
+          "hybrid": [
+            40,
+            40
+          ],
+          "keyword": [
+            40,
+            40
+          ],
+          "meaning": [
+            40,
+            40
+          ]
+        },
+        "hybrid_ms": {
+          "max": 112.307,
+          "n": 200,
+          "p50": 54.506,
+          "p95": 81.556,
+          "p99": 93.898
+        },
+        "keyword_ms": {
+          "max": 1.066,
+          "n": 200,
+          "p50": 0.55,
+          "p95": 0.845,
+          "p99": 0.904
+        },
+        "meaning_index_misses": [],
+        "meaning_ms": {
+          "max": 91.561,
+          "n": 200,
+          "p50": 46.783,
+          "p95": 67.464,
+          "p99": 82.098
+        },
+        "meaning_transient_failure_last": null,
+        "meaning_transient_failures": 0,
+        "questions": 40,
+        "repeats": 5,
+        "vector_read_failure": null
+      },
+      "size": 10000,
+      "storage": {
+        "file_bytes": 22011904,
+        "free_bytes": 0,
+        "full": false,
+        "quota_bytes": 1073741824,
+        "used_bytes": 22011904
+      },
+      "sweep_after_ingest": {
+        "error": null,
+        "passes": [
+          {
+            "complete": true,
+            "embedded": 0,
+            "missing": 0,
+            "removed": 0,
+            "seconds": 0.477
+          }
+        ]
+      },
+      "sweep_idle": {
+        "chunk_listing_ms": 21.951,
+        "keyword_coverage_ms": 44.253,
+        "ms": 429.388,
+        "rows_listed": {
+          "active_chunks": 10000,
+          "chunks_counted": 10000,
+          "keyword_index_rows_counted": 10000,
+          "vector_ids": 10000
+        },
+        "vector_listing_ms": 358.427
+      },
+      "violations": []
+    },
+    {
+      "backup": {
+        "bytes": 23437312,
+        "seconds": 0.096
+      },
+      "build_child": {
+        "peak_rss_mib": 317.0,
+        "process": {
+          "handles": 418,
+          "processes": 1,
+          "rss_mib": 240.8
+        }
+      },
+      "ceilings": {
+        "after_delete": {
+          "knowledge_db": {
+            "bytes": 23437312,
+            "rows": {
+              "knowledge_chunks": 0,
+              "knowledge_chunks_fts": 0,
+              "knowledge_chunks_fts_config": 1,
+              "knowledge_chunks_fts_content": 0,
+              "knowledge_chunks_fts_data": 2,
+              "knowledge_chunks_fts_docsize": 0,
+              "knowledge_chunks_fts_idx": 0,
+              "knowledge_libraries": 0,
+              "knowledge_meta": 2,
+              "knowledge_vector_status": 0
+            }
+          },
+          "vector_dir_bytes": 38494240
+        },
+        "after_ingest": {
+          "knowledge_db": {
+            "bytes": 23437312,
+            "rows": {
+              "knowledge_chunks": 10000,
+              "knowledge_chunks_fts": 10000,
+              "knowledge_chunks_fts_config": 1,
+              "knowledge_chunks_fts_content": 10000,
+              "knowledge_chunks_fts_data": 614,
+              "knowledge_chunks_fts_docsize": 10000,
+              "knowledge_chunks_fts_idx": 472,
+              "knowledge_libraries": 1,
+              "knowledge_meta": 2,
+              "knowledge_vector_status": 1
+            }
+          },
+          "settings_db_bytes": 57344,
+          "vector_dir_bytes": 84849988
+        }
+      },
+      "delete": {
+        "after": {
+          "chunk_rows": 0,
+          "collection": false,
+          "coverage_rows": 0,
+          "keyword_rows": 0,
+          "keyword_segment_residue": [
+            0,
+            40
+          ],
+          "library_rows": 0,
+          "problems": [],
+          "provenance_dir": false,
+          "running_crawls": 0
+        },
+        "collection": "kazma_kb_scale-10000-ar",
+        "result": {
+          "deleted": true,
+          "documents": 0,
+          "provenance_removed": true
+        },
+        "seconds": 1.168,
+        "vector_folders": {
+          "folders": 0,
+          "orphan_bytes": 0,
+          "orphans": 0
+        }
+      },
+      "identity": "SoakHashEmbedder|kazma-soak-hash-v1|1024|local",
+      "ingest": {
+        "capped": null,
+        "chunks": 10000,
+        "chunks_per_s": 732.9,
+        "pages": 500,
+        "publish_seconds": 3.062,
+        "seconds": 13.645,
+        "vector_and_other_seconds": 10.583
+      },
+      "language": "ar",
+      "library": "scale-10000-ar",
+      "planted_lost_to_cap": 0,
+      "restore": {
+        "copy_seconds": 0.086,
+        "coverage_record_before_sweep": {
+          "sqlite_chunks": 10000,
+          "state": "unknown",
+          "vector_chunks": 0
+        },
+        "keyword_before_sweep": {
+          "found": [
+            40,
+            40
+          ],
+          "ms": {
+            "max": 1.267,
+            "n": 40,
+            "p50": 0.51,
+            "p95": 0.816,
+            "p99": 1.267
+          }
+        },
+        "keyword_rto_seconds": 0.097,
+        "open_seconds": 0.01,
+        "reembed_rto_at_cadence_seconds": 38.769,
+        "reembed_rto_seconds": 38.769,
+        "search_after": {
+          "found": {
+            "hybrid": [
+              40,
+              40
+            ],
+            "keyword": [
+              40,
+              40
+            ],
+            "meaning": [
+              40,
+              40
+            ]
+          },
+          "hybrid_ms": {
+            "max": 69.101,
+            "n": 40,
+            "p50": 53.225,
+            "p95": 65.949,
+            "p99": 69.101
+          },
+          "keyword_ms": {
+            "max": 1.551,
+            "n": 40,
+            "p50": 0.484,
+            "p95": 0.972,
+            "p99": 1.551
+          },
+          "meaning_index_misses": [],
+          "meaning_ms": {
+            "max": 61.624,
+            "n": 40,
+            "p50": 44.501,
+            "p95": 53.572,
+            "p99": 61.624
+          },
+          "meaning_transient_failure_last": null,
+          "meaning_transient_failures": 0,
+          "questions": 40,
+          "repeats": 1,
+          "vector_read_failure": null
+        },
+        "sweep": {
+          "error": null,
+          "passes": [
+            {
+              "complete": true,
+              "embedded": 10000,
+              "missing": 0,
+              "removed": 0,
+              "seconds": 38.672
+            }
+          ],
+          "seconds": 38.672
+        },
+        "vectors_after": {
+          "active": 10000,
+          "available": true,
+          "current": 10000,
+          "foreign": 0,
+          "health_chunks": 10000,
+          "health_state": "ok",
+          "health_vectors": 10000,
+          "identity": "SoakHashEmbedder|kazma-soak-hash-v1|1024|local",
+          "missing": 0,
+          "orphans": 0
+        }
+      },
+      "restore_child": {
+        "peak_rss_mib": 229.4,
+        "process": {
+          "handles": 439,
+          "processes": 1,
+          "rss_mib": 214.8
+        }
+      },
+      "search": {
+        "found": {
+          "hybrid": [
+            40,
+            40
+          ],
+          "keyword": [
+            40,
+            40
+          ],
+          "meaning": [
+            40,
+            40
+          ]
+        },
+        "hybrid_ms": {
+          "max": 100.139,
+          "n": 200,
+          "p50": 62.501,
+          "p95": 80.101,
+          "p99": 88.532
+        },
+        "keyword_ms": {
+          "max": 1.941,
+          "n": 200,
+          "p50": 0.664,
+          "p95": 0.954,
+          "p99": 1.149
+        },
+        "meaning_index_misses": [],
+        "meaning_ms": {
+          "max": 84.387,
+          "n": 200,
+          "p50": 54.22,
+          "p95": 70.991,
+          "p99": 79.72
+        },
+        "meaning_transient_failure_last": null,
+        "meaning_transient_failures": 0,
+        "questions": 40,
+        "repeats": 5,
+        "vector_read_failure": null
+      },
+      "size": 10000,
+      "storage": {
+        "file_bytes": 23437312,
+        "free_bytes": 0,
+        "full": false,
+        "quota_bytes": 1073741824,
+        "used_bytes": 23437312
+      },
+      "sweep_after_ingest": {
+        "error": null,
+        "passes": [
+          {
+            "complete": true,
+            "embedded": 0,
+            "missing": 0,
+            "removed": 0,
+            "seconds": 0.269
+          }
+        ]
+      },
+      "sweep_idle": {
+        "chunk_listing_ms": 13.951,
+        "keyword_coverage_ms": 32.013,
+        "ms": 333.372,
+        "rows_listed": {
+          "active_chunks": 10000,
+          "chunks_counted": 10000,
+          "keyword_index_rows_counted": 10000,
+          "vector_ids": 10000
+        },
+        "vector_listing_ms": 283.9
+      },
+      "violations": []
+    },
+    {
+      "backup": {
+        "bytes": 23232512,
+        "seconds": 0.21
+      },
+      "build_child": {
+        "peak_rss_mib": 315.7,
+        "process": {
+          "handles": 419,
+          "processes": 1,
+          "rss_mib": 234.8
+        }
+      },
+      "ceilings": {
+        "after_delete": {
+          "knowledge_db": {
+            "bytes": 23232512,
+            "rows": {
+              "knowledge_chunks": 0,
+              "knowledge_chunks_fts": 0,
+              "knowledge_chunks_fts_config": 1,
+              "knowledge_chunks_fts_content": 0,
+              "knowledge_chunks_fts_data": 2,
+              "knowledge_chunks_fts_docsize": 0,
+              "knowledge_chunks_fts_idx": 0,
+              "knowledge_libraries": 0,
+              "knowledge_meta": 2,
+              "knowledge_vector_status": 0
+            }
+          },
+          "vector_dir_bytes": 40685600
+        },
+        "after_ingest": {
+          "knowledge_db": {
+            "bytes": 23232512,
+            "rows": {
+              "knowledge_chunks": 10000,
+              "knowledge_chunks_fts": 10000,
+              "knowledge_chunks_fts_config": 1,
+              "knowledge_chunks_fts_content": 10000,
+              "knowledge_chunks_fts_data": 666,
+              "knowledge_chunks_fts_docsize": 10000,
+              "knowledge_chunks_fts_idx": 660,
+              "knowledge_libraries": 1,
+              "knowledge_meta": 2,
+              "knowledge_vector_status": 1
+            }
+          },
+          "settings_db_bytes": 57344,
+          "vector_dir_bytes": 87191264
+        }
+      },
+      "delete": {
+        "after": {
+          "chunk_rows": 0,
+          "collection": false,
+          "coverage_rows": 0,
+          "keyword_rows": 0,
+          "keyword_segment_residue": [
+            0,
+            40
+          ],
+          "library_rows": 0,
+          "problems": [],
+          "provenance_dir": false,
+          "running_crawls": 0
+        },
+        "collection": "kazma_kb_scale-10000-mixed",
+        "result": {
+          "deleted": true,
+          "documents": 0,
+          "provenance_removed": true
+        },
+        "seconds": 1.444,
+        "vector_folders": {
+          "folders": 0,
+          "orphan_bytes": 0,
+          "orphans": 0
+        }
+      },
+      "identity": "SoakHashEmbedder|kazma-soak-hash-v1|1024|local",
+      "ingest": {
+        "capped": null,
+        "chunks": 10000,
+        "chunks_per_s": 557.5,
+        "pages": 500,
+        "publish_seconds": 3.939,
+        "seconds": 17.937,
+        "vector_and_other_seconds": 13.999
+      },
+      "language": "mixed",
+      "library": "scale-10000-mixed",
+      "planted_lost_to_cap": 0,
+      "restore": {
+        "copy_seconds": 0.134,
+        "coverage_record_before_sweep": {
+          "sqlite_chunks": 10000,
+          "state": "unknown",
+          "vector_chunks": 0
+        },
+        "keyword_before_sweep": {
+          "found": [
+            40,
+            40
+          ],
+          "ms": {
+            "max": 1.102,
+            "n": 40,
+            "p50": 0.415,
+            "p95": 0.504,
+            "p99": 1.102
+          }
+        },
+        "keyword_rto_seconds": 0.143,
+        "open_seconds": 0.009,
+        "reembed_rto_at_cadence_seconds": 50.92,
+        "reembed_rto_seconds": 50.92,
+        "search_after": {
+          "found": {
+            "hybrid": [
+              40,
+              40
+            ],
+            "keyword": [
+              40,
+              40
+            ],
+            "meaning": [
+              40,
+              40
+            ]
+          },
+          "hybrid_ms": {
+            "max": 95.358,
+            "n": 40,
+            "p50": 67.13,
+            "p95": 73.502,
+            "p99": 95.358
+          },
+          "keyword_ms": {
+            "max": 1.053,
+            "n": 40,
+            "p50": 0.691,
+            "p95": 0.907,
+            "p99": 1.053
+          },
+          "meaning_index_misses": [],
+          "meaning_ms": {
+            "max": 68.91,
+            "n": 40,
+            "p50": 56.755,
+            "p95": 65.937,
+            "p99": 68.91
+          },
+          "meaning_transient_failure_last": null,
+          "meaning_transient_failures": 0,
+          "questions": 40,
+          "repeats": 1,
+          "vector_read_failure": null
+        },
+        "sweep": {
+          "error": null,
+          "passes": [
+            {
+              "complete": true,
+              "embedded": 10000,
+              "missing": 0,
+              "removed": 0,
+              "seconds": 50.777
+            }
+          ],
+          "seconds": 50.777
+        },
+        "vectors_after": {
+          "active": 10000,
+          "available": true,
+          "current": 10000,
+          "foreign": 0,
+          "health_chunks": 10000,
+          "health_state": "ok",
+          "health_vectors": 10000,
+          "identity": "SoakHashEmbedder|kazma-soak-hash-v1|1024|local",
+          "missing": 0,
+          "orphans": 0
+        }
+      },
+      "restore_child": {
+        "peak_rss_mib": 232.4,
+        "process": {
+          "handles": 437,
+          "processes": 1,
+          "rss_mib": 205.3
+        }
+      },
+      "search": {
+        "found": {
+          "hybrid": [
+            40,
+            40
+          ],
+          "keyword": [
+            40,
+            40
+          ],
+          "meaning": [
+            40,
+            40
+          ]
+        },
+        "hybrid_ms": {
+          "max": 128.56,
+          "n": 200,
+          "p50": 67.892,
+          "p95": 85.359,
+          "p99": 93.833
+        },
+        "keyword_ms": {
+          "max": 1.066,
+          "n": 200,
+          "p50": 0.665,
+          "p95": 0.917,
+          "p99": 1.034
+        },
+        "meaning_index_misses": [],
+        "meaning_ms": {
+          "max": 84.703,
+          "n": 200,
+          "p50": 58.973,
+          "p95": 70.289,
+          "p99": 80.585
+        },
+        "meaning_transient_failure_last": null,
+        "meaning_transient_failures": 0,
+        "questions": 40,
+        "repeats": 5,
+        "vector_read_failure": null
+      },
+      "size": 10000,
+      "storage": {
+        "file_bytes": 23232512,
+        "free_bytes": 0,
+        "full": false,
+        "quota_bytes": 1073741824,
+        "used_bytes": 23232512
+      },
+      "sweep_after_ingest": {
+        "error": null,
+        "passes": [
+          {
+            "complete": true,
+            "embedded": 0,
+            "missing": 0,
+            "removed": 0,
+            "seconds": 0.385
+          }
+        ]
+      },
+      "sweep_idle": {
+        "chunk_listing_ms": 14.194,
+        "keyword_coverage_ms": 40.596,
+        "ms": 401.69,
+        "rows_listed": {
+          "active_chunks": 10000,
+          "chunks_counted": 10000,
+          "keyword_index_rows_counted": 10000,
+          "vector_ids": 10000
+        },
+        "vector_listing_ms": 341.391
+      },
+      "violations": []
+    }
+  ],
+  "tracker_row": "KB-Q01",
+  "updated_at": "2026-10-14T23:39:04Z",
+  "violations": []
+}

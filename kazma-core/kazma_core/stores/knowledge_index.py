@@ -46,7 +46,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kazma_core.memory.vector_store_global import VectorStore
+from kazma_core.memory import chroma_local
+from kazma_core.memory.vector_store_global import VectorStore, index_reloads, release_dropped_vectors
 from kazma_core.paths import vector_memory_path
 from kazma_core.stores.knowledge import (
     KnowledgeLibraryGone,
@@ -853,10 +854,20 @@ class KnowledgeIndex:
         "N of N" over vectors a previous model made. ``state`` is
         ``unknown`` (not checked yet), ``ok``, ``rebuilding`` (fewer than
         all), ``unavailable`` or ``failed``.
+
+        A coverage the sweep recorded on another vector store is not shown
+        (KB-Q01): the record lives in knowledge.db, which is backed up, and
+        the vectors are not -- a database restored onto a machine without
+        them reported every library fully covered while no vector existed.
+        The record names the store it measured (``store_id``,
+        :func:`~kazma_core.memory.chroma_local.vector_store_id`); a record of
+        another store, or of none, is ``unknown`` until the next pass.
         """
         chunks = self._store.count_chunks(library_id)
         status = self._store.vector_status(library_id)
         if status is None:
+            covered, state, checked = 0, "unknown", None
+        elif status["state"] in ("ok", "rebuilding") and not self._measured_here(status):
             covered, state, checked = 0, "unknown", None
         else:
             covered = min(int(status["covered"]), chunks)
@@ -875,6 +886,12 @@ class KnowledgeIndex:
             "persist_dir": self._persist_dir,
         }
 
+    def _measured_here(self, status: dict[str, Any]) -> bool:
+        """Whether a coverage record was measured on this index's vector
+        store (read from the store's id file: no client, no model)."""
+        here = chroma_local.vector_store_id(self._persist_dir)
+        return bool(here) and status.get("store_id") == here
+
     def backfill_vectors(self, *, time_budget_s: float = 300.0, batch: int = 16) -> dict[str, Any]:
         """Make each library's vectors match its chunks; one bounded, resumable pass.
 
@@ -891,9 +908,10 @@ class KnowledgeIndex:
         step = max(1, int(batch))
         report: dict[str, Any] = {"libraries": 0, "embedded": 0, "removed": 0, "missing": 0,
                                   "unavailable": False, "complete": True, "failed": {},
-                                  "coverage": {}, "identity": ""}
+                                  "coverage": {}, "identity": "", "graphs_rebuilt": 0}
         stores: dict[str, VectorStore] = {}
         identities: dict[str, str] = {}
+        store_ids: dict[str, str] = {}
         todo: list[tuple[int, str, str]] = []  # (characters, library, chunk id)
         for library_id in self._store.all_library_ids():
             if time.monotonic() >= deadline:
@@ -911,6 +929,11 @@ class KnowledgeIndex:
                 identity = vs.identity
                 report["identity"] = identity
                 report["libraries"] += 1
+                # An index made with Chroma's sparser defaults is rebuilt
+                # from its own vectors, once (KB-Q01).
+                if vs.graph_outdated():
+                    vs.rebuild_graph()
+                    report["graphs_rebuilt"] += 1
                 # Vectors first: a chunk ingested between the two reads is then
                 # embedded twice (harmless), never taken for a retired one.
                 tags = vs.models()
@@ -921,6 +944,7 @@ class KnowledgeIndex:
                 todo += [(sizes[cid], library_id, cid) for cid in set(sizes) - current]
                 stores[library_id] = vs
                 identities[library_id] = identity
+                store_ids[library_id] = vs.store_id
                 report["coverage"][library_id] = [covered, len(sizes)]
             except Exception as exc:
                 report["failed"][library_id] = f"{type(exc).__name__}: {exc}"[:300]
@@ -960,7 +984,7 @@ class KnowledgeIndex:
             try:
                 self._store.set_vector_status(library_id, identity=identities.get(library_id, ""),
                                               chunks=chunks, covered=covered, state=state,
-                                              error=failed)
+                                              error=failed, store_id=store_ids.get(library_id, ""))
             except Exception:
                 logger.debug("[knowledge] coverage not recorded for %s", library_id, exc_info=True)
         for library_id, error in report["failed"].items():
@@ -1108,6 +1132,14 @@ def repair_metric_lines() -> list[str]:
         "# HELP kazma_kb_vector_last_pass_timestamp_seconds When the last repair pass ran",
         "# TYPE kazma_kb_vector_last_pass_timestamp_seconds gauge",
         f"kazma_kb_vector_last_pass_timestamp_seconds {float(report['ran_at'] or 0):.0f}",
+        "# HELP kazma_kb_vector_orphan_folders Vector folders of dropped collections still on disk "
+        "after the last repair pass (another process holds them)",
+        "# TYPE kazma_kb_vector_orphan_folders gauge",
+        f"kazma_kb_vector_orphan_folders {len((report.get('vector_folders') or {}).get('held') or [])}",
+        "# HELP kazma_kb_vector_index_reloads_total Indexes this process rebuilt from Chroma's log "
+        "after Chroma lost them",
+        "# TYPE kazma_kb_vector_index_reloads_total counter",
+        f"kazma_kb_vector_index_reloads_total {sum((report.get('index_reloads') or {}).values())}",
     ]
     coverage = report.get("coverage") or {}
     if coverage:
@@ -1191,6 +1223,10 @@ def run_repair_sweep(*, time_budget_s: float = 300.0) -> dict[str, Any]:
         store.rebuild_fts(reason="coverage check")
     report = index.backfill_vectors(time_budget_s=time_budget_s)
     report["fts"] = fts
+    # The vectors of collections dropped since (deleted libraries, model
+    # switches, rebuilt indexes) leave the disk (KB-Q01).
+    report["vector_folders"] = release_dropped_vectors(index._persist_dir)
+    report["index_reloads"] = index_reloads()
     bad = bool(report["unavailable"] or report["failed"])
     with _SWEEP_LOCK:
         _SWEEP["report"] = report

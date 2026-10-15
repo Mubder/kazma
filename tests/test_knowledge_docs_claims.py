@@ -116,6 +116,28 @@ def _private_seed_refused_at_admission() -> bool:
     from kazma_core.stores import knowledge_ingest
 
     return "_admit_public_seed(" in inspect.getsource(knowledge_ingest._prepare_ingest_site)
+def _dropped_folders_removed() -> bool:
+    source = _src("kazma-core/kazma_core/memory/vector_store_global.py")
+    return ("remove_orphan_segment_folders" in source and "def release_dropped_vectors" in source
+            and "release_dropped_vectors(" in _src("kazma-core/kazma_core/stores/knowledge_index.py"))
+
+
+def _coverage_names_its_store() -> bool:
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+
+    return "_measured_here" in inspect.getsource(KnowledgeIndex.health)
+
+
+def _hnsw_settings() -> bool:
+    from kazma_core.memory.vector_store_global import _HNSW
+
+    return (_HNSW["max_neighbors"], _HNSW["ef_construction"], _HNSW["ef_search"]) == (48, 400, 256)
+
+
+def _delete_purges_words() -> bool:
+    from kazma_core.stores.knowledge import KnowledgeStore
+
+    return "self.purge_search_index()" in inspect.getsource(KnowledgeStore.delete_library)
 
 
 @dataclass(frozen=True)
@@ -154,6 +176,14 @@ CLAIMS = [
     Claim("private crawl seed", None,
           "A crawl seed on a private network is refused before anything is created",
           _private_seed_refused_at_admission),
+    # KB-Q01 (2026-10-15): what the soak harness found and the store now does.
+    Claim("dropped vectors", None, "**A dropped collection's vectors leave the disk.**", _dropped_folders_removed),
+    Claim("coverage after a restore", None,
+          "never the coverage of vectors it lost", _coverage_names_its_store),
+    Claim("HNSW settings", None,
+          "48 neighbours a vector, a construction breadth of 400 and a search breadth of 256", _hnsw_settings),
+    Claim("deleted words", None,
+          "which leaves none of the library's words in the file", _delete_purges_words),
 ]
 
 

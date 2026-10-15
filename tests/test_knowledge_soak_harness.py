@@ -8,12 +8,15 @@ having done the work they report: ingest, searches, the idle sweep, a
 backup, a restore and its re-embed, deletes that leave nothing behind,
 crawls and refreshes through the crawl journal, document publications,
 crashes and their resumes, a restart every cycle and a model switch with
-re-embedding. Their reports are on disk while they run. And the checks see
-planted violations: a chunk deleted behind the store's back, a keyword row
-left for a retired chunk, a deleted library's fetched pages left on disk, a
-vector folder no collection owns, an over-full crawl journal, ``unified_items``
-back, searches that miss, and a collection that cannot be read in two
-processes in a row (negative controls).
+re-embedding. They run strict (KB-Q01's fixes, 2026-10-15): no vector folder
+left by a dropped collection, no deleted library's words in the keyword
+index, no coverage record claiming vectors a restore lost, no collection a
+process cannot read. Their reports are on disk while they run. And the checks
+see planted violations: a chunk deleted behind the store's back, a keyword row
+left for a retired chunk, a deleted library's fetched pages left on disk, its
+words left in the keyword index, a vector folder no collection owns, an
+over-full crawl journal, ``unified_items`` back, searches that miss, and a
+collection that cannot be read in two processes in a row (negative controls).
 
 The runs need ``chromadb`` (the ``rag`` extra, which CI does not install);
 the negative controls run everywhere.
@@ -22,6 +25,7 @@ the negative controls run everywhere.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -52,12 +56,13 @@ def _run(mode: str, argv: list[str], tmp_path_factory) -> tuple[int, dict, Path]
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(knowledge_soak, "_write_report", record)
-        # Two Chroma defects are counted, not judged, here (each has its own
-        # negative control below): the folder a dropped collection leaves,
-        # and a collection a process cannot read.
+        # Strict (KB-Q01, 2026-10-15): a folder a dropped collection leaves
+        # and a collection a process cannot read are violations, as they are
+        # for an operator's run; until the fixes of that day they were
+        # counted here with --tolerate-orphan-vector-folders and
+        # --tolerate-vector-read-failures.
         code = knowledge_soak.main([mode, *argv, "--data-dir", str(data), "--report", str(report),
-                                    "--hardware-name", "test", "--tolerate-orphan-vector-folders",
-                                    "--tolerate-vector-read-failures"])
+                                    "--hardware-name", "test"])
     return code, json.loads(report.read_text(encoding="utf-8")), data
 
 
@@ -101,19 +106,42 @@ def test_a_tiny_scale_run_measures_every_step(scale_run):
         assert restore["search_after"]["found"]["keyword"] == [6, 6]
         delete = step["delete"]
         assert delete["result"]["deleted"] and delete["after"]["problems"] == [], delete
+        assert delete["vector_folders"]["orphans"] == 0 and delete["after"]["keyword_segment_residue"][0] == 0
+        assert restore["coverage_record_before_sweep"]["state"] == "unknown", restore
         assert step["ceilings"]["after_ingest"]["knowledge_db"]["rows"]["knowledge_chunks"] == 240
         assert step["ceilings"]["after_delete"]["knowledge_db"]["rows"]["knowledge_chunks"] == 0
     # The Arabic questions were asked: the corpus has Arabic planted answers.
     assert report["steps"][1]["search"]["questions"] == 6
 
 
+def test_a_soak_run_leaves_this_process_environment_as_it_was(soak_run):
+    """The run points its own process at its private stores; afterwards the
+    process reads the stores it read before (the Knowledge benchmark, run
+    after it, found KAZMA_VECTOR_PATH still naming the soak's folder)."""
+    _code, _report, data = soak_run
+    leaked = {k: v for k, v in os.environ.items() if k.startswith("KAZMA_") and str(data) in v}
+    assert not leaked, leaked
+
+
+def test_negative_control_the_run_without_its_restore_leaks_its_stores(tmp_path, monkeypatch):
+    """What a run did before: its environment stayed in the process."""
+    data = tmp_path / "data"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(knowledge_soak, "_run_soak", lambda args: os.environ.update(knowledge_soak._env(data)) or 0)
+        knowledge_soak.run_soak(None)
+        assert "KAZMA_VECTOR_PATH" not in os.environ or str(data) not in os.environ["KAZMA_VECTOR_PATH"]
+        # The same body called without the wrapper leaves it behind.
+        knowledge_soak._run_soak(None)
+        assert str(data) in os.environ["KAZMA_VECTOR_PATH"]
+
+
 def test_a_short_soak_does_every_operation_and_stays_healthy(soak_run):
     code, report, data = soak_run
     assert code == 0 and report["healthy"] and report["status"] == "passed", report["violations"]
-    # Six cycles and the final start, which a library the last process could
-    # not read (a counted Chroma defect) repeats, twice at most.
-    assert report["restarts"] == report["cycles"], report
-    assert report["cycles"] == 7 or (report.get("vector_read_failures") and report["cycles"] <= 9), report
+    # Six cycles and the final start; no process failed to read a library
+    # (the final start would have been repeated for it).
+    assert report["restarts"] == report["cycles"] == 7, report
+    assert not report.get("vector_read_failures"), report.get("vector_read_failures")
     ops = report["operations"]
     for name in ("crawls", "refreshes", "resumes", "documents", "deletes", "model_switches"):
         assert ops[name] >= 1, (name, ops)
@@ -125,11 +153,10 @@ def test_a_short_soak_does_every_operation_and_stays_healthy(soak_run):
     assert report["recall"]["keyword"][0] == report["recall"]["keyword"][1]
     last = report["growth_last"]
     assert last["active_chunks"] > 0 and last["journal_jobs"] <= 24 and last["provenance_files"] > 0, last
-    if last["orphan_vector_folders"]:  # what a dropped Chroma collection leaves (Windows): counted
-        assert any(f.startswith("vector store:") for f in report["findings"]), report["findings"]
-    if report.get("vector_read_failures"):  # a collection a process could not read: counted, its log kept
-        assert any(f.startswith("vector store read failures:") for f in report["findings"]), report["findings"]
-        assert all(Path(e["log"]).is_file() for e in report["vector_read_failures"])
+    # Dropped collections (deletes, model switches) left nothing on disk; a
+    # deleted library's words left the keyword index.
+    assert all(g["orphan_vector_folders"] == 0 for g in report["growth"]), report["growth"]
+    assert all(g["deleted_words_in_keyword_segments"] == 0 for g in report["growth"]), report["growth"]
     # Every operation's effect is in the stores at the end.
     held = report["held"]
     assert held["live_libraries"] >= 1 and held["deleted_libraries"] >= 1 and held["pending_resumes"] == 0
@@ -228,6 +255,31 @@ def test_the_check_sees_a_deleted_librarys_fetched_pages_left_on_disk(tmp_path, 
                                          encoding="utf-8")
     problems, _ = knowledge_soak.check_stores(data, state, seed)
     assert any("gone-en" in p and "left on disk" in p for p in problems), problems
+
+
+def test_the_check_sees_a_deleted_librarys_words_left_in_the_keyword_index(tmp_path, monkeypatch):
+    from kazma_core.stores.knowledge import KnowledgeStore
+    from kazma_core.stores.knowledge_chunker import chunk_markdown_doc, chunk_to_dict
+
+    data, state, seed = _stores(tmp_path, monkeypatch)
+    lib, lang = "gone-en", "en"
+    seed_url = knowledge_soak.seed_url_for(lib)
+    store = KnowledgeStore(db_path=str(data / "knowledge.db"))
+    try:
+        store.create_library(lib, lib, seed_url=seed_url)
+        text, _fact = knowledge_soak.page_doc(seed, lib, lang, 1, 1)
+        url = knowledge_soak.page_url(seed_url, 1)
+        store.publish_page(lib, url, [chunk_to_dict(c) for c in chunk_markdown_doc(
+            text, source_url=url, library_id=lib, document_title="t")])
+        # The delete as it was before 2026-10-15: rows and markers, no purge.
+        monkeypatch.setattr(KnowledgeStore, "purge_search_index", lambda self: {})
+        store.delete_library(lib)
+    finally:
+        store.close()
+    state["deleted"][lib] = {"lang": lang, "seed_url": seed_url, "stored": {"1": 1}, "docs": {}}
+    problems, sample = knowledge_soak.check_stores(data, state, seed)
+    assert sample["deleted_words_in_keyword_segments"] == 1
+    assert any(p.startswith("keyword index: its segments still hold at least 1") for p in problems), problems
 
 
 def test_the_check_sees_a_vector_folder_no_collection_owns(tmp_path, monkeypatch):

@@ -3986,6 +3986,54 @@ module was deleted and the import's `except` said "chromadb not installed".
   by name and the call retried once (`VectorStore._reopen_if_missing`). Only
   `knowledge_index_for` constructs an index in product code (gate in
   `tests/test_knowledge_vectors.py`).
+- **Chroma's local store, kept honest** (`memory/chroma_local.py`, KB-Q01,
+  2026-10-15; chromadb 1.5.9, the newest release that day, has all three):
+  - *Dropped vectors leave the disk.* `delete_collection` removes the catalog
+    rows and keeps the segment folder (~40 MB per 10k chunks): 17 folders in a
+    4-minute soak. `remove_orphan_segment_folders` removes the UUID-named
+    folders no row of `chroma.sqlite3`'s `segments` owns (folders listed
+    BEFORE the catalog is read; an unreadable catalog removes nothing; a
+    non-UUID folder is never touched) -- at client start, before any
+    collection opens (`_shared_client`), after every drop
+    (`VectorStore._drop_collection`, the ONE drop path: gate in
+    `tests/test_knowledge_vector_lifecycle.py`), and at the end of each
+    repair pass (`release_dropped_vectors`). On Windows a folder whose index
+    this process loaded is held open until the client is closed: the pass
+    then closes it -- a `_Gate` per client: every Chroma call of a
+    `VectorStore` holds it shared (an embedding runs before it, so a model
+    call never holds up a close), the close exclusive, so it waits for calls
+    in flight and holds new ones -- removes the folders and bumps the
+    client's generation; every store re-opens on its next call. `atexit`
+    does the same.
+  - *An evicted index is not lost.* Chroma's HNSW pool holds
+    `max_file_handles // 5` indexes over 64 shards (102 on Windows: one or two
+    a shard) and writes an index to disk only every `sync_threshold` (1,000)
+    records; two collections in one shard evict each other, an evicted small
+    index existed only in memory, and the process had already replayed that
+    collection's log -- every read failed "Nothing found on disk" until a
+    restart (5 of 20 short soaks). `raise_stream_limits` raises what Chroma
+    sizes the pool from before the first client (Windows: msvcrt 2,048 ->
+    pool 409, ucrtbase 8,192 for the index files' streams; POSIX: soft
+    NOFILE to 10,240 under the hard limit; never lowers). A read that still
+    finds an index lost (`VectorStore._hnsw_read`) deletes the id
+    `kazma:reload-index`: the push makes Chroma rebuild the index from its
+    write log before the read is asked again (WARNING,
+    `kazma_kb_vector_index_reloads_total`). A newer chromadb, or
+    `hnsw:sync_threshold`, does not fix it: none is newer, and the threshold's
+    minimum is 2 (a one-chunk library stays memory-only). Left: past 6
+    indexes in one shard (on Windows, likely only from about 100 libraries)
+    an evicted index of 1,000+ records reloads from disk without its records
+    since the last persist until the collection's next write replays its
+    log -- no error to catch.
+  - *The index is built for recall* (`_HNSW`: 48 neighbours, construction
+    400, search 256). Chroma's defaults (16/100/100) returned 31-39 of 40
+    planted answers at 10k chunks while exact search ranked all 40 first;
+    these return 40/40 in EN, AR and mixed in 11 of 12 harness measurements
+    (39 in one: Chroma builds in parallel) for ~1 ms more a query. An older
+    collection's search breadth is raised by `modify` (applies at the index's
+    next load) and its graph rebuilt by the repair pass from its own vectors
+    (`VectorStore.rebuild_graph`: copy to `<name>.rebuild`, counts compared,
+    old dropped, copy renamed; nothing embedded again).
 
 **G. The Knowledge store and its surfaces** (Knowledge audit 2026-10-13,
 tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
@@ -4005,6 +4053,24 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   ends `partial`. Chunk ids carry the position (`make_chunk_id`, KB-E05). The
   FTS is keyed by rowid and deleted by `rowid AND chunk_id` (KB-E06); library
   deletes run in 500-row batches with the lock released between them.
+- **A deleted library's words leave the index file** (KB-Q01, 2026-10-15):
+  FTS5 keeps a deleted row's words in its older segments until a merge
+  reaches them -- every planted word of a deleted 10k library was still in
+  `knowledge_chunks_fts_data`. `delete_library` ends with
+  `purge_search_index`: an FTS5 `merge` of every segment (memory's M01
+  purge, bounded: `_PURGE_STEP_PAGES` = 1,000 pages a transaction, the lock
+  released between steps). A replaced page or document version keeps its old
+  words until FTS5's own merges (unsearchable; a full rewrite per page would
+  cost the whole index each time). `tests/test_knowledge_store.py`.
+- **A coverage record names the vector store it measured** (KB-Q01): the
+  record is in knowledge.db (backed up), the vectors are not, and a restored
+  database reported "ok, 10,000 of 10,000" before the first pass with no
+  vector there. `knowledge_vector_status.store_id` is the id the sweep read
+  from `vector_memory/kazma_vector_store_id` (`chroma_local.vector_store_id`,
+  written at the directory's first client start); `KnowledgeIndex.health`
+  shows an ok/rebuilding record of another store, or of none (a row from
+  before the column), as `unknown` -- read from that file, no client, no
+  model (KB-S15). `tests/test_knowledge_vectors.py`.
 - **Delete goes through `knowledge_lifecycle.delete_library`** (KB-E08): 409
   while a crawl owns the library, the documents it holds unindexed through
   the Documents service first, then vectors, chunks and the fetched pages
@@ -4083,7 +4149,12 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   named hardware; `soak`: crawls, refreshes, documents, deletes, model
   switches, crashes, a restart every cycle, checked from the stores), held by
   `tests/test_knowledge_soak_harness.py` (its runs need the real chromadb;
-  the negative controls run everywhere).
+  the negative controls run everywhere). It runs strict since the KB-Q01
+  fixes: a dropped collection's folder, a deleted library's words in the
+  keyword index, a restored coverage record claiming lost vectors and a
+  collection a process cannot read are violations (`--tolerate-*` exists
+  only to measure an older build); an index Chroma lost and the product
+  rebuilt is a counted finding.
 
 ### 25. Long-Task Continue Protocol & Partial Pause (`agent/long_task.py`)
 

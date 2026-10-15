@@ -14,19 +14,29 @@ model is never loaded twice.
 
 from __future__ import annotations
 
+import atexit
+import functools
 import hashlib
 import logging
 import math
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
+from kazma_core.memory import chroma_local
 from kazma_core.memory.embedder import get_embedder
 
-__all__ = ["VectorStore", "directory_client", "embedder_identity", "get_encoder"]
+__all__ = [
+    "VectorStore",
+    "directory_client",
+    "embedder_identity",
+    "get_encoder",
+    "index_reloads",
+    "release_dropped_vectors",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +62,117 @@ _RETRY_AFTER_S = 300.0
 #: collection ranks exactly as a cosine one, and :func:`_similarity` turns
 #: either distance into the cosine it stands for.
 _SPACE = "cosine"
+
+#: The HNSW index a new collection is built with (KB-Q01, 2026-10-15).
+#: Chroma's defaults (16 neighbours, construction and search breadth 100)
+#: returned 31-39 of 40 planted answers at 10,000 chunks while an exact
+#: search ranked every one of them first (``scripts/knowledge_soak.py``'s
+#: corpus, EN/AR/mixed). 48 neighbours, a construction breadth of 400 and a
+#: search breadth of 256 returned 40 of 40 in 11 of 12 measurements (39 in
+#: the other; Chroma builds in parallel, so graphs differ a little), for
+#: about 1 ms more a query and a tenth more build time; a wider search on
+#: the default graph needed a breadth of 2,000 to reach 40. An existing
+#: collection gets the search breadth by Chroma's ``modify`` (it applies
+#: when Chroma next loads the index) and the graph by
+#: :meth:`VectorStore.rebuild_graph`, which copies its vectors -- nothing
+#: is embedded again.
+_HNSW: dict[str, Any] = {"space": _SPACE, "max_neighbors": 48, "ef_construction": 400, "ef_search": 256}
+#: Vectors copied per call when a collection's graph is rebuilt.
+_COPY_PAGE = 500
+
+#: A record id no Knowledge chunk has (theirs are ``library:url digest:
+#: position:content digest``, the digests hexadecimal). Deleting it
+#: pushes one record to a collection's write log, and Chroma rebuilds an
+#: index it lost from that log before it applies the record -- the one way
+#: to make it replay the log without a restart (see :mod:`chroma_local`).
+_RELOAD_PROBE_ID = "kazma:reload-index"
+#: How many times this process rebuilt a lost index, by collection
+#: (``/metrics``, the repair report): expected 0.
+_INDEX_RELOADS: dict[str, int] = {}
+
+_T = TypeVar("_T")
+
+
+def _client_key(persist_dir: str | None) -> str:
+    return str(Path(persist_dir).expanduser().resolve()) if persist_dir else ":memory:"
+
+
+class _Gate:
+    """Every Chroma call on a client holds the gate shared; closing the
+    client (to let go of a dropped collection's files) takes it exclusive,
+    which waits for the calls in flight and holds new ones. Shared is
+    re-entrant within a thread, and a waiting close holds new callers."""
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._shared = 0
+        self._closing = False
+        self._waiting = 0
+        self._local = threading.local()
+
+    @contextmanager
+    def shared(self) -> Iterator[None]:
+        depth = getattr(self._local, "depth", 0)
+        if depth == 0:
+            with self._cond:
+                self._cond.wait_for(lambda: not self._closing and not self._waiting)
+                self._shared += 1
+        self._local.depth = depth + 1
+        try:
+            yield
+        finally:
+            self._local.depth = depth
+            if depth == 0:
+                with self._cond:
+                    self._shared -= 1
+                    self._cond.notify_all()
+
+    def acquire_exclusive(self, timeout: float) -> bool:
+        if getattr(self._local, "depth", 0):
+            return False  # a caller inside a Chroma call never closes the client
+        with self._cond:
+            self._waiting += 1
+            try:
+                ok = self._cond.wait_for(lambda: not self._closing and not self._shared, timeout)
+                if ok:
+                    self._closing = True
+                return ok
+            finally:
+                self._waiting -= 1
+                self._cond.notify_all()
+
+    def release_exclusive(self) -> None:
+        with self._cond:
+            self._closing = False
+            self._cond.notify_all()
+
+
+_GATES: dict[str, _Gate] = {}
+#: Bumped each time a directory's client is closed: a store holding a
+#: collection of an older client re-opens it.
+_GENERATIONS: dict[str, int] = {}
+_EXIT_HOOK: list[bool] = []
+
+
+def _gate(key: str) -> _Gate:
+    with _CLIENTS_LOCK:
+        gate = _GATES.get(key)
+        if gate is None:
+            gate = _GATES[key] = _Gate()
+        return gate
+
+
+def _gated(method: Callable[..., _T]) -> Callable[..., _T]:
+    """Run a :class:`VectorStore` method inside its client's shared gate."""
+
+    @functools.wraps(method)
+    def wrapper(self: VectorStore, *args: Any, **kwargs: Any) -> _T:
+        with _gate(self._key).shared():
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 #: Ids fetched per call when listing a collection.
 _ID_PAGE = 5000
 #: The most text one vector is made from; keyword search still reads the
@@ -102,6 +223,10 @@ def _shared_client(persist_dir: str | None) -> Any:
 
     A client registered for the folder (:func:`directory_client`) is used
     as it is. Telemetry off: Chroma's default sends usage events to PostHog.
+    Before a directory's client starts -- before any collection opens, so
+    nothing in this process holds a folder -- the limits Chroma sizes its
+    index pool from are raised, the folders no collection owns are removed,
+    and the store's id is recorded (:mod:`chroma_local`).
     """
     key = _client_key(persist_dir)
     with _CLIENTS_LOCK:
@@ -117,7 +242,13 @@ def _shared_client(persist_dir: str | None) -> Any:
             settings = Settings(anonymized_telemetry=False)
             if persist_dir:
                 Path(key).mkdir(parents=True, exist_ok=True)
+                chroma_local.raise_stream_limits()
+                chroma_local.remove_orphan_segment_folders(key)
+                chroma_local.vector_store_id(key, create=True)
                 client = chromadb.PersistentClient(path=key, settings=settings)
+                if not _EXIT_HOOK:
+                    _EXIT_HOOK.append(True)
+                    atexit.register(_release_at_exit)
             else:
                 client = chromadb.Client(settings)
             _CLIENTS[key] = client
@@ -145,6 +276,73 @@ def directory_client(persist_dir: str, client: Any) -> Iterator[Any]:
         with _CLIENTS_LOCK:
             if _CLIENTS.get(key) is client:
                 del _CLIENTS[key]
+
+
+def index_reloads() -> dict[str, int]:
+    """Indexes this process rebuilt from Chroma's log, by collection."""
+    with _CLIENTS_LOCK:
+        return dict(_INDEX_RELOADS)
+
+
+def release_dropped_vectors(persist_dir: str | None, *, timeout: float = 60.0) -> dict[str, Any]:
+    """Remove the vector folders no collection owns in *persist_dir*.
+
+    A folder whose index this process loaded is held open (Windows) until
+    the process lets go of it: then the client is closed -- after the calls
+    in flight, holding new ones -- and the folders removed; every store
+    re-opens its collection on its next call. A client busy past *timeout*,
+    or one that fails to close (logged), keeps its folders for the next
+    pass. Returns :func:`chroma_local.remove_orphan_segment_folders`'s
+    report with ``client_closed``.
+    """
+    report: dict[str, Any] = {"removed": 0, "removed_bytes": 0, "held": [], "unreadable": False,
+                              "client_closed": False}
+    if not persist_dir:
+        return report
+    key = _client_key(persist_dir)
+    report.update(chroma_local.remove_orphan_segment_folders(key))
+    if not report["held"]:
+        return report
+    with _CLIENTS_LOCK:
+        client = _CLIENTS.get(key)
+    close = getattr(client, "close", None)
+    if client is None or not callable(close):
+        return report
+    gate = _gate(key)
+    if not gate.acquire_exclusive(timeout):
+        logger.info("[VectorStore] %d dropped vector folder(s) wait for a quiet moment to go", len(report["held"]))
+        return report
+    try:
+        with _CLIENTS_LOCK:
+            if _CLIENTS.get(key) is client:
+                del _CLIENTS[key]
+            _GENERATIONS[key] = _GENERATIONS.get(key, 0) + 1
+        try:
+            close()
+            report["client_closed"] = True
+        except (*_chroma_errors(), OSError, RuntimeError):  # the folders wait for the next pass
+            logger.warning("[VectorStore] could not close the vector store to let go of dropped "
+                           "collections' files", exc_info=True)
+        removed_before = report["removed"]
+        again = chroma_local.remove_orphan_segment_folders(key)
+        report.update(again, removed=removed_before + again["removed"],
+                      removed_bytes=report["removed_bytes"] + again["removed_bytes"], client_closed=True)
+    finally:
+        gate.release_exclusive()
+    if report["held"]:
+        logger.warning("[VectorStore] %d dropped vector folder(s) are still held by another process: %s",
+                       len(report["held"]), ", ".join(report["held"][:5]))
+    return report
+
+
+def _release_at_exit() -> None:
+    """At exit, let go of every directory's dropped vectors (best effort: a
+    client still busy after a few seconds keeps them for the next start)."""
+    for key in [k for k in list(_CLIENTS) if k != ":memory:"]:
+        try:
+            release_dropped_vectors(key, timeout=5.0)
+        except (*_chroma_errors(), OSError, RuntimeError):  # never fails the exit
+            logger.debug("[VectorStore] exit cleanup of %s failed", key, exc_info=True)
 
 
 def embedder_identity(model: Any) -> str:
@@ -175,6 +373,26 @@ def _collection_missing(exc: BaseException) -> bool:
     """A collection another handle dropped (Chroma's ``NotFoundError``)."""
     return (type(exc).__name__ in ("NotFoundError", "InvalidCollectionException")
             or "does not exist" in str(exc).lower())
+
+
+def _chroma_errors() -> tuple[type[BaseException], ...]:
+    """Chroma's own error class (``chromadb.errors.ChromaError``; its errors
+    are not OSError or ValueError), or none without the real chromadb."""
+    try:
+        from chromadb.errors import ChromaError
+    except ImportError:
+        return ()
+    return (ChromaError,)
+
+
+@contextmanager
+def _unless_missing() -> Iterator[None]:
+    """Ignore a collection that is not there; raise anything else."""
+    try:
+        yield
+    except (*_chroma_errors(), ValueError) as exc:
+        if not _collection_missing(exc):
+            raise
 
 
 def get_encoder(model_name: str | None = None) -> Any | None:
@@ -209,6 +427,8 @@ class VectorStore:
     ) -> None:
         self._collection_name = collection_name
         self._persist_dir = persist_dir
+        self._key = _client_key(persist_dir)
+        self._generation = 0  # of the client the open collection belongs to
         self._collection: Any = None
         self._client: Any = None
         self._ready: bool = False
@@ -217,6 +437,7 @@ class VectorStore:
         self._space: str = _SPACE
         self._dim: int | None = None  # the size this collection's vectors are
         self._mismatch_noted: int | None = None
+        self._open_lock = threading.RLock()
 
     # ── Initialisation ─────────────────────────────────────────────────
 
@@ -225,10 +446,22 @@ class VectorStore:
 
         A failure is retried after :data:`_RETRY_AFTER_S` and reported once
         per attempt with its real cause: "chromadb not installed" only when
-        ``chromadb`` itself is missing.
+        ``chromadb`` itself is missing. A collection of a client that was
+        closed since (:func:`release_dropped_vectors`) is opened again.
         """
-        if self._ready:
+        if self._ready and self._generation == _GENERATIONS.get(self._key, 0):
             return True
+        with self._open_lock:
+            return self._open()
+
+    def _open(self) -> bool:
+        generation = _GENERATIONS.get(self._key, 0)
+        if self._ready and self._generation == generation:
+            return True
+        if self._ready:
+            self._ready = False
+            self._collection = None
+            self._dim = None
         if self._failed_at is not None and time.monotonic() - self._failed_at < _RETRY_AFTER_S:
             return False
         try:
@@ -237,13 +470,17 @@ class VectorStore:
             # Every write and search passes its own vectors, so the collection
             # needs no embedding function (Chroma would otherwise attach its
             # default model, and it is deprecating custom wrappers without a
-            # config). An existing collection keeps its metadata and space.
+            # config). An existing collection keeps its metadata, space and
+            # graph; its search breadth is raised here (:data:`_HNSW`).
             self._collection = self._client.get_or_create_collection(
                 name=self._collection_name,
-                metadata={"description": "Kazma global semantic memory", "hnsw:space": _SPACE},
+                metadata={"description": "Kazma global semantic memory"},
+                configuration={"hnsw": dict(_HNSW)},
                 embedding_function=None,
             )
             self._space = _collection_space(self._collection)
+            self._widen_search()
+            self._generation = generation
             self._ready = True
             self._failed_at = None
             logger.info("[VectorStore] ChromaDB collection ready: %s", self._collection_name)
@@ -266,13 +503,56 @@ class VectorStore:
     @property
     def available(self) -> bool:
         """Whether the vector store is ready for queries."""
-        return self._ensure_client() and self._model is not None
+        with _gate(self._key).shared():
+            return self._ensure_client() and self._model is not None
 
     @property
     def identity(self) -> str:
         """:func:`embedder_identity` of the embedder this store writes and
         queries with ("" while it is unavailable)."""
         return embedder_identity(self._model) if self.available else ""
+
+    @property
+    def store_id(self) -> str:
+        """The id of the vector store this collection lives in
+        (:func:`chroma_local.vector_store_id`): recorded with a coverage
+        measurement, so a measurement is never shown for another store."""
+        return chroma_local.vector_store_id(self._key, create=True) if self._persist_dir else ""
+
+    def _hnsw(self) -> dict[str, Any]:
+        """The collection's HNSW settings, as Chroma reports them."""
+        config = getattr(self._collection, "configuration_json", None)
+        hnsw = config.get("hnsw") if isinstance(config, dict) else None
+        return hnsw if isinstance(hnsw, dict) else {}
+
+    def _widen_search(self) -> None:
+        """Raise an older collection's search breadth to :data:`_HNSW`'s
+        (Chroma applies it when it next loads the index). Best effort."""
+        breadth = self._hnsw().get("ef_search")
+        if not isinstance(breadth, int) or breadth >= _HNSW["ef_search"]:
+            return
+        try:
+            self._collection.modify(configuration={"hnsw": {"ef_search": _HNSW["ef_search"]}})
+            logger.info("[VectorStore] %s searches %d candidates now (was %d)", self._collection_name,
+                        _HNSW["ef_search"], breadth)
+        except (*_chroma_errors(), ValueError, TypeError) as exc:  # searches keep the old breadth
+            logger.info("[VectorStore] could not widen the search of %s: %s", self._collection_name, exc)
+
+    def _hnsw_read(self, call: Callable[[], _T]) -> _T:
+        """A read that needs the collection's HNSW index, rebuilt once from
+        Chroma's log when Chroma lost it ("Nothing found on disk": an index
+        it evicted before writing it to disk, :mod:`chroma_local`)."""
+        try:
+            return call()
+        except _chroma_errors() as exc:
+            if "nothing found on disk" not in str(exc).lower():
+                raise
+            with _CLIENTS_LOCK:
+                _INDEX_RELOADS[self._collection_name] = _INDEX_RELOADS.get(self._collection_name, 0) + 1
+            logger.warning("[VectorStore] Chroma lost the index of %s (evicted before it was written to "
+                           "disk); rebuilding it from Chroma's log", self._collection_name)
+            self._collection.delete(ids=[_RELOAD_PROBE_ID])
+            return call()
 
     def _reopen_if_missing(self, exc: BaseException) -> bool:
         """Re-open the collection by name when another handle dropped it
@@ -290,8 +570,20 @@ class VectorStore:
 
     def _held_dim(self) -> int | None:
         """The size of the vectors the collection holds (None: empty)."""
-        held = self._collection.get(limit=1, include=["embeddings"]).get("embeddings")
+        held = self._hnsw_read(
+            functools.partial(self._collection.get, limit=1, include=["embeddings"])).get("embeddings")
         return len(held[0]) if held is not None and len(held) else None
+
+    def _drop_collection(self) -> None:
+        """Delete the collection, then the vector folder Chroma leaves behind
+        (:mod:`chroma_local`): at once when nothing holds it, else when
+        :func:`release_dropped_vectors` closes the client."""
+        self._client.delete_collection(self._collection_name)
+        self._collection = None
+        self._ready = False
+        self._dim = None
+        if self._persist_dir:
+            chroma_local.remove_orphan_segment_folders(self._key)
 
     # ── CRUD ───────────────────────────────────────────────────────────
 
@@ -314,7 +606,8 @@ class VectorStore:
     ) -> bool:
         """Index a document into the ChromaDB collection.
 
-        Returns True on success.
+        Returns True on success. The text is embedded before the client's
+        gate is taken: a model call never holds up a close.
         """
         if not self.available:
             return False
@@ -327,21 +620,24 @@ class VectorStore:
         meta = dict(metadata or {})
         if not meta:
             meta = {"source": "memory"}
-        for attempt in (0, 1):
-            try:
-                self._fit(len(embedding))
-                self._collection.upsert(
-                    ids=[doc_id],
-                    embeddings=[embedding],
-                    documents=[text[:2000]],
-                    metadatas=[meta],
-                )
-                return True
-            except Exception as exc:
-                if attempt == 0 and self._reopen_if_missing(exc):
-                    continue
-                logger.warning("[VectorStore] Index failed: %s", exc)
+        with _gate(self._key).shared():
+            if not self._ensure_client():
                 return False
+            for attempt in (0, 1):
+                try:
+                    self._fit(len(embedding))
+                    self._collection.upsert(
+                        ids=[doc_id],
+                        embeddings=[embedding],
+                        documents=[text[:2000]],
+                        metadatas=[meta],
+                    )
+                    return True
+                except Exception as exc:
+                    if attempt == 0 and self._reopen_if_missing(exc):
+                        continue
+                    logger.warning("[VectorStore] Index failed: %s", exc)
+                    return False
         return False
 
     def encode_query(self, text: str) -> list[float] | None:
@@ -395,7 +691,8 @@ class VectorStore:
     ) -> list[tuple[str, float]]:
         """Semantic search via cosine similarity.
 
-        Returns list of (doc_id, similarity_score) tuples.
+        Returns list of (doc_id, similarity_score) tuples. The question is
+        embedded before the client's gate is taken (as in :meth:`index`).
 
         Args:
             tenant_id: If provided, results are filtered to this tenant.
@@ -414,6 +711,13 @@ class VectorStore:
             filters.update(where)
         if tenant_id:
             filters["tenant_id"] = tenant_id
+        return self._query_vector(embedding, limit, filters)
+
+    @_gated
+    def _query_vector(self, embedding: list[float], limit: int,
+                      filters: dict[str, Any]) -> list[tuple[str, float]]:
+        if not self._ensure_client():
+            return []
         for attempt in (0, 1):
             try:
                 count = self._collection.count() if hasattr(self._collection, "count") else limit
@@ -433,11 +737,12 @@ class VectorStore:
                             "meaning search waits for the repair sweep", self._collection_name,
                             self._dim, len(embedding))
                     return []
-                results = self._collection.query(
+                results = self._hnsw_read(functools.partial(
+                    self._collection.query,
                     query_embeddings=[embedding],
                     n_results=min(limit, count),
                     where=filters or None,
-                )
+                ))
                 if not results or not results.get("ids") or not results["ids"][0]:
                     return []
                 scored: list[tuple[str, float]] = []
@@ -455,6 +760,7 @@ class VectorStore:
                 return []
         return []
 
+    @_gated
     def delete(self, doc_id: str) -> bool:
         """Remove a document from the collection."""
         if not self._ensure_client():
@@ -478,6 +784,7 @@ class VectorStore:
         """
         return set(self.models())
 
+    @_gated
     def models(self) -> dict[str, str | None]:
         """Every document id with the model its vector records (None: none).
 
@@ -505,6 +812,7 @@ class VectorStore:
                 return found
             offset += len(ids)
 
+    @_gated
     def delete_many(self, doc_ids: list[str]) -> int:
         """Remove *doc_ids* from the collection; returns how many were asked for.
 
@@ -539,13 +847,13 @@ class VectorStore:
                 "[VectorStore] %s holds %d-dimension vectors and the model now makes %d: "
                 "rebuilding it", self._collection_name, stored, dim,
             )
-            self._client.delete_collection(self._collection_name)
-            self._ready = False
+            self._drop_collection()
             if not self._ensure_client():
                 raise RuntimeError(f"could not recreate {self._collection_name}")
         self._dim = dim
         self._mismatch_noted = None
 
+    @_gated
     def drop(self) -> bool:
         """Delete the whole collection (its Knowledge Library is being deleted).
 
@@ -553,10 +861,72 @@ class VectorStore:
         """
         if not self._ensure_client():
             return False
-        self._client.delete_collection(self._collection_name)
-        self._collection = None
-        self._ready = False
+        self._drop_collection()
         return True
+
+    @_gated
+    def graph_outdated(self) -> bool:
+        """Whether the collection's HNSW graph is sparser than :data:`_HNSW`
+        (a collection made before 2026-10-15, with Chroma's defaults)."""
+        if not self._ensure_client():
+            return False
+        hnsw = self._hnsw()
+        return any(isinstance(hnsw.get(key), int) and hnsw[key] < _HNSW[key]
+                   for key in ("max_neighbors", "ef_construction"))
+
+    @_gated
+    def rebuild_graph(self) -> int:
+        """Rebuild the collection with :data:`_HNSW`'s graph from the vectors
+        it holds -- nothing is embedded again; returns the vectors copied.
+
+        The vectors are copied into ``<name>.rebuild``, made with the
+        settings; only when it holds as many as the old one is the old one
+        dropped and the copy renamed to its name. A copy left by an earlier
+        attempt is dropped first. Vectors written while it copies may be
+        missing from the copy: the repair sweep embeds what is missing. A
+        failure leaves the old collection in place and raises.
+        """
+        with self._open_lock:  # no caller re-creates the name while it is swapped
+            if not self._ensure_client():
+                return 0
+            temp = f"{self._collection_name}.rebuild"
+            with _unless_missing():
+                self._client.delete_collection(temp)
+            old = self._collection
+            copy = self._client.create_collection(
+                name=temp, metadata={"description": "Kazma global semantic memory"},
+                configuration={"hnsw": dict(_HNSW)}, embedding_function=None)
+            copied = offset = 0
+            complete = False
+            try:
+                while True:
+                    page = self._hnsw_read(functools.partial(
+                        old.get, include=["embeddings", "metadatas", "documents"], limit=_COPY_PAGE,
+                        offset=offset))
+                    ids = list(page.get("ids") or [])
+                    if ids:
+                        copy.upsert(ids=ids, embeddings=page["embeddings"], metadatas=page["metadatas"],
+                                    documents=[d or "" for d in page["documents"]])
+                        copied += len(ids)
+                    if len(ids) < _COPY_PAGE:
+                        break
+                    offset += len(ids)
+                held = old.count()
+                if copy.count() != held:
+                    raise RuntimeError(f"the copy of {self._collection_name} holds {copy.count()} vectors, "
+                                       f"the collection {held}: it changed while it was copied")
+                complete = True
+            finally:
+                if not complete:  # the old collection stays; the next pass tries again
+                    with _unless_missing():
+                        self._client.delete_collection(temp)
+            self._drop_collection()
+            copy.modify(name=self._collection_name)
+            if not self._ensure_client():
+                raise RuntimeError(f"could not re-open {self._collection_name} after its rebuild")
+        logger.info("[VectorStore] rebuilt the index of %s with %d neighbours a vector (%d vectors copied)",
+                    self._collection_name, _HNSW["max_neighbors"], copied)
+        return copied
 
     def index_many(self, docs: list[tuple[str, str, dict[str, Any]]]) -> int:
         """Embed and store ``(doc_id, text, metadata)`` in one batch; returns how many.
@@ -575,22 +945,28 @@ class VectorStore:
         keep = [(d, u) for d, u in ((d, _unit(v)) for d, v in zip(docs, vectors)) if u]
         if not keep:
             return 0
-        for attempt in (0, 1):
-            try:
-                self._fit(len(keep[0][1]))
-                self._collection.upsert(
-                    ids=[d[0] for d, _v in keep],
-                    embeddings=[v for _d, v in keep],
-                    documents=[d[1][:2000] for d, _v in keep],
-                    metadatas=[dict(d[2]) or {"source": "memory"} for d, _v in keep],
-                )
-                return len(keep)
-            except Exception as exc:
-                if attempt == 0 and self._reopen_if_missing(exc):
-                    continue
-                raise
+        # The batch was embedded outside the gate: a model call never holds
+        # up a close.
+        with _gate(self._key).shared():
+            if not self._ensure_client():
+                return 0
+            for attempt in (0, 1):
+                try:
+                    self._fit(len(keep[0][1]))
+                    self._collection.upsert(
+                        ids=[d[0] for d, _v in keep],
+                        embeddings=[v for _d, v in keep],
+                        documents=[d[1][:2000] for d, _v in keep],
+                        metadatas=[dict(d[2]) or {"source": "memory"} for d, _v in keep],
+                    )
+                    return len(keep)
+                except Exception as exc:
+                    if attempt == 0 and self._reopen_if_missing(exc):
+                        continue
+                    raise
         return 0
 
+    @_gated
     def count(self) -> int:
         """Return the number of documents in the collection."""
         if not self._ensure_client():
@@ -600,6 +976,7 @@ class VectorStore:
         except Exception:
             return 0
 
+    @_gated
     def get_documents(self, ids: list[str]) -> dict[str, str]:
         """Fetch document text by IDs. Returns a {id: text} mapping.
 

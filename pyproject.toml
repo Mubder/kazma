@@ -106,7 +106,9 @@ tui = [
     "python-bidi>=0.4.0",
 ]
 rag = [
-    "chromadb>=0.5.0",
+    # The local (Rust) store the Knowledge Library's fixes of 2026-10-15
+    # were measured on (KB-Q01: collection configuration, close, modify).
+    "chromadb>=1.5.9",
     "sentence-transformers>=3.0.0",
     "sqlite-vec>=0.1.6",  # L4 local vector layer (UnifiedMemoryAdapter)
     # Security floors for what these bring in (see the base list).

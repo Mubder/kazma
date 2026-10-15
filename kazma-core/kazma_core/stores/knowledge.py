@@ -51,6 +51,7 @@ import logging
 import re
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -206,7 +207,8 @@ CREATE TABLE IF NOT EXISTS knowledge_vector_status (
     covered     INTEGER NOT NULL DEFAULT 0,
     state       TEXT NOT NULL DEFAULT 'unknown',
     error       TEXT NOT NULL DEFAULT '',
-    checked_at  TEXT NOT NULL
+    checked_at  TEXT NOT NULL,
+    store_id    TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -244,6 +246,11 @@ _SCHEMA += _FTS_SCHEMA
 #: store lock is released between batches, so searches never wait for a
 #: whole library.
 _DELETE_BATCH = 500
+
+#: Pages of the keyword index rewritten per transaction when a delete's
+#: words are purged from it (:meth:`KnowledgeStore.purge_search_index`): the
+#: store lock is released between steps.
+_PURGE_STEP_PAGES = 1000
 
 #: Test hook: called with the name of each step of a page publication
 #: (fault injection, ``tests/test_knowledge_publication.py``). None in
@@ -373,6 +380,7 @@ class KnowledgeStore:
             # column is missing. Mirrors the WorkspaceStore pattern.
             self._migrate_library_columns(conn)
             self._migrate_chunk_columns(conn)
+            self._migrate_status_columns(conn)
             if self._default:
                 self._move_legacy_tables(conn)
             self._ensure_fts_layout(conn)
@@ -520,6 +528,14 @@ class KnowledgeStore:
             """CREATE INDEX IF NOT EXISTS idx_kc_document
                ON knowledge_chunks(library_id, document_id, version_id, active)"""
         )
+
+    @staticmethod
+    def _migrate_status_columns(conn: sqlite3.Connection) -> None:
+        """The vector store a coverage record was measured on (KB-Q01): a
+        record without one is shown as not checked until the next pass."""
+        from kazma_core.db.sqlite_columns import add_missing_columns
+
+        add_missing_columns(conn, "knowledge_vector_status", (("store_id", "TEXT NOT NULL DEFAULT ''"),))
 
     # ------------------------------------------------------------------
     # FTS rows, by rowid (KB-E06)
@@ -785,9 +801,11 @@ class KnowledgeStore:
         Each batch deletes up to :data:`_DELETE_BATCH` chunks and their
         keyword-index rows in its own transaction, and the store lock is
         released between batches, so searches and other writers never wait
-        for a whole library. The library row goes last. Returns ``True`` if
-        the library existed and was removed.
+        for a whole library. The library row goes last, then the deleted
+        words leave the keyword index's segments (:meth:`purge_search_index`).
+        Returns ``True`` if the library existed and was removed.
         """
+        had_chunks = False
         while True:
             with self._lock:
                 conn = self._get_conn()
@@ -806,13 +824,62 @@ class KnowledgeStore:
                     self._fts_delete(conn, [(r[0], r[1]) for r in rows])
                     conn.executemany("DELETE FROM knowledge_chunks WHERE rowid = ?", [(r[0],) for r in rows])
                     conn.execute("COMMIT")
+                    had_chunks = True
                 except Exception:
                     if conn.in_transaction:
                         conn.execute("ROLLBACK")
                     raise
+        if had_chunks:
+            try:
+                self.purge_search_index()
+            except sqlite3.Error:
+                # The words are unsearchable already; the next delete's
+                # purge, or FTS5's own merges, take them off the disk.
+                logger.warning("[KnowledgeStore] the keyword index still holds the deleted library %r's "
+                               "words (they are unsearchable)", library_id, exc_info=True)
         if deleted:
             logger.info("[KnowledgeStore] Deleted library %r and its chunks", library_id)
         return deleted
+
+    def purge_search_index(self) -> dict[str, Any]:
+        """Rewrite the keyword index without the words of deleted rows (KB-Q01).
+
+        FTS5 records a deleted row as a delete marker in a new segment; the
+        row's words stay in the older segments of ``knowledge_chunks_fts_data``
+        until a merge happens to reach them -- unsearchable, but on disk: the
+        soak harness found every planted word of a deleted 10,000-chunk
+        library there after the delete. This merges every segment into one
+        (which drops deleted rows and their markers), as memory's
+        ``purge_search_index`` does (Memory audit M01), but in steps of
+        :data:`_PURGE_STEP_PAGES` pages, each its own transaction with the
+        store lock released between them, so a search or a writer never waits
+        for the whole rewrite. Returns the steps taken and the seconds.
+        """
+        started = time.monotonic()
+        steps = 0
+        pages = -_PURGE_STEP_PAGES  # negative: every segment may merge (a full merge starts)
+        while True:
+            with self._lock:
+                conn = self._get_conn()
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    before = conn.total_changes
+                    conn.execute("INSERT INTO knowledge_chunks_fts (knowledge_chunks_fts, rank) "
+                                 "VALUES ('merge', ?)", (pages,))
+                    # FTS5: a delta under 2 means the merge found nothing to do.
+                    worked = conn.total_changes - before >= 2
+                    conn.execute("COMMIT")
+                except sqlite3.Error:
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
+                    raise
+            steps += 1
+            if not worked:
+                break
+            pages = _PURGE_STEP_PAGES  # positive: continue the merge that started
+        seconds = time.monotonic() - started
+        logger.info("[KnowledgeStore] keyword index merged in %d step(s), %.2f s", steps, seconds)
+        return {"steps": steps, "seconds": round(seconds, 3)}
 
     def set_chunk_count(self, library_id: str, count: int) -> None:
         with self._lock:
@@ -1637,30 +1704,33 @@ class KnowledgeStore:
     # ── meaning-search coverage, written by the repair sweep (KB-E03) ───
 
     def set_vector_status(self, library_id: str, *, identity: str, chunks: int, covered: int,
-                          state: str, error: str = "") -> None:
+                          state: str, error: str = "", store_id: str = "") -> None:
+        """Record what the repair sweep measured, and on which vector store
+        (``store_id``: a record is shown only for the store it measured)."""
         with self._lock:
             conn = self._get_conn()
             conn.execute(
                 """INSERT INTO knowledge_vector_status
-                   (library_id, identity, chunks, covered, state, error, checked_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   (library_id, identity, chunks, covered, state, error, checked_at, store_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(library_id) DO UPDATE SET identity = excluded.identity,
                      chunks = excluded.chunks, covered = excluded.covered, state = excluded.state,
-                     error = excluded.error, checked_at = excluded.checked_at""",
-                (library_id, identity, int(chunks), int(covered), state, error[:500], _now_iso()),
+                     error = excluded.error, checked_at = excluded.checked_at,
+                     store_id = excluded.store_id""",
+                (library_id, identity, int(chunks), int(covered), state, error[:500], _now_iso(), store_id),
             )
 
     def vector_status(self, library_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._get_conn().execute(
-                "SELECT identity, chunks, covered, state, error, checked_at "
+                "SELECT identity, chunks, covered, state, error, checked_at, store_id "
                 "FROM knowledge_vector_status WHERE library_id = ?",
                 (library_id,),
             ).fetchone()
         if row is None:
             return None
         return {"identity": row[0], "chunks": int(row[1]), "covered": int(row[2]),
-                "state": row[3], "error": row[4], "checked_at": row[5]}
+                "state": row[3], "error": row[4], "checked_at": row[5], "store_id": row[6] or ""}
 
     # ------------------------------------------------------------------
     # Marshalling

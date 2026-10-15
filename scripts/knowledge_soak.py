@@ -60,24 +60,28 @@ planned; growth past a declared bound (the crawl journal's 24 jobs and 16
 MiB, 5,000 fetched pages a library) and ``unified_items`` (retired by the
 Memory audit) in any database; a vector-store folder no collection owns --
 what a dropped Chroma collection leaves on disk (with
-``--tolerate-orphan-vector-folders`` a counted finding instead); any
-connection off the machine. The soak stops at the first violation.
+``--tolerate-orphan-vector-folders`` a counted finding instead); a deleted
+library's words still in the keyword index's FTS5 segments (unsearchable,
+but on disk); a restored database's coverage record claiming vectors that
+do not exist yet; any connection off the machine. The soak stops at the
+first violation. (The deleted words and the coverage record were findings
+until the fixes of 2026-10-15, KB-Q01: the store now removes dropped
+collections' folders, purges a deleted library's words and records which
+vector store a coverage was measured on.)
 
 Findings, recorded and counted, not violations: meaning-search recall below
-100 % when every missed vector was present (the approximate HNSW index at
-Chroma's default search settings passed over it), and the hybrid top-k
-then leaving out such an answer that the keyword index returned (reciprocal
-rank fusion prefers chunks both layers return: ranking, KQ01's ground); a
-meaning query that
-failed once and answered when asked again; a process that could not read a
-library's collection at all (a Chroma internal error: "Error creating hnsw
-segment reader: Nothing found on disk") when the next process reads it --
-the next start is made to ask that library, and a failure that survives
-the restart is a violation, or with ``--tolerate-vector-read-failures`` a
-counted finding (in ``scale``, the restore is run once more in a fresh
-process); a deleted library's words still in the keyword
-index's FTS5 segments (unsearchable, gone at a merge); a restored
-database's coverage record claiming vectors that do not exist yet. The
+100 % when every missed vector was present (the approximate HNSW index
+passed over it), and the hybrid top-k then leaving out such an answer that
+the keyword index returned (reciprocal rank fusion prefers chunks both
+layers return: ranking, KQ01's ground); a meaning query that failed once
+and answered when asked again; an index Chroma lost and the product
+rebuilt from Chroma's log (``index_reloads``: the recovery worked, and it
+is counted); a process that could not read a library's collection at all
+(a Chroma internal error: "Error creating hnsw segment reader: Nothing
+found on disk") when the next process reads it -- the next start is made
+to ask that library, and a failure that survives the restart is a
+violation, or with ``--tolerate-vector-read-failures`` a counted finding
+(in ``scale``, the restore is run once more in a fresh process). The
 product's log of a cycle with a violation or a read failure is kept beside
 the plans (``cycle-<n>.log``).
 
@@ -100,7 +104,8 @@ Usage (``--hardware-name`` names the machine in the report):
   python scripts/knowledge_soak.py scale --chunks 10000,100000,1000000 --report kb-scale.json
   python scripts/knowledge_soak.py soak --duration 259200 --report kb-soak.json
   python scripts/knowledge_soak.py soak --duration 300 --cycle-seconds 2 --switch-every 10 --report short.json
-  (add --tolerate-orphan-vector-folders --tolerate-vector-read-failures to count those Chroma defects)
+  (--tolerate-orphan-vector-folders --tolerate-vector-read-failures count those two Chroma defects instead
+  of judging them: for measuring a build from before 2026-10-15, which did not work around them)
 """
 
 from __future__ import annotations
@@ -729,9 +734,9 @@ def _meaning_query(vs: Any, question: str, lib: str, top_k: int) -> tuple[list[t
 def _classify_miss(vs: Any, question: str, chunk_ids: list[str], raw: list[tuple[str, float]]) -> dict[str, Any]:
     """Why meaning search did not return a planted answer: ``no_vector``
     (its chunk has no vector of the active embedder: a violation), or the
-    vector is there and the approximate index (HNSW, Chroma's default search
-    settings) passed over it -- ``index`` when it was nearer than everything
-    returned, ``farther`` when other chunks were nearer."""
+    vector is there and the approximate index (HNSW) passed over it --
+    ``index`` when it was nearer than everything returned, ``farther`` when
+    other chunks were nearer."""
     if not chunk_ids:
         return {"kind": "no_vector", "detail": "no chunk holds the answer"}
     try:
@@ -1388,6 +1393,10 @@ def _child(plan_path: Path) -> int:
         out = _scale_restore(plan)
     else:
         out = asyncio.run(_soak_cycle(plan))
+    from kazma_core.memory import vector_store_global as vsg
+
+    reloads = getattr(vsg, "index_reloads", None)  # a build from before 2026-10-15 has none
+    out["index_reloads"] = reloads() if callable(reloads) else {}
     out["network_refused"] = refused
     out["peak_rss_mib"] = _peak_rss_mib()
     out["process"] = process_tree_sample()
@@ -1486,6 +1495,15 @@ def _add_finding(report: dict[str, Any], where: str, text: str) -> None:
     report["findings"].append(f"{where}: {text}")
 
 
+def _reload_finding(report: dict[str, Any], where: str, reloads: dict[str, int] | None) -> None:
+    """An index Chroma lost and the product rebuilt from its log: the
+    recovery worked, and it is counted (the pool should not evict at all)."""
+    if reloads:
+        _add_finding(report, f"{where} index reloads",
+                     f"Chroma lost {sum(reloads.values())} index(es) of {sorted(reloads)} (evicted before it was "
+                     "written to disk); the product rebuilt each from Chroma's log and asked again")
+
+
 def _orphan_outcome(report: dict[str, Any], where: str, orphans: dict[str, Any], tolerate: bool) -> list[str]:
     """A vector folder no collection owns: a violation, or a counted finding."""
     if orphans.get("orphans") is None:
@@ -1516,7 +1534,7 @@ def _recall_finding(report: dict[str, Any], lib: str, when: str, search: dict[st
         unread = asked - found - len(misses)
         _add_finding(report, f"{lib} meaning recall {when}",
                      f"meaning search returned {found} of {asked} planted answers: {len(misses)} missed with their "
-                     f"vector present (the approximate HNSW index at Chroma's default search settings passed over "
+                     f"vector present (the approximate HNSW index passed over "
                      f"it; {sum(m['kind'] == 'index' for m in misses)} were nearer than everything it returned)"
                      + (f", {unread} in a process that could not read the collection" if unread else "")
                      + (f"; the hybrid top {report['parameters']['top_k']} then left out {len(dropped)} of them "
@@ -1627,16 +1645,17 @@ def run_scale(args: argparse.Namespace) -> int:
                 violations += restored["violations"] + [f"network: {h}" for h in restored["network_refused"]]
                 _recall_finding(report, lib, "after the restore", restored["restore"]["search_after"])
                 record = restored["restore"]["coverage_record_before_sweep"]
-                if record.get("state") == "ok" and record.get("vector_chunks"):
-                    _add_finding(report, f"{lib} coverage record after the restore",
-                                 f"before the first repair pass the store reported meaning search {record['state']} "
-                                 f"with {record['vector_chunks']} of {record['sqlite_chunks']} chunks covered while "
-                                 "no vector existed (the record came back with the database)")
+                if record.get("state") != "unknown" or record.get("vector_chunks"):
+                    violations.append(
+                        f"coverage record after the restore: before the first repair pass the store reported "
+                        f"meaning search {record.get('state')} with {record.get('vector_chunks')} of "
+                        f"{record.get('sqlite_chunks')} chunks covered while no vector existed")
                 residue, planted = restored["delete"]["after"]["keyword_segment_residue"]
                 if residue:
-                    _add_finding(report, f"{lib} keyword index after the delete",
-                                 f"the keyword index's segments still hold at least {residue} of the deleted "
-                                 f"library's {planted} planted words (unsearchable; gone at the next FTS merge)")
+                    violations.append(f"keyword index after the delete: its segments still hold at least {residue} "
+                                      f"of the deleted library's {planted} planted words")
+                for when, child in (("after ingest", build), ("in the restore", restored)):
+                    _reload_finding(report, f"{lib} {when}", child.get("index_reloads"))
                 orphans = _orphan_vector_folders(step_dir / "vector_memory")
                 step["delete"]["vector_folders"] = orphans
                 violations += _orphan_outcome(report, f"{lib} after the delete", orphans, args.tolerate_orphan_vector_folders)
@@ -1990,10 +2009,9 @@ def check_stores(data_dir: Path, state: dict[str, Any], seed: int, *, tolerate_o
         residue = _segment_residue(conn, gone_tokens) if gone_tokens else 0
     finally:
         conn.close()
-    if residue and report is not None:
-        _add_finding(report, "keyword index after deletes",
-                     f"the keyword index's segments still hold at least {residue} of {len(gone_tokens)} planted words "
-                     "of deleted libraries (unsearchable; gone when FTS5 merges the segments)")
+    if residue:
+        problems.append(f"keyword index: its segments still hold at least {residue} of {len(gone_tokens)} planted "
+                        "words of deleted libraries")
     live = set(state["libs"])
     if libraries != live:
         problems.append(f"libraries: the store holds {sorted(libraries)}, expected {sorted(live)}")
@@ -2198,6 +2216,18 @@ def _soak_summary(report: dict[str, Any], lat: dict[str, list[float]], started: 
 
 
 def run_soak(args: argparse.Namespace) -> int:
+    """The soak, with this process's environment put back afterwards: the run
+    points it at its private stores, and a caller in the same process (the
+    harness's own tests) must not keep reading them."""
+    saved = dict(os.environ)
+    try:
+        return _run_soak(args)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+def _run_soak(args: argparse.Namespace) -> int:
     work = Path(tempfile.mkdtemp(prefix="kazma-kb-soak-"))
     data_dir = Path(args.data_dir) if args.data_dir else work / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -2353,8 +2383,14 @@ def _record_cycle(report: dict[str, Any], lat: dict[str, list[float]], plan: dic
         _add_finding(report, "meaning recall",
                      f"meaning search returned {recall['meaning'][0]} of {recall['meaning'][1]} planted answers: "
                      f"{report['meaning_passed_over']} missed with their vector present (the approximate HNSW "
-                     f"index at Chroma's default search settings passed over it), {report['meaning_query_failed']} "
+                     f"index passed over it), {report['meaning_query_failed']} "
                      "in a process that could not read the library's collection (see the read failures)")
+    reloads = sum((facts.get("index_reloads") or {}).values())
+    if reloads:
+        report["index_reloads"] = report.get("index_reloads", 0) + reloads
+        _add_finding(report, "vector index reloads",
+                     f"Chroma lost {report['index_reloads']} index(es) (evicted before written to disk), the "
+                     f"last in cycle {cycle}; the product rebuilt each from Chroma's log and asked again")
     sweep = facts.get("sweep") or {}
     agg = report["sweep"]
     agg["passes"] += len(sweep.get("passes") or [])
@@ -2397,10 +2433,11 @@ def _parser() -> argparse.ArgumentParser:
     common.add_argument("--top-k", type=int, default=5)
     common.add_argument("--child-log-level", default="WARNING", help="the product's log level in the children")
     common.add_argument("--tolerate-orphan-vector-folders", action="store_true",
-                        help="count a vector folder no collection owns as a finding, not a violation")
+                        help="count a vector folder no collection owns as a finding, not a violation "
+                             "(for a build from before 2026-10-15)")
     common.add_argument("--tolerate-vector-read-failures", action="store_true",
                         help="count a collection Chroma cannot read in two processes in a row as a finding, "
-                             "not a violation")
+                             "not a violation (for a build from before 2026-10-15)")
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     sub = parser.add_subparsers(dest="command", required=True)
     scale = sub.add_parser("scale", parents=[common], help="measure ingest, search, sweep, restore and delete")
