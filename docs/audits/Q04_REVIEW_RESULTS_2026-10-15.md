@@ -6,8 +6,11 @@ against the pack `docs/audits/Q04_DOCUMENTS_SECURITY_REVIEW_PACK_2026-10-15.md`.
 Their report and these results are the Q04 evidence
 (`docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md`, decision D4).
 
-**Status: review done, one finding fixed, awaiting the reviewer's retest of
-the fix commit.** Q04 closes when the reviewer confirms FIND-01 is resolved.
+**Status: CLOSED 2026-10-15.** The reviewer retested the fix commit
+`7a6a98b9` and confirmed FIND-01 resolved, with OBS-02 and OBS-03 verified
+and their old-code-fails controls reproduced; no regression and no
+over-blocking (section "Retest" below). Independent review done, its one
+finding fixed and confirmed.
 
 ## Scope the reviewer tested
 
@@ -69,4 +72,37 @@ three PoCs (must refuse), the plain-`/GoTo` control (must still parse),
 `tests/test_document_pdf_policy.py` and the certification hostile corpus on
 that commit. On their confirmation, Q04 closes; until then it stays open.
 
-Fix commit: see `CHANGELOG.md` (the Q04 FIND-01 entry).
+Fix commit: `7a6a98b9` (see `CHANGELOG.md`, the Q04 FIND-01 entry).
+
+## Retest (2026-10-15, commit `7a6a98b9`)
+
+The reviewer re-ran their pre-fix proof-of-concept PDFs and the repository
+tests on the fix commit, on their own machine, clean tree, nothing published:
+
+- The three remote-file PoCs (`/GoTo` + `/F` string, `/GoTo` + `/F` filespec
+  dict, `/Thread` + `/F`) now **refuse** with "PDF references a remote file
+  (a GoTo or Thread action with a file specification)"; they were allowed on
+  `5cafcd5b`.
+- The negative controls still **parse**: plain `/GoTo`, plain `/Thread`, a
+  blank PDF, navigation with an `https` link, `mailto:`, a leading-space
+  `https`. No over-blocking.
+- Every other hostile shape (JS, Launch, EF, XFA, SubmitForm, Rendition, the
+  non-web URI schemes, hex `#`-escape names, `/Next` chains, `/AA`, indirect
+  refs, the structural budget on deep nesting, a proper compressed-object
+  stream, incremental update) stays refused or fail-closed, on both commits.
+- `tests/test_document_pdf_policy.py` + `tests/test_pdf_openers_stay_in_workers.py`:
+  **65 passed** (re-run here on `7a6a98b9` to confirm).
+- The three new policy tests and the opener-gate alias/attribute cases were
+  reproduced failing on pristine `5cafcd5b` (genuine regression tests).
+- OBS-02: wrong-case `/JAVASCRIPT`, `/jAvAsCrIpT`, `/js` now refused (allowed
+  on `5cafcd5b`). OBS-03: the four alias/attribute opener shapes now found
+  by the gate (missed on `5cafcd5b`).
+
+Reviewer note recorded for a future touch of the policy: `/S` is read as the
+exact key while `/F` is matched case-insensitively over keys. That is the
+right call -- PDF dict keys are case-sensitive per spec, so a lowercase `/s`
+or `/f` is inert in a real viewer -- and is worth one comment line if the
+code is changed again.
+
+**Verdict:** FIND-01 fixed; OBS-02 and OBS-03 addressed and verified; no
+regression. Q04 closed on commit `7a6a98b9`.

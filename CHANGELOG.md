@@ -25,8 +25,8 @@
   is caught, not only the canonical spellings. No product bypass existed.
 - **OBS-04** (attestation judges the image's self-report) is an inherent
   operator-trust limit, already in the threat model; no change.
-- Results and the retest plan: `docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`.
-  Q04 closes on the reviewer's retest of this fix.
+- Results and retest: `docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`. The
+  reviewer retested this commit and confirmed the fix; **Q04 is closed**.
 
 
 ## OCR reads a line's last mark as written, and the fidelity measure checks marks (2026-10-15)

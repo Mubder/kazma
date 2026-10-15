@@ -91,12 +91,18 @@ SQ05 (published limits) is tied to the Swarm soak's numbers when it ends.
 
 | Item | Why it is the owner's |
 |---|---|
-| Q04 independent security review | The review is someone else's by definition (D4). The pack a reviewer needs is ready: `docs/audits/Q04_DOCUMENTS_SECURITY_REVIEW_PACK_2026-10-15.md` (scope, 14 claims with their tests, setup, where the risk is, what to deliver). An independent reviewer then reviewed it (2026-10-15): one finding (FIND-01, a remote-file PDF reference) fixed; awaiting their retest of the fix commit, on which Q04 closes (`docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`) |
+| Q04 independent security review | The review is someone else's by definition (D4). The pack a reviewer needs is ready: `docs/audits/Q04_DOCUMENTS_SECURITY_REVIEW_PACK_2026-10-15.md` (scope, 14 claims with their tests, setup, where the risk is, what to deliver). An independent reviewer reviewed it (2026-10-15): one finding (FIND-01, a remote-file PDF reference), fixed in `7a6a98b9`; the reviewer retested that commit and confirmed it, so **Q04 is closed** (`docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`). Documents overall stays open on Q02/Q03/F02 |
 | GitHub Actions billing lock | The account's payment; no CI runs until it is fixed |
 | Cloudflare Web Analytics switch | The site allows it and the policy says so (kazma.ai `f2d7564`, served 2026-10-15 with a clean console in EN and AR), but Cloudflare injects no beacon today: Web Analytics is off for the project. Turning it on (Cloudflare dashboard: Web Analytics, automatic setup for kazma.ai) is the owner's |
 
 ## Done today
 
+- Q04 CLOSED (`7a6a98b9`): an independent reviewer reviewed the Documents
+  security pack, found one Medium finding (FIND-01, a `/GoTo`/`/Thread` with
+  a file spec passed the PDF policy as navigation -- a remote file / UNC
+  reference), it was fixed with tests the old code fails, and the reviewer
+  retested the fix commit and confirmed it. OBS-02 and OBS-03 done, OBS-04
+  accepted. (`docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`.)
 - Q04 defensive check (the owner's request, after the attack-style pre-review
   was stopped by a safety check): three read-only readers compared the pack's
   14 claims with the code; gaps in 8 claims fixed, each with a test the old
