@@ -200,6 +200,10 @@ class SwarmEngine:
         # Each task's newest store write (SW-E07): writes run in threads,
         # each after the one before it for the same task.
         self._writes: dict[str, asyncio.Task] = {}
+        # An admission write whose run or approval was stopped while it ran:
+        # kept for the code that records the stop, which reads its outcome
+        # (the write itself goes on in its thread).
+        self._stopped_admissions: dict[str, asyncio.Future] = {}
         # Why a task's newest write did not land, after its retries (SQ04):
         # the run's caller is never told the work ended as stored.
         self._unsaved: dict[str, str] = {}
@@ -598,11 +602,32 @@ class SwarmEngine:
         pipeline -- it is a refusal instead (``admission_unrecorded``): an
         approval the store never took leaves the row PAUSED, and a crash
         would offer the checkpoint again and run its steps twice (SW-E01,
-        Swarm tracker SQ04)."""
+        Swarm tracker SQ04).
+
+        The write is the task's first store write (``_writes``): one recording
+        the task's ending waits for it, and a stop that lands while it runs
+        does not stop it -- the thread writes the row whatever happens to the
+        run, so the run's ending must come after it (the SQ01 soak found five
+        RUNNING rows a shutdown had stopped mid-write left unended). It writes
+        a snapshot: the run may record its ending on the task meanwhile."""
         if self._task_store is None:
             return None
+        snapshot = SwarmTask.from_dict(task.to_dict())
+        write = asyncio.ensure_future(asyncio.to_thread(self._task_store.admit, snapshot))
+        self._writes[task.id] = write
+
+        def _done(finished: asyncio.Future, tid: str = task.id) -> None:
+            if self._writes.get(tid) is finished:
+                self._writes.pop(tid, None)
+            if not finished.cancelled():
+                finished.exception()  # seen by the await below, or by nobody after a stop
+
+        write.add_done_callback(_done)
         try:
-            admitted = await asyncio.to_thread(self._task_store.admit, task)
+            admitted = await asyncio.shield(write)
+        except asyncio.CancelledError:
+            self._stopped_admissions[task.id] = write
+            raise  # the caller records the stop (_stopped_at_admission)
         except Exception as exc:
             # The RUNNING row is the only crash evidence: say it is missing.
             logger.warning(
@@ -633,6 +658,104 @@ class SwarmEngine:
             error="This task is already running or finished elsewhere; it was not run again.",
             metadata={"duplicate_admission": True},
         )
+
+    async def _stopped_at_admission(self, task: SwarmTask, started: float) -> TaskResult:
+        """The ending of a run stopped (a shutdown, a cancel, a caller that
+        stopped waiting) while its RUNNING row was being written.
+
+        Nothing has run. Once the write has landed (bounded wait) the stop is
+        recorded as the run's interruption -- cancelled, its cause,
+        ``none_invoked`` -- and written after the RUNNING row. If the store
+        refused the admission (another run holds the id), that run's row is
+        not this one's to end: the slot is freed and the dispatch answered."""
+        write = self._stopped_admissions.pop(task.id, None) or self._writes.get(task.id)
+        admitted: bool | None = None
+        if write is not None:
+            try:
+                await asyncio.wait({write}, timeout=_STOP_GRACE_S)
+            except asyncio.CancelledError:
+                pass  # stopped again: the ending is recorded all the same
+            if write.done() and not write.cancelled() and write.exception() is None:
+                admitted = bool(write.result())
+        if admitted is False:
+            status, _error, cause = self._interrupts.pop(
+                task.id, ("cancelled", "Cancelled by user", "cancelled_by_user"))
+            self._active_tasks.pop(task.id, None)
+            logger.warning("[SwarmEngine] task '%s' was stopped (%s) while another run held it; not run",
+                           task.id, cause)
+            return TaskResult(
+                task_id=task.id, status=status,
+                error="Stopped before it was admitted; another run holds this task, which was not run again.",
+                metadata={"duplicate_admission": True, "interrupted_by": cause,
+                          "execution_outcome": "none_invoked"},
+            )
+        return self._interrupted(task, started)
+
+    async def _approval_stopped_at_admission(self, entry: Any, task: SwarmTask,
+                                             paused_as: tuple[Any, Any, Any, Any]) -> None:
+        """An approval stopped while its RUNNING row was being written.
+
+        Nothing has resumed, and the human's decision did not take effect: the
+        checkpoint is opened again, its auto-reject armed again, so the
+        approval can be given again. The write goes on in its thread; its
+        outcome (waited for, bounded) decides how:
+
+        * admitted: the approval's RUNNING row is written back to PAUSED at
+          its new generation, after the admission;
+        * the write failed: the row is still the paused one, kept as it was;
+        * refused: another run holds the task and owns it; the checkpoint
+          closes.
+
+        An outcome not known in time (the write still running) leaves the
+        claim held, so no second approval races it; the next start decides
+        from the row: PAUSED is offered again, RUNNING is held as an
+        interrupted run and never resumed (SW-E01)."""
+        if self._task_store is None:
+            task.status, task.generation, task.run_id, task.started_at = paused_as
+            entry.claim = "pending"
+            return
+        write = self._stopped_admissions.pop(task.id, None) or self._writes.get(task.id)
+        if write is not None and not write.done():
+            try:
+                await asyncio.wait({write}, timeout=_STOP_GRACE_S)
+            except asyncio.CancelledError:
+                pass  # stopped again: decided all the same, from what is known
+        if write is None or not write.done() or write.cancelled():
+            logger.warning(
+                "[SwarmEngine] approval of '%s' was stopped while being recorded and its outcome is not "
+                "known yet; the checkpoint stays claimed until the next start decides from the task's row",
+                task.id)
+            record_swarm_failure("approval_stopped")
+            return
+        failed = write.exception()
+        reopen = False
+        if failed is None and write.result():
+            # Admitted: written back to PAUSED, ordered after the admission.
+            task.status = TaskStatus.PAUSED
+            task.started_at = paused_as[3]
+            self._persist(task, "paused", None)
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.shield(self._flush_writes(task.id))
+            reopen = True
+        elif failed is not None:
+            # The write never landed: the row is still the paused one.
+            logger.warning("[SwarmEngine] the stopped approval of '%s' was not recorded (%s: %s)",
+                           task.id, type(failed).__name__, failed)
+            task.status, task.generation, task.run_id, task.started_at = paused_as
+            reopen = True
+        if not reopen:
+            logger.warning("[SwarmEngine] approval of '%s' was stopped; another run holds the task, "
+                           "which was not resumed here", task.id)
+            self._active_tasks.pop(task.id, None)
+            self._checkpoint_handler.close(task.id)
+            return
+        entry.claim = "pending"
+        timeout = (task.metadata or {}).get("checkpoint_timeout")
+        if timeout and float(timeout) > 0:
+            self._checkpoint_mgr._arm_checkpoint_timeout(task.id, float(timeout))
+        logger.warning(
+            "[SwarmEngine] approval of '%s' was stopped before it resumed anything; the checkpoint is "
+            "open again: approve again", task.id)
 
     async def _dispatch(self, task: SwarmTask) -> TaskResult:
         from kazma_core.swarm.durable import (
@@ -710,8 +833,13 @@ class SwarmEngine:
         # NO DB row and the boot-time requeue_orphaned_running recovery had
         # nothing to recover — "crash recovery" was decorative. The write is
         # the admission compare-and-set (SW-E03): an id another run holds is
-        # not run twice.
-        held = await self._admit_to_store(task)
+        # not run twice. A stop during it is this run's ending, like a stop
+        # during the work below: it raised past every handler, and the task
+        # kept its slot and a RUNNING row until the next boot (SQ01 soak).
+        try:
+            held = await self._admit_to_store(task)
+        except asyncio.CancelledError:
+            return await self._stopped_at_admission(task, started)
         if held is not None:
             self._active_tasks.pop(task.id, None)
             return held
@@ -2024,7 +2152,14 @@ class SwarmEngine:
         task.run_id = _new_run_id()
         task.started_at = _utc_now_iso()  # the resumed run's own watchdog start
         self._active_tasks[task.id] = task
-        held = await self._admit_to_store(task, must_record=True)
+        try:
+            held = await self._admit_to_store(task, must_record=True)
+        except asyncio.CancelledError:
+            # The approval was stopped (a shutdown, the approving request
+            # gone) while its write ran: nothing resumed, so the checkpoint
+            # is offered again once the write's outcome is known.
+            await self._approval_stopped_at_admission(entry, task, paused_as)
+            raise
         if held is not None and (held.metadata or {}).get("admission_unrecorded"):
             # The store did not take the approval: nothing resumes, and the
             # checkpoint is pending again, its auto-reject armed again.

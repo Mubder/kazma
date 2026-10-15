@@ -465,8 +465,18 @@ compatibility. **All public API methods and constructors are unchanged.**
   its effect tracker; an uncertain result is stored `failed`; retrying an
   unknown outcome needs `acknowledge_unknown`; a resumed pipeline skips its
   journaled steps. Task writes run in threads, one task's in order
-  (`_persist` / `_flush_writes`). Gates: `tests/test_swarm_owned_lifecycle.py`,
-  `tests/test_swarm_interrupted_effects.py`.
+  (`_persist` / `_flush_writes`); the admission write is the first of them,
+  and a stop that lands during it is the run's interruption like any other
+  (`_stopped_at_admission`, 2026-10-15: the SQ01 24-hour soak found a
+  shutdown leaving five tasks admitted, with RUNNING rows, and never ended).
+  An approval stopped during its admission write has resumed nothing: the
+  checkpoint is offered again and its auto-reject armed again
+  (`_approval_stopped_at_admission`, decided by the write's own outcome:
+  admitted, its RUNNING row goes back to PAUSED; failed, the PAUSED row
+  stays; refused, another run's task is left to that run; an outcome not
+  known in time keeps the claim, and the next start decides from the row).
+  Gates: `tests/test_swarm_owned_lifecycle.py`,
+  `tests/test_swarm_interrupted_effects.py`, `tests/test_swarm_stop_at_admission.py`.
 - **A store fault never becomes a stored-looking success** (Swarm tracker
   SQ04, 2026-10-15). A task write the store refuses for a reason that passes
   (lock, busy, database away: `_store_error_passes`) is tried again

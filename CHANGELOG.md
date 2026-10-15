@@ -25,6 +25,13 @@
   now fixed: an approval the task store could not record resumed the
   pipeline anyway. It now resumes nothing, leaves the checkpoint open, and
   the Swarm page says to approve again.
+- The 24-hour swarm soak found a fault at its 53rd restart. A task stopped
+  while its "running" record was being written (by a shutdown, a cancel, or a
+  caller that stopped waiting) was left half-started: it kept its place in
+  the queue and its running record until the next start, which then
+  recorded it as a failure of unknown outcome. The stop is now recorded as
+  the task's cancellation, and nothing ran. An approval stopped the same way
+  opens its checkpoint again, so it can be approved again.
 
 ## Soak harnesses for every audited area (2026-10-15)
 
