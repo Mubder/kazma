@@ -2666,7 +2666,10 @@ the old route as its control), `tests/test_document_claim_fairness.py`,
 authorized the read. A missing actor is refused -- it used to mean "no check".
 An unreadable job reads exactly like an unknown one on the Web routes, the
 agent's tools and the gateway (no existence oracle; a replay by another actor
-is `idempotency_conflict`). `/api/documents/ops/audit` is admin-only. Gate:
+is `idempotency_conflict`). `/api/documents/ops/audit` is admin-only. A
+nameless caller is refused before the lookup, whether or not the job exists,
+and cancelling needs write access, as a retry does (2026-10-15, the Q04
+defensive check: read was enough). Gate:
 `tests/test_document_job_read_matrix.py` (signature gate with its control).
 
 **B4b. One operator, one principal** (2026-10-13, DOC-A3). The Web page acted
@@ -2764,7 +2767,10 @@ SQLite choice (2026-09-28).
 
 **E. Fence + security honesty.**
 LLM-visible document text goes through untrusted fences
-(`source="document"` or chat `document_attachment`). Auto-index is **off** by
+(`source="document"` or chat `document_attachment`), the document intent
+handler's and pipeline's "reorganize this document" prompts included (they
+put it in raw until 2026-10-15; `tests/test_document_text_fenced_to_model.py`,
+the unfenced prompt as control). Auto-index is **off** by
 default. Redaction UI confirm is Web-only; API/tools can redact under ACL.
 **Malware:** `documents/malware.py` runs on quarantine via
 `scan_if_configured` (`auto`/`on`/`off` + fail-closed). Uses system
@@ -2789,7 +2795,9 @@ parser, operations mutation/renderer) branch to
 socket -- never mount it into Kazma. One container per job under one fixed
 policy (no network/mounts, read-only root, tmpfs, cgroup limits, caps
 dropped, uid 10001); the broker attests it from inside the image before
-serving. Inputs/outputs are digest-checked bundles (`worker_bundle.py`); the
+serving -- the exact uid and gid and an empty capability bounding set too
+(2026-10-15: any non-root uid passed, and the bounding set was read and never
+checked). Inputs/outputs are digest-checked bundles (`worker_bundle.py`); the
 output is untrusted. No fallback to `process`; an invalid mode refuses every
 run; a crash with no stream is `parser_result_missing`, as locally. Never
 block the output pump on a kill: an attached container whose stdout backs up
@@ -2822,11 +2830,14 @@ Rendering engines: a readiness probe imports exactly what its render path
 uses -- WeasyPrint 70 (the locked floor) removed `default_url_fetcher`, and
 every HTML->PDF job failed while the engine read "ready". The renderer's
 fetcher (a `URLFetcher` subclass) allows only `data:` and files inside the
-approved asset folder (`tests/test_weasyprint_renderer.py`). A LibreOffice call
-made through `binaries.run_soffice_cli` kills the whole process tree on
-timeout and bounds the last wait: `subprocess.run(timeout=)` waited without a
-limit for the pipes soffice.bin still held and hung the certification
-(`tests/test_soffice_call_bounded.py`, the old call as its control).
+approved asset folder (`tests/test_weasyprint_renderer.py`). Every LibreOffice
+call goes through `binaries.run_soffice_cli`, which kills the whole process
+tree on timeout and bounds the last wait: `subprocess.run(timeout=)` waited
+without a limit for the pipes soffice.bin still held and hung the
+certification, and the legacy Office parser still called it that way until
+2026-10-15 (`tests/test_soffice_call_bounded.py`: the old call as its control,
+the legacy parser, and a gate -- no product module naming LibreOffice starts a
+process itself, two probes of other programs declared).
 
 **E1. Which profile runs is the admin's setting; the guard runs the broker**
 (2026-10-15). Live that day: the install required containers, documents ran
@@ -2894,7 +2905,12 @@ that holds it (`DocumentKnowledgeAdapter.libraries_holding`, the one answer,
 also shown on the Documents page) BEFORE the tombstone; a library it cannot
 leave stops the delete (`document_unindex_failed`, naming the library) so a
 retry can finish it. It used to swallow the failure and archive a document
-chat could still quote. `tests/test_document_library_membership.py`.
+chat could still quote. The whole sequence, from reading the libraries to the
+tombstone, holds the document's publication lock (an index published in
+between survived the delete), and with no knowledge adapter (Knowledge failed
+to start) a document the store records as indexed is not deleted (it was
+tombstoned and stayed searchable; 2026-10-15).
+`tests/test_document_library_membership.py`.
 
 **E3. One PDF active-content policy, applied only inside the worker**
 (2026-10-13, F01). `documents/pdf_policy.assert_pdf_safe` walks the object
@@ -3303,7 +3319,9 @@ re-raised and the fallback never ran). Both providers use one client
 never re-sent elsewhere), decoded answers capped at 32 MiB
 (`remote_parse_response_limit`). Remote parsing runs in the Kazma process
 (`DocumentService`), never in the worker; local salvage runs only in the
-worker. Transient excerpts lack durable egress scope and cannot upload remotely. The legacy
+worker (every other caller passes `allow_local=False`, gated in
+`tests/test_extract_salvage.py`), and a remote parse that is refused or fails
+is a WARNING naming the error type (it was DEBUG). Transient excerpts lack durable egress scope and cannot upload remotely. The legacy
 `KAZMA_REMOTE_PARSE=0` / `KAZMA_DOCLING=0` env switches remain as an additional
 veto only — they can turn a tier off, never on. Gates:
 `tests/test_document_egress_hardening.py`, `tests/test_document_egress_pg.py`
@@ -6218,7 +6236,9 @@ code) and Kazma ran with nobody supervising it.
   install folder below the ephemeral ranges). The token
   `.kazma/document_broker.token` is made once, restricted to the guard's
   account (`icacls /inheritance:r` + its SID) before the secret is written,
-  never logged. The server gets URL, token file and request file through
+  never logged; it is restricted again at every start, and a file that
+  cannot be restricted gets no secret and stops the broker (2026-10-15: a
+  failed restriction was a warning and the token was served anyway). The server gets URL, token file and request file through
   `spawn()`'s env, like the state and reload files. The state file's
   `document_broker` is what readiness reads; `guard_features` lists
   `document_broker`, and `guard_code` lets `--status` say the running guard

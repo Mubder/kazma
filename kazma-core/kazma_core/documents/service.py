@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -23,6 +24,7 @@ from .errors import (
     DocumentOcrUnavailableError,
     DocumentParseError,
     DocumentSandboxError,
+    infrastructure_errors,
 )
 from .knowledge import DocumentIndexResult, DocumentKnowledgeAdapter, DocumentSearchResult
 from .models import DocumentIR, DocumentResult
@@ -733,10 +735,11 @@ class DocumentService:
         """Unindex active libraries (when knowledge is wired), then tombstone.
 
         Soft-delete / archive: the document leaves the library list
-        (``deleted_at`` set). Physical content is reclaimed later by GC.
-        Without a knowledge adapter there is nothing to unindex and the
-        tombstone proceeds; with one, a library the document cannot be taken
-        out of stops the delete (``document_unindex_failed``).
+        (``deleted_at`` set). Physical content is reclaimed later by GC. A
+        library the document cannot be taken out of stops the delete
+        (``document_unindex_failed``), and so does a missing knowledge
+        adapter while the store records the document as indexed. The whole
+        sequence holds the document's publication lock.
         """
         if self.repository is None:
             return DocumentResult(
@@ -765,6 +768,53 @@ class DocumentService:
                 message="Document is unavailable",
                 document_id=document_id,
             )
+        # One publication lock from reading the libraries to the tombstone:
+        # an index published in between would have stayed searchable after
+        # the delete (Q04 defensive check C14, 2026-10-15). The lock is
+        # re-entrant, so the unindex calls inside take it again.
+        lock = (
+            self.knowledge_adapter.publication_lock(tenant_id, record.id)
+            if self.knowledge_adapter is not None
+            else contextlib.nullcontext()
+        )
+        with lock:
+            return self._unindex_then_tombstone(
+                record, tenant_id=tenant_id, actor_id=actor_id, reason=reason
+            )
+
+    def _unindex_then_tombstone(
+        self, record: Any, *, tenant_id: str, actor_id: str, reason: str
+    ) -> DocumentResult[dict[str, Any]]:
+        """Take the document out of every library that holds it, then
+        tombstone it; a library it cannot leave stops the delete."""
+        if self.knowledge_adapter is None:
+            # No adapter (Knowledge failed to start) is not "nothing to
+            # unindex": the store records the libraries the document is
+            # searchable in, and tombstoning it there would leave it
+            # searchable until a later start's reconcile.
+            unreadable = False
+            try:
+                indexed = tuple(
+                    self.repository.list_indexed_libraries(
+                        tenant_id=tenant_id, document_id=record.id
+                    )
+                )
+            except infrastructure_errors():
+                logger.warning(
+                    "[documents] delete %s: its libraries could not be read",
+                    record.id,
+                    exc_info=True,
+                )
+                indexed, unreadable = (), True
+            if indexed or unreadable:
+                return DocumentResult(
+                    ok=False,
+                    code="document_unindex_failed",
+                    message="The Knowledge Library is unavailable and this document "
+                    "may be searchable there; nothing was deleted. Try again once it is back.",
+                    data={"libraries": list(indexed)},
+                    document_id=record.id,
+                )
         libraries: list[str] = []
         if self.knowledge_adapter is not None:
             # A deleted document must not stay searchable: when it cannot be

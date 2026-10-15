@@ -94,3 +94,63 @@ def test_salvage_segments_never_claim_physical_pdf_pages(tmp_path, text):
     assert chunks and all(' page:' not in c.citation_label for c in chunks)
     assert all(' segment:' in c.citation_label for c in chunks)
     assert all(c.to_knowledge_dict(library_id='fixture')['metadata']['physical_page_mapping'] is False for c in chunks)
+
+
+def test_a_remote_parse_that_does_not_run_is_said(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog) -> None:
+    """Remote parsing switched on, then refused or failing (no audit scope, an
+    audit that could not be written, a provider error): a WARNING naming the
+    error type, never only DEBUG, and the local reading is kept (Q04
+    defensive check C10, 2026-10-15). The provider's message is not logged."""
+    import logging
+
+    from kazma_core.documents import extract_salvage
+
+    def refuse(path, document):
+        raise RuntimeError("provider said: secret-request-detail")
+
+    monkeypatch.setattr(extract_salvage, "try_remote_parse", refuse)
+    monkeypatch.delenv("KAZMA_REMOTE_PARSE", raising=False)
+    config = DocumentConfig(storage_root=tmp_path / "store", security_local_salvage=False,
+                            security_remote_parse=True)
+    doc = _ir("weak", 0.1)
+    with caplog.at_level(logging.WARNING, logger="kazma_core.documents.extract_salvage"):
+        out = maybe_salvage_extract(tmp_path / "a.pdf", doc, config=config)
+    assert out is doc
+    warned = [r for r in caplog.records
+              if r.name == "kazma_core.documents.extract_salvage" and r.levelno == logging.WARNING]
+    assert warned and "RuntimeError" in warned[0].getMessage()
+    assert "secret-request-detail" not in warned[0].getMessage()
+
+
+def _salvage_calls_allowing_local(source: str) -> list[int]:
+    """Lines calling maybe_salvage_extract without allow_local=False."""
+    import ast
+
+    lines = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == "maybe_salvage_extract":
+            local = next((kw.value for kw in node.keywords if kw.arg == "allow_local"), None)
+            if not (isinstance(local, ast.Constant) and local.value is False):
+                lines.append(node.lineno)
+    return lines
+
+
+def test_local_salvage_runs_only_in_the_parser_worker() -> None:
+    """Local salvage (Docling) runs only inside the bounded worker
+    (AGENTS.md section 19 K): every other caller passes allow_local=False.
+    Its default is True, so a new caller in the Kazma process would run it
+    there (Q04 defensive check C10, 2026-10-15)."""
+    repo = Path(__file__).resolve().parents[1]
+    worker = repo / "kazma-core/kazma_core/documents/parser_worker.py"
+    offenders = []
+    for package in ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway",
+                    "kazma-skills/kazma_skills", "kazma-cli/kazma_cli", "kazma-tui/kazma_tui"):
+        for path in (repo / package).rglob("*.py"):
+            if path == worker:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "maybe_salvage_extract(" in text:
+                offenders += [f"{path.relative_to(repo)}:{line}" for line in _salvage_calls_allowing_local(text)]
+    assert offenders == [], offenders
+    # Negative control: a caller relying on the default is seen.
+    assert _salvage_calls_allowing_local("maybe_salvage_extract(p, d, config=c)") == [1]

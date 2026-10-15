@@ -341,6 +341,37 @@ def test_the_token_file_is_made_once_and_kept(monkeypatch, tmp_path):
     assert token not in Path(os.environ["KAZMA_GUARD_LOG"]).read_text(encoding="utf-8")
 
 
+def test_no_restriction_no_token_and_no_broker(monkeypatch, tmp_path):
+    """A token file that cannot be restricted to the guard's account gets no
+    secret written into it, and the broker does not start (Q04 defensive check
+    C5, 2026-10-15: it logged a warning and served the token anyway)."""
+    h = _Harness(monkeypatch, tmp_path)
+    monkeypatch.setattr(guard, "_restrict_to_owner", lambda path: False)
+    h.b.before_spawn()
+    assert not h.b.token_path.exists()
+    assert not list(h.b.token_path.parent.glob(f"{h.b.token_path.name}.*.tmp"))
+    assert h.procs == []
+    assert "broker.token_unavailable" in h.events()
+
+
+def test_an_existing_token_is_restricted_again_at_every_start(monkeypatch, tmp_path):
+    h = _Harness(monkeypatch, tmp_path)
+    h.b.before_spawn()
+    assert len(h.procs) == 1
+    restricted: list[Path] = []
+    monkeypatch.setattr(guard, "_restrict_to_owner", lambda path: restricted.append(path) or True)
+    h.exit_current(1)
+    h.run_for(10)
+    assert len(h.procs) == 2 and restricted == [h.b.token_path]
+
+    # A token file that can no longer be restricted stops the next start.
+    monkeypatch.setattr(guard, "_restrict_to_owner", lambda path: False)
+    h.exit_current(1)
+    h.run_for(30)
+    assert len(h.procs) == 2
+    assert "broker.token_unavailable" in h.events()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="the access list is a Windows ACL; POSIX gets mode 600")
 def test_the_token_file_is_readable_by_its_owner_only(tmp_path):
     path = tmp_path / "token"

@@ -86,6 +86,28 @@ def test_a_missing_actor_is_refused_not_unchecked(service, method, missing):
         getattr(service, method)(tenant_id="t", job_id=job.job_id, actor_id=missing)
 
 
+@pytest.mark.parametrize("method", ["job_status", "job_events", "cancel_job", "retry_job"])
+def test_a_missing_actor_is_refused_for_an_unknown_job_too(service, method):
+    """A caller with no name was answered "unknown" (None) when the job did
+    not exist, and refused only when it did (Q04 defensive check C8,
+    2026-10-15). It is refused either way now."""
+    with pytest.raises(DocumentAccessError):
+        getattr(service, method)(tenant_id="t", job_id=str(uuid.uuid4()), actor_id="")
+
+
+def test_cancelling_needs_write_permission_like_a_retry(service):
+    """Read access shows a job; changing its ingestion needs write (Q04
+    defensive check C8, 2026-10-15: a reader could cancel)."""
+    job = _upload(service, "alice")
+    service.repository.grant_access(tenant_id="t", document_id=job.document_id,
+                                    actor_id="alice", principal_id="bob", permission="read")
+    assert service.job_status(tenant_id="t", job_id=job.job_id, actor_id="bob")
+    with pytest.raises(DocumentAccessError):
+        service.cancel_job(tenant_id="t", job_id=job.job_id, actor_id="bob")
+    # The owner still can.
+    assert service.cancel_job(tenant_id="t", job_id=job.job_id, actor_id="alice")
+
+
 def test_the_system_actor_is_not_a_string_a_request_can_send(service):
     job = _upload(service, "alice")
     assert service.job_status(tenant_id="t", job_id=job.job_id, actor_id=SYSTEM_ACTOR)

@@ -504,10 +504,21 @@ def _isolation_check() -> tuple[CertificationCheck, dict[str, object]]:
         "profile": profile,
         "ready": bool(report.get("ready")),
         "image_code_matches": report.get("image_code_matches"),
+        "image_current": report.get("image_current"),
+        "image_fallback": bool(report.get("image_fallback")),
         "hostile_document_profile": str(report.get("hostile_document_profile") or ""),
     }
     if profile == "container":
-        if report.get("ready") and report.get("image_code_matches") is not False:
+        # PASS needs the image KNOWN to run this code: a match not reported
+        # (None), an older image or a fallback build passed until 2026-10-15
+        # (Q04 defensive check C7), while AGENTS.md said "only attested and
+        # with a current image".
+        current = (
+            report.get("image_code_matches") is True
+            and report.get("image_current") is not False
+            and not report.get("image_fallback")
+        )
+        if report.get("ready") and current:
             return CertificationCheck(
                 "worker_isolation", "PASS",
                 "Documents run in the attested per-job container profile (no network, no mounts, "
@@ -515,7 +526,8 @@ def _isolation_check() -> tuple[CertificationCheck, dict[str, object]]:
             ), report
         return CertificationCheck(
             "worker_isolation", "FAIL",
-            "The container profile is configured but not ready, or its image runs other document code.",
+            "The container profile is configured but not ready, or its image is not known to run "
+            "the document code Kazma runs (not reported, older, or a fallback build).",
             facts,
         ), report
     if profile == "process":

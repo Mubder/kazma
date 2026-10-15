@@ -342,7 +342,8 @@ def _good_facts(limits: BrokerLimits) -> dict[str, Any]:
     return {
         "uid": 10001,
         "gid": 10001,
-        "status": {"CapEff": zero, "CapPrm": zero, "CapAmb": zero, "NoNewPrivs": "1", "Seccomp": "2"},
+        "status": {"CapEff": zero, "CapPrm": zero, "CapAmb": zero, "CapBnd": zero,
+                   "NoNewPrivs": "1", "Seccomp": "2"},
         "interfaces": ["lo"],
         "external_connect_errno": 101,
         "dns_resolved": False,
@@ -377,6 +378,13 @@ def test_attestation_accepts_the_policy() -> None:
     ("mutate", "expected"),
     [
         (lambda f: f.update(uid=0), "root"),
+        (lambda f: f.update(uid=1000), "not 10001:10001"),
+        (lambda f: f.update(gid=1000), "not 10001:10001"),
+        (lambda f: f["status"].update(CapPrm="00000000a80425fb"), "CapPrm"),
+        (lambda f: f["status"].update(CapAmb="0000000000000400"), "CapAmb"),
+        (lambda f: f["status"].update(CapBnd="000001ffffffffff"), "CapBnd"),
+        (lambda f: f["status"].pop("CapBnd"), "CapBnd"),
+        (lambda f: f["cgroup"].update({"cpu.max": "max 100000"}), "cpu.max"),
         (lambda f: f["status"].update(CapEff="00000000a80425fb"), "CapEff"),
         (lambda f: f["status"].update(NoNewPrivs="0"), "no_new_privs"),
         (lambda f: f["status"].update(Seccomp="0"), "seccomp"),
@@ -1048,3 +1056,24 @@ def test_container_required_admits_the_container_profile(strict_profile, stub_br
     stub_broker({"chunks": [_inspect_output(source)]})
     assert _service(tmp_path).inspect_path(source).mime_type == "application/pdf"
     assert worker_container.isolation_report()["ready"] is True
+
+
+@pytest.mark.parametrize("stale", [{"image_current": False}, {"image_fallback": True}])
+def test_readiness_flags_an_older_or_fallback_image_too(tmp_path: Path, monkeypatch, stale) -> None:
+    """AGENTS.md section 19 E1: an image older than its tag, or a fallback
+    build, is document_worker_image_outdated. Only a code mismatch was flagged
+    until the Q04 defensive check (2026-10-15)."""
+    from kazma_core.documents.ingestion import DocumentIngestionService
+
+    report = {"mode": "container", "ready": True, "image_code_matches": True,
+              "image_current": True, "image_fallback": False, **stale}
+    monkeypatch.setattr("kazma_core.documents.ingestion.isolation_report", lambda: dict(report))
+    service = DocumentIngestionService(config=replace(
+        DocumentConfig(storage_root=tmp_path / "ingest"), ocr_enabled=False,
+        security_malware_scan="off",
+    ))
+    try:
+        readiness = service.readiness()
+    finally:
+        service.close()
+    assert "document_worker_image_outdated" in readiness["degraded_reasons"]

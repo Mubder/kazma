@@ -185,7 +185,10 @@ def _action(kind, **fields):
 
 
 @pytest.mark.parametrize('kind', ['/GoToR', '/SubmitForm', '/ImportData', '/Rendition',
-                                  '/RichMediaExecute', '/Sound', '/Movie'])
+                                  '/RichMediaExecute', '/Sound', '/Movie',
+                                  # Every action type of the policy has a case
+                                  # (Q04 defensive check C1, 2026-10-15).
+                                  '/Launch', '/GoToE', '/RichMedia', '/JavaScript'])
 def test_actions_that_leave_the_document_are_refused(tmp_path, kind):
     path = _with_action(tmp_path, kind[1:], _action(kind, F=TextStringObject('x')))
     with pytest.raises(DocumentSecurityError):
@@ -321,3 +324,42 @@ async def test_intake_refuses_active_content_through_the_service(tmp_path):
         with pytest.raises(DocumentParseError) as parsed:
             await service.parse_path(path, tenant_id='t', workspace_id='w', actor_id='a')
         assert parsed.value.code == 'unsafe_document'
+
+
+def test_a_typed_embedded_file_and_a_rich_media_key_are_refused(tmp_path):
+    """The two shapes the action cases do not reach: a stream typed
+    /EmbeddedFile anywhere, and an annotation holding /RichMedia content
+    (Q04 defensive check C1, 2026-10-15)."""
+    from pypdf.generic import StreamObject
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    stream = StreamObject()
+    stream.set_data(b'inert attachment')
+    stream[NameObject('/Type')] = NameObject('/EmbeddedFile')
+    writer._root_object[NameObject('/Kazma')] = writer._add_object(stream)
+    typed = tmp_path / 'typed.pdf'
+    writer.write(typed)
+    with pytest.raises(DocumentSecurityError, match='embedded-file'):
+        assert_pdf_safe(PdfReader(typed))
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=100, height=100)
+    page[NameObject('/Annots')] = ArrayObject([writer._add_object(DictionaryObject({
+        NameObject('/Type'): NameObject('/Annot'), NameObject('/Subtype'): NameObject('/RichMedia'),
+        NameObject('/RichMedia'): DictionaryObject(),
+    }))])
+    media = tmp_path / 'media.pdf'
+    writer.write(media)
+    with pytest.raises(DocumentSecurityError, match='rich media'):
+        assert_pdf_safe(PdfReader(media))
+
+
+def test_the_policy_s_default_budgets_are_the_documented_ones():
+    """100,000 objects and depth 128 (AGENTS.md section 19 E3): every caller
+    uses the defaults, so the defaults are the policy."""
+    import inspect
+
+    params = inspect.signature(assert_pdf_safe).parameters
+    assert params['max_objects'].default == 100_000
+    assert params['max_depth'].default == 128
