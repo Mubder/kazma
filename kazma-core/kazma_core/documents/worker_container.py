@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import DocumentSandboxError
-from .ocr.base import OcrComponentHealth, OcrHealth, OcrReadiness
+from .ocr.base import OcrComponentHealth, OcrEngineReport, OcrHealth, OcrReadiness
 from .registry import ParserCapability, ParserPlugin, ParserReadiness, ParserRegistry
 from .renderers import RendererCapability, RendererPlugin, RendererReadiness, RendererRegistry
 from .sandbox import SandboxResult
@@ -246,6 +246,13 @@ def parser_container_request(
         raise DocumentSandboxError("Parser request has no configuration", code="worker_input_unsupported")
     # A per-run scratch root: the shared content store is never visible.
     config["storage_root"] = f"{RUN_ROOT}/storage"
+    ocr = body.get("ocr")
+    if isinstance(ocr, dict):
+        # The neural OCR models are the image's own read-only copy; the
+        # host's model directory is never visible to the container.
+        from .ocr.neural_models import IMAGE_MODEL_DIR
+
+        ocr["models"] = IMAGE_MODEL_DIR
     return body, [(staged, Path(source))]
 
 
@@ -753,35 +760,55 @@ def _component(value: Any, fallback_reason: str) -> OcrComponentHealth:
     )
 
 
-def image_ocr_health(requested_languages: tuple[str, ...] = ()) -> OcrHealth:
-    """OCR readiness inside the worker image, for the requested languages."""
+def _image_engine(row: Any, name: str, requested: tuple[str, ...]) -> OcrEngineReport:
+    """One OCR engine as the image reports it, for the requested languages."""
+    if not isinstance(row, dict):
+        return OcrEngineReport(OcrComponentHealth(
+            OcrReadiness.UNAVAILABLE, name, reason=f"The worker image reports no {name} OCR engine"), ())
+    try:
+        languages = _strings(row.get("languages") or [])
+    except TypeError:
+        languages = ()
+    health = _component(row, f"invalid {name} OCR engine report")
+    absent = sorted(set(requested) - set(languages))
+    if absent and health.readiness is not OcrReadiness.UNAVAILABLE:
+        reason = (f"Tesseract language data is missing in the worker image: {', '.join(absent)}"
+                  if name == "tesseract" else
+                  f"The worker image's {name} OCR engine does not read: {', '.join(absent)}")
+        health = OcrComponentHealth(OcrReadiness.UNAVAILABLE, health.name, health.version, reason)
+    return OcrEngineReport(health, languages)
+
+
+def image_ocr_health(requested_languages: tuple[str, ...] = (), *, engine: str = "auto") -> OcrHealth:
+    """OCR readiness inside the worker image, for the requested languages and
+    ``documents.ocr.engine``."""
+    from .ocr.pipeline import combine_health, effective_engine
 
     report, why = _image_report()
     row = (report or {}).get("ocr")
+    requested = tuple(requested_languages)
     if not isinstance(row, dict):
         missing = OcrComponentHealth(OcrReadiness.UNAVAILABLE, None, reason=why or "no OCR report")
         return OcrHealth(OcrReadiness.UNAVAILABLE, missing, missing, missing, (),
-                         tuple(requested_languages), why or "The worker image reported no OCR")
-    try:
-        languages = _strings(row.get("languages") or [])
-        readiness = OcrReadiness(row.get("readiness"))
-    except (TypeError, ValueError):
-        languages, readiness = (), OcrReadiness.UNAVAILABLE
-    engine = _component(row.get("engine"), "invalid OCR engine report")
-    reason = _reason(row.get("reason"))
-    absent = sorted(set(requested_languages) - set(languages))
-    if absent and readiness is not OcrReadiness.UNAVAILABLE:
-        reason = f"Tesseract language data is missing in the worker image: {', '.join(absent)}"
-        engine = OcrComponentHealth(OcrReadiness.UNAVAILABLE, engine.name, engine.version, reason)
-        readiness = OcrReadiness.UNAVAILABLE
-    return OcrHealth(
-        readiness,
-        engine,
+                         requested, why or "The worker image reported no OCR", engine_setting=engine)
+    engines_row = row.get("engines") if isinstance(row.get("engines"), dict) else {}
+    tesseract_row = engines_row.get("tesseract")
+    if tesseract_row is None and isinstance(row.get("engine"), dict):
+        # An image built before 2026-10-15 reports Tesseract alone.
+        tesseract_row = {**row["engine"], "languages": row.get("languages") or []}
+    tesseract = _image_engine(tesseract_row, "tesseract", requested)
+    neural = _image_engine(engines_row.get("neural"), "neural", requested)
+    selected = effective_engine(engine, neural.health.readiness is OcrReadiness.READY)
+    fallback = (
+        f"The neural OCR engine is unavailable in the worker image ({neural.health.reason}); Tesseract reads pages"
+        if engine == "neural" and selected != "neural" else None
+    )
+    return combine_health(
+        neural if selected == "neural" else tesseract,
         _component(row.get("rasterizer"), "invalid rasterizer report"),
         _component(row.get("image_parser"), "invalid image parser report"),
-        languages,
-        tuple(requested_languages),
-        reason,
+        requested, engine_setting=engine, selected=selected,
+        engines=(("tesseract", tesseract), ("neural", neural)), fallback_reason=fallback,
     )
 
 

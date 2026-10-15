@@ -12,6 +12,7 @@ from ..models import DocumentBlock
 __all__ = [
     "OcrCapability",
     "OcrComponentHealth",
+    "OcrEngineReport",
     "OcrHealth",
     "OcrPageResult",
     "OcrProvider",
@@ -68,6 +69,17 @@ class OcrCapability:
 
 
 @dataclass(frozen=True, slots=True)
+class OcrEngineReport:
+    """One OCR engine as this process (or the worker image) has it."""
+
+    health: OcrComponentHealth
+    languages: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {**self.health.to_dict(), "languages": list(self.languages)}
+
+
+@dataclass(frozen=True, slots=True)
 class OcrHealth:
     readiness: OcrReadiness
     engine: OcrComponentHealth
@@ -76,6 +88,11 @@ class OcrHealth:
     languages: tuple[str, ...]
     requested_languages: tuple[str, ...]
     reason: str | None = None
+    #: ``documents.ocr.engine`` as asked, and the engine that reads pages
+    #: under it (``auto`` and ``neural`` fall back to Tesseract).
+    engine_setting: str = "auto"
+    selected_engine: str = "tesseract"
+    engines: tuple[tuple[str, OcrEngineReport], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -86,6 +103,9 @@ class OcrHealth:
             "engine": self.engine.to_dict(),
             "rasterizer": self.rasterizer.to_dict(),
             "image_parser": self.image_parser.to_dict(),
+            "engine_setting": self.engine_setting,
+            "selected_engine": self.selected_engine,
+            "engines": {name: report.to_dict() for name, report in self.engines},
         }
 
 

@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Documents: an OCR engine that reads Arabic and Arabic-Indic digits (2026-10-15)
+
+- Scanned Arabic now reads far better. A new on-device OCR engine reads
+  Arabic letters and Arabic-Indic digits (١٢٣٤٥٦٧), which Tesseract could
+  not:
+  - On the Arabic test page it read every word and every number. Tesseract
+    read 66% of the words and 33% of the numbers.
+  - On a real scanned booklet, more of each page's terms and numbers were
+    found.
+- How it reads:
+  - PaddleOCR finds the text lines.
+  - EasyOCR's Arabic model reads them.
+  - A second reader votes on letters, never on numbers.
+  - Everything runs on ONNX Runtime, on the CPU, inside the document
+    worker. Nothing leaves the machine.
+- It costs about 5 seconds and 900 MB a page, against half a second for
+  Tesseract.
+  - Ruled tables are read cell by cell.
+  - Near the worker's time limit, the remaining pages go to Tesseract, and
+    the document says so.
+- Settings → Documents chooses the engine: `auto` (the default), `neural`
+  or `tesseract`. It also shows whether the neural engine is ready, and
+  why not.
+- The models are fetched once by `python scripts/ocr_models.py install`.
+  Each file is pinned by URL, size and SHA-256. The document worker image
+  carries them already. Until they are installed, `auto` reads with
+  Tesseract.
+
 ## Three faults seen on the live install (2026-10-15)
 
 - **A slow Docker answer no longer pages you.** Readiness checks the

@@ -554,9 +554,12 @@ def _rebuilt_dirs() -> set[Path]:
     leaving meaning search off. Without it, the knowledge vector repair sweep
     re-embeds every chunk from the Knowledge database, which IS backed up.
     """
+    from kazma_core.documents.ocr.neural_models import default_model_directory
     from kazma_core.paths import vector_memory_path
 
-    return {Path(vector_memory_path()).resolve()}
+    # The neural OCR models (230 MB) are re-installed from their pinned
+    # sources (store_registry: "models"); a backup copy is only weight.
+    return {Path(vector_memory_path()).resolve(), default_model_directory().parent.resolve()}
 
 
 def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:

@@ -113,8 +113,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Observability",
     },
     "packages.extra.ocr.desc": {
-        "ar": "Tesseract للمستندات الممسوحة. ثبّت tesseract-ocr على النظام أيضاً.",
-        "en": "Tesseract OCR for scanned documents. Also install system tesseract-ocr.",
+        "ar": "Tesseract للمستندات الممسوحة، والمحرك العصبي للعربية والأرقام الهندية (ثم ثبّت نماذجه: python scripts/ocr_models.py install). ثبّت tesseract-ocr على النظام أيضاً.",
+        "en": "Tesseract OCR for scanned documents, and the neural OCR engine for Arabic and Arabic-Indic digits (then install its models: python scripts/ocr_models.py install). Also install system tesseract-ocr.",
     },
     "packages.extra.ocr.title": {
         "ar": "التعرّف الضوئي",

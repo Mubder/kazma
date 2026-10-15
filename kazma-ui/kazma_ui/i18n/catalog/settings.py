@@ -3193,6 +3193,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "قراءة جداول الصفحات الممسوحة خلية خلية",
         "en": "Read tables on scanned pages cell by cell",
     },
+    "settings.docs.ocr_engine": {
+        "ar": "محرك التعرف الضوئي على النصوص",
+        "en": "OCR engine",
+    },
+    "settings.docs.ocr_engine_auto": {
+        "ar": "تلقائي: المحرك العصبي متى ثُبّت، وإلا Tesseract",
+        "en": "Automatic: the neural engine when installed, else Tesseract",
+    },
+    "settings.docs.ocr_engine_neural": {
+        "ar": "المحرك العصبي (العربية والأرقام الهندية)",
+        "en": "Neural (Arabic and Arabic-Indic digits)",
+    },
+    "settings.docs.ocr_engine_tesseract": {
+        "ar": "Tesseract",
+        "en": "Tesseract",
+    },
+    "settings.docs.ocr_engine_neural_ready": {
+        "ar": "المحرك العصبي مثبّت وجاهز.",
+        "en": "The neural engine is installed and ready.",
+    },
+    "settings.docs.ocr_engine_neural_missing": {
+        "ar": "المحرك العصبي غير مثبّت، فيقرأ Tesseract الصفحات. تثبيته مشروح في دليل معالجة المستندات.",
+        "en": "The neural engine is not installed, so Tesseract reads the pages. The Document processing guide says how to install it.",
+    },
     "settings.docs.gc_enabled": {
         "ar": "تنظيف المساحة مفعّل",
         "en": "GC enabled",

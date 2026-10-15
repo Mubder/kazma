@@ -88,6 +88,8 @@
             intake_max_files: 10,
             ocr_enabled: true,
             ocr_tables: true,
+            ocr_engine: 'auto',
+            ocr_engine_health: null,
             worker_timeout_seconds: 300,
             worker_memory_mb: 1024,
             capacity_storage_free_floor_bytes: 536870912,

@@ -30,7 +30,7 @@ product detail: [Document Intelligence → PDF text extraction](../guide/documen
 | `GET /api/documents/health` (the Documents page's capability list) | PDF parser **ready** when PyMuPDF or pdfplumber is installed |
 | pypdfium2 / pypdf only | Parser **degraded** (text only — tables not advertised) |
 | Arabic electronic PDF | Logical-order tokens; IR metadata `extractor` / `extraction_score` |
-| Arabic scan | Tesseract + `ara` traineddata on PATH; OCR may still be imperfect |
+| Arabic scan | The neural OCR engine (`documents.ocr.engine`: `auto` uses it once installed, below), else Tesseract + `ara` traineddata on PATH (Arabic-Indic digits not read) |
 | After `kazma update` | CLI imports (`kazma serve` works); see [Kazma Update](./kazma-update) |
 
 Deploy deps: `pip install -e ".[document-platform]"` (pymupdf + pypdfium2) and
@@ -51,8 +51,57 @@ Measured on a real 300 dpi scan of an Arabic booklet: a contents table's page
 numbers went from 22 % to 91 % read, and from 3 % to 56 % of its rows came
 back complete on one line. **Arabic-Indic digits** (١٢٣) are not read by
 Tesseract's Arabic model, fast or best, at any page segmentation and in
-either bundled font; European digits are. Reading them needs another OCR
-engine.
+either bundled font; European digits are. The neural engine reads them.
+
+### The neural OCR engine (Arabic and Arabic-Indic digits)
+
+`documents.ocr.engine` (Settings → Documents, validated on every write):
+`auto` (default) reads scanned pages with the neural engine when it is
+installed here (or in the worker image, in the container profile) and with
+Tesseract otherwise; `neural` is the same and says on the document when
+Tesseract had to read it; `tesseract` never uses the neural engine.
+`/api/settings/documents` and `/api/documents/health` say which engine reads
+pages (`selected_engine`) and why the neural one cannot.
+
+Install it on a host (the `process` profile):
+
+```bash
+uv pip install -e ".[ocr]"            # onnxruntime, opencv-python-headless, pyclipper, numpy
+python scripts/ocr_models.py install  # about 240 MB into <data dir>/models/ocr
+python scripts/ocr_models.py verify
+```
+
+`install` downloads the four pinned models (each checked against its size
+and SHA-256), converts EasyOCR's two PyTorch recognizers to ONNX (checked
+against PyTorch on fixed inputs) and writes a `manifest.json`. The conversion
+needs PyTorch once; without it in this interpreter the script runs it through
+`uv run --isolated` (CPU wheels on Linux), so Kazma's own environment gains
+nothing. `KAZMA_OCR_MODEL_DIR` moves the model directory. The document worker
+uses the models only when they match the manifest, and downloads nothing.
+The directory is not backed up or carried by `kazma migrate` (it is
+re-installed).
+
+In the **container profile** the worker image carries the engine: its
+`ocr-models` build stage (`deploy/document-worker/ocr-models.txt`, hash-locked,
+CPU PyTorch) runs the same installer, and only the models reach the final
+image (`/opt/kazma/ocr-models`, read-only). The image's capability report
+names both engines; rebuild the image to update the models.
+
+Measured on 2026-10-15 (CPU only; numbers in
+`docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md`, Q02): on the fidelity
+corpus the clean Arabic page went from token recall 0.66 / CER 0.24 / numbers
+1 of 3 (Tesseract) to every word and number (CER 0); on a 12-font set of Arabic
+lines with numbers, numbers read 27 % -> 74 % clean and 28 % -> 69 % as a poor
+scan; on the real scan (five pages of an Arabic booklet), cover-page terms
+30 % -> 90 %, the contents table's page numbers 91 % -> 100 % and its rows
+56 % -> 75 % complete, while three text pages lost terms (85 -> 80 %,
+100 -> 94 %, 86 -> 71 %) and one page the single number Tesseract read. It
+costs time and memory: on one core (the worker's limit) about 15 s for
+an Arabic text page and 30–45 s for a page with ruled tables, against 2–8 s,
+and about 800 MB of the worker's 1 GiB. Near the worker's time limit
+(`documents.workers.timeout_seconds`, 300 s) the remaining pages are read by
+Tesseract and the document's warnings say from which page: raise the limit
+(about 45 s a scanned page) to keep a long scan on the neural engine.
 
 ---
 

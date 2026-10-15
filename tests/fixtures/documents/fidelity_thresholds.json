@@ -1,10 +1,130 @@
 {
-  "corpus_version": "2026-10-13.3",
-  "measured_on": "2026-10-13, Windows 11, Python 3.12.9, PyMuPDF 1.28.2, python-bidi 0.6.10, LibreOffice 26.2.6.3 (Arabic PDF route), Tesseract 5.4.0 (ara, eng)",
-  "notes": {
-    "ar-ocr": "Below release: Tesseract 'ara' misreads the Arabic-Indic digits of this font, and its page layout analysis skips the second heading and the last paragraph (both are read when cropped). Segmentation modes 3/4/6/11/12, removing the coloured rules, grayscale and 2x upscaling were measured; none qualifies (best CER 0.2357). Arabic OCR is not qualified.",
-    "ar-ocr-table": "Below release: the table is found and read cell by cell (its labels come back), but Tesseract 'ara' cannot read the Arabic-Indic digits in its cells (the same limit as ar-ocr), and the page around it loses the same heading and paragraph.",
-    "en-ocr-degraded": "Below release: on the degraded scan Tesseract reads 3.75 as 3:75. Every word is right (CER/WER 0 count words, not the punctuation inside them), so numbers OCR'd from poor scans are not qualified."
+  "corpus_version": "2026-10-15.4",
+  "measured_on": "2026-10-15, Windows 11, Python 3.12.9, PyMuPDF 1.28.2, python-bidi 0.6.10, LibreOffice 26.2.6.3 (Arabic PDF route)",
+  "notes": {},
+  "ocr_engines": {
+    "neural": {
+      "measured_on": "2026-10-15, documents.ocr.engine neural: PP-OCRv5 mobile detection + EasyOCR 1.7.2 arabic_g1/english_g2 + PP-OCRv5 Arabic recognition, ONNX Runtime 1.31.0, Tesseract 5.4.0 as the third reader; in the document worker (1 core, 1 GiB)",
+      "notes": {
+        "ar-ocr-table": "Below release by one word: 'ريالاً' is read 'ربالأ' (ي taken for ب: token recall 0.984, so segment recall 0.857); every number (Arabic-Indic and European) and every table cell is read, CER 0.003, WER 0.018.",
+        "en-ocr-degraded": "Below release: on the degraded scan 3.75 is read as 3,75 (as Tesseract reads 3:75); every word is right."
+      },
+      "qualified": [
+        "ar-ocr",
+        "en-ocr",
+        "en-ocr-table"
+      ],
+      "thresholds": {
+        "ar-ocr": {
+          "cer": 0.02,
+          "number_recall": 0.98,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.98,
+          "token_recall": 0.98,
+          "wer": 0.02
+        },
+        "ar-ocr-table": {
+          "cer": 0.0228,
+          "number_recall": 0.98,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.8371,
+          "table_cell_recall": 1.0,
+          "token_recall": 0.9641,
+          "wer": 0.0375
+        },
+        "en-ocr": {
+          "cer": 0.02,
+          "number_recall": 0.98,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.98,
+          "token_recall": 0.98,
+          "wer": 0.02
+        },
+        "en-ocr-degraded": {
+          "cer": 0.02,
+          "number_recall": 0.73,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.98,
+          "token_recall": 0.98,
+          "wer": 0.02
+        },
+        "en-ocr-table": {
+          "cer": 0.02,
+          "number_recall": 0.98,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.98,
+          "table_cell_recall": 1.0,
+          "token_recall": 0.98,
+          "wer": 0.02
+        }
+      }
+    },
+    "tesseract": {
+      "measured_on": "2026-10-15, Tesseract 5.4.0 (ara, eng), the installed fast models",
+      "notes": {
+        "ar-ocr": "Below release: Tesseract 'ara' does not read Arabic-Indic digits in any font or model measured (fast, script/Arabic, tessdata_best ara and script/Arabic), and its layout analysis skips a heading and a paragraph (both are read when cropped). Token recall 0.66, CER 0.24, WER 0.29 against the whole page (corpus version 4).",
+        "ar-ocr-table": "Below release: the table is found and read cell by cell (its labels come back), but the Arabic-Indic digits in its cells are not read (the same limit as ar-ocr), and the page around it loses the same heading and paragraph.",
+        "en-ocr-degraded": "Below release: on the degraded scan Tesseract reads 3.75 as 3:75. Every word is right (CER/WER count words, not the punctuation inside them), so numbers OCR'd from poor scans are not qualified."
+      },
+      "qualified": [
+        "en-ocr",
+        "en-ocr-table"
+      ],
+      "thresholds": {
+        "ar-ocr": {
+          "cer": 0.2623,
+          "number_recall": 0.3133,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.2657,
+          "token_recall": 0.6379,
+          "wer": 0.3117
+        },
+        "ar-ocr-table": {
+          "cer": 0.2672,
+          "number_recall": 0.1229,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.2657,
+          "table_cell_recall": 0.5556,
+          "token_recall": 0.6379,
+          "wer": 0.3709
+        },
+        "en-ocr": {
+          "cer": 0.02,
+          "number_recall": 0.98,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.98,
+          "token_recall": 0.98,
+          "wer": 0.02
+        },
+        "en-ocr-degraded": {
+          "cer": 0.02,
+          "number_recall": 0.73,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.98,
+          "token_recall": 0.98,
+          "wer": 0.02
+        },
+        "en-ocr-table": {
+          "cer": 0.02,
+          "number_recall": 0.98,
+          "order": 1.0,
+          "page_honesty": 1.0,
+          "segment_recall": 0.98,
+          "table_cell_recall": 1.0,
+          "token_recall": 0.98,
+          "wer": 0.02
+        }
+      }
+    }
   },
   "qualified": [
     "ar-docx",
@@ -17,8 +137,6 @@
     "en-docx",
     "en-docx-widetable",
     "en-html",
-    "en-ocr",
-    "en-ocr-table",
     "en-pdf",
     "en-pdf-columns",
     "en-pdf-long",
@@ -51,25 +169,6 @@
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
-    },
-    "ar-ocr": {
-      "cer": 0.2481,
-      "number_recall": 0.3133,
-      "order": 1.0,
-      "page_honesty": 1.0,
-      "segment_recall": 0.2657,
-      "token_recall": 0.6379,
-      "wer": 0.3382
-    },
-    "ar-ocr-table": {
-      "cer": 0.3461,
-      "number_recall": 0.1229,
-      "order": 1.0,
-      "page_honesty": 1.0,
-      "segment_recall": 0.2657,
-      "table_cell_recall": 0.5556,
-      "token_recall": 0.6379,
-      "wer": 0.454
     },
     "ar-pdf": {
       "alignment": 1.0,
@@ -136,34 +235,6 @@
       "segment_recall": 1.0,
       "table_cell_recall": 1.0,
       "token_recall": 1.0
-    },
-    "en-ocr": {
-      "cer": 0.02,
-      "number_recall": 0.98,
-      "order": 1.0,
-      "page_honesty": 1.0,
-      "segment_recall": 0.98,
-      "token_recall": 0.98,
-      "wer": 0.02
-    },
-    "en-ocr-degraded": {
-      "cer": 0.02,
-      "number_recall": 0.73,
-      "order": 1.0,
-      "page_honesty": 1.0,
-      "segment_recall": 0.98,
-      "token_recall": 0.98,
-      "wer": 0.02
-    },
-    "en-ocr-table": {
-      "cer": 0.02,
-      "number_recall": 0.98,
-      "order": 1.0,
-      "page_honesty": 1.0,
-      "segment_recall": 0.98,
-      "table_cell_recall": 1.0,
-      "token_recall": 0.98,
-      "wer": 0.02
     },
     "en-pdf": {
       "alignment": 1.0,

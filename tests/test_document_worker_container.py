@@ -853,6 +853,12 @@ def test_renderer_mutator_and_ocr_readiness_come_from_the_image(stub_broker, mon
         mutators={"pypdf": None},
     )
     report["ocr"].update(readiness="ready", languages=["eng"], reason=None)
+    # Since 2026-10-15 the image names each OCR engine it carries: this one
+    # reads with Tesseract, English only, and has no neural engine (whatever
+    # this host has).
+    report["ocr"]["engines"] = {"tesseract": {
+        "readiness": "ready", "name": "tesseract", "version": None, "reason": None, "languages": ["eng"],
+    }}
     stub_broker({"capabilities": report})
     markdown = get_renderer_registry().resolve("generate:markdown")
     assert not markdown.available and markdown.reason == "markdown missing in image"

@@ -79,14 +79,9 @@ def _direction(text: str) -> str:
     return "rtl" if has_rtl else "ltr"
 
 
-def _parse_tsv(
-    payload: bytes,
-    *,
-    page_number: int,
-    language: str,
-    engine_version: str | None,
-    dpi: int,
-) -> OcrPageResult:
+def _tsv_words(payload: bytes) -> list[tuple[tuple[int, int, int], str, int, int, int, int, float]]:
+    """Every recognised word of Tesseract's TSV, in its reading order:
+    (block, paragraph, line), text, left, top, width, height, confidence."""
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -103,7 +98,7 @@ def _parse_tsv(
     }
     if reader.fieldnames is None or not required <= set(reader.fieldnames):
         raise DocumentOcrError("Tesseract returned malformed TSV output")
-    lines: dict[tuple[int, int, int], list[tuple[str, int, int, int, int, float]]] = defaultdict(list)
+    words = []
     for row in reader:
         word = (row.get("text") or "").strip()
         if not word:
@@ -112,14 +107,26 @@ def _parse_tsv(
             confidence = float(row["conf"]) / 100.0
             if confidence < 0:
                 continue
-            left = int(row["left"])
-            top = int(row["top"])
-            width = int(row["width"])
-            height = int(row["height"])
-            key = (int(row["block_num"]), int(row["par_num"]), int(row["line_num"]))
+            words.append((
+                (int(row["block_num"]), int(row["par_num"]), int(row["line_num"])), word,
+                int(row["left"]), int(row["top"]), int(row["width"]), int(row["height"]), min(confidence, 1.0),
+            ))
         except (KeyError, TypeError, ValueError) as exc:
             raise DocumentOcrError("Tesseract returned invalid TSV coordinates") from exc
-        lines[key].append((word, left, top, width, height, min(confidence, 1.0)))
+    return words
+
+
+def _parse_tsv(
+    payload: bytes,
+    *,
+    page_number: int,
+    language: str,
+    engine_version: str | None,
+    dpi: int,
+) -> OcrPageResult:
+    lines: dict[tuple[int, int, int], list[tuple[str, int, int, int, int, float]]] = defaultdict(list)
+    for key, word, left, top, width, height, confidence in _tsv_words(payload):
+        lines[key].append((word, left, top, width, height, confidence))
 
     from ..arabic import number_in_logical_order
 
@@ -364,6 +371,30 @@ class TesseractProvider:
             timeout_seconds=timeout_seconds, output_limit_bytes=output_limit_bytes,
             work_dir=work_dir, engine_version=capability.engine_version, options=options,
         )
+
+    def words(
+        self,
+        image_path: Path,
+        *,
+        language: str,
+        dpi: int,
+        timeout_seconds: float,
+        output_limit_bytes: int,
+        work_dir: Path,
+    ) -> list[tuple[float, float, str]]:
+        """The page's words with their centres, in Tesseract's reading order:
+        the third reader of the neural engine's letter vote (``ocr/neural.py``)."""
+        capability = self.probe(tuple(language.split("+")))
+        if not capability.available:
+            raise DocumentOcrUnavailableError(capability.reason or "Tesseract OCR is unavailable")
+        result = self._run(
+            (str(image_path), "stdout", "-l", language, "--dpi", str(dpi), "tsv"),
+            work_dir=work_dir, timeout=timeout_seconds, stdout_limit=output_limit_bytes,
+        )
+        return [
+            (left + width / 2.0, top + height / 2.0, word)
+            for _key, word, left, top, width, height, _confidence in _tsv_words(result.stdout)
+        ]
 
     def _recognize_file(
         self,

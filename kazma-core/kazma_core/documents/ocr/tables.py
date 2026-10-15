@@ -209,6 +209,16 @@ def _has_letters(text: str) -> bool:
     return any(char.isalpha() for char in text)
 
 
+def table_regions(image_path: Path) -> list[tuple[int, int, int, int]]:
+    """The boxes of the page's ruled tables, exactly as ``read_tables`` finds
+    them: a line-by-line reader skips what the table pass will read."""
+    from PIL import Image
+
+    with Image.open(image_path) as source:
+        image = source.convert("L")
+    return [grid.bbox for grid in _find_grids(image)]
+
+
 def read_tables(
     image_path: Path,
     *,
@@ -287,6 +297,7 @@ def with_tables(
     language: str,
     engine_version: str | None,
     dpi: int,
+    engine: str = "tesseract",
 ) -> tuple[DocumentBlock, ...]:
     """The page's lines outside every table, and one TABLE block per table, in
     top-to-bottom order."""
@@ -315,7 +326,7 @@ def with_tables(
                 "rows": len(table.rows),
                 "columns": max(len(row) for row in table.rows),
                 "language": language,
-                "engine": "tesseract",
+                "engine": engine,
                 "engine_version": engine_version,
                 "dpi": dpi,
                 "direction": "rtl" if table.rtl else "ltr",

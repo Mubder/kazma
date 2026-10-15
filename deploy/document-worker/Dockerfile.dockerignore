@@ -1,10 +1,13 @@
 # BuildKit reads this instead of the root .dockerignore when building with
 # -f deploy/document-worker/Dockerfile: the worker image needs exactly the
 # kazma_core source and its hash-locked requirements, nothing else from the
-# checkout (no data, worktrees, tests or other packages).
+# checkout (no data, worktrees, tests or other packages) -- and, for its
+# ocr-models build stage, the model installer and that stage's requirements.
 *
 !kazma-core/kazma_core
 !deploy/document-worker/requirements.txt
+!deploy/document-worker/ocr-models.txt
+!scripts/ocr_models.py
 **/__pycache__
 **/*.pyc
 **/*.pyo

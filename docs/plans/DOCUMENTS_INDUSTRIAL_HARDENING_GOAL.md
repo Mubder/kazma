@@ -27,7 +27,7 @@ must not become permanent tests that require those defects to remain.
 | F09 | Source reading order and provenance survive extraction | Labeled EN/AR/bilingual structural corpus, no invented physical-page citations | Implemented 2026-10-13 — versioned corpus `documents/fidelity.py` (EN/AR/bilingual × DOCX/PDF/HTML, EN/AR OCR) with declared floors and release targets; fixed Arabic PDF extraction (numbers, ligatures and table cells reversed by PyMuPDF; `parsers/pdf_rtl.py`) and fused HTML table cells. Same day, continued: the "reversed date" was the extraction's error, not the renderer's — after Arabic letters digits are Arabic numbers to the bidi algorithm and "-" does not join them, so `2026-09-30` is DRAWN `30-09-2026`; each number cluster's reading is now the one python-bidi draws as the page shows (round trips through the real algorithm; control without the check), a table row's numbers come back in column order, cells on one baseline are separate words, a misread zero-advance mark is dropped; OCR words get the same number rule. Corpus v2 adds long EN/AR documents, two columns from another producer, wide wrapping tables and a degraded scan; segment recall now requires the words together (control: reading across columns fails). **15/17** cases meet release targets (`ar-pdf` now qualified). Not qualified: `ar-ocr` (Tesseract `ara`: digits of this font misread and two lines dropped by its layout analysis; CER 0.23; 3/4/6/11/12 segmentation, rule removal, grayscale, 2× upscale measured, none qualifies) and `en-ocr-degraded` (3.75 read as 3:75). Corpus v3 (before the commit): OCR pages with a ruled table, read cell by cell -- **16/19** qualified (`en-ocr-table` yes, `ar-ocr-table` no: Arabic-Indic digits) |
 | F10 | Certification reports actual performed qualification and effective deployment | Backend/engine/profile/version evidence, worker-tree/native resources, no false soak success | Implemented 2026-10-13 — the report names the configured isolation profile, worker image and metadata/jobs backends; a `process` profile is CONDITIONAL and never reported as confined; `extraction_fidelity` and `backup_restore_sqlite` are real runs; soak and external review stay NOT RUN |
 | Q01 | Recovery survives process death at every publication stage | Intake/parse/manifest/index/verify crash matrix, lease loss, DB/disk/scanner faults, shutdown bounds | Implemented 2026-10-13 for single-host recovery — real child processes killed after each of 7 intake stages (keyed/unkeyed) and inside 4 job stages, on SQLite and real PostgreSQL 16.15 (44 cases): reservations released, partial publications rolled back, leases recovered, every job ready once; scanner/disk/DB faults and a bounded shutdown with a stuck stage. Same day, continued: cross-host takeover with fencing — an owner that cannot be proven dead renews a lease (`documents.intake.lease_seconds`, stored on the row); once lapsed it is taken over and rolled back, and the stale owner is fenced (its job is created only while the reservation is still its own, serialized with the takeover; a claim refuses a published intake); it removes its own token rows, and the sweep removes what it left for a day. Drilled with a real child on "another host", paused, taken over and resumed, on SQLite and PostgreSQL 16.15 (8+8 cases; controls: without the fence it publishes over the takeover, without the sweep its rows stay). Legacy rows without a lease are still never taken over. Same day, before the commit: the stale owner in a REAL other container (own hostname, data dir, install id; today's kazma_core mounted) sharing a disposable PostgreSQL with the recoverer here -- frozen with `docker pause` until its lease really lapsed on the database's clock, or cut off the network -- is taken over and fenced when it returns; with its renewals blind the fence alone refuses it; blind and unfenced it publishes (control). `tests/test_document_intake_lease_containers.py` **4 passed**, opt-in, removes everything it starts |
-| Q02 | Document fidelity has declared release thresholds | Versioned corpus; OCR CER/WER, tables/numbers, order, omission, citation and rendered-layout measurements | In progress — release thresholds declared for corpus v3 (F09): long, two-column (another producer), wide-table, degraded-scan and OCR ruled-table cases, **16/19** qualified. Real scans measured opt-in through the real intake, OCR and search (`tests/test_document_real_scans.py`, manifest outside the repo): the first (a 300 dpi copier scan of an Arabic booklet, 5 pages) found and fixed the OCR TSV quote defect and ruled-table loss. Open: more real scans (handwriting, forms, merged cells, other producers), Arabic-Indic digits under OCR (Tesseract fast and best models measured; an engine choice for the owner) |
+| Q02 | Document fidelity has declared release thresholds | Versioned corpus; OCR CER/WER, tables/numbers, order, omission, citation and rendered-layout measurements | In progress — release thresholds declared for corpus v4 (F09; v4, 2026-10-15: the OCR reference holds the page furniture the renderer drew) with the OCR cases held per engine: **17/19** qualified with the neural OCR engine (`ar-ocr` now qualified: every word and number, CER 0), 16/19 with Tesseract. Arabic and Arabic-Indic digits under OCR: done 2026-10-15 — seven candidates measured (below), the neural engine adopted behind `documents.ocr.engine` (default `auto`), in the document worker on both profiles, Tesseract the fallback. Real scans measured opt-in through the real intake, OCR and search (`tests/test_document_real_scans.py`, manifest outside the repo, floors per engine): the first (a 300 dpi copier scan of an Arabic booklet, 5 pages) found and fixed the OCR TSV quote defect and ruled-table loss. Open: `ar-ocr-table` (one Arabic word) and `en-ocr-degraded` (a decimal point) with either engine; Arabic decimal/date separators; more real scans (handwriting, forms, merged cells, other producers) |
 | Q03 | Sustained operation is measured on supported profiles | Actual 48–72 h mixed-load soak with restarts/faults; p95/p99/throughput/resource evidence | Open |
 | Q04 | Independent review supports the claimed industrial security profile | External review with scope/results/remediation evidence; never substitute self-review | Open |
 | Q05 | Product, ops and certification documentation matches verified behavior | Updated architecture/security/ops/gates and regression checks, explicit limitations | Done 2026-10-13 — the full documentation review ran (5 reviewers, every Documents page); its corrections and the 12 code defects it found (DOC-A1..A13, below) landed with gates; the docs gates pass |
@@ -509,3 +509,95 @@ run of each fresh process and 1.03-1.15 afterwards; after the fix the first
 runs used 1.17-1.30. A memory hog allocated 768 MiB under a 256 MiB job with
 the old launch and a late assignment; it is refused now.
 
+## 2026-10-15: Arabic and Arabic-Indic digits under OCR (Q02)
+
+The owner approved the downloads and asked for the best engine, replacing the
+dependency if needed. Every candidate ran CPU-only through Kazma's own OCR
+pipeline (`apply_ocr` and the ruled-table pass), wrapped as an OCR provider,
+in a separate virtual environment (`C:\Users\balfa\kazma-soak\ocr-eval`,
+outside the repository: scripts and JSON results, no page text). Three
+measurements: the corpus v4 OCR cases (`fidelity.measure_case`); a digit set
+of generated text (12 fonts -- IBM Plex Sans Arabic, Amiri, Noto Naskh, Kufi
+and Sans Arabic, Arial, Tahoma, Times New Roman, Simplified Arabic,
+Traditional Arabic, Sakkal Majalla, Arabic Typesetting -- each 10 Arabic lines
+with one number: three in four Arabic-Indic, a fifth decimals, a fifth dates;
+clean at 300 dpi and as a poor 200 dpi scan, tilted, blurred, speckled and
+JPEG-compressed); and the real scan's five measured pages
+(`tests/test_document_real_scans.py`'s checks). Four threads; the peak is the
+whole process tree's resident memory.
+
+| Engine | `ar-ocr` tokens / numbers / CER | `ar-ocr-table` tokens / numbers / cells / CER | `en-ocr-degraded` numbers | `en-ocr`, `en-ocr-table` | Digit set, numbers exact clean / scan | s per `ar-ocr` page | Peak MiB |
+|---|---|---|---|---|---|---|---|
+| Tesseract 5 `ara` (installed, fast) | 0.66 / 0.33 / 0.242 | 0.66 / 0.14 / 0.56 / 0.247 | 0.75 | both clean | 0.28 / 0.28 | 0.5 | 216 |
+| Tesseract `script/Arabic` (installed, fast) | 0.62 / 0.33 / 0.242 | 0.62 / 0.14 / 0.56 / 0.247 | 0.75 | both clean | 0.39 / 0.32 | 0.5 | 222 |
+| tessdata_best `ara` | 0.66 / 0.33 / 0.239 | 0.66 / 0.14 / 0.56 / 0.236 | 0.75 | both clean | 0.27 / 0.27 | 0.6 | 215 |
+| tessdata_best `script/Arabic` | 0.66 / 0.33 / 0.212 | 0.66 / 0.14 / 0.56 / 0.210 | 0.75 | both clean | 0.39 / 0.34 | 0.6 | 231 |
+| PaddleOCR PP-OCRv5 Arabic (RapidOCR 3.10, ONNX) | 0.84 / 0.00 / 0.106 | 0.85 / 0.14 / 0.67 / 0.125 | 1.00 | 0.99 / CER 0.016; 1.00 / 0.010 | 0.12 / 0.03 | 1.6 | 652 |
+| EasyOCR 1.7.2 (`ar`+`en`, CRAFT, PyTorch) | 0.96 / 1.00 / 0.014 | 0.97 / 0.57 / 0.67 / 0.017 | 0.75 | both clean | 0.62 / 0.59 | 16.0 | 4,358 |
+| **Kazma neural engine** (adopted) | **1.00 / 1.00 / 0.000** | **0.98 / 1.00 / 1.00 / 0.003** | 0.75 | both clean | **0.65 / 0.63** | 4.8 | 917 |
+
+- **Not adopted, measured:** native PaddleOCR 3.7 (PP-OCRv5 server detection,
+  PaddlePaddle): 167-244 s a page and a 43.8 GB peak -- out on cost alone (its
+  Arabic numbers in the harness were invalid, a harness defect; the same
+  models were measured through RapidOCR's ONNX conversion instead). Tesseract
+  in every model and segmentation: no Arabic-Indic digits in any of the 12
+  fonts. PaddleOCR alone: the best letters of the candidates, but its Arabic
+  recognizer has no Arabic-Indic digits (0.00 on `ar-ocr`'s numbers). EasyOCR
+  alone: the digits, but CRAFT detection costs 12 s and 4.3 GB a page.
+- **Not measured:** Surya (GPL-3.0 code, model weights under a license that
+  restricts commercial use: excluded by license); vision-language OCR models
+  (QARI-OCR and the like: billions of parameters, far outside the worker's
+  one core and 1 GiB).
+- **The adopted engine** combines what measured best, all Apache-2.0 models on
+  ONNX Runtime (MIT): PP-OCRv5 mobile detection (RapidAI's ONNX), EasyOCR's
+  `arabic_g1` recognizer (the only one that read Arabic-Indic digits) on each
+  line, `english_g2` on lines without Arabic, and a vote on letters with
+  PaddleOCR's PP-OCRv5 Arabic recognizer and Tesseract's words (two agreeing,
+  or PaddleOCR at >= 0.9 alone; a number is always EasyOCR's). EasyOCR's two
+  PyTorch recognizers are converted to ONNX at install, checked against
+  PyTorch; no PyTorch at run time. Runtime packages: the `ocr` extra
+  (onnxruntime, opencv-python-headless, pyclipper, numpy; all permissive).
+  Models: about 240 MB (`scripts/ocr_models.py install`, every source pinned
+  by URL, size and SHA-256); the worker image grows from 1.27 to 2.16 GB.
+- **In the real worker** (one core, 1 GiB, `worker_memory_mb` 1024):
+  `ar-ocr` 17.7 s (Tesseract 5.5 s), `ar-ocr-table` 37.4 s (6.2 s), English
+  pages 4.7-5.7 s (2.2-3.3 s); peak inside the 1 GiB limit (~800 MB). Near the
+  worker's time limit the remaining pages go to Tesseract, said on the
+  document.
+- **Real scan** (5 measured pages, both engines through the real intake with
+  a long worker time limit; every page read by the engine asked for):
+
+| Page | Check | Tesseract | Neural |
+|---|---|---|---|
+| 1 (cover) | terms | 0.30 | 0.90 |
+| 2 (contents table) | terms / page numbers / rows' numbers on one line / complete rows | 0.57 / 0.91 / 0.91 / 0.56 | 0.86 / 1.00 / 1.00 / 0.75 |
+| 3 (lesson, tables) | terms / numbers (1) | 0.85 / 1.00 | 0.80 / 0.00 |
+| 30 | terms / numbers | 1.00 / 0.00 | 0.94 / 0.50 |
+| 48 | terms / numbers / symbols | 0.86 / 0.67 / 0.80 | 0.71 / 0.83 / 0.60 |
+
+  The six searches land on the right page with either engine. The neural
+  engine wins on the cover and the contents table and on the numbers of pages
+  30 and 48, and loses terms on three text pages (a ligature "الم" read short)
+  and page 3's one number. Floors per engine, each 0.02 under its measurement,
+  are in the manifest (`floors_by_engine`, outside the repository).
+- **Corpus v4 locked per engine** (`tests/fixtures/documents/fidelity_thresholds.json`,
+  `ocr_engines`): neural qualified `ar-ocr`, `en-ocr`, `en-ocr-table`;
+  Tesseract `en-ocr`, `en-ocr-table`. Not qualified, with reasons in the file:
+  neural `ar-ocr-table` ("ريالاً" read with ب for ي; every number and cell
+  right) and `en-ocr-degraded` (3.75 read 3,75); Tesseract `ar-ocr`,
+  `ar-ocr-table` (no Arabic-Indic digits, lines dropped) and
+  `en-ocr-degraded` (3:75).
+- **Integration**: `documents.ocr.engine` (`auto` default, `neural`,
+  `tesseract`), validated on every write and shown in Settings -> Documents in
+  English and Arabic, with whether the neural engine is ready and why not.
+  The engine runs only in the document worker; the container image carries it
+  and its models (`ocr-models` build stage, hash-locked), and its capability
+  report names both engines. Gates: `tests/test_document_ocr_neural.py` (each
+  rule with its control), `tests/test_document_fidelity.py` (per engine),
+  `tests/test_document_real_scans.py` (per engine, opt-in),
+  `tests/test_document_worker_container_docker.py` (the image reads
+  Arabic-Indic digits; control: Tesseract in the same image does not).
+- **Open:** Arabic decimals and dates with the Arabic separators (`arabic_g1`
+  has no "٫" and rarely reads "/" between Arabic-Indic digits); the "الم"
+  ligature on real scans; a second real scan; speed (one core) -- the
+  per-document time limit decides how many pages stay on the neural engine.

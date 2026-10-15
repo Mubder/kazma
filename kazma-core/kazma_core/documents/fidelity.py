@@ -52,6 +52,17 @@ cell by cell (``ocr/tables.py``). The OCR reference text is now the whole
 page -- the sections, then the table's rows -- since a page's table is text
 the page shows.
 
+Version 4 (2026-10-15, measuring OCR engines for Arabic): the reference is
+ALL the text the page shows, so it also holds the page furniture Kazma's
+renderer drew on it -- the brand footer the Arabic route (DOCX through
+LibreOffice) prints on every page. Version 3 left it out, so an OCR that
+read the page perfectly scored CER 0.114 / WER 0.091 on ``ar-ocr`` (0.093 /
+0.075 with the table): the Arabic cases could not reach the release target
+whatever the engine. Which furniture a page carries is read from the
+rendered PDF's own text layer (``_drawn_furniture``), never assumed per
+language. The ``*-ocr`` cases are measured with each OCR engine Kazma can
+run (``documents.ocr.engine``), each against its own floors.
+
 What this is NOT: a corpus of real-world documents. Paper scans,
 handwriting, forms, nested or merged-cell tables and documents from
 producers other than Kazma's engines and MuPDF are not represented, and a
@@ -70,16 +81,19 @@ from typing import Any
 __all__ = [
     "CORPUS_VERSION",
     "ERROR_RATES",
+    "OCR_ENGINES",
     "RELEASE_TARGETS",
     "FidelityCase",
     "corpus",
+    "engine_available",
+    "is_ocr_case",
     "lock_thresholds",
     "measure_case",
     "meets",
     "run_corpus",
 ]
 
-CORPUS_VERSION = "2026-10-13.3"
+CORPUS_VERSION = "2026-10-15.4"
 
 #: Metrics where lower is better (a ceiling, not a floor).
 ERROR_RATES = frozenset({"cer", "wer"})
@@ -513,6 +527,30 @@ def _alignment(case: FidelityCase, source: Path) -> float | None:
     return round(correct / judged, 4) if judged else 0.0
 
 
+def _drawn_furniture(case: FidelityCase, source: Path) -> list[str]:
+    """The page chrome (brand, short brand, page number) Kazma's renderer drew
+    on the OCR'd page, as its rendered PDF's own text layer shows it.
+
+    A line counts only when it IS one of the chrome strings: text the page
+    shows, so part of the OCR reference (version 4)."""
+    pdf = source.parent / f"{case.case_id}.pdf"
+    if case.fmt != "ocr" or not pdf.is_file():
+        return []
+    import pymupdf
+
+    from .arabic import fold_for_search
+    from .parsers.pdf_rtl import logical_line, page_glyph_lines
+    from .style_theme import format_page_number, localized_chrome
+
+    with pymupdf.open(pdf) as doc:
+        shown = {" ".join(fold_for_search(logical_line(line)).split()) for line in page_glyph_lines(doc[0])}
+    chrome = localized_chrome(rtl=case.language == "ar")
+    candidates = [chrome["brand"], chrome["brand_short"]] + [
+        chrome["page_fmt"].format(n=format_page_number(1, numerals=numerals)) for numerals in ("latn", "arab")
+    ]
+    return [text for text in dict.fromkeys(candidates) if " ".join(fold_for_search(text).split()) in shown]
+
+
 def measure_case(case: FidelityCase, ir: Any, source: Path) -> dict[str, Any]:
     text, table_text = _ir_text(ir)
     doc_tokens = _tokens(text)
@@ -550,6 +588,7 @@ def measure_case(case: FidelityCase, ir: Any, source: Path) -> dict[str, Any]:
         page = list(case.segments())
         if case.table is not None:
             page += [" ".join(row) for row in (case.table[0], *case.table[1])]
+        page += _drawn_furniture(case, source)
         truth = " ".join(_tokens("\n".join(page)))
         got = " ".join(doc_tokens)
         result["cer"] = round(_edit_distance(got, truth) / max(1, len(truth)), 4)
@@ -557,20 +596,55 @@ def measure_case(case: FidelityCase, ir: Any, source: Path) -> dict[str, Any]:
     return result
 
 
+#: The OCR engines the ``*-ocr`` cases are measured with, each against its
+#: own floors (``documents.ocr.engine``; ``ocr/pipeline.select_ocr_provider``).
+OCR_ENGINES: tuple[str, ...] = ("tesseract", "neural")
+
+
+def is_ocr_case(case_id: str) -> bool:
+    return case_id.split("-")[1] == "ocr"
+
+
+def engine_available(engine: str, languages: tuple[str, ...] = ("ara", "eng")) -> str | None:
+    """None when ``engine`` reads ``languages`` here; else why not."""
+    from .ocr.pipeline import get_ocr_health
+
+    health = get_ocr_health(languages, engine=engine)
+    if health.selected_engine != engine:
+        reports = dict(health.engines)
+        report = reports.get(engine)
+        return (report.health.reason if report else None) or f"the {engine} OCR engine is not installed"
+    if str(getattr(health.readiness, "value", health.readiness)) == "unavailable":
+        return health.reason or f"the {engine} OCR engine is not ready"
+    return None
+
+
 def run_corpus(
     work_dir: Path, *, service: Any = None, cases: list[FidelityCase] | None = None,
+    ocr_engine: str | None = None,
 ) -> dict[str, Any]:
-    """Build, parse and measure every case; the report names what could not run."""
+    """Build, parse and measure every case; the report names what could not run.
+
+    ``ocr_engine`` reads the OCR cases with that engine (the service's live
+    configuration otherwise); each OCR case's report names the engine that
+    actually read it (``ocr_engine``), so a fallback is never mistaken for it."""
+    from dataclasses import replace as replace_config
+
     from .service import DocumentService
 
-    svc = service or DocumentService()
+    if service is None:
+        service = DocumentService()
+        if ocr_engine is not None:
+            service = DocumentService(config=replace_config(service.config, ocr_engine=ocr_engine))
     results: dict[str, Any] = {}
     for case in cases or corpus():
         try:
             source = build_case(case, Path(work_dir) / "corpus")
-            ir = svc.parse_ingested_blob(source, force_ocr=case.fmt == "ocr",
-                                         ocr_language="ara" if case.language == "ar" else "eng")
+            ir = service.parse_ingested_blob(source, force_ocr=case.fmt == "ocr",
+                                             ocr_language="ara" if case.language == "ar" else "eng")
             results[case.case_id] = {"metrics": measure_case(case, ir, source), "source": source.name}
+            if case.fmt == "ocr":
+                results[case.case_id]["ocr_engine"] = (ir.metadata.get("ocr") or {}).get("engine")
         except (OSError, RuntimeError, ValueError, ImportError) as exc:  # one case's failure is reported, never hidden
             results[case.case_id] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
     return {"corpus_version": CORPUS_VERSION, "cases": results}
@@ -590,48 +664,96 @@ def meets(metrics: dict[str, Any], bounds: dict[str, float]) -> list[str]:
     return misses
 
 
-def lock_thresholds(report: dict[str, Any], previous: dict[str, Any] | None) -> dict[str, Any]:
-    """Regression floors from a measurement; never lowered within a corpus version.
-
-    Raises when a case could not be measured, or when a floor would drop
-    while the corpus version is unchanged (a regression is fixed, not locked
-    in). ``qualified`` names the cases that meet ``RELEASE_TARGETS``.
-    """
-    errors = {case: entry["error"] for case, entry in report["cases"].items() if "error" in entry}
-    if errors:
-        raise ValueError(f"cases could not be measured: {errors}")
-    same_version = bool(previous) and previous.get("corpus_version") == report["corpus_version"]
+def _lock_cases(
+    cases: dict[str, Any], old_floors: dict[str, Any] | None, *, label: str = "",
+) -> tuple[dict[str, dict[str, float]], list[str]]:
+    """Floors and the qualified list for one set of measured cases; a floor
+    is never lowered against ``old_floors`` (the same corpus version)."""
     floors: dict[str, dict[str, float]] = {}
-    for case_id, entry in sorted(report["cases"].items()):
+    for case_id, entry in sorted(cases.items()):
         metrics = {k: v for k, v in entry["metrics"].items() if v is not None}
-        ocr = case_id.split("-")[1] == "ocr"
+        ocr = is_ocr_case(case_id)
         floor = {}
         for name, value in metrics.items():
             margin = _OCR_MARGIN if ocr and name in _RECOGNITION else 0.0
             floor[name] = round(min(1.0, value + margin) if name in ERROR_RATES else max(0.0, value - margin), 4)
-        if same_version:
-            old = previous["thresholds"].get(case_id, {})
+        if old_floors is not None:
+            old = old_floors.get(case_id, {})
             for name, value in floor.items():
                 before = old.get(name)
                 if before is None:
                     continue
                 worse = value > before if name in ERROR_RATES else value < before
                 if worse:
-                    raise ValueError(f"{case_id}.{name} would loosen {before} -> {value}; fix the regression")
+                    raise ValueError(f"{label}{case_id}.{name} would loosen {before} -> {value}; fix the regression")
         floors[case_id] = floor
-    qualified = sorted(
-        case_id for case_id, entry in report["cases"].items() if not meets(entry["metrics"], RELEASE_TARGETS)
-    )
-    # What the file says by hand -- why a case is not qualified, the machine it
-    # was measured on -- is kept: a re-lock used to drop it silently.
+    qualified = sorted(case_id for case_id, entry in cases.items() if not meets(entry["metrics"], RELEASE_TARGETS))
+    return floors, qualified
+
+
+def lock_thresholds(report: dict[str, Any], previous: dict[str, Any] | None) -> dict[str, Any]:
+    """Regression floors from a measurement; never lowered within a corpus version.
+
+    ``report["cases"]`` holds the cases that read no page image; the OCR
+    cases are under ``report["ocr_engines"][engine]["cases"]``, one set per
+    engine measured. An engine not measured in this run keeps its floors
+    (same corpus version) -- a machine without the neural engine cannot
+    erase its floors. Raises when a case could not be measured, when an OCR
+    case was read by another engine than the one it is filed under (a
+    fallback), or when a floor would drop while the corpus version is
+    unchanged (a regression is fixed, not locked in). ``qualified`` names the
+    cases that meet ``RELEASE_TARGETS``.
+    """
+    sections = report.get("ocr_engines") or {}
+    every = dict(report["cases"])
+    for engine, section in sections.items():
+        every.update({f"{engine}:{case}": entry for case, entry in section["cases"].items()})
+    errors = {case: entry["error"] for case, entry in every.items() if "error" in entry}
+    if errors:
+        raise ValueError(f"cases could not be measured: {errors}")
+    stray = sorted(case for case in report["cases"] if is_ocr_case(case))
+    if stray:
+        raise ValueError(f"OCR cases must be measured per engine (ocr_engines), not at the top: {stray}")
+    for engine, section in sections.items():
+        read_by = {case: entry.get("ocr_engine") for case, entry in section["cases"].items()}
+        wrong = {case: used for case, used in read_by.items() if used != engine}
+        if wrong:
+            raise ValueError(f"{engine}: cases read by another engine (a fallback): {wrong}")
+    same_version = bool(previous) and previous.get("corpus_version") == report["corpus_version"]
     kept = previous or {}
-    locked = {
+    floors, qualified = _lock_cases(report["cases"], kept.get("thresholds") if same_version else None)
+    locked: dict[str, Any] = {
         "corpus_version": report["corpus_version"],
         "release_targets": RELEASE_TARGETS,
         "qualified": qualified,
         "thresholds": floors,
+        # What the file says by hand -- why a case is not qualified, the
+        # machine it was measured on -- is kept: a re-lock used to drop it.
         "notes": {case: note for case, note in (kept.get("notes") or {}).items() if case in floors},
+        "ocr_engines": {},
     }
     if kept.get("measured_on"):
         locked["measured_on"] = kept["measured_on"]
+    old_engines = kept.get("ocr_engines") or {}
+    for engine in OCR_ENGINES:
+        old = old_engines.get(engine) or {}
+        section = sections.get(engine)
+        if section is None:
+            if same_version and old:
+                locked["ocr_engines"][engine] = old
+            continue
+        engine_floors, engine_qualified = _lock_cases(
+            section["cases"], old.get("thresholds") if same_version else None, label=f"{engine}: ")
+        # Version 3 kept Tesseract's OCR notes at the top: they carry over once.
+        notes = old.get("notes") or ({
+            case: note for case, note in (kept.get("notes") or {}).items() if is_ocr_case(case)
+        } if engine == "tesseract" else {})
+        entry: dict[str, Any] = {
+            "qualified": engine_qualified,
+            "thresholds": engine_floors,
+            "notes": {case: note for case, note in notes.items() if case in engine_floors},
+        }
+        if old.get("measured_on"):
+            entry["measured_on"] = old["measured_on"]
+        locked["ocr_engines"][engine] = entry
     return locked

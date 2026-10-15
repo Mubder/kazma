@@ -2752,6 +2752,13 @@ image reports a fingerprint of its document code: readiness says
 image was built from other code than Kazma runs (rebuild it and restart the
 broker). The image carries no Docling and no httpx: local salvage is not part
 of the container profile, and remote parsing stays in the Kazma process (K).
+It carries the neural OCR engine (G4) and its models: the `ocr-models` build
+stage (hash-locked `deploy/document-worker/ocr-models.txt`, CPU PyTorch) runs
+`scripts/ocr_models.py install`, only `/models` reaches the final image
+(`KAZMA_OCR_MODEL_DIR=/opt/kazma/ocr-models`, read-only, verified at build),
+and `parser_container_request` points the parse at that copy -- the host's
+model directory is never sent. The capability report names both OCR engines
+(`ocr.engines`); an older image's report without them reads neural as absent.
 `security.execution.container_required` refuses the `process` profile
 (`worker_isolation_required`; unreadable policy refuses too) -- checked where
 Kazma starts a worker, never inside one. Gates:
@@ -2898,13 +2905,21 @@ words come back together (`_SPAN_SLACK`): words in order but interleaved with
 another column are not. Alignment judges every line that shows its side
 against its segment's direction by `arabic.direction_of`, the engines' own
 per-block rule. Version 3 adds `*-ocr-table`, an OCR page with its ruled
-table; the OCR reference text is the whole page, table included. Not
-qualified, each with its reason in the thresholds file: `ar-ocr` and
-`ar-ocr-table` (Tesseract does not read Arabic-Indic digits, and its layout
-analysis drops lines of the Arabic page) and `en-ocr-degraded` (3.75 read as
-3:75). A re-lock keeps the file's `notes` and `measured_on`. Certification
-runs the corpus and reports the actual isolation profile and backends (F10).
-Gate: `tests/test_document_fidelity.py`.
+table; the OCR reference text is the whole page, table included. Version 4
+(2026-10-15) puts the page furniture the renderer drew (the Arabic route's
+brand footer, read from the rendered PDF: `_drawn_furniture`) into the OCR
+reference: without it a perfect reading scored CER 0.114 on `ar-ocr`. The OCR
+cases are measured per engine (`fidelity.OCR_ENGINES`: `tesseract`,
+`neural`), each with its own floors and `qualified` list under
+`ocr_engines.<engine>`; a case another engine read (a fallback) fails the
+test and is refused by `--lock`, and a lock keeps the floors of an engine not
+installed where it runs. Not qualified, each with its reason in the
+thresholds file: with Tesseract `ar-ocr`, `ar-ocr-table` (no Arabic-Indic
+digits, lines dropped) and `en-ocr-degraded` (3.75 read as 3:75); with the
+neural engine `ar-ocr-table` (one word misread) and `en-ocr-degraded` (3,75).
+A re-lock keeps the file's `notes` and `measured_on`. Certification runs the
+corpus and reports the actual isolation profile and backends (F10). Gate:
+`tests/test_document_fidelity.py`.
 
 **G3. Scanned pages: tables cell by cell; real scans measured opt-in**
 (2026-10-13, from a real 300 dpi copier scan of an Arabic booklet).
@@ -2927,14 +2942,57 @@ table pass for that page (`documents.ocr.tables`, default on, Settings →
 Documents). Measured on the scan: a contents table's numbers 22 % -> 91 %,
 its rows kept together 3 % -> 56 % complete, 6 of 6 searches on the right
 page. Tesseract did not read Arabic-Indic digits in any font measured (fast or
-best `ara` model, any segmentation mode); a different engine is the owner's
-decision. Gates: `tests/test_document_ocr_tables.py`,
+best `ara` model, `script/Arabic` fast or best, any segmentation mode): the
+neural engine (G4) does. Gates: `tests/test_document_ocr_tables.py`,
 `tests/test_document_ocr_phase5.py` (the quote with the old quoting as
 control), `test_ocr_without_the_table_pass_fails_the_floor`, and the opt-in
 `tests/test_document_real_scans.py` (`KAZMA_TEST_REAL_SCANS_MANIFEST`: a
 manifest outside the repository names each scan by path and SHA-256, the
 pages, the numbers, symbols and single terms each holds -- never page text --
-the searches and the floors; without it the test skips).
+the searches and the floors; without it the test skips). Since 2026-10-15
+each engine is held to its own floors there (`floors_by_engine`), with a long
+worker time limit so every page stays with the engine asked for.
+
+**G4. The neural OCR engine** (2026-10-15, Q02: Arabic and Arabic-Indic
+digits). `documents.ocr.engine`: `auto` (default; the neural engine when its
+packages and models are installed where documents are parsed, else
+Tesseract), `neural` (the same, with a document warning when Tesseract read
+it), `tesseract`. Validated on every write (`settings_validation`, and the
+Documents settings route asks it): an engine the policy cannot read would
+stop every document job. `ocr/pipeline.select_ocr_provider` is the one
+choice. `ocr/neural.py` runs four models on ONNX Runtime in the document
+worker, never in the Kazma process: PP-OCRv5 detection; boxes of one line
+joined (gap <= 1 line height: per-word crops gave stray characters), cut to
+their ink; EasyOCR `arabic_g1` reads each line (`english_g2` a line without
+Arabic, and English-only pages); each word without a digit is voted on with
+PaddleOCR's PP-OCRv5 Arabic recognizer and Tesseract's words on the page --
+the two agreeing, or PaddleOCR at >= 0.9 alone, replace EasyOCR's word; a
+number is always EasyOCR's. A drawn line goes to logical order by
+`parsers.pdf_rtl.logical_line`, never a recognizer's `get_display` (which
+leaves "30-09-2026" reversed). The page pass skips the lines inside ruled
+tables (`skips_table_regions`; `tables.table_regions` is `read_tables`' own
+grid finder) and the page is read again in full when a table was not read
+cell by cell. Near the worker's time limit (`apply_ocr(deadline=)`, 0.8 of
+`documents.workers.timeout_seconds` from the parser worker's start) the
+remaining pages go to Tesseract, said on the document (`tesseract_from_page`):
+one core makes it ~15 s an Arabic text page, 30-45 s with ruled tables. The
+digits-only cell pass keeps an English reading only at EasyOCR's own score >=
+0.75 (an English reading of an Arabic-Indic number is confident by character).
+Models (`ocr/neural_models.py`): every source pinned by URL, size and SHA-256
+(Apache-2.0), installed by `scripts/ocr_models.py install` (EasyOCR's PyTorch
+weights converted to ONNX and checked against PyTorch; without torch it
+converts in a `uv run --isolated` environment) into `KAZMA_OCR_MODEL_DIR` or
+`<data dir>/models/ocr` (`store_registry`: `models`, rebuilt, not backed up)
+with a `manifest.json`; the worker uses them only when every file matches it.
+The service tells the worker where they are (its environment is scrubbed).
+Runtime packages are the `ocr` extra (onnxruntime, opencv-python-headless,
+pyclipper, numpy). Measured against Tesseract, PaddleOCR (native and ONNX),
+EasyOCR alone, tessdata_best and the 2-reader combinations:
+`docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md` (Q02). Gates:
+`tests/test_document_ocr_neural.py` (each rule with its control; the
+end-to-end readings need the models and skip without them),
+`tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
+the image `test_the_neural_ocr_engine_reads_inside_the_container`.
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
 `documents/arabic.py` is the ONLY home for Arabic text policy. Do not

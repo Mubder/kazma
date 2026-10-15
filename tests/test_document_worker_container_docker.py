@@ -443,6 +443,42 @@ def test_the_image_reports_its_own_engines(container_profile) -> None:
     assert worker_container.isolation_report()["image_code_matches"] is True
 
 
+def test_the_neural_ocr_engine_reads_inside_the_container(container_profile, tmp_path: Path) -> None:
+    """2026-10-15 (Q02): the image carries the neural OCR engine and its
+    models (no network at run time) and reads an Arabic-Indic number with it.
+    Negative control: the same page with documents.ocr.engine: tesseract."""
+    import pymupdf
+
+    report = container_profile.capabilities
+    assert report["ocr"]["engines"]["neural"]["readiness"] == "ready", report["ocr"]["engines"]
+    fonts = Path(worker_container.__file__).resolve().parent / "assets" / "fonts"
+    text = "بلغت الإيرادات لهذا الفصل ١٢٣٤٥٦٧ ريالا في جميع المناطق"
+    css = "@font-face {font-family: F; src: url(IBMPlexSansArabic-Regular.ttf);} body {font-family: F; font-size: 14pt;}"
+    story = pymupdf.Story(html=f'<body dir="rtl"><p dir="rtl">{text}</p></body>', user_css=css,
+                          archive=pymupdf.Archive(str(fonts)))
+    pdf = tmp_path / "line.pdf"
+    writer = pymupdf.DocumentWriter(str(pdf))
+    device = writer.begin_page(pymupdf.Rect(0, 0, 595, 120))
+    story.place(pymupdf.Rect(30, 30, 565, 100))
+    story.draw(device)
+    writer.end_page()
+    writer.close()
+    image = tmp_path / "line.png"
+    with pymupdf.open(pdf) as doc:
+        doc[0].get_pixmap(dpi=300).save(image)
+
+    def read(engine: str):
+        service = DocumentService(config=replace(_config(tmp_path / engine), ocr_enabled=True, ocr_engine=engine))
+        return service.parse_ingested_blob(image, force_ocr=True, ocr_language="ara")
+
+    neural = read("neural")
+    assert neural.metadata["ocr"]["engine"] == "neural"
+    assert "١٢٣٤٥٦٧" in " ".join(text for _, text in _texts(neural))
+    tesseract = read("tesseract")
+    assert tesseract.metadata["ocr"]["engine"] == "tesseract"
+    assert "١٢٣٤٥٦٧" not in " ".join(text for _, text in _texts(tesseract))
+
+
 async def test_readiness_follows_the_image_not_this_host(container_profile, tmp_path: Path, monkeypatch) -> None:
     from kazma_core.documents.ocr import get_ocr_health
     from kazma_core.documents.renderers import get_renderer_registry

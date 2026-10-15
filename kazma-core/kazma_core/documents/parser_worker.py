@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from dataclasses import fields
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,7 @@ def _config(value: object) -> DocumentConfig:
 
 
 def execute(request_path: Path, result_path: Path) -> int:
+    started = time.monotonic()
     try:
         request = _load_request(request_path)
         source = Path(str(request["source_path"])).resolve(strict=True)
@@ -118,6 +120,9 @@ def execute(request_path: Path, result_path: Path) -> int:
         language = ocr.get("language")
         if language is not None and not isinstance(language, str):
             raise ValueError("invalid OCR language")
+        models = ocr.get("models")
+        if models is not None and not isinstance(models, str):
+            raise ValueError("invalid OCR model directory")
         if config.ocr_enabled or force_ocr:
             ir = apply_ocr(
                 source,
@@ -127,6 +132,10 @@ def execute(request_path: Path, result_path: Path) -> int:
                 language=language,
                 pages=ocr_pages,
                 work_dir=result_path.parent,
+                model_dir=Path(models) if models else None,
+                # The parent ends this worker at worker_timeout_seconds:
+                # OCR leaves a fifth of it for the rest of the parse.
+                deadline=started + 0.8 * config.worker_timeout_seconds,
             )
         # Local third-party parser code shares the same process-tree resource
         # and wall-clock boundary. The credentialed remote broker stays in the

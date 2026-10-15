@@ -318,6 +318,10 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
         "bundle"),
     "code-index": DataDirEntry(
         "codebase search indexes", "rebuilt", reason="re-indexed from the workspace"),
+    "models": DataDirEntry(
+        "the neural OCR engine's models (documents.ocr.engine)", "rebuilt",
+        reason="re-installed from their pinned sources with python scripts/ocr_models.py install; "
+               "230 MB of downloads, not state"),
     "vuln_cache.json": DataDirEntry(
         "the retired cache of vulnerability lookups", "legacy",
         reason="answers were kept forever and hid new advisories; the scanner asks OSV "

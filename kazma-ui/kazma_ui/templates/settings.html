@@ -2586,6 +2586,15 @@
                 <label><input type="checkbox" x-model="documents.ocr_tables"> {{ t('settings.docs.ocr_tables') }}</label>
             </div>
             <div class="form-group">
+                <label>{{ t('settings.docs.ocr_engine') }}</label>
+                <select class="form-select" x-model="documents.ocr_engine">
+                    <option value="auto">{{ t('settings.docs.ocr_engine_auto') }}</option>
+                    <option value="neural">{{ t('settings.docs.ocr_engine_neural') }}</option>
+                    <option value="tesseract">{{ t('settings.docs.ocr_engine_tesseract') }}</option>
+                </select>
+                <div class="form-hint" x-text="documents.ocr_engine_health && documents.ocr_engine_health.neural_ready ? t('settings.docs.ocr_engine_neural_ready') : t('settings.docs.ocr_engine_neural_missing')"></div>
+            </div>
+            <div class="form-group">
                 <label><input type="checkbox" x-model="documents.gc_enabled"> {{ t('settings.docs.gc_enabled') }}</label>
             </div>
             <div class="form-group">

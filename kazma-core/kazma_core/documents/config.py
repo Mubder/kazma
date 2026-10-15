@@ -87,6 +87,11 @@ class DocumentConfig:
     ocr_output_limit_bytes: int = 8 * _MIB
     #: Read ruled tables on scanned pages cell by cell (``ocr/tables.py``).
     ocr_tables: bool = True
+    #: Which OCR engine reads a page (``ocr/pipeline.select_ocr_provider``):
+    #: ``auto`` the neural engine (``ocr/neural.py``) when its packages and
+    #: models are installed, else Tesseract; ``neural`` the same, with a
+    #: warning on the document when Tesseract had to read it; ``tesseract``.
+    ocr_engine: str = "auto"
     indexing_enabled: bool = True
     indexing_chunk_tokens: int = 800
     indexing_overlap_tokens: int = 120
@@ -229,6 +234,19 @@ def _unit_float(value: Any) -> float:
     if not 0.0 <= parsed <= 1.0:
         raise ValueError("expected a value between 0 and 1")
     return parsed
+
+
+OCR_ENGINES: tuple[str, ...] = ("auto", "neural", "tesseract")
+#: The setting that picks the OCR engine (settings_validation checks every write).
+OCR_ENGINE_KEY = "documents.ocr.engine"
+
+
+def ocr_engine_choice(value: Any) -> str:
+    """``documents.ocr.engine``: one of :data:`OCR_ENGINES`."""
+    normalized = str(value).strip().lower() if isinstance(value, str) else ""
+    if normalized not in OCR_ENGINES:
+        raise ValueError(f"expected one of: {', '.join(OCR_ENGINES)}")
+    return normalized
 
 
 def _ocr_dpi(value: Any) -> int:
@@ -576,6 +594,7 @@ def get_document_config(*, required: bool = False) -> DocumentConfig:
                 _positive_int,
             ),
             ocr_tables=_read(store, "documents.ocr.tables", defaults.ocr_tables, _coerce_bool),
+            ocr_engine=_read(store, OCR_ENGINE_KEY, defaults.ocr_engine, ocr_engine_choice),
             ocr_output_limit_bytes=_read(
                 store,
                 "documents.ocr.output_limit_bytes",
