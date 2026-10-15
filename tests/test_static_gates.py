@@ -1074,6 +1074,10 @@ _LOOP_STALL_HELPERS = frozenset({
     # deletion of text (a VACUUM under the client's gate), what a collection
     # holds (catalog reads) and the start of Chroma's system.
     "compact_vectors", "compact_catalog", "holds_text", "only_model", "start_system",
+    # KB-Q01's multi-day soak (2026-10-15): an FTS5 merge checked by the shape
+    # it left and rebuilt when it kept deleted words, and the keyword-index
+    # purge a killed delete left due (finished at open and by the pass).
+    "purge_deleted_rows", "drop_deleted_rows", "finish_pending_purge",
 })
 
 

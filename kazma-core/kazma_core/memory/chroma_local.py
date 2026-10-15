@@ -69,6 +69,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from kazma_core.db.fts5_purge import purge_deleted_rows
+
 __all__ = [
     "CATALOG",
     "FILES_PER_INDEX",
@@ -438,7 +440,9 @@ def compact_catalog(persist_dir: str | Path, *, busy_timeout_s: float = 10.0) ->
     """Rewrite ``chroma.sqlite3`` so no deleted row stays readable in it.
 
     The full-text index is merged first (``optimize``: FTS5 keeps a deleted
-    row's terms in its older segments until a merge reaches them), then the
+    row's terms in its older segments until a merge reaches them; rebuilt
+    when the merge could not drop them,
+    :func:`kazma_core.db.fts5_purge.purge_deleted_rows`), then the
     file is rebuilt from its live rows (``VACUUM``: free pages and the free
     space inside pages go, and the file shrinks). The caller makes sure no
     Chroma call runs meanwhile; another process's write waits up to
@@ -462,8 +466,9 @@ def compact_catalog(persist_dir: str | Path, *, busy_timeout_s: float = 10.0) ->
     try:
         if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'embedding_fulltext_search'").fetchone():
             try:
-                conn.execute("INSERT INTO embedding_fulltext_search(embedding_fulltext_search) "
-                             "VALUES ('optimize')")
+                # A merge into one segment, rebuilt when FTS5 could not drop
+                # every delete marker (KB-Q01: segments on one level below the top).
+                purge_deleted_rows(conn, "embedding_fulltext_search")
             except sqlite3.OperationalError as exc:  # no FTS5 or trigram here: the VACUUM still runs
                 logger.warning("[chroma] could not merge the vector catalog's full-text index: %s", exc)
         conn.execute("VACUUM")

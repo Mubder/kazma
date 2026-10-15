@@ -6,14 +6,20 @@ cascade delete.  Uses a temp DB so the real settings.db is untouched.
 from __future__ import annotations
 
 import os
+import random
+import sqlite3
 import sys
 import tempfile
+import types
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
 
 from kazma_core.stores.knowledge import KnowledgeStore, slugify_library_id
 
+from tests._fts5_segments import held_only_by_deleted_rows, segment_terms
 
 # ── Slugification ───────────────────────────────────────────────────────────
 
@@ -332,3 +338,232 @@ def test_without_the_purge_a_deleted_librarys_words_stay(monkeypatch):
         assert all(_held_in_index(s, w) for w in _GONE)  # ... and still on disk
     finally:
         s.close()
+
+
+# ── The purge is checked, and outlives the process (KB-Q01, 2026-10-15) ─────
+#
+# The multi-day soak stopped at cycle 76 of its first run: 8 planted words of
+# the library deleted in that cycle were held by delete markers in the
+# index's oldest segment after the purge. FTS5 drops a marker only when a
+# merge writes the oldest segment, judged by its place in the structure;
+# with every segment on one level below the top it merges them one level up
+# and keeps every marker (``tests/test_fts5_purge.py``). A store gets there
+# by itself: each full merge adds two levels, and a library larger than the
+# rest of the index pulls the older segment down beside its own.
+
+
+def _words(tag: str, n: int) -> list[str]:
+    rng = random.Random(tag)
+    return ["zq" + "".join(rng.choice("bcdfghjklmnpqrstvwx") for _ in range(8)) for _ in range(n)]
+
+
+def _publish(s: KnowledgeStore, lib: str, words: list[str]) -> None:
+    s.create_library(lib, lib)
+    s.publish_page(lib, f"https://{lib}.example.test/p0", [
+        {"content": f"Section {i} mentions {w} and other words alpha beta", "chunk_index": i}
+        for i, w in enumerate(words)])
+
+
+def _store_at_one_level(db: str) -> tuple[KnowledgeStore, list[str], list[str]]:
+    """A store whose next delete -- of library ``gone`` -- leaves every
+    keyword segment on one level below the top: (store, gone's words, the
+    kept library's words). Three small libraries deleted (three full merges)
+    under a 400-chunk library, then a 1,200-chunk one."""
+    from kazma_core.db.fts5_purge import _read_structure
+
+    s = KnowledgeStore(db_path=db)
+    kept = _words("kept", 400)
+    _publish(s, "kept", kept)
+    for n in range(3):
+        _publish(s, f"small{n}", _words(f"small{n}", 2))
+        s.delete_library(f"small{n}")
+    gone = _words("gone", 1200)
+    _publish(s, "gone", gone)
+    structure = _read_structure(s._get_conn(), "knowledge_chunks_fts")
+    populated = [n for n, level in enumerate(structure.levels) if level]
+    assert len(populated) == 1 and populated[0] < len(structure.levels) - 2, structure
+    return s, gone, kept
+
+
+def _left_on_disk(db: str) -> set[str]:
+    """Terms the keyword index's segments hold that no live row holds."""
+    conn = sqlite3.connect(f"file:{Path(db).as_posix()}?mode=ro", uri=True)
+    try:
+        return held_only_by_deleted_rows(conn, "knowledge_chunks_fts")
+    finally:
+        conn.close()
+
+
+def _in_segments(db: str) -> set[str]:
+    conn = sqlite3.connect(f"file:{Path(db).as_posix()}?mode=ro", uri=True)
+    try:
+        return segment_terms(conn, "knowledge_chunks_fts")
+    finally:
+        conn.close()
+
+
+def _purge_mark(db: str) -> str | None:
+    conn = sqlite3.connect(f"file:{Path(db).as_posix()}?mode=ro", uri=True)
+    try:
+        row = conn.execute("SELECT value FROM knowledge_meta WHERE key = 'keyword_purge_due'").fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def test_a_delete_leaves_no_word_when_every_segment_sits_on_one_level(tmp_path):
+    db = str(tmp_path / "knowledge.db")
+    s, gone, kept = _store_at_one_level(db)
+    try:
+        assert s.delete_library("gone") is True
+        assert _left_on_disk(db) == set()
+        assert not set(gone) & _in_segments(db)
+        assert s.fts_search(kept[11], "kept") and s.fts_coverage()["ok"] is True
+        assert _purge_mark(db) is None
+    finally:
+        s.close()
+
+
+def test_the_merge_alone_left_the_deleted_librarys_words_on_one_level(tmp_path, monkeypatch):
+    """Negative control: the purge of 01cba7cb -- the stepped merge with no
+    check of the shape it left -- on the same store."""
+    from kazma_core.stores import knowledge
+
+    monkeypatch.setattr(knowledge, "drop_deleted_rows", lambda conn, table: "clean")
+    db = str(tmp_path / "knowledge.db")
+    s, gone, _kept = _store_at_one_level(db)
+    try:
+        s.delete_library("gone")
+        assert s.fts_search(gone[5], "gone") == []  # unsearchable ...
+        assert set(gone) <= _left_on_disk(db)  # ... and every word still on disk
+    finally:
+        s.close()
+
+
+def test_a_purge_keeps_the_mark_of_a_delete_made_while_it_ran(tmp_path, monkeypatch):
+    """A delete marked between two steps of the purge (another process) is
+    not cleared by it: its own purge, or the next open, still runs."""
+    from kazma_core.stores import knowledge
+
+    db = str(tmp_path / "knowledge.db")
+    s = KnowledgeStore(db_path=db)
+    try:
+        _publish(s, "a", _words("a", 50))
+        _publish(s, "b", _words("b", 50))
+
+        def another_delete(point: str) -> None:
+            if point == "purge_step":
+                other = sqlite3.connect(db, isolation_level=None)
+                try:
+                    KnowledgeStore._mark_purge_due(other)
+                finally:
+                    other.close()
+
+        monkeypatch.setattr(knowledge, "_FAULT", another_delete)
+        s.delete_library("a")
+        assert _purge_mark(db) is not None  # the later mark survived this purge
+        monkeypatch.setattr(knowledge, "_FAULT", None)
+        assert s.finish_pending_purge() is not None
+        assert _purge_mark(db) is None and _left_on_disk(db) == set()
+    finally:
+        s.close()
+
+
+_KILL_CHILD = r"""
+import os, sys
+sys.path.insert(0, {core!r})
+from kazma_core.stores import knowledge
+knowledge._DELETE_BATCH = 300
+knowledge._PURGE_STEP_PAGES = 2
+if {without_mark!r}:  # the store as it was: no record of the purge it owes
+    knowledge.KnowledgeStore._mark_purge_due = staticmethod(lambda conn: None)
+store = knowledge.KnowledgeStore(db_path={db!r})
+def fault(at):
+    if at == {point!r}:
+        os._exit(17)
+knowledge._FAULT = fault
+store.delete_library("gone")
+os._exit(0)
+"""
+
+
+def _kill_during_delete(db: str, point: str, *, without_mark: bool = False) -> None:
+    """A real process deleting library ``gone``, killed at *point*."""
+    from kazma_core.security.process_budget import run_bounded
+
+    core = str(Path(__file__).resolve().parents[1] / "kazma-core")
+    allowed = {"systemroot", "windir", "temp", "tmp", "path", "kazma_data_dir"}
+    result = run_bounded(
+        [sys.executable, "-I", "-c", _KILL_CHILD.format(core=core, db=db, point=point, without_mark=without_mark)],
+        env={k: v for k, v in os.environ.items() if k.lower() in allowed},
+        timeout=120, output_bytes=32768, memory_bytes=1024**3)
+    assert result.returncode == 17, result.stderr
+
+
+@pytest.mark.parametrize("point", ["delete_batch", "library_row_deleted", "purge_step", "purge_checked"])
+def test_a_process_killed_before_its_purge_ended_leaves_it_to_the_next_open(tmp_path, point):
+    """Killed after a batch of the delete, after the library row, between
+    two merge steps, and inside the last transaction (the rebuild rolled
+    back): the next open finishes the purge, and no deleted word stays."""
+    db = str(tmp_path / "knowledge.db")
+    s, gone, kept = _store_at_one_level(db)
+    s.close()
+    _kill_during_delete(db, point)
+    assert _left_on_disk(db)  # the kill left words of deleted rows in the segments
+    assert _purge_mark(db) is not None
+    reopened = KnowledgeStore(db_path=db)  # the next open
+    try:
+        assert _left_on_disk(db) == set()
+        assert _purge_mark(db) is None
+        if point == "delete_batch":  # the library is still there: the operator deletes it again
+            assert reopened.library_exists("gone")
+            assert reopened.delete_library("gone") is True
+        assert not set(gone) & _in_segments(db)
+        assert reopened.fts_search(kept[3], "kept") and reopened.fts_coverage()["ok"] is True
+    finally:
+        reopened.close()
+
+
+def test_without_the_mark_a_killed_delete_left_its_words_for_good(tmp_path):
+    """Negative control: the store as it was -- nothing recorded the purge
+    a delete owed, so a process killed before it left the words on disk
+    through every later open."""
+    db = str(tmp_path / "knowledge.db")
+    s, gone, _kept = _store_at_one_level(db)
+    s.close()
+    _kill_during_delete(db, "library_row_deleted", without_mark=True)
+    reopened = KnowledgeStore(db_path=db)
+    try:
+        assert not reopened.library_exists("gone")
+        assert set(gone) <= _left_on_disk(db)
+    finally:
+        reopened.close()
+
+
+def test_the_maintenance_pass_finishes_a_purge_a_killed_delete_left(tmp_path, monkeypatch):
+    """The other way back: a store opened while the purge could not run,
+    then the maintenance pass (``run_repair_sweep``) finishes it."""
+    from kazma_core.stores import knowledge_index as ki
+
+    db = str(tmp_path / "knowledge.db")
+    s, gone, _kept = _store_at_one_level(db)
+    s.close()
+    _kill_during_delete(db, "library_row_deleted")
+    real = KnowledgeStore.finish_pending_purge
+    monkeypatch.setattr(KnowledgeStore, "finish_pending_purge", lambda self: None)  # the open could not run it
+    reopened = KnowledgeStore(db_path=db)
+    monkeypatch.setattr(KnowledgeStore, "finish_pending_purge", real)
+    try:
+        assert set(gone) <= _left_on_disk(db)
+        index = types.SimpleNamespace(
+            store=reopened, _persist_dir=None,
+            backfill_vectors=lambda time_budget_s: {"unavailable": False, "failed": {}, "embedded": 0,
+                                                    "removed": 0, "missing": 0, "complete": True})
+        monkeypatch.setattr(ki, "get_knowledge_index", lambda: index)
+        monkeypatch.setattr(ki, "_SWEEP", {"report": None, "unavailable": False, "bad_passes": 0, "at": None})
+        report = ki.run_repair_sweep(time_budget_s=1)
+        assert report["keyword_purge"]["rebuilt"] is True
+        assert _left_on_disk(db) == set() and _purge_mark(db) is None
+        assert ki.run_repair_sweep(time_budget_s=1)["keyword_purge"] is None  # nothing owed now
+    finally:
+        reopened.close()

@@ -140,6 +140,24 @@ def _delete_purges_words() -> bool:
     return "self.purge_search_index()" in inspect.getsource(KnowledgeStore.delete_library)
 
 
+def _purge_checks_its_shape() -> bool:
+    from kazma_core.memory import chroma_local, forget
+    from kazma_core.stores.knowledge import KnowledgeStore
+
+    return ("drop_deleted_rows(" in inspect.getsource(KnowledgeStore.purge_search_index)
+            and "purge_deleted_rows(" in inspect.getsource(forget.purge_search_index)
+            and "purge_deleted_rows(" in inspect.getsource(chroma_local.compact_catalog))
+
+
+def _purge_outlives_the_process() -> bool:
+    from kazma_core.stores.knowledge import KnowledgeStore
+    from kazma_core.stores.knowledge_index import run_repair_sweep
+
+    return ("_mark_purge_due(" in inspect.getsource(KnowledgeStore.delete_library)
+            and "finish_pending_purge(" in inspect.getsource(KnowledgeStore.__init__)
+            and "finish_pending_purge(" in inspect.getsource(run_repair_sweep))
+
+
 def _no_text_beside_vectors() -> bool:
     from kazma_core.memory.vector_store_global import KEPT_METADATA, VectorStore
     from kazma_core.stores.knowledge_index import KnowledgeIndex
@@ -235,6 +253,11 @@ CLAIMS = [
     Claim("index pool", "Kazma raises the limits Chroma sizes the pool from before the first client starts",
           "**No index is evicted.**", _no_eviction),
     Claim("search filter", None, "**A search asks no metadata filter when it needs none.**", _filter_only_when_mixed),
+    # KB-Q01's multi-day soak (2026-10-15): the purge checked, and finished after a kill.
+    Claim("purge checked", None, "**rebuilds the index from its own rows**", _purge_checks_its_shape),
+    Claim("purge after a kill", None,
+          "**a process stopped before the purge ends leaves it to the next open of the store or the next "
+          "maintenance pass**", _purge_outlives_the_process),
 ]
 
 
@@ -297,6 +320,20 @@ def test_the_guide_before_the_kb_q01_follow_up_fails_its_rows():
     for topic in ("vector text", "deleted vector text", "library ceiling", "index pool", "search filter"):
         assert any(p.startswith(topic + ":") for p in problems), topic
     assert any(p.startswith("index pool: the guide still says") for p in problems)
+
+
+def test_the_guide_before_the_multi_day_soak_fails_its_rows():
+    """Negative control: the guide as committed in ff282522, when a merge
+    was taken for proof and a killed delete's purge was never finished."""
+    old = subprocess.run(["git", "show", "ff282522:docs/docs/guide/knowledge-library.md"], cwd=REPO,
+                         capture_output=True, text=True, encoding="utf-8")
+    if old.returncode != 0:  # a shallow clone without that commit
+        import pytest
+
+        pytest.skip("the guide of ff282522 is not in this clone")
+    problems = claim_problems(old.stdout)
+    for topic in ("purge checked", "purge after a kill"):
+        assert any(p.startswith(topic + ":") for p in problems), topic
 
 
 def test_a_stale_claim_is_caught():

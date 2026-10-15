@@ -52,6 +52,8 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | Every backup failed to copy the held writer lock | Live log | The registry keeps it out of backups | Done: `tests/test_universal_backup_held_files.py` (the lock held while the backup runs; the old copy as control) |
 | WeasyPrint warns about its own stylesheet at every render | Live log | Only those selectors filtered | Done: `tests/test_weasyprint_log.py` |
 | A prune reported Time Travel's disk use growing | Full suite 2026-10-15 | `-shm` not counted as disk use | Done: `tests/test_snapshot_retention_actually_prunes.py` |
+| A deleted library's words left in the keyword index | KB-Q01 72-hour soak, cycle 76 | The purge removes every deleted word; a purge cut short is finished | Done: root cause FTS5 drops a delete marker only when a merge writes its oldest segment; `db/fts5_purge.py` checks the structure and rebuilds; Memory's Forget purge and the Chroma compaction share it; a durable purge mark; `tests/test_fts5_purge.py`, child kills in `tests/test_knowledge_store.py`; the failing run's replay passes 81 cycles |
+| A malformed document id answered 400 with a WARNING | Live probe 2026-10-15 | It reads like an unknown id (404) | Done: `InvalidIdError`, `tests/test_document_malformed_ids.py` (the old mapping as control) |
 
 ## Measurements (soaks)
 

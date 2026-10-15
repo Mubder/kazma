@@ -1673,7 +1673,9 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   180-day sweep), `memory_audit_log` (now redacted to a hash, the event
   kept), a queued turn's payload, the legacy tables, the full-text index
   segments (`purge_search_index`: FTS5 keeps a deleted row's words until a
-  merge) and `unified_items`, a copy of every fact and Knowledge chunk with
+  merge, and a merge on one level below the top keeps them too, so it
+  goes through `db/fts5_purge.purge_deleted_rows`, §24 G) and
+  `unified_items`, a copy of every fact and Knowledge chunk with
   no delete path that federated search served -- retired, dropped by
   `ensure_ops_schema`. A tool record keeps argument NAMES, never values
   (`procedural.strip_argument_values` rewrites older ones). What Forget
@@ -4167,7 +4169,8 @@ module was deleted and the import's `except` said "chromadb not installed".
     kazma_compaction_due`; at the end of each repair pass `compact_vectors`
     takes the client's gate exclusive (calls in flight finish, new ones wait,
     the client stays open) and `compact_catalog` runs FTS5 `optimize` on
-    Chroma's full-text index, then `VACUUM` (Chroma's own `chroma utils
+    Chroma's full-text index (rebuilt when the merge kept deleted words:
+    `fts5_purge.purge_deleted_rows`, G below), then `VACUUM` (Chroma's own `chroma utils
     vacuum`), and clears the marker. 10k chunks: 41.0 -> 3.2 MB in 0.3 s; a
     text-free catalog 0.13 s. A failure keeps the marker (WARNING);
     `kazma_kb_vector_compaction_pending`.
@@ -4219,6 +4222,31 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   released between steps). A replaced page or document version keeps its old
   words until FTS5's own merges (unsearchable; a full rewrite per page would
   cost the whole index each time). `tests/test_knowledge_store.py`.
+  **A merge is not proof** (the multi-day soak, 2026-10-15: 8 words of the
+  library deleted at cycle 76 left after the purge). FTS5 drops a delete
+  marker -- which carries the word -- only when the merge writes the
+  index's OLDEST segment, judged by place (the only segment on the
+  structure's last level); every full merge adds two levels and a larger
+  new segment pulls older ones down, and with every segment on one level
+  below the top `merge -N` and `optimize` merge it one level up and keep
+  every marker. So the purge's last transaction reads the structure record
+  (`db/fts5_purge.drop_deleted_rows`; an unreadable record counts as
+  unchecked) and rebuilds the index (FTS5 `rebuild`) unless it is one
+  segment on the last level. Every FTS5 `optimize`/`merge` in product code
+  goes through `fts5_purge` or ends with that check -- memory's Forget
+  purge and the vector catalog's compaction too (gate:
+  `tests/test_fts5_purge.py`, the plain `optimize` as negative control).
+  **The purge outlives the process:** each delete batch writes
+  `knowledge_meta.keyword_purge_due` (a counter) in its own transaction;
+  the purge clears it only if unchanged; every store open and the repair
+  pass (`finish_pending_purge`) finish a purge a killed delete left, and a
+  delete that finds no chunk still purges when it is set. Gate: a real
+  child killed after a batch, after the library row, between two merge
+  steps and inside the rebuild (`tests/test_knowledge_store.py`, the store
+  without the mark as negative control). The soak's check reads whole words
+  from the leaf pages and leaves out words a live row holds
+  (`knowledge_soak._segment_residue`): its old test of a word's last 4-6
+  letters anywhere in the blobs hit 6 of 20,000 random Arabic tokens.
 - **A coverage record names the vector store it measured** (KB-Q01): the
   record is in knowledge.db (backed up), the vectors are not, and a restored
   database reported "ok, 10,000 of 10,000" before the first pass with no

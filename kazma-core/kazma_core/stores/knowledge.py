@@ -59,6 +59,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.db.fts5_purge import drop_deleted_rows
 
 __all__ = [
     "KB_FOLD_VERSION",
@@ -280,9 +281,20 @@ _DELETE_BATCH = 500
 #: store lock is released between steps.
 _PURGE_STEP_PAGES = 1000
 
-#: Test hook: called with the name of each step of a page publication
-#: (fault injection, ``tests/test_knowledge_publication.py``). None in
-#: production.
+#: ``knowledge_meta`` key of the keyword-index purge a delete owes (KB-Q01):
+#: written in the same transaction as the rows it deletes, cleared by the
+#: purge that took their words out, so a process killed in between leaves
+#: the purge to the next open or maintenance pass. Its value counts the
+#: deleting transactions, so a purge never clears a later delete's mark.
+_PURGE_DUE_KEY = "keyword_purge_due"
+
+#: The keyword index's FTS5 table.
+_FTS_TABLE = "knowledge_chunks_fts"
+
+#: Test hook: called with the name of each step of a page publication, a
+#: library delete and its keyword-index purge (fault injection,
+#: ``tests/test_knowledge_publication.py``, ``tests/test_knowledge_store.py``).
+#: None in production.
 _FAULT: Callable[[str], None] | None = None
 
 
@@ -353,6 +365,13 @@ class KnowledgeStore:
         self.fts_problem: str | None = None
         self._quota_warned = False
         self._init_db()
+        # A delete whose process was killed before its keyword-index purge
+        # finished left the purge due (KB-Q01): the next open finishes it.
+        try:
+            self.finish_pending_purge()
+        except sqlite3.Error:
+            logger.warning("[KnowledgeStore] the keyword-index purge a delete left due could not run at "
+                           "open; the maintenance pass tries again", exc_info=True)
 
     @property
     def path(self) -> Path:
@@ -473,6 +492,8 @@ class KnowledgeStore:
             )
             self._set_meta(conn, "fts_layout", _FTS_LAYOUT)
             self._set_meta(conn, "fold_version", str(KB_FOLD_VERSION))
+            # A new index holds no deleted row's words: no purge is owed.
+            conn.execute("DELETE FROM knowledge_meta WHERE key = ?", (_PURGE_DUE_KEY,))
             conn.execute("COMMIT")
             logger.info("[KnowledgeStore] keyword index rebuilt (%d chunks)", len(rows))
             self.fts_problem = None
@@ -837,9 +858,12 @@ class KnowledgeStore:
         released between batches, so searches and other writers never wait
         for a whole library. The library row goes last, then the deleted
         words leave the keyword index's segments (:meth:`purge_search_index`).
+        Each batch records the purge as due in its own transaction, so a
+        process killed before the purge ends leaves it to the next open or
+        maintenance pass (:meth:`finish_pending_purge`), and a delete that
+        finds the chunks already gone still purges.
         Returns ``True`` if the library existed and was removed.
         """
-        had_chunks = False
         while True:
             with self._lock:
                 conn = self._get_conn()
@@ -857,23 +881,53 @@ class KnowledgeStore:
                         break
                     self._fts_delete(conn, [(r[0], r[1]) for r in rows])
                     conn.executemany("DELETE FROM knowledge_chunks WHERE rowid = ?", [(r[0],) for r in rows])
+                    self._mark_purge_due(conn)
                     conn.execute("COMMIT")
-                    had_chunks = True
                 except Exception:
                     if conn.in_transaction:
                         conn.execute("ROLLBACK")
                     raise
-        if had_chunks:
+            _fault("delete_batch")
+        _fault("library_row_deleted")
+        if self._purge_due() is not None:
             try:
                 self.purge_search_index()
             except sqlite3.Error:
-                # The words are unsearchable already; the next delete's
-                # purge, or FTS5's own merges, take them off the disk.
+                # The words are unsearchable already, and the purge stays
+                # due: the next open or maintenance pass finishes it.
                 logger.warning("[KnowledgeStore] the keyword index still holds the deleted library %r's "
-                               "words (they are unsearchable)", library_id, exc_info=True)
+                               "words (they are unsearchable); the next open or maintenance pass "
+                               "purges them", library_id, exc_info=True)
         if deleted:
             logger.info("[KnowledgeStore] Deleted library %r and its chunks", library_id)
         return deleted
+
+    @staticmethod
+    def _mark_purge_due(conn: sqlite3.Connection) -> None:
+        """Record, in the caller's transaction, that deleted rows' words are
+        still in the keyword index's segments (:data:`_PURGE_DUE_KEY`)."""
+        conn.execute(
+            "INSERT INTO knowledge_meta (key, value) VALUES (?, '1') "
+            "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
+            (_PURGE_DUE_KEY,),
+        )
+
+    def _purge_due(self) -> str | None:
+        """The purge mark's value, or None when no purge is owed."""
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT value FROM knowledge_meta WHERE key = ?", (_PURGE_DUE_KEY,)
+            ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    def finish_pending_purge(self) -> dict[str, Any] | None:
+        """Finish a keyword-index purge a delete left due (KB-Q01): a process
+        killed between a delete's commit and the end of its purge. Run at
+        every open and by the maintenance pass; None when none is due."""
+        if self._purge_due() is None:
+            return None
+        logger.info("[KnowledgeStore] finishing the keyword-index purge a delete left due")
+        return self.purge_search_index()
 
     def purge_search_index(self) -> dict[str, Any]:
         """Rewrite the keyword index without the words of deleted rows (KB-Q01).
@@ -883,13 +937,23 @@ class KnowledgeStore:
         until a merge happens to reach them -- unsearchable, but on disk: the
         soak harness found every planted word of a deleted 10,000-chunk
         library there after the delete. This merges every segment into one
-        (which drops deleted rows and their markers), as memory's
-        ``purge_search_index`` does (Memory audit M01), but in steps of
+        (which drops deleted rows and their markers), in steps of
         :data:`_PURGE_STEP_PAGES` pages, each its own transaction with the
         store lock released between them, so a search or a writer never waits
-        for the whole rewrite. Returns the steps taken and the seconds.
+        for the whole rewrite.
+
+        A merge drops the markers only when the segment it writes is the
+        oldest in the index, and when every segment sits on one level below
+        the top FTS5 merges them one level up and keeps every marker, word
+        included (the multi-day soak, 2026-10-15: 8 words of a library
+        deleted at cycle 76). So the last transaction checks the shape the
+        merge left and rebuilds the index when it is not one segment on the
+        last level (:func:`kazma_core.db.fts5_purge.drop_deleted_rows`), and
+        clears the purge mark -- unless a delete marked it again meanwhile.
+        Returns the steps, the seconds and whether the index was rebuilt.
         """
         started = time.monotonic()
+        due = self._purge_due()
         steps = 0
         pages = -_PURGE_STEP_PAGES  # negative: every segment may merge (a full merge starts)
         while True:
@@ -908,12 +972,27 @@ class KnowledgeStore:
                         conn.execute("ROLLBACK")
                     raise
             steps += 1
+            _fault("purge_step")
             if not worked:
                 break
             pages = _PURGE_STEP_PAGES  # positive: continue the merge that started
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                outcome = drop_deleted_rows(conn, _FTS_TABLE)
+                _fault("purge_checked")
+                if due is not None:
+                    conn.execute("DELETE FROM knowledge_meta WHERE key = ? AND value = ?", (_PURGE_DUE_KEY, due))
+                conn.execute("COMMIT")
+            finally:
+                if conn.in_transaction:  # anything raised: the rebuild and the mark stay as they were
+                    conn.execute("ROLLBACK")
         seconds = time.monotonic() - started
-        logger.info("[KnowledgeStore] keyword index merged in %d step(s), %.2f s", steps, seconds)
-        return {"steps": steps, "seconds": round(seconds, 3)}
+        rebuilt = outcome == "rebuilt"
+        logger.info("[KnowledgeStore] keyword index merged in %d step(s)%s, %.2f s", steps,
+                    " and rebuilt" if rebuilt else "", seconds)
+        return {"steps": steps, "seconds": round(seconds, 3), "rebuilt": rebuilt}
 
     def set_chunk_count(self, library_id: str, count: int) -> None:
         with self._lock:

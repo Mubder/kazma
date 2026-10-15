@@ -40,6 +40,7 @@ import asyncio
 import logging
 import os
 import re
+import sqlite3
 import threading
 import time
 import weakref
@@ -1242,8 +1243,17 @@ def run_repair_sweep(*, time_budget_s: float = 300.0) -> dict[str, Any]:
             f", error: {fts['error']}" if fts["error"] else "",
         )
         store.rebuild_fts(reason="coverage check")
+    # A delete killed before its keyword-index purge ended left the purge
+    # due; it finishes here if no open has finished it yet (KB-Q01).
+    try:
+        purge = store.finish_pending_purge()
+    except sqlite3.Error as exc:
+        logger.warning("[knowledge] the keyword-index purge a delete left due failed (%s); the next pass "
+                       "tries again", exc)
+        purge = {"error": f"{type(exc).__name__}: {exc}"}
     report = index.backfill_vectors(time_budget_s=time_budget_s)
     report["fts"] = fts
+    report["keyword_purge"] = purge
     # The vectors of collections dropped since (deleted libraries, model
     # switches, rebuilt indexes) leave the disk (KB-Q01).
     report["vector_folders"] = release_dropped_vectors(index._persist_dir)

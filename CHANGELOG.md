@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Deleted words really leave the keyword index (2026-10-15)
+
+- **A deleted library's words now leave the keyword index file.** The
+  72-hour Knowledge soak found 8 words of a deleted library still in the
+  index file. The cause was SQLite's full-text index (FTS5). It drops a
+  deleted word only when a merge rewrites the index's oldest segment, and
+  after many merges a plain "optimize" can leave every deleted word
+  behind.
+  - Kazma now checks the index's structure after a purge. When the deleted
+    words could remain, it rebuilds the index. This takes 0.35 s at 10,000
+    chunks.
+  - Memory's Forget and the vector catalog's cleanup had the same flaw.
+    They now use the same check.
+- **A purge cut short is finished later.** A delete marks a purge as due in
+  its own transaction. The next start or repair pass finishes the purge.
+  Tests kill the process at four points between a delete and the end of
+  its purge, and the words are gone after the next start.
+- **A malformed document id now reads like an unknown one.** It gets the
+  same 404 "Document is unavailable" an unknown id gets. Before, it got a
+  vague 400 and a warning in the log.
+
 ## Swarm: the Temporal path qualified; no task runs without its record (2026-10-15)
 
 - **The Temporal durable path is tested against Temporal's own test

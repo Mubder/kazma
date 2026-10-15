@@ -1109,21 +1109,71 @@ def _scale_restore(plan: dict[str, Any]) -> dict[str, Any]:
             "vector_read_failure": unreadable, "violations": violations}
 
 
-def _tail(token: str) -> bytes:
-    """The end of a planted token, as the keyword index's segments store it
-    (a term is kept after the prefix it shares with the term before it)."""
-    return token[-6:].encode() if token.isascii() else token[-4:].encode()
+def _varint(blob: bytes, i: int) -> tuple[int, int]:
+    """SQLite's variable-length integer, as FTS5 writes it."""
+    value = 0
+    for k in range(8):
+        byte = blob[i + k]
+        value = (value << 7) | (byte & 0x7F)
+        if not byte & 0x80:
+            return value, i + k + 1
+    return (value << 8) | blob[i + 8], i + 9
+
+
+def _leaf_terms(page: bytes) -> list[bytes]:
+    """The words of one leaf page of an FTS5 segment: the page footer gives
+    each word's offset; the first is stored whole, each next one after the
+    prefix it shares with the word before it."""
+    footer = int.from_bytes(page[2:4], "big")
+    offsets, i, at = [], footer, 0
+    while i < len(page):
+        delta, i = _varint(page, i)
+        at += delta
+        offsets.append(at)
+    terms: list[bytes] = []
+    previous = b""
+    for n, offset in enumerate(offsets):
+        if n == 0:
+            size, j = _varint(page, offset)
+            term = page[j:j + size]
+        else:
+            shared, j = _varint(page, offset)
+            size, j = _varint(page, j)
+            term = previous[:shared] + page[j:j + size]
+        terms.append(term)
+        previous = term
+    return terms
+
+
+def _segment_terms(conn: sqlite3.Connection) -> set[str]:
+    """Every word the keyword index's segments hold, read from their leaf
+    pages: a deleted row's words too, until a merge drops them."""
+    out: set[str] = set()
+    for rowid, block in conn.execute("SELECT id, block FROM knowledge_chunks_fts_data WHERE id > 10"):
+        # b-tree node or doclist index (height, flag), a tombstone segment, an empty block
+        if (rowid >> 31) & 0x3F or rowid >> 37 >= 1 << 16 or not block:
+            continue
+        out.update(t[1:].decode("utf-8", "replace") for t in _leaf_terms(bytes(block)) if t[:1] == b"0")
+    return out
 
 
 def _segment_residue(conn: sqlite3.Connection, tokens: list[str]) -> int:
-    """How many *tokens* the keyword index's segments still hold, at least.
+    """How many *tokens* the keyword index's segments hold as words no live
+    row holds.
 
     FTS5 deletes by writing a delete marker; the deleted row's words stay in
     the segment blobs (``knowledge_chunks_fts_data``) until a merge rewrites
-    them -- unsearchable, but on disk.
+    them -- unsearchable, but on disk. Read word by word: the test this
+    replaced looked for each token's last 4 (Arabic) or 6 (English) letters
+    anywhere in the blobs, and another word holding those letters counted --
+    6 of 20,000 random Arabic tokens in the store the first multi-day run
+    stopped on, a leak that is not there for a run checking every cycle.
     """
-    blob = b"".join(bytes(r[0]) for r in conn.execute("SELECT block FROM knowledge_chunks_fts_data") if r[0])
-    return sum(1 for t in tokens if _tail(t) in blob)
+    conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS temp.kb_soak_vocab "
+                 "USING fts5vocab(main, knowledge_chunks_fts, 'row')")
+    live = {str(r[0]) for r in conn.execute("SELECT term FROM temp.kb_soak_vocab")}
+    held = _segment_terms(conn) - live
+    return sum(1 for t in tokens if t in held)
 
 
 def _after_delete(store: Any, index: Any, lib: str, tokens: list[str]) -> dict[str, Any]:
@@ -1668,7 +1718,7 @@ def run_scale(args: argparse.Namespace) -> int:
                         f"{record.get('sqlite_chunks')} chunks covered while no vector existed")
                 residue, planted = restored["delete"]["after"]["keyword_segment_residue"]
                 if residue:
-                    violations.append(f"keyword index after the delete: its segments still hold at least {residue} "
+                    violations.append(f"keyword index after the delete: its segments still hold {residue} "
                                       f"of the deleted library's {planted} planted words")
                 for when, child in (("after ingest", build), ("in the restore", restored)):
                     _reload_finding(report, f"{lib} {when}", child.get("index_reloads"))
@@ -2032,7 +2082,7 @@ def check_stores(data_dir: Path, state: dict[str, Any], seed: int, *, tolerate_o
     finally:
         conn.close()
     if residue:
-        problems.append(f"keyword index: its segments still hold at least {residue} of {len(gone_tokens)} planted "
+        problems.append(f"keyword index: its segments still hold {residue} of {len(gone_tokens)} planted "
                         "words of deleted libraries")
     live = set(state["libs"])
     if libraries != live:

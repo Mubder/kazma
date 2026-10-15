@@ -1224,12 +1224,29 @@ def _coded_error(code: str, message: str, *, default: int) -> JSONResponse:
     )
 
 
+def _unknown_id(exc: Exception) -> JSONResponse | None:
+    """A malformed id reads exactly like an id nobody holds (DOC-B4: no
+    existence oracle): a job's as an unknown job, any other as an
+    unavailable document. None when *exc* is not one."""
+    from kazma_core.documents.models import InvalidIdError
+
+    if not isinstance(exc, InvalidIdError):
+        return None
+    logger.debug("[documents_api] malformed %s in a request", exc.kind)
+    if exc.kind == "JobId":
+        return JSONResponse(status_code=404, content={"ok": False, "error": "Job not found"})
+    return _coded_error("document_access_denied", "Document is unavailable", default=404)
+
+
 def _action_error(exc: Exception, op: str) -> JSONResponse:
     """Map a document-action failure to a truthful HTTP status."""
     from kazma_core.documents.ingestion import DocumentIngestionError
 
     if isinstance(exc, DocumentPolicyError):
         return _policy_error(exc)
+    unknown = _unknown_id(exc)
+    if unknown is not None:
+        return unknown
     if isinstance(exc, DocumentIngestionError):
         return _coded_error(exc.code, exc.safe_message, default=422)
     logger.warning("[documents_api] %s failed type=%s", op, type(exc).__name__)
@@ -1341,6 +1358,9 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
 
     if isinstance(exc, DocumentPolicyError):
         return _policy_error(exc)
+    unknown = _unknown_id(exc)
+    if unknown is not None:
+        return unknown
     if isinstance(exc, DocumentIngestionError):
         return _coded_error(exc.code, exc.safe_message, default=400)
     if isinstance(exc, JobNotFoundError):
