@@ -466,8 +466,19 @@ def _check_temporal_runtime() -> dict[str, Any]:
     return {"status": "ok" if running else "not_initialized", "component": "temporal"}
 
 
+#: How long a Docker daemon that answered stays trusted while a later probe
+#: only times out. ``docker info`` on Docker Desktop takes seconds when the
+#: machine is busy: on 2026-10-15 three slow answers in a row (2 s limit)
+#: made readiness 503 for 90 s and paged the owner over a daemon that was
+#: running. A daemon that answers with an error fails at once; one that has
+#: not answered for this long fails too.
+_DOCKER_SLOW_GRACE_S = 300.0
+_docker_answered_at: float | None = None
+
+
 def _check_code_execution() -> dict[str, Any]:
     """Check the local jail daemon without running code or pulling an image."""
+    global _docker_answered_at
     from kazma_core.sandbox.e2b import e2b_available
     from kazma_core.security.child_env import tool_child_env
     from kazma_core.tools import code_exec
@@ -485,9 +496,24 @@ def _check_code_execution() -> dict[str, Any]:
             probe = subprocess.run([docker, "info", "--format", "{{.ServerVersion}}"],
                                    capture_output=True, text=True, timeout=2, env=tool_child_env())
             if probe.returncode == 0 and probe.stdout.strip():
+                _docker_answered_at = time.monotonic()
                 return {"status": "ok", "component": "code_execution", "backend": "docker",
                         "check_mode": "daemon_only", "image_verified": False}
-        except (OSError, subprocess.TimeoutExpired):
+            _docker_answered_at = None  # it answered: not running
+            logger.warning("[Health] the Docker daemon is not running (docker info exit %s): %s",
+                           probe.returncode, (probe.stderr or "").strip()[:200])
+        except subprocess.TimeoutExpired:
+            seen = _docker_answered_at
+            if seen is not None and time.monotonic() - seen < _DOCKER_SLOW_GRACE_S:
+                logger.info("[Health] docker info is slow (over 2 s); the daemon answered %.0f s ago",
+                            time.monotonic() - seen)
+                return {"status": "ok", "component": "code_execution", "backend": "docker",
+                        "check_mode": "daemon_recently_answered", "probe": "slow",
+                        "image_verified": False}
+            logger.warning("[Health] code execution daemon probe failed: docker info did not answer "
+                           "in 2 s, and has not answered in the last %.0f s", _DOCKER_SLOW_GRACE_S)
+        except OSError:
+            _docker_answered_at = None
             logger.warning("[Health] code execution daemon probe failed", exc_info=True)
     return {"status": "failed", "component": "code_execution", "error": "No available isolated execution backend"}
 

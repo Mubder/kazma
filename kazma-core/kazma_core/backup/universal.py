@@ -561,10 +561,15 @@ def _rebuilt_dirs() -> set[Path]:
 
 def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
     """Copy all non-DB files and directories (recursive) excluding backups."""
+    from kazma_core.store_registry import DATA_DIR_ENTRIES
+
     copied: list[dict[str, Any]] = []
     rebuilt = _rebuilt_dirs()
+    # What the registry keeps out (the server's held writer lock: copying it
+    # failed with "Permission denied" at every backup, 2026-10-15).
+    kept_out = {name for name, entry in DATA_DIR_ENTRIES.items() if not entry.backed_up}
     for item in sorted(src.iterdir()):
-        if _should_exclude(item.name, is_dir=item.is_dir()):
+        if _should_exclude(item.name, is_dir=item.is_dir()) or item.name in kept_out:
             continue
         if item.is_dir() and item.resolve() in rebuilt:
             copied.append({"path": item.name, "type": "rebuilt", "files": 0})

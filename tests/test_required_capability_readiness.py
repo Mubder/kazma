@@ -77,3 +77,69 @@ def test_docker_cli_without_a_working_daemon_is_not_execution_ready(monkeypatch)
     monkeypatch.setattr(code_exec, "use_docker_jail", lambda: True)
     monkeypatch.setattr(health.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 1, stdout="", stderr="daemon down"))
     assert health._check_code_execution()["status"] == "failed"
+
+
+# A slow docker info is not a missing daemon (live 2026-10-15: three probes
+# over the 2 s limit, while the machine was busy, made readiness 503 for 90 s
+# and paged the owner over a running daemon).
+
+
+@pytest.fixture
+def docker_jail(monkeypatch):
+    from kazma_core.sandbox import e2b
+    from kazma_core.tools import code_exec
+
+    monkeypatch.setattr(e2b, "e2b_available", lambda: False)
+    monkeypatch.setattr(code_exec, "local_exec_forbidden", lambda: True)
+    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "fixture-docker")
+    monkeypatch.setattr(code_exec, "use_docker_jail", lambda: True)
+    monkeypatch.setattr(health, "_docker_answered_at", None)
+    answers: list = []
+
+    def run(argv, **_kw):
+        import subprocess
+
+        answer = answers.pop(0)
+        if answer == "slow":
+            raise subprocess.TimeoutExpired(argv, 2)
+        if answer == "down":
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="cannot connect to the daemon")
+        return subprocess.CompletedProcess(argv, 0, stdout="29.0.1\n", stderr="")
+
+    monkeypatch.setattr(health.subprocess, "run", run)
+    return answers
+
+
+def test_a_slow_answer_soon_after_a_good_one_keeps_execution_ready(docker_jail):
+    docker_jail += ["up", "slow", "slow", "slow"]
+    assert health._check_code_execution()["status"] == "ok"
+    for _ in range(3):
+        result = health._check_code_execution()
+        assert result["status"] == "ok" and result["probe"] == "slow", result
+
+
+def test_a_daemon_that_never_answered_is_not_ready_when_slow(docker_jail):
+    docker_jail += ["slow"]
+    assert health._check_code_execution()["status"] == "failed"
+
+
+def test_a_daemon_slow_past_the_grace_is_not_ready(docker_jail, monkeypatch):
+    docker_jail += ["up", "slow"]
+    assert health._check_code_execution()["status"] == "ok"
+    monkeypatch.setattr(health, "_docker_answered_at", health.time.monotonic() - health._DOCKER_SLOW_GRACE_S - 1)
+    assert health._check_code_execution()["status"] == "failed"
+
+
+def test_a_daemon_that_answers_down_fails_at_once_and_is_not_trusted_after(docker_jail):
+    docker_jail += ["up", "down", "slow"]
+    assert health._check_code_execution()["status"] == "ok"
+    assert health._check_code_execution()["status"] == "failed"
+    assert health._check_code_execution()["status"] == "failed", "a slow probe after a down answer passed"
+
+
+def test_negative_control_without_the_grace_one_slow_answer_fails_readiness(docker_jail, monkeypatch):
+    """The rule before 2026-10-15: every probe over 2 s failed."""
+    monkeypatch.setattr(health, "_DOCKER_SLOW_GRACE_S", 0.0)
+    docker_jail += ["up", "slow"]
+    assert health._check_code_execution()["status"] == "ok"
+    assert health._check_code_execution()["status"] == "failed"

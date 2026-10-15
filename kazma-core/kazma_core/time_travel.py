@@ -1177,14 +1177,19 @@ def _free_pages(db: Path) -> tuple[int, int, int]:
 
 
 def _disk_bytes(db: Path) -> int:
-    """What the store holds on disk: the file, its WAL and its shared memory.
+    """What the store holds on disk: the file and its WAL.
 
     In WAL mode a VACUUM writes the rewritten file into the WAL; the file is
     cut only at a checkpoint, and the WAL keeps its size until truncated.
     Counting the file alone, the TT-G3 soak saw maintenance report 27.5 MB
     reclaimed while the disk use went from 81.6 MB to 108.2 MB.
+
+    The shared-memory index (``-shm``) is not counted: it is a fixed 32 KB a
+    connection keeps, and a read-only reader leaves it behind after closing.
+    Counted, a prune of a store that had none yet reported its disk use
+    growing (8 KB to 40 KB) while the file itself shrank.
     """
-    return sum(p.stat().st_size for p in (db, Path(f"{db}-wal"), Path(f"{db}-shm")) if p.exists())
+    return sum(p.stat().st_size for p in (db, Path(f"{db}-wal")) if p.exists())
 
 
 def _truncate_wal(conn: sqlite3.Connection) -> str:

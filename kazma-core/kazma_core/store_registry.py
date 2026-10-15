@@ -278,6 +278,10 @@ class DataDirEntry:
     #: Carried even by a lean bundle (``kazma migrate export --no-assets``):
     #: small state Kazma reads at boot, not a folder of files.
     state: bool = False
+    #: Copied by the universal backup. False for a file the running server
+    #: holds locked: the copy fails (a WARNING every backup) and restores
+    #: nothing a server could use.
+    backed_up: bool = True
 
 
 #: Every entry product code puts directly in the data dir that is not a
@@ -293,7 +297,7 @@ class DataDirEntry:
 #: fails on an entry product code names that is not declared here.
 DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     ".runtime-state-id": DataDirEntry("the state volume's identity paired with its HA Postgres database", "bundle", state=True),
-    ".runtime-writer.lock": DataDirEntry("the server process's local writer fence", "machine", reason="OS ownership is reacquired after restore; the inode is never copied"),
+    ".runtime-writer.lock": DataDirEntry("the server process's local writer fence", "machine", reason="OS ownership is reacquired after restore; the inode is never copied", backed_up=False),
     "swarm_registry.json": DataDirEntry("the swarm's registered workers", "bundle", state=True),
     "swarm_templates.json": DataDirEntry(
         "the operator's own worker templates", "bundle", state=True),

@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## Three faults seen on the live install (2026-10-15)
+
+- **A slow Docker answer no longer pages you.** Readiness checks the
+  Docker daemon that runs code in its jail. When the machine was busy,
+  `docker info` took more than its 2-second limit three times in a row.
+  Readiness went to "not ready" for 90 seconds, and the owner was paged
+  about a daemon that was running. A slow answer now counts as ready for 5
+  minutes after the daemon last answered. A daemon that answers with an
+  error still fails at once.
+- **Backups no longer try to copy the server's lock file.** Every backup
+  logged "Permission denied" on `.runtime-writer.lock`, the file the running
+  server holds locked. A copy would restore nothing, so the backup now
+  leaves it out.
+- **WeasyPrint's warnings about its own stylesheet are dropped.** Every
+  process that renders HTML logged three warnings about selectors in
+  WeasyPrint's built-in stylesheet, a file Kazma neither ships nor
+  controls. Only those three are dropped. A selector WeasyPrint refuses in
+  any other stylesheet is still logged.
+- Time Travel's maintenance no longer counts SQLite's 32 KB shared-memory
+  file as disk use. Counting it, a prune reported the store growing while
+  the file shrank.
+
 ## Knowledge Library: vectors that leave, indexes that are not lost (2026-10-15)
 
 The Knowledge scale and soak harness found five faults in how the library
