@@ -2920,7 +2920,11 @@ submit or fetch outside the document (Launch, remote GoTo, SubmitForm,
 ImportData, renditions, rich media, sound, movie), embedded files (a bare
 `/EF` without `/Type` too) and links that are not absolute http, https or
 mailto (`file:`, UNC and relative targets leak credentials when opened).
-Navigation inside the document and web links stay. A graph it cannot read, or
+A `/GoTo` or `/Thread` with an `/F` file specification is a remote go-to by
+another spelling and is refused too (Q04 FIND-01, 2026-10-15: the independent
+review found it passed as navigation). Action and key names are matched
+case-insensitively (OBS-02), as the sniffer's regex is. Navigation inside the
+document and web links stay. A graph it cannot read, or
 one past its budget, is refused, never passed. It runs on intake (`sniff`), on
 every mutation input and output (redaction opened its source before the
 policy until 2026-10-13) and on every PDF Kazma renders (LibreOffice,

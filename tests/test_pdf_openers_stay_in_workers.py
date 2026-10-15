@@ -42,19 +42,53 @@ OWN_OUTPUT_CHECKS = {
 }
 
 
+# The PDF libraries, and how each opens a document. Matched through the
+# module's own imports so an alias (``import pypdfium2 as pdfium``) or an
+# attribute call (``pypdf.PdfReader``, ``fitz.Document``) is seen, not only the
+# canonical ``module.attr`` spellings (Q04 OBS-03, 2026-10-15).
+_MODULE_OPENERS = {
+    "fitz": {"open", "Document"},
+    "pymupdf": {"open", "Document"},
+    "pdfplumber": {"open", "PDF"},
+    "pdfium": {"PdfDocument"},
+    "pypdfium2": {"PdfDocument"},
+    "pypdf": {"PdfReader", "PdfDocument"},
+}
+#: Class names distinctive enough to be a PDF opener on any receiver or bare.
+_BARE_OPENERS = frozenset({"PdfReader", "PdfDocument"})
+
+
+def _import_map(tree: ast.AST) -> tuple[dict[str, str], set[str]]:
+    """Local name -> the PDF module it refers to, and the bare opener names a
+    ``from <pdf module> import ...`` brought in (alias included)."""
+    modules: dict[str, str] = {}
+    bare: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in _MODULE_OPENERS:
+                    modules[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module in _MODULE_OPENERS:
+            openers = _MODULE_OPENERS[node.module] | _BARE_OPENERS
+            for alias in node.names:
+                if alias.name in openers:
+                    bare.add(alias.asname or alias.name)
+    return modules, bare
+
+
 def _openers(tree: ast.AST) -> list[tuple[int, str]]:
+    modules, bare = _import_map(tree)
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            if (func.value.id, func.attr) in {
-                ("fitz", "open"), ("pymupdf", "open"), ("pdfplumber", "open"),
-                ("pdfium", "PdfDocument"), ("pypdfium2", "PdfDocument"),
-            }:
-                found.append((node.lineno, f"{func.value.id}.{func.attr}"))
-        elif isinstance(func, ast.Name) and func.id in {"PdfReader", "PdfDocument"}:
+            receiver, attr = func.value.id, func.attr
+            canonical = modules.get(receiver) or (receiver if receiver in _MODULE_OPENERS else None)
+            if (canonical and attr in _MODULE_OPENERS[canonical]) or attr in _BARE_OPENERS:
+                found.append((node.lineno, f"{receiver}.{attr}"))
+        elif isinstance(func, ast.Name) and (func.id in _BARE_OPENERS or func.id in bare):
             found.append((node.lineno, func.id))
     return found
 
@@ -110,6 +144,24 @@ def test_the_gate_sees_the_old_in_process_reader() -> None:
     )
     assert _openers(ast.parse(old)) == [(3, "fitz.open")]
     assert _openers(ast.parse("from pypdf import PdfReader\nr = PdfReader(p)\n")) == [(2, "PdfReader")]
+
+
+def test_the_gate_sees_alias_and_attribute_openers() -> None:
+    # Q04 OBS-03: shapes the old pair-list missed -- an aliased import, an
+    # attribute call, and a bare opener imported under another name.
+    cases = {
+        "import pypdfium2 as pdfium\npdfium.PdfDocument(p)\n": "pdfium.PdfDocument",
+        "import fitz\nfitz.Document(p)\n": "fitz.Document",
+        "import pypdf\npypdf.PdfReader(p)\n": "pypdf.PdfReader",
+        "import pymupdf as fitz\nfitz.open(p)\n": "fitz.open",
+        "from pypdf import PdfReader as PR\nPR(p)\n": "PR",
+    }
+    for source, label in cases.items():
+        hits = _openers(ast.parse(source))
+        assert [name for _line, name in hits] == [label], source
+    # Not a PDF opener: python-docx's Document, a plain file open.
+    assert _openers(ast.parse("import docx\ndocx.Document(p)\n")) == []
+    assert _openers(ast.parse("import zipfile\nzipfile.ZipFile(p).open(n)\n")) == []
 
 
 def test_the_source_readers_use_the_documents_service() -> None:

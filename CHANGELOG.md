@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Q04 independent review: a remote-file PDF reference refused (FIND-01, 2026-10-15)
+
+- **An independent reviewer** (no Kazma authorship, no owner infrastructure)
+  reviewed the Documents security profile against the Q04 review pack. Of its
+  14 claims, 13 held; FIND-01 broke C1.
+- **FIND-01 (Medium):** the PDF active-content policy refused the explicit
+  remote actions (`/GoToR`, `/GoToE`, `/Launch`) but let a `/GoTo` or
+  `/Thread` action carrying an `/F` file specification through as
+  "in-document navigation". It is a remote go-to by another spelling: opening
+  the stored document makes the viewer resolve the named file or UNC share (an
+  NTLM credential leak or phishing). All three enforcement points -- intake,
+  mutation, render -- shared the gap. Now refused, for an `/F` that is a
+  string, a filespec dict or an indirect object
+  (`documents/pdf_policy.assert_pdf_safe`; `tests/test_document_pdf_policy.py`,
+  each test failing on the old policy; plain in-document navigation still
+  parses).
+- **OBS-02:** active-content action and key names are matched
+  case-insensitively, as the sniffer's regex is (defence in depth; PDF names
+  are case-sensitive and pypdf decodes the dangerous `#`-escape form already).
+- **OBS-03:** the C2 opener gate (`tests/test_pdf_openers_stay_in_workers.py`)
+  resolves each module's imports, so a future out-of-worker opener written as
+  an aliased import or an attribute call (`pypdf.PdfReader`, `fitz.Document`)
+  is caught, not only the canonical spellings. No product bypass existed.
+- **OBS-04** (attestation judges the image's self-report) is an inherent
+  operator-trust limit, already in the threat model; no change.
+- Results and the retest plan: `docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`.
+  Q04 closes on the reviewer's retest of this fix.
+
+
 ## OCR reads a line's last mark as written, and the fidelity measure checks marks (2026-10-15)
 
 - **A line's last full stop is no longer read as a colon.** The live
