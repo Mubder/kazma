@@ -32,6 +32,13 @@ length, JSON ``{protocol, token, op, worker, run_id, timeout_seconds,
 input_size}``. ``op`` is ``run`` or ``status``. The broker answers frames of
 one type byte and a 4-byte length: ``A`` (admitted: send exactly
 ``input_size`` bytes now), ``D`` (output data), ``S`` (final JSON status).
+
+Exit codes say why the broker stopped, so a supervisor (the guard,
+``scripts/service/kazma_guard.py``) can tell an operator what to do: 0 a
+requested stop, 2 it could not start, 3 the policy did not hold or the image
+reported no engines, 4 no worker image is built, 5 the Docker engine does not
+answer, 6 the image built for this code appeared while an older one served
+(start again to use it).
 """
 
 from __future__ import annotations
@@ -69,6 +76,15 @@ __all__ = [
 logger = logging.getLogger("kazma.document_broker")
 
 PROTOCOL = 1
+#: Exit codes (see the module docstring).
+EXIT_STOPPED, EXIT_CANNOT_START, EXIT_POLICY = 0, 2, 3
+EXIT_NO_IMAGE, EXIT_NO_ENGINE, EXIT_NEWER_IMAGE = 4, 5, 6
+#: Mirrors kazma_core.documents.worker_image.SOURCE_LABEL / DOCUMENTS_LABEL
+#: (kept equal by a test): the broker image is this file alone.
+IMAGE_SOURCE_LABEL = "io.kazma.document-worker-image.source"
+IMAGE_DOCUMENTS_LABEL = "io.kazma.document-worker-image.documents-code"
+#: How often a broker serving an older image looks for the one it was asked for.
+NEWER_IMAGE_CHECK_SECONDS = 60.0
 REQUEST_MAGIC = b"KZDB-REQ/1\n"
 FRAME_ADMIT, FRAME_DATA, FRAME_STATUS = b"A", b"D", b"S"
 WORKERS = ("parser", "mutation", "renderer", "probe")
@@ -146,6 +162,11 @@ class BrokerSettings:
     name: str = "default"
     limits: BrokerLimits = BrokerLimits()
     qualification: bool = False
+    #: When *image* is not built here, serve the newest local image that
+    #: ``scripts/document_worker_image.py`` built (it carries
+    #: IMAGE_SOURCE_LABEL), say so in the status, and stop with
+    #: EXIT_NEWER_IMAGE once *image* appears.
+    fallback_to_newest_built: bool = False
 
     def validate(self) -> None:
         if not _NAME.match(self.name):
@@ -294,6 +315,15 @@ class _Refused(Exception):
     pass
 
 
+class _NoWorkerImageError(RuntimeError):
+    """No worker image to serve: neither the one asked for nor, with the
+    fallback, any image ``scripts/document_worker_image.py`` built."""
+
+
+class _DockerEngineUnavailableError(RuntimeError):
+    """The docker CLI is there and the engine behind it does not answer."""
+
+
 class _Broker:
     """Runs fixed document workers in attested, disposable containers."""
 
@@ -302,6 +332,10 @@ class _Broker:
         self.settings = settings
         self.limits = settings.limits
         self.image_id: str | None = None
+        #: The reference actually served, and its build labels.
+        self.image_ref: str | None = None
+        self.image_labels: dict[str, str] = {}
+        self.image_fallback = False
         self.attestation: dict[str, Any] = {"verified": False, "problems": ["not attested"]}
         self.capabilities: dict[str, Any] | None = None
         self.capability_error: str | None = "not collected"
@@ -336,13 +370,76 @@ class _Broker:
             logger.warning("[broker] docker %s did not answer within %.0fs", args[0], timeout)
             return subprocess.CompletedProcess(argv, -1, "", "timeout")
 
-    def resolve_image(self) -> str:
-        result = self._docker("image", "inspect", "--format", "{{.Id}}", self.settings.image)
-        image_id = result.stdout.strip()
+    def _inspect_image(self, ref: str) -> tuple[str, dict[str, str]] | None:
+        """``(image id, labels)`` of a local image, or None when it is not here."""
+
+        result = self._docker("image", "inspect", "--format", "{{.Id}}|{{json .Config.Labels}}", ref)
+        image_id, _, raw_labels = result.stdout.strip().partition("|")
         if result.returncode != 0 or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
-            raise RuntimeError(f"worker image {self.settings.image!r} is not available locally")
-        self.image_id = image_id
-        return image_id
+            return None
+        try:
+            labels = json.loads(raw_labels or "null")
+        except json.JSONDecodeError:
+            labels = None
+        if not isinstance(labels, dict):
+            labels = {}
+        return image_id, {str(key): str(value) for key, value in labels.items()}
+
+    def _newest_built(self) -> str | None:
+        """The newest local image the build script made (it carries the source
+        label), as ``repository:tag``. ``docker image ls`` lists newest first."""
+
+        result = self._docker(
+            "image", "ls", "--filter", f"label={IMAGE_SOURCE_LABEL}",
+            "--format", "{{.Repository}}:{{.Tag}}",
+        )
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.split():
+            if "<none>" not in line:
+                return line
+        return None
+
+    def check_engine(self) -> None:
+        """Raise :class:`_DockerEngineUnavailableError` when the engine does not answer.
+
+        Told apart from a missing image, which only the operator can fix: an
+        engine still starting (Docker Desktop at logon) is waited out."""
+
+        result = self._docker("version", "--format", "{{.Server.Version}}", timeout=30.0)
+        if result.returncode != 0 or not result.stdout.strip():
+            detail = (result.stderr or result.stdout or "no answer").strip().splitlines()
+            raise _DockerEngineUnavailableError(
+                f"the Docker engine does not answer ({detail[-1][:200] if detail else 'no answer'})"
+            )
+
+    def resolve_image(self) -> str:
+        found = self._inspect_image(self.settings.image)
+        ref, fallback = self.settings.image, False
+        if found is None and self.settings.fallback_to_newest_built:
+            newest = self._newest_built()
+            if newest is not None:
+                found = self._inspect_image(newest)
+                ref, fallback = newest, True
+        if found is None:
+            raise _NoWorkerImageError(f"worker image {self.settings.image!r} is not available locally")
+        self.image_id, self.image_labels = found
+        self.image_ref, self.image_fallback = ref, fallback
+        if fallback:
+            logger.warning(
+                "[broker] %s is not built here; serving the newest built image %s until it is",
+                self.settings.image, ref,
+            )
+        return self.image_id
+
+    def requested_image_present(self) -> bool:
+        """Whether the image this broker was asked for is built now."""
+
+        return self._inspect_image(self.settings.image) is not None
+
+    def idle(self) -> bool:
+        with self._lock:
+            return not self._active
 
     def _containers(self, label: str) -> list[str]:
         result = self._docker("ps", "-a", "-q", "--no-trunc", "--filter", f"label={label}")
@@ -678,6 +775,7 @@ class _Broker:
         qualification tests both start a broker through here.
         """
 
+        self.check_engine()
         self.resolve_image()
         swept = self.sweep()
         if self.attest()["verified"]:
@@ -718,6 +816,13 @@ class _Broker:
             "broker": self.settings.name,
             "image": self.settings.image,
             "image_id": self.image_id,
+            # What is served, when it is not the image asked for (the build
+            # for this code is missing), and the code the image was built
+            # from: Kazma compares IMAGE_SOURCE_LABEL with its own.
+            "image_ref": self.image_ref,
+            "image_fallback": self.image_fallback,
+            "image_source": self.image_labels.get(IMAGE_SOURCE_LABEL),
+            "image_documents_code": self.image_labels.get(IMAGE_DOCUMENTS_LABEL),
             "limits": asdict(self.limits),
             "attestation": {
                 key: self.attestation.get(key) for key in ("verified", "problems", "at", "cleanup")
@@ -954,6 +1059,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="octal mode of a unix listen socket (default 660)")
     parser.add_argument("--qualification", action="store_true",
                         help="serve probe stress jobs (qualification only; never in production)")
+    parser.add_argument("--fallback-to-newest-built", action="store_true",
+                        help="when --image is not built here, serve the newest image "
+                             "scripts/document_worker_image.py built, and stop (exit 6) "
+                             "once --image appears")
     parser.add_argument("--attest-only", action="store_true",
                         help="attest the policy, print the report and exit")
     return parser.parse_args(argv)
@@ -980,14 +1089,55 @@ def _find_docker_cli() -> str | None:
     return named if named and Path(named).is_file() else None
 
 
+def _watch_for_requested_image(broker: _Broker, server: socketserver.BaseServer,
+                               outcome: dict[str, int], stop: threading.Event) -> None:
+    """While an older image serves, stop (EXIT_NEWER_IMAGE) once the image
+    asked for is built and no job runs: the supervisor starts the broker
+    again and it serves the new one. The operator builds; nothing else to do."""
+
+    while not stop.wait(NEWER_IMAGE_CHECK_SECONDS):
+        if broker.idle() and broker.requested_image_present():
+            logger.info("[broker] %s is built now; stopping to serve it", broker.settings.image)
+            outcome["code"] = EXIT_NEWER_IMAGE
+            server.shutdown()
+            return
+
+
+def _stop_on_signals(server: socketserver.BaseServer) -> list[threading.Thread]:
+    """A supervisor's stop: stop serving, then kill and remove every job
+    container (``main``'s finally), instead of dying with jobs running.
+
+    ``docker stop`` sends SIGTERM; the guard on Windows sends CTRL_BREAK to
+    the broker's process group, which Python raises as SIGBREAK -- whose
+    default ends the process on the spot, leaving job containers behind.
+    """
+
+    stoppers: list[threading.Thread] = []
+
+    def stop(*_args: object) -> None:
+        # Not on this thread: shutdown() waits for serve_forever, which runs here.
+        stopper = threading.Thread(target=server.shutdown, name="broker-stop", daemon=True)
+        stoppers.append(stopper)
+        stopper.start()
+
+    signal.signal(signal.SIGTERM, stop)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, stop)
+    return stoppers
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = _parse_args(argv)
     docker = args.docker or _find_docker_cli()
     if not docker:
         logger.error("[broker] docker CLI not found")
-        return 2
-    token = args.token_file.read_text(encoding="utf-8").strip()
+        return EXIT_NO_ENGINE
+    try:
+        token = args.token_file.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logger.error("[broker] cannot read the token file: %s", type(exc).__name__)
+        return EXIT_CANNOT_START
     limits = BrokerLimits(
         memory_mb=args.memory_mb,
         cpus=args.cpus,
@@ -1001,30 +1151,49 @@ def main(argv: list[str] | None = None) -> int:
     settings = BrokerSettings(
         docker=docker, image=args.image, token=token, name=args.name,
         limits=limits, qualification=args.qualification,
+        fallback_to_newest_built=args.fallback_to_newest_built,
     )
+    # A stop asked for while the broker attests (a container runs then) ends
+    # it cleanly too: the interrupt reaches the except below, which removes
+    # what this broker started.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
+    broker: _Broker | None = None
     try:
         broker = _Broker(settings)
         swept = broker.prepare()
         if swept:
             logger.warning("[broker] removed %d containers left by an earlier run", swept)
         report = broker.attestation
+    except KeyboardInterrupt:
+        logger.info("[broker] stopped while starting")
+        if broker is not None:
+            broker.shutdown()
+        return EXIT_STOPPED
+    except _DockerEngineUnavailableError as exc:
+        logger.error("[broker] cannot start: %s", exc)
+        return EXIT_NO_ENGINE
+    except _NoWorkerImageError as exc:
+        logger.error("[broker] cannot start: %s; build it: python scripts/document_worker_image.py build", exc)
+        return EXIT_NO_IMAGE
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         logger.error("[broker] cannot start: %s", exc)
-        return 2
+        return EXIT_CANNOT_START
     if args.attest_only:
         print(json.dumps(
             {"image_id": broker.image_id, **report, "capabilities": broker.capabilities,
              "capability_error": broker.capability_error},
             indent=2, sort_keys=True,
         ))
-        return 0 if report["verified"] and broker.capabilities is not None else 3
+        return EXIT_STOPPED if report["verified"] and broker.capabilities is not None else EXIT_POLICY
     if not report["verified"]:
         logger.error("[broker] container policy did not hold; refusing to serve: %s", report["problems"])
-        return 3
+        return EXIT_POLICY
     if broker.capabilities is None:
         logger.error("[broker] the worker image reported no engines; refusing to serve: %s",
                      broker.capability_error)
-        return 3
+        return EXIT_POLICY
     try:
         server = _make_server(
             args.listen, broker, allow_non_loopback=args.allow_non_loopback,
@@ -1032,20 +1201,32 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (OSError, ValueError) as exc:
         logger.error("[broker] cannot listen on %s: %s", args.listen, exc)
-        return 2
-    logger.info("[broker] serving %s image=%s on %s", settings.name, broker.image_id, args.listen)
-    # `docker stop` sends SIGTERM: stop serving, then kill and remove every
-    # job container (the finally below), instead of dying with jobs running.
-    signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
+        return EXIT_CANNOT_START
+    logger.info("[broker] serving %s image=%s (%s) on %s", settings.name, broker.image_id,
+                broker.image_ref, args.listen)
+    stoppers = _stop_on_signals(server)
+    outcome = {"code": EXIT_STOPPED}
+    watching = threading.Event()
+    watcher: threading.Thread | None = None
+    if broker.image_fallback:
+        watcher = threading.Thread(
+            target=_watch_for_requested_image, args=(broker, server, outcome, watching),
+            name="broker-newer-image", daemon=True,
+        )
+        watcher.start()
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         logger.info("[broker] stopping")
     finally:
+        watching.set()
+        for thread in (*stoppers, *([watcher] if watcher is not None else [])):
+            if thread is not threading.current_thread():
+                thread.join(timeout=5.0)
         server.server_close()
         broker.shutdown()
         logger.info("[broker] stopped; job containers of %s removed", settings.name)
-    return 0
+    return outcome["code"]
 
 
 if __name__ == "__main__":

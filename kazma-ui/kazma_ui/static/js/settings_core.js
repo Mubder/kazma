@@ -98,6 +98,10 @@
             gc_enabled: true,
             indexing_enabled: true,
             malware_probe: { available: false },
+            // Where untrusted documents run (security.execution.document_worker_isolation):
+            // what the server reports, and the page's choice.
+            worker_isolation: null,
+            worker_profile_choice: 'process',
         },
         documentsSaving: false,
         documentsStatus: '',
@@ -761,6 +765,7 @@
                 const docSettings = await this._fetch('/api/settings/documents');
                 if (docSettings && !docSettings.error) {
                     Object.assign(this.documents, docSettings);
+                    this._syncWorkerProfileChoice();
                 }
             } catch (e) {
                 console.error('[Settings] Failed to load document config:', e);

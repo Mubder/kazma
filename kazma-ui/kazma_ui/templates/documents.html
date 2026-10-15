@@ -255,6 +255,24 @@
           <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.3rem;">
             {{ t('documents.worker') }} <span x-text="health && health.worker && health.worker.running ? t('documents.worker_running') : t('documents.worker_stopped')"></span>
           </div>
+          {# Where untrusted documents run, the broker the guard runs, and the one step that fixes what is not right. #}
+          <div style="margin-bottom:.4rem;" data-testid="document-isolation" x-show="isolation()" x-cloak>
+            <span class="cap-pill" :class="isolation() && isolation().ready ? 'cap-ready' : 'cap-unavailable'">
+              {{ t('documents.isolation') }} <span x-text="isolationLabel()"></span>
+            </span>
+            <span class="cap-pill" x-show="brokerLabel()" x-cloak>
+              {{ t('documents.broker') }} <span x-text="brokerLabel()"></span>
+            </span>
+            <span class="cap-pill cap-degraded" x-show="isolation() && isolation().image_fallback" x-cloak>
+              {{ t('documents.isolation_image_older') }}
+            </span>
+            <div class="doc-meta" role="status" x-show="isolationAction()" x-cloak style="margin-top:.3rem;">
+              <span x-text="isolationActionText()"></span>
+              <code translate="no" dir="ltr" style="display:block;margin-top:.2rem;"
+                    x-show="isolationAction() && isolationAction().command" x-text="isolationAction() ? isolationAction().command : ''"></code>
+              <a href="/settings?tab=documents" x-show="isolationNeedsSettings()" x-cloak>{{ t('documents.isolation_open_settings') }}</a>
+            </div>
+          </div>
           <template x-for="p in (health ? health.parsers : [])" :key="p.parser_id">
             <span class="cap-pill" :class="capClass(p.readiness)"><span translate="no" x-text="p.parser_id"></span>: <span x-text="tOr('documents.cap_' + p.readiness, p.readiness)"></span></span>
           </template>

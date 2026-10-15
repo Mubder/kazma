@@ -3237,6 +3237,38 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "غير موجود في PATH (الوضع التلقائي يتخطّاه ما لم يُفعَّل الرفض)",
         "en": "not on PATH (auto skips unless fail-closed)",
     },
+    "settings.docs.worker_profile": {
+        "ar": "أين تُعالَج المستندات غير الموثوقة",
+        "en": "Where untrusted documents run",
+    },
+    "settings.docs.profile_process": {
+        "ar": "عملية محلية: حدود للوقت والذاكرة، بلا عزل للملفات أو الشبكة",
+        "en": "Local process: time and memory limits, no file or network isolation",
+    },
+    "settings.docs.profile_container": {
+        "ar": "حاوية لكل مهمة: بلا شبكة وبلا ملفات هذا التثبيت",
+        "en": "A container per job: no network, none of this install's files",
+    },
+    "settings.docs.profile_hint": {
+        "ar": "نمط الحاوية يحتاج Docker وصورة عامل المستندات. يشغّل الحارس الوسيط الذي يبدأ الحاويات، وتعرض صفحة المستندات حالته.",
+        "en": "The container profile needs Docker and the document worker image. The guard runs the broker that starts the containers; the Documents page shows its state.",
+    },
+    "settings.docs.profile_from_environment": {
+        "ar": "يحدّده المتغيّر KAZMA_DOCUMENT_WORKER_ISOLATION في البيئة، وهو يتقدّم على هذا الإعداد.",
+        "en": "Set by KAZMA_DOCUMENT_WORKER_ISOLATION in the environment, which wins over this setting.",
+    },
+    "settings.docs.profile_old_guard": {
+        "ar": "بدأ الحارس الذي يشغّل Kazma قبل أن يصبح قادرًا على تشغيل الوسيط: أعد تشغيل الحارس مرة واحدة.",
+        "en": "The guard running Kazma started before it could run the broker: restart the guard once.",
+    },
+    "settings.docs.container_required_notice": {
+        "ar": "يتطلّب هذا التثبيت العزل في حاويات (نمط التنفيذ الصارم): تُرفض المستندات حتى تُعالَج في نمط الحاوية.",
+        "en": "This install requires container isolation (the strict execution profile): documents are refused until they run in the container profile.",
+    },
+    "settings.docs.use_container_profile": {
+        "ar": "استخدم نمط الحاوية",
+        "en": "Use the container profile",
+    },
     "settings.docs.opt_auto": {
         "ar": "تلقائي",
         "en": "auto",

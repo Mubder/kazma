@@ -199,8 +199,12 @@ def validate_setting(key: str, value: Any) -> tuple[Any, str | None]:
     Raises :class:`SettingRejected` for a value the setting cannot hold. A
     key with no rule passes unchanged."""
     from kazma_core.safety.deployment_policy import (
-        CONTAINER_REQUIRED_KEY, WORKSPACE_ROOTS_KEY,
-        normalize_container_required, normalize_workspace_roots,
+        CONTAINER_REQUIRED_KEY,
+        DOCUMENT_WORKER_ISOLATION_KEY,
+        WORKSPACE_ROOTS_KEY,
+        normalize_container_required,
+        normalize_document_worker_isolation,
+        normalize_workspace_roots,
     )
 
     name = base_key(key)
@@ -209,6 +213,8 @@ def validate_setting(key: str, value: Any) -> tuple[Any, str | None]:
             return normalize_workspace_roots(value), "security"
         if name == CONTAINER_REQUIRED_KEY:
             return normalize_container_required(value), "security"
+        if name == DOCUMENT_WORKER_ISOLATION_KEY:
+            return normalize_document_worker_isolation(value), "security"
         # A parent mapping save or backup restore must enforce the same rules.
         if name in ("security", "security.execution") and isinstance(value, dict):
             return {child: validate_setting(name + "." + child, item)[0]

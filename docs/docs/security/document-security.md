@@ -108,8 +108,11 @@ setting has a reader (`tests/test_document_config_fields_read.py`).
 
 ### Layer 3: Isolated execution — two profiles {#layer-3-isolated-execution}
 
-`KAZMA_DOCUMENT_WORKER_ISOLATION` selects where every parse, OCR, render and
-mutation job runs. `GET /api/documents/ops/readiness` and
+The admin's setting `security.execution.document_worker_isolation`
+(Settings → Documents) selects where every parse, OCR, render and mutation job
+runs; `KAZMA_DOCUMENT_WORKER_ISOLATION` wins when it is set. The setting is
+protected from the agent's config tools and never changed by a settings
+restore; one that cannot be read refuses documents. `GET /api/documents/ops/readiness` and
 `GET /api/documents/health` report the profile in force (`worker_isolation`):
 its mode, whether filesystem and network isolation hold, and for the
 container profile the broker's attestation. Readiness's
@@ -154,10 +157,14 @@ documents you do not trust.
 
 #### `container`: one attested container per job (Docker deployment profile)
 
-- A separate **broker** (`kazma_core/documents/worker_broker.py`, its own
-  container in `deploy/docker-compose.document-broker.yml`) is the only
-  process that holds the Docker engine socket. The engine API is host-root
-  authority: it is never mounted into Kazma.
+- A separate **broker** (`kazma_core/documents/worker_broker.py`; its own
+  container in `deploy/docker-compose.document-broker.yml`, or on a native
+  install a process the guard runs beside Kazma) is the only process that
+  holds the Docker engine connection. The engine API is host-root authority:
+  it is never handed to Kazma. The guard's broker listens on loopback only,
+  authenticates every request with a token file only the guard's account can
+  read, and runs with an environment reduced to what Python and the docker
+  CLI need (the guard's own secrets stay out).
 - Kazma sends the request and exactly the files it names as one bounded,
   digest-checked stream (`worker_bundle.py`). Shared document storage is never
   mounted; the parser's scratch `storage_root` is a per-job directory.
@@ -430,7 +437,7 @@ review NOT RUN.
 ## Recommendations for production
 
 1. **Run documents you do not trust in the container profile**
-   (`KAZMA_DOCUMENT_WORKER_ISOLATION=container` with the broker), confirm
+   (Settings → Documents; the guard runs the broker on a native install), confirm
    readiness `worker_isolation.ready` and `image_code_matches: true`, and set
    `security.execution.container_required` so the `process` profile is refused.
 2. **Install ClamAV** (`clamscan`/`clamdscan` on PATH) for production; verify

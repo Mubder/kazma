@@ -21,6 +21,13 @@ Any other value refuses every run (a typo must not quietly mean "process").
 The broker is addressed by ``KAZMA_DOCUMENT_BROKER_URL`` (``unix:///path``
 or ``tcp://host:port``) and authenticated with the token in the file named
 by ``KAZMA_DOCUMENT_BROKER_TOKEN_FILE``.
+
+Which profile runs is the admin's setting
+``security.execution.document_worker_isolation`` (Settings -> Documents;
+under ``security.`` so the agent's config tools cannot change it), and
+``KAZMA_DOCUMENT_WORKER_ISOLATION`` wins when it is set: the environment is
+the floor. On a native install the guard runs the broker and hands Kazma its
+address (``kazma_core.documents.broker_supervision``).
 """
 
 from __future__ import annotations
@@ -41,6 +48,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from . import worker_process
 from .errors import DocumentSandboxError
 from .ocr.base import OcrComponentHealth, OcrEngineReport, OcrHealth, OcrReadiness
 from .registry import ParserCapability, ParserPlugin, ParserReadiness, ParserRegistry
@@ -62,6 +70,7 @@ __all__ = [
     "CONTAINER",
     "PROCESS",
     "image_engines_unavailable",
+    "isolation_selection",
     "image_ocr_health",
     "image_parser_registry",
     "image_renderer_registry",
@@ -101,18 +110,69 @@ def _unavailable(message: str, code: str = "worker_isolation_unavailable") -> Do
     return DocumentSandboxError(message, code=code)
 
 
-def worker_isolation_mode() -> str:
-    """``process`` or ``container``; anything else refuses execution."""
+def isolation_selection() -> dict[str, Any]:
+    """Which profile runs and what chose it; never raises.
 
-    raw = (os.environ.get(ISOLATION_ENV) or "").strip().lower()
-    if raw in ("", PROCESS):
+    ``source`` is ``environment`` (``KAZMA_DOCUMENT_WORKER_ISOLATION``, which
+    wins), ``setting`` (the admin's choice in Settings -> Documents),
+    ``default`` (``process``) or ``worker`` (inside a worker). ``mode`` is
+    ``invalid`` for a value that is not a profile and ``unknown`` when the
+    setting could not be read; ``error`` says which.
+    """
+
+    from kazma_core.safety.deployment_policy import document_worker_isolation_setting, policy_read_failures
+
+    raw = (os.environ.get(ISOLATION_ENV) or "").strip()
+    selection: dict[str, Any] = {"environment": raw or None, "setting": None, "error": None}
+    if worker_process.is_worker():
+        return {**selection, "mode": PROCESS, "source": "worker"}
+    try:
+        selection["setting"] = document_worker_isolation_setting()
+    except policy_read_failures() as exc:
+        selection["error"] = f"setting unreadable ({type(exc).__name__})"
+    if raw:
+        mode = raw.lower() if raw.lower() in (PROCESS, CONTAINER) else "invalid"
+        if mode == "invalid":
+            selection["error"] = f"{ISOLATION_ENV} must be 'process' or 'container'"
+        return {**selection, "mode": mode, "source": "environment"}
+    if selection["error"]:
+        return {**selection, "mode": "unknown", "source": "setting"}
+    if selection["setting"]:
+        return {**selection, "mode": selection["setting"], "source": "setting"}
+    return {**selection, "mode": PROCESS, "source": "default"}
+
+
+def worker_isolation_mode() -> str:
+    """``process`` or ``container``; anything else refuses execution.
+
+    ``KAZMA_DOCUMENT_WORKER_ISOLATION`` wins when it is set; otherwise the
+    admin's setting decides, and none saved is ``process``. A setting that
+    cannot be read refuses (``document_policy_unavailable``, retried): it must
+    never guess the less isolated profile. A worker process is always
+    ``process`` (:mod:`kazma_core.documents.worker_process`). Blocking (a
+    settings read): async callers use ``asyncio.to_thread``.
+    """
+
+    if worker_process.is_worker():
         return PROCESS
-    if raw == CONTAINER:
-        return CONTAINER
-    raise _unavailable(
-        f"{ISOLATION_ENV} must be 'process' or 'container'; document execution is refused",
-        code="worker_isolation_invalid",
-    )
+    raw = (os.environ.get(ISOLATION_ENV) or "").strip().lower()
+    if raw:
+        if raw in (PROCESS, CONTAINER):
+            return raw
+        raise _unavailable(
+            f"{ISOLATION_ENV} must be 'process' or 'container'; document execution is refused",
+            code="worker_isolation_invalid",
+        )
+    from kazma_core.safety.deployment_policy import document_worker_isolation_setting, policy_read_failures
+
+    try:
+        setting = document_worker_isolation_setting()
+    except policy_read_failures() as exc:
+        raise _unavailable(
+            "The document worker profile setting could not be read; document execution is refused",
+            code="document_policy_unavailable",
+        ) from exc
+    return setting or PROCESS
 
 
 def process_profile_refusal() -> DocumentSandboxError | None:
@@ -135,9 +195,14 @@ def process_profile_refusal() -> DocumentSandboxError | None:
             code="document_policy_unavailable",
         )
     if required:
+        if (os.environ.get(ISOLATION_ENV) or "").strip():
+            how = (f"{ISOLATION_ENV}={os.environ.get(ISOLATION_ENV, '').strip()} in the environment "
+                   "overrides the setting: remove it (or set it to container) and restart Kazma")
+        else:
+            how = "choose the container profile in Settings -> Documents"
         return DocumentSandboxError(
             "This install requires container isolation (security.execution.container_required): "
-            "set KAZMA_DOCUMENT_WORKER_ISOLATION=container with a document worker broker",
+            + how,
             code="worker_isolation_required",
         )
     return None
@@ -150,13 +215,27 @@ class _Endpoint:
     token: str
 
 
+def _no_endpoint_message() -> str:
+    """Why there is no broker address, in the words that fix it."""
+
+    from .broker_supervision import supervisor_report
+
+    by = supervisor_report().get("by")
+    if by == "old_guard":
+        return ("The guard running Kazma started before it could run the document broker: "
+                "restart the guard once so it runs it")
+    if by == "guard":
+        return ("The guard does not hand Kazma a document broker (KAZMA_GUARD_DOCUMENT_BROKER=off): "
+                f"run one and set {BROKER_URL_ENV} and {BROKER_TOKEN_FILE_ENV}")
+    return (f"Container document isolation needs {BROKER_URL_ENV} and {BROKER_TOKEN_FILE_ENV}: "
+            "run Kazma under the guard (it runs the broker), or run a broker and set them")
+
+
 def _endpoint() -> _Endpoint:
     url = (os.environ.get(BROKER_URL_ENV) or "").strip()
     token_file = (os.environ.get(BROKER_TOKEN_FILE_ENV) or "").strip()
     if not url or not token_file:
-        raise _unavailable(
-            f"Container document isolation needs {BROKER_URL_ENV} and {BROKER_TOKEN_FILE_ENV}"
-        )
+        raise _unavailable(_no_endpoint_message())
     try:
         token = Path(token_file).read_text(encoding="utf-8").strip()
     except OSError as exc:
@@ -501,13 +580,30 @@ def _broker_status(*, max_age_seconds: float = _STATUS_TTL_SECONDS) -> dict[str,
 
 
 def isolation_report() -> dict[str, Any]:
-    """What isolation document workers run under, for health and readiness."""
+    """What isolation document workers run under, for health and readiness.
 
+    Besides the profile and the broker's own report: which profile was chosen
+    and by what (``selection``), who runs the broker and what the guard says
+    about it (``supervisor``), and the one step that fixes what is not right
+    (``action``: a ``code`` the pages word, an English ``message`` and the
+    ``command`` to run, or None).
+    """
+
+    from .broker_supervision import isolation_action, supervisor_report
+
+    report = _isolation_report()
+    report["selection"] = isolation_selection()
+    report["supervisor"] = supervisor_report()
+    report["action"] = isolation_action(report)
+    return report
+
+
+def _isolation_report() -> dict[str, Any]:
     try:
         mode = worker_isolation_mode()
     except DocumentSandboxError as exc:
         return {
-            "mode": "invalid",
+            "mode": "invalid" if exc.code == "worker_isolation_invalid" else "unknown",
             "ready": False,
             "filesystem_isolation": False,
             "network_isolation": False,
@@ -542,10 +638,17 @@ def isolation_report() -> dict[str, Any]:
         "image_code_matches": (
             image_code == _local_code_fingerprint() if isinstance(image_code, str) else None
         ),
+        # False: the image serving was built from other inputs than this
+        # checkout's (scripts/document_worker_image.py labels each build);
+        # None: an image built by hand, or not a checkout.
+        "image_current": _image_current(status.get("image_source")),
+        "image_fallback": status.get("image_fallback") is True,
         "engines_reported": bool(capabilities),
         "broker": {
             "status": status.get("status"),
             "name": status.get("broker"),
+            "image": status.get("image_ref") or status.get("image"),
+            "image_requested": status.get("image"),
             "image_id": status.get("image_id"),
             "limits": status.get("limits"),
             "attested": bool(attestation.get("verified")),
@@ -815,3 +918,12 @@ def image_ocr_health(requested_languages: tuple[str, ...] = (), *, engine: str =
 @lru_cache(maxsize=1)
 def _local_code_fingerprint() -> str:
     return code_fingerprint(Path(__file__).resolve().parent)
+
+
+def _image_current(image_source: Any) -> bool | None:
+    if not isinstance(image_source, str) or not image_source:
+        return None
+    from .broker_supervision import local_build_fingerprint
+
+    local = local_build_fingerprint()
+    return None if local is None else image_source == local

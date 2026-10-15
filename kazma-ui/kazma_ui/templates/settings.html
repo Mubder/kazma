@@ -2533,6 +2533,31 @@
                 {{ t('settings.documents_hint') }}
                 <a href="/documents" style="margin-left:8px;">{{ t('settings.docs.open_documents_page') }}</a>
             </div>
+            {# Where untrusted documents run (security.execution.document_worker_isolation). #}
+            <div class="form-group" data-testid="document-worker-profile">
+                <label for="document-worker-profile">{{ t('settings.docs.worker_profile') }}</label>
+                <select id="document-worker-profile" class="form-select" x-model="documents.worker_profile_choice"
+                        :disabled="workerProfileFromEnvironment()">
+                    <option value="process">{{ t('settings.docs.profile_process') }}</option>
+                    <option value="container">{{ t('settings.docs.profile_container') }}</option>
+                </select>
+                <div class="form-hint">{{ t('settings.docs.profile_hint') }}</div>
+                <div class="form-hint" x-show="workerProfileFromEnvironment()" x-cloak>
+                    {{ t('settings.docs.profile_from_environment') }}
+                </div>
+                <div class="form-hint" x-show="documents.worker_isolation && documents.worker_isolation.supervised_by === 'old_guard'" x-cloak>
+                    {{ t('settings.docs.profile_old_guard') }}
+                </div>
+            </div>
+            <div x-show="containerProfileNeeded()" x-cloak role="status"
+                 style="margin-bottom:12px;padding:10px 12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.35);border-radius:var(--radius);font-size:0.8rem;">
+                <span class="ki" data-icon="alert-triangle" aria-hidden="true"></span>
+                {{ t('settings.docs.container_required_notice') }}
+                <button class="btn btn-sm btn-primary" style="margin-inline-start:8px;" @click="useContainerProfile()"
+                        :disabled="documentsSaving || workerProfileFromEnvironment()">
+                    {{ t('settings.docs.use_container_profile') }}
+                </button>
+            </div>
             <div class="form-group">
                 <label><input type="checkbox" x-model="documents.enabled"> {{ t('settings.docs.enabled_durable_writes') }}</label>
             </div>

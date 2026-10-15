@@ -110,13 +110,14 @@ Tesseract and the document's warnings say from which page: raise the limit
 | Surface | Use |
 |---|---|
 | Web `/documents` | Upload, library, detail, ops panel (capacity, readiness, audit, GC) |
-| Settings `/settings?tab=documents` | Rollout, intake, execution limits, storage floor, OCR (and its table pass), malware, GC, indexing |
+| Settings `/settings?tab=documents` | Where untrusted documents run (process or container), rollout, intake, execution limits, storage floor, OCR (and its table pass), malware, GC, indexing |
 | `GET /api/documents/health` | Parser, OCR, renderer and PDF-mutator readiness, isolation profile, policy revision |
 | `GET /api/documents/ops/*` | Metrics, capacity, readiness, retention, audit (audit is admin-only) |
 | `POST /api/documents/ops/maintenance/{dry-run,run}` | Admin GC |
 | `python scripts/certify_documents.py` | Cert smoke / `--soak` |
 | `python scripts/document_pg_backup.py` | Postgres store: backup, verify, restore; knowledge-index comparison (`index`) |
 | `python scripts/document_fidelity.py` | Extraction fidelity corpus against its floors |
+| `python scripts/document_worker_image.py` | The container profile's worker image for the code on disk: `build`, `status`, `prune` |
 
 ---
 
@@ -375,6 +376,118 @@ mutation job then runs in a fresh, attested container with no network and no
 mounts. The security model is in
 [Document security — Layer 3](../security/document-security.md#layer-3-isolated-execution).
 
+### Choose the profile
+
+**Settings → Documents → Where untrusted documents run** (admin only):
+*Local process* or *A container per job*. The setting is
+`security.execution.document_worker_isolation`. It is under `security.`, so
+the agent's config tools cannot change it, and a settings restore never
+changes it. `KAZMA_DOCUMENT_WORKER_ISOLATION` in the environment still wins
+when it is set; the page then shows the switch disabled and says why.
+
+When the install requires containers (`security.execution.container_required`,
+the strict execution profile), the local process profile refuses every
+document (`worker_isolation_required`). The Settings page says so above the
+switch and offers **Use the container profile**.
+
+A setting that cannot be read refuses documents (`document_policy_unavailable`,
+retried): it never falls back to the less isolated profile.
+
+### Native install: the guard runs the broker
+
+On an install the guard supervises (`scripts/service/kazma_guard.py`, the
+`KazmaAgent` task), nothing has to be run by hand and `.env` needs nothing:
+
+- **Kazma asks, the guard runs it.** When the container profile is chosen,
+  Kazma writes a request into `.kazma/document_broker.request.json` (at boot,
+  within a second of the Settings change, and on the 15-minute maintenance
+  pass). The guard starts the broker within a second, and stops it when the
+  profile goes back to *process*. The request outlives restarts, so after one
+  the guard starts the broker **before** Kazma, and it attests while Kazma
+  boots.
+- **The guard hands Kazma the address.** It starts every server with
+  `KAZMA_DOCUMENT_BROKER_URL` (a loopback port it keeps for the install),
+  `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` (`.kazma/document_broker.token`, made once
+  by the guard, readable by its account only, never logged) and
+  `KAZMA_GUARD_BROKER_REQUEST_FILE`. A `.env` that names another broker wins;
+  the guard then runs none.
+- **The image for this code.** The broker asks for
+  `kazma-document-worker:src-<16 hex>`, a tag derived from everything the
+  image is built from (the Dockerfile, its requirements, all of `kazma_core`).
+  While that tag is not built it serves the newest image the build script
+  made, and stops to switch (exit 6, restarted at once) as soon as it is.
+- **Kept running.** A broker that exits is restarted (5 s, 15 s ... 5 min); one
+  that stops answering is restarted after three missed probes. A missing image
+  or a Docker engine that does not answer is checked again every 30 s, quietly.
+  The guard pages once when the broker keeps failing (three failed starts in a
+  row) and once when Docker has not answered for 10 minutes, and once more
+  when it is back. A missing or outdated image is Kazma's ops alert instead
+  (`documents.worker_image_outdated`, once per build, with the command).
+- **Maintenance.** A pause (`--pause`, `kazma update`) stops the broker with
+  Kazma; the next start starts it again. A broker whose code or image changed
+  is restarted when Kazma is.
+- **What it records.** `guard.log` has `broker.*` events like the guard's own;
+  the broker's output is `.kazma/document_broker.log`; the guard's state file
+  holds `document_broker` (state, pid, image, restarts, last exit), which
+  readiness reads; `kazma_guard.py --status` shows it.
+
+The broker runs as the account that runs the guard, with an environment
+reduced to what Python, Windows and the docker CLI need (the guard's own
+variables, its Telegram token included, stay out). It listens on loopback
+only; the token is the only authentication there.
+
+#### Switch an install to the container profile
+
+In the install folder, with the install's Python (`.venv\Scripts\python.exe`
+on Windows):
+
+1. **Build the worker image** for the code on disk. The first build takes a
+   few minutes (the engines), later ones seconds:
+
+   ```powershell
+   .venv\Scripts\python.exe scripts\document_worker_image.py build
+   ```
+
+2. **Choose the container profile**: Settings → Documents → *Use the container
+   profile* (or the switch, then **Save**).
+
+3. **Restart the guard once**, as below -- only because the guard that runs
+   today started before it could run the broker. The Documents page and
+   `kazma_guard.py --status` say when this is needed.
+
+#### Restart the guard
+
+A reload (`kazma_guard.py --reload`) restarts Kazma, never the guard's own
+code: the guard is the `KazmaAgent` task's process and lives from boot to
+boot. To run a newer guard, when no chat turn runs:
+
+```powershell
+.venv\Scripts\python.exe scripts\service\kazma_guard.py --pause --stop --when-idle --reason "guard update"
+schtasks /End /TN KazmaAgent
+schtasks /Run /TN KazmaAgent
+.venv\Scripts\python.exe scripts\service\kazma_guard.py --resume
+```
+
+The pause has the old guard stop Kazma gracefully and hold; the new guard
+starts holding the same pause, and the resume starts Kazma, which asks for
+the broker. Run the two `schtasks` lines from an elevated terminal if a
+normal one is refused. A reboot does what the two `schtasks` lines do.
+
+From then on: switching the profile is the Settings page alone, a code update
+is the usual `kazma_guard.py --reload --when-idle`, and after an update the
+Documents page (and the ops alert) asks for step 1 again when the image is
+older than the code -- the broker keeps serving the older image until it is
+built, then switches by itself.
+
+The guard's own settings, in its environment (the `KazmaAgent` task's, not
+`.env`): `KAZMA_GUARD_DOCUMENT_BROKER` (`auto` follows Kazma's request, `on`
+always runs one, `off` never does), `KAZMA_GUARD_BROKER_PORT` (pin the port),
+`KAZMA_GUARD_BROKER_IMAGE` (pin an image; no fallback then).
+
+`python scripts/document_worker_image.py status` says which tag this code
+needs, which are built, and what the guard's broker serves;
+`... prune` removes older builds (never this code's or the one serving).
+
 ### Deploy (Docker Compose)
 
 ```bash
@@ -399,15 +512,18 @@ read-only root and no capabilities — and sets
 `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` on `kazma`. The token must be at least 32
 characters. Never mount the engine socket into `kazma` itself.
 
-A host that runs Kazma natively can use the same broker: run
-`python -I kazma-core/kazma_core/documents/worker_broker.py --image
-kazma-document-worker:local --token-file <file> --listen tcp:127.0.0.1:8765`
-under an account that may use Docker, and set
-`KAZMA_DOCUMENT_WORKER_ISOLATION=container`,
-`KAZMA_DOCUMENT_BROKER_URL=tcp://127.0.0.1:8765` and
-`KAZMA_DOCUMENT_BROKER_TOKEN_FILE=<file>` for Kazma. The token is the only
-authentication on TCP: the broker listens on loopback unless started with
-`--allow-non-loopback`.
+### A broker run by hand
+
+Without the guard (a developer's server, another supervisor), run
+`python -I kazma-core/kazma_core/documents/worker_broker.py --image <tag>
+--token-file <file> --listen tcp:127.0.0.1:8765` under an account that may
+use Docker (add `--fallback-to-newest-built` to serve the newest build while
+`<tag>` is missing), and set `KAZMA_DOCUMENT_BROKER_URL=tcp://127.0.0.1:8765`
+and `KAZMA_DOCUMENT_BROKER_TOKEN_FILE=<file>` for Kazma. The token is the
+only authentication on TCP: the broker listens on loopback unless started
+with `--allow-non-loopback`. Its exit codes: 0 asked to stop, 2 could not
+start, 3 the policy did not hold or the image reported no engines, 4 no
+worker image, 5 Docker does not answer, 6 the image asked for appeared.
 
 ### Check it
 
@@ -419,11 +535,19 @@ authentication on TCP: the broker listens on loopback unless started with
 - `GET /api/documents/ops/readiness` → `worker_isolation`: `mode`, `ready`,
   `filesystem_isolation`, `network_isolation`, `hostile_document_profile`
   (`container_broker` when ready; `unqualified` for the `process` profile),
-  `image_code_matches`, and `broker` (image id, limits, `attested`,
-  `attested_at`, `problems`, `active`, `quarantined`). A container profile
-  that is not ready -- or the `process` profile while
+  `image_code_matches`, `image_current` (the image serving was built from
+  this checkout), `image_fallback` (an older build serves), `broker` (image,
+  image id, limits, `attested`, `attested_at`, `problems`, `active`,
+  `quarantined`), `selection` (which profile and what chose it: the
+  environment, the setting or the default), `supervisor` (who runs the
+  broker -- the guard, an older guard, another broker, nobody -- and the
+  guard's own record of it) and `action`: the one step that fixes what is not
+  right (`code`, an English `message`, and the `command` to run), or null. A
+  container profile that is not ready -- or the `process` profile while
   `security.execution.container_required` is on -- adds
   `document_worker_isolation_unavailable` to `degraded_reasons`.
+- The Documents page shows the same: the profile, the broker's state, an
+  older image serving, and the step with its command (both languages).
 - The broker logs one line per job: worker, status, exit code, output bytes,
   `cleanup=verified|failed` and duration.
 - **Engine readiness comes from the image.** At start the broker also asks the
@@ -434,21 +558,21 @@ authentication on TCP: the broker listens on loopback unless started with
   WeasyPrint does not refuse what the image can do, and an engine the image
   lacks reads unavailable with the image's reason.
 - **A stale image is visible.** The image reports a fingerprint of its
-  document code; `worker_isolation.image_code_matches: false` (and the
-  readiness reason `document_worker_image_outdated`) means the image was
-  built from other code than this Kazma runs. The fingerprint covers the
-  Python source of `kazma_core/documents` only, while the image holds all of
-  `kazma_core`: rebuild the image and restart the broker after every update,
-  not only one that changes the document code.
+  document code, and the build script labels it with the fingerprint of
+  everything it was built from. `image_code_matches: false` or
+  `image_current: false` (and the readiness reason
+  `document_worker_image_outdated`) means the image was built from other code
+  than this Kazma runs: `python scripts/document_worker_image.py build`.
 
 ### Failures and what they mean
 
 | Code | Meaning | Action |
 |---|---|---|
-| `worker_isolation_unavailable` | Broker unconfigured, unreachable, unattested, token refused, or the run was lost | Check the broker container and its log; the job is retried within the queue's finite budget |
+| `worker_isolation_unavailable` | Broker unconfigured, unreachable, unattested, token refused, or the run was lost | Readiness names the step (`worker_isolation.action`); the job is retried within the queue's finite budget |
 | `worker_isolation_busy` | Every broker slot was busy for the admission wait | Raise `--concurrency` (and the host's capacity) or let the retries absorb the burst |
 | `worker_isolation_invalid` | `KAZMA_DOCUMENT_WORKER_ISOLATION` is neither `process` nor `container` | Fix the setting; every run is refused until then |
-| `worker_isolation_required` | `security.execution.container_required` is on and documents run in the `process` profile | Deploy the broker and set `KAZMA_DOCUMENT_WORKER_ISOLATION=container` |
+| `worker_isolation_required` | `security.execution.container_required` is on and documents run in the `process` profile | Settings → Documents → *Use the container profile* (or remove a `KAZMA_DOCUMENT_WORKER_ISOLATION=process` from the environment) |
+| `document_policy_unavailable` | The profile setting (or the execution policy) could not be read | Retried; the settings store's own outage is reported elsewhere |
 | `document_engine_unavailable` | The worker image itself lacks the engine for this operation (its own report says why) | Rebuild the worker image with the engine; the host's packages do not count |
 | `worker_output_invalid` | The worker returned a stream that breaks the protocol (names, sizes, digests) | Permanent; treat the document as hostile |
 | `parser_oom` | The job container was killed by its memory limit | Retried within budget; raise `--memory-mb` only if legitimate documents hit it |
@@ -478,14 +602,21 @@ images, attests the policy, runs the qualification suite
 `KAZMA_TEST_DOCUMENT_WORKER_IMAGE` naming the image; a skip fails the job)
 and the compose-shaped topology
 (`python scripts/document_broker_topology.py <worker image> <broker image>`).
-Run the same two commands on a deployment host to qualify it.
+Run the same two commands on a deployment host to qualify it. On a native
+install, `tests/test_document_broker_guard_docker.py` (same variable) runs
+the real guard and broker: a real PDF parsed through the container, the
+broker killed and brought back by the guard, and nothing left behind.
 
 ### Rebuild and rotate
 
-The broker pins the worker image by id at start: after rebuilding the
-worker image, restart `document-broker`. The token file is read per run on
-the Kazma side and at start on the broker side: write the new token, then
-restart `document-broker`.
+Native install: `python scripts/document_worker_image.py build` after an
+update; the guard's broker switches to the new image within a minute, no
+restart. To rotate the token, delete `.kazma/document_broker.token` and reload
+Kazma: the guard makes a new one and restarts the broker. Compose: the broker
+pins the worker image by id at start, so after rebuilding the worker image,
+restart `document-broker`; the token file is read per run on the Kazma side
+and at start on the broker side: write the new token, then restart
+`document-broker`.
 
 ## Malware scanning
 

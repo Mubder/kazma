@@ -54,6 +54,7 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | A prune reported Time Travel's disk use growing | Full suite 2026-10-15 | `-shm` not counted as disk use | Done: `tests/test_snapshot_retention_actually_prunes.py` |
 | A deleted library's words left in the keyword index | KB-Q01 72-hour soak, cycle 76 | The purge removes every deleted word; a purge cut short is finished | Done: root cause FTS5 drops a delete marker only when a merge writes its oldest segment; `db/fts5_purge.py` checks the structure and rebuilds; Memory's Forget purge and the Chroma compaction share it; a durable purge mark; `tests/test_fts5_purge.py`, child kills in `tests/test_knowledge_store.py`; the failing run's replay passes 81 cycles |
 | A malformed document id answered 400 with a WARNING | Live probe 2026-10-15 | It reads like an unknown id (404) | Done: `InvalidIdError`, `tests/test_document_malformed_ids.py` (the old mapping as control) |
+| Documents refused on a strict install: no broker | Live readiness 2026-10-15 (`container_required` on, `process` profile, no broker) | The guard runs the broker, the profile is a Settings switch, one command builds the image for the code | Done in code: `tests/test_guard_document_broker.py`, `tests/test_document_worker_profile.py`, `tests/test_document_worker_image.py`, `tests/js/test_settings_document_profile.js`, real Docker `tests/test_document_broker_guard_docker.py` (broker ready 5.2 s, a real PDF through the container 1.25 s, a killed broker back in 9.3 s); the live switch is the owner's (below) |
 
 ## Measurements (soaks)
 
@@ -78,6 +79,7 @@ SQ05 (published limits) is tied to the Swarm soak's numbers when it ends.
 | Q04 independent security review | The owner reviews it later (decided 2026-10-15) |
 | GitHub Actions billing lock | The account's payment; no CI runs until it is fixed |
 | Cloudflare Web Analytics switch | The site allows it and the policy says so (kazma.ai `f2d7564`, served 2026-10-15 with a clean console in EN and AR), but Cloudflare injects no beacon today: Web Analytics is off for the project. Turning it on (Cloudflare dashboard: Web Analytics, automatic setup for kazma.ai) is the owner's |
+| Switch the live install to the container profile | After the deploy: `.venv\Scripts\python.exe scripts\document_worker_image.py build`, then Settings → Documents → *Use the container profile*, then restart the guard once (the running guard predates broker supervision; `docs/docs/ops/document-processing.md`, "Restart the guard") |
 
 ## Done today
 

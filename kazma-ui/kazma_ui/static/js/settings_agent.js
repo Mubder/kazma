@@ -490,6 +490,28 @@
             this.proxyTestResult = null;
         },
 
+        _syncWorkerProfileChoice() {
+            const w = this.documents.worker_isolation;
+            const known = ['process', 'container'];
+            const chosen = w && (w.setting || w.mode);
+            this.documents.worker_profile_choice = known.indexOf(chosen) >= 0 ? chosen : 'process';
+        },
+
+        workerProfileFromEnvironment() {
+            const w = this.documents.worker_isolation;
+            return !!(w && w.source === 'environment');
+        },
+
+        containerProfileNeeded() {
+            const w = this.documents.worker_isolation;
+            return !!(w && w.container_required && w.mode !== 'container');
+        },
+
+        async useContainerProfile() {
+            this.documents.worker_profile_choice = 'container';
+            await this.saveDocuments();
+        },
+
         async saveDocuments() {
             this.documentsSaving = true;
             this.documentsStatus = '';
@@ -511,6 +533,16 @@
                     gc_enabled: !!this.documents.gc_enabled,
                     indexing_enabled: !!this.documents.indexing_enabled,
                 };
+                // The profile is written only when it is a change from what the
+                // server reported: the server keeps "none chosen" (the process
+                // default) until then, and a page that could not read it never
+                // writes over it blind. The environment's value wins over the
+                // setting, so the switch is not offered while it is set.
+                const w = this.documents.worker_isolation;
+                const choice = this.documents.worker_profile_choice;
+                if (w && !this.workerProfileFromEnvironment() && choice && choice !== (w.setting || w.mode)) {
+                    body.worker_isolation = choice;
+                }
                 const resp = await fetch('/api/settings/documents', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -521,7 +553,10 @@
                 const saved = await resp.json().catch(function() { return {}; });
                 if (saved && (saved.ok === false || saved.status === 'error')) throw new Error(saved.error || 'save failed');
                 const refreshed = await this._fetch('/api/settings/documents');
-                if (refreshed && !refreshed.error) Object.assign(this.documents, refreshed);
+                if (refreshed && !refreshed.error) {
+                    Object.assign(this.documents, refreshed);
+                    this._syncWorkerProfileChoice();
+                }
                 this.documentsStatus = _k('settings.agentjs.st_saved', 'Saved');
                 if (window.showToast) window.showToast(_k('settings.agentjs.document_settings_saved', 'Document settings saved'), 'success');
             } catch (e) {

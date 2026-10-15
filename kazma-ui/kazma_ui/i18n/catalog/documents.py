@@ -668,4 +668,84 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّرت إزالته من المكتبة: {error}",
         "en": "Could not remove it from the library: {error}",
     },
+    # ── Where untrusted documents run (worker_container.isolation_report) ──
+    "documents.isolation": {"en": "Isolation:", "ar": "العزل:"},
+    "documents.isolation_mode_process": {
+        "en": "local process (no file or network isolation)",
+        "ar": "عملية محلية (بلا عزل للملفات أو الشبكة)",
+    },
+    "documents.isolation_mode_container": {
+        "en": "a container per job",
+        "ar": "حاوية لكل مهمة",
+    },
+    "documents.isolation_mode_invalid": {"en": "invalid setting", "ar": "إعداد غير صالح"},
+    "documents.isolation_mode_unknown": {"en": "setting unreadable", "ar": "تعذّرت قراءة الإعداد"},
+    "documents.broker": {"en": "Broker:", "ar": "الوسيط:"},
+    "documents.broker_state_running": {"en": "running", "ar": "يعمل"},
+    "documents.broker_state_starting": {"en": "starting", "ar": "يبدأ"},
+    "documents.broker_state_idle": {"en": "not running", "ar": "متوقف"},
+    "documents.broker_state_backoff": {"en": "failed, retrying", "ar": "فشل، تُعاد المحاولة"},
+    "documents.broker_state_image_missing": {"en": "no image built", "ar": "لا توجد صورة مبنية"},
+    "documents.broker_state_docker_unavailable": {"en": "Docker not answering", "ar": "Docker لا يستجيب"},
+    "documents.broker_state_off": {"en": "turned off in the guard", "ar": "مُعطَّل في الحارس"},
+    "documents.isolation_image_older": {
+        "en": "an older image build serves",
+        "ar": "تعمل صورة مبنية لإصدار أقدم",
+    },
+    "documents.isolation_open_settings": {
+        "en": "Open Settings → Documents",
+        "ar": "افتح الإعدادات ← المستندات",
+    },
+    "documents.isolation_action.use_container": {
+        "en": "This install requires container isolation for documents: choose the container profile in Settings → Documents.",
+        "ar": "يتطلّب هذا التثبيت عزل المستندات في حاويات: اختر نمط الحاوية من الإعدادات ← المستندات.",
+    },
+    "documents.isolation_action.remove_environment_override": {
+        "en": "KAZMA_DOCUMENT_WORKER_ISOLATION in the environment overrides the setting: remove it from .env, then restart Kazma.",
+        "ar": "المتغيّر KAZMA_DOCUMENT_WORKER_ISOLATION في البيئة يتقدّم على الإعداد: احذفه من ‎.env ثم أعد تشغيل Kazma.",
+    },
+    "documents.isolation_action.fix_environment": {
+        "en": "KAZMA_DOCUMENT_WORKER_ISOLATION must be process or container.",
+        "ar": "يجب أن تكون قيمة KAZMA_DOCUMENT_WORKER_ISOLATION إما process أو container.",
+    },
+    "documents.isolation_action.settings_unavailable": {
+        "en": "The document isolation setting could not be read; documents are refused until the settings store answers.",
+        "ar": "تعذّرت قراءة إعداد عزل المستندات؛ تُرفض المستندات حتى يستجيب مخزن الإعدادات.",
+    },
+    "documents.isolation_action.build_image": {
+        "en": "Build the document worker image for this code with the command below, in the install folder. The broker switches to it by itself.",
+        "ar": "ابنِ صورة عامل المستندات لهذا الإصدار بالأمر أدناه في مجلد التثبيت. ينتقل الوسيط إليها من تلقاء نفسه.",
+    },
+    "documents.isolation_action.restart_guard": {
+        "en": "The guard running Kazma started before it could run the document broker: restart the guard once (see the document processing operations guide).",
+        "ar": "بدأ الحارس الذي يشغّل Kazma قبل أن يصبح قادرًا على تشغيل وسيط المستندات: أعد تشغيل الحارس مرة واحدة (راجع دليل تشغيل معالجة المستندات).",
+    },
+    "documents.isolation_action.start_guard": {
+        "en": "The guard that started Kazma is not running, so nothing runs the document broker: start it.",
+        "ar": "الحارس الذي شغّل Kazma متوقف، فلا شيء يشغّل وسيط المستندات: شغّله.",
+    },
+    "documents.isolation_action.wait": {
+        "en": "The guard is starting the document broker; it checks its containers first.",
+        "ar": "يبدأ الحارس تشغيل وسيط المستندات؛ يتحقّق من حاوياته أولًا.",
+    },
+    "documents.isolation_action.start_docker": {
+        "en": "Docker does not answer: start Docker. The guard keeps trying.",
+        "ar": "Docker لا يستجيب: شغّل Docker. يواصل الحارس المحاولة.",
+    },
+    "documents.isolation_action.check_broker_log": {
+        "en": "The document broker keeps failing. Its log:",
+        "ar": "يتكرّر فشل وسيط المستندات. سجلّه:",
+    },
+    "documents.isolation_action.enable_guard_broker": {
+        "en": "The guard does not run a document broker here (KAZMA_GUARD_DOCUMENT_BROKER=off).",
+        "ar": "لا يشغّل الحارس وسيط مستندات هنا (KAZMA_GUARD_DOCUMENT_BROKER=off).",
+    },
+    "documents.isolation_action.run_broker": {
+        "en": "Nothing runs a document broker: run Kazma under the guard, which runs one, or run a broker and point Kazma at it.",
+        "ar": "لا شيء يشغّل وسيط مستندات: شغّل Kazma تحت الحارس فهو يشغّله، أو شغّل وسيطًا ووجّه Kazma إليه.",
+    },
+    "documents.isolation_action.check_external_broker": {
+        "en": "The document broker Kazma is set to use does not answer or is not attested: check it and its log.",
+        "ar": "وسيط المستندات الذي تستخدمه Kazma لا يستجيب أو لم يُثبت سلامة حاوياته: افحصه وسجلّه.",
+    },
 }

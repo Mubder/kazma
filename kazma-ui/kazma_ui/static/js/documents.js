@@ -66,6 +66,40 @@ function documentsPage() {
       return "cap-unavailable";
     },
 
+    // Where untrusted documents run (health.worker_isolation): the profile,
+    // the broker the guard runs, and the one step that fixes what is not
+    // right. Words from the catalog; the command is shown as it is.
+    isolation() {
+      return this.health && this.health.worker_isolation ? this.health.worker_isolation : null;
+    },
+
+    isolationLabel() {
+      const w = this.isolation();
+      return w ? kazmaT("documents.isolation_mode_" + w.mode, w.mode) : "";
+    },
+
+    brokerLabel() {
+      const w = this.isolation();
+      const broker = w && w.supervisor ? w.supervisor.broker : null;
+      if (!broker || !broker.state || w.mode !== "container") return "";
+      return kazmaT("documents.broker_state_" + broker.state, broker.state);
+    },
+
+    isolationAction() {
+      const w = this.isolation();
+      return w && w.action ? w.action : null;
+    },
+
+    isolationActionText() {
+      const action = this.isolationAction();
+      return action ? kazmaT("documents.isolation_action." + action.code, action.message) : "";
+    },
+
+    isolationNeedsSettings() {
+      const action = this.isolationAction();
+      return !!action && (action.code === "use_container" || action.code === "remove_environment_override");
+    },
+
     async loadDocuments() {
       try {
         const r = await fetch("/api/documents");

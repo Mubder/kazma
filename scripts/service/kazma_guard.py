@@ -55,14 +55,24 @@ Configuration (all optional, env vars):
     KAZMA_GUARD_STATE           child-PID state file (orphan reaping)
     KAZMA_GUARD_TELEGRAM_TOKEN  bot token (falls back to SWARM_BOT_TOKEN)
     KAZMA_GUARD_TELEGRAM_CHAT   chat id   (falls back to SWARM_CHAT_ID)
+    KAZMA_GUARD_DOCUMENT_BROKER auto (run the document broker when Kazma
+                                asks) | on (always) | off (never) (default: auto)
+    KAZMA_GUARD_BROKER_PORT     the broker's loopback port (default: chosen once)
+    KAZMA_GUARD_BROKER_IMAGE    pin the worker image (default: the one built
+                                for the code on disk)
+    KAZMA_GUARD_BROKER_SCRIPT   the broker program (default: worker_broker.py)
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import secrets
 import signal
+import socket
+import struct
 import subprocess
 import sys
 import time
@@ -147,7 +157,9 @@ GUARD_ACK_S = 20.0
 # it, lists none of it:
 #   pause_held -- the gate before every spawn records the pause it holds
 #                 (state ``pause_held`` = that pause's ``since``).
-GUARD_FEATURES = ("pause_held",)
+#   document_broker -- runs the document worker broker beside Kazma when
+#                 Kazma asks (state ``document_broker``; see DocumentBroker).
+GUARD_FEATURES = ("pause_held", "document_broker")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -1369,7 +1381,8 @@ def server_stderr_tail(proc: subprocess.Popen | None, max_lines: int = 20,
     return "\n".join(lines[-max_lines:])[-max_chars:]
 
 
-def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
+def spawn(cmd: list[str], cwd: Path, log: GuardLog,
+          extra_env: dict[str, str] | None = None) -> subprocess.Popen:
     # The server reads the guard's heartbeat from here to notice when it is
     # left running with no guard (kazma_core.observability.supervisor_watch).
     env = dict(os.environ)
@@ -1377,6 +1390,9 @@ def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
     # ...and where to ask for a reload (Settings' "Restart server" goes
     # through the guard: supervisor_watch.request_guard_reload).
     env["KAZMA_GUARD_RELOAD_FILE"] = str(_reload_path())
+    # ...and the document worker broker's address, token file and request
+    # file (DocumentBroker.server_env), so .env needs nothing for it.
+    env.update(extra_env or {})
     kwargs: dict = {"cwd": str(cwd), "env": env}
     if os.name == "nt":
         # Own process group so the child and ITS children (serve.py spawns
@@ -1474,6 +1490,736 @@ def stop_child(proc: subprocess.Popen, log: GuardLog, *, grace_s: float = 0.0) -
     return False
 
 
+# -- document worker broker -------------------------------------------
+#
+# Untrusted documents can run in a fresh, attested container per job (the
+# "container" profile, kazma_core/documents/worker_container.py). Docker is
+# reached by one narrow process, the broker
+# (kazma_core/documents/worker_broker.py); Kazma talks to it over loopback
+# with a token. Under docker compose the broker is its own service. On a
+# native install nothing ran it: on 2026-10-15 the live install required
+# containers (security.execution.container_required), no broker ran, and
+# every document was refused. The guard runs it now, beside Kazma:
+#
+#   * Kazma decides whether it needs one (its profile setting, or
+#     KAZMA_DOCUMENT_WORKER_ISOLATION) and says so in a request file the guard
+#     hands it (KAZMA_GUARD_BROKER_REQUEST_FILE); the guard starts or stops
+#     the broker within a second. The request outlives restarts, so after one
+#     the broker starts before Kazma does.
+#   * The guard hands Kazma the broker's loopback URL and token file
+#     (KAZMA_DOCUMENT_BROKER_URL / _TOKEN_FILE), as it hands the state file:
+#     .env needs nothing. A .env that names another broker wins; the guard then
+#     runs none (Kazma's request names that other URL).
+#   * The broker asks for the worker image built for the code on disk
+#     (kazma_core/documents/worker_image.py, built by
+#     scripts/document_worker_image.py), and serves the newest one built when
+#     that is missing, until it appears.
+#   * It is restarted when it exits or stops answering, with a backoff; the
+#     guard pages once when it cannot keep it running, and records it all in
+#     its state file (``document_broker``) for Kazma's readiness.
+
+BROKER_MODE_ENV = "KAZMA_GUARD_DOCUMENT_BROKER"
+BROKER_MODES = ("auto", "on", "off")
+#: Between restarts of a broker that crashed, by consecutive failure.
+BROKER_BACKOFF_S = (5, 15, 30, 60, 120, 300)
+#: A missing image or a Docker engine that does not answer is checked again
+#: this often: the checks are cheap, and the fix is the operator's.
+BROKER_RETRY_S = 30.0
+#: Spawned to answering ready: the broker attests its policy and asks the
+#: image for its engines, a container run each.
+BROKER_START_BUDGET_S = 600.0
+BROKER_PROBE_INTERVAL_S = 30.0
+#: Probes a ready broker may miss in a row before it is restarted.
+BROKER_FAILURES_TO_KILL = 3
+#: Failed starts in a row before the one page that says the guard cannot keep
+#: the broker running.
+BROKER_PAGE_AFTER = 3
+#: Docker not answering this long is paged once.
+BROKER_ENGINE_PAGE_AFTER_S = 600.0
+#: A stop asks the broker to end its jobs and remove their containers first.
+BROKER_STOP_GRACE_S = 45.0
+#: worker_broker.py's exit codes the guard tells apart.
+BROKER_EXIT_NO_IMAGE, BROKER_EXIT_NO_ENGINE, BROKER_EXIT_NEWER_IMAGE = 4, 5, 6
+BROKER_LOG_MAX_BYTES = 2 * 1024 * 1024
+#: Everything else in the guard's environment stays out of the broker, the
+#: one process with authority over Docker: the guard's own secrets
+#: (KAZMA_GUARD_TELEGRAM_TOKEN) included. What Python, Windows and the docker
+#: CLI need (its config lives under the user profile).
+_BROKER_ENV_KEEP = (
+    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP",
+    "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES",
+    "PROGRAMW6432", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH",
+    "DOCKER_TLS_VERIFY", "KAZMA_DOCKER_BIN", "LANG", "LC_ALL", "TZ",
+)
+_BROKER_REQUEST_MAGIC = b"KZDB-REQ/1\n"
+
+
+def _broker_mode() -> str:
+    raw = (os.environ.get(BROKER_MODE_ENV) or "auto").strip().lower()
+    return raw if raw in BROKER_MODES else "auto"
+
+
+def _broker_file(name: str) -> Path:
+    """Beside the guard's state file (``<install>/.kazma``)."""
+    return _state_path().with_name(name)
+
+
+def _broker_log_path() -> Path:
+    return _default_log_path().with_name("document_broker.log")
+
+
+def _broker_script() -> Path:
+    named = (os.environ.get("KAZMA_GUARD_BROKER_SCRIPT") or "").strip()
+    if named:
+        return Path(named)
+    return REPO_ROOT / "kazma-core" / "kazma_core" / "documents" / "worker_broker.py"
+
+
+def _broker_name() -> str:
+    """Names this install's job containers (the broker's sweep removes only
+    its own name's): two installs on one machine never remove each other's."""
+    digest = hashlib.sha256(str(REPO_ROOT).lower().encode("utf-8")).hexdigest()
+    return f"guard-{digest[:8]}"
+
+
+def _port_is_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _choose_broker_port(preferred: int | None) -> int:
+    """The broker's loopback port: KAZMA_GUARD_BROKER_PORT, else the one used
+    before, else one derived from the install folder, below the ephemeral
+    ranges (an outgoing connection can take an ephemeral port while the
+    broker restarts), the first free of 64."""
+    named = (os.environ.get("KAZMA_GUARD_BROKER_PORT") or "").strip()
+    if named:
+        return int(named)
+    if preferred and _port_is_free(preferred):
+        return preferred
+    digest = hashlib.sha256(str(REPO_ROOT).lower().encode("utf-8")).hexdigest()
+    base = 20000 + int(digest[:8], 16) % 10000
+    for step in range(64):
+        port = 20000 + (base - 20000 + step) % 10000
+        if _port_is_free(port):
+            return port
+    return base
+
+
+def _current_user_sid() -> str:
+    """The SID of the account this process runs as (Windows), or ""."""
+    try:
+        out = subprocess.run(
+            ["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20, check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    sid = out.rsplit(",", 1)[-1].strip().strip('"')
+    return sid if sid.startswith("S-") else ""
+
+
+def _restrict_to_owner(path: Path) -> bool:
+    """Only the account that runs the guard (and so Kazma and the broker) may
+    read *path*. True when the restriction was applied."""
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o600)
+            return True
+        except OSError:
+            return False
+    sid = _current_user_sid()
+    if not sid:
+        return False
+    try:
+        result = subprocess.run(
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:(F)"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def _file_sha(*paths: Path) -> str:
+    digest = hashlib.sha256()
+    for path in paths:
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"<missing>")
+    return digest.hexdigest()
+
+
+_WORKER_IMAGE_MODULE = None
+
+
+def _worker_image():
+    """kazma_core/documents/worker_image.py, loaded by path (standard library
+    only, like process_priority.py: the guard never imports the app)."""
+    global _WORKER_IMAGE_MODULE
+    if _WORKER_IMAGE_MODULE is None:
+        import importlib.util
+
+        path = REPO_ROOT / "kazma-core" / "kazma_core" / "documents" / "worker_image.py"
+        name = "kazma_guard_worker_image"
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        _WORKER_IMAGE_MODULE = module
+    return _WORKER_IMAGE_MODULE
+
+
+def broker_status(port: int, token: str, timeout: float = 3.0) -> dict | None:
+    """The broker's own status report (its ``status`` operation), or None."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            header = json.dumps({"protocol": 1, "token": token, "op": "status"}).encode("utf-8")
+            sock.sendall(_BROKER_REQUEST_MAGIC + struct.pack(">I", len(header)) + header)
+            head = _recv_all(sock, 5)
+            kind, size = head[:1], struct.unpack(">I", head[1:])[0]
+            if kind != b"S" or size > 1024 * 1024:
+                return None
+            data = json.loads(_recv_all(sock, size).decode("utf-8"))
+    except (OSError, ValueError, struct.error):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _spawn_broker(cmd: list[str], kwargs: dict) -> subprocess.Popen:
+    return subprocess.Popen(cmd, **kwargs)
+
+
+def _ask_broker_to_stop(proc: subprocess.Popen) -> None:
+    """CTRL_BREAK to its process group (Windows; Python raises SIGBREAK,
+    which the broker handles), SIGTERM to it elsewhere. Raises OSError."""
+    if os.name == "nt":
+        os.kill(proc.pid, signal.CTRL_BREAK_EVENT)
+    else:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+
+
+def _kill_broker_tree(proc: subprocess.Popen) -> None:
+    """The broker and what it started (docker CLI processes). Raises OSError."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                       capture_output=True, timeout=30, check=False)
+    else:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+
+
+def _recv_all(sock: socket.socket, size: int) -> bytes:
+    data = bytearray()
+    while len(data) < size:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
+            raise ConnectionError("closed")
+        data.extend(chunk)
+    return bytes(data)
+
+
+class DocumentBroker:
+    """The document worker broker beside Kazma (see the section comment).
+
+    Driven from the guard's own loop -- :meth:`tick` runs in every wait the
+    guard makes, about once a second -- so the guard stays one thread. Never
+    raises out of a tick: broker supervision must not take down the
+    supervision of Kazma itself.
+    """
+
+    def __init__(self, guard: Guard) -> None:
+        self.guard = guard
+        self.log = guard.log
+        self.mode = _broker_mode()
+        self.proc: subprocess.Popen | None = None
+        self.state = "off" if self.mode == "off" else "idle"
+        self.why = "disabled" if self.mode == "off" else "no_request"
+        self.wanted = False
+        self.detail = ""
+        self.port: int | None = None
+        self.token = ""
+        self.image_requested = ""
+        self.fallback = False
+        self.script_sha = ""
+        self.restarts = 0
+        self.failures = 0
+        self.last_exit: int | None = None
+        self.started_at = 0.0
+        self.ready_at = 0.0
+        self._spawned = 0.0
+        self._next_start: float | None = None
+        self._next_probe = 0.0
+        self._probe_failures = 0
+        self._request_seen: tuple[int, int] | None = None
+        self._episode = ""          # the failure condition being retried quietly
+        self._episode_since = 0.0
+        self._paged = ""            # the condition paged; cleared (and recovered) when ready
+        self._status: dict = {}
+        self._stopping = False
+        self._created: float | None = None
+        # Maintenance: wanted or not, nothing starts until the next spawn.
+        self.held = False
+
+    # -- what Kazma is handed -----------------------------------------
+
+    @property
+    def url(self) -> str:
+        return f"tcp://127.0.0.1:{self.port}" if self.port else ""
+
+    @property
+    def token_path(self) -> Path:
+        return _broker_file("document_broker.token")
+
+    @property
+    def request_path(self) -> Path:
+        return _broker_file("document_broker.request.json")
+
+    def _ensure_port(self) -> None:
+        if self.port is None:
+            recorded = (_read_state().get("document_broker") or {}).get("port")
+            self.port = _choose_broker_port(recorded if isinstance(recorded, int) else None)
+
+    def server_env(self) -> dict[str, str]:
+        """What the server needs to use and ask for the broker (empty when off)."""
+        if self.mode == "off":
+            return {}
+        self._ensure_port()
+        return {
+            "KAZMA_DOCUMENT_BROKER_URL": self.url,
+            "KAZMA_DOCUMENT_BROKER_TOKEN_FILE": str(self.token_path),
+            "KAZMA_GUARD_BROKER_REQUEST_FILE": str(self.request_path),
+        }
+
+    # -- the request ---------------------------------------------------
+
+    def _request_signature(self) -> tuple[int, int] | None:
+        try:
+            st = self.request_path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
+
+    def _read_request(self) -> dict | None:
+        try:
+            data = json.loads(self.request_path.read_text(encoding="utf-8") or "{}")
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _decide(self) -> tuple[bool, str]:
+        self._request_seen = self._request_signature()
+        if self.mode == "off":
+            return False, "disabled"
+        if self.mode == "on":
+            return True, "forced"
+        req = self._read_request()
+        if req is None:
+            return False, "no_request"
+        if req.get("want") is not True:
+            return False, "not_requested"
+        self._ensure_port()
+        if str(req.get("url") or "") != self.url:
+            # Kazma uses another broker (its .env names one): not this one.
+            return False, "external"
+        return True, "requested"
+
+    # -- lifecycle -------------------------------------------------------
+
+    def on_guard_start(self) -> None:
+        """Reap a broker an earlier guard left, keep the port it used, record."""
+        self.reap_orphan()
+        if self.mode != "off":
+            self._ensure_port()
+        self._write()
+
+    def reap_orphan(self) -> None:
+        """A broker left by a guard that was killed without cleanup."""
+        rec = _read_state().get("document_broker") or {}
+        try:
+            pid = int(rec.get("pid") or 0)
+        except (TypeError, ValueError):
+            return
+        if not pid or pid == os.getpid() or not _pid_alive(pid):
+            return
+        if not _recorded_child_is_ours(pid, {"child_created": rec.get("created")}, self.log):
+            return
+        self.log("warn", "broker.orphan_reaping", pid=pid)
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               capture_output=True, timeout=30, check=False)
+            else:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.log("error", "broker.orphan_reap_failed", pid=pid, error=str(exc)[:200])
+            return
+        self.log("info", "broker.orphan_reaped", pid=pid)
+
+    def before_spawn(self) -> None:
+        """Before Kazma starts: run the broker if it is wanted (it then warms up
+        while Kazma boots), and restart one whose code or image changed."""
+        try:
+            self.held = False
+            self._refresh("spawn")
+            if self.proc is not None and self.proc.poll() is None:
+                image, fallback, sha = self._planned()
+                if image != self.image_requested or sha != self.script_sha or not self._token_ok():
+                    self.log("info", "broker.code_changed", image=image,
+                             was=self.image_requested)
+                    self.stop("code changed")
+                    self._start()
+        except Exception as exc:  # noqa: BLE001 -- see the class docstring
+            self._internal(exc)
+
+    def on_pause(self) -> None:
+        """Maintenance: nothing of Kazma runs while the guard holds."""
+        self.held = True
+        self._next_start = None
+        if self.proc is not None:
+            self.stop("maintenance")
+
+    def shutdown(self) -> None:
+        if self.proc is not None:
+            self.stop("guard shutting down")
+
+    def tick(self) -> None:
+        try:
+            self._tick()
+        except Exception as exc:  # noqa: BLE001 -- see the class docstring
+            self._internal(exc)
+
+    def _internal(self, exc: BaseException) -> None:
+        self.log("error", "broker.internal_error", error=f"{type(exc).__name__}: {exc}"[:300])
+
+    def _refresh(self, reason: str) -> None:
+        if self.mode != "off":
+            self._ensure_port()
+        wanted, why = self._decide()
+        changed = wanted != self.wanted or why != self.why
+        self.wanted, self.why = wanted, why
+        if changed:
+            self.log("info", "broker.wanted" if wanted else "broker.not_wanted",
+                     why=why, reason=reason, url=self.url)
+        if not wanted:
+            if self.proc is not None:
+                self.stop("not wanted")
+            self.state = "off" if self.mode == "off" else "idle"
+            self._next_start = None
+            self._episode = ""
+            self._write()
+            return
+        if self.proc is None and self._next_start is None and not self.held:
+            self._start()
+        elif changed:
+            self._write()
+
+    def _tick(self) -> None:
+        if self.mode == "off":
+            return
+        if self._request_signature() != self._request_seen:
+            self._refresh("request")
+        now = time.monotonic()
+        if self.proc is not None:
+            code = self.proc.poll()
+            if code is not None:
+                self._exited(code)
+                return
+            if now < self._next_probe:
+                return
+            if self.state == "starting":
+                self._next_probe = now + 2.0
+                status = broker_status(self.port or 0, self.token)
+                if status is not None and status.get("ready") is True:
+                    self._became_ready(status)
+                elif now - self._spawned >= BROKER_START_BUDGET_S:
+                    self.log("error", "broker.never_ready", budget_s=BROKER_START_BUDGET_S,
+                             tail=self._log_tail())
+                    self.stop("never ready")
+                    self._failed("never answered ready", None)
+                return
+            self._next_probe = now + BROKER_PROBE_INTERVAL_S
+            status = broker_status(self.port or 0, self.token)
+            if status is not None and status.get("ready") is True:
+                self._probe_failures = 0
+                self._status = status
+                return
+            self._probe_failures += 1
+            self.log("warn", "broker.health_failed", consecutive=self._probe_failures,
+                     answered=status is not None)
+            if self._probe_failures >= BROKER_FAILURES_TO_KILL:
+                self.stop("not answering")
+                self._failed("stopped answering", None)
+            return
+        if self.wanted and not self.held and self._next_start is not None and now >= self._next_start:
+            self._next_start = None
+            self._start()
+
+    def _planned(self) -> tuple[str, bool, str]:
+        """(image to ask for, fall back to the newest built?, script digest)."""
+        script = _broker_script()
+        sha = _file_sha(script, script.parent.parent / "docker_cli.py")
+        pinned = (os.environ.get("KAZMA_GUARD_BROKER_IMAGE") or "").strip()
+        if pinned:
+            return pinned, False, sha
+        try:
+            module = _worker_image()
+            image = module.expected_tag(REPO_ROOT)
+        except (OSError, ImportError, AttributeError) as exc:
+            self.log("warn", "broker.image_unknown", error=str(exc)[:200])
+            image = "kazma-document-worker:src-unknown"
+        return image, True, sha
+
+    def _token_ok(self) -> bool:
+        try:
+            return len(self.token_path.read_text(encoding="utf-8").strip()) >= 32
+        except OSError:
+            return False
+
+    def _ensure_token(self) -> str:
+        path = self.token_path
+        if self._token_ok():
+            return path.read_text(encoding="utf-8").strip()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        token = secrets.token_urlsafe(48)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.close(fd)
+        # The empty file is restricted before the secret is in it; the
+        # rename keeps its access list.
+        restricted = _restrict_to_owner(tmp)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(token)
+        os.replace(tmp, path)
+        self.log("info" if restricted else "warn", "broker.token_created", path=str(path),
+                 owner_only=restricted)
+        return token
+
+    def _start(self) -> None:
+        if self._stopping:
+            return
+        self._ensure_port()
+        try:
+            self.token = self._ensure_token()
+        except OSError as exc:
+            self.log("error", "broker.token_unavailable", error=str(exc)[:200])
+            self._failed("token file unavailable", None)
+            return
+        image, fallback, sha = self._planned()
+        self.image_requested, self.fallback, self.script_sha = image, fallback, sha
+        python = self.guard.server_python or sys.executable
+        cmd = [python, "-I", str(_broker_script()), "--image", image,
+               "--token-file", str(self.token_path), "--listen", f"tcp:127.0.0.1:{self.port}",
+               "--name", _broker_name()]
+        if fallback:
+            cmd.append("--fallback-to-newest-built")
+        env = {k: v for k, v in os.environ.items() if k.upper() in _BROKER_ENV_KEEP}
+        kwargs: dict = {"cwd": str(self.guard.cwd), "env": env, "stdin": subprocess.DEVNULL}
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs["start_new_session"] = True
+        log_path = _broker_log_path()
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            if log_path.is_file() and log_path.stat().st_size > BROKER_LOG_MAX_BYTES:
+                os.replace(log_path, log_path.with_name(log_path.name + ".1"))
+            fh = log_path.open("ab")
+        except OSError:
+            fh = None
+        if fh is not None:
+            kwargs["stdout"] = fh
+            kwargs["stderr"] = subprocess.STDOUT
+        try:
+            self.proc = _spawn_broker(cmd, kwargs)
+        except OSError as exc:
+            self.log("error", "broker.spawn_failed", error=str(exc)[:200])
+            self.proc = None
+            self._failed(f"could not start: {exc}", None)
+            return
+        finally:
+            if fh is not None:
+                fh.close()
+        self._spawned = time.monotonic()
+        self._created = _process_started_at(self.proc.pid)
+        self._next_probe = self._spawned + 2.0
+        self._probe_failures = 0
+        self.started_at = time.time()
+        self.ready_at = 0.0
+        self._status = {}
+        self.state = "starting"
+        self.detail = ""
+        if self._episode not in ("image_missing", "docker_unavailable"):
+            # A quiet retry (every 30 s until the operator acts) is not logged
+            # again: its episode was, once.
+            self.log("info", "broker.starting", pid=self.proc.pid, image=image,
+                     fallback_allowed=fallback, url=self.url, log=str(log_path))
+        self._write()
+
+    def _became_ready(self, status: dict) -> None:
+        self._status = status
+        self.state = "running"
+        self.ready_at = time.time()
+        self.failures = 0
+        self._next_probe = time.monotonic() + BROKER_PROBE_INTERVAL_S
+        self.log("info", "broker.ready", pid=self.proc.pid if self.proc else None,
+                 image=status.get("image_ref"), image_id=status.get("image_id"),
+                 fallback=bool(status.get("image_fallback")),
+                 after_s=round(time.monotonic() - self._spawned, 1))
+        if self._episode:
+            self.log("info", "broker.recovered", after=self._episode)
+        if self._paged:
+            self.guard._page("success", "Kazma's document broker is running again",
+                             f"{self._paged} -- recovered.", fingerprint="broker:recovered",
+                             force=True)
+        self._episode, self._paged = "", ""
+        self._write()
+
+    def _exited(self, code: int) -> None:
+        tail = self._log_tail()
+        self.proc = None
+        self.last_exit = code
+        self.restarts += 1
+        if code == BROKER_EXIT_NEWER_IMAGE:
+            # The image built for this code appeared: start again, now.
+            self.log("info", "broker.newer_image", code=code)
+            self._start()
+            return
+        if code == BROKER_EXIT_NO_IMAGE:
+            self._quiet_retry("image_missing", "no worker image is built", code, tail)
+            return
+        if code == BROKER_EXIT_NO_ENGINE:
+            self._quiet_retry("docker_unavailable", "Docker does not answer", code, tail)
+            return
+        self.log("warn", "broker.exited", code=code, tail=tail)
+        self._failed(f"exited with code {code}", tail)
+
+    def _quiet_retry(self, state: str, detail: str, code: int, tail: str) -> None:
+        """A condition the operator fixes (an image to build, Docker to start):
+        logged once, then checked again every BROKER_RETRY_S without a line."""
+        now = time.monotonic()
+        if self._episode != state:
+            self._episode, self._episode_since = state, now
+            self.log("warn", f"broker.{state}", code=code, tail=tail,
+                     retry_every_s=BROKER_RETRY_S)
+        self.state, self.detail = state, detail
+        self._next_start = now + BROKER_RETRY_S
+        if (state == "docker_unavailable" and now - self._episode_since >= BROKER_ENGINE_PAGE_AFTER_S
+                and self._paged != state):
+            self._paged = state
+            self.guard._page(
+                "warn", "Docker does not answer: documents are refused",
+                f"Kazma's document broker needs the Docker engine and it has not answered "
+                f"for {int(BROKER_ENGINE_PAGE_AFTER_S // 60)} min. Start Docker; the guard "
+                "keeps trying.", fingerprint="broker:docker", force=True)
+        self._write()
+
+    def _failed(self, detail: str, tail: str | None) -> None:
+        self.failures += 1
+        self.state, self.detail = "backoff", detail
+        delay = float(BROKER_BACKOFF_S[min(self.failures, len(BROKER_BACKOFF_S)) - 1])
+        self._next_start = time.monotonic() + delay
+        self._episode = "failing"
+        self.log("warn", "broker.restarting", reason=detail, in_s=delay, failures=self.failures)
+        if self.failures >= BROKER_PAGE_AFTER and self._paged != "failing":
+            self._paged = "failing"
+            last = "\n".join((tail or self._log_tail()).splitlines()[-8:])[-600:]
+            self.log("error", "broker.failed", failures=self.failures, reason=detail)
+            self.guard._page(
+                "error", "Kazma's document broker keeps failing: documents are refused",
+                f"It {detail} ({self.failures} times in a row). The guard keeps trying "
+                f"every {int(BROKER_BACKOFF_S[-1] // 60)} min at most.\n"
+                f"Its log ({_broker_log_path().name}):\n{last}",
+                fingerprint="broker:failing", force=True)
+        self._write()
+
+    def stop(self, reason: str) -> None:
+        """Ask the broker to end its jobs and remove their containers, then
+        kill whatever is left. Never raises."""
+        proc = self.proc
+        if proc is None:
+            return
+        self._stopping = True
+        try:
+            if proc.poll() is None:
+                self.log("info", "broker.stopping", pid=proc.pid, reason=reason)
+                asked = False
+                try:
+                    _ask_broker_to_stop(proc)
+                    asked = True
+                except OSError as exc:
+                    self.log("warn", "broker.graceful_unavailable", error=str(exc)[:200])
+                if asked:
+                    try:
+                        proc.wait(timeout=BROKER_STOP_GRACE_S)
+                    except subprocess.TimeoutExpired:
+                        self.log("warn", "broker.graceful_timeout", pid=proc.pid)
+                if proc.poll() is None:
+                    try:
+                        _kill_broker_tree(proc)
+                        proc.wait(timeout=TERMINATE_GRACE_S)
+                    except (OSError, subprocess.SubprocessError) as exc:
+                        self.log("warn", "broker.kill_failed", error=str(exc)[:200])
+            self.log("info", "broker.stopped", pid=proc.pid, reason=reason, code=proc.poll())
+        finally:
+            self.proc = None
+            self._stopping = False
+            self.state = "idle" if self.mode != "off" else "off"
+            self._write()
+
+    # -- reporting -------------------------------------------------------
+
+    def _log_tail(self, max_lines: int = 12) -> str:
+        try:
+            with _broker_log_path().open("rb") as fh:
+                fh.seek(max(0, fh.seek(0, os.SEEK_END) - 8192))
+                text = fh.read().decode("utf-8", "replace")
+        except OSError:
+            return ""
+        lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+        return "\n".join(lines[-max_lines:])[-1500:]
+
+    def record(self) -> dict:
+        """What the state file says about the broker; Kazma's readiness reads it."""
+        proc = self.proc
+        status = self._status or {}
+        return {
+            "mode": self.mode,
+            "state": self.state,
+            "wanted": self.wanted,
+            "why": self.why,
+            "detail": self.detail,
+            "url": self.url,
+            "port": self.port,
+            "token_file": str(self.token_path),
+            "request_file": str(self.request_path),
+            "log": str(_broker_log_path()),
+            "pid": proc.pid if proc is not None else None,
+            "created": self._created if proc is not None else None,
+            "image_requested": self.image_requested,
+            "image": status.get("image_ref"),
+            "image_id": status.get("image_id"),
+            "image_fallback": status.get("image_fallback"),
+            "restarts": self.restarts,
+            "failures": self.failures,
+            "last_exit": self.last_exit,
+            "started_at": self.started_at or None,
+            "ready_at": self.ready_at or None,
+            "updated": time.time(),
+        }
+
+    def _write(self) -> None:
+        _update_state(document_broker=self.record())
+
+
 # -- supervisor -------------------------------------------------------
 
 
@@ -1499,6 +2245,7 @@ class Guard:
             self.cmd[0] if self.cmd and "python" in Path(self.cmd[0]).name.lower() else None
         )
         self.notify = Notifier(self.log, cwd=self.cwd, python=server_python)
+        self.server_python = server_python
         self.health_url = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
         self.once = once
         self.proc: subprocess.Popen | None = None
@@ -1526,6 +2273,8 @@ class Guard:
         self._last_beat = 0.0
         # Consecutive errors in the guard's own code (backoff between them).
         self._internal_errors = 0
+        # The document worker broker beside Kazma (DocumentBroker).
+        self.broker = DocumentBroker(self)
 
     # -- lifecycle ----------------------------------------------------
 
@@ -1644,6 +2393,7 @@ class Guard:
         next_progress = started + 60.0
         while time.monotonic() < deadline and not self._stop:
             self._beat()
+            self._broker_tick()
             if self._reload_pending() and self._take_reload_request():
                 # New code landed while this child was booting, and it may
                 # already have imported part of the old. Start over rather
@@ -1734,6 +2484,7 @@ class Guard:
             if remaining <= 0:
                 return False
             self._beat()
+            self._broker_tick()
             if wake_on_reload and self._reload_pending():
                 return True
             if wake_on_pause and read_pause() is not None:
@@ -1748,6 +2499,13 @@ class Guard:
                 return True
             time.sleep(min(1.0, remaining))
         return True
+
+    def _broker_tick(self) -> None:
+        # Every wait the guard makes supervises the broker too (about once a
+        # second). A Guard built without __init__ (tests) has none.
+        broker = getattr(self, "broker", None)
+        if broker is not None:
+            broker.tick()
 
     def _beat(self, *, force: bool = False) -> None:
         """Record that this guard is alive (see HEARTBEAT_EVERY_S)."""
@@ -1846,7 +2604,9 @@ class Guard:
         # From here on this is the guard --reload, --status and the server
         # see as alive (the heartbeat; see HEARTBEAT_EVERY_S).
         _update_state(guard_pid=os.getpid(), guard_started=time.time(),
-                      guard_features=list(GUARD_FEATURES), pause_held=None)
+                      guard_features=list(GUARD_FEATURES), pause_held=None,
+                      guard_code=_file_sha(Path(__file__).resolve()))
+        self.broker.on_guard_start()
         self._beat(force=True)
 
         if self._foreign_server_present():
@@ -1917,11 +2677,14 @@ class Guard:
                                 self.log("debug", "guard.port_still_held.notify_failed")
                     else:
                         self._last_stale_holder_notified = None
+                    # The broker first, when Kazma asked for one: it attests
+                    # while Kazma boots (minutes), so it is ready before it.
+                    self.broker.before_spawn()
                     spawned_at = time.time()
                     self.spawned_at = spawned_at
                     self._stopped_for_reload = False
                     self._stopped_for_maintenance = False
-                    self.proc = spawn(self.cmd, self.cwd, self.log)
+                    self.proc = spawn(self.cmd, self.cwd, self.log, self.broker.server_env())
                     # --reload reads this: a child spawned after its request
                     # already runs the code it asked for.
                     _update_state(child_spawned=spawned_at)
@@ -1959,6 +2722,7 @@ class Guard:
                     break
                 if self.once:
                     self.log("info", "guard.once_exit", reason=reason)
+                    self.broker.shutdown()
                     return 1
 
                 if reason == "maintenance":
@@ -2030,6 +2794,8 @@ class Guard:
 
         if self.proc:
             stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
+        # After Kazma, which may be in the middle of a job on it.
+        self.broker.shutdown()
         self.log("info", "guard.stopped")
         return 0
 
@@ -2084,6 +2850,11 @@ class Guard:
         # it is reached only with no live child.
         held = _pause_signature(pause)
         _update_state(pause_held=pause.get("since"))
+        # Nothing of Kazma runs while the guard holds: an update may be
+        # replacing the broker's code too. The next spawn starts it again.
+        broker = getattr(self, "broker", None)
+        if broker is not None:
+            broker.on_pause()
 
         until = float(pause.get("until") or 0.0)
         human_until = (
@@ -2302,7 +3073,38 @@ def _cmd_status() -> int:
         print("  Kazma is not supervised: a crash will not be restarted.")
         print("  Start it:  schtasks /Run /TN KazmaAgent   (or run --reload)")
     print(f"guard child : pid {state.get('child_pid') if state else 'unknown'}")
+    for line in _broker_status_lines(state, alive):
+        print(line)
     return 0
+
+
+def _broker_status_lines(state: dict, alive: bool) -> list[str]:
+    """What --status says about the document worker broker, and about a
+    running guard older than this file (it may lack what the file does)."""
+    lines: list[str] = []
+    rec = state.get("document_broker")
+    if isinstance(rec, dict):
+        where = rec.get("url") or "no address yet"
+        what = f"{rec.get('state')} ({rec.get('why')})"
+        if rec.get("pid"):
+            what += f", pid {rec.get('pid')}"
+        lines.append(f"doc broker  : {what}, {where}")
+        if rec.get("image") or rec.get("image_requested"):
+            image = rec.get("image") or rec.get("image_requested")
+            note = " (an older build; the one for this code is not built)" if rec.get("image_fallback") else ""
+            lines.append(f"  image     : {image}{note}")
+        if rec.get("detail"):
+            lines.append(f"  detail    : {rec.get('detail')}")
+        lines.append(f"  log       : {rec.get('log')}")
+    if alive:
+        here = _file_sha(Path(__file__).resolve())
+        running = state.get("guard_code")
+        features = state.get("guard_features") or []
+        if (running and running != here) or "document_broker" not in features:
+            lines.append("NOTE        : the running guard started from older code than this file.")
+            lines.append("  A reload restarts Kazma, not the guard: restart the guard to run "
+                         "this code (Document processing operations, 'Restart the guard').")
+    return lines
 
 
 def _cmd_pause(
@@ -2934,6 +3736,12 @@ def main() -> int:
             },
             "notifier_configured": guard.notify.configured,
             "notifier": guard.notify.describe(),
+            "document_broker": {
+                "mode": guard.broker.mode,
+                "script": str(_broker_script()),
+                "state_dir": str(_broker_file("x").parent),
+                "log": str(_broker_log_path()),
+            },
         }, indent=2))
         return 0
     return _run_supervisor(guard)
@@ -2974,6 +3782,14 @@ def _run_supervisor(guard: Guard) -> int:
     except BaseException as exc:
         import traceback
 
+        # The broker is the guard's to stop: a dead guard leaves nothing to
+        # stop it until the next guard reaps it.
+        broker = getattr(guard, "broker", None)
+        if broker is not None:
+            try:
+                broker.shutdown()
+            except Exception as stop_exc:  # noqa: BLE001 -- the crash below is what matters
+                guard.log("warn", "broker.shutdown_failed", error=str(stop_exc)[:200])
         guard.log(
             "critical", "guard.crashed",
             error=f"{type(exc).__name__}: {exc}"[:300],

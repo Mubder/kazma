@@ -1869,6 +1869,14 @@ class KazmaAppBuilder:
 
             spawn_background(_aio.to_thread(report_unmet_requirements), name="install-requirements")
 
+            # ── The document worker broker the guard runs ───────────
+            # Tell the guard now whether documents need it (it then starts
+            # while the rest of Kazma boots), and again whenever the profile
+            # setting changes. Nothing to do without a guard that runs one.
+            from kazma_core.documents.broker_supervision import start_broker_requests
+
+            spawn_background(_aio.to_thread(start_broker_requests), name="document-broker-request")
+
             from kazma_ui.dashboard import set_dashboard_context
 
             set_dashboard_context(checkpoint_manager=self._checkpointer)

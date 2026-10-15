@@ -11,6 +11,12 @@ from typing import Any
 
 WORKSPACE_ROOTS_KEY = "security.workspace_roots"
 CONTAINER_REQUIRED_KEY = "security.execution.container_required"
+#: Where untrusted document jobs run: ``process`` or ``container``
+#: (``kazma_core.documents.worker_container``). Under ``security.`` so the
+#: agent's config tools can never change it (``safety/protected_config.py``);
+#: ``KAZMA_DOCUMENT_WORKER_ISOLATION`` still wins when it is set.
+DOCUMENT_WORKER_ISOLATION_KEY = "security.execution.document_worker_isolation"
+DOCUMENT_WORKER_PROFILES = ("process", "container")
 
 
 def policy_read_failures() -> tuple[type[Exception], ...]:
@@ -57,6 +63,25 @@ def normalize_container_required(value: Any) -> bool:
     if type(value) is not bool:
         raise ValueError("Container required must be a boolean.")
     return value
+
+
+def normalize_document_worker_isolation(value: Any) -> str:
+    """``process`` or ``container``; anything else is refused, never guessed."""
+    text = value.strip().lower() if isinstance(value, str) else None
+    if text not in DOCUMENT_WORKER_PROFILES:
+        raise ValueError("Document workers run in the 'process' or the 'container' profile.")
+    return text
+
+
+def document_worker_isolation_setting() -> str | None:
+    """The saved document worker profile, or None when none is saved.
+
+    A stored value that is not a profile raises ``ValueError`` (one of
+    :func:`policy_read_failures`): the caller refuses, it never guesses."""
+    from kazma_core.config_store import get_config_store
+
+    value = get_config_store().get(DOCUMENT_WORKER_ISOLATION_KEY)
+    return None if value is None else normalize_document_worker_isolation(value)
 
 
 def configured_workspace_roots() -> list[Path]:

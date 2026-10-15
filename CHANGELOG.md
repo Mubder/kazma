@@ -73,6 +73,34 @@
   carries them already. Until they are installed, `auto` reads with
   Tesseract.
 
+## Documents in containers without a hand-run broker (2026-10-15)
+
+On the live install every document was refused. The owner had turned on the
+strict execution profile, which allows untrusted documents to run only in a
+container. The container profile needed three `.env` lines, a worker image
+built by hand and a broker process kept running by hand, and nothing did
+that.
+
+- **The profile is a setting.** Settings → Documents → *Where untrusted
+  documents run*: a local process or a container per job. Only an admin can
+  change it; the agent's config tools cannot, and a settings restore never
+  does. `KAZMA_DOCUMENT_WORKER_ISOLATION` still wins when it is set. When the
+  install requires containers, the page says so and offers *Use the
+  container profile*.
+- **The guard runs the broker.** When Kazma needs it, the guard starts the
+  document worker broker beside Kazma, hands Kazma its address and token,
+  restarts it when it dies or stops answering, and pages once when it cannot
+  keep it running. `.env` needs nothing.
+- **One command builds the image for the code.** `python
+  scripts/document_worker_image.py build`. The image's tag comes from
+  everything it is built from. While the image for the current code is not
+  built, the broker serves the newest one built, and it switches by itself
+  once the new one exists. After an update, Kazma sends one alert naming the
+  command.
+- **Readiness says what to do.** The Documents page shows which profile runs,
+  the broker's state, and the one step that fixes what is not right, with
+  its command, in English and Arabic.
+
 ## Three faults seen on the live install (2026-10-15)
 
 - **A slow Docker answer no longer pages you.** Readiness checks the

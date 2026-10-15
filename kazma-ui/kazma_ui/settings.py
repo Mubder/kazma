@@ -1317,10 +1317,31 @@ class SettingsRouterBuilder:
                     "malware_probe": probe_malware_scanner(),
                     "gc_enabled": cfg.gc_enabled,
                     "indexing_enabled": cfg.indexing_enabled,
+                    "worker_isolation": _document_worker_profile(),
                 }
             except Exception as exc:  # noqa: BLE001
                 logger.warning("document settings get failed: %s", exc)
                 return {"error": safe_error(exc)}
+
+        def _document_worker_profile() -> dict[str, Any]:
+            """Where untrusted documents run, what chose it, and whether the
+            install requires containers: what the Settings page shows above
+            its profile switch. The broker's state is the Documents page's."""
+            from kazma_core.documents.worker_container import isolation_selection
+            from kazma_core.safety.deployment_policy import container_required, policy_read_failures
+
+            selection = isolation_selection()
+            try:
+                required: bool | None = container_required()
+            except policy_read_failures():
+                required = None
+            from kazma_core.documents.broker_supervision import supervisor_report
+
+            return {
+                **selection,
+                "container_required": required,
+                "supervised_by": supervisor_report().get("by"),
+            }
 
         @router.put("/api/settings/documents")
         def api_save_document_settings(req: dict[str, Any]) -> dict[str, str]:
@@ -1359,6 +1380,17 @@ class SettingsRouterBuilder:
                 except SettingRejected as exc:
                     raise HTTPException(status_code=400, detail=f"{key}: {exc}") from None
                 items.append((key, value, category or cat))
+            if "worker_isolation" in req:
+                # Where untrusted documents run: a security setting, checked
+                # by the one rule every writer applies (settings_validation).
+                from kazma_core.safety.deployment_policy import DOCUMENT_WORKER_ISOLATION_KEY
+
+                try:
+                    value, category = validate_setting(
+                        DOCUMENT_WORKER_ISOLATION_KEY, req["worker_isolation"])
+                except SettingRejected as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from None
+                items.append((DOCUMENT_WORKER_ISOLATION_KEY, value, category or "security"))
             if items:
                 config_store.batch_set(items)
             return {"status": "ok", "updated": str(len(items))}

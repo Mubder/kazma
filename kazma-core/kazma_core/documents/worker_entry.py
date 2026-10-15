@@ -348,6 +348,9 @@ def _outputs(work: Path, result_path: Path) -> list[tuple[str, Path | bytes]]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .worker_process import mark
+
+    mark()  # a worker: its own engines, never a settings store
     args = list(sys.argv[1:] if argv is None else argv)
     qualification = args[1:] == ["--qualification"]
     if not args or args[0] not in WORKERS or (len(args) > 1 and not qualification):

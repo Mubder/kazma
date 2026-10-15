@@ -1098,6 +1098,15 @@ def _watch_supervisor() -> None:
     check_supervisor()
 
 
+def _document_broker() -> None:
+    # The guard runs the document worker broker when Kazma asks: the request
+    # again (a write that failed is retried) and, once per build, an alert
+    # when the worker image for this code is not built.
+    from kazma_core.documents.broker_supervision import document_broker_sweep
+
+    document_broker_sweep()
+
+
 #: Every sweep on the 15-minute maintenance cadence, in order. A cleanup that
 #: exists but is on no cadence never runs: that is how backups once went inert
 #: (§15) and how swarm task history went unpruned until 2026-09-25. Add a new
@@ -1112,6 +1121,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("swarm approval rows", _purge_swarm_approvals),
     ("checkpoint retention", _prune_checkpoints),
     ("supervisor watch", _watch_supervisor),
+    ("document worker broker", _document_broker),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),

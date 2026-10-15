@@ -2800,8 +2800,9 @@ broker that is not ready answers the retryable `worker_isolation_unavailable`
 (a full one `worker_isolation_busy`), never a permanent engine error. The
 image reports a fingerprint of its document code: readiness says
 `image_code_matches: false` and `document_worker_image_outdated` when the
-image was built from other code than Kazma runs (rebuild it and restart the
-broker). The image carries no Docling and no httpx: local salvage is not part
+image was built from other code than Kazma runs (rebuild it:
+`scripts/document_worker_image.py build`; the guard's broker switches by
+itself, E1). The image carries no Docling and no httpx: local salvage is not part
 of the container profile, and remote parsing stays in the Kazma process (K).
 It carries the neural OCR engine (G4) and its models: the `ocr-models` build
 stage (hash-locked `deploy/document-worker/ocr-models.txt`, CPU PyTorch) runs
@@ -2825,6 +2826,66 @@ made through `binaries.run_soffice_cli` kills the whole process tree on
 timeout and bounds the last wait: `subprocess.run(timeout=)` waited without a
 limit for the pipes soffice.bin still held and hung the certification
 (`tests/test_soffice_call_bounded.py`, the old call as its control).
+
+**E1. Which profile runs is the admin's setting; the guard runs the broker**
+(2026-10-15). Live that day: the install required containers, documents ran
+in `process`, no broker ran -- the container profile needed three `.env`
+lines and a hand-run process -- and every document was refused.
+- **One answer for the profile** (`worker_container.worker_isolation_mode` /
+  `isolation_selection`): `KAZMA_DOCUMENT_WORKER_ISOLATION` wins when set
+  (the environment's floor); else the setting
+  `security.execution.document_worker_isolation` (`process`/`container`,
+  Settings -> Documents, `PUT /api/settings/documents` `worker_isolation`,
+  validated by `settings_validation`); none saved is `process`. Under
+  `security.` so `config_save` refuses it, and a restore never changes it
+  (`KEY_RULES` credential class: an older backup must not move documents out
+  of containers). An unreadable setting refuses (`document_policy_unavailable`),
+  never guesses `process`.
+- **A worker never reads settings**: every worker entry point (`main` of the
+  parser, mutation and renderer workers, and `worker_entry`) calls
+  `worker_process.mark()` first, and the profile is then `process` (its own
+  engines). The local profile scrubs the worker's environment, so a settings
+  read there would open the default data folder's store. A new worker entry
+  point marks itself (`test_every_worker_entry_point_marks_itself_first`).
+- **Kazma asks the guard** (`documents/broker_supervision.py`): it writes
+  `want` and the broker URL it uses to `KAZMA_GUARD_BROKER_REQUEST_FILE` --
+  at boot (`start_broker_requests`, in a thread), on a profile change (a
+  ConfigStore change listener that publishes on a retained thread of its own,
+  `_drain_publishes`) and on the maintenance sweep "document worker broker";
+  only when the decision changed. An unreadable profile leaves the request
+  standing. A URL that is not the guard's (a `.env` broker) means the guard
+  runs none. Readiness reads the guard's record back (`supervisor_report`:
+  `guard`, `old_guard` -- `document_broker` missing from `guard_features` --,
+  `external`, `none`).
+- **One step that fixes it**: `worker_isolation.action` (`isolation_action`)
+  is a `code` the pages word from the catalog (`documents.isolation_action.*`),
+  an English `message` and the `command` to run; the Documents page shows it,
+  Settings -> Documents offers *Use the container profile* when the install
+  requires containers. Never tell the owner to edit `.env` for what a setting
+  decides.
+- **The image is named by its build inputs** (`documents/worker_image.py`,
+  stdlib-only, loaded by the guard by path): the Dockerfile, its
+  `.dockerignore`, the requirements and every file of `kazma_core` the build
+  context sends, CRLF-insensitive -> `kazma-document-worker:src-<16 hex>`.
+  `test_the_tag_covers_exactly_what_the_build_sends` holds the walk to the
+  `.dockerignore`. `scripts/document_worker_image.py build` builds and labels
+  it (`io.kazma.document-worker-image.source` / `.documents-code`); never make
+  a boot build an image. The broker serves the newest labelled build while
+  the tag asked for is missing (`--fallback-to-newest-built`, status
+  `image_fallback`/`image_source`) and exits 6 to switch, idle, once it
+  appears. Readiness: `image_current: false` or `image_fallback` is
+  `document_worker_image_outdated`; one ops alert per build
+  (`documents.worker_image_outdated`, stamped
+  `system.documents.worker_image_alerted`).
+- **Broker exit codes** are the guard's vocabulary: 2 cannot start, 3 policy or
+  no engines, 4 no image (`_NoWorkerImageError`), 5 no Docker engine
+  (`_DockerEngineUnavailableError`, `check_engine` first), 6 newer image. The
+  broker handles the guard's CTRL_BREAK (SIGBREAK) and SIGTERM, also while it
+  attests, and removes its job containers on the way out.
+Gates: `tests/test_document_worker_profile.py`, `tests/test_document_worker_image.py`
+(the CTRL_BREAK stop with an unhandled one as control),
+`tests/test_guard_document_broker.py`; real Docker (opt-in
+`KAZMA_TEST_DOCUMENT_WORKER_IMAGE`): `tests/test_document_broker_guard_docker.py`.
 
 **E2. A deleted document is never still searchable** (2026-09-28).
 `DocumentService.delete_document` takes the document out of every library
@@ -6049,6 +6110,32 @@ code) and Kazma ran with nobody supervising it.
   (`stderr_tail`) and the page. `serve.py` enables `faulthandler` and prints
   a failure's whole traceback there: on 2026-09-25 "process exited (code 1)"
   left no trace anywhere (the message went to stdout, nothing kept it).
+- **The guard runs the document worker broker** (`DocumentBroker`,
+  2026-10-15; the Kazma side is §19 E1). Same loop, same thread: `tick()` runs
+  in every wait (`_sleep`, `_wait_ready`) and never raises into the guard
+  (`broker.internal_error`). It runs the broker when Kazma's request asks
+  (`KAZMA_GUARD_DOCUMENT_BROKER=auto`; `on` always, `off` never) and starts
+  it BEFORE spawning Kazma when the persisted request wants one; restarts it
+  on exit (5 s .. 5 min), after three missed status probes, and at a spawn
+  when its script, image or token changed (`broker.code_changed`); retries a
+  missing image (exit 4) or a silent Docker engine (exit 5) every 30 s,
+  logging it once; pages once after three failed starts (`broker.failed`) or
+  ten minutes without Docker, and once on recovery; stops it gracefully
+  (CTRL_BREAK / SIGTERM, 45 s, then the tree) at a pause, when no longer
+  wanted, at guard shutdown, `--once` and a guard crash; reaps a broker an
+  earlier guard left (`broker.orphan_reaped`). Its environment is scrubbed
+  (`_BROKER_ENV_KEEP`: the guard's Telegram token never reaches the Docker
+  holder). The loopback port is kept for the install
+  (`KAZMA_GUARD_BROKER_PORT`, else the recorded one, else derived from the
+  install folder below the ephemeral ranges). The token
+  `.kazma/document_broker.token` is made once, restricted to the guard's
+  account (`icacls /inheritance:r` + its SID) before the secret is written,
+  never logged. The server gets URL, token file and request file through
+  `spawn()`'s env, like the state and reload files. The state file's
+  `document_broker` is what readiness reads; `guard_features` lists
+  `document_broker`, and `guard_code` lets `--status` say the running guard
+  is older than its file -- a reload restarts Kazma, never the guard, so a
+  guard change needs the task restarted once (ops doc, "Restart the guard").
 - **Settings' "Restart server" asks the guard.** A server the guard started
   writes the guard's reload request (`supervisor_watch.request_guard_reload`;
   the guard hands the path over in `KAZMA_GUARD_RELOAD_FILE`, an older guard
@@ -6064,7 +6151,11 @@ graceful reload, an ignored stop, a leftover request, the heartbeat, a
 dependency outage ridden out and one past its runway, a crash's stderr kept,
 the server's own reload request), `tests/test_idle_reload.py`,
 `tests/test_settings_restart_via_guard.py`,
-`tests/js/test_settings_restart_reload.js`.
+`tests/js/test_settings_restart_reload.js`, `tests/test_guard_document_broker.py`
+(the supervisor on a fake clock with the old no-broker guard as control; the
+real guard with a stand-in broker: before Kazma, the handed address, a killed
+broker restarted, a failing one paged once, the request deciding, `--once`
+stopping it, an orphan reaped).
 
 ### 40. One checkpoint serializer, strict (`kazma_core/checkpoint_serde.py`)
 

@@ -895,6 +895,13 @@ _LOOP_STALL_HELPERS = frozenset({
     # (the worker deadline plus start and removal); the readiness report
     # reads the broker's status over a socket.
     "run_container_worker", "isolation_report",
+    # Which document worker profile runs: a settings read (2026-10-15). The
+    # guard's broker request: that read and a file write; the outdated-image
+    # alert: the broker's status, settings and an ops alert; the build
+    # fingerprint: a hash of every file the worker image is built from.
+    "worker_isolation_mode", "isolation_selection", "_publish_broker_request",
+    "start_broker_requests", "_report_outdated_image", "document_broker_sweep",
+    "local_build_fingerprint",
     # Document engine readiness: local binary probes (subprocess), or the
     # broker's capability report over a socket in the container profile.
     "get_parser_registry", "get_renderer_registry", "get_mutation_registry",

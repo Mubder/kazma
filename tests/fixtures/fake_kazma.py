@@ -30,6 +30,11 @@ each of the specific ways that broke the guard in production:
     FAKE_ACTIVE_TURNS     chat turns /health/activity reports as running
                           (default 0)
     FAKE_ACTIVITY         0 drops /health/activity: a build from before it
+    FAKE_NOTE_ENV         comma-separated variables to record in the
+                          "spawned" line (what the guard handed the server)
+    FAKE_BROKER_REQUEST   "want" or "no": at boot, write the document broker
+                          request the way Kazma does (the file and URL the
+                          guard handed over)
 
 A graceful stop request is otherwise honoured the way uvicorn honours it:
 the process notes "graceful_exit" and exits 0.
@@ -63,6 +68,8 @@ IGNORE_STOP = os.environ.get("FAKE_IGNORE_STOP", "").lower() in ("1", "true", "y
 RESTART_REQUIRED = os.environ.get("FAKE_NOT_READY_RESTART_REQUIRED", "").lower() in ("1", "true", "yes")
 ACTIVE_TURNS = int(os.environ.get("FAKE_ACTIVE_TURNS", "0"))
 ACTIVITY = os.environ.get("FAKE_ACTIVITY", "1").lower() not in ("0", "false", "no")
+NOTE_ENV = [name for name in os.environ.get("FAKE_NOTE_ENV", "").split(",") if name]
+BROKER_REQUEST = os.environ.get("FAKE_BROKER_REQUEST", "").strip().lower()
 
 _state = {"hung": False, "not_ready": False, "degraded": False}
 
@@ -190,9 +197,29 @@ def _install_stop_handler() -> None:
         signal.signal(sig, handler)
 
 
+def _ask_for_broker() -> None:
+    """What Kazma's broker_supervision.publish_broker_request writes."""
+    path = os.environ.get("KAZMA_GUARD_BROKER_REQUEST_FILE")
+    if not BROKER_REQUEST or not path:
+        return
+    body = {"want": BROKER_REQUEST == "want",
+            "url": os.environ.get("KAZMA_DOCUMENT_BROKER_URL", ""),
+            "mode": "container" if BROKER_REQUEST == "want" else "process",
+            "source": "setting", "ts": time.time(), "pid": os.getpid()}
+    tmp = path + f".{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(body))
+    os.replace(tmp, path)
+    _note("broker_requested", want=body["want"])
+
+
 def main() -> int:
     _install_stop_handler()
-    _note("spawned", priority=_priority())
+    if NOTE_ENV:
+        _note("spawned", priority=_priority(), env={k: os.environ.get(k) for k in NOTE_ENV})
+    else:
+        _note("spawned", priority=_priority())
+    _ask_for_broker()
 
     if NEVER_READY:
         # Started, alive, binds nothing. The guard must detect this by
