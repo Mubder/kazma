@@ -166,22 +166,31 @@ one; Swarm tracker SQ04). The rules those endings follow:
   `result_status` holding what the run ended as; the output is kept). The row
   keeps its last stored state, RUNNING after an admission, and the next start
   holds it as interrupted with an unknown outcome.
-- **A new task whose RUNNING row cannot be written runs without that crash
-  evidence** (a WARNING, `running_row` counted). **An approval whose row
-  cannot be written resumes nothing**: the checkpoint is pending again, its
-  auto-reject re-armed, and the page answers `503 approval_not_recorded` --
-  resumed, a crash would have offered the checkpoint again and run its steps
-  twice.
+- **A new task whose RUNNING row cannot be written is not run.** The row's
+  write is tried again as any task write is; one that still fails refuses the
+  task with `task_store_unavailable` (a WARNING, `running_row` counted, its
+  admission slot freed, nothing ran). The dispatch route answers 503 with
+  `Retry-After`, a background dispatch's stream ends with the same refusal, and
+  the Swarm page says it in the page's language; sending it again runs it.
+  Until 2026-10-15 the task ran without its RUNNING row, so a crash in it left
+  effects no recovery could see. **An approval whose row cannot be written
+  resumes nothing**: the checkpoint is pending again, its auto-reject re-armed,
+  and the page answers `503 approval_not_recorded` -- resumed, a crash would
+  have offered the checkpoint again and run its steps twice.
 - **A durable dispatch that never ran** (Temporal required and unreachable)
   **is finalized** as failed with the reason, freeing its row, its admission
   slot and its stream.
 - **Every lost write is counted** in `kazma_swarm_failures_total`:
   `running_row`, `task_write`, `step_journal`, `worker_metric`, and for shared
   breakers `breaker_read`, `breaker_persist`, `breaker_lease`.
+- **A shared breaker never takes an older state from the settings store**: a
+  refresh applies another copy's state only when its generation is newer
+  (the soak caught a trip undone by the copy written before it).
 
 | Fault | The caller is told | The store holds (after the next start) | Counted |
 |---|---|---|---|
-| SQLite store locked at admission, free while the task runs | success | completed | `running_row` |
+| SQLite store locked through every attempt of the RUNNING row's write | failed, `task_store_unavailable` (nothing ran; try again) | nothing (no row) | `running_row` |
+| Locked at the RUNNING row's first attempt, free before the retries run out | success (the write tried again, the task run once) | completed | nothing |
 | Locked through a resumed pipeline's step journal | success (each step once) | completed | `step_journal` x2 |
 | Locked past the ending's first write attempt | success (the write tried again) | completed | `worker_metric` |
 | Locked past every attempt of the ending's write | failed, `unsaved` (ran: success) | running (failed, outcome unknown) | `task_write`, `worker_metric` |
@@ -189,23 +198,73 @@ one; Swarm tracker SQ04). The rules those endings follow:
 | Shared breakers on, settings store down; admission limit 1 | refused at capacity; trip, refusal and probe recovery on the local breaker | completed / failed as each ran | `breaker_read`, `breaker_persist`, `breaker_lease` |
 | Temporal configured, nothing listening | success (in-process fallback, a WARNING) | completed | nothing |
 | Temporal required, nothing listening | failed, naming Temporal (the worker never ran) | failed | nothing |
+| Temporal (required) accepts the workflow, then goes away while the work runs | success (the work's own ending; Temporal not waited on past 10 s) | completed | `durable_workflow` |
 | Shutdown with a pipeline, fan-out, consult and dispatch running | cancelled | cancelled, `interrupted_by: shutdown`, `unknown` + `file_write` where noted, `none_invoked` otherwise, written before `stop_all_runs` returns; nothing to recover | nothing |
-| Postgres store refusing connections at admission | success | completed | `running_row` |
+| Postgres store refusing connections at admission, back while the RUNNING row's write is tried again | success (the task run once) | completed | nothing |
 | Postgres store refusing connections at the ending | failed, `unsaved` (ran: success) | running (failed, outcome unknown) | `task_write`, `worker_metric` |
 
-Recorded on 2026-10-15 at the product's timeouts (Windows, SQLite and a
-disposable `postgres:16-alpine`). Not run: a Temporal server that accepts the
-workflow and then goes away (SQ03, decision D9).
+Recorded on 2026-10-15 at the product's timeouts (Windows, SQLite, a
+disposable `postgres:16-alpine` and Temporal's time-skipping test server).
+The durable path's own cases (deadlines, cancels, a killed worker process) are
+in §1.0a.
 
 ### 1.0a Durable execution (Temporal, opt-in)
 
-Swarm **planning** stays in-process. When `KAZMA_TEMPORAL_HOST` is set,
-`SwarmEngine.dispatch` wraps `_dispatch_inner` in a Temporal workflow so a
-crash can resume the step (`kazma_core/swarm/durable.py`). The Temporal
-worker runs **inside the Kazma process** (app lifespan, fail-open). Default
-is still asyncio. Kill-switch `KAZMA_TEMPORAL=0`. Strict:
-`KAZMA_TEMPORAL_REQUIRED=1` (no in-process fallback). Extra:
-`pip install -e ".[durable]"`.
+Swarm **planning** stays in-process. When `KAZMA_TEMPORAL_HOST` is set, an
+admitted task runs through one Temporal workflow per run
+(`kazma_core/swarm/durable.py`): `kazma-swarm-<task id>`, and
+`kazma-swarm-<task id>-g<generation>` for an approved pipeline's resume, which
+takes the durable path too. The Temporal workers run **inside the Kazma
+process** (app lifespan, fail-open; stopped at shutdown after the engine has
+stopped its runs). Default is still asyncio. Kill-switch `KAZMA_TEMPORAL=0`.
+Strict: `KAZMA_TEMPORAL_REQUIRED=1` (no in-process fallback; an approval is
+then deferred, its checkpoint left open, while Temporal is not available:
+`503 temporal_unavailable`). Extra: `pip install -e ".[durable]"`.
+
+What Temporal adds is a durable identity and history for each run, and a
+heartbeat that names a process that died. What runs, and how it ends, is the
+engine's own run:
+
+- **The work runs only where it was admitted.** The workflow's one activity
+  is scheduled on a task queue only that Kazma process polls, and runs only
+  for a run registered and waiting there, in that run's own context. Another
+  Kazma, or the same one after a restart, never runs it.
+- **One deadline owner: the engine.** The activity runs the same body as an
+  in-process run (`SwarmEngine._run_admitted`, or `_resume`): the same
+  deadline, the same watchdog and the same endings, `interrupted_by` and
+  `execution_outcome` included. Temporal's limits are taken from the same
+  budget and sit after the engine's own end of the run (the watchdog's margin,
+  its stop grace and 60 s more). If one of them fires anyway, or a cancel or
+  terminate is made through Temporal, the run stops the work and records it as
+  the engine would: `timeout` / `deadline`, `failed` / `worker_lost` (the
+  heartbeat stopped), `cancelled` / `temporal_cancel`.
+- **One retry owner: the engine.** Temporal never runs the activity again
+  (`maximum_attempts=1`). A worker's own retries run inside it, only while no
+  tool that changes things has run.
+- **A stop stops the work.** A cancel, the watchdog, a shutdown or a caller
+  that stops waiting stops the work in the process first (Temporal need not
+  be reachable), then asks Temporal to cancel the workflow.
+- **A process that dies mid-run.** Temporal calls its worker lost after 20 s
+  without a heartbeat (the activity heartbeats every 2 s), and the restarted
+  Kazma's workflow worker closes that workflow at once (the workers keep no
+  workflow cache, so no task waits on the dead process's sticky queue). The
+  next start holds the task as an unknown outcome naming the step it stopped
+  in (a pipeline journals each step, first run and resume alike); nothing
+  runs again.
+- **Nothing large leaves the process.** The workflow carries the task's id,
+  type and limits, never its prompt or output; its result is a summary (the
+  task store holds the result). A run whose work has ended waits at most
+  10 s for Temporal to close the workflow (counted `durable_workflow` when it
+  does not): a Temporal that went away holds no ending hostage.
+
+Qualified on Temporal's time-skipping test server
+(`tests/test_swarm_temporal_durable.py`): a task and a pipeline once, a worker
+past its deadline (the same record as in process), Temporal's own limit, a
+cancel from Kazma and one through Temporal, a shutdown mid-run, an approved
+resume, lost start and result acknowledgements, an activity no run waits for,
+Temporal going away mid-run, and a real worker process killed mid-step. The
+test server does not skip time while an activity is scheduled or running, so
+those limits run short and real in the tests.
 
 ### 1.1 Constructor
 
@@ -585,7 +644,9 @@ Swarm bookkeeping that fails and loses evidence or a decision is a WARNING and
 counts `kazma_swarm_failures_total{site}` on `GET /metrics`: `running_row` (the
 RUNNING row), `task_write`, `orphan_evidence`, `recovery_read`, `reap`,
 `idle_reap`, `gate_register`, `gate_settle`, `checkpoint_timeout_arm`,
-`breaker_persist`, `approval_resolve`; and a degraded result: `refiner` (the
+`breaker_persist`, `approval_resolve`, `durable_workflow` (a durable run's
+workflow did not close after its work ended: Temporal's history lacks the
+ending the task store holds); and a degraded result: `refiner` (the
 unrefined result kept), `synthesis` (the deterministic fallback),
 `semantic_routing` (keywords route until the embedder is back, counted once).
 A catch-all handler in the swarm or the

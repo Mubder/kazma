@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Swarm: the Temporal path qualified; no task runs without its record (2026-10-15)
+
+- **The Temporal durable path is tested against Temporal's own test
+  server.** Each task runs as one workflow with explicit time limits and no
+  retries, so Temporal never re-runs a step whose effect is uncertain. The
+  swarm engine keeps the only deadline; Temporal's own limits sit behind
+  it, as a backstop.
+  - A Temporal timeout, cancel or shutdown ends the task with the same
+    record the engine writes in-process: what interrupted it, and whether
+    anything ran.
+  - A worker process killed in the middle of a pipeline never re-runs a
+    step that had finished. A step whose effect is unknown is held as
+    unknown.
+  - When Temporal is required and down, an approval leaves its checkpoint
+    open, and the Swarm page says why.
+- **A task whose "running" record cannot be written is refused.** Before,
+  it ran anyway, and a crash in the middle left no trace of what it had
+  done. The write is now retried. If it still fails, the task is refused
+  with a clear, retryable message (HTTP 503 `task_store_unavailable`), and
+  nothing runs.
+- **A race in the shared circuit breaker is fixed.** A refresh could put an
+  older shared state over a newer local one. It was found by the swarm
+  soak's own test, which failed 2 runs in 10 and now passes every run.
+
 ## Documents: an OCR engine that reads Arabic and Arabic-Indic digits (2026-10-15)
 
 - Scanned Arabic now reads far better. A new on-device OCR engine reads

@@ -191,13 +191,18 @@ and extras `kazma[sandbox]` / `kazma[durable]`.
 | `KAZMA_HOST_SHELL` | unset | Escape hatch | Production, multi-user and forced Docker profiles deny host shell by default. `1` explicitly grants it after HITL; this restores host capability, not isolation. Policy lookup failures deny it. |
 | `KAZMA_CODE_EXEC_IMAGE` | `python:3.12-slim` | No | Image for the Docker jail that runs `python_exec` / `code_exec` (no network, read-only work mount, tmpfs `/tmp`, memory cap). |
 | `KAZMA_LIVE_EVAL` | unset | No | `1` runs the opt-in live-model eval (`tests/test_hands_live.py`). CI skips. |
-| `KAZMA_TEMPORAL_HOST` / `TEMPORAL_ADDRESS` | unset | Multi-hour swarm | Temporal frontend (`localhost:7233`). Wraps swarm `_dispatch_inner`. |
+| `KAZMA_TEMPORAL_HOST` / `TEMPORAL_ADDRESS` | unset | Multi-hour swarm | Temporal frontend (`localhost:7233`). Each admitted swarm task runs through a Temporal workflow whose activity runs the engine's own run in this process ([swarm guide §1.0a](../guide/swarm-orchestration.md#10a-durable-execution-temporal-opt-in)). |
 | `KAZMA_TEMPORAL` | auto if host set | No | `0` keeps in-process swarm. |
-| `KAZMA_TEMPORAL_REQUIRED` | unset | Required durable execution | `1` = fail the task if Temporal/SDK is disabled or down; readiness also requires the running worker. After submission, no profile permits local fallback. Whole-task activities do not retry arbitrary effects. |
+| `KAZMA_TEMPORAL_REQUIRED` | unset | Required durable execution | `1` = fail the task if Temporal/SDK is disabled or down, or this process's worker is not running; an approval is then deferred with its checkpoint left open. Readiness also requires the running worker. After submission, no profile permits local fallback. Temporal never retries a task's activity. |
 | `KAZMA_TEMPORAL_NAMESPACE` | `default` | No | Temporal namespace. |
-| `KAZMA_TEMPORAL_QUEUE` | `kazma-swarm` | No | Task queue for the in-process Temporal worker. |
+| `KAZMA_TEMPORAL_QUEUE` | `kazma-swarm` | No | The workflows' task queue. Each process's activities use `<queue>-run-<tag>`, a queue only that process polls (the tag is drawn at start). |
 | `KAZMA_CODE_INDEX` | on | No | `0` disables the workspace symbol index + `codebase_search`. |
 | `KAZMA_IDE_LSP` | on | No | `0` disables the `/api/ide/lsp` backend. The Web `/ide` editor is CodeMirror 5 (syntax only); hover/complete UI is not bound. |
+
+Test-only: `KAZMA_TEST_TEMPORAL_REQUIRED=1` makes the durable path's
+qualification (`tests/test_swarm_temporal_durable.py`, on Temporal's
+time-skipping test server) fail instead of skip when the SDK is missing or the
+test server cannot start; its CI job sets it.
 
 ---
 

@@ -972,6 +972,10 @@
         statusEl.className = 'badge badge-' + ((data.result && data.result.status === 'success') ? 'success' : 'danger');
       }
       addEventLine(taskId, '', t('swarm.task_completed'));
+      // A background dispatch the task store could not record: nothing ran.
+      if (data.result && data.result.metadata && data.result.metadata.code === 'task_store_unavailable') {
+        showError(dispatchRefusalText(data.result.metadata, t('swarm.dispatch_failed')));
+      }
       evtSource.close();
       // Keep the completed card visible for a few seconds so the user can see
       // it finished, then refresh the dashboard. The activeTasks entry is
@@ -1059,6 +1063,7 @@
     if (data.code === 'swarm_at_capacity') return t('swarm.at_capacity', {n: data.max_concurrent_tasks});
     if (data.code === 'not_pending') return t('swarm.checkpoint_not_pending');
     if (data.code === 'approval_not_recorded') return t('swarm.approval_not_recorded');
+    if (data.code === 'temporal_unavailable') return t('swarm.temporal_unavailable');
     return data.message || t('common.error');
   }
 
@@ -1106,6 +1111,9 @@
   function dispatchRefusalText(data, fallback) {
     if (data && data.code === 'swarm_at_capacity') {
       return t('swarm.at_capacity', {n: data.max_concurrent_tasks});
+    }
+    if (data && data.code === 'task_store_unavailable') {
+      return t('swarm.task_store_unavailable');
     }
     return (data && data.message) || fallback;
   }

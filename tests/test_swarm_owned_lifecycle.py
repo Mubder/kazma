@@ -194,8 +194,8 @@ async def test_a_caller_that_stops_waiting_stops_the_work(store: TaskStore) -> N
 
 #: The engine's private executors, called on an engine (``engine._x`` or, in
 #: the engine, ``self._x``), and the swarm functions that run a task's work.
-_ENGINE_EXECUTORS = {"_dispatch", "_dispatch_inner", "_broadcast_task", "_resume"}
-_FUNCTION_EXECUTORS = {"broadcast_task", "resume_pipeline", "dispatch_inner", "_dispatch_inner_impl"}
+_ENGINE_EXECUTORS = {"_dispatch", "_dispatch_inner", "_broadcast_task", "_resume", "_run_admitted", "_resume_run"}
+_FUNCTION_EXECUTORS = {"broadcast_task", "resume_pipeline", "dispatch_inner", "_dispatch_inner_impl", "_run_here"}
 #: (module, function) -> why it may call an executor directly.
 _EXECUTOR_CALLERS = {
     ("swarm/engine.py", "SwarmEngine.dispatch"): "the owned run (via _run_owned)",
@@ -204,8 +204,11 @@ _EXECUTOR_CALLERS = {
     ("swarm/engine.py", "SwarmEngine._broadcast_task"): "inside the run",
     ("swarm/engine.py", "SwarmEngine.approve_checkpoint"): "the resumed run (via _run_owned)",
     ("swarm/engine.py", "SwarmEngine._resume"): "the resumed run's body",
-    ("swarm/durable.py", "run_via_durable"): "inside the run: the durable path of _dispatch",
-    ("swarm/durable.py", "run_activity_payload"): "the Temporal activity of a run",
+    ("swarm/engine.py", "SwarmEngine._run_admitted"): "the run's body (in process, or the durable activity's)",
+    ("swarm/engine.py", "SwarmEngine._resume_run"): "the resumed run (through Temporal or in process)",
+    ("swarm/durable.py", "_run_here"): "the run's body, in the run's own process",
+    ("swarm/durable.py", "run_via_durable"): "inside the run: the durable path's in-process fallback",
+    ("swarm/durable.py", "_run_body"): "the Temporal activity of a run, in the process that admitted it",
 }
 
 

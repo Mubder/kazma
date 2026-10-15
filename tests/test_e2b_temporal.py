@@ -15,7 +15,6 @@ from kazma_core.sandbox.e2b import e2b_available, e2b_enabled, run_python
 from kazma_core.swarm.durable import (
     durable_enabled,
     in_durable_activity,
-    run_activity_payload,
     run_via_durable,
 )
 from kazma_core.tools.code_exec import python_exec
@@ -116,13 +115,11 @@ async def test_durable_missing_sdk_falls_back(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("KAZMA_TEMPORAL_HOST", "localhost:7233")
     monkeypatch.delenv("KAZMA_TEMPORAL_REQUIRED", raising=False)
 
-    inner = MagicMock()
-
-    async def _inner(task: Any, started: float, span: Any) -> str:
+    async def _run_admitted(task: Any, started: float, span: Any) -> str:
         return "in-process"
 
     engine = MagicMock()
-    engine._dispatch_inner = _inner
+    engine._run_admitted = _run_admitted
     monkeypatch.setattr("kazma_core.swarm.durable._sdk_available", lambda: False)
     out = await run_via_durable(engine, MagicMock(id="t1"), 0.0, None)
     assert out == "in-process"
@@ -143,24 +140,29 @@ async def test_durable_required_fails_without_sdk(
 
 
 @pytest.mark.asyncio
-async def test_activity_payload_uses_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_run_body_is_marked_in_durable_activity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The activity runs the run's own body with the durable mark set (a
+    swarm dispatch started inside it runs in process, never a nested
+    workflow), in a copy of the run's context."""
+    import contextvars
+
+    from kazma_core.swarm import durable
     from kazma_core.swarm.task import SwarmTask, TaskResult
 
-    task = SwarmTask(prompt="hi", id="act-1")
+    seen: list[bool] = []
+
+    async def _run_admitted(task: Any, started: float, span: Any) -> TaskResult:
+        seen.append(in_durable_activity())
+        return TaskResult(task_id=task.id, status="success", aggregated_output="ok")
+
     engine = MagicMock()
-    engine._active_tasks = {"act-1": task}
+    engine._run_admitted = _run_admitted
+    task = SwarmTask(prompt="hi", id="act-1")
+    entry = durable._DurableRun(engine=engine, task=task, started=0.0, task_span=None,
+                                context=contextvars.copy_context(), workflow_id="kazma-swarm-act-1")
+    import asyncio
 
-    async def _inner(t: Any, started: float, span: Any) -> TaskResult:
-        assert in_durable_activity() is True
-        return TaskResult(task_id=t.id, status="success", aggregated_output="ok")
-
-    engine._dispatch_inner = _inner
-    monkeypatch.setattr(
-        "kazma_core.swarm.engine.get_swarm_engine", lambda: engine
-    )
-    out = await run_activity_payload(
-        {"task_id": "act-1", "task": task.to_dict(), "started": 1.0}
-    )
-    assert out["status"] == "success"
-    assert out["aggregated_output"] == "ok"
-    assert in_durable_activity() is False
+    body = asyncio.get_running_loop().create_task(durable._run_body(entry), context=entry.context.copy())
+    result = await body
+    assert result.status == "success" and seen == [True]
+    assert in_durable_activity() is False  # only the activity's own copy of the context

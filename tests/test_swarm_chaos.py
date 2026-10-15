@@ -1,18 +1,23 @@
 """Swarm chaos runs end honestly (Swarm tracker SQ04).
 
 ``scripts/swarm_chaos.py`` injects one fault at a time into a real
-``SwarmEngine`` -- the task store's SQLite file locked at admission, at a
-resumed step's journal write, at the ending's write (briefly and for good), at
-an approval; the shared breakers' settings store down; Temporal configured
-with nothing there (and required); a shutdown in the middle of a pipeline, a
-fan-out and a consult; the Postgres task store down at admission and at the
-ending (on a disposable server, ``@pytest.mark.postgres``) -- and records the
-ending. These run the same cases with short waits (a 300 ms busy timeout,
-short write retries) and hold each ending, with the counted
-``kazma_swarm_failures_total`` sites.
+``SwarmEngine`` -- the task store's SQLite file locked at admission (for good,
+and for a moment), at a resumed step's journal write, at the ending's write
+(briefly and for good), at an approval; the shared breakers' settings store
+down; Temporal configured with nothing there (and required), and Temporal
+going away mid-run (on its time-skipping test server); a shutdown in the
+middle of a pipeline, a fan-out and a consult; the Postgres task store down
+at admission and at the ending (on a disposable server,
+``@pytest.mark.postgres``) -- and records the ending. These run the same
+cases with short waits (a 300 ms busy timeout, short write retries) and hold
+each ending, with the counted ``kazma_swarm_failures_total`` sites.
 
 Negative controls, each the code before 2026-10-15 put back:
 
+* a new task whose RUNNING row the store would not take ran anyway, with no
+  crash evidence (now refused, ``task_store_unavailable``);
+* the admission's write without its retries refuses a task a lock held for
+  a moment;
 * the ending's write without its retries loses a lock that passes;
 * a run whose ending was not stored, reported as the run said: the caller
   is told a success the store does not hold;
@@ -46,6 +51,7 @@ FAST = swarm_chaos.Timing(busy_ms=300, write_waits=(0.1, 0.2, 0.4), pg_pool_time
 #: The kazma_swarm_failures_total sites each case must count.
 _COUNTED = {
     "sqlite_locked_admission": {"running_row"},
+    "sqlite_locked_admission_briefly": set(),
     "sqlite_locked_step_journal": {"step_journal"},
     "sqlite_locked_finalize_briefly": {"worker_metric"},
     "sqlite_locked_finalize": {"task_write", "worker_metric"},
@@ -53,8 +59,9 @@ _COUNTED = {
     "breaker_store_down": {"breaker_read", "breaker_persist", "breaker_lease"},
     "temporal_unreachable": set(),
     "temporal_unreachable_required": set(),
+    "temporal_lost_mid_run": set(),
     "shutdown_mid_patterns": set(),
-    "postgres_down_at_admission": {"running_row"},
+    "postgres_down_at_admission": set(),
     "postgres_down_at_finalize": {"task_write"},
 }
 _LOCAL = sorted(set(swarm_chaos.CASES) - swarm_chaos.POSTGRES_CASES)
@@ -114,15 +121,43 @@ async def test_an_unsaved_ending_reported_as_run_is_caught(tmp_path: Path, monke
     assert "the caller was told success, the store holds running" in out.problems, out.problems
 
 
+async def _run_anyway(self, task, *, must_record=False):
+    """``_admit_to_store`` before 2026-10-15 for a new task: one attempt, and
+    a write the store refused let the task run without its RUNNING row."""
+    import asyncio
+
+    try:
+        await asyncio.to_thread(self._task_store.admit, task)
+    except Exception:
+        return None
+    return None
+
+
+async def test_a_task_run_without_its_running_row_is_caught(tmp_path: Path, monkeypatch) -> None:
+    """Negative control for the refusal: the old run-anyway admission runs
+    the task with no crash evidence, and the case says so."""
+    from kazma_core.swarm.engine import SwarmEngine
+
+    monkeypatch.setattr(SwarmEngine, "_admit_to_store", _run_anyway)
+    out = await swarm_chaos.run_case("sqlite_locked_admission", tmp_path, timing=FAST)
+    assert "the task ran without its RUNNING row" in out.problems, out.problems
+
+
+async def test_without_retries_a_lock_that_passes_refuses_the_admission(tmp_path: Path) -> None:
+    """Negative control for the admission's retries: one attempt refuses a
+    task a lock held for a moment, which the retries run."""
+    timing = swarm_chaos.Timing(busy_ms=300, write_waits=())
+    out = await swarm_chaos.run_case("sqlite_locked_admission_briefly", tmp_path, timing=timing)
+    assert not out.honest
+    assert out.returned.get("code") == "task_store_unavailable", out.returned
+
+
 async def test_an_unrecorded_approval_that_resumes_is_caught(tmp_path: Path, monkeypatch) -> None:
     from kazma_core.swarm.engine import SwarmEngine
 
-    admit = SwarmEngine._admit_to_store
-
-    async def old(self, task, *, must_record=False):
-        return await admit(self, task)  # the approval's write failing let it resume
-
-    monkeypatch.setattr(SwarmEngine, "_admit_to_store", old)
+    # The approval's write failing let it resume (it was admitted as a new
+    # task's was, run anyway).
+    monkeypatch.setattr(SwarmEngine, "_admit_to_store", _run_anyway)
     out = await swarm_chaos.run_case("sqlite_locked_approval", tmp_path, timing=FAST)
     assert any("nothing ran on the unrecorded approval" in p for p in out.problems), out.problems
 
@@ -170,11 +205,13 @@ def test_the_honesty_check_sees_each_dishonest_ending() -> None:
 
 @pytest.mark.parametrize("unrecorded, status, code", [
     (True, 503, "approval_not_recorded"),
+    ("temporal", 503, "temporal_unavailable"),
     (False, 409, "not_pending"),  # control: an ended task (a stale card) as before
 ])
 def test_the_page_hears_an_unrecorded_approval(monkeypatch, unrecorded, status, code) -> None:
-    """The approve route answers an approval the store did not take with 503
-    (the checkpoint still pending, try again), never the stale card's 409."""
+    """The approve route answers an approval the store did not take -- or one
+    deferred because Temporal is required and down (SW-E16) -- with 503 (the
+    checkpoint still pending, try again), never the stale card's 409."""
     from typing import Any
 
     from fastapi import APIRouter, FastAPI
@@ -187,7 +224,8 @@ def test_the_page_hears_an_unrecorded_approval(monkeypatch, unrecorded, status, 
             return object()
 
         async def approve_checkpoint(self, task_id: str, *, wait: bool = True) -> TaskResult:
-            meta = {"admission_unrecorded": True, "checkpoint_open": True} if unrecorded else {}
+            meta = ({"checkpoint_open": True, "code": "temporal_unavailable"} if unrecorded == "temporal"
+                    else {"admission_unrecorded": True, "checkpoint_open": True} if unrecorded else {})
             return TaskResult(task_id=task_id, status="failed", error="not recorded", metadata=meta)
 
     class _Svc:
@@ -207,6 +245,137 @@ def test_the_page_hears_an_unrecorded_approval(monkeypatch, unrecorded, status, 
     assert response.json()["code"] == code
     if unrecorded:
         assert response.json()["task_status"] == "paused" and response.headers.get("Retry-After")
+
+
+def test_the_panel_answers_a_store_refusal_with_503(monkeypatch, tmp_path: Path) -> None:
+    """A dispatch whose RUNNING row the store will not take: the route answers
+    503 ``task_store_unavailable`` with Retry-After, nothing ran, no slot is
+    held; a background dispatch ends its task with the same refusal (the page
+    shows it from the stream); once the store is back the same request runs."""
+    import sqlite3
+    import time as _time
+    from typing import Any
+
+    import kazma_core.swarm.engine as engine_module
+    import kazma_gateway.agent_handler as ah
+    from fastapi import APIRouter, FastAPI
+    from fastapi.testclient import TestClient
+    from kazma_core.swarm.config import SwarmConfig, WorkerConfig
+    from kazma_core.swarm.engine import STORE_UNAVAILABLE, SwarmEngine
+    from kazma_core.swarm.task_store import TaskStore
+    from kazma_ui.swarm_panel import routes_tasks
+
+    class _Locked(TaskStore):
+        locked = True
+
+        def admit(self, task):
+            if self.locked:
+                raise sqlite3.OperationalError("database is locked")
+            return super().admit(task)
+
+    monkeypatch.setattr(engine_module, "_WRITE_RETRY_WAITS", (0.01, 0.01))
+    for name, value in (("KAZMA_SHARED_BREAKERS", "0"), ("KAZMA_TEMPORAL", "0"), ("KAZMA_GATE_REGISTRY", "0"),
+                        ("KAZMA_SELF_IMPROVEMENT", "0")):
+        monkeypatch.setenv(name, value)
+    store = _Locked(db_path=str(tmp_path / "swarm_tasks.db"))
+    engine = SwarmEngine(SwarmConfig(enabled=True, workers=[]), task_store=store)
+    engine.add_worker(WorkerConfig(name="probe", type="in_process"))
+    ran: list[str] = []
+
+    async def probe(task: str, context: Any = None) -> dict:
+        ran.append(task)
+        return {"worker": "probe", "task_id": "", "status": "success", "output": "ok", "error": None}
+
+    engine.get_worker("probe").dispatch = probe
+
+    class _Svc:
+        def resolve_engine(self, m: Any = None) -> Any:
+            return engine
+
+        def has_swarm_core(self) -> bool:
+            return True
+
+        def register_task_handle(self, *a: Any) -> None: ...
+
+        def unregister_task_handle(self, *a: Any) -> None: ...
+
+    async def _no_send(*a: Any, **k: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(routes_tasks, "get_swarm_service", lambda: _Svc())
+    monkeypatch.setattr(ah, "_maybe_send_to_output_target", _no_send)
+    router = APIRouter()
+    routes_tasks.register_tasks_routes(router, templates=None)
+    app = FastAPI()
+    app.include_router(router)
+    try:
+        with TestClient(app) as client:
+            r = client.post("/api/swarm/dispatch", json={"workers": ["probe"], "task": "fore"})
+            assert r.status_code == 503, r.text
+            assert r.json()["code"] == STORE_UNAVAILABLE and r.headers.get("Retry-After")
+            assert ran == [] and engine.list_active_tasks() == []
+            assert store.get_task(r.json()["task_id"]) is None  # nothing stored, nothing to recover
+
+            r = client.post("/api/swarm/dispatch", json={"workers": ["probe"], "task": "back", "background": True})
+            assert r.status_code == 200 and r.json()["result_status"] == "running", r.text
+            tid = r.json()["task_id"]
+            until = _time.monotonic() + 10
+            while (engine.get_task(tid) is None or engine.get_task(tid).result is None) and _time.monotonic() < until:
+                _time.sleep(0.05)
+            refused = engine.get_task(tid).result
+            assert refused.metadata["code"] == STORE_UNAVAILABLE and ran == [], refused
+            assert engine.list_active_tasks() == []
+
+            store.locked = False
+            r = client.post("/api/swarm/dispatch", json={"workers": ["probe"], "task": "fore"})
+            assert r.status_code == 200 and r.json()["result_status"] == "success", r.text
+            assert ran == ["fore"]
+    finally:
+        store.close()
+
+
+async def test_a_refused_task_dispatched_again_runs(tmp_path: Path, monkeypatch) -> None:
+    """The refusal is not a recorded ending: the same task dispatched again
+    once the store is back runs (one run, stored completed)."""
+    import sqlite3
+
+    import kazma_core.swarm.engine as engine_module
+    from kazma_core.swarm.config import SwarmConfig, WorkerConfig
+    from kazma_core.swarm.engine import STORE_UNAVAILABLE, SwarmEngine
+    from kazma_core.swarm.task import SwarmTask, TaskStatus
+    from kazma_core.swarm.task_store import TaskStore
+
+    class _Locked(TaskStore):
+        locked = True
+
+        def admit(self, task):
+            if self.locked:
+                raise sqlite3.OperationalError("database is locked")
+            return super().admit(task)
+
+    monkeypatch.setattr(engine_module, "_WRITE_RETRY_WAITS", (0.01,))
+    monkeypatch.setenv("KAZMA_SHARED_BREAKERS", "0")
+    monkeypatch.setenv("KAZMA_TEMPORAL", "0")
+    store = _Locked(db_path=str(tmp_path / "t.db"))
+    engine = SwarmEngine(SwarmConfig(enabled=True, workers=[]), task_store=store)
+    engine.add_worker(WorkerConfig(name="w", type="in_process"))
+    runs: list[str] = []
+
+    async def w(task: str, context=None) -> dict:
+        runs.append(task)
+        return {"worker": "w", "task_id": "", "status": "success", "output": "ok", "error": None}
+
+    engine.get_worker("w").dispatch = w
+    task = SwarmTask(prompt="p", workers=["w"], timeout=30)
+    try:
+        first = await engine.dispatch(task)
+        assert first.metadata["code"] == STORE_UNAVAILABLE and runs == []
+        store.locked = False
+        second = await engine.dispatch(task)
+        assert second.status == "success" and runs == ["p"]
+        assert store.get_task(task.id).status == TaskStatus.COMPLETED
+    finally:
+        store.close()
 
 
 # ── the class: an ending after admission is finalized ──────────────────────

@@ -486,12 +486,59 @@ compatibility. **All public API methods and constructors are unchanged.**
   the next start holds it unknown). An approval whose admission write fails
   resumes nothing (`_admit_to_store(must_record=True)`, `503
   approval_not_recorded`): resumed, a crash would offer the checkpoint again.
-  A new task whose RUNNING row fails still runs, counted `running_row`. A
-  durable dispatch that never ran is finalized (`durable._not_run`). Lost
-  writes are counted (`task_write`, `step_journal`, `worker_metric`,
-  `breaker_read`, `breaker_persist`, `breaker_lease`). Harness:
-  `scripts/swarm_chaos.py`; gate: `tests/test_swarm_chaos.py` (each fix's old
-  code as its negative control; the Postgres cases `@pytest.mark.postgres`).
+  **A new task runs only with its RUNNING row** (2026-10-15): the admission
+  write is tried again the same way, and one that still fails refuses the
+  task, nothing run (`_store_refused`: `task_store_unavailable`, retryable,
+  the slot freed, counted `running_row`; the dispatch route answers 503 with
+  Retry-After, the Swarm page words it in its language). It used to run with
+  no RUNNING row, so a crash in it left effects no recovery could see. The
+  refusal is the task's ending in this process only (history and stream, so a
+  background dispatch's page hears it); dispatching the same task again runs
+  it. A refused attempt whose write landed before its connection was lost is
+  our own row (same `run_id` and generation): admitted. A durable dispatch
+  that never ran is finalized (`durable._not_run`). Lost writes are counted
+  (`task_write`, `step_journal`, `worker_metric`, `breaker_read`,
+  `breaker_persist`, `breaker_lease`). Harness: `scripts/swarm_chaos.py`;
+  gate: `tests/test_swarm_chaos.py` (each fix's old code as its negative
+  control, the run-anyway admission included; the Postgres cases
+  `@pytest.mark.postgres`).
+- **A shared breaker never takes an older state** (SQ01 soak, 2026-10-15):
+  an outcome changes the breaker under its lock and shares it in a second
+  step, so a refresh between the two read the generation before;
+  `refresh_from_shared` takes a NEWER generation's state only, and from the
+  same generation only its counters and settings (never its state or open
+  time). The soak harness test failed 2 runs in 10 on it. Gate:
+  `tests/test_swarm_breaker_shared_refresh.py` (the old refresh as control).
+- **The durable path (Temporal) runs the engine's own run, where it was
+  admitted** (Swarm tracker SQ03, SW-E16, 2026-10-15; rules in
+  `swarm/durable.py`'s docstring). One workflow per run (`kazma-swarm-<id>`,
+  `-g<generation>` for an approved resume, which takes the durable path too);
+  its one activity is scheduled on a queue only the admitting process polls
+  (`activity_queue`) and runs only for a run registered and waiting there,
+  in the run's own context, the body being `SwarmEngine._run_admitted` (or
+  `_resume`) -- the same deadline, watchdog and endings as in process (one
+  deadline owner). Temporal's limits come from the same budget
+  (`engine.task_budget`, `durable.activity_timeouts`) and sit after the
+  engine's own end of the run; one Temporal does fire, or a cancel or
+  terminate made through it, is settled in the run (`durable._settle`:
+  `deadline`, `worker_lost` or `temporal_cancel`, with `execution_outcome`).
+  Never retried (`maximum_attempts=1`: the worker's own retries run inside,
+  under §30 G). A stop stops the work here first, then cancels the
+  workflow. A heartbeat every `HEARTBEAT_EVERY_S` lets Temporal call a dead
+  process's worker lost; the workflow worker keeps no cache (no sticky
+  queue), so a restarted Kazma settles that workflow at once; the activity
+  uses TRY_CANCEL (the SDK cannot evict a workflow waiting on a cancel).
+  The workflow's result is a summary (no prompt or output); the task store
+  holds the result, and a run whose work ended does not wait past
+  `WORKFLOW_CLOSE_WAIT_S` for Temporal (counted `durable_workflow`). A first
+  run of a pipeline journals its steps too, so a killed process's task is
+  held unknown naming the step it stopped in. Gate:
+  `tests/test_swarm_temporal_durable.py` on Temporal's time-skipping test
+  server (a real child process killed mid-step; the old activity body, the
+  old ending, the worker's own context, the in-process resume and no
+  heartbeat/journal as controls). The test server does
+  not skip time while an activity is scheduled or running: those limits run
+  short and real there.
 - **Swarm failures are loud and counted** (SW-E14): lost evidence or a lost
   decision is a WARNING and `kazma_core.metrics.record_swarm_failure(site)`
   (`kazma_swarm_failures_total{site}`). A catch-all handler in `swarm/` or the
@@ -554,7 +601,9 @@ compatibility. **All public API methods and constructors are unchanged.**
   then left the next boot to record a failure of unknown outcome; it now
   waits for them, bounded (`_flush_stopped_writes`, a WARNING and
   `site="shutdown_write"` when one is left), and the soak counts one left as
-  a violation.
+  a violation. `--duration` is seconds of LOAD: the time a restart takes is
+  added (one that waits out the stop grace for a task ignoring its stop took
+  12 s of the test's 24 s run and left the breaker no window to recover in).
 - `engine.py` public methods are thin delegates — the real logic lives in the extracted modules.
 - The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
 - Constructor signature is unchanged — test fixtures work without modification.

@@ -61,7 +61,7 @@ async def test_malformed_requirement_cannot_drop_the_requirement(healthy):
 async def test_required_temporal_failure_cannot_hide_behind_ready_chat(healthy, monkeypatch):
     from kazma_core.swarm import durable
     monkeypatch.setenv("KAZMA_TEMPORAL_REQUIRED", "1")
-    monkeypatch.setattr(durable, "_worker_task", None)
+    monkeypatch.setattr(durable, "worker_running", lambda: False)
     response = await health._readiness()
     assert response.status_code == 503
     assert "temporal" in json.loads(response.body)["unavailable_capabilities"]

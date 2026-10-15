@@ -90,6 +90,7 @@ async def dispatch_inner(
             pattern_result = await execute_pipeline(
                 task,
                 dispatch_worker_by_name=engine._dispatch_worker_by_name,
+                on_step=engine._journal_step,
             )
         except PipelineConfigurationError as exc:
             engine._tracing_emitter.record_exception(task_span, exc)

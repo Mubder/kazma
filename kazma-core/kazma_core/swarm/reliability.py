@@ -380,23 +380,30 @@ class CircuitBreaker:
             return admission
 
     def refresh_from_shared(self, worker_name: str) -> None:
-        """Overlay ConfigStore breaker state, keeping a local in-flight probe."""
+        """Overlay ConfigStore breaker state, keeping a local in-flight probe.
+
+        Only a NEWER generation's state is taken (Swarm tracker SQ01): an
+        outcome changes the breaker under its lock and is shared afterwards,
+        in its own step, so a dispatch refreshing in between read the copy of
+        the generation before -- and put that state back over the newer one
+        (a trip undone, a recovery reopened; the soak caught it in 2 runs of
+        10). A shared copy of an older generation is ignored. One of the same
+        generation brings its counters and settings, never its state or
+        open time: the same trip, timed by this process's own clock (a copy
+        remapped from the wall clock moved an open breaker to half-open a
+        moment early)."""
         shared = type(self).load_shared(worker_name)
-        if shared is None:
+        if shared is None or shared.generation < self.generation:
             return
-        probe = self._probe_in_flight
-        lease_worker = self._probe_lease_worker
-        lease_holder = self._probe_lease_holder
         self.consecutive_failures = shared.consecutive_failures
         self.failure_threshold = shared.failure_threshold
         self.cooldown_seconds = shared.cooldown_seconds
+        if shared.generation == self.generation:
+            return
         self._state = shared._state
         self._opened_at = shared._opened_at
         self._opened_at_wall = shared._opened_at_wall
-        self.generation = max(self.generation, shared.generation)
-        self._probe_in_flight = probe
-        self._probe_lease_worker = lease_worker
-        self._probe_lease_holder = lease_holder
+        self.generation = shared.generation
 
     # ------------------------------------------------------------------
     # Recording outcomes

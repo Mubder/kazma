@@ -2421,6 +2421,15 @@ class KazmaAppBuilder:
                 logger.info("[app] Swarm engine drained")
         except Exception as e:
             logger.warning("[app] swarm drain failed: %s", e)
+        # The Temporal workers stop after the engine stopped its runs, so a
+        # durable run ends as the shutdown the engine recorded (a no-op
+        # without Temporal).
+        try:
+            from kazma_core.swarm.durable import stop_temporal_worker
+
+            await stop_temporal_worker()
+        except Exception as e:
+            logger.warning("[app] Temporal worker stop failed: %s", e)
 
         # 3) Shut down the agent (closes MCP processes, LLM clients)
         if self.agent is not None:

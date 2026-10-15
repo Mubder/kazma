@@ -390,6 +390,10 @@ _ENDS_OUTSIDE_FINALIZE = {
         "relabels an ending _finalize_task already made (checkpoint closed, panel told) "
         "whose write the store refused: it tells the panel again and saves nothing, "
         "since the store is what failed (Swarm tracker SQ04)",
+    ("engine.py", "SwarmEngine._store_refused"):
+        "a new task the store would not record as running, refused before it ran: nothing to "
+        "save (the store is what refused it), no checkpoint (it never paused); it tells the "
+        "panel (task_completed) and frees its slot (Swarm tracker SQ04, 2026-10-15)",
 }
 
 

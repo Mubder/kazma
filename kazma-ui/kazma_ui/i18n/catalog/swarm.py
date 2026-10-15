@@ -212,6 +212,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر حفظ الموافقة، فلم يُستأنف شيء. نقطة التحقق ما زالت بانتظار قرار: وافق مرة أخرى بعد قليل.",
         "en": "The approval could not be saved, so nothing resumed. The checkpoint is still waiting: approve again shortly.",
     },
+    "swarm.temporal_unavailable": {
+        "ar": "خدمة Temporal مطلوبة لتشغيل المهام وهي غير متاحة الآن، فلم يُستأنف شيء. نقطة التحقق ما زالت بانتظار قرار: وافق مرة أخرى عندما تعود.",
+        "en": "Temporal is required to run tasks and is not available right now, so nothing resumed. The checkpoint is still waiting: approve again once it is back.",
+    },
     "swarm.approve_failed": {
         "ar": "فشلت الموافقة: {msg}",
         "en": "Approve failed: {msg}",
@@ -1051,6 +1055,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.at_capacity": {
         "ar": "السرب ممتلئ (الحد الأقصى: {n}). انتظر حتى تنتهي مهمة قيد التشغيل ثم أعد المحاولة.",
         "en": "The swarm is full (limit: {n}). Wait for a running task to finish, then try again.",
+    },
+    "swarm.task_store_unavailable": {
+        "ar": "تعذّر تسجيل المهمة في سجل المهام، فلم تُشغَّل ولم يتغير شيء. أعد المحاولة بعد قليل.",
+        "en": "The task could not be recorded in the task store, so it was not run and nothing changed. Try again shortly.",
     },
     "swarm.retry_unknown_title": {
         "ar": "قد تكون المهمة غيّرت أشياء بالفعل",

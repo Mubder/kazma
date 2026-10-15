@@ -129,6 +129,10 @@ _WRITE_RETRY_WAITS: tuple[float, ...] = (0.5, 1.0, 2.0)
 #: Tasks whose newest write the store did not take, kept for the run's caller.
 _MAX_UNSAVED = 256
 
+#: The code of a new task the store would not record as running: not run,
+#: try again (the dispatch route answers 503 with Retry-After).
+STORE_UNAVAILABLE = "task_store_unavailable"
+
 
 def _store_error_passes(exc: BaseException) -> bool:
     """Whether a task store error may pass if the write is tried again: a
@@ -142,6 +146,28 @@ def _store_error_passes(exc: BaseException) -> bool:
     if type(exc).__name__ in ("OperationalError", "InterfaceError", "PoolTimeout"):
         return True  # psycopg's and psycopg_pool's, without importing them
     return isinstance(exc, RuntimeError) and "pool unavailable" in str(exc).lower()
+
+
+def _store_errors() -> tuple[type[BaseException], ...]:
+    """The classes of the task store errors ``_store_error_passes`` may let
+    pass: SQLite's, a socket's, a timeout, a pool's, psycopg's (imported only
+    here, when a write has failed: the driver is optional)."""
+    import sqlite3
+
+    errors: list[type[BaseException]] = [sqlite3.OperationalError, ConnectionError, TimeoutError, RuntimeError]
+    try:
+        import psycopg
+
+        errors += [psycopg.OperationalError, psycopg.InterfaceError]
+    except ImportError:
+        pass  # no Postgres driver: no Postgres store
+    try:
+        import psycopg_pool
+
+        errors.append(psycopg_pool.PoolTimeout)
+    except ImportError:
+        pass
+    return tuple(errors)
 
 
 def _new_run_id() -> str:
@@ -168,6 +194,41 @@ _PER_STEP_PATTERN_TYPES = (
     TaskType.CONSULT,
     TaskType.CONDITIONAL,
 )
+
+
+#: How long past its budget the watchdog lets a task run before it stops it.
+WATCHDOG_MARGIN_S = 30.0
+
+
+def task_budget(task: Any) -> tuple[float, int] | None:
+    """A running task's time budget: (seconds per step, steps), or None for
+    a task with no deadline (``timeout`` 0 or less).
+
+    The one budget every deadline reads (Swarm tracker SW-E16): the
+    watchdog stops a task ``WATCHDOG_MARGIN_S`` past it, and the durable
+    path's Temporal limits sit after that (``durable.activity_timeouts``).
+    Pattern tasks (PIPELINE/FAN_OUT/CONSULT/CONDITIONAL) get ``task.timeout``
+    PER STEP, not as a whole-task deadline -- dispatch() exempts them from
+    the whole-task wait_for and patterns.py applies wait_timeout(task.timeout)
+    around EACH step -- so the budget scales with the step count: pipeline
+    steps run sequentially (len(workers)); fan-out/consult waves are bounded
+    above by sequential steps; conditional is router + one branch (at least
+    2). A missing timeout reads as 300 s."""
+    raw_timeout = getattr(task, "timeout", None)
+    if raw_timeout is not None and float(raw_timeout) <= 0:
+        return None
+    timeout = float(raw_timeout or 300.0)
+    step_budget = 1
+    if getattr(task, "type", None) in _PER_STEP_PATTERN_TYPES:
+        step_budget = max(len(getattr(task, "workers", None) or []), 1)
+        if task.type == TaskType.CONDITIONAL:
+            step_budget = max(step_budget, 2)
+        elif task.type == TaskType.PIPELINE:
+            # The Refiner runs after the last step, within the step deadline
+            # (SW-E15): one step more, or a pipeline whose steps took their
+            # time is reaped while it refines.
+            step_budget += 1
+    return timeout, step_budget
 
 
 class SwarmEngine:
@@ -536,9 +597,34 @@ class SwarmEngine:
         earlier = _hist_get_task(self._task_history, self._task_lock, task_id)
         if earlier is None or earlier.result is None:
             return None
+        if (earlier.result.metadata or {}).get("code") == STORE_UNAVAILABLE:
+            return None  # refused before it ran: dispatching it again runs it
         if earlier.status in TERMINAL_STATUSES or earlier.status == TaskStatus.PAUSED:
             return earlier.result
         return None
+
+    def _store_refused(self, task: SwarmTask, exc: BaseException) -> TaskResult:
+        """A new task the store would not record as running: not run.
+
+        Its refusal is the task's ending in this process only (the store
+        holds nothing of it): the engine's record and the task's stream say
+        it, so a page watching it hears why; the caller is told to try again
+        (``task_store_unavailable``, retryable). Dispatching it again runs it
+        (``_recorded_result`` does not answer from a refusal)."""
+        task.status = TaskStatus.FAILED
+        task.completed_at = _utc_now_iso()
+        result = TaskResult(
+            task_id=task.id, status="failed",
+            error=(f"The task store could not record this task as running ({type(exc).__name__}), "
+                   "so it was not run. Nothing ran: try again shortly."),
+            metadata={"admission_unrecorded": True, "code": STORE_UNAVAILABLE, "retryable": True,
+                      "execution_outcome": "none_invoked"},
+        )
+        task.result = result
+        self._active_tasks.pop(task.id, None)
+        _hist_record_task(self._task_history, self._task_lock, task, max_history=self._max_history)
+        self._emit_sse(task.id, "task_completed", {"task_id": task.id, "result": result.to_dict()})
+        return result
 
     def _interrupted(self, task: SwarmTask, started: float, task_span: Any = None) -> TaskResult:
         """Record the ending a stop asked for, after the work stopped.
@@ -595,14 +681,18 @@ class SwarmEngine:
 
     async def _admit_to_store(self, task: SwarmTask, *, must_record: bool = False) -> TaskResult | None:
         """Record *task* RUNNING at its new generation (SW-E03). None when
-        admitted; the stored outcome when another run already holds the id.
+        admitted; the stored outcome when another run already holds the id;
+        a refusal when the store did not take the row.
 
-        A write the store refuses lets a new task run without crash evidence
-        (counted). With *must_record* -- an approval resuming a paused
-        pipeline -- it is a refusal instead (``admission_unrecorded``): an
-        approval the store never took leaves the row PAUSED, and a crash
-        would offer the checkpoint again and run its steps twice (SW-E01,
-        Swarm tracker SQ04).
+        A write the store refuses for a reason that passes (a lock, a busy
+        file, a database that is away: ``_store_error_passes``) is tried
+        again with the waits a task write uses (``_WRITE_RETRY_WAITS``). One
+        that still fails refuses the run, nothing run (Swarm tracker SQ04,
+        2026-10-15): a new task ends ``task_store_unavailable`` (retryable,
+        its slot freed); it used to run with no RUNNING row, so a crash in it
+        left effects no recovery could see. An approval (*must_record*)
+        resumes nothing (``admission_unrecorded``): the row stays PAUSED, and
+        a resumed run a crash would offer again ran its steps twice (SW-E01).
 
         The write is the task's first store write (``_writes``): one recording
         the task's ending waits for it, and a stop that lands while it runs
@@ -613,7 +703,31 @@ class SwarmEngine:
         if self._task_store is None:
             return None
         snapshot = SwarmTask.from_dict(task.to_dict())
-        write = asyncio.ensure_future(asyncio.to_thread(self._task_store.admit, snapshot))
+        store = self._task_store
+
+        def _admit() -> bool:
+            waits = list(_WRITE_RETRY_WAITS)
+            tried_again = False
+            while True:
+                try:
+                    admitted = store.admit(snapshot)
+                except _store_errors() as exc:  # anything else is raised as it is
+                    if waits and _store_error_passes(exc):
+                        logger.info("[SwarmEngine] task '%s' not admitted yet (%s): trying again",
+                                    snapshot.id, exc)
+                        time.sleep(waits.pop(0))
+                        tried_again = True
+                        continue
+                    raise
+                if admitted or not tried_again:
+                    return admitted
+                # Refused after a failed attempt: that attempt may have landed
+                # before its connection was lost. Our own row is ours.
+                stored = store.get_task(snapshot.id)
+                return bool(stored is not None and stored.run_id == snapshot.run_id
+                            and int(stored.generation or 0) == int(snapshot.generation or 0))
+
+        write = asyncio.ensure_future(asyncio.to_thread(_admit))
         self._writes[task.id] = write
 
         def _done(finished: asyncio.Future, tid: str = task.id) -> None:
@@ -629,10 +743,10 @@ class SwarmEngine:
             self._stopped_admissions[task.id] = write
             raise  # the caller records the stop (_stopped_at_admission)
         except Exception as exc:
-            # The RUNNING row is the only crash evidence: say it is missing.
+            # The RUNNING row is the only crash evidence: without it, nothing runs.
             logger.warning(
                 "[SwarmEngine] could not record task '%s' as running; %s",
-                task.id, "nothing resumes" if must_record else "it runs without crash evidence",
+                task.id, "nothing resumes" if must_record else "it is not run",
                 exc_info=True,
             )
             record_swarm_failure("running_row")
@@ -643,7 +757,7 @@ class SwarmEngine:
                            "Nothing was resumed and the checkpoint stays open: approve again."),
                     metadata={"admission_unrecorded": True, "checkpoint_open": True},
                 )
-            return None
+            return self._store_refused(task, exc)
         if admitted:
             return None
         stored = await asyncio.to_thread(self._task_store.get_task, task.id)
@@ -849,64 +963,54 @@ class SwarmEngine:
             "workers": list(task.workers) if task.workers else [],
         })
 
-        # Broadcast fans out to every worker — dispatch it AFTER the shared
-        # preamble above so it is subject to the same admission cap, tenant
-        # stamping, and task_started SSE as a normal dispatch (previously it
-        # returned before all four, exempting the most expensive pattern).
-        if task.type == TaskType.BROADCAST:
-            # It must ALSO finalize through the same cancel/timeout/error
-            # paths as a normal dispatch: returning before the try/except
-            # below let a cancelled BROADCAST leak as RUNNING in
-            # _active_tasks until the watchdog reaped it, with no
-            # task_completed SSE (deep-audit 2026-08-19).
+        # Broadcast fans out to every worker; it is admitted, recorded RUNNING,
+        # tenant-stamped and finalized like any task (it used to return before
+        # all four), and has no task span of its own.
+        task_span = None
+        if task.type != TaskType.BROADCAST:
+            task_span = self._tracing_emitter.start_task_span(
+                task_id=task.id,
+                task_type=task.type.value,
+                workers=list(task.workers),
+            )
+
+        if (durable_enabled() or durable_required()) and not in_durable_activity():
+            # The durable path (Swarm tracker SQ03/SW-E16): a Temporal workflow
+            # whose activity runs _run_admitted below, in this process, under
+            # the same deadline, recording the same endings.
             try:
-                if (durable_enabled() or durable_required()) and not in_durable_activity():
-                    return await run_via_durable(self, task, started, None)
-                return await self._broadcast_task(task)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "[SwarmEngine] Broadcast '%s' timed out after %.1fs",
-                    task.id, float(task.timeout or 0),
-                )
-                return self._finalize_task(
-                    task,
-                    worker_results=[],
-                    status="timeout",
-                    error=f"Task timed out after {float(task.timeout or 0):.1f}s",
-                    duration_seconds=perf_counter() - started,
-                )
-            except asyncio.CancelledError:
-                return self._interrupted(task, started)
-            except Exception as exc:
-                logger.exception(
-                    "[SwarmEngine] Unhandled error in broadcast for task '%s'", task.id
-                )
-                return self._finalize_task(
-                    task,
-                    worker_results=[],
-                    status="failed",
-                    error=str(exc),
-                    duration_seconds=perf_counter() - started,
-                )
-
-        # Start a root tracing span for this task.
-        task_span = self._tracing_emitter.start_task_span(
-            task_id=task.id,
-            task_type=task.type.value,
-            workers=list(task.workers),
-        )
-
-        try:
-            # Pattern executors (pipeline/fan_out/consult/conditional) already
-            # apply ``task.timeout`` PER STEP / per worker internally
-            # (patterns.py ``wait_timeout``). Wrapping them here in a whole-task
-            # deadline of the same value wrongly capped the TOTAL runtime at one
-            # step's budget — e.g. a 3-step pipeline with timeout=0.01 was killed
-            # before step 1 finished (2026-08-15 audit). Only single-worker
-            # DISPATCH keeps the whole-task deadline as its safety net.
-            # (The set lives at module level: _PER_STEP_PATTERN_TYPES.)
-            if (durable_enabled() or durable_required()) and not in_durable_activity():
                 return await run_via_durable(self, task, started, task_span)
+            except asyncio.CancelledError:
+                return self._interrupted(task, started, task_span)
+            except Exception as exc:
+                logger.exception("[SwarmEngine] durable dispatch of task '%s' failed", task.id)
+                if task_span is not None:
+                    self._tracing_emitter.record_exception(task_span, exc)
+                    self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
+                return self._finalize_task(task, worker_results=[], status="failed", error=str(exc),
+                                           duration_seconds=perf_counter() - started)
+        return await self._run_admitted(task, started, task_span)
+
+    async def _run_admitted(self, task: SwarmTask, started: float, task_span: Any) -> TaskResult:
+        """An admitted task's work under the engine's own deadline; every
+        ending is recorded here.
+
+        The one body of a task's run: the in-process run calls it, and so
+        does the durable path's Temporal activity (in this same process), so
+        the deadline, the watchdog and the endings -- ``interrupted_by`` and
+        ``execution_outcome`` included -- are the same either way (SW-E16:
+        one deadline owner, the engine; Temporal's own time limits sit after
+        it, ``durable.activity_timeouts``).
+
+        Pattern executors (pipeline/fan_out/consult/conditional) apply
+        ``task.timeout`` PER STEP (patterns.py ``wait_timeout``): a whole-task
+        deadline of the same value capped the TOTAL runtime at one step's
+        budget (2026-08-15 audit), so only a single-worker DISPATCH keeps the
+        whole-task deadline; the watchdog covers the rest
+        (``task_budget_s``). A broadcast keeps its workers' own timeouts."""
+        try:
+            if task.type == TaskType.BROADCAST:
+                return await self._broadcast_task(task)
             if (
                 task.timeout
                 and float(task.timeout) > 0
@@ -919,11 +1023,12 @@ class SwarmEngine:
             return await self._dispatch_inner(task, started, task_span)
         except asyncio.TimeoutError:
             logger.warning("[SwarmEngine] Task '%s' timed out after %.1fs", task.id, float(task.timeout or 0))
-            self._tracing_emitter.end_span(
-                task_span,
-                status="error",
-                status_msg=f"Task timed out after {float(task.timeout or 0):.1f}s",
-            )
+            if task_span is not None:
+                self._tracing_emitter.end_span(
+                    task_span,
+                    status="error",
+                    status_msg=f"Task timed out after {float(task.timeout or 0):.1f}s",
+                )
             evidence, note = self._effect_evidence(task.id, "deadline")
             return self._finalize_task(
                 task,
@@ -934,15 +1039,17 @@ class SwarmEngine:
                 metadata=evidence,
             )
         except asyncio.CancelledError:
-            # Stopped by cancel_task(), the watchdog or a caller that gave up:
-            # the work has stopped, so its ending is recorded now (SW-E02).
+            # Stopped by cancel_task(), the watchdog, a shutdown, a caller
+            # that gave up, or Temporal: the work has stopped, so its ending
+            # is recorded now (SW-E02), with the cause the stop named.
             return self._interrupted(task, started, task_span)
         except Exception as exc:
             # Catch-all: any unhandled exception finalizes the task as
             # failed and closes the tracing span so neither leaks.
             logger.exception("[SwarmEngine] Unhandled error in dispatch for task '%s'", task.id)
-            self._tracing_emitter.record_exception(task_span, exc)
-            self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
+            if task_span is not None:
+                self._tracing_emitter.record_exception(task_span, exc)
+                self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
             return self._finalize_task(
                 task,
                 worker_results=[],
@@ -965,30 +1072,12 @@ class SwarmEngine:
         for tid, t in list(self._active_tasks.items()):
             if getattr(t, "status", None) == TaskStatus.PAUSED:
                 continue
-            raw_timeout = getattr(t, "timeout", None)
-            if raw_timeout is not None and float(raw_timeout) <= 0:
+            budget = task_budget(t)
+            if budget is None:
                 continue
             if tid in self._interrupts:
                 continue  # already being stopped
-            timeout = float(raw_timeout or 300.0)
-            # Pattern tasks (PIPELINE/FAN_OUT/CONSULT/CONDITIONAL) get
-            # ``task.timeout`` PER STEP, not as a whole-task deadline —
-            # dispatch() exempts them from the whole-task wait_for and
-            # patterns.py applies wait_timeout(task.timeout) around EACH
-            # step. Scale the deadline by the step count: pipeline steps run
-            # sequentially (len(workers)); fan-out/consult waves are
-            # bounded above by sequential steps; conditional is router +
-            # one branch (at least 2).
-            step_budget = 1
-            if getattr(t, "type", None) in _PER_STEP_PATTERN_TYPES:
-                step_budget = max(len(getattr(t, "workers", None) or []), 1)
-                if t.type == TaskType.CONDITIONAL:
-                    step_budget = max(step_budget, 2)
-                elif t.type == TaskType.PIPELINE:
-                    # The Refiner runs after the last step, within the step
-                    # deadline (SW-E15): one step more, or a pipeline whose
-                    # steps took their time is reaped while it refines.
-                    step_budget += 1
+            timeout, step_budget = budget
             started_iso = getattr(t, "started_at", None)
             if not started_iso:
                 continue
@@ -999,7 +1088,7 @@ class SwarmEngine:
             except Exception as exc:
                 logger.warning("[SwarmEngine] cannot read the start time of task %s: %s", tid, exc)
                 continue
-            if elapsed <= timeout * step_budget + 30.0:
+            if elapsed <= timeout * step_budget + WATCHDOG_MARGIN_S:
                 continue
             logger.warning(
                 "[SwarmEngine] Reaping stale task %s (elapsed: %.1fs, timeout: %.1fs x %d steps)",
@@ -2132,6 +2221,23 @@ class SwarmEngine:
                 metadata={"admission_denied": True, "max_concurrent_tasks": cap, "checkpoint_open": True},
             )
 
+        # Temporal required and not available here: the resumed run could
+        # not start, so nothing is claimed and the checkpoint stays open
+        # (SW-E16). Decided before the approval is recorded: a recorded one
+        # would end the pipeline unrun.
+        from kazma_core.swarm.durable import durable_ready, durable_required
+
+        if durable_required() and self._checkpoint_handler.get_checkpoint(task_id) is not None:
+            ready, problem = durable_ready()
+            if not ready:
+                logger.warning("[SwarmEngine] approve of '%s' deferred: %s", task_id, problem)
+                return TaskResult(
+                    task_id=task_id, status="failed",
+                    error=(f"{problem} Nothing resumed and the checkpoint stays open: approve again "
+                           "once Temporal is back."),
+                    metadata={"checkpoint_open": True, "code": "temporal_unavailable"},
+                )
+
         entry = self._checkpoint_handler.try_claim(task_id, "approving")
         if entry is None:
             return None
@@ -2196,10 +2302,37 @@ class SwarmEngine:
         next_step = checkpoint.step + 1
         return await self._run_owned(
             task,
-            lambda: self._resume(task, next_step, worker_results, blackboard_data),
+            lambda: self._resume_run(task, next_step, worker_results, blackboard_data),
             resumed=True,
             wait=wait,
         )
+
+    async def _resume_run(
+        self,
+        task: SwarmTask,
+        next_step: int,
+        worker_results: list[WorkerResult],
+        blackboard_data: dict[str, Any],
+    ) -> TaskResult:
+        """An approved pipeline's resumed run: through Temporal when the
+        durable path is on (SW-E16: approved resumes take the durable path,
+        a workflow of their own), in process otherwise -- ``_resume`` either
+        way."""
+        from kazma_core.swarm.durable import (
+            durable_enabled,
+            durable_required,
+            in_durable_activity,
+            run_via_durable,
+        )
+
+        if (durable_enabled() or durable_required()) and not in_durable_activity():
+            started = perf_counter()
+            try:
+                return await run_via_durable(self, task, started, None,
+                                             resume=(next_step, worker_results, blackboard_data))
+            except asyncio.CancelledError:
+                return self._interrupted(task, started)
+        return await self._resume(task, next_step, worker_results, blackboard_data)
 
     async def _journal_step(self, task: SwarmTask, step: int, state: str) -> None:
         """Record a resumed step's begin and commit on the task's row, under
