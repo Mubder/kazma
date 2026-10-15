@@ -18,6 +18,11 @@
 - **A guard that refuses to start leaves the document broker alone.** A
   second guard that finds Kazma already running refuses to start. Before,
   it first rewrote the running guard's record of the document broker.
+- **The OCR model installer works on a Python 3.11 install.** It converts
+  two models in a temporary environment, which used the server's own
+  Python version. The pinned converter versions need Python 3.12, so on a
+  3.11 install the conversion failed. It now always uses 3.12, and uv
+  fetches that version when it is missing.
 
 ## Deleted words really leave the keyword index (2026-10-15)
 

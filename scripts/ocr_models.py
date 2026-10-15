@@ -50,6 +50,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SPECS_PATH = ROOT / "kazma-core" / "kazma_core" / "documents" / "ocr" / "neural_models.py"
 #: The converter's versions when it runs in a throwaway environment.
 EXPORT_REQUIREMENTS = ("torch==2.14.1", "onnx==1.23.2", "onnxruntime==1.31.0", "numpy==2.5.4")
+#: ... and its Python, whatever the server runs: these pins were tested on
+#: 3.12 (numpy 2.5 needs 3.12 or later). It took the server's own version, and
+#: on a 3.11 install the throwaway environment could not be built
+#: (2026-10-15). uv fetches this interpreter when it is missing.
+EXPORT_PYTHON = "3.12"
 TORCH_CPU_INDEX = "https://download.pytorch.org/whl/cpu"
 #: Recognizer architecture per role: EasyOCR "generation 1" (ResNet) and
 #: "generation 2" (VGG) networks, hidden size of their LSTMs.
@@ -280,7 +285,7 @@ def _convert(weights: Path, target: Path, role: str) -> dict:
         raise SystemExit(
             "Converting EasyOCR's models needs torch and onnx once. Install them into a separate environment, or "
             "install uv (https://docs.astral.sh/uv/) and run this again: it converts in a throwaway environment.")
-    command = [uv, "run", "--isolated", "--no-project", "--python", f"{sys.version_info[0]}.{sys.version_info[1]}"]
+    command = [uv, "run", "--isolated", "--no-project", "--python", EXPORT_PYTHON]
     if platform.system() != "Windows":
         command += ["--index", TORCH_CPU_INDEX]  # CPU wheels: no CUDA download
     for requirement in EXPORT_REQUIREMENTS:

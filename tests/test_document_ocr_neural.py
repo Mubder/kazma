@@ -206,6 +206,34 @@ def test_the_installer_refuses_a_download_that_is_not_the_pinned_file(tmp_path, 
     assert target.read_bytes() == payload
 
 
+def test_the_converter_runs_on_the_python_its_pins_were_tested_on(tmp_path, monkeypatch):
+    """The throwaway converter took the SERVER's Python version: on the live
+    install (3.11) uv could not build it, because the pinned numpy needs 3.12
+    (2026-10-15). It now always names the version the pins were tested on."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ocr_models_script", REPO / "scripts" / "ocr_models.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    commands: list[list[str]] = []
+
+    def run(command, check):
+        commands.append(command)
+        Path(command[-1]).write_text(json.dumps({"converted": True}), encoding="utf-8")
+
+    monkeypatch.setattr(script, "_can_convert", lambda: False)
+    monkeypatch.setattr(script.shutil, "which", lambda name: "uv")
+    monkeypatch.setattr(script.subprocess, "run", run)
+    # A server on Python 3.11 (the live install's).
+    monkeypatch.setattr(script, "sys", SimpleNamespace(version_info=(3, 11, 15)))
+    assert script._convert(tmp_path / "w.pth", tmp_path / "out.onnx", "rec_arabic") == {"converted": True}
+    python = commands[0][commands[0].index("--python") + 1]
+    assert python == script.EXPORT_PYTHON == "3.12"
+    # The pins name a numpy that needs 3.12: an older interpreter cannot build them.
+    numpy = next(r for r in script.EXPORT_REQUIREMENTS if r.startswith("numpy=="))
+    assert tuple(int(x) for x in numpy.split("==")[1].split(".")[:2]) >= (2, 5)
+
+
 # ── choosing the engine ───────────────────────────────────────────────────
 
 def _config(tmp_path, **changes) -> DocumentConfig:
