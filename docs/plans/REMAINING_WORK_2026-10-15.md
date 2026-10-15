@@ -99,3 +99,19 @@ SQ05 (published limits) is tied to the Swarm soak's numbers when it ends.
   what it collects (`Mubder/KazmaAI` `f2d7564`).
 - The pre-deploy backup copy (176 MB, with a vault copy) moved to the
   Recycle Bin.
+- Live install on `2e9c4f5e` (reloaded 12:46 UTC, no warnings since): the
+  container profile is on (Settings), the guard was restarted once and runs
+  the broker, the worker image for the code (`src-eb7381309fbef301`) is
+  attested. Neural OCR models installed (`scripts/ocr_models.py install`, after
+  its Python 3.11 fix). Re-read on live: the Arabic scan, the Arabic table
+  scan and the English scan come back exactly as written (separators, tanween,
+  full stops); test documents and test chats deleted, memory kept off.
+- kazma.ai synced to `2e9c4f5e` (`Mubder/KazmaAI` `6eb5d75`, `191322d`: 46
+  pages in EN and AR, the OCR and isolation claims from FEATURES); metrics
+  pull request [Mubder/KazmaAI#21](https://github.com/Mubder/KazmaAI/pull/21)
+  merged (17,075 tests on the site). Build, link check and 76 browser tests
+  passed.
+- The full suite on `49506a67`: 16,839 passed, 1 failed (an e2e file missing
+  from CI, fixed in `2e9c4f5e`). The Postgres job's list on a disposable
+  postgres:16: 506 passed. The document worker container job on Linux: every
+  step passed at `0685ab9f`.
