@@ -220,6 +220,84 @@ def test_web_links_and_navigation_stay_usable(tmp_path, target):
         assert_pdf_safe(PdfReader(_with_action(tmp_path, kind[1:], _action(kind, **fields))))
 
 
+def test_a_goto_or_thread_with_a_file_is_a_remote_reference(tmp_path):
+    """Q04 FIND-01 (independent review, 2026-10-15): /GoTo and /Thread are
+    in-document navigation and so are not in _DANGEROUS_ACTIONS, but either
+    with an /F file specification is a REMOTE go-to -- the viewer resolves
+    another file or a UNC share (NTLM credential leak, phishing). The policy
+    let them through as navigation. Every /F shape is refused; plain
+    navigation still parses."""
+    filespec = DictionaryObject({
+        NameObject('/Type'): NameObject('/Filespec'), NameObject('/F'): TextStringObject('evil.pdf'),
+    })
+    for name, action in (
+        ('goto-file', _action('/GoTo', F=TextStringObject('evil.pdf'),
+                              D=ArrayObject([NumberObject(0), NameObject('/Fit')]))),
+        ('goto-filespec', _action('/GoTo', F=filespec,
+                                  D=ArrayObject([NumberObject(0), NameObject('/Fit')]))),
+        ('goto-unc', _action('/GoTo', F=TextStringObject(_UNC),
+                            D=ArrayObject([NumberObject(0), NameObject('/Fit')]))),
+        ('thread-file', _action('/Thread', F=TextStringObject('evil.pdf'))),
+    ):
+        path = _with_action(tmp_path, name, action)
+        with pytest.raises(DocumentSecurityError, match='remote file'):
+            assert_pdf_safe(PdfReader(path))
+        with pytest.raises(WorkerError) as error:
+            _reader(path)
+        assert error.value.code == 'unsafe_document'
+
+    # Negative controls: in-document navigation (no /F) still parses.
+    for name, action in (
+        ('goto-plain', _action('/GoTo', D=ArrayObject([NumberObject(0), NameObject('/Fit')]))),
+        ('thread-plain', _action('/Thread', D=ArrayObject([NumberObject(0), NameObject('/Fit')]))),
+    ):
+        assert_pdf_safe(PdfReader(_with_action(tmp_path, name, action)))
+
+
+def test_a_goto_with_an_indirect_filespec_is_refused(tmp_path):
+    """The /F filespec reached through an indirect object, as a real producer
+    writes it (Q04 FIND-01)."""
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    filespec = writer._add_object(DictionaryObject({
+        NameObject('/Type'): NameObject('/Filespec'), NameObject('/F'): TextStringObject('evil.pdf'),
+    }))
+    writer._root_object[NameObject('/OpenAction')] = DictionaryObject({
+        NameObject('/S'): NameObject('/GoTo'), NameObject('/F'): filespec,
+        NameObject('/D'): ArrayObject([NumberObject(0), NameObject('/Fit')]),
+    })
+    path = tmp_path / 'goto-indirect.pdf'
+    writer.write(path)
+    with pytest.raises(DocumentSecurityError, match='remote file'):
+        assert_pdf_safe(PdfReader(path))
+
+
+def test_dangerous_action_and_key_names_are_matched_case_insensitively(tmp_path):
+    """Q04 OBS-02 (2026-10-15): PDF names are case-sensitive and a wrong-case
+    /JAVASCRIPT is inert in most viewers, but matching the active-content
+    names case-insensitively is defence in depth and matches the sniffer's
+    IGNORECASE regex. A wrong-case dangerous action or key is refused; a
+    wrong-case benign action is not."""
+    for kind in ('/LAUNCH', '/jAvAsCrIpT', '/sOuNd'):
+        path = _with_action(tmp_path, kind[1:], _action(kind, F=TextStringObject('x')))
+        with pytest.raises(DocumentSecurityError):
+            assert_pdf_safe(PdfReader(path))
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer._root_object[NameObject('/AcroForm')] = DictionaryObject({
+        NameObject('/Fields'): ArrayObject(), NameObject('/Xfa'): ArrayObject(),  # /XFA, wrong case
+    })
+    xfa = tmp_path / 'xfa-mixed.pdf'
+    writer.write(xfa)
+    with pytest.raises(DocumentSecurityError):
+        assert_pdf_safe(PdfReader(xfa))
+
+    # Negative control: a wrong-case BENIGN navigation action still parses.
+    assert_pdf_safe(PdfReader(_with_action(
+        tmp_path, 'goto-mixed', _action('/gOtO', D=ArrayObject([NumberObject(0), NameObject('/Fit')])))))
+
+
 def test_an_indirect_link_target_shared_with_a_safe_role_is_still_judged(tmp_path):
     writer = PdfWriter()
     writer.add_blank_page(width=100, height=100)

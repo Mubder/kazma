@@ -32,6 +32,14 @@ _DANGEROUS_ACTIONS = frozenset(
         "/Sound", "/Movie",
     }
 )
+# Matched case-insensitively (Q04 OBS-02, 2026-10-15). PDF names are
+# case-sensitive per the spec, so a wrong-case /JAVASCRIPT is inert in most
+# viewers and pypdf already decodes the genuinely dangerous #-escape form
+# (/J#61vaScript -> /JavaScript); folding is defence-in-depth and matches the
+# sniffer's IGNORECASE regex. pypdf decodes #-escapes before we see the name.
+_DANGEROUS_KEYS_FOLDED = frozenset(key.lower() for key in _DANGEROUS_KEYS)
+_DANGEROUS_ACTIONS_FOLDED = frozenset(action.lower() for action in _DANGEROUS_ACTIONS)
+_REMOTE_GOTO_ACTIONS_FOLDED = frozenset({"/goto", "/thread"})
 _SAFE_URI_PREFIXES = ("http://", "https://", "mailto:")
 # Roles whose scalar value the policy judges: resolved even when the same
 # indirect object was already walked under another role.
@@ -85,9 +93,9 @@ def assert_pdf_safe(
                     raise DocumentSecurityError("PDF security inspection could not verify an object reference")
                 pending.append((resolved, depth + 1, role))
                 continue
-            if role == "/S" and str(value) in _DANGEROUS_ACTIONS:
+            if role == "/S" and str(value).lower() in _DANGEROUS_ACTIONS_FOLDED:
                 raise DocumentSecurityError("PDF contains executable actions")
-            if role == "/Type" and str(value) == "/EmbeddedFile":
+            if role == "/Type" and str(value).lower() == "/embeddedfile":
                 raise DocumentSecurityError("PDF contains embedded-file content")
             if role == "/URI":
                 # A link action's target (the catalog's /URI is a dict with
@@ -103,9 +111,25 @@ def assert_pdf_safe(
                     continue
                 seen_containers.add(identity)
                 if isinstance(value, Mapping):
-                    if any(key in value for key in _DANGEROUS_KEYS):
+                    if any(str(key).lower() in _DANGEROUS_KEYS_FOLDED for key in value):
                         raise DocumentSecurityError(
                             "PDF JavaScript, Launch, rich media or attachments are disabled"
+                        )
+                    # /GoTo and /Thread are in-document navigation and so are
+                    # not in _DANGEROUS_ACTIONS -- but either one with an /F
+                    # file specification is a REMOTE go-to (another file, a UNC
+                    # share): the viewer that opens it leaks credentials or is
+                    # phished. /GoToR and /GoToE (already refused) are the
+                    # explicit remote forms; /GoTo + /F and /Thread + /F are
+                    # the same reach by another spelling. Q04 FIND-01, 2026-10-15.
+                    subtype = value.get("/S")
+                    if isinstance(subtype, IndirectObject):
+                        subtype = subtype.get_object()
+                    if str(subtype).lower() in _REMOTE_GOTO_ACTIONS_FOLDED and any(
+                        str(key).lower() == "/f" for key in value
+                    ):
+                        raise DocumentSecurityError(
+                            "PDF references a remote file (a GoTo or Thread action with a file specification)"
                         )
                     children = ((item, str(key)) for key, item in value.items())
                 else:
