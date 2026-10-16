@@ -7130,7 +7130,19 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   save against an accepting server).
 - **Toasts:** use `window.showToast(msg, type, duration)` or
   `Alpine.store('toast').add(...)`. `streaming.js`'s `KazmaStream.toast`
-  delegates to `$store.toast` — there is one toast system.
+  delegates to `$store.toast` — there is one toast system. `add(message,
+  type, duration, action)` takes an optional `{label, run}` button (the
+  toast closes after it); `duration` 0 stays until answered.
+- **An open tab is told when Kazma was updated** (`modules/build_watch.js`,
+  2026-10-16): the page carries the build that rendered it
+  (`<meta name="kazma-build">`, the `build_commit()` template global,
+  resolved at process start) and, when visible and every 5 minutes, compares
+  it with `/health/live`'s build through `kazmaGetJson`; another build shows
+  ONE "Kazma was updated -- Refresh" toast per tab. An unknown build, a
+  restart of the same build or a server not answering shows nothing. Never
+  scan the asset files on `/health/live`: it is the guard's probe, on the
+  loop. Gates: `tests/js/test_build_watch.js`, `tests/e2e/test_update_notice.py`
+  (EN/AR, after a sidebar navigation, Refresh reloads).
 - **`x-cloak` is GLOBAL — do not re-introduce the blink.** The rule
   `[x-cloak] { display: none !important; }` lives once in `kazma.css`
   (`base.html` then loads `kazma.v5.css` — last-wins for overlapping

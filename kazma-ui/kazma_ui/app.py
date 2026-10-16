@@ -816,6 +816,17 @@ class KazmaAppBuilder:
         self.templates.env.globals["css_version"] = _css_version
         self.templates.env.globals["js_version"] = _js_version
 
+        def _build_commit() -> str:
+            # The build that rendered the page (<meta name="kazma-build">):
+            # modules/build_watch.js compares it with /health/live and offers a
+            # Refresh after a deploy. Resolved once at process start, so a
+            # render does no I/O.
+            from kazma_ui.health import get_build_info
+
+            return str(get_build_info().get("commit") or "")
+
+        self.templates.env.globals["build_commit"] = _build_commit
+
         # NOTE: no browser WS token is injected anymore. The per-session WS
         # token was embedded as a <meta> tag + ?token= query param, which
         # leaked the bearer token into page source, proxy/access logs, browser

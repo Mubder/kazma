@@ -11,6 +11,9 @@
     <meta name="color-scheme" content="{{ theme()|default('light') }}">
     <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
     <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
+    {# The build that rendered this page: modules/build_watch.js compares it
+       with /health/live and offers a Refresh after a deploy. #}
+    <meta name="kazma-build" content="{{ build_commit() }}">
     {# Critical inline theme CSS — in the FIRST HTML bytes so iOS Safari
        paints a correctly-colored canvas before kazma.css downloads+parses.
        Per the CSS spec the canvas takes its color from the root element
@@ -286,7 +289,8 @@
         "/static/js/modules/turn_preferences.js": "/static/js/modules/turn_preferences.js?v={{ js_version() }}",
         "/static/js/modules/turn_presentation.js": "/static/js/modules/turn_presentation.js?v={{ js_version() }}",
         "/static/js/modules/turn_visibility.js": "/static/js/modules/turn_visibility.js?v={{ js_version() }}",
-        "/static/js/modules/push_client.js": "/static/js/modules/push_client.js?v={{ js_version() }}"
+        "/static/js/modules/push_client.js": "/static/js/modules/push_client.js?v={{ js_version() }}",
+        "/static/js/modules/build_watch.js": "/static/js/modules/build_watch.js?v={{ js_version() }}"
       }
     }
     </script>

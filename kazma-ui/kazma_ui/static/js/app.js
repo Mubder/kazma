@@ -21,6 +21,7 @@ import {
     closeModal,
 } from './modules/util.js';
 import { initSoftNav } from './modules/nav.js';
+import { startBuildWatch } from './modules/build_watch.js';
 
 // ── Preserve legacy globals consumed by templates + classic scripts ──
 window.kazmaApp = kazmaApp;
@@ -37,6 +38,7 @@ window.closeModal = closeModal;
 // ── Boot ──
 registerStores();   // registers Alpine stores on alpine:init
 initSoftNav();      // progressive-enhancement client-side nav
+startBuildWatch();  // "Kazma was updated -- Refresh" when the server's build moves on
 
 // ── Phone keyboard: keep the composer visible via visualViewport ──
 // iOS Safari does NOT shrink layout viewport when the soft keyboard opens,

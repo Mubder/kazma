@@ -1473,6 +1473,20 @@ tbody tr:last-child td {
 }
 .toast-dismiss:hover { opacity: 1; }
 .toast-dismiss svg { width: 14px; height: 14px; }
+/* Optional action button (the update notice's Refresh). */
+.toast-action {
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  padding: 2px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.toast-action:hover { background: rgba(127, 127, 127, 0.15); }
 
 .toast-success {
   background: rgba(63, 185, 80, 0.1);

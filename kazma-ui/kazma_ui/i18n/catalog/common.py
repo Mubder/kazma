@@ -91,6 +91,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "النوع",
         "en": "Type",
     },
+    "common.update_available": {
+        "ar": "تم تحديث كاظمه. حدّث الصفحة لتحميل الإصدار الجديد.",
+        "en": "Kazma was updated. Refresh to load the new version.",
+    },
     "common.yes": {
         "ar": "نعم",
         "en": "Yes",
