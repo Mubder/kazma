@@ -99,6 +99,7 @@ These are Kazma caps **on top of** X's own quota. They fail closed.
 | Guard | Default | Why |
 |-------|---------|-----|
 | Always-HITL (`ALWAYS_HITL_TOOLS`) | `x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post` | Chat/agent tools: human sees the exact text. YOLO / grants / HITL-off cannot skip. Web Studio does not call these tools — the operator click *is* the approval. |
+| Drafted, shown, then posted | `x_post`, `x_schedule_post`, `book_x_post` | A draft the agent saves (`save_proposal`) is never published in the same turn: the agent shows it and stops, and you ask to post it in a later message. Then the card says what it does — "Publish to X — public, can't be undone", the post shown whole, a **Post now** button — on the web and in Telegram, Discord and Slack. It offers no "Allow tool", YOLO or "Approve for task": those answers are refused and approve nothing. (2026-10-16: "check the metrics" ended in a post approved as part of the reading.) |
 | Official API only | `POST /2/tweets` | Automation must use the API, not the website. |
 | No extra verbs | no like / follow / DM / search | Stays inside posting. |
 | No write retry | network drop ≠ second POST | Avoids double-posts. |

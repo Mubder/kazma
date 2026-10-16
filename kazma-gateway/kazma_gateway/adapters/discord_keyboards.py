@@ -19,8 +19,8 @@ __all__ = [
 ]
 
 
-def build_approval_components(request_id: str) -> list[dict[str, Any]]:
-    return discord_approval_components(request_id)
+def build_approval_components(request_id: str, **labels: Any) -> list[dict[str, Any]]:
+    return discord_approval_components(request_id, **labels)
 
 
 def build_personality_components(personalities: list[str]) -> list[dict[str, Any]]:

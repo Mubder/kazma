@@ -48,9 +48,16 @@ def _get_config_store() -> Any:
 # ── Escape helpers ──────────────────────────────────────────────────────
 
 
+#: Every character MarkdownV2 reads as markup, the backslash FIRST: it is the
+#: escape character itself, so an unescaped one swallows the character after
+#: it. Live 2026-10-16 an ops alert's Windows command arrived as
+#: ".venvScriptspython.exe scriptsdocument_worker_image.py build".
+_MDV2_SPECIALS = "\\_*[]()~`>#+-=|{}.!"
+
+
 def _escape_md(text: str) -> str:
     """Escape MarkdownV2 special characters for Telegram."""
-    chars = r"_*[]()~`>#+-=|{}.!"
+    chars = _MDV2_SPECIALS
     result = text
     for c in chars:
         result = result.replace(c, f"\\{c}")
@@ -143,7 +150,7 @@ class TelegramBusAdapter(BusAdapter):
                     raw_text = fallback_payload.get("text", "")
                     if isinstance(raw_text, str):
                         # Strip Markdown escape slashes if present
-                        fallback_payload["text"] = re.sub(r"\\([_*\[\]()~`>#+\-=|{}.!])", r"\1", raw_text)[:4096]
+                        fallback_payload["text"] = re.sub(r"\\([\\_*\[\]()~`>#+\-=|{}.!])", r"\1", raw_text)[:4096]
                     fallback_resp = await http.post(
                         f"{_TELEGRAM_API}/bot{self._bot_token}/{method}",
                         json=fallback_payload,

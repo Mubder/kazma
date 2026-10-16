@@ -34,7 +34,7 @@ _LINE = re.compile(r"^\s*([a-z0-9_]+):\s*\{\{\s*(t|plural_forms)\('([a-z0-9_.]+)
 # literal ti() key. Until 2026-09-28 the phase names were not, and an Arabic
 # turn ended under "Completed"; the tool names were English literals until
 # 2026-09-29 ("Read file" on an Arabic page).
-_PHASE_TABLE = re.compile(r"var (?:_HEADER_PHASE_LABELS|_TOOL_FRIENDLY) = \{(.*?)\};", re.S)
+_PHASE_TABLE = re.compile(r"var (?:_HEADER_PHASE_LABELS|_TOOL_FRIENDLY|_PUBLIC_ACTION_LABELS) = \{(.*?)\};", re.S)
 _PHASE_NAME = re.compile(r"\[\s*'([a-z0-9_]+)'\s*,")
 
 

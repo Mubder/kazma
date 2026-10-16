@@ -1571,13 +1571,13 @@ class TelegramAdapter(BaseAdapter):
     # ── Inline keyboard builders (delegates to telegram_keyboards) ──
 
     @staticmethod
-    def build_approval_keyboard(request_id: str) -> dict[str, Any]:
+    def build_approval_keyboard(request_id: str, **labels: Any) -> dict[str, Any]:
         """Build an inline keyboard for HITL approval prompts."""
         from kazma_gateway.adapters.telegram_keyboards import (
             build_approval_keyboard as _build,
         )
 
-        return _build(request_id)
+        return _build(request_id, **labels)
 
     @staticmethod
     def build_personality_keyboard(personalities: list[str]) -> dict[str, Any]:

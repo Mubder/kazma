@@ -363,8 +363,28 @@ never stores one (`hitl_grants.one_time_only`). Live 2026-10-16 an "Allow tool
 (session)" click on an x_post card -- beside a tip saying grants cannot skip
 the tool -- approved THAT call and published a post the owner read as "it
 will still ask me before posting". Gates: `tests/test_always_ask_one_time_only.py`
-(the route without the refusal as control), `tests/e2e/test_always_ask_one_time_approval.py`
-(a scripted save_proposal + x_post on the real graph; 5 of 6 fail on the old code).
+(the route without the refusal as control), `tests/e2e/test_always_ask_one_time_approval.py`.
+
+**A draft is published only after the user has seen it, on a card that says
+it publishes** (2026-10-16, the same incident: "check the metrics" saved a
+draft and asked to post it 2 s later, in that turn, and the card was approved
+as part of the reading). `safety/commitment/proposals.bind_turn` names the
+running turn (thread + `created_at`, the effect journal's turn scope) in
+`tool_worker_node` before the commitment gate; `save_proposal` stamps the
+draft with it (`saved_turn`); `_resolve_proposal_backed_post` refuses a draft
+stamped with the running turn, or stamped with no turn running
+(`drafted_this_turn`), telling the model to show the draft (its text is in the
+refusal) and post after the user answers. An unstamped draft (a page, an older
+build) is not judged. The card names the public action
+(`safety/public_actions.PUBLIC_ACTIONS`, catalog `chat.hitl_public_<tool>` and
+`_btn`, chat.js `_PUBLIC_ACTION_LABELS`: one list, held to `ALWAYS_HITL_TOOLS`):
+"Publish to X — public, can't be undone", the post first and whole, **Post now**
+-- on the chat card (which keeps that title on every pending render,
+`data-pending-title`), the approvals panel and the chat apps, whose keyboards
+take `approve_label` and drop "Approve for task" (`task=False`), and whose
+`/hitl approve_task` on an always-ask gate approves nothing. Gates:
+`tests/test_proposal_seen_before_publish.py`, `tests/test_public_action_cards.py`,
+the e2e above (two turns, real graph, browser EN/AR; all fail on the old code).
 
 **Danger tool list SoT (must stay one list):**
 - **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
@@ -5501,6 +5521,13 @@ audit SW-S15); a set `SWARM_BOT_TOKEN` is a startup WARNING.
 - Gate: `tests/test_ops_alert_delivery.py` (the loop a worker-thread alert
   is delivered on, with the unbound path as the negative control; a refusing
   bus; each platform sender's answer; the test alert's routes and its route).
+- **A Telegram alert shows what it says** (`telegram_bus._escape_md`,
+  2026-10-16): MarkdownV2's escape character is the backslash, so the escaper
+  escapes it FIRST (`_MDV2_SPECIALS`), and the plain-text fallback unescapes
+  it too. It did neither, and every Windows path in a Telegram alert lost its
+  separators (".venvScriptspython.exe scriptsdocument_worker_image.py build").
+  Gate: `tests/test_telegram_bus_backslash.py` (read back the way Telegram
+  shows it; the old escaper as the negative control).
 
 **Research/crawl progress and results (2026-10-12).**
 `web_acquire.monitor` reconciles local session/crawl journals every 15 s, with
