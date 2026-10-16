@@ -257,13 +257,11 @@ def _log_paths() -> list[Path]:
     """
     found: list[Path] = []
     try:
-        from kazma_core.paths import data_dir, user_home
+        from kazma_core.paths import data_dir, log_file, user_home
 
         root = Path(data_dir()).parent
         candidates = [
-            Path(user_home()) / "kazma.log",
-            root / ".kazma" / "kazma.log",
-            root / "kazma.log",
+            log_file(),                               # the file the server writes
             Path(user_home()) / "guard.log",
             root / ".kazma" / "guard.log",
             Path.home() / ".kazma" / "guard.log",     # legacy guard home

@@ -13,22 +13,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import secrets
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
-
-def _paths_data_dir():
-    """``paths.data_dir()``, imported lazily (honours KAZMA_DATA_DIR)."""
-    from kazma_core.paths import data_dir
-
-    return data_dir()
-
 
 # Where Kazma learns of a newer version: the canonical repo's newest release.
 # ``kazma update`` holds the same URL in kazma_cli/update.py (it must run while
@@ -1051,14 +1042,13 @@ class SettingsManager:
     def get_logs(self, lines: int = 100) -> dict[str, Any]:
         """Read recent log entries using bounded tail read."""
         lines = max(1, min(lines, 5000))
-        log_paths = []
-        if env_log := os.environ.get("KAZMA_LOG_FILE"):
-            log_paths.append(Path(env_log))
-        log_paths.extend([
-            _paths_data_dir() / "kazma.log",
-            Path.cwd() / "kazma.log",
-        ])
-        for log_path in log_paths:
+        # The file the server writes (``paths.log_file()``: ``KAZMA_LOG_FILE``,
+        # else ``<install>/.kazma/kazma.log``). It looked in the data dir and
+        # the process's working folder, where no log is written, and showed
+        # "No log file found" on every install (2026-10-16).
+        from kazma_core.paths import log_file
+
+        for log_path in (log_file(),):
             if log_path.exists():
                 try:
                     size = log_path.stat().st_size

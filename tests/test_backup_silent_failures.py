@@ -339,6 +339,9 @@ def test_ledger_reads_rotated_logs(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(paths, "user_home", lambda: home)
     monkeypatch.setattr(paths, "data_dir", lambda: tmp_path / "kazma-data")
+    # The ledger reads the file the server writes (paths.log_file()); the
+    # root conftest points that at a temp file, so unpin it here.
+    monkeypatch.delenv("KAZMA_LOG_FILE", raising=False)
     assert home / "kazma.log.2026-09-20" in fl._log_paths()
     counts = {e.mechanism: e.count for e in fl.scan_log(hours=1e9).entries}
     assert counts["universal backup"] == 1

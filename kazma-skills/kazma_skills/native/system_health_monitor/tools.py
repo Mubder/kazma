@@ -157,28 +157,20 @@ def _tail_lines(path: Path, count: int) -> list[str]:
 
 def _read_system_logs_sync(lines: int) -> str:
     """Blocking body of :func:`read_system_logs` — runs in a worker thread."""
-    workspace = _get_workspace()
+    # The file the server writes (``logging_config`` -> ``paths.log_file()``):
+    # ``<install>/.kazma/kazma.log``, or ``KAZMA_LOG_FILE``. This tool used to
+    # guess -- the home folder's ``.kazma`` and the workspace -- and found
+    # nothing on an install whose workspace is not the install folder, so
+    # the agent told the owner it could not read the logs (2026-10-16).
+    from kazma_core.paths import log_file
 
-    # Check standard Kazma log file locations in precedence order
-    candidate_paths = [
-        Path.home() / ".kazma" / "kazma.log",
-        workspace / "kazma.log",
-        workspace / "kazma-data" / "logs" / "kazma.log",
-        workspace / "out.log",
-        workspace / "server.log",
-    ]
-
-    log_path = None
-    for cand in candidate_paths:
-        try:
-            if cand.exists():
-                log_path = cand
-                break
-        except OSError:
-            continue
-
-    if log_path is None:
-        return "Error: System log file not found. Checked ~/.kazma/kazma.log, workspace/kazma.log, kazma-data/logs/kazma.log, out.log."
+    log_path = log_file()
+    try:
+        found = log_path.is_file()
+    except OSError:
+        found = False
+    if not found:
+        return f"Error: The server log was not found at {log_path}."
 
     try:
         tail_lines = _tail_lines(log_path, lines)
