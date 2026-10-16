@@ -3561,6 +3561,29 @@
   // Unique-id sequence for aria-controls on workbench panel bodies.
   var _panelSeq = 0;
 
+  // An always-ask card names its public action, in its header and on the
+  // button that does it: [[header key, English], [button key, English]].
+  // Live 2026-10-16 an x_post card read "Approval Required ... Approve once",
+  // like any other card, and was approved as part of "check the metrics".
+  // The same words for the chat apps: kazma_core.safety.public_actions.
+  var _PUBLIC_ACTION_LABELS = {
+    x_post: [['hitl_public_x_post', 'Publish to X — public, can’t be undone'], ['hitl_public_x_post_btn', 'Post now']],
+    x_schedule_post: [['hitl_public_x_schedule_post', 'Schedule a public post on X'], ['hitl_public_x_schedule_post_btn', 'Schedule post']],
+    x_delete_post: [['hitl_public_x_delete_post', 'Delete a post from X — can’t be undone'], ['hitl_public_x_delete_post_btn', 'Delete post']],
+    x_cancel_scheduled_post: [['hitl_public_x_cancel_scheduled_post', 'Cancel a scheduled X post'], ['hitl_public_x_cancel_scheduled_post_btn', 'Cancel scheduled post']],
+  };
+
+  // The public action a card asks about: its labels, or null.
+  function _publicActionOf(data) {
+    var names = [data && data.tool].concat(
+      (Array.isArray(data && data.tools) ? data.tools : []).map(function (t) { return t && t.name; }));
+    for (var i = 0; i < names.length; i++) {
+      var pa = _PUBLIC_ACTION_LABELS[String(names[i] || '')];
+      if (pa) return { title: ti(pa[0][0], pa[0][1]), button: ti(pa[1][0], pa[1][1]) };
+    }
+    return null;
+  }
+
   // A step's tool, named in the reader's language: [catalog key, English].
   // These were English literals, so an Arabic page read "Read file".
   var _TOOL_FRIENDLY = {
@@ -5898,8 +5921,12 @@
           ' ' + escapeHtml(ti('hitl_verified', '(verified against what you approved):')) + '</p>' +
           '<ul class="hitl-proposal-items" style="margin:0;padding-left:18px;font-size:0.78rem;">' +
           _propItems.map(function(i) {
+            // A public post is shown whole (the server sends up to 600
+            // characters): the owner approves the text, not a preview of it.
             return '<li style="margin:3px 0;"><code>' + escapeHtml(String(i.id || '')) +
-              '</code> ' + escapeHtml(truncateStr(String(i.text || ''), 240)) + '</li>';
+              '</code> <span class="hitl-proposal-text" dir="auto" translate="no">' +
+              escapeHtml(_publicActionOf(data) ? String(i.text || '') : truncateStr(String(i.text || ''), 240)) +
+              '</span></li>';
           }).join('') +
           '</ul></div>';
       }
@@ -5923,20 +5950,35 @@
     // grants cannot skip the tool -- live 2026-10-16 that click published a
     // post the owner read as "it will still ask me". The route refuses it too.
     var alwaysAsk = data.always_ask === true;
+    // An always-ask card names the public action it approves, in its header
+    // and on its button ("Post now", never "Approve once"), and shows the
+    // text it publishes first, so it cannot be read as one more step of the
+    // work around it: live 2026-10-16 an x_post card was approved as part of
+    // "check the metrics".
+    var publicAction = alwaysAsk ? _publicActionOf(data) : null;
+    if (publicAction) {
+      card.classList.add('hitl-public-action');
+      card.setAttribute('data-pending-title', '📢 ' + publicAction.title);
+    }
     card.innerHTML =
-      '<div class="hitl-approval-header"><span class="hitl-header-title">' + escapeHtml(ti('hitl_title', '\u26A0 Approval Required')) + '</span></div>' +
+      '<div class="hitl-approval-header"><span class="hitl-header-title">' +
+        escapeHtml(publicAction ? '\uD83D\uDCE2 ' + publicAction.title : ti('hitl_title', '\u26A0 Approval Required')) +
+      '</span></div>' +
       '<div class="hitl-approval-body">' +
+        (publicAction ? proposalHtml : '') +
         '<p><strong>' + escapeHtml(ti('hitl_tool_label', 'Tool:')) + '</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
         (tools.length <= 1
           ? '<p><strong>' + escapeHtml(ti('hitl_args_label', 'Args:')) + '</strong></p><div class="hitl-approval-args">' + renderApprovalArgsHtml(data.tool, data.args) + '</div>'
           : toolsHtml) +
-        proposalHtml +
+        (publicAction ? '' : proposalHtml) +
         (data.jail_note
           ? '<p class="hitl-jail-note" dir="auto">' + escapeHtml(String(data.jail_note)) + '</p>'
           : '') +
         '<p class="hitl-message" dir="auto">' + _hitlMessageHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
-          (yoloOk
+          (publicAction
+            ? escapeHtml(ti('hitl_public_note', 'This is a public action and asks you every time. Read the text above before you answer.'))
+            : yoloOk
             ? ti('hitl_tip_yolo', 'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
               '<strong>YOLO session</strong> skips every danger tool (native + MCP) until you <code>/yolo off</code> or TTL.')
             : ti('hitl_tip_always', 'This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO and session grants cannot skip it.')) +
@@ -5944,7 +5986,7 @@
       '</div>' +
       '<div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">' +
         '<button class="btn btn-sm btn-success hitl-approve" data-scope="once" title="' + escapeHtml(ti('hitl_approve_once_title', 'This call only')) + '">' +
-          escapeHtml(ti('hitl_approve_once', 'Approve once')) + '</button>' +
+          escapeHtml(publicAction ? publicAction.button : ti('hitl_approve_once', 'Approve once')) + '</button>' +
         // "Allow tool" is singular, but on a GROUPED card this grants every
         // tool in the batch — `_extract_pending_tools_from_snapshot` returns
         // all of their names and each gets `grant_tool()`. A button that says
@@ -8277,7 +8319,9 @@
       ? String(resolvedState) : _hitlDisplayState(part);
     if (!show) return;
     if (show === 'pending') {
-      _setHitlHeaderTitle(card, ti('hitl_title', '\u26A0 Approval Required'));
+      // A public-action card keeps the title naming its action.
+      _setHitlHeaderTitle(card, card.getAttribute('data-pending-title')
+        || ti('hitl_title', '\u26A0 Approval Required'));
       // Only a gate the registry confirms is live gets a ticker. Re-arming
       // it on every render of anything that merely *looks* pending is what
       // let a stale part resurrect a countdown after the fact.

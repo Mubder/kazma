@@ -186,11 +186,25 @@
       // Always-HITL tools (X ToU fail-safes) re-prompt even under YOLO —
       // hide the button so YOLO never reads as "approve once".
       var yoloOk = item.yolo_allowed !== false;
+      // An always-ask card names the public action it approves (header and
+      // button, catalog chat.hitl_public_<tool>[_btn], the chat card's words):
+      // live 2026-10-16 an x_post card was approved as part of reading.
+      var publicTitle = '';
+      var publicButton = '';
+      if (item.always_ask === true && toolRaw) {
+        var _ptKey = 'chat.hitl_public_' + toolRaw;
+        var _pt = t(_ptKey, '');
+        if (_pt && _pt !== _ptKey) {
+          publicTitle = _pt;
+          publicButton = t(_ptKey + '_btn', t('dashboard.hitl_once', 'Once'));
+        }
+      }
       return (
-        '<div class="hitl-approval-card" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '" data-gate-id="' + gateId + '">' +
+        '<div class="hitl-approval-card' + (publicTitle ? ' hitl-public-action' : '') +
+          '" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '" data-gate-id="' + gateId + '">' +
         '  <div class="hitl-approval-header">' +
         '    <span class="hitl-tool-name">' +
-        (icon ? icon + ' ' : '') + toolName + '</span>' +
+        (publicTitle ? '📢 ' + escapeHtml(publicTitle) : (icon ? icon + ' ' : '') + toolName) + '</span>' +
         (threadId
           ? '    <span class="hitl-thread-id" title="thread">' + threadId + '</span>'
           : '') +
@@ -203,7 +217,7 @@
         '</div>') +
         '  <div class="hitl-approval-actions">' +
         '    <button class="btn btn-sm btn-success hitl-approve-btn" data-thread-id="' + threadId + '" data-scope="once">' +
-        '      ' + safeIcon('check') + ' ' + t('dashboard.hitl_once', 'Once') +
+        '      ' + safeIcon('check') + ' ' + (publicButton ? escapeHtml(publicButton) : t('dashboard.hitl_once', 'Once')) +
         '    </button>' +
         // An always-ask tool (X writes) takes a one-time approval only: no
         // "Allow tool" (it approved THIS call; the approve route refuses it).

@@ -274,10 +274,12 @@ def register_external_tools(registry: Any) -> None:
                 get_current_thread_id as _thread,
             )
 
-            tenant, thread = _tenant() or "default", _thread() or ""
+            from kazma_core.safety.commitment.proposals import current_turn as _turn
+
+            tenant, thread, turn = _tenant() or "default", _thread() or "", _turn()
             try:
                 payload = await asyncio.to_thread(
-                    lambda: _gas().save_proposal(tenant, thread, kind, items)
+                    lambda: _gas().save_proposal(tenant, thread, kind, items, saved_turn=turn)
                 )
             except ValueError as ve:
                 return f"Error: {ve}"
@@ -289,6 +291,12 @@ def register_external_tools(registry: Any) -> None:
                 "proposal_id when posting — posting tools refuse without it. Read "
                 "the drafts back any time with list_proposals."
             )
+            if turn:
+                lines.append(
+                    "The user has not seen these drafts yet: show them the full "
+                    "text and ask before posting. A draft is never published in "
+                    "the turn that wrote it; post it after the user answers."
+                )
             return "\n".join(lines)
 
         registry.register_function(
@@ -299,7 +307,10 @@ def register_external_tools(registry: Any) -> None:
                 "messages) as a durable proposal BEFORE asking for approval or "
                 "posting. Returns stable proposal/item IDs that survive context "
                 "trim, turn boundaries, and restarts. ALWAYS call this before "
-                "posting an enumerated draft set; then post with proposal_id=<id>. "
+                "posting an enumerated draft set; then SHOW the drafts to the user "
+                "and stop. Post with proposal_id=<id> only after the user asks in "
+                "a later message: a draft is never published in the turn that "
+                "wrote it. "
                 "Args: kind (e.g. 'tweets'), items (list of draft texts)."
             ),
             category="memory",

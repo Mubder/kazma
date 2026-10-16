@@ -26,16 +26,22 @@ __all__ = [
 # ── Discord components (v2 action rows) ───────────────────────────────────
 
 
-def discord_approval_components(request_id: str) -> list[dict[str, Any]]:
-    """HITL Approve / Deny / Approve-for-task buttons for Discord."""
-    return [
+def discord_approval_components(
+    request_id: str, *, approve_label: str = "", task: bool = True,
+) -> list[dict[str, Any]]:
+    """HITL Approve / Deny / Approve-for-task buttons for Discord.
+
+    A public action names itself on the approving button (*approve_label*)
+    and has no task approval (``task=False``): one-time only (2026-10-16).
+    """
+    rows: list[dict[str, Any]] = [
         {
             "type": 1,
             "components": [
                 {
                     "type": 2,
                     "style": 3,
-                    "label": "Approve",
+                    "label": approve_label or "Approve",
                     "custom_id": encode_callback_data(f"hitl:approve:{request_id}", max_bytes=100),
                 },
                 {
@@ -46,7 +52,9 @@ def discord_approval_components(request_id: str) -> list[dict[str, Any]]:
                 },
             ],
         },
-        {
+    ]
+    if task:
+        rows.append({
             "type": 1,
             "components": [
                 {
@@ -56,8 +64,8 @@ def discord_approval_components(request_id: str) -> list[dict[str, Any]]:
                     "custom_id": encode_callback_data(f"hitl:approve_task:{request_id}", max_bytes=100),
                 },
             ],
-        },
-    ]
+        })
+    return rows
 
 
 def discord_personality_components(personalities: list[str]) -> list[dict[str, Any]]:
@@ -129,8 +137,13 @@ def discord_model_components(provider_name: str, models: list[str]) -> list[dict
 
 def slack_approval_blocks(
     request_id: str, text: str = "Approval required", *, details: str | None = None,
+    approve_label: str = "", task: bool = True,
 ) -> list[dict[str, Any]]:
-    """Keep the redacted decision visible when Slack renders blocks over text."""
+    """Keep the redacted decision visible when Slack renders blocks over text.
+
+    A public action names itself on the approving button (*approve_label*)
+    and has no task approval (``task=False``): one-time only (2026-10-16).
+    """
     blocks = [
         {
             "type": "section",
@@ -142,7 +155,7 @@ def slack_approval_blocks(
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Approve"},
+                    "text": {"type": "plain_text", "text": approve_label or "Approve"},
                     "style": "primary",
                     "value": f"hitl:approve:{request_id}",
                     "action_id": f"hitl_approve_{request_id}",
@@ -163,6 +176,8 @@ def slack_approval_blocks(
             ],
         },
     ]
+    if not task:
+        blocks[1]["elements"] = blocks[1]["elements"][:2]
     if details:
         # Section text is capped at 3,000 characters; a message allows 50 blocks.
         # Plain text keeps argument markup, mentions and links literal.

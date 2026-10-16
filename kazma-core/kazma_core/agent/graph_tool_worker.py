@@ -699,6 +699,11 @@ async def tool_worker_node(
 
     session_messages = [_normalize_msg(m) for m in state.get("messages", [])]
     _messages_token = set_current_session_messages(session_messages)
+    # The running turn, for save_proposal's stamp and the outbound resolver:
+    # a draft is never published in the turn that wrote it (2026-10-16).
+    from kazma_core.safety.commitment.proposals import bind_turn, reset_turn
+
+    _proposal_turn_token = bind_turn(state)
 
     # ── Bind YOLO/HITL thread id from checkpointed state ────────────
     # Transports (SSE/WS) set the ContextVar, but LangGraph node execution
@@ -1609,6 +1614,7 @@ async def tool_worker_node(
         # Always restore prior ContextVar values, even if a tool raised or
         # the graph was interrupted by HITL.
         reset_current_session_messages(_messages_token)
+        reset_turn(_proposal_turn_token)
         if _state_tid_token is not None:
             reset_current_thread_id(_state_tid_token)
         reset_current_tenant_id(_state_tenant_token)

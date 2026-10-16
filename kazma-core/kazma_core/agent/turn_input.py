@@ -975,7 +975,9 @@ def proposal_nudge(user_text: str, *, active_goal: str = "") -> str | None:
         "save_proposal(kind, [draft, draft, …]) — then reference the returned "
         "proposal_id when posting. Approval must never depend on the drafts "
         "still being in conversation context: posting tools refuse without a "
-        "resolvable proposal_id."
+        "resolvable proposal_id. A draft written in this turn is never "
+        "published in this turn: show it to the user and post only after they "
+        "ask in a later message."
     )
 
 

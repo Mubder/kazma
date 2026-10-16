@@ -1357,6 +1357,43 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "المحتوى المراد نشره",
         "en": "Content to publish",
     },
+    # An always-ask card names its public action (kazma_core.safety.public_actions).
+    "chat.hitl_public_x_post": {
+        "ar": "نشر على X — منشور عام لا يمكن التراجع عنه",
+        "en": "Publish to X — public, can't be undone",
+    },
+    "chat.hitl_public_x_post_btn": {
+        "ar": "انشر الآن",
+        "en": "Post now",
+    },
+    "chat.hitl_public_x_schedule_post": {
+        "ar": "جدولة منشور عام على X",
+        "en": "Schedule a public post on X",
+    },
+    "chat.hitl_public_x_schedule_post_btn": {
+        "ar": "جدولة المنشور",
+        "en": "Schedule post",
+    },
+    "chat.hitl_public_x_delete_post": {
+        "ar": "حذف منشور من X — لا يمكن التراجع عنه",
+        "en": "Delete a post from X — can't be undone",
+    },
+    "chat.hitl_public_x_delete_post_btn": {
+        "ar": "احذف المنشور",
+        "en": "Delete post",
+    },
+    "chat.hitl_public_x_cancel_scheduled_post": {
+        "ar": "إلغاء منشور مجدول على X",
+        "en": "Cancel a scheduled X post",
+    },
+    "chat.hitl_public_x_cancel_scheduled_post_btn": {
+        "ar": "ألغِ المنشور المجدول",
+        "en": "Cancel scheduled post",
+    },
+    "chat.hitl_public_note": {
+        "ar": "هذا إجراء عام يُطلب له تأكيدك في كل مرة. اقرأ النص أعلاه قبل أن تجيب.",
+        "en": "This is a public action and asks you every time. Read the text above before you answer.",
+    },
     "chat.hitl_stored_proposal": {
         "ar": "المسودة المحفوظة {pid}",
         "en": "stored proposal {pid}",

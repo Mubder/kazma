@@ -213,8 +213,13 @@ class ArtifactStore:
         items: list[Any],
         *,
         reviews: list[dict[str, Any]] | None = None,
+        saved_turn: str = "",
     ) -> dict[str, Any]:
         """Persist an enumerated set of outbound drafts; returns stable IDs.
+
+        *saved_turn* names the chat turn that wrote them
+        (``safety.commitment.proposals.current_turn``): a draft is never
+        published in the turn that wrote it, before the user has seen it.
 
         The proposal is one artifact row whose value is JSON:
         ``{"kind": ..., "items": [{"id": ..., "text": ...}, ...]}``.
@@ -237,6 +242,7 @@ class ArtifactStore:
             ],
             "created_at": time.time(),
             "thread_id": thread_id or "",
+            **({"saved_turn": str(saved_turn)} if saved_turn else {}),
         }
         self._put(
             tenant_id,
@@ -287,6 +293,7 @@ class ArtifactStore:
             "kind": str(payload.get("kind") or "drafts"),
             "items": items,
             "texts": [str(i.get("text") or "") for i in items],
+            "saved_turn": str(payload.get("saved_turn") or ""),
         }
 
     def stored_text_for(

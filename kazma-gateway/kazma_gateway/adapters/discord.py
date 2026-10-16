@@ -909,11 +909,11 @@ class DiscordAdapter(BaseAdapter):
     # ── Interactive builders (Telegram-parity static API) ───────────
 
     @staticmethod
-    def build_approval_keyboard(request_id: str) -> list[dict[str, Any]]:
+    def build_approval_keyboard(request_id: str, **labels: Any) -> list[dict[str, Any]]:
         """Discord components for graph HITL (same IDs as Telegram)."""
         from kazma_gateway.adapters.discord_keyboards import build_approval_components
 
-        return build_approval_components(request_id)
+        return build_approval_components(request_id, **labels)
 
     @staticmethod
     def build_personality_keyboard(personalities: list[str]) -> list[dict[str, Any]]:

@@ -14,7 +14,9 @@ __all__ = [
 ]
 
 
-def build_approval_keyboard(request_id: str) -> dict[str, Any]:
+def build_approval_keyboard(
+    request_id: str, *, approve_label: str = "", task: bool = True,
+) -> dict[str, Any]:
     """Build an inline keyboard for HITL approval prompts.
 
     Three actions:
@@ -24,27 +26,31 @@ def build_approval_keyboard(request_id: str) -> dict[str, Any]:
     - 🔓 Approve for task: auto-approve ALL danger tools for this thread
       until the user sends a new message (or the 10-minute TTL expires).
       Eliminates approval spam for multi-step tasks.
+
+    A public action (X writes) names itself on the approving button
+    (*approve_label*, "Post now") and has no task approval (``task=False``):
+    it takes a one-time approval only (2026-10-16).
     """
-    return {
-        "inline_keyboard": [
-            [
-                {
-                    "text": "✅ Approve",
-                    "callback_data": encode_callback_data(f"hitl:approve:{request_id}"),
-                },
-                {
-                    "text": "❌ Deny",
-                    "callback_data": encode_callback_data(f"hitl:deny:{request_id}"),
-                },
-            ],
-            [
-                {
-                    "text": "🔓 Approve for task",
-                    "callback_data": encode_callback_data(f"hitl:approve_task:{request_id}"),
-                },
-            ],
-        ]
-    }
+    rows: list[list[dict[str, Any]]] = [
+        [
+            {
+                "text": f"✅ {approve_label}" if approve_label else "✅ Approve",
+                "callback_data": encode_callback_data(f"hitl:approve:{request_id}"),
+            },
+            {
+                "text": "❌ Deny",
+                "callback_data": encode_callback_data(f"hitl:deny:{request_id}"),
+            },
+        ],
+    ]
+    if task:
+        rows.append([
+            {
+                "text": "🔓 Approve for task",
+                "callback_data": encode_callback_data(f"hitl:approve_task:{request_id}"),
+            },
+        ])
+    return {"inline_keyboard": rows}
 
 
 def build_semantic_keyboard(request_id: str, options: list[dict]) -> dict[str, Any]:

@@ -482,6 +482,42 @@ def _gate_request_id(thread_id: str, payload: dict[str, Any]) -> str:
     return f"{thread_id}~{gate_id}" if gate_id else thread_id
 
 
+def _public_card(tool: Any, tools: Any) -> tuple[tuple[str, str] | None, dict[str, Any], int]:
+    """``(public action, keyboard labels, draft clip)`` for a card.
+
+    An always-ask tool (X writes) takes a one-time approval only, and its card
+    names the public action it approves ("Post now") and shows the post whole,
+    so it cannot be read as one more step of the work around it (2026-10-16:
+    an x_post card was approved as part of "check the metrics").
+    """
+    from kazma_core.safety.hitl_grants import one_time_only
+    from kazma_core.safety.public_actions import public_action
+
+    one_time = one_time_only(tools if isinstance(tools, list) else [], str(tool or ""))
+    public = public_action(*one_time) if one_time else None
+    labels: dict[str, Any] = {"task": not one_time}
+    if public:
+        labels["approve_label"] = public[1]
+    return public, labels, (600 if one_time else 240)
+
+
+def _single_tool_card_text(
+    tool: Any, args_str: str, proposal_lines: list[str], request_id: str,
+    public: tuple[str, str] | None,
+) -> str:
+    """A one-tool card's text: a public action first names itself and shows
+    exactly what it publishes, then the call."""
+    drafts = "\n".join(proposal_lines) + "\n" if proposal_lines else ""
+    reply = f"Reply: hitl approve {request_id}\n   or: hitl deny {request_id}"
+    if public:
+        return (
+            f"📢 {public[0]}\n\n{drafts}Tool: {tool}\nArgs: {args_str}\n\n"
+            "This is a public action and asks you every time. Read the text "
+            f"above before you answer.\n\n{reply}"
+        )
+    return f"⚠️ Approval required\nTool: {tool}\nArgs: {args_str}\n\n{drafts}{reply}"
+
+
 def _build_approval_prompt(
     payload: dict[str, Any],
     thread_id: str,
@@ -520,6 +556,7 @@ def _build_approval_prompt(
 
     args_str = _format_args_for_approval(tool, _redact(args))
     tools = payload.get("tools") or []
+    _public, _labels, _clip = _public_card(tool, tools)
     # S1-3: proposal-backed posts — show the STORED drafts this approval
     # publishes, resolved server-side from the durable artifact store. The
     # user approves the stored text, not the model's memory.
@@ -544,7 +581,7 @@ def _build_approval_prompt(
                 if isinstance(_item, dict):
                     proposal_lines.append(
                         f"  • {_item.get('id', '')}: "
-                        f"{str(_item.get('text') or '')[:240]}"
+                        f"{str(_item.get('text') or '')[:_clip]}"
                     )
         if proposal_lines:
             proposal_lines.append("")
@@ -578,15 +615,15 @@ def _build_approval_prompt(
             if plat_multi == "telegram":
                 from kazma_gateway.adapters.telegram import TelegramAdapter
 
-                markup_multi = TelegramAdapter.build_approval_keyboard(request_id)
+                markup_multi = TelegramAdapter.build_approval_keyboard(request_id, **_labels)
             elif plat_multi == "discord":
                 from kazma_gateway.adapters.discord import DiscordAdapter
 
-                markup_multi = DiscordAdapter.build_approval_keyboard(request_id)
+                markup_multi = DiscordAdapter.build_approval_keyboard(request_id, **_labels)
             elif plat_multi == "slack":
                 from kazma_gateway.adapters.slack import SlackAdapter
 
-                markup_multi = SlackAdapter.build_approval_keyboard(request_id, details=text_multi)
+                markup_multi = SlackAdapter.build_approval_keyboard(request_id, details=text_multi, **_labels)
         except Exception as exc:
             logger.debug(
                 "Approval keyboard build failed for platform=%s: %s",
@@ -624,29 +661,22 @@ def _build_approval_prompt(
             except Exception:
                 pass
         return {"text": text, "markup": markup, "platform": plat}
-    text = (
-        f"⚠️ Approval required\n"
-        f"Tool: {tool}\n"
-        f"Args: {args_str}\n\n"
-        + ("\n".join(proposal_lines) + "\n" if proposal_lines else "")
-        + f"Reply: hitl approve {request_id}\n"
-        f"   or: hitl deny {request_id}"
-    )
+    text = _single_tool_card_text(tool, args_str, proposal_lines, request_id, _public)
     markup = None
     plat = (platform or "telegram").lower()
     try:
         if plat == "telegram":
             from kazma_gateway.adapters.telegram import TelegramAdapter
 
-            markup = TelegramAdapter.build_approval_keyboard(request_id)
+            markup = TelegramAdapter.build_approval_keyboard(request_id, **_labels)
         elif plat == "discord":
             from kazma_gateway.adapters.discord import DiscordAdapter
 
-            markup = DiscordAdapter.build_approval_keyboard(request_id)
+            markup = DiscordAdapter.build_approval_keyboard(request_id, **_labels)
         elif plat == "slack":
             from kazma_gateway.adapters.slack import SlackAdapter
 
-            markup = SlackAdapter.build_approval_keyboard(request_id, details=text)
+            markup = SlackAdapter.build_approval_keyboard(request_id, details=text, **_labels)
     except Exception as exc:
         logger.debug(
             "Approval keyboard build failed for platform=%s: %s",
@@ -842,6 +872,34 @@ async def _handle_hitl_resume(
                     context_metadata=ctx,
                 ))
                 return True
+
+            # An always-ask tool (X writes) takes a one-time approval only:
+            # "Approve for task" approved THIS call while reading as "allow
+            # the task, it will still ask me" -- the web route's "Allow tool"
+            # published a post that way on 2026-10-16. Refused before anything
+            # is recorded; the card stays answerable with Approve or Deny.
+            if is_task_grant and isinstance(pending, dict):
+                from kazma_core.safety.hitl_grants import one_time_only
+
+                _always = one_time_only(
+                    list(pending.get("tools") or []), str(pending.get("tool") or "")
+                )
+                if _always:
+                    logger.warning(
+                        "[HITL] task approval refused for one-time tool(s) %s thread=%s",
+                        ",".join(_always), target_thread,
+                    )
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=(
+                            "Nothing was approved: "
+                            + ", ".join(_always)
+                            + " takes a one-time approval only. Use the card's "
+                            "Post now / Approve or Deny."
+                        ),
+                        context_metadata=ctx,
+                    ))
+                    return True
 
             logger.info(
                 "[HITL] Resume: thread=%s approved=%s action=%s",

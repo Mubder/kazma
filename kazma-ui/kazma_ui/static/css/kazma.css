@@ -1927,6 +1927,11 @@ textarea {
   border-color: var(--warning, #f59e0b);
   color: #111;
 }
+/* A public, irreversible action (X writes): its own look, so it is never read
+   as one more routine approval (2026-10-16). */
+.hitl-approval-card.hitl-public-action { border: 2px solid var(--warning); }
+.hitl-approval-card.hitl-public-action .hitl-header-title { font-weight: 700; }
+.hitl-approval-card.hitl-public-action .hitl-proposal-text { font-size: 0.9rem; white-space: pre-wrap; }
 .hitl-approval-card.hitl-approved { border-color: var(--success); }
 .hitl-approval-card.hitl-denied { border-color: var(--danger); }
 .hitl-approval-card.hitl-error { border-color: var(--danger); }

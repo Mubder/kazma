@@ -1362,6 +1362,21 @@ def _resolve_proposal_backed_post(profile, tool_name, args, *, audit, thread_id,
             f"discard_proposal(proposal_id={ref!r}, restore=True), or save a new draft.",
             profile, audit,
         )
+    from .proposals import DRAFTED_THIS_TURN, drafted_this_turn
+
+    if drafted_this_turn(info):
+        # The user has not seen this draft: it was written in the running
+        # turn (live 2026-10-16, "check the metrics" saved a draft and asked
+        # to post it 2 s later; the card was approved as part of the reading).
+        logger.info(
+            "[commitment] deny outbound %s: proposal %s was drafted this turn "
+            "(the user has not seen it) source=%s",
+            tool_name, info.get("proposal_id"), source,
+        )
+        drafts = "\n".join(
+            f"- {i.get('id')}: {str(i.get('text') or '')}" for i in info.get("items") or []
+        )
+        return EffectDecision("deny", f"{DRAFTED_THIS_TURN}\nThe draft:\n{drafts}", profile, audit)
     texts = list(info["texts"])
     if len(texts) != 1:
         return EffectDecision(
