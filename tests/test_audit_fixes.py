@@ -153,18 +153,23 @@ class TestConfigReadAliases:
 
 
 class TestReadSystemLogsFallbacks:
-    """Verify read_system_logs finds logs in ~/.kazma/kazma.log or workspace."""
+    """read_system_logs reads the file the server writes (paths.log_file()).
+
+    It used to guess (~/.kazma, the workspace) and found nothing on the live
+    install (2026-10-16); tests/test_log_readers_read_the_written_log.py
+    holds the rule.
+    """
 
     @pytest.mark.asyncio
-    async def test_read_system_logs_finds_file(self, tmp_path) -> None:
+    async def test_read_system_logs_finds_file(self, tmp_path, monkeypatch) -> None:
         from kazma_skills.native.system_health_monitor.tools import read_system_logs
 
         log_file = tmp_path / "kazma.log"
         log_file.write_text("2026-07-28 [INFO] Test log line 1\n2026-07-28 [INFO] Test log line 2\n")
+        monkeypatch.setenv("KAZMA_LOG_FILE", str(log_file))
 
-        with patch("kazma_skills.native.system_health_monitor.tools._get_workspace", return_value=tmp_path):
-            res = await read_system_logs(lines=10)
-            assert "Test log line" in res
+        res = await read_system_logs(lines=10)
+        assert "Test log line" in res
 
 
 class TestWSChatConnectHitlScan:
