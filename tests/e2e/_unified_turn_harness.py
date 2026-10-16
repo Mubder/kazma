@@ -649,6 +649,11 @@ def _reset_process_singletons() -> None:
         ("kazma_core.config_store", "reset_config_store"),
         ("kazma_core.model_registry", "reset_model_registry"),
         ("kazma_ui.delivery", "reset_turn_broker"),
+        # Drafts (save_proposal): the store binds the data dir it first saw,
+        # so the next harness server saved into the previous one's deleted
+        # temp folder and x_post found no draft (2026-10-16, the first
+        # harness script to post).
+        ("kazma_core.agent.artifacts", "reset_artifact_store"),
         # ...and hand the operator's own workspace store back.
         ("kazma_core.stores.workspaces", "reset_workspace_store"),
     )

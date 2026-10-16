@@ -1319,6 +1319,11 @@ async def _stream_langgraph_events(
                                     "yolo_allowed": payload.get(
                                         "yolo_allowed", True
                                     ),
+                                    # One-time approval only (X writes): the
+                                    # card offers no "Allow tool".
+                                    "always_ask": bool(
+                                        payload.get("always_ask", False)
+                                    ),
                                 }
                                 try:
                                     from kazma_core.safety.hitl import (

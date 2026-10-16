@@ -64,6 +64,7 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "kind": value.get("kind", "security"),
                 "items": value.get("items") or [],
                 "yolo_allowed": bool(value.get("yolo_allowed", True)),
+                "always_ask": bool(value.get("always_ask", False)),
                 "interrupt_id": iid,
             }
         # Fallback: some interrupt payloads may not carry the type tag but
@@ -80,6 +81,7 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "kind": value.get("kind", "security"),
                 "items": value.get("items") or [],
                 "yolo_allowed": bool(value.get("yolo_allowed", True)),
+                "always_ask": bool(value.get("always_ask", False)),
                 "interrupt_id": iid,
             }
     return None
@@ -259,6 +261,7 @@ async def _get_pending_approvals(
                         "arguments": info["arguments"],
                         "message": info["message"],
                         "yolo_allowed": info.get("yolo_allowed", True),
+                        "always_ask": bool(info.get("always_ask", False)),
                         "interrupt_id": iid,
                     }
                 )

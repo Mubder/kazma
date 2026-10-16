@@ -12,8 +12,10 @@
     <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
     <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
     {# The build that rendered this page: modules/build_watch.js compares it
-       with /health/live and offers a Refresh after a deploy. #}
-    <meta name="kazma-build" content="{{ build_commit() }}">
+       with /health/live and offers a Refresh after a deploy. A template
+       environment without the global (a router built bare, as in a test)
+       renders an empty build, and an empty build never notifies. #}
+    <meta name="kazma-build" content="{{ build_commit() if build_commit is defined else '' }}">
     {# Critical inline theme CSS — in the FIRST HTML bytes so iOS Safari
        paints a correctly-colored canvas before kazma.css downloads+parses.
        Per the CSS spec the canvas takes its color from the root element

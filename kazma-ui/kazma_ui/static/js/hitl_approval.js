@@ -205,9 +205,12 @@
         '    <button class="btn btn-sm btn-success hitl-approve-btn" data-thread-id="' + threadId + '" data-scope="once">' +
         '      ' + safeIcon('check') + ' ' + t('dashboard.hitl_once', 'Once') +
         '    </button>' +
+        // An always-ask tool (X writes) takes a one-time approval only: no
+        // "Allow tool" (it approved THIS call; the approve route refuses it).
+        (item.always_ask === true ? '' :
         '    <button class="btn btn-sm btn-primary hitl-approve-tool-btn" data-thread-id="' + threadId + '" data-scope="tool" data-tool="' + toolName + '">' +
         '      ' + t('dashboard.hitl_allow_tool', 'Allow tool') +
-        '    </button>' +
+        '    </button>') +
         (yoloOk
           ? '    <button class="btn btn-sm btn-warning hitl-approve-yolo-btn" data-thread-id="' + threadId + '" data-scope="yolo">' +
             '      ' + t('dashboard.hitl_yolo', 'YOLO') +

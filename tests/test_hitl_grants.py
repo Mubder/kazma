@@ -119,7 +119,16 @@ def test_yolo_does_not_cross_threads(mem_store, monkeypatch):
 
 
 def test_always_hitl_tools_ignore_grant(mem_store, monkeypatch):
-    """Public X writes stay gated even if a grant or YOLO is on this thread."""
+    """Public X writes stay gated even if a grant or YOLO is on this thread.
+
+    Since 2026-10-16 ``grant_tool`` refuses to store a grant for one at all
+    (an "Allow tool" click on an x_post card published a post the owner read
+    as "it will still ask me"). A grant row an older build wrote -- the live
+    install holds one from that click -- must still not skip the gate, so it
+    is planted directly here.
+    """
+    import time as _time
+
     monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
     monkeypatch.setenv("KAZMA_ALLOW_YOLO", "1")
     from kazma_core.safety.yolo import disable_yolo, enable_yolo
@@ -131,8 +140,15 @@ def test_always_hitl_tools_ignore_grant(mem_store, monkeypatch):
         try:
             enable_yolo("th-always", actor="test", force=True)
             for tool in sorted(ALWAYS_HITL_TOOLS):
-                grant_tool("th-always", tool, actor="test")
-                assert has_tool_grant("th-always", tool) is True
+                refused = grant_tool("th-always", tool, actor="test")
+                assert refused["active"] is False and refused.get("error") == "one_time_only", tool
+                assert has_tool_grant("th-always", tool) is False, tool
+                # A row an older build stored: present, and still no skip.
+                store.set(f"hitl_grant.th-always.{tool}", {
+                    "enabled": True, "tool": tool, "since": _time.time(), "actor": "old-build",
+                    "ttl_seconds": 1800, "expires_at": _time.time() + 1800,
+                }, category="safety")
+                assert has_tool_grant("th-always", tool) is True, tool
                 assert requires_approval(tool, cfg) is True, tool
         finally:
             try:

@@ -25,8 +25,8 @@ code to one another).
   status             content, status (joined a turn already running)
   context_compacted  detail, and counts
   approval_required  thread_id, interrupt_id, kind, tool, args, tools, items,
-                     message, yolo_allowed, approval_deadline, view,
-                     gate_views (paused for approval; no done follows)
+                     message, yolo_allowed, always_ask, approval_deadline,
+                     view, gate_views (paused for approval; no done follows)
   hitl               state, interrupt_id, tool, thread_id, turn_id, actor,
                      view, gate_views (an approval decided)
   approval_timeout   thread_id, interrupt_id, tool, turn_id, message

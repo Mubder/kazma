@@ -22,6 +22,7 @@ __all__ = [
     "grant_tool",
     "has_tool_grant",
     "list_grants",
+    "one_time_only",
     "tool_batch_label",
     "tools_to_grant",
 ]
@@ -69,6 +70,20 @@ def tools_to_grant(
     return list(dict.fromkeys(chosen))
 
 
+def one_time_only(pending_tools: Any, pending_tool_name: str = "") -> list[str]:
+    """The always-ask tools (``ALWAYS_HITL_TOOLS``: X writes) a question asks
+    about. They take a one-time approval only: a grant can never skip them
+    (``requires_approval`` checks the list first), so "allow for this chat"
+    on their card only approved THIS call -- live 2026-10-16 a click on it
+    published a post the owner read as "it will still ask me before posting".
+    The approve route refuses that answer; :func:`grant_tool` never stores it.
+    """
+    from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
+
+    asked = tools_to_grant(pending_tools, pending_tool_name)
+    return [name for name in asked if name in ALWAYS_HITL_TOOLS]
+
+
 def _ttl_seconds() -> int:
     """Grant lifetime. A number is seconds, at least 60 — so ``0`` is 60,
     not "forever": for an approval dial the safe reading of zero is the
@@ -98,6 +113,15 @@ def grant_tool(
 
     if not thread_id or not tool:
         return {"active": False, "error": "thread_id and tool required"}
+    from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
+
+    if tool in ALWAYS_HITL_TOOLS:
+        # A grant it could never honour (see one_time_only): not stored.
+        logger.warning(
+            "[SECURITY] HITL grant refused for always-ask tool=%s thread=%s actor=%s",
+            tool, thread_id, actor,
+        )
+        return {"active": False, "tool": tool, "error": "one_time_only"}
 
     cs = get_config_store()
     now = time.time()

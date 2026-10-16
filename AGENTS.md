@@ -350,6 +350,22 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   shared task failed, and judging after it left restored rejects unsaved
   (2026-09-25: four `200`s, still paused at the next boot).
 
+**An always-ask tool takes a one-time approval only** (2026-10-16).
+`ALWAYS_HITL_TOOLS` (X writes) are never skipped by YOLO or a grant, so their
+card offers Approve once / Deny only: the interrupt carries `always_ask`
+(`graph_tool_worker`; `yolo_allowed` is no marker -- it is also false wherever
+YOLO is off for the install), every hop to the page passes it (the SSE frame,
+the socket card, the pending-approvals items, the client copies), and the
+chat card and the approvals panel drop "Allow tool". The approve route
+refuses a `tool` or `yolo` answer for one before anything is claimed or
+resumed (409 `one_time_only`, the gate stays pending), and `grant_tool`
+never stores one (`hitl_grants.one_time_only`). Live 2026-10-16 an "Allow tool
+(session)" click on an x_post card -- beside a tip saying grants cannot skip
+the tool -- approved THAT call and published a post the owner read as "it
+will still ask me before posting". Gates: `tests/test_always_ask_one_time_only.py`
+(the route without the refusal as control), `tests/e2e/test_always_ask_one_time_approval.py`
+(a scripted save_proposal + x_post on the real graph; 5 of 6 fail on the old code).
+
 **Danger tool list SoT (must stay one list):**
 - **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
 - **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested by

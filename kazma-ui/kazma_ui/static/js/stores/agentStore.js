@@ -669,6 +669,7 @@ function registerAgentStore() {
               yolo_allowed: frame.yolo_allowed !== undefined
                 ? frame.yolo_allowed
                 : (data.yolo_allowed !== undefined ? data.yolo_allowed : undefined),
+              always_ask: frame.always_ask === true || data.always_ask === true,
             });
           } else if (statusVal === 'idle') {
             // Do not finalize a still-streaming turn: journaled idle fans
@@ -829,6 +830,7 @@ function registerAgentStore() {
             yolo_allowed: frame.yolo_allowed !== undefined
               ? frame.yolo_allowed
               : (data.yolo_allowed !== undefined ? data.yolo_allowed : undefined),
+            always_ask: frame.always_ask === true || data.always_ask === true,
             // The registry's view of this gate travels with the frame. Without
             // it the page held a pending gate it could not show: the row was
             // withheld and the render invariant fired on every approval the

@@ -677,6 +677,45 @@ def register_misc_routes(self: Any) -> None:
             pending_tool_name = str(_live_payload.get("tool") or "")
             pending_tools = list(_live_payload.get("tools") or [])
 
+            # An always-ask tool (X writes) takes a one-time approval only. A
+            # "allow for this chat" (or YOLO) answer approved THIS call and
+            # stored a grant that can never apply: live 2026-10-16 a click on
+            # "Allow tool (session)" published a post the owner read as "it
+            # will still ask me before posting". Refused here, before anything
+            # is claimed or resumed, so that click does nothing at all; the
+            # gate stays pending for Approve once or Deny.
+            if approved and scope in ("tool", "yolo"):
+                from kazma_core.safety.hitl_grants import one_time_only
+
+                _always = one_time_only(pending_tools, pending_tool_name)
+                if _always:
+                    logger.warning(
+                        "[HITL] %s approval refused: always-ask tool(s) %s take a "
+                        "one-time approval only (thread=%s); nothing approved",
+                        scope, ",".join(_always), thread_id,
+                    )
+                    return _JSONResponse(
+                        _attach_hitl_view(
+                            {
+                                "ok": False,
+                                "status": "refused",
+                                "thread_id": thread_id,
+                                "error": (
+                                    "This tool takes a one-time approval only. "
+                                    "Nothing was approved; use Approve once or Deny."
+                                ),
+                                "reason": "one_time_only",
+                                "tools": _always,
+                                "running": False,
+                                "hitl_state": "pending",
+                            },
+                            thread_id,
+                            _body_interrupt_id(body),
+                            state_hint="pending",
+                        ),
+                        status_code=409,
+                    )
+
             # Audit identity from the SERVER-side session, not the client
             # body: body session_id is attacker-chosen text and made the
             # gate-registry decision log spoofable (audit M-W3). Fall back

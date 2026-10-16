@@ -1302,6 +1302,13 @@ async def tool_worker_node(
                 "message": message,
                 "jail_note": _jail,
                 "yolo_allowed": _yolo_allowed() and not _batch_always,
+                # An always-ask tool (X writes) takes a one-time approval
+                # only: the card offers no "allow for this chat" either, and
+                # the approve route refuses one (live 2026-10-16: that button
+                # published a post the owner read as "it will still ask me").
+                # `yolo_allowed` is no marker for this -- it is also false
+                # wherever YOLO is off for the install.
+                "always_ask": bool(_batch_always),
             }
 
             # Defense-in-depth: requires_approval() already filtered YOLO/grants
