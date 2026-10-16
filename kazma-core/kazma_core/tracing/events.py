@@ -220,8 +220,12 @@ class EventBridge:
         items: Optional[list] = None,
         interrupt_id: Optional[str] = None,
         yolo_allowed: Optional[bool] = None,
+        always_ask: Optional[bool] = None,
     ) -> TelemetryEvent:
         """Create a TelemetryEvent for HITL tool approval required.
+
+        ``always_ask`` marks an always-ask tool (X writes): one-time approval
+        only, so the card offers no "Allow tool" (2026-10-16).
 
         For semantic clarify/confirm interrupts, pass ``kind`` (e.g.
         ``"semantic_clarify"``) and ``items`` (the clarify payload's ``items``
@@ -246,6 +250,8 @@ class EventBridge:
             data["interrupt_id"] = interrupt_id
         if yolo_allowed is not None:
             data["yolo_allowed"] = bool(yolo_allowed)
+        if always_ask:
+            data["always_ask"] = True
         return TelemetryEvent(type="status_update", data=data, thread_id=thread_id)
 
     @staticmethod

@@ -5278,6 +5278,7 @@
       tools: p.tools || [],
       message: p.message || g.message || '',
       yolo_allowed: p.yolo_allowed !== false,
+      always_ask: p.always_ask === true,
       interrupt_id: p.interrupt_id || g.gate_id || '',
       items: p.items || null,
       approval_deadline: g.approval_deadline || p.approval_deadline || 0,
@@ -5497,6 +5498,7 @@
             args: hit.arguments || hit.args || {},
             message: hit.message || '',
             yolo_allowed: hit.yolo_allowed !== false,
+            always_ask: hit.always_ask === true,
             interrupt_id: hit.interrupt_id || '',
           },
           turn_id: _liveTurnId,
@@ -5916,6 +5918,11 @@
     // Server marks always-HITL batches (X ToU fail-safes) yolo_allowed=false —
     // offering a YOLO button there reads as "approve once" when it re-prompts.
     var yoloOk = data.yolo_allowed !== false;
+    // An always-ask tool (X writes) takes a one-time approval only: no
+    // "Allow tool (session)" either. It approved THIS call while the tip said
+    // grants cannot skip the tool -- live 2026-10-16 that click published a
+    // post the owner read as "it will still ask me". The route refuses it too.
+    var alwaysAsk = data.always_ask === true;
     card.innerHTML =
       '<div class="hitl-approval-header"><span class="hitl-header-title">' + escapeHtml(ti('hitl_title', '\u26A0 Approval Required')) + '</span></div>' +
       '<div class="hitl-approval-body">' +
@@ -5943,7 +5950,7 @@
         // all of their names and each gets `grant_tool()`. A button that says
         // "tool" and grants four is the same class of defect as a card that
         // hides which tools one approval covers (2026-09-21). Say the number.
-        (tools.length > 1
+        (alwaysAsk ? '' : (tools.length > 1
           ? '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="' +
             escapeHtml(tiCount('hitl_allow_n_title', tools.length,
               'Allow this tool for ~30m in this session: {names}',
@@ -5952,7 +5959,7 @@
               })) +
             '">' + escapeHtml(tiCount('hitl_allow_n', tools.length, 'Allow this tool (session)', 'Allow these {n} tools (session)')) + '</button>'
           : '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="' + escapeHtml(ti('hitl_allow_tool_title', 'Allow this tool for ~30m in this session')) + '">' +
-            escapeHtml(ti('hitl_allow_tool', 'Allow tool (session)')) + '</button>') +
+            escapeHtml(ti('hitl_allow_tool', 'Allow tool (session)')) + '</button>')) +
         (yoloOk
           ? '<button class="btn btn-sm btn-warning hitl-approve-yolo" data-scope="yolo" title="' + escapeHtml(ti('hitl_yolo_title', 'Skip all danger tools for this session')) + '">' +
             escapeHtml(ti('hitl_yolo', 'YOLO session')) + '</button>'

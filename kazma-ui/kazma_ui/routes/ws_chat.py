@@ -269,6 +269,7 @@ def create_ws_chat_router(
                                 items=payload.get("items"),
                                 interrupt_id=iid or None,
                                 yolo_allowed=payload.get("yolo_allowed"),
+                                always_ask=payload.get("always_ask"),
                             )
                             await websocket.send_json(approval_ev.to_dict())
                             logger.info(
