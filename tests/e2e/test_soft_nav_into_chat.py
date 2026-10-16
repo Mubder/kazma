@@ -86,6 +86,10 @@ def test_a_turn_sent_after_reaching_chat_from_another_page_paints_live(tmp_path)
             pg.wait_for_timeout(1000)
             _soft_nav(pg, "/chat")
             pg.locator("#chat-input").wait_for(state="visible", timeout=30000)
+            # ...and the turn left waiting is still there to answer. This walk
+            # checked only the scripts, so a returned page showing the paused
+            # turn dead passed it (live 2026-10-16; test_return_to_running_turn).
+            pg.wait_for_function(CARD_JS, timeout=30000)
             runs = pg.evaluate(
                 "() => performance.getEntriesByType('resource')"
                 ".filter((r) => /\\/static\\/js\\/modules\\/turn_view\\.js/.test(r.name)).length")

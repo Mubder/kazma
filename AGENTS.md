@@ -5377,6 +5377,22 @@ Send in seconds, and threw `Cannot read properties of null (reading
   `_lastSeqSeen` follows SSE only and no terminal callback records a seq, so
   attaches replayed from 0 or from before the previous turn's end and flipped
   finished blocks back to "working".
+- **A gap resumes from the head the server names, on EVERY cursor**
+  (`KazmaDeliveryCursor.adoptHead`, 2026-10-16), from both mouths: the SSE
+  `resync` (`chat.js` `_adoptJournalHead`) and the socket's `resumed {gap}`
+  (`agentStore.js`) save the head as the session's cursor and move the
+  socket tracker to it. The journal restarts at seq 1 on every server
+  restart and after an hour idle, so the cursor a browser saved is AHEAD of
+  it; the gap handler cleared only `_lastSeqSeen`, the saved cursor won the
+  next attach's `max()`, the same gap came back until the reopen budget ran
+  out (looping while paused, where it is waived) -- live, a running turn and
+  its approval showed dead after a trip to Memory, a refresh did not help,
+  and the watchdog auto-denied the approval. The server logs every gap
+  (`[delivery] ... cursor not in the journal`). Gates:
+  `tests/test_delivery_cursor_gap.py` (the old handlers as the negative
+  control), `tests/e2e/test_return_to_running_turn.py` (a stale saved
+  cursor, by sidebar and by refresh, running and paused; fails on the old
+  code).
 - **Only an ENDED turn may be healed from the checkpoint.**
   `_checkpoint_backfill_unanswered` returns early while the thread's turn
   runs, is paused, or its snapshot has a `next` node; it had written a paused

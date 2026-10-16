@@ -72,9 +72,32 @@ window.KazmaDeliveryCursor = (function() {
     };
   }
 
+  /**
+   * The server answered a cursor with a GAP and named its journal head:
+   * reading resumes there. Saves *head* as the session's cursor and moves
+   * *tracker* (when given) to it; returns the head as a number.
+   *
+   * The ONE answer for both mouths (chat.js's SSE attach, agentStore's
+   * socket resume). The journal restarts at seq 1 on every server restart and
+   * after an hour idle, so a cursor saved earlier is AHEAD of it; keeping that
+   * cursor sent it again on every attach -- the same gap, the reopen budget
+   * spent, a running turn shown dead, a refresh no help (2026-10-16).
+   */
+  function adoptHead(sessionKey, head, tracker) {
+    var n = parseInt(head, 10);
+    if (isNaN(n) || n < 0) n = 0;
+    if (sessionKey) persist(sessionKey, n);
+    if (tracker) {
+      if (typeof tracker.reset === 'function') tracker.reset();
+      if (n > 0 && typeof tracker.seed === 'function') tracker.seed(n);
+    }
+    return n;
+  }
+
   return {
     loadPersisted: loadPersisted,
     persist: persist,
     createTracker: createTracker,
+    adoptHead: adoptHead,
   };
 })();

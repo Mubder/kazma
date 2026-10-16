@@ -527,7 +527,13 @@ function registerAgentStore() {
         );
         if (r.gap) {
           // Cursor predates journal retention — snapshot resync is the only
-          // correct recovery; replay would be silently partial.
+          // correct recovery; replay would be silently partial. Reading
+          // resumes at the head the server named (`to`): the journal restarts
+          // at seq 1 on a server restart, and keeping the old saved cursor
+          // sent the same `?last_seq=` -- the same gap -- on every reconnect.
+          if (window.KazmaDeliveryCursor && typeof KazmaDeliveryCursor.adoptHead === 'function') {
+            KazmaDeliveryCursor.adoptHead(this.sessionId, r.to, this._cursor);
+          }
           try {
             if (window.KazmaChat && typeof window.KazmaChat.resync === 'function') {
               window.KazmaChat.resync('resume-gap');

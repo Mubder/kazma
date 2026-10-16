@@ -1750,6 +1750,15 @@ async def _sse_attach_stream(
             },
         )
         if gap:
+            # Said in the log: a page re-attaching with a cursor the journal
+            # does not hold (a server restart or an idle thread restarts its
+            # seq at 1) is how "the turn looks dead after I came back" began
+            # (2026-10-16), and nothing on the server showed it.
+            logger.info(
+                "[delivery] attach cursor not in the journal: thread=%s after=%s "
+                "head=%s -- client told to resync from the head",
+                str(thread_id)[:12], int(after_seq or 0), head,
+            )
             yield _sse_frame("status_update", {"status": "resync", "seq": head})
             return
         for frame in frames:

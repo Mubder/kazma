@@ -495,6 +495,33 @@
     return 0;
   }
 
+  /**
+   * The server said our cursor is not in its journal (a ``resync`` gap) and
+   * named the journal's head: resume from there, on EVERY cursor this page
+   * keeps. The snapshot resync repaints what came before (a running turn's
+   * steps are checkpointed in the transcript); frames after the head are live.
+   *
+   * The journal restarts at seq 1 on every server restart and after an hour
+   * idle, so the cursor a browser saved earlier is AHEAD of it. Clearing only
+   * `_lastSeqSeen` (the old gap handler) left the saved cursor in
+   * `_pageDeliveryCursor()`, which the next attach took as the max: gap again,
+   * the reopen budget ran out, and a turn the server was running sat on
+   * "Reconnecting..." -- a refresh kept the saved cursor (live 2026-10-16).
+   */
+  function _adoptJournalHead(head) {
+    var n = Number(head);
+    if (!(n >= 0)) n = 0;
+    _lastSeqSeen = n;
+    try {
+      var st = window.Alpine && Alpine.store && Alpine.store('agent');
+      var tracker = (st && st._cursor
+        && String(st.sessionId || '') === String(chatSessionId || '')) ? st._cursor : null;
+      if (window.KazmaDeliveryCursor && typeof KazmaDeliveryCursor.adoptHead === 'function') {
+        _lastSeqSeen = KazmaDeliveryCursor.adoptHead(chatSessionId, n, tracker);
+      }
+    } catch (eA) { /* storage off: `_lastSeqSeen` still moved */ }
+  }
+
   function _attachJournal(reason) {
     if (!chatSessionId) return;
     // A dead handle is not a live stream. Treating `activeStream` as
@@ -3182,9 +3209,11 @@
           // Journal-gap attach: the server closed the stream and told us to
           // reconcile with durable truth. Silently ignoring it left a dead
           // stream with no recovery (2026-08-26). The gap ALSO means our
-          // cursor is invalid — drop it so no recovery path re-attaches
-          // with the same dead cursor (that looped forever).
-          _lastSeqSeen = 0;
+          // cursor is invalid -- resume from the head the server named, on
+          // every cursor we keep, so no recovery path re-attaches with the
+          // same dead cursor (that looped forever, and came back through the
+          // saved cursor: `_adoptJournalHead`).
+          _adoptJournalHead(data && data.seq);
           _resyncDelivery('sse-gap');
           return;
         }
