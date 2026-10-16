@@ -188,11 +188,44 @@ def _judge(query: str, candidates: list[KnowledgeHit], sims: dict[str, float],
         return []
     best = max(ev for _hit, ev in passing)
     kept = [row for row in passing if row[1] >= best - gap]
-    kept.sort(key=lambda row: row[1], reverse=True)  # stable: fusion order breaks a tie
+    exact = _sole_exact_match(terms, candidates)
+    if exact is not None:
+        # The one chunk naming everything the question names leads, on the
+        # evidence of the best kept chunk: it changes the order of what is
+        # kept, never what is kept.
+        kept = [(hit, max(ev, best)) if hit is exact else (hit, ev) for hit, ev in kept]
+    kept.sort(key=lambda row: (row[0] is exact, row[1]), reverse=True)  # stable: fusion order breaks a tie
     for hit, ev in kept:
         hit.score = round(ev, 4)
         hit.strength = "strong" if ev >= strong else "weak"
     return [hit for hit, _ev in kept]
+
+
+def _sole_exact_match(terms: list[str], candidates: list[KnowledgeHit]) -> KnowledgeHit | None:
+    """The one candidate holding every content word of the question, when one
+    of those words is in no other candidate (an identifier: a service, a code,
+    a version); else None.
+
+    Meaning search is weak at exact identifiers. The KB-Q01 soak (2026-10-16)
+    asked "Which port does zqfmbfjvdv listen on?" of a library holding five
+    lines like "zqtkjhghfc listens on port 5997": the answer was the keyword
+    index's first hit by a wide margin and the only chunk naming zqfmbfjvdv,
+    but the five look-alikes were nearer by meaning and word coverage weighs
+    0.12, so it ranked 6th and the top 5 left it out.
+    """
+    from kazma_core.memory.query_terms import mentions
+
+    if len(terms) < 2:
+        return None
+    texts = [(hit, f"{hit.document_title}\n{hit.content}") for hit in candidates]
+    full = [(hit, text) for hit, text in texts if all(mentions(text, [t]) for t in terms)]
+    if len(full) != 1:
+        return None
+    exact = full[0][0]
+    others = [text for hit, text in texts if hit is not exact]
+    if not any(not any(mentions(text, [t]) for text in others) for t in terms):
+        return None
+    return exact
 
 
 def _vector_dir_for(store: KnowledgeStore) -> str:

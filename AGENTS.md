@@ -4475,6 +4475,16 @@ tracker `docs/plans/KNOWLEDGE_INDUSTRIAL_HARDENING_GOAL.md`).
   for every question nothing answers. A keyword-only candidate is measured
   by its stored vector (`VectorStore.similarities`); the question is
   embedded once per search. A document-scoped search is not judged.
+  **An identifier the question names wins** (`_sole_exact_match`,
+  2026-10-16): the one candidate holding every content word of the
+  question, when one of them is in no other candidate, leads with the best
+  kept evidence. It reorders what is kept, never keeps more. The KB-Q01 72 h
+  soak failed at cycle 1,757 on "Which port does zqfmbfjvdv listen on?": five
+  look-alikes ("zqtkjhghfc listens on port 5997") were nearer by meaning, word
+  coverage weighs 0.12, and the answer -- the keyword index's first hit --
+  came 6th. Benchmark scores unchanged. Gate:
+  `tests/test_knowledge_exact_identifier.py` (the soak's measured scores; the
+  judge without the rule as control; the kept set identical with and without).
 - **Retrieval quality is measured and ratcheted** (KQ01):
   `stores/knowledge_benchmark.py` publishes a versioned EN/AR/mixed corpus
   (`knowledge_benchmark_data/dataset.json`, built by
