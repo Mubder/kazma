@@ -20,11 +20,13 @@ export function registerStores() {
              * Show a toast notification.
              * @param {string} message - Toast message
              * @param {string} type - 'success' | 'error' | 'warning' | 'info'
-             * @param {number} duration - Auto-dismiss in ms (default 5000)
+             * @param {number} duration - Auto-dismiss in ms (default 5000); 0 stays
+             * @param {{label: string, run: Function}|null} action - optional
+             *   button (e.g. the update notice's Refresh); the toast closes after it
              */
-            add(message, type = 'info', duration = 5000) {
+            add(message, type = 'info', duration = 5000, action = null) {
                 const id = ++this._counter;
-                this.items.push({ id, message, type, duration });
+                this.items.push({ id, message, type, duration, action });
                 if (duration > 0) {
                     setTimeout(() => this.dismiss(id), duration);
                 }
