@@ -55,6 +55,12 @@ async def _ws_resume_handshake(socket: Any, thread_id: str, last_seq: int) -> No
     """
     broker = get_turn_broker()
     frames, gap, head = await asyncio.to_thread(broker.resume, thread_id, int(last_seq or 0))
+    if gap:
+        logger.info(
+            "[delivery] socket resume cursor not in the journal: thread=%s after=%s "
+            "head=%s -- client told to resync from the head",
+            str(thread_id)[:12], int(last_seq or 0), head,
+        )
     try:
         await socket.send_json(
             TelemetryEvent(

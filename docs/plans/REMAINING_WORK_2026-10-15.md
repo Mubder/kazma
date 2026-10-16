@@ -64,6 +64,7 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | The same voice routes registered twice | Page tours, 2026-10-15 | One copy; a gate on any method and path registered twice | Done (`64832385`): `tests/test_no_route_registered_twice.py`; the edge-tts voice list kept a day (`tests/test_voice_list_cached.py`); the route listing keeps include prefixes (the Telegram webhook's routes were checked under wrong paths) |
 | Browser tests failed under the egress guard (6 of 13 tours) | Merging the egress guard | Every e2e test with no model and no voice service | Done (`64832385`): an autouse fixture in `tests/e2e/conftest.py`; 13/13 tours pass |
 | The document broker refused any image without labels (Docker 29) | Local Linux run of the CI container job, 2026-10-15 | The image read from the whole inspect object | Done (`0685ab9f`): broker and image script; a Docker-29-shaped fake with the old template as control; the job installs PyMuPDF; the qualification suite 139/139 on the image for this code |
+| A turn looked dead after leaving Chat and coming back; its approval could not be answered | Owner report + live log 2026-10-16 11:16-11:22 UTC (the server ran the turn and paused it for python_exec; no approval reached it; auto-denied at 300 s) | The page resumes from the head the server names on a journal gap, on every cursor | Done: `KazmaDeliveryCursor.adoptHead`, used by the SSE `resync` branch and the socket's `resumed {gap}` branch (the old handler cleared one cursor and the saved one won the next attach); server logs each gap. `tests/test_delivery_cursor_gap.py` (old handlers as control), `tests/e2e/test_return_to_running_turn.py` (stale saved cursor by sidebar and refresh, running and paused: 3 of 4 fail on the old code, all pass now), `tests/e2e/test_soft_nav_into_chat.py` now checks the returned turn is still answerable |
 | OCR line-final punctuation | Live OCR read 2026-10-15 ("placed under review:") | A measured rule; the fidelity measure counts marks | Done: EasyOCR says that a mark is there, Tesseract's reading of the same word says which (one mark; an Arabic ',' means either comma form; never added, never removed, numbers untouched); design set of 176 lines: English 61 -> 83 of 88 right with 0 wrong, Arabic 70 -> 74, 0 marks added. Fidelity corpus v5 counts punctuation (target 1.0): neural English pages 0.5-0.75 -> 1.0, every text case 1.0; `tests/test_document_ocr_reading_rules.py`, `tests/test_document_fidelity.py` (the old vote as control) |
 
 ## Measurements (soaks)
@@ -71,8 +72,13 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | Soak | Started | Ends | Report |
 |---|---|---|---|
 | Memory (72 h) on defcc3ad | 2026-10-14 20:22 UTC | failed at cycle 420 (a backup older than a table could not be restored; fixed in 526fef85) | `C:\Users\balfa\kazma-soak\finished-reports\2026-10-14\memory\report.json` |
-| Memory (72 h) on 526fef85 | 2026-10-15 00:10 UTC | 2026-10-18 | `...\2026-10-15\memory-526fef85\run\report.json` |
-| Documents Q03 (48 h) | 2026-10-14 20:22 UTC | 2026-10-16 | `...\2026-10-14\documents\report.json` |
+| Memory (72 h) on 526fef85 | 2026-10-15 00:10 UTC | interrupted 2026-10-15 13:00 UTC by a stray console Ctrl+C (see below), cycle 1,635, 0 violations | `...\finished-reports\2026-10-15\memory-526fef85-interrupted\report.json` |
+| Documents Q03 (48 h) on defcc3ad | 2026-10-14 20:22 UTC | interrupted 2026-10-15 13:00 UTC by the same Ctrl+C, ~17 h, 65 restarts | `...\finished-reports\2026-10-15\documents-defcc3ad-interrupted\report.json` |
+| Documents Q03 (48 h) on 430f9a81 | 2026-10-15 23:15 UTC | ~2026-10-17 23:15 UTC | `...\2026-10-16\documents-430f9a81\run\report.json` |
+| Memory (72 h) on 430f9a81 | 2026-10-15 23:15 UTC | ~2026-10-18 23:15 UTC | `...\2026-10-16\memory-430f9a81\run\report.json` |
+| Time Travel TT-G3 (72 h) on 430f9a81 | 2026-10-15 23:15 UTC | ~2026-10-18 23:15 UTC | `...\2026-10-16\time-travel-430f9a81\run\report.json` |
+| Knowledge KB-Q01 multi-day (72 h) on 430f9a81 | 2026-10-15 23:15 UTC | ~2026-10-18 23:15 UTC | `...\2026-10-16\kb-soak-430f9a81\run\report.json` |
+| Knowledge KB-Q01 scale (100k, 1M, hash embedder) on 430f9a81 | 2026-10-15 23:15 UTC | when both steps end | `...\2026-10-16\kb-scale-430f9a81\run\report.json` |
 | Swarm SQ01 (24 h) on ec6b8512 | 2026-10-14 21:36 UTC | failed at restart 53 (fixed in c19ab323) | `...\finished-reports\2026-10-15\swarm\report.json` |
 | Swarm SQ01 (24 h) on 01cba7cb | 2026-10-15 02:33 UTC | failed at 10.4 h on the breaker refresh race 5d6353e1 fixed (one refresh put a same-generation state back); 99,587 submissions, 310 restarts, that 1 violation | `...\finished-reports\2026-10-15\swarm-01cba7cb\report.json` |
 | Swarm SQ01 (24 h) on 35670ff4 | 2026-10-15 14:00 UTC | 2026-10-16 | `...\2026-10-15\swarm-35670ff4\run\report.json` |
@@ -80,12 +86,26 @@ the Recycle Bin); kazma.ai allows Cloudflare Web Analytics.
 | Scheduled (28 fake days, 8,000 jobs) on c4e8f51c | 2026-10-14 | failed: 2 double fires, a check error (see the Code table); passed on f632db5f (68,397 occurrences, 251 restarts, 0 violations) | `...\finished-reports\2026-10-15\scheduled-28d-f632db5f\report.json` |
 | Scheduled Stage 5 on b52b2fab (the alert outbox) | 2026-10-15 | passed: 5,228 occurrences each ended once, 260 alerts = 257 expected + 3 recorded redeliveries, 0 violations | `...\finished-reports\2026-10-15\scheduled-b52b2fab\report.json` |
 | Time Travel TT-G3 on 680c5367 | 2026-10-14 22:08 UTC | stopped after 258 clean cycles (the code changed) | `...\finished-reports\2026-10-15\time-travel\report-old-code-680c5367.json` |
-| Time Travel TT-G3 (72 h) on 87b0cea8 | 2026-10-15 | 2026-10-18 | `...\2026-10-15\time-travel-87b0cea8\run\report.json` |
-| Knowledge KB-Q01 scale (100k, 1M, hash embedder) on 01cba7cb | 2026-10-15 02:33 UTC | when both steps end | `...\2026-10-15\kb-scale-01cba7cb\run\report.json` |
+| Time Travel TT-G3 (72 h) on 87b0cea8 | 2026-10-15 | interrupted 2026-10-15 13:00 UTC by the same Ctrl+C, cycle 2,819, 0 violations | `...\finished-reports\2026-10-15\time-travel-87b0cea8-interrupted\report.json` |
+| Knowledge KB-Q01 scale (100k, 1M, hash embedder) on 01cba7cb | 2026-10-15 02:33 UTC | interrupted 2026-10-15 13:00 UTC by the same Ctrl+C, in the 1M step | `...\finished-reports\2026-10-15\kb-scale-01cba7cb-interrupted\report.json` |
 | Knowledge KB-Q01 multi-day on 01cba7cb | 2026-10-15 02:33 UTC | failed at cycle 76 (deleted words in FTS5; fixed in 1badfb85) | `...\finished-reports\2026-10-15\kb-soak-01cba7cb\report.json` |
-| Knowledge KB-Q01 multi-day (72 h) on f7345de3 | 2026-10-15 | 2026-10-18 | `...\2026-10-15\kb-soak-f7345de3\run\report.json` |
+| Knowledge KB-Q01 multi-day (72 h) on f7345de3 | 2026-10-15 | interrupted 2026-10-15 13:00 UTC by the same Ctrl+C, cycle 666, 0 violations | `...\finished-reports\2026-10-15\kb-soak-f7345de3-interrupted\report.json` |
 
 SQ05 (published limits) is tied to the Swarm soak's numbers when it ends.
+
+**The 13:00 UTC interruption (found 2026-10-15 23:07 UTC).** Five soaks got
+one console Ctrl+C within 8 seconds (`KeyboardInterrupt` in each err.log); no
+check had failed, and the live guard's log shows nothing at that time. It
+came from outside the product, most likely the stop of the failed
+swarm-01cba7cb run a few minutes earlier; only swarm-35670ff4, started after
+it, survived. The launcher now keeps a soak out of reach of any Ctrl+C:
+`lowpytest.py` makes the process ignore it when `KAZMA_SOAK_IGNORE_CTRL_C=1`,
+which `start_soak.ps1` sets, with its own hidden console and process group
+(a new process group alone did not hold: cmd.exe turns Ctrl+C back on).
+Measured on dummies with the old launch as the control (it was interrupted,
+the new one kept running, and `taskkill /F` still stopped it). All five were
+restarted on 430f9a81 at 23:15 UTC. A stalled run is now judged by its
+report's age as well as its `status`.
 
 ## Owner-held
 
