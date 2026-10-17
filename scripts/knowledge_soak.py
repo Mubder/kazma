@@ -415,6 +415,10 @@ def _env(data_dir: Path) -> dict[str, str]:
         "HF_HUB_OFFLINE": "1",
         "TRANSFORMERS_OFFLINE": "1",
         "PYTHONIOENCODING": "utf-8",
+        # A native crash in a child (chromadb's Rust bindings, 2026-10-17:
+        # 0xc0000005 with nothing in the log) still names its Python stack
+        # in the kept failed-<tag>.log.
+        "PYTHONFAULTHANDLER": "1",
     })
     return env
 
