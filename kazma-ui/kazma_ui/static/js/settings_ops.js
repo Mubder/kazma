@@ -661,11 +661,11 @@
             const layerText = (k) => (typeof window.tOr === 'function' ? window.tOr(k, k) : k);
             const order = [
                 ['embedder', 'packages.layer.embedder', 'Embedder'],
-                ['vector_memory', 'packages.layer.vector_memory', 'VectorMemory'],
-                ['layer_l1', 'packages.layer.layer_l1', 'L1 Chroma'],
-                ['layer_l2', 'packages.layer.layer_l2', 'L2 Graph'],
-                ['layer_l3', 'packages.layer.layer_l3', 'L3 FTS5'],
-                ['layer_l4', 'packages.layer.layer_l4', 'L4 sqlite-vec'],
+                ['vector_memory', 'packages.layer.vector_memory', 'Memory engine'],
+                ['layer_l1', 'packages.layer.layer_l1', 'Facts'],
+                ['layer_l2', 'packages.layer.layer_l2', 'Conversation memories'],
+                ['layer_l3', 'packages.layer.layer_l3', 'Procedures and task queue'],
+                ['layer_l4', 'packages.layer.layer_l4', 'Entities'],
                 ['pkg_chromadb', null, 'chromadb'],
                 ['pkg_st', null, 'sentence-transformers'],
                 ['pkg_sqlite_vec', null, 'sqlite-vec'],

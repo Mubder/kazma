@@ -2370,7 +2370,7 @@
                     </template>
                 </ul>
             </div>
-            <p class="pkg-muted pkg-hint">
+            <p class="pkg-muted pkg-hint" x-show="pkgLoaded && !pkgExtras.some(e => e.name === 'rag' && e.installed)" x-cloak>
                 {{ t('packages.memory_hint') }}
                 <code>pip install -e ".[rag]"</code>
             </p>
@@ -2461,8 +2461,11 @@
             <p class="pkg-muted" style="margin:0 0 10px 0;">{{ t('packages.install_all_desc') }}</p>
             <div class="pkg-install-bar">
                 <span class="pkg-install-prompt">$</span>
-                <code class="pkg-install-cmd">uv sync --all-extras</code>
-                <button type="button" class="btn btn-xs btn-secondary" @click="copyPkgCmd('uv sync --all-extras')">{{ t('packages.copy') }}</button>
+                {# Additive, as `kazma update` installs (kazma_cli.update._reinstall_local):
+                   uv's exact sync, with all extras too, removes every package outside
+                   the set it was asked for. #}
+                <code class="pkg-install-cmd" translate="no">uv pip install -e ".[all]"</code>
+                <button type="button" class="btn btn-xs btn-secondary" @click="copyPkgCmd('uv pip install -e &quot;.[all]&quot;')">{{ t('packages.copy') }}</button>
             </div>
         </div>
     </div>

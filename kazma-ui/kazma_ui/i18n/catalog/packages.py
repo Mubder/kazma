@@ -185,8 +185,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Missing",
     },
     "packages.install_all_desc": {
-        "ar": "لتثبيت جميع التبعيات الاختيارية دفعة واحدة:",
-        "en": "To install all optional dependencies at once:",
+        "ar": "لتثبيت جميع التبعيات الاختيارية دفعة واحدة، في مجلد التثبيت وكاظمه متوقف (يضيف الحزم ولا يزيل أيًا منها):",
+        "en": "To install all optional dependencies at once, in the install folder with Kazma stopped (it adds packages and removes none):",
     },
     "packages.install_all_title": {
         "ar": "تثبيت الكل",
@@ -220,29 +220,32 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "المضمّن",
         "en": "Embedder",
     },
+    # The rows memory.health reports (V2): the V1 layer names they kept
+    # (L1 Chroma, L2 Graph...) labelled facts, memories, procedures and
+    # entities until 2026-10-17.
     "packages.layer.layer_l1": {
-        "ar": "L1 كروما",
-        "en": "L1 Chroma",
+        "ar": "الحقائق",
+        "en": "Facts",
     },
     "packages.layer.layer_l2": {
-        "ar": "L2 الرسم",
-        "en": "L2 Graph",
+        "ar": "ذكريات المحادثات",
+        "en": "Conversation memories",
     },
     "packages.layer.layer_l3": {
-        "ar": "L3 FTS5",
-        "en": "L3 FTS5",
+        "ar": "الإجراءات وقائمة المهام",
+        "en": "Procedures and task queue",
     },
     "packages.layer.layer_l4": {
-        "ar": "L4 sqlite-vec",
-        "en": "L4 sqlite-vec",
+        "ar": "الكيانات",
+        "en": "Entities",
     },
     "packages.layer.per_turn_retrieval": {
         "ar": "RAG لكل دورة",
         "en": "Per-turn RAG",
     },
     "packages.layer.vector_memory": {
-        "ar": "ذاكرة المتجهات",
-        "en": "VectorMemory",
+        "ar": "محرك الذاكرة",
+        "en": "Memory engine",
     },
     "packages.memory_hint": {
         "ar": "لاسترجاع المتجهات بالكامل ثبّت إضافة rag:",

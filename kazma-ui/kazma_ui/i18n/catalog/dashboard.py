@@ -265,21 +265,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "المضمّن",
         "en": "Embedder",
     },
+    # The rows memory.health reports (V2); see packages.layer.layer_l1.
     "dashboard.comp.layer_l1": {
-        "ar": "L1 كروما",
-        "en": "L1 Chroma",
+        "ar": "الحقائق",
+        "en": "Facts",
     },
     "dashboard.comp.layer_l2": {
-        "ar": "L2 الرسم",
-        "en": "L2 Graph",
+        "ar": "ذكريات المحادثات",
+        "en": "Conversation memories",
     },
     "dashboard.comp.layer_l3": {
-        "ar": "L3 FTS5",
-        "en": "L3 FTS5",
+        "ar": "الإجراءات وقائمة المهام",
+        "en": "Procedures and task queue",
     },
     "dashboard.comp.layer_l4": {
-        "ar": "L4 sqlite-vec",
-        "en": "L4 sqlite-vec",
+        "ar": "الكيانات",
+        "en": "Entities",
     },
     "dashboard.comp.memory_enabled": {
         "ar": "الذاكرة مفعّلة",
@@ -302,8 +303,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Package: sentence-transformers",
     },
     "dashboard.comp.vector_memory": {
-        "ar": "ذاكرة المتجهات",
-        "en": "Vector memory",
+        "ar": "محرك الذاكرة",
+        "en": "Memory engine",
     },
     "dashboard.confirm_clear_all": {
         "ar": "مسح الخطوات المحفوظة لكل المحادثات؟ تبقى المحادثات ورسائلها، وتُستأنف كل محادثة من رسائلها. تُلغى الموافقات المعلّقة في أي محادثة، ولا يمكن التراجع عن ذلك.",
