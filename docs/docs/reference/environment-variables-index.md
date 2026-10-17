@@ -145,7 +145,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_LITELLM_LOCAL` | (none) | `kazma_core.llm_gateway`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_LITELLM_URL` | (none) | `kazma_core.llm_gateway`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_LLM_STREAM` | (none) | `kazma_core.llm_stream` | yes |
-| `KAZMA_LOG_FILE` | (none) | `kazma_core.paths`, `kazma_core.settings_manager` | yes |
+| `KAZMA_LOG_FILE` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_LOG_FORMAT` | (none) | `kazma_core.logging_config` | yes |
 | `KAZMA_LOG_LEVEL` | (none) | `kazma_core.logging_config` | yes |
 | `KAZMA_LOG_RETENTION_DAYS` | (none) | `kazma_core.logging_config` | yes |

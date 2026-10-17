@@ -4009,7 +4009,7 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   descendants (Windows kill-on-close, Linux pidfd guardian). Capacity releases
   only after OS verification of no live descendants; uncertainty quarantines it.
   The private Playwright Connection/stdio compatibility seam is isolated here,
-  qualified against 1.61.0. Upgrades must pass the real-browser/boundary gates.
+  qualified against 1.61.0 and, 2026-10-17, 1.64.0 (35 boundary tests, real Chromium). Upgrades must pass the real-browser/boundary gates.
   Gates: `tests/test_browser_driver_budget.py`,
   `tests/test_acquisition_resources.py` and the broker suite. This boundary does
   not constrain arbitrary Python HTTP/XML threads or all install storage,
