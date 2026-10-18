@@ -1116,8 +1116,30 @@ async def tool_worker_node(
                 duration_ms=duration_ms,
             )
 
-        def _denied_result(tc: PendingToolCall) -> ToolResult:
-            """Create a ToolResult for a denied tool call."""
+        def _denied_result(tc: PendingToolCall, answer: Any = None) -> ToolResult:
+            """The result of a call the approval did not let through.
+
+            An approval that expired unanswered is not a refusal: live
+            2026-10-18 the watchdog's timeout reached the model as "denied
+            by user", the model told the owner they had refused (they had
+            not seen the card), and went on to ask for another approval
+            nobody was there to give. A timeout says what happened, carries
+            the watchdog's instruction and ends the round (``terminal``).
+            """
+            if isinstance(answer, dict) and answer.get("timed_out"):
+                reason = str(answer.get("reason") or "").strip()
+                return ToolResult(
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                    content=(
+                        f"Approval for tool '{tc['name']}' expired unanswered. "
+                        "Nothing was run; the user did not decide."
+                        + (f" {reason}" if reason else "")
+                    ),
+                    is_error=True,
+                    duration_ms=0,
+                    outcome="terminal",
+                )
             return ToolResult(
                 tool_call_id=tc["id"],
                 name=tc["name"],
@@ -1132,6 +1154,7 @@ async def tool_worker_node(
         # *before* resume so later turns skip the gate entirely.
         approved = False
         approved_ids = None
+        approval: Any = None
         approval_tools = list(danger_tools)
         approval_mode = "policy"
         # Bound here (not at the safe-tool section below) because the
@@ -1435,7 +1458,7 @@ async def tool_worker_node(
                         results.append(await _exec_one(tc))
                 else:
                     logger.info("[ToolWorker] HITL denied: %s", tc["name"])
-                    results.append(_denied_result(tc))
+                    results.append(_denied_result(tc, approval))
 
         # S1-3 audit trail: mark the drafts consumed by SUCCESSFUL posts
         # (SQLite read-modify-write under BEGIN IMMEDIATE — off the loop).

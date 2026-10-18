@@ -19,13 +19,17 @@ def _json(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2)
 
 
-async def x_status(recent: int = 5) -> str:
+async def x_status(recent: int = 5, offset: int = 0) -> str:
     """Read-only connector status. Never returns secret values.
 
     Args:
-        recent: How many of the latest posts to list (1-50, default 5). This
-            is the model's read path for the post ledger (``x_posts.db``);
-            the database itself is refused to the SQL, file and exec tools.
+        recent: How many posts to list (1-50, default 5). This is the
+            model's read path for the post ledger (``x_posts.db``); the
+            database itself is refused to the SQL, file and exec tools.
+        offset: How many of the newest posts to skip. ``posts_total`` says
+            how many the ledger holds and ``next_offset`` where the next
+            page starts (null on the last): live 2026-10-18 an archive of
+            "every post" read the newest 50 at most and stopped, 17 short.
     """
     try:
         cfg = await asyncio.to_thread(get_x_config)
@@ -36,13 +40,19 @@ async def x_status(recent: int = 5) -> str:
             n_recent = max(1, min(int(recent or 5), 50))
         except (TypeError, ValueError):
             n_recent = 5
-        day, month, recent_rows = await asyncio.to_thread(
+        try:
+            n_offset = max(0, int(offset or 0))
+        except (TypeError, ValueError):
+            n_offset = 0
+        day, month, total, recent_rows = await asyncio.to_thread(
             lambda: (
                 ledger.count_since(time.time() - 86400),
                 ledger.count_since(time.time() - 30 * 86400),
-                ledger.recent(n_recent),
+                ledger.count_all(),
+                ledger.recent(n_recent, n_offset),
             )
         )
+        shown_to = n_offset + len(recent_rows)
         payload = {
             "configured": cfg.credentials.complete(),
             "enabled": cfg.enabled,
@@ -71,6 +81,9 @@ async def x_status(recent: int = 5) -> str:
                 }
                 for r in recent_rows
             ],
+            "posts_total": total,
+            "recent_offset": n_offset,
+            "next_offset": shown_to if shown_to < total else None,
             "setup": (
                 "Open Settings → X. Create a Project + App at developer.x.com, "
                 "set User authentication to Read and write, generate the four "

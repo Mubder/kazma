@@ -152,7 +152,83 @@ class DocxEngine:
             except Exception:
                 logger.debug("[docx] block render failed: %r", block, exc_info=True)
 
+        self._give_direction_marks_a_face(document)
         document.save(str(output))
+
+    #: Direction marks the body may hold (Kazma's own and the author's).
+    _MARKS_RE = re.compile("([\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069])")
+
+    def _give_direction_marks_a_face(self, document: Any) -> None:
+        """Draw every direction mark in its own run, in a face that has it.
+
+        IBM Plex Sans Arabic has no glyph for any mark, and LibreOffice drew
+        a mark with the run font's space glyph: the PDF's text map then named
+        that face's spaces by the mark (live 2026-10-18, the bold headings of
+        a tweet archive read back with U+2066 for every space, and Kazma's
+        reader failed on the page). With no face that has the marks, they
+        are dropped: a mark is worth less than a text layer that reads.
+        """
+        from copy import deepcopy
+
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        from kazma_core.documents.fonts import direction_mark_family
+
+        family = direction_mark_family()
+        body = document.element.body
+        for run in list(body.iter(qn("w:r"))):
+            texts = run.findall(qn("w:t"))
+            if not any(self._MARKS_RE.search(t.text or "") for t in texts):
+                continue
+            if family is None:
+                for t in texts:
+                    t.text = self._MARKS_RE.sub("", t.text or "")
+                continue
+            r_pr = run.find(qn("w:rPr"))
+            pieces: list[tuple[bool, list[Any]]] = []  # (is mark, run children)
+            for child in list(run):
+                if child is r_pr:
+                    continue
+                if child.tag != qn("w:t"):
+                    if not pieces or pieces[-1][0]:
+                        pieces.append((False, []))
+                    pieces[-1][1].append(child)
+                    continue
+                for part in self._MARKS_RE.split(child.text or ""):
+                    if not part:
+                        continue
+                    t = OxmlElement("w:t")
+                    t.text = part
+                    t.set(qn("xml:space"), "preserve")
+                    is_mark = bool(self._MARKS_RE.fullmatch(part))
+                    if is_mark or not pieces or pieces[-1][0]:
+                        pieces.append((is_mark, []))
+                    pieces[-1][1].append(t)
+            parent = run.getparent()
+            at = parent.index(run)
+            for is_mark, children in pieces:
+                new_run = OxmlElement("w:r")
+                props = deepcopy(r_pr) if r_pr is not None else None
+                if is_mark:
+                    if props is None:
+                        props = OxmlElement("w:rPr")
+                    fonts = props.find(qn("w:rFonts"))
+                    if fonts is None:
+                        fonts = OxmlElement("w:rFonts")
+                        props.insert(0, fonts)
+                    for attr in list(fonts.attrib):
+                        if attr.endswith("Theme"):
+                            del fonts.attrib[attr]
+                    for slot in ("ascii", "hAnsi", "cs", "eastAsia"):
+                        fonts.set(qn(f"w:{slot}"), family)
+                if props is not None:
+                    new_run.append(props)
+                for child in children:
+                    new_run.append(child)
+                parent.insert(at, new_run)
+                at += 1
+            parent.remove(run)
 
     def _set_core_properties(self, document: Any, model: ContentModel) -> None:
         """Populate the file's core properties (shown in Explorer/Finder/search)."""

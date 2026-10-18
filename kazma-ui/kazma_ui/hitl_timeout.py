@@ -33,7 +33,7 @@ from typing import Any, Callable
 
 from kazma_core.shutdown import is_shutting_down
 
-__all__ = ["start_hitl_timeout_watchdog", "stop_hitl_timeout_watchdog"]
+__all__ = ["register_chat_app_resumer", "start_hitl_timeout_watchdog", "stop_hitl_timeout_watchdog"]
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,46 @@ _watchdog_task: asyncio.Task | None = None
 _first_seen: dict[str, float] = {}
 # Strong refs so auto-deny graph tasks are not GC'd mid-resume.
 _deny_tasks: set[asyncio.Task] = set()
+
+# The chat apps' resume (kazma_gateway.agent_handler.hitl.make_timeout_resumer),
+# registered by the gateway handler: platforms it serves, and the coroutine.
+_chat_app_resumer: tuple[frozenset[str], Callable[..., Any]] | None = None
+
+
+def register_chat_app_resumer(platforms: frozenset[str], resumer: Callable[..., Any]) -> None:
+    """Let the gateway finish an expired approval of a chat app's thread.
+
+    The watchdog's own resume drives the turn into the web journal, which
+    only a browser reads: live 2026-10-18 a Telegram turn's next approval
+    card and its answer never reached the chat after a timeout.
+    """
+    global _chat_app_resumer
+    _chat_app_resumer = (frozenset(platforms), resumer)
+
+
+async def _chat_app_route(graph: Any, config: dict[str, Any]) -> tuple[str, str] | None:
+    """(platform, target id) when the paused turn belongs to a chat app.
+
+    Read from the turn's own routing block in the checkpoint, never the
+    session store (its rows expire in five minutes; the card outlives them).
+    """
+    if _chat_app_resumer is None:
+        return None
+    # The checkpoint was read a moment ago for the interrupt; a failure here
+    # is the caller's (its handler logs it and resumes nothing).
+    snapshot = await graph.aget_state(config)
+    routing = (getattr(snapshot, "values", None) or {}).get("_gateway") or {}
+    platform = str(routing.get("platform") or "").strip().lower()
+    target = str(routing.get("delivery_target") or "").strip()
+    if platform not in _chat_app_resumer[0]:
+        return None
+    if not target.startswith(f"{platform}:") or target.endswith(":unknown"):
+        logger.warning(
+            "[HITL-WD] %s thread has no delivery address; its timeout resumes in the web journal only",
+            platform,
+        )
+        return None
+    return platform, target
 
 
 async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
@@ -152,19 +192,35 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         except Exception:
             logger.debug("[HITL-WD] timeout frame skipped", exc_info=True)
 
-        # Journal-only resume — do not await the graph on the watchdog tick.
-        # invoke_turn still runs inside the streamer so SessionStore gets
-        # the continuation (2026-08-31 silent turn b1cb7994e22a).
-        task = asyncio.create_task(
-            _drive_graph_to_journal(
-                graph,
-                _resume_cmd,
-                config,
-                thread_id=thread_id,
-                session_id=session_id,
-                reply_turn_id=turn_id,
+        # A chat app's turn goes back to its chat (its answer and its next
+        # card); any other is resumed into the journal -- not awaited on the
+        # watchdog tick. invoke_turn still runs inside the streamer so
+        # SessionStore gets the continuation (2026-08-31 silent turn
+        # b1cb7994e22a).
+        route = await _chat_app_route(graph, config)
+        if route is not None and _chat_app_resumer is not None:
+            task = asyncio.create_task(
+                _chat_app_resumer[1](
+                    thread_id=thread_id,
+                    resume_cmd=_resume_cmd,
+                    resume_config=config,
+                    platform=route[0],
+                    target_id=route[1],
+                    tool=str((_intr_payload or {}).get("tool") or ""),
+                    timeout_s=timeout_s,
+                )
             )
-        )
+        else:
+            task = asyncio.create_task(
+                _drive_graph_to_journal(
+                    graph,
+                    _resume_cmd,
+                    config,
+                    thread_id=thread_id,
+                    session_id=session_id,
+                    reply_turn_id=turn_id,
+                )
+            )
         _deny_tasks.add(task)
         task.add_done_callback(_deny_tasks.discard)
         register_turn(thread_id, task)
@@ -178,6 +234,7 @@ async def _watchdog_loop(
     checkpointer_getter: Callable[[], Any],
 ) -> None:
     from kazma_core.safety.hitl import get_hitl_config
+
     from kazma_ui.hitl_approval import _get_pending_approvals
 
     logger.info("[HITL-WD] Approval-timeout watchdog started")

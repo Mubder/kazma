@@ -169,8 +169,12 @@ def test_a_rendered_arabic_pdf_reads_back_in_order(tmp_path, case_id):
         assert "2026-09-30" in text and "30-09-2026" not in text
         # The producer maps the tanween to "/": dropped, never read as text.
         assert "ريالا في" in text and "/" not in text
-        assert "الشمال ١٢٥٠ ١٨٤٠٠" in text  # the row in column order, words apart
         table = next(b.text for p in ir.pages for b in p.blocks if str(b.block_type) == "table")
         assert table.splitlines()[0] == "المنطقة | الوحدات | الإيراد"  # right-to-left columns
+        # The row in column order, words apart. Re-pointed 2026-10-18: a
+        # table is read once, as the table, where it stands; its cells were
+        # also read as page text, so every table came back twice.
+        assert "الشمال | ١٢٥٠ | ١٨٤٠٠" in table
+        assert "الشمال ١٢٥٠ ١٨٤٠٠" not in text, "not read a second time as page text"
     else:
         assert "99.95" in text and "اكتملت عملية الترحيل" in text

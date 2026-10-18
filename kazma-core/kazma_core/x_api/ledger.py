@@ -182,17 +182,32 @@ class XPostLedger:
             finally:
                 conn.close()
 
-    def recent(self, limit: int = 10) -> list[dict[str, Any]]:
+    def recent(self, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
+        """The newest posts, ``offset`` posts back (deleted ones included)."""
         lim = max(1, min(50, int(limit)))
+        off = max(0, int(offset))
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
                     "SELECT tweet_id, text_preview, handle, created_at, deleted_at "
-                    "FROM x_posts WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
-                    (x_tenant_id(), lim),
+                    "FROM x_posts WHERE tenant_id = ? ORDER BY created_at DESC, id DESC "
+                    "LIMIT ? OFFSET ?",
+                    (x_tenant_id(), lim, off),
                 ).fetchall()
                 return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def count_all(self) -> int:
+        """Every post the ledger holds for this tenant, deleted ones included."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM x_posts WHERE tenant_id = ?", (x_tenant_id(),)
+                ).fetchone()
+                return int(row[0] or 0)
             finally:
                 conn.close()
 

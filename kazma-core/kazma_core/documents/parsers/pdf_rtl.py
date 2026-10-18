@@ -55,6 +55,9 @@ _EUROPEAN_SEPARATORS = frozenset("-+")
 _NUMBER_JOINERS = _COMMON_SEPARATORS | _EUROPEAN_SEPARATORS
 #: A gap wider than this many font sizes between two glyphs is a word break.
 _GAP_EM = 0.5
+#: A Latin letter narrower than this many font sizes is a kashida misnamed
+#: by the producer (Plex's narrowest letters are about a quarter em).
+_KASHIDA_EM = 0.15
 #: Number clusters per line whose reading is searched (2 ** this layouts).
 _MAX_SEARCHED = 5
 _BRACKETS = str.maketrans({c: "|" for c in "()[]{}<>"})
@@ -109,12 +112,32 @@ def page_glyph_lines(page: Any) -> list[list[Glyph]]:
         size = float(span.get("size") or 0) or 10.0
         for unicode, glyph_id, origin, bbox in (c[:4] for c in span.get("chars") or ()):
             char = chr(int(unicode))
+            if unicodedata.category(char) == "Cf" and float(bbox[2]) - float(bbox[0]) >= 0.01:
+                # A direction mark with a visible advance is the space glyph
+                # it was drawn with: LibreOffice draws a mark its font lacks
+                # with the space, and the PDF's text map then names every
+                # space of that face by the mark (live 2026-10-18, U+2066
+                # for each space of a bold heading).
+                char = " "
             if int(glyph_id) == -1 and glyphs:
                 glyphs[-1].text += char  # a ligature's next character, logical order
                 continue
             glyph = Glyph(char, float(bbox[0]), float(bbox[2]), float(origin[1]), size)
             category = unicodedata.category(char)
-            if glyph.x1 - glyph.x0 < 0.01 and category[0] not in "LNZ":
+            zero_advance = glyph.x1 - glyph.x0 < 0.01
+            if (category[0] == "L" and unicodedata.bidirectional(char) == "L"
+                    and glyph.x1 - glyph.x0 < _KASHIDA_EM * size):
+                # Narrower than any letter: the kashida LibreOffice stretches
+                # a justified Arabic word with, named "G" in its text map
+                # (live 2026-10-18, "المعGGGرّف").
+                continue
+            if zero_advance and category[0] in "LN" and unicodedata.bidirectional(char) in {"L", "EN"}:
+                # A digit or Latin letter that takes no room is a mark the
+                # producer named wrong: LibreOffice names IBM Plex Sans
+                # Arabic's shadda "8" or "3" (live 2026-10-18, "يح3دد").
+                # Arabic letters of no width stay: a ligature's parts.
+                continue
+            if zero_advance and category[0] not in "LNZ":
                 if category[0] == "M":
                     marks.append(glyph)
                 # A zero-advance glyph that is no mark is a mark mapped wrong

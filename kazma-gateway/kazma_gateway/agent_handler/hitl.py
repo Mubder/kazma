@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from typing import Any
 
 from kazma_core.english_count import count_noun
+
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
 
 from .store import _build_target_id
@@ -16,6 +18,57 @@ logger = logging.getLogger(__name__)
 __all__: list[str] = []
 
 
+def _minutes_ago(at: float | None) -> str:
+    import time
+
+    if not at:
+        return "earlier"
+    minutes = max(0, int((time.time() - float(at)) // 60))
+    return "just now" if minutes < 1 else f"{count_noun(minutes, 'minute')} ago"
+
+
+async def _decided_card_message(requested_gate: str) -> str | None:
+    """What the registry recorded for the card that was tapped, or None.
+
+    Live 2026-10-18: a card that had expired unanswered (the watchdog's
+    timeout, recorded ``deny`` by ``watchdog:timeout``) was tapped twelve
+    minutes later and answered "Already handled -- this approval was applied
+    earlier": the old message judged by the turn having finished, never by
+    the card's own decision.
+    """
+    if not requested_gate:
+        return None
+    try:
+        from kazma_core.safety.hitl_gates import gate_for_async, gate_registry_enabled
+
+        if not gate_registry_enabled():
+            return None
+        gate = await gate_for_async(requested_gate)
+    except (sqlite3.Error, OSError, ValueError):
+        logger.debug("[HITL] gate lookup for a stale card failed", exc_info=True)
+        return None
+    if gate is None or gate.is_live:
+        return None
+    tool = gate.tool or "the tool"
+    when = _minutes_ago(gate.settled_at or gate.claimed_at)
+    if gate.actor.startswith("watchdog:"):
+        return (
+            f"⏱ This approval expired {when}: nobody answered in time, so "
+            f"{tool} was not run. Send the request again if you still want it."
+        )
+    decision = (gate.decision or "").lower()
+    if decision.startswith("approve") or decision in ("yolo", "tool"):
+        return None  # the approve path below says it, with its debounce
+    if decision.startswith("deny"):
+        return f"🚫 This approval was denied {when}; {tool} was not run."
+    if gate.state in ("superseded", "error") or decision:
+        return (
+            f"⚠️ This approval card is no longer active ({gate.state}); {tool} "
+            "was not run from it. Send the request again if you still want it."
+        )
+    return None
+
+
 async def _stale_approval_message(
     graph: Any,
     config: dict[str, Any],
@@ -23,14 +76,21 @@ async def _stale_approval_message(
     *,
     action: str,
     approved: bool,
+    requested_gate: str = "",
 ) -> str | None:
     """Human message for a late/duplicate approve, or None to stay silent.
 
-    If we recently completed a resume for this thread, silence the second tap.
-    If the graph already finished with an assistant answer, say so honestly —
-    never claim "Nothing was executed" when work already completed.
+    The tapped card's own recorded decision comes first (an expired or
+    denied card says so). Otherwise: if we recently completed a resume for
+    this thread, silence the second tap; if the graph already finished with
+    an assistant answer, say so honestly — never claim "Nothing was
+    executed" when work already completed.
     """
     import time
+
+    decided = await _decided_card_message(requested_gate)
+    if decided is not None:
+        return decided
 
     try:
         from kazma_core.config_store import get_config_store
@@ -729,6 +789,171 @@ def apply_hitl_approval_markup(
     return out
 
 
+
+async def _run_resume(
+    graph: Any, resume_cmd: Any, resume_config: dict[str, Any], thread_id: str,
+) -> tuple[Any, dict[str, Any] | None]:
+    """Resume a paused turn and settle its gates; the caller holds the lock.
+
+    Returns the turn's state and the interrupt it paused on next, if any.
+    """
+    from kazma_ui.turn_runtime import invoke_turn as _invoke_hitl
+
+    result_state = await _invoke_hitl(
+        graph,
+        resume_cmd,
+        resume_config,
+        thread_id=thread_id,
+    )
+
+    # Re-surface a chained interrupt (a second danger tool paused in
+    # the same resumed turn). Without this the user sees "Approved —
+    # continuing." while the graph is actually still paused on
+    # another tool, so the agent appears to "do nothing".
+    chained = await _check_graph_interrupt(graph, resume_config)
+    # Gate registry (P3): the resume reached a terminal or a new
+    # pause — settle the claimed gate; register the chained one so
+    # every surface shows the second question immediately.
+    try:
+        from kazma_ui.hitl_gate_bridge import (
+            gate_pending_from_payload,
+            settle_thread_gates,
+        )
+
+        await settle_thread_gates(thread_id)
+        if isinstance(chained, dict):
+            _chained_payload = dict(chained)
+            _chained_payload["thread_id"] = thread_id
+            await gate_pending_from_payload(_chained_payload)
+    except Exception:
+        logger.debug("[HITL] gate settle/chain skipped", exc_info=True)
+    return result_state, chained
+
+
+async def _deliver_resume(
+    manager: Any,
+    *,
+    platform: str,
+    target_id: str,
+    ctx: dict[str, Any],
+    thread_id: str,
+    result_state: Any,
+    chained: dict[str, Any] | None,
+    fallback_text: str,
+) -> None:
+    """Send a resumed turn's answer, then the card it paused on next, to the chat."""
+    from .graph import _prepare_outbound
+
+    # Extract the assistant's response from the resumed turn.
+    assistant_text = ""
+    messages = result_state.get("messages", []) if isinstance(result_state, dict) else []
+    for m in reversed(messages):
+        if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
+            assistant_text = m["content"]
+            break
+
+    # If there is assistant text, send it first
+    if assistant_text:
+        out_text, out_ctx = _prepare_outbound(platform, assistant_text, ctx)
+        await manager.send(
+            OutboundMessage(
+                target_id=target_id,
+                text=out_text,
+                context_metadata=out_ctx,
+            )
+        )
+
+    if chained is not None:
+        prompt = _build_approval_prompt(chained, thread_id, platform=platform)
+        prompt_text, send_ctx = _prepare_outbound(platform, prompt["text"], ctx)
+        if prompt.get("markup"):
+            if platform == "telegram":
+                send_ctx["reply_markup"] = prompt["markup"]
+            elif platform == "discord":
+                send_ctx["components"] = prompt["markup"]
+            elif platform == "slack":
+                send_ctx["blocks"] = prompt["markup"]
+        await manager.send(
+            OutboundMessage(
+                target_id=target_id,
+                text=prompt_text,
+                context_metadata=send_ctx,
+            )
+        )
+        return
+
+    if not assistant_text:
+        await manager.send(
+            OutboundMessage(
+                target_id=target_id,
+                text=fallback_text,
+                context_metadata=ctx,
+            )
+        )
+
+
+#: The chat apps whose turns the gateway delivers.
+CHAT_APP_PLATFORMS = frozenset({"telegram", "discord", "slack"})
+
+
+def make_timeout_resumer(graph: Any, manager: Any, lock_getter: Any):
+    """The watchdog's way to finish a chat app's expired approval.
+
+    Live 2026-10-18 (Telegram): an approval expired, the watchdog resumed the
+    turn into the web journal only, and the turn's next card (``send_file``)
+    and its answer never reached the chat -- the next card expired unseen
+    five minutes later. A chat app's thread is resumed here instead, under
+    its thread lock, and the outcome is delivered to the chat the turn's
+    routing names (its ``delivery_target``, recorded in the checkpoint: a
+    paused card outlives the session store's five minutes).
+    """
+
+    async def resume_after_timeout(
+        *,
+        thread_id: str,
+        resume_cmd: Any,
+        resume_config: dict[str, Any],
+        platform: str,
+        target_id: str,
+        tool: str,
+        timeout_s: float,
+    ) -> None:
+        import contextlib
+
+        notice = (
+            f"⏱ The approval for {tool or 'the tool'} expired after "
+            f"{count_noun(max(1, round(timeout_s / 60)), 'minute')} with no answer, "
+            "so it was not run."
+        )
+        try:
+            lock = await lock_getter(thread_id) if lock_getter is not None else None
+            async with (lock if lock is not None else contextlib.AsyncExitStack()):
+                result_state, chained = await _run_resume(
+                    graph, resume_cmd, resume_config, thread_id,
+                )
+            await manager.send(OutboundMessage(target_id=target_id, text=notice, context_metadata={}))
+            await _deliver_resume(
+                manager,
+                platform=platform,
+                target_id=target_id,
+                ctx={},
+                thread_id=thread_id,
+                result_state=result_state,
+                chained=chained,
+                fallback_text="Nothing else was run.",
+            )
+        except Exception:
+            logger.exception("[HITL] timeout resume failed for thread=%s", thread_id)
+            with contextlib.suppress(Exception):
+                await manager.send(OutboundMessage(
+                    target_id=target_id,
+                    text=notice + " Continuing the task failed; send your request again.",
+                    context_metadata={},
+                ))
+
+    return resume_after_timeout
+
+
 def _approval_card_is_stale(msg: IncomingMessage, requested_gate: str, pending: dict[str, Any]) -> bool:
     """An interactive decision must identify the currently paused interrupt."""
     context = msg.context_metadata or {}
@@ -803,6 +1028,7 @@ async def _handle_hitl_resume(
     # comes from the durable directory, not a delivery cache that expires or
     # changes on /session take-over. Never infer identity from the command.
     from kazma_core.sessions.directory import ThreadOwnerUnavailable, thread_owner
+
     from kazma_gateway.allowlists import is_gateway_admin
 
     authorized = False
@@ -846,7 +1072,8 @@ async def _handle_hitl_resume(
                 # (double-tap, Telegram retries). Prefer a calm message — and
                 # suppress spam within a short debounce window.
                 soft = await _stale_approval_message(
-                    graph, resume_config, target_thread, action=action, approved=approved
+                    graph, resume_config, target_thread, action=action, approved=approved,
+                    requested_gate=requested_gate,
                 )
                 logger.info(
                     "[HITL] Stale approval ignored: thread=%s action=%s "
@@ -994,88 +1221,20 @@ async def _handle_hitl_resume(
                     context_metadata=ctx,
                 ))
                 return True
-            from kazma_ui.turn_runtime import invoke_turn as _invoke_hitl
-
-            result_state = await _invoke_hitl(
-                graph,
-                _resume_cmd,
-                resume_config,
-                thread_id=target_thread,
+            result_state, chained = await _run_resume(
+                graph, _resume_cmd, resume_config, target_thread,
             )
 
-            # Re-surface a chained interrupt (a second danger tool paused in
-            # the same resumed turn). Without this the user sees "Approved —
-            # continuing." while the graph is actually still paused on
-            # another tool, so the agent appears to "do nothing".
-            chained = await _check_graph_interrupt(graph, resume_config)
-            # Gate registry (P3): the resume reached a terminal or a new
-            # pause — settle the claimed gate; register the chained one so
-            # every surface shows the second question immediately.
-            try:
-                from kazma_ui.hitl_gate_bridge import (
-                    gate_pending_from_payload,
-                    settle_thread_gates,
-                )
-
-                await settle_thread_gates(target_thread)
-                if isinstance(chained, dict):
-                    _chained_payload = dict(chained)
-                    _chained_payload["thread_id"] = target_thread
-                    await gate_pending_from_payload(_chained_payload)
-            except Exception:
-                logger.debug("[HITL] gate settle/chain skipped", exc_info=True)
-
-        from .graph import _prepare_tg_outbound
-
-        # Extract the assistant's response from the resumed turn.
-        assistant_text = ""
-        messages = result_state.get("messages", []) if isinstance(result_state, dict) else []
-        for m in reversed(messages):
-            if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
-                assistant_text = m["content"]
-                break
-
-        # If there is assistant text, send it first
-        if assistant_text:
-            tg_text, tg_ctx = _prepare_tg_outbound(msg, assistant_text, ctx)
-            await manager.send(
-                OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text=tg_text,
-                    context_metadata=tg_ctx,
-                )
-            )
-
-        if chained is not None:
-            prompt = _build_approval_prompt(
-                chained, target_thread, platform=msg.platform
-            )
-            prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
-            if prompt.get("markup"):
-                if msg.platform == "telegram":
-                    send_ctx["reply_markup"] = prompt["markup"]
-                elif msg.platform == "discord":
-                    send_ctx["components"] = prompt["markup"]
-                elif msg.platform == "slack":
-                    send_ctx["blocks"] = prompt["markup"]
-            await manager.send(
-                OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text=prompt_text,
-                    context_metadata=send_ctx,
-                )
-            )
-            return True
-
-        if not assistant_text:
-            fallback_text = "✅ Approved — continuing." if approved else "🚫 Denied."
-            await manager.send(
-                OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text=fallback_text,
-                    context_metadata=ctx,
-                )
-            )
+        await _deliver_resume(
+            manager,
+            platform=msg.platform,
+            target_id=_build_target_id(msg.platform, ctx),
+            ctx=ctx,
+            thread_id=target_thread,
+            result_state=result_state,
+            chained=chained,
+            fallback_text="✅ Approved — continuing." if approved else "🚫 Denied.",
+        )
     except Exception:
         logger.exception("[HITL] Resume failed for thread=%s", target_thread)
         await manager.send(

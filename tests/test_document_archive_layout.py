@@ -251,22 +251,23 @@ def test_libreoffice_in_the_worker_image_renders_in_plex_only_with_the_bundle(tm
 
 # ── left-to-right runs inside right-to-left text ────────────────────────
 
+LRM = "\u200e"
 LRI, PDI = "\u2066", "\u2069"
 DELETED = "10 · 2026-10-05 — 15:15 UTC · 2107127443748266448 — محذوفة"
 
 
 def _shown(text: str) -> str:
-    return text.replace(LRI, "[").replace(PDI, "]")
+    return text.replace(LRM, "|")
 
 
 @pytest.mark.parametrize(("text", "isolated"), [
-    (DELETED, "[10 · 2026-10-05 — 15:15 UTC · 2107127443748266448] — محذوفة"),
+    (DELETED, "|10 · 2026-10-05 — 15:15 UTC · 2107127443748266448| — محذوفة"),
     # a number alone keeps the Arabic convention (W2), which the readers expect
     ("تاريخ التوثيق: 2026-10-18", "تاريخ التوثيق: 2026-10-18"),
-    ("الحساب: @KazmaAI · المصدر", "الحساب: [@KazmaAI] · المصدر"),
+    ("الحساب: @KazmaAI · المصدر", "الحساب: |@KazmaAI| · المصدر"),
     ("بتوقيت الكويت (+3).", "بتوقيت الكويت (+3)."),
-    ("الساعة +3 UTC هنا", "الساعة [+3 UTC] هنا"),
-    ("**قيد:** أحدث N سجلاً", "**قيد:** أحدث [N] سجلاً"),
+    ("الساعة +3 UTC هنا", "الساعة |+3 UTC| هنا"),
+    ("**قيد:** أحدث N سجلاً", "**قيد:** أحدث |N| سجلاً"),
     ("كلمة-كلمة #كاظمه", "كلمة-كلمة #كاظمه"),
     ("Latin only 2026-10-18", "Latin only 2026-10-18"),
 ])
@@ -279,9 +280,26 @@ def test_each_ltr_run_in_rtl_text_is_isolated(text, isolated):
 def test_the_docx_isolates_ltr_runs_in_rtl_blocks_only(tmp_path):
     root = _docx(tmp_path, f"## {DELETED}\n\nتاريخ التوثيق: 2026-10-18\n\nKazma, counted 2026-10-16")
     texts = [t for _, t in _paragraphs(root)]
-    assert f"{LRI}10 · 2026-10-05 — 15:15 UTC · 2107127443748266448{PDI} — محذوفة" in texts
+    assert f"{LRM}10 · 2026-10-05 — 15:15 UTC · 2107127443748266448{LRM} — محذوفة" in texts
     assert "تاريخ التوثيق: 2026-10-18" in texts  # a number alone is not isolated
     assert "Kazma, counted 2026-10-16" in texts  # an LTR block is left as written
+
+
+def test_each_mark_is_drawn_in_a_face_that_has_it(tmp_path):
+    """Plex has no mark glyph: a mark left in a Plex run is drawn with the
+    space glyph, and the PDF's text map names that face's spaces by it."""
+    from kazma_core.documents.fonts import direction_mark_family
+
+    family = direction_mark_family()
+    assert family, "the bundle carries a face with the direction marks (Amiri)"
+    root = _docx(tmp_path, f"## {DELETED}")
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    marked = [r for r in root.iter(f"{w}r") if LRM in "".join(t.text or "" for t in r.iter(f"{w}t"))]
+    assert marked and len(marked) % 2 == 0, "each run is marked on both sides"
+    for run in marked:
+        assert "".join(t.text or "" for t in run.iter(f"{w}t")) == LRM, "a mark is a run of its own"
+        fonts = run.find(f"{w}rPr/{w}rFonts")
+        assert {fonts.get(f"{w}{slot}") for slot in ("ascii", "hAnsi", "cs")} == {family}
 
 
 def test_kazma_reads_its_own_pdf_without_the_marks():
@@ -301,15 +319,29 @@ def _word_x(pdf: Path, words: list[str]) -> list[float]:
     return [found[w] for w in words]
 
 
-def _soffice_pdf(tmp_path: Path, monkeypatch, *, isolate: bool) -> Path:
+def _old_isolates(self, text: str) -> str:
+    """The isolation of 2026-10-18 morning: LRI ... PDI, left in Plex runs."""
+    from kazma_core.documents import arabic
+
+    marked = arabic.isolate_ltr_runs(text) if self.profile.block_is_rtl(text) else text
+    return marked.replace(LRM, LRI, 1).replace(LRM, PDI, 1)
+
+
+def _soffice_pdf(tmp_path: Path, monkeypatch, *, isolate: bool | str) -> Path:
     from kazma_core.documents.binaries import find_soffice, run_soffice_cli
 
     if not isolate:
         monkeypatch.setattr(DocxEngine, "_isolated", lambda self, text: text)
-    out = tmp_path / ("on" if isolate else "off")
+    if isolate == "old":
+        monkeypatch.setattr(DocxEngine, "_isolated", _old_isolates)
+        monkeypatch.setattr(DocxEngine, "_give_direction_marks_a_face", lambda self, document: None)
+    out = tmp_path / {True: "on", False: "off", "old": "old"}[isolate]
     out.mkdir()
     model = ContentModel()
-    model.add(BodyBlock(text=f"## {DELETED}\n\nتاريخ التوثيق: 2026-10-18"))
+    model.add(BodyBlock(text=(
+        f"## {DELETED}\n\nتاريخ التوثيق: 2026-10-18\n\n"
+        "| البند | القيمة |\n|---|---|\n| السجلات المقروءة | 3 |\n| حد الأحرف | 280 |\n\nبعد الجدول"
+    )))
     DocxEngine(DocProfile.for_content(DELETED)).render(model, out / "a.docx")
     give_soffice_the_bundled_fonts(out / "profile")
     assert find_soffice()
@@ -343,6 +375,31 @@ def test_libreoffice_draws_the_heading_and_the_date_in_reading_order(tmp_path, m
     old = _soffice_pdf(tmp_path, monkeypatch, isolate=False)
     old_xs = _word_x(old, order)
     assert old_xs != sorted(old_xs), "the old drawing reversed the groups"
+
+
+@pytest.mark.skipif(not _soffice_available(), reason="needs LibreOffice and PyMuPDF")
+def test_the_pdfs_text_reads_back_with_its_spaces(tmp_path, monkeypatch):
+    """Live 2026-10-18: the archive's bold headings read back with U+2066 for
+    every space (the isolates drawn with Plex's space glyph), and Kazma's own
+    reader failed on the page and fell back to a garbled reading."""
+    from kazma_core.documents.service import DocumentService
+
+    marks = "\u200e\u200f\u2066\u2067\u2068\u2069"
+    pdf = _soffice_pdf(tmp_path, monkeypatch, isolate=True)
+    import pymupdf
+
+    layer = "".join(page.get_text() for page in pymupdf.open(pdf))
+    assert "محذوفة" in layer and "UTC" in layer
+    assert not any(c in layer.replace("\u200e", "") for c in marks), "no space is named by a mark"
+    ir = DocumentService().parse_ingested_blob(pdf, force_ocr=False, ocr_language="ara")
+    read = " ".join(b.text for page in ir.pages for b in page.blocks)
+    assert "15:15 UTC" in read and "تاريخ التوثيق" in read, read
+    assert read.count("حد الأحرف") == 1, "the table is read once"
+    assert read.index("حد الأحرف") < read.index("بعد الجدول"), "where it stands"
+
+    old = _soffice_pdf(tmp_path, monkeypatch, isolate="old")
+    old_layer = "".join(page.get_text() for page in pymupdf.open(old))
+    assert LRI in old_layer or PDI in old_layer, "the old marks named the spaces"
 
 
 # ── reading a document back: a bidi mark is not a cut ──────────────────

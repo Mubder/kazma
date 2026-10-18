@@ -64,7 +64,17 @@ def _prepare_tg_outbound(
     platforms get the text unchanged. The returned context is a shallow copy so
     the caller's ``ctx`` is not mutated.
     """
-    if msg.platform != "telegram":
+    return _prepare_outbound(msg.platform, text, ctx)
+
+
+def _prepare_outbound(
+    platform: str,
+    text: str,
+    ctx: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """``_prepare_tg_outbound`` for a send with no inbound message (a resume
+    the approval watchdog runs)."""
+    if platform != "telegram":
         return text, ctx
     out_ctx = dict(ctx)
     out_ctx["parse_mode"] = "HTML"
@@ -647,6 +657,21 @@ def create_graph_handler(
         from kazma_ui.thread_locks import thread_mutation
 
         return thread_mutation(thread_id)
+
+    # An approval that expires on a chat app's turn is finished here, and its
+    # answer and next card go back to the chat (the watchdog's own resume
+    # reaches only the web journal).
+    if manager is not None:
+        try:
+            from kazma_ui.hitl_timeout import register_chat_app_resumer
+
+            from .hitl import CHAT_APP_PLATFORMS, make_timeout_resumer
+
+            register_chat_app_resumer(
+                CHAT_APP_PLATFORMS, make_timeout_resumer(graph, manager, _get_thread_lock),
+            )
+        except ImportError:
+            logger.warning("[agent-handler] chat-app timeout resume not registered", exc_info=True)
 
     async def handler(msg: IncomingMessage) -> None:
         """Process a single IncomingMessage through the agent graph."""

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
+import struct
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -113,10 +114,12 @@ def has_arabic_coverage(path: str) -> bool:
     free. Returns ``False`` (never raises) when the file cannot be parsed.
     """
     try:
-        from reportlab.pdfbase.ttfonts import TTFont
-
+        from reportlab.pdfbase.ttfonts import TTFError, TTFont
+    except ImportError:
+        return False
+    try:
         cmap = TTFont("kazma-probe", path).face.charToGlyph
-    except Exception:
+    except _FONT_FILE_ERRORS + (TTFError,):
         logger.debug("[fonts] cmap probe failed for %s", path, exc_info=True)
         return False
     if not all(cp in cmap for cp in _BASE_PROBE):
@@ -125,6 +128,48 @@ def has_arabic_coverage(path: str) -> bool:
     # Forms-A ligatures); demand the rest.
     hits = sum(1 for cp in _PRESENTATION_PROBE if cp in cmap)
     return hits >= len(_PRESENTATION_PROBE) - 1
+
+
+#: What reading a damaged or unreadable font file raises (besides TTFError).
+_FONT_FILE_ERRORS: tuple[type[BaseException], ...] = (
+    OSError, ValueError, KeyError, IndexError, struct.error,
+)
+
+#: The direction marks Kazma writes (LRM, RLM).
+_DIRECTION_MARKS = (0x200E, 0x200F)
+
+
+@lru_cache(maxsize=8)
+def _mark_family_in(directory: str) -> str | None:
+    try:
+        from reportlab.pdfbase.ttfonts import TTFError, TTFont
+    except ImportError:
+        return None
+    for face in sorted(Path(directory).glob("*.ttf")):
+        try:
+            parsed = TTFont("kazma-mark-probe", str(face)).face
+        except _FONT_FILE_ERRORS + (TTFError,):
+            logger.debug("[fonts] cmap probe failed for %s", face, exc_info=True)
+            continue
+        if all(cp in parsed.charToGlyph for cp in _DIRECTION_MARKS):
+            family = parsed.familyName
+            if isinstance(family, bytes):
+                family = family.decode("utf-8", "replace")
+            return str(family or "").strip() or None
+    return None
+
+
+def direction_mark_family() -> str | None:
+    """A bundled face that has glyphs for the direction marks, or None.
+
+    The product face (IBM Plex Sans Arabic) has none, and LibreOffice draws a
+    mark its run's font lacks with that font's space glyph: the PDF's text
+    map then names the space by the mark, for every space of the face (live
+    2026-10-18: a heading's spaces read back as U+2066). A mark drawn in a
+    face that has it keeps its own glyph. Amiri, bundled, has both.
+    """
+    directory = bundled_font_dir()
+    return _mark_family_in(str(directory)) if directory is not None else None
 
 
 def bundled_font_dir() -> Path | None:
