@@ -5126,6 +5126,20 @@ tools have one invocation attempt; a failure after invocation carries
 `effect_uncertain=True`, which the journal persists and holds on replay.
 Argument validation before invocation is still correctable. Do not turn a
 post-invocation error into a retryable ordinary result.
+**A refusal before anything ran is not uncertain** (2026-10-18,
+`agent/tool_refusal.RefusedBeforeEffect`): a tool raises it only before it
+writes, sends or starts anything, and the registry answers it as an ordinary
+`Error:` result. Live, an approved `shell_exec` refused by the host-shell
+policy was recorded "effects unknown; must not be repeated" and the turn
+failed. `shell_exec` (every refusal before its process starts) and
+`python_exec` (no code, a Kazma store, an unreadable policy) raise it. **And a
+shell call that cannot run gets no card**: `safety/shell_preflight.shell_refusal`
+(the policy, off the loop, then an empty command or a shell metacharacter) is
+asked by the chat tool worker before the commitment gate (`outcome="policy"`,
+the turn goes on) and by the registry before the swarm bus. The card had said
+"BLOCKED: host shell is disabled" and still asked for approval. Gate:
+`tests/test_shell_refused_before_card.py` (the live command; the old code
+fails 7; a runnable call still gets its card).
 `dispatch_effects` tracks actual local/MCP mutator invocation across the worker
 retry boundary, after validation and HITL. An unsuccessful dispatch after such
 an invocation carries `retry_safe=False`; keep it on `WorkerResult` through

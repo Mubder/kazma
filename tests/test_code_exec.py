@@ -204,9 +204,11 @@ for i in range(5):
 
     @pytest.mark.asyncio
     async def test_python_exec_empty_code(self) -> None:
-        """Empty code returns an error."""
-        result = await python_exec("")
-        assert "Error" in result
+        """Empty code is refused before anything runs."""
+        from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+        with pytest.raises(RefusedBeforeEffect, match="No code provided"):
+            await python_exec("")
 
     @pytest.mark.asyncio
     async def test_python_exec_exit_code_format(self) -> None:

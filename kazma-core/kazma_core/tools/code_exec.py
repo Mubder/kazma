@@ -731,8 +731,12 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     Returns:
         Formatted output with exit code, stdout, and stderr.
     """
+    # Refusals before anything runs raise RefusedBeforeEffect: the registry
+    # answers them as ordinary errors, never "effects unknown" (agent/tool_refusal).
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
     if not code or not code.strip():
-        return "Error: No code provided."
+        raise RefusedBeforeEffect("No code provided.")
 
     from kazma_core.store_registry import store_refusal
     from kazma_core.workspace.path_policy import code_mentions_control_plane
@@ -741,8 +745,8 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     if mentioned:
         # Normally refused before the approval card (commitment exec
         # resolver); this is the backstop when that layer is off.
-        return (
-            "Error: Kazma control-plane store — python_exec may not open it. "
+        raise RefusedBeforeEffect(
+            "Kazma control-plane store — python_exec may not open it. "
             + store_refusal(mentioned, door="python_exec")
         )
 
@@ -752,7 +756,7 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         strict_container = await asyncio.to_thread(container_required)
     except policy_read_failures():
         logger.warning("[code_exec] execution profile unavailable; refusing execution", exc_info=True)
-        return "Error: Execution policy is unavailable; execution refused."
+        raise RefusedBeforeEffect("Execution policy is unavailable; execution refused.") from None
     try:
         from kazma_core.sandbox.e2b import e2b_enabled, run_python as _e2b_run
 
