@@ -215,15 +215,31 @@ def _build_model_and_profile(
         headings_equivalent,
     )
 
+    # A section's level is its heading's ``#`` count, relative to the
+    # shallowest heading below the title: every heading used to be level 1,
+    # so a Markdown source's ``##`` groups and ``###`` entries were drawn the
+    # same size (live 2026-10-18, a tweet archive).
+    def _depth(raw: str) -> int:
+        stripped = raw.lstrip()
+        return len(stripped) - len(stripped.lstrip("#"))
+
+    depths = [_depth(str(item.get("heading") or "")) for item in sections
+              if _depth(str(item.get("heading") or ""))
+              and not headings_equivalent(str(item.get("heading") or "").lstrip("#").strip(), title_txt)]
+    base = min(depths) if depths else 1
+
     last_heading = title_txt
     for item in sections:
-        heading = (item.get("heading") or "").lstrip("#").strip()
+        raw_heading = str(item.get("heading") or "")
+        heading = raw_heading.lstrip().lstrip("#").strip()
         body = item.get("body") or ""
         if heading:
             body = drop_leading_heading(body, heading)
             body = drop_leading_heading(body, last_heading)
             if not headings_equivalent(heading, last_heading):
-                model.add(HeadingBlock(text=heading, level=1, fill=fill_h))
+                depth = _depth(raw_heading)
+                level = min(3, max(1, depth - base + 1)) if depth else 1
+                model.add(HeadingBlock(text=heading, level=level, fill=fill_h))
                 last_heading = heading
         if body.strip():
             model.add(BodyBlock(text=body))
@@ -566,6 +582,11 @@ def _libreoffice(request: dict[str, Any], source: Path, output: Path) -> None:
         )
     profile = output.parent / "lo-profile"
     profile.mkdir()
+    # A document Kazma generated names the bundled face (IBM Plex Sans
+    # Arabic); LibreOffice finds it only in the system or this profile.
+    from kazma_core.documents.fonts import give_soffice_the_bundled_fonts
+
+    give_soffice_the_bundled_fonts(profile)
     target = output.suffix.lstrip(".")
     env = {
         key: os.environ[key]

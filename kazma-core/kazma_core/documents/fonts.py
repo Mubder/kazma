@@ -41,6 +41,7 @@ __all__ = [
     "font_paths",
     "has_arabic_coverage",
     "embedded_font_face_css",
+    "give_soffice_the_bundled_fonts",
 ]
 
 # Sample codepoints spanning the ranges the reshaper actually emits. A font that
@@ -137,6 +138,32 @@ def bundled_font_dir() -> Path | None:
     if _BUNDLED_DIR.is_dir() and any(_BUNDLED_DIR.glob("*.ttf")):
         return _BUNDLED_DIR
     return None
+
+
+def give_soffice_the_bundled_fonts(profile_dir: Path) -> list[str]:
+    """Copy the bundled faces into a LibreOffice user profile's ``user/fonts``.
+
+    A DOCX names IBM Plex Sans Arabic (``THEME``), and LibreOffice uses only
+    the fonts the system, or the profile it runs with, holds. The document
+    worker image installs none of the bundle, so every Arabic PDF the
+    container rendered came out in DejaVu Sans with Noto Serif for Latin
+    (live 2026-10-18; the same DOCX in that image with the bundle in
+    ``user/fonts`` renders in Plex). Returns the file names copied; none
+    when the deployment ships no bundle (LibreOffice then substitutes).
+    """
+    import shutil
+
+    source = bundled_font_dir()
+    if source is None:
+        return []
+    target = Path(profile_dir) / "user" / "fonts"
+    target.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    for face in sorted(source.iterdir()):
+        if face.is_file() and face.suffix.lower() in (".ttf", ".otf"):
+            shutil.copyfile(face, target / face.name)
+            copied.append(face.name)
+    return copied
 
 
 def _bundled_pair(*, arabic: bool) -> tuple[Path, Path | None] | None:

@@ -712,6 +712,48 @@ class DocxEngine:
     # ================================================================== #
     # heading bar (full-width filled single-cell table)
     # ================================================================== #
+    #: Children of ``w:pPr`` that follow ``w:pBdr`` (ECMA-376 order).
+    _AFTER_PBDR = (
+        "w:shd", "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap",
+        "w:overflowPunct", "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN",
+        "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind",
+        "w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap", "w:jc",
+        "w:textDirection", "w:textAlignment", "w:textboxTightWrap", "w:outlineLvl",
+        "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange",
+    )
+    #: Children of ``w:pBdr``, in order.
+    _PBDR_ORDER = ("top", "left", "bottom", "right", "between", "bar")
+
+    def _edge_bar(self, p: Any, *, rtl: bool, color: str, size: int) -> None:
+        """A vertical bar on the paragraph's reading-start side.
+
+        ``rtl`` is the paragraph's own direction (``w:left``/``w:right`` are
+        the physical sides LibreOffice draws). ``w:pBdr`` and its children go
+        where the schema puts them: Word reports a file with them out of
+        order as damaged.
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        p_pr = p._p.get_or_add_pPr()
+        p_bdr = p_pr.find(qn("w:pBdr"))
+        if p_bdr is None:
+            p_bdr = OxmlElement("w:pBdr")
+            p_pr.insert_element_before(p_bdr, *self._AFTER_PBDR)
+        edge = "right" if rtl else "left"
+        side = OxmlElement(f"w:{edge}")
+        side.set(qn("w:val"), "single")
+        side.set(qn("w:sz"), str(size))
+        side.set(qn("w:space"), "8")
+        side.set(qn("w:color"), color)
+        later = {qn(f"w:{name}") for name in self._PBDR_ORDER[self._PBDR_ORDER.index(edge) + 1:]}
+        for index, child in enumerate(list(p_bdr)):
+            if child.tag in later:
+                p_bdr.insert(index, side)
+                break
+        else:
+            p_bdr.append(side)
+
     def _heading_bar(self, document: Any, text: str, *, level: int = 1,
                      fill_hex: str | None = None, indexable: bool = False) -> None:
         from docx.oxml import OxmlElement
@@ -751,15 +793,12 @@ class DocxEngine:
         bottom.set(qn("w:space"), "6")
         bottom.set(qn("w:color"), rule)
         p_bdr.append(bottom)
+        p_pr.insert_element_before(p_bdr, *self._AFTER_PBDR)
         if int(level) in (1, 2):
-            edge = "right" if self.profile.rtl else "left"
-            side = OxmlElement(f"w:{edge}")
-            side.set(qn("w:val"), "single")
-            side.set(qn("w:sz"), "18")
-            side.set(qn("w:space"), "8")
-            side.set(qn("w:color"), rule)
-            p_bdr.append(side)
-        p_pr.append(p_bdr)
+            # The bar sits on the heading's OWN reading side: a Latin heading
+            # in an Arabic document is set left-to-right, and its bar stayed
+            # on the right, away from the text (live 2026-10-18).
+            self._edge_bar(p, rtl=self.profile.block_is_rtl(text or ""), color=rule, size=18)
 
         self._set_paragraph(p, "start")
         # Keep the heading with the following body. Do NOT page-break-before
@@ -852,6 +891,14 @@ class DocxEngine:
             else:
                 _shade(cell, (self.theme.get("table_row_bg") or "#f8fafc").lstrip("#").upper())
             self._set_paragraph(p, "start")
+            # A cell is not a body paragraph: the body's 8pt after-space and
+            # 1.65 leading left every row tall with its text at the top.
+            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+
+            p.paragraph_format.space_before = Pt(3)
+            p.paragraph_format.space_after = Pt(3)
+            p.paragraph_format.line_spacing = 1.2
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
         for ci, h in enumerate(headers):
             _fill(table.rows[0].cells[ci], str(h), header=True)
@@ -888,8 +935,11 @@ class DocxEngine:
             blocks = [{"type": "paragraph", "text": p.strip()}
                       for p in body.split("\n\n") if p.strip()]
 
-        for block in blocks:
+        for index, block in enumerate(blocks):
             btype = block["type"]
+            # A paragraph that introduces a quote (a tweet's link) stays on
+            # the quote's page.
+            before_quote = index + 1 < len(blocks) and blocks[index + 1]["type"] == "quote"
             if btype == "heading":
                 level = min(3, max(1, int(block.get("level") or 2)))
                 fill = "1E3A5F" if level <= 2 else "334155"
@@ -903,17 +953,29 @@ class DocxEngine:
                                     list(maybe2.get("rows") or []))
                     continue
                 p = document.add_paragraph()
-                self._add_inline_md_runs(p, block.get("text") or "")
-                self._set_paragraph(p, "justify")
+                text = block.get("text") or ""
+                self._add_inline_md_runs(p, text)
+                # A line Word ends at a hard break is stretched when justified.
+                self._set_paragraph(p, "start" if "\n" in text else "justify")
+                if before_quote:
+                    p.paragraph_format.keep_with_next = True
             elif btype == "math":
                 self._write_math(document, block.get("text") or "", display=True)
             elif btype == "quote":
+                # Upright, a muted ink and a bar on the quote's own reading
+                # side: Arabic has no italic face (LibreOffice slanted it), and
+                # its lines (a tweet's) are kept as written (rich_render).
                 p = document.add_paragraph()
-                run = p.add_run(block.get("text") or "")
-                run.italic = True
-                run.font.color.rgb = RGBColor(0x47, 0x55, 0x69)
-                self._set_paragraph(p, "justify")
-                p.paragraph_format.left_indent = Pt(18)
+                text = block.get("text") or ""
+                self._add_inline_md_runs(p, text)
+                for run in p.runs:
+                    run.font.color.rgb = RGBColor(0x33, 0x41, 0x55)
+                self._set_paragraph(p, "start" if "\n" in text else "justify")
+                p.paragraph_format.left_indent = Pt(14)
+                # Its lines read as one block (a tweet), on one page.
+                p.paragraph_format.line_spacing = 1.4
+                p.paragraph_format.keep_together = True
+                self._edge_bar(p, rtl=self.profile.block_is_rtl(text), color="CBD5E1", size=18)
             elif btype == "code":
                 self._write_code_block(document, block.get("text") or "")
             elif btype == "list":
@@ -931,9 +993,25 @@ class DocxEngine:
                 self._add_table(document, list(block.get("headers") or []),
                                 list(block.get("rows") or []))
             elif btype == "hr":
-                p = document.add_paragraph("─" * 40)
-                from docx.enum.text import WD_ALIGN_PARAGRAPH
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                # A real rule (a bottom border on an empty paragraph): forty
+                # "─" were drawn in whatever font had the glyph (Tahoma,
+                # DejaVu), as a line of text.
+                from docx.oxml import OxmlElement
+                from docx.oxml.ns import qn
+
+                p = document.add_paragraph()
+                p_bdr = OxmlElement("w:pBdr")
+                bottom = OxmlElement("w:bottom")
+                bottom.set(qn("w:val"), "single")
+                bottom.set(qn("w:sz"), "6")
+                bottom.set(qn("w:space"), "1")
+                bottom.set(qn("w:color"), "CBD5E1")
+                p_bdr.append(bottom)
+                p._p.get_or_add_pPr().insert_element_before(p_bdr, *self._AFTER_PBDR)
+                self._set_paragraph(p, "start")
+                p.paragraph_format.space_before = Pt(4)
+                p.paragraph_format.space_after = Pt(10)
+                p.paragraph_format.line_spacing = 0.5
 
     def _add_inline_md_runs(self, paragraph: Any, text: str) -> None:
         """Add bold/italic/code/math/plain runs for inline Markdown."""

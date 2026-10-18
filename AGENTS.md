@@ -3287,8 +3287,16 @@ call-site-local normalization.
   the same wherever it is opened. That costs ~850 KB per Arabic file; the flag
   exists for deployments that serve these over the wire. English exports are
   never affected. DOCX names `THEME["font_latin"]` / `THEME["font_arabic"]`
-  (both IBM Plex Sans Arabic); LibreOffice needs the family, or the PDF
-  route copies the TTFs into the soffice user profile.
+  (both IBM Plex Sans Arabic); LibreOffice uses only the system's fonts and
+  its profile's, so every rendering conversion (the PDF route,
+  `renderer_worker._libreoffice`) copies the bundle into the profile's
+  `user/fonts` first (`fonts.give_soffice_the_bundled_fonts`). Until
+  2026-10-18 nothing did, and the document worker image installs no Plex:
+  every Arabic PDF the container profile rendered was DejaVu Sans with Noto
+  Serif for Latin (live: the owner's tweet archive). Gate:
+  `tests/test_document_archive_layout.py` (the opt-in
+  `KAZMA_TEST_DOCUMENT_WORKER_IMAGE` case converts in the real image with and
+  without the bundle).
 - **The images and CI carry the system deps.** `fonts-noto-core` (the Naskh
   faces ship inside it; `fonts-noto-naskh-arabic` is not a Debian/Ubuntu
   package, and naming it failed the image build and CI's Tests job),
@@ -3336,6 +3344,20 @@ Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
 in HTML) so a heading is never the last thing on a page. Paragraph widows and
 orphans are off (`allowWidows=0`/`allowOrphans=0`, `orphans: 3`/`widows: 3`).
+
+**A Markdown source keeps its shape** (2026-10-18, the same archive):
+`rich_render.parse_rich_blocks` keeps a hard line break (two trailing spaces
+or a backslash) as `\n` in a paragraph's or quote's text, and the engines
+draw it (DOCX a `w:br`, ReportLab line by line, so an Arabic paragraph's lines
+are not reversed; HTML through `markdown`) -- a tweet's lines ran into one
+justified paragraph. A quote is upright (Arabic has no italic face; LibreOffice
+slanted it), in muted ink, with a bar on its own reading side, kept on one page
+with the paragraph that introduces it. A section's heading level is its `#`
+count relative to the shallowest heading below the title
+(`renderer_worker._build_model_and_profile`; every section was level 1). A
+heading's bar sits on the heading's own reading side (`_edge_bar`, which also
+keeps `w:pBdr` in schema order). A divider is a rule, never a row of "─".
+Table cells are compact and vertically centred.
 
 `tests/test_document_layout.py` measures all of this against a rendered PDF
 with PyMuPDF rather than grepping the source — every defect it covers was

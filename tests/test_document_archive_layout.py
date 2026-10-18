@@ -1,0 +1,247 @@
+"""A generated Arabic PDF in the brand face, with its lines and levels kept.
+
+Live 2026-10-18: the owner asked for a PDF of every X post. The file came
+out of the document worker container in DejaVu Sans (Arabic) and Noto Serif
+(Latin) -- the DOCX names IBM Plex Sans Arabic and LibreOffice in the image
+had no Plex --, each tweet's lines ran into one justified paragraph, the
+quotes were italic (Arabic slanted by LibreOffice), ``##`` groups and
+``###`` entries were the same size, the heading bar of a Latin heading sat
+on the right, the divider was a row of "─" in a fallback font, and table
+rows were tall with their text at the top.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import zipfile
+from pathlib import Path
+
+import pytest
+from kazma_core.documents.content_model import BodyBlock, ContentModel, TitleBlock
+from kazma_core.documents.engines.docx import DocxEngine
+from kazma_core.documents.fonts import give_soffice_the_bundled_fonts
+from kazma_core.documents.profile import DocProfile
+from kazma_core.documents.rich_render import parse_rich_blocks
+
+#: The live archive's shape (two tweets, a table, a divider, two levels);
+#: ``<BR>`` is a hard break (two trailing spaces an editor would strip).
+ARCHIVE = """# أرشيف تغريدات كاظمه على X
+
+الحساب: @KazmaAI · المصدر: موصّل X الرسمي
+
+---
+
+## نطاق الملف — اقرأه أولاً
+
+| البند | القيمة |
+|---|---|
+| منها منشورة الآن | 9 |
+
+## أولاً: المنشورات القائمة (9)
+
+### 1 · 2026-10-16 — 12:25 UTC · 2111071024812847259
+
+https://x.com/KazmaAI/status/2111071024812847259
+
+> Kazma metrics — 2026-10-16, commit 03f80393<BR>
+> Python files: 2,371<BR>
+> Collected test cases: 17,128 (collected, not passes)
+
+### 2 · 2026-10-16 — 11:48 UTC · 2111061637000011943
+
+> كاظمه بالأرقام 2026-10-16<BR>
+> ملفات بايثون: 2,368<BR>
+> #كاظمه
+""".replace("<BR>", "  ")  # two trailing spaces: a Markdown hard break
+
+
+# ── the Markdown: hard line breaks are kept ─────────────────────────────
+
+
+def test_a_tweets_lines_stay_lines():
+    quotes = [b["text"] for b in parse_rich_blocks(ARCHIVE) if b["type"] == "quote"]
+    assert quotes[0].split("\n") == [
+        "Kazma metrics — 2026-10-16, commit 03f80393",
+        "Python files: 2,371",
+        "Collected test cases: 17,128 (collected, not passes)",
+    ]
+    assert quotes[1].split("\n")[-1] == "#كاظمه"
+
+
+def test_markdown_breaks_and_joins():
+    assert parse_rich_blocks("one\ntwo")[0]["text"] == "one two"  # a soft newline is a space
+    assert parse_rich_blocks("one  \ntwo\\\nthree")[0]["text"] == "one\ntwo\nthree"
+    assert parse_rich_blocks("> x\n>\n> y")[0]["text"] == "x\ny"
+    assert parse_rich_blocks("> a\n> b")[0]["text"] == "a b"
+
+
+def test_negative_control_the_old_join_lost_the_lines():
+    lines = [ln.lstrip("> ").strip() for ln in ARCHIVE.splitlines() if ln.startswith(">")][:3]
+    assert "\n" not in " ".join(lines)
+
+
+# ── the payload: a heading's level is its own ───────────────────────────
+
+
+def _model(sections, title="أرشيف تغريدات كاظمه على X"):
+    from kazma_core.documents.content_model import HeadingBlock
+    from kazma_core.documents.renderer_worker import _build_model_and_profile
+
+    model, _ = _build_model_and_profile({"title": title, "sections": sections, "lang": "ar", "rtl": True})
+    return [(b.text, b.level) for b in model.blocks if isinstance(b, HeadingBlock)]
+
+
+def test_section_levels_follow_their_hashes():
+    sections = [{"heading": "# أرشيف تغريدات كاظمه على X", "body": "x"},
+                {"heading": "## أولاً: المنشورات", "body": "x"},
+                {"heading": "### 1 · 2026-10-16", "body": "x"},
+                {"heading": "## ثانياً", "body": "x"},
+                {"heading": "Plain heading", "body": "x"}]
+    assert _model(sections) == [("أولاً: المنشورات", 1), ("1 · 2026-10-16", 2), ("ثانياً", 1),
+                                ("Plain heading", 1)]
+
+
+# ── the DOCX ────────────────────────────────────────────────────────────
+
+
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _docx(tmp_path: Path, text: str = ARCHIVE):
+    from lxml import etree
+
+    model = ContentModel()
+    model.add(TitleBlock(text="أرشيف تغريدات كاظمه على X", level=0))
+    model.add(BodyBlock(text=text))
+    out = tmp_path / "a.docx"
+    DocxEngine(DocProfile.for_content(text)).render(model, out)
+    with zipfile.ZipFile(out) as z:
+        return etree.fromstring(z.read("word/document.xml"))
+
+
+def _paragraphs(root):
+    for p in root.iter(f"{W}p"):
+        text = "".join(t.text or "" for t in p.iter(f"{W}t"))
+        yield p, text
+
+
+def _side(p) -> str | None:
+    bdr = p.find(f"{W}pPr/{W}pBdr")
+    if bdr is None:
+        return None
+    sides = [c.tag.replace(W, "") for c in bdr if c.tag in (f"{W}left", f"{W}right")]
+    return sides[0] if sides else None
+
+
+def test_quotes_are_upright_broken_into_lines_and_barred_on_their_side(tmp_path):
+    root = _docx(tmp_path)
+    quotes = {text: p for p, text in _paragraphs(root) if text.startswith(("Kazma metrics", "كاظمه بالأرقام"))}
+    en, ar = quotes["Kazma metrics — 2026-10-16, commit 03f80393Python files: 2,371Collected test cases: "
+                    "17,128 (collected, not passes)"], next(p for t, p in quotes.items() if t.startswith("كاظمه"))
+    for p in (en, ar):
+        assert not list(p.iter(f"{W}i")), "no italic"
+        assert len(list(p.iter(f"{W}br"))) == 2, "the tweet's line breaks"
+    assert _side(en) == "left" and _side(ar) == "right"
+
+
+def test_a_latin_headings_bar_sits_on_its_left_in_an_arabic_document(tmp_path):
+    root = _docx(tmp_path, ARCHIVE.replace("### 1 · 2026-10-16", "## 1 · 2026-10-16"))
+    latin = next(p for p, t in _paragraphs(root) if t.startswith("1 · 2026-10-16"))
+    arabic = next(p for p, t in _paragraphs(root) if t.startswith("أولاً"))
+    assert _side(latin) == "left" and _side(arabic) == "right"
+
+
+def test_the_divider_is_a_rule_not_a_line_of_glyphs(tmp_path):
+    root = _docx(tmp_path)
+    assert not any("─" in t for _, t in _paragraphs(root))
+    rules = [p for p, t in _paragraphs(root) if not t and p.find(f"{W}pPr/{W}pBdr/{W}bottom") is not None]
+    assert rules
+
+
+def test_borders_sit_where_the_schema_puts_them(tmp_path):
+    """Word reports a file whose pPr children are out of order as damaged."""
+    root = _docx(tmp_path)
+    for p, _ in _paragraphs(root):
+        ppr = p.find(f"{W}pPr")
+        if ppr is None or ppr.find(f"{W}pBdr") is None:
+            continue
+        tags = [c.tag.replace(W, "") for c in ppr]
+        before = tags[:tags.index("pBdr")]
+        later = {t.replace("w:", "") for t in DocxEngine._AFTER_PBDR}
+        assert not (later & set(before)), tags
+        sides = [c.tag.replace(W, "") for c in ppr.find(f"{W}pBdr")]
+        order = ["top", "left", "bottom", "right", "between", "bar"]
+        assert sides == sorted(sides, key=order.index), sides
+
+
+def test_table_cells_are_compact_and_centred(tmp_path):
+    root = _docx(tmp_path)
+    tc = next(root.iter(f"{W}tc"))
+    assert tc.find(f"{W}tcPr/{W}vAlign").get(f"{W}val") == "center"
+    spacing = tc.find(f"{W}p/{W}pPr/{W}spacing")
+    assert spacing.get(f"{W}after") == "60"  # 3 pt
+
+
+# ── the fonts LibreOffice is given ──────────────────────────────────────
+
+
+def test_the_conversion_profile_holds_the_bundled_faces(tmp_path):
+    copied = give_soffice_the_bundled_fonts(tmp_path)
+    assert {"IBMPlexSansArabic-Regular.ttf", "IBMPlexSansArabic-Bold.ttf"} <= set(copied)
+    assert (tmp_path / "user" / "fonts" / "IBMPlexSansArabic-Regular.ttf").is_file()
+
+
+def test_the_pdf_route_converts_with_that_profile(tmp_path, monkeypatch):
+    """The DOCX→LibreOffice route hands soffice a profile holding the bundle."""
+    from kazma_core.documents import binaries
+    from kazma_core.documents.engines import pdf as pdfmod
+
+    seen: dict[str, list[str]] = {}
+
+    def fake_soffice(args, **kwargs):
+        profile = next(a for a in args if a.startswith("-env:UserInstallation="))
+        from urllib.parse import unquote, urlparse
+
+        path = Path(unquote(urlparse(profile.split("=", 1)[1]).path).lstrip("/") if os.name == "nt"
+                    else unquote(urlparse(profile.split("=", 1)[1]).path))
+        seen["fonts"] = sorted(f.name for f in (path / "user" / "fonts").glob("*.ttf"))
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(binaries, "find_soffice", lambda: "soffice")
+    monkeypatch.setattr(binaries, "run_soffice_cli", fake_soffice)
+    model = ContentModel()
+    model.add(BodyBlock(text="نص عربي"))
+    pdfmod.PdfEngine(DocProfile.for_content("نص عربي"), []).render(model, tmp_path / "x.pdf")
+    assert "IBMPlexSansArabic-Regular.ttf" in seen["fonts"]
+
+
+# ── the real worker image (opt-in) ──────────────────────────────────────
+
+IMAGE = os.environ.get("KAZMA_TEST_DOCUMENT_WORKER_IMAGE", "")
+
+
+@pytest.mark.skipif(not IMAGE or not shutil.which("docker"), reason="needs KAZMA_TEST_DOCUMENT_WORKER_IMAGE and docker")
+def test_libreoffice_in_the_worker_image_renders_in_plex_only_with_the_bundle(tmp_path):
+    """The live failure, in the image: no bundle in the profile -> DejaVu and
+    Noto Serif (the negative control); the bundle -> Plex."""
+    import pymupdf
+
+    model = ContentModel()
+    model.add(TitleBlock(text="أرشيف تغريدات كاظمه على X", level=0))
+    model.add(BodyBlock(text=ARCHIVE))
+    DocxEngine(DocProfile.for_content(ARCHIVE)).render(model, tmp_path / "a.docx")
+    give_soffice_the_bundled_fonts(tmp_path / "with")
+    (tmp_path / "without").mkdir()
+    fonts = {}
+    for profile in ("with", "without"):
+        subprocess.run(["docker", "run", "--rm", "--network", "none", "-v", f"{tmp_path}:/w",
+                        "--entrypoint", "soffice", IMAGE, "--headless", "--nologo", "--norestore",
+                        f"-env:UserInstallation=file:///w/{profile}", "--convert-to", "pdf",
+                        "--outdir", f"/w/{profile}", "/w/a.docx"], check=True, timeout=300,
+                       capture_output=True)
+        doc = pymupdf.open(tmp_path / profile / "a.pdf")
+        fonts[profile] = {f[3].split("+")[-1] for page in doc for f in page.get_fonts()}
+    assert fonts["with"] == {"IBMPlexSansArabic", "IBMPlexSansArabic-Bold"}, fonts
+    assert not any("Plex" in f for f in fonts["without"]), fonts
