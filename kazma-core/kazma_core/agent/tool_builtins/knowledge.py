@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect, effect_unknown
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def register_knowledge_tools(registry: Any) -> None:
         try:
             refused = _refusal()
             if refused:
-                return refused
+                raise RefusedBeforeEffect(refused)
             from kazma_core.stores.knowledge import (
                 KnowledgeUrlRefused,
                 get_knowledge_store,
@@ -97,11 +98,11 @@ def register_knowledge_tools(registry: Any) -> None:
             store = get_knowledge_store()
             lib_id = (library_id or "").strip()
             if not lib_id:
-                return "Error: library_id is required."
+                raise RefusedBeforeEffect("Error: library_id is required.")
             try:
                 validate_web_url(seed_url, allow_empty=True)
             except KnowledgeUrlRefused as exc:
-                return f"Error: seed_url refused — {exc}"
+                raise RefusedBeforeEffect(f"Error: seed_url refused — {exc}") from exc
             display = (name or "").strip() or lib_id.replace("_", " ").replace("-", " ")
             existing = store.get_library(lib_id)
             if existing:
@@ -111,10 +112,8 @@ def register_knowledge_tools(registry: Any) -> None:
                         f"(name={existing.get('name')!r}, chunks={existing.get('chunk_count', 0)}). "
                         "Use knowledge_ingest_url to add pages."
                     )
-                return (
-                    f"Error: Library already exists: id={existing.get('id')} "
-                    f"name={existing.get('name')!r}."
-                )
+                raise RefusedBeforeEffect(f"Error: Library already exists: id={existing.get('id')} "
+                    f"name={existing.get('name')!r}.")
             created = store.create_library(
                 lib_id,
                 display,
@@ -126,6 +125,8 @@ def register_knowledge_tools(registry: Any) -> None:
                 f"name={created.get('name')!r}. "
                 "Next: knowledge_ingest_url(library_id, url)."
             )
+        except RefusedBeforeEffect:
+            raise
         except Exception as exc:
             return f"Error: create library failed — {exc}"
 
@@ -147,21 +148,21 @@ def register_knowledge_tools(registry: Any) -> None:
         try:
             refused = await asyncio.to_thread(_refusal)
             if refused:
-                return refused
+                raise RefusedBeforeEffect(refused)
             from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
             from kazma_core.stores.knowledge_ingest import ingest_url
 
             lib_id = slugify_library_id((library_id or "").strip()) if (library_id or "").strip() else ""
             page = (url or "").strip()
             if not lib_id or not page:
-                return "Error: library_id and url are required."
+                raise RefusedBeforeEffect("Error: library_id and url are required.")
             display = (name or "").strip() or lib_id.replace("_", " ")
             result = await ingest_url(
                 lib_id, page, document_title=(document_title or "").strip(), name=display
             )
             if result.pages_failed or not result.pages_fetched:
                 err = "; ".join(result.errors[:3]) if result.errors else "fetch failed"
-                return f"Error: ingest failed for {page!r} — {err}"
+                return effect_unknown(f"Error: ingest failed for {page!r} — {err}")
             store = await asyncio.to_thread(get_knowledge_store)
             lib = await asyncio.to_thread(store.get_library, lib_id) or {}
             return (
@@ -171,6 +172,8 @@ def register_knowledge_tools(registry: Any) -> None:
                 f"Library total chunks={lib.get('chunk_count', '?')}. "
                 f"Search with knowledge_search(query, library={lib_id!r})."
             )
+        except RefusedBeforeEffect:
+            raise
         except Exception as exc:
             return f"Error: knowledge_ingest_url failed — {exc}"
 
@@ -193,7 +196,7 @@ def register_knowledge_tools(registry: Any) -> None:
         try:
             refused = await asyncio.to_thread(_refusal)
             if refused:
-                return refused
+                raise RefusedBeforeEffect(refused)
             from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
             from kazma_core.stores.knowledge_ingest import _prepare_ingest_site, ingest_site
             from kazma_core.web_acquire.crawl_jobs import call
@@ -201,7 +204,7 @@ def register_knowledge_tools(registry: Any) -> None:
             lib_id = slugify_library_id((library_id or "").strip()) if (library_id or "").strip() else ""
             seed = (seed_url or "").strip()
             if not lib_id or not seed:
-                return "Error: library_id and seed_url are required."
+                raise RefusedBeforeEffect("Error: library_id and seed_url are required.")
             try:
                 cap = max(1, min(int(max_pages or 5), 15))
             except (TypeError, ValueError):
@@ -229,7 +232,7 @@ def register_knowledge_tools(registry: Any) -> None:
                 last = upd
                 final_msg = getattr(upd, "message", "") or final_msg
             if last is None or last.phase == 'error':
-                return f"Error: knowledge_ingest_site failed — {final_msg or 'No terminal crawl outcome received.'}"
+                return effect_unknown(f"Error: knowledge_ingest_site failed — {final_msg or 'No terminal crawl outcome received.'}")
             lib = await asyncio.to_thread(store.get_library, lib_id) or {}
             failed = getattr(last, "failed", 0)
             return (
@@ -242,6 +245,8 @@ def register_knowledge_tools(registry: Any) -> None:
                 f"Crawl job={getattr(last, 'job_id', '')}; inspect with research_readiness(job_id). "
                 f"Search with knowledge_search(query, library={lib_id!r})."
             )
+        except RefusedBeforeEffect:
+            raise
         except Exception as exc:
             return f"Error: knowledge_ingest_site failed — {exc}"
 

@@ -31,6 +31,8 @@ from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
+from tests._tool_answer import answer
+
 ROOT = Path(__file__).resolve().parents[1]
 _TEMPLATE_DIR = ROOT / "kazma-ui" / "kazma_ui" / "templates"
 _CSRF = {"X-Requested-With": "XMLHttpRequest"}
@@ -56,7 +58,6 @@ def real_cron(tmp_path, monkeypatch):
     """The real CronScheduler + SQLiteCronStore behind the real router."""
     import kazma_core.cron.scheduler as sm
     from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
-
     from kazma_ui.scheduled_api import create_scheduled_router
 
     db = tmp_path / "cron.db"
@@ -290,7 +291,6 @@ def test_the_page_says_why_in_its_language(monkeypatch) -> None:
     in both languages)."""
     import kazma_core.security.platform_rbac as rbac
     from fastapi.responses import HTMLResponse
-
     from kazma_ui.i18n.catalog.scheduled import TRANSLATIONS
     from kazma_ui.scheduled_api import create_scheduled_router
 
@@ -326,8 +326,9 @@ async def test_with_platform_users_every_tool_refuses(real_cron, monkeypatch) ->
 
     monkeypatch.setattr(rbac, "_load_users_from_store", lambda: [{"username": "a"}])
     tools = importlib.import_module("kazma_skills.native.task_scheduler_cron.tools")
-    for out in (await tools.schedule_task("1h", "x"), await tools.list_scheduled(),
-                await tools.cancel_scheduled("cron-x"), await tools.edit_scheduled("cron-x", prompt="y")):
+    for out in (await answer(tools.schedule_task("1h", "x")), await answer(tools.list_scheduled()),
+                await answer(tools.cancel_scheduled("cron-x")),
+                await answer(tools.edit_scheduled("cron-x", prompt="y"))):
         assert json.loads(out)["code"] == "scheduled_single_operator"
 
 

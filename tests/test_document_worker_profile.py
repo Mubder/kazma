@@ -37,6 +37,8 @@ from kazma_core.safety.deployment_policy import (
     DOCUMENT_WORKER_ISOLATION_KEY,
 )
 
+from tests._tool_answer import answer_now
+
 ENV = "KAZMA_DOCUMENT_WORKER_ISOLATION"
 
 
@@ -153,7 +155,7 @@ def test_the_agent_s_config_tool_cannot_change_the_profile(store) -> None:
 
     reg = LocalToolRegistry()
     register_system_tools(reg)
-    out = reg._tools["config_save"].func(key=DOCUMENT_WORKER_ISOLATION_KEY, value="process")
+    out = answer_now(reg._tools["config_save"].func, key=DOCUMENT_WORKER_ISOLATION_KEY, value="process")
     assert out.startswith("Error: Cannot modify restricted key"), out
     assert store.get(DOCUMENT_WORKER_ISOLATION_KEY) is None
 

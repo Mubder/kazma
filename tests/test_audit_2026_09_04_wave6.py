@@ -16,7 +16,6 @@ Covers:
 """
 
 import asyncio
-import io
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,7 +23,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # H8 & M16: Skills UI & Research ready rate limit
@@ -127,14 +125,15 @@ def test_health_and_pending_approvals_gate():
 
 @pytest.mark.asyncio
 async def test_browser_automation_ssrf_and_cleanup():
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
     from kazma_skills.native.browser_automation.tools import _close_sync, browser_navigate
 
-    # SSRF: loopback / metadata blocked
-    res = await browser_navigate("http://127.0.0.1:8000")
-    assert "Error: URL blocked" in res and "blocked" in res
-
-    res_meta = await browser_navigate("http://169.254.169.254/latest/meta-data/")
-    assert "Error: URL blocked" in res_meta and "blocked" in res_meta
+    # SSRF: loopback / metadata blocked -- refused before the browser starts,
+    # so the registry answers an ordinary error, never "effects unknown".
+    for url in ("http://127.0.0.1:8000", "http://169.254.169.254/latest/meta-data/"):
+        with pytest.raises(RefusedBeforeEffect) as refused:
+            await browser_navigate(url)
+        assert refused.value.content().startswith("Error: URL blocked")
 
     # Test _close_sync error isolation
     mock_page = MagicMock()

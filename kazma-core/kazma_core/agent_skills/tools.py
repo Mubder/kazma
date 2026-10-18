@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 __all__ = [
     "activate_skill",
@@ -114,12 +115,10 @@ async def install_agent_skill(source: str, scope: str = "user") -> str:
 
     src = (source or "").strip()
     if not src:
-        return (
-            "Error: source is required. Examples:\n"
+        raise RefusedBeforeEffect("Error: source is required. Examples:\n"
             "  install_agent_skill(source='shadcn/improve')\n"
             "  install_agent_skill(source='https://github.com/shadcn/improve')\n"
-            "Browse: https://agentskills.io/"
-        )
+            "Browse: https://agentskills.io/")
 
     scope_norm = (scope or "user").strip().lower()
     if scope_norm not in ("user", "project"):
@@ -136,7 +135,7 @@ async def uninstall_agent_skill(name: str) -> str:
 
     skill_name = (name or "").strip()
     if not skill_name:
-        return "Error: skill name is required."
+        raise RefusedBeforeEffect("Error: skill name is required.")
     result = await asyncio.to_thread(uninstall_skill, skill_name)
     return result.to_user_message()
 

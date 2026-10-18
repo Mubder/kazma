@@ -20,6 +20,7 @@ from kazma_core.workspace.binding import (
 )
 from kazma_core.tools.text_newlines import existing_newline, in_newline_style
 from kazma_core.workspace.path_policy import check_path_access, denied_message, resolve_and_check
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect, effect_unknown
 
 __all__ = ["configure_workspace", "file_write"]
 
@@ -88,19 +89,19 @@ async def file_write(path: str, content: str) -> str:
         Success message with line/byte counts, or a friendly error.
     """
     if not path or not path.strip():
-        return "Error: No path provided."
+        raise RefusedBeforeEffect("Error: No path provided.")
 
     # ── Safety check (workspace + path grants + allow_absolute) ───
     # Store reads: resolved and checked in a worker thread.
     p, access = await resolve_and_check(path, "write")
     if not access.allowed:
-        return denied_message(path, "write", result=access)
+        raise RefusedBeforeEffect(denied_message(path, "write", result=access))
 
     MAX_FILE_WRITE_BYTES = 8 * 1024 * 1024  # 8 MB cap
     encoded_bytes = content.encode("utf-8")
     byte_count = len(encoded_bytes)
     if byte_count > MAX_FILE_WRITE_BYTES:
-        return f"Error: Content exceeds maximum write limit of 8 MB (received {byte_count} bytes)."
+        raise RefusedBeforeEffect(f"Error: Content exceeds maximum write limit of 8 MB (received {byte_count} bytes).")
 
     def _write_sync() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -133,10 +134,8 @@ async def file_write(path: str, content: str) -> str:
                 await asyncio.to_thread(p.unlink)
             except Exception:
                 pass
-            return (
-                "Error: destination changed between access check and write "
-                f"(symlink swap?) — {path}"
-            )
+            return effect_unknown("Error: destination changed between access check and write "
+                f"(symlink swap?) — {path}")
     except PermissionError:
         return _friendly_error(PermissionError(), path)
     except IsADirectoryError:

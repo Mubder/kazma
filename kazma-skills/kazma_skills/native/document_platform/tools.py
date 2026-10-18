@@ -13,6 +13,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Any
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -303,7 +304,7 @@ async def document_cancel(job_id: str) -> str:
     """Request cooperative cancellation of a running/pending document job."""
 
     if not job_id.strip():
-        return "Error: job_id is required"
+        raise RefusedBeforeEffect("Error: job_id is required")
     scope = await _scope()
     if isinstance(scope, str):
         return scope
@@ -366,9 +367,9 @@ async def document_redact(
     """
 
     if not document_id.strip():
-        return "Error: document_id is required"
+        raise RefusedBeforeEffect("Error: document_id is required")
     if not isinstance(terms, (list, tuple)) or not terms:
-        return "Error: at least one redaction term is required"
+        raise RefusedBeforeEffect("Error: at least one redaction term is required")
     scope = await _scope()
     if isinstance(scope, str):
         return scope

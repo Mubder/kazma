@@ -19,6 +19,7 @@ from kazma_skills.native.email_manager.router import (
     mode_banner,
     resolve_provider,
 )
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 # account= names a mail account: its name ("work"), its address, or a main
 # account's word ("gmail"); email_accounts lists them (email_manager.accounts).
@@ -127,7 +128,8 @@ async def email_list(
             + "\n\nUse `email_get(message_id=...)` for full body."
         )
     except EmailNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:
         logger.exception("email_list failed")
         msg = str(exc)
@@ -194,7 +196,8 @@ async def email_get(
     except KeyError as exc:
         return f"Error: {exc}"
     except EmailNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:
         logger.exception("email_get failed")
         return f"Error getting email: {exc}"
@@ -215,11 +218,11 @@ async def email_send(
     try:
         action_n = (action or "send").lower().strip()
         if action_n not in ("send", "reply", "forward", "draft"):
-            return "Error: action must be send|reply|forward|draft"
+            raise RefusedBeforeEffect("Error: action must be send|reply|forward|draft")
         to_list = _parse_addr_list(to)
         if action_n in ("send", "forward") and not to_list and action_n != "draft":
             if action_n == "send" and not to_list:
-                return "Error: `to` is required for send."
+                raise RefusedBeforeEffect("Error: `to` is required for send.")
         backend = await asyncio.to_thread(get_backend, provider, account or None)
         banner = mode_banner(backend)
         result = await backend.send(
@@ -241,8 +244,11 @@ async def email_send(
             f"message_id: `{result.message_id or 'n/a'}`\n"
             f"{result.detail}"
         )
+    except RefusedBeforeEffect:
+        raise
     except EmailNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:
         logger.exception("email_send failed")
         return f"Error sending email: {exc}"
@@ -256,7 +262,7 @@ async def email_delete(
 ) -> str:
     """Move email to trash or permanently delete. Requires HITL approval."""
     if not message_id or not str(message_id).strip():
-        return "Error: message_id is required."
+        raise RefusedBeforeEffect("Error: message_id is required.")
     try:
         backend = await asyncio.to_thread(get_backend, provider, account or None)
         banner = mode_banner(backend)
@@ -266,7 +272,8 @@ async def email_delete(
     except KeyError as exc:
         return f"Error: {exc}"
     except EmailNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:
         logger.exception("email_delete failed")
         return f"Error deleting email: {exc}"
@@ -284,7 +291,7 @@ async def email_categorize(
 ) -> str:
     """Mark read/unread, star, labels/folders. Requires HITL approval."""
     if not message_id or not str(message_id).strip():
-        return "Error: message_id is required."
+        raise RefusedBeforeEffect("Error: message_id is required.")
     try:
         backend = await asyncio.to_thread(get_backend, provider, account or None)
         banner = mode_banner(backend)
@@ -302,7 +309,8 @@ async def email_categorize(
     except KeyError as exc:
         return f"Error: {exc}"
     except EmailNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:
         logger.exception("email_categorize failed")
         return f"Error categorizing email: {exc}"
@@ -362,7 +370,8 @@ async def email_analyze(
     except KeyError as exc:
         return f"Error: {exc}"
     except EmailNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:
         logger.exception("email_analyze failed")
         return f"Error analyzing email: {exc}"

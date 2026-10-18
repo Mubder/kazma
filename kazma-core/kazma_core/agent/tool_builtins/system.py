@@ -13,6 +13,8 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
 logger = logging.getLogger(__name__)
 
 _pending_dispatch_tasks: set[Any] = set()
@@ -110,12 +112,10 @@ def register_system_tools(registry: Any) -> None:
         # expose a secret. One list, shared with the commitment resolver
         # (kazma_core.safety.protected_config; audit 2026-09-30, AUD-007).
         if is_protected_config_key(key):
-            return f"Error: Cannot modify restricted key '{key}'."
+            raise RefusedBeforeEffect(f"Error: Cannot modify restricted key '{key}'.")
         if is_sensitive_config_key(key):
-            return (
-                f"Error: '{key}' is a sensitive credential. "
-                "Change it in Settings UI — not via tools."
-            )
+            raise RefusedBeforeEffect(f"Error: '{key}' is a sensitive credential. "
+                "Change it in Settings UI — not via tools.")
         # The value checks the Settings page applies (a time zone the
         # scheduler can resolve, a retention the sweep can read...).
         from kazma_core.settings_validation import SettingRejected, validate_setting
@@ -253,7 +253,6 @@ def register_system_tools(registry: Any) -> None:
     async def shell_exec(command: str, timeout: int = 30) -> str:
         import shlex
 
-        from kazma_core.agent.tool_refusal import RefusedBeforeEffect
         from kazma_core.safety.shell_preflight import shell_refusal
 
         # Every refusal before the process starts is RefusedBeforeEffect:
@@ -675,7 +674,7 @@ def register_system_tools(registry: Any) -> None:
 
         manager = get_sub_agent_manager()
         if manager is None:
-            return "Error: Sub-agent manager not initialized."
+            raise RefusedBeforeEffect("Error: Sub-agent manager not initialized.")
 
         try:
             tool_list = _json.loads(tools) if isinstance(tools, str) else tools
@@ -699,7 +698,7 @@ def register_system_tools(registry: Any) -> None:
 
         manager = get_sub_agent_manager()
         if manager is None:
-            return "Error: Sub-agent manager not initialized."
+            raise RefusedBeforeEffect("Error: Sub-agent manager not initialized.")
 
         try:
             task_list = _json.loads(tasks) if isinstance(tasks, str) else tasks
@@ -707,7 +706,7 @@ def register_system_tools(registry: Any) -> None:
             return "Error: tasks must be a JSON array."
 
         if not isinstance(task_list, list):
-            return "Error: tasks must be a JSON array."
+            raise RefusedBeforeEffect("Error: tasks must be a JSON array.")
 
         results = await manager.spawn_parallel(task_list)
         return _json.dumps(
@@ -740,13 +739,11 @@ def register_system_tools(registry: Any) -> None:
         # A single-operator surface (SW-S16, decision D1).
         refusal = await _asyncio.to_thread(swarm_refusal)
         if refusal:
-            return f"Error: {refusal}"
+            raise RefusedBeforeEffect(f"Error: {refusal}")
         engine = get_swarm_engine()
         if engine is None:
-            return (
-                "Error: Swarm engine not initialized. "
-                "Configure swarm workers in kazma.yaml."
-            )
+            raise RefusedBeforeEffect("Error: Swarm engine not initialized. "
+                "Configure swarm workers in kazma.yaml.")
 
         # Auto-register a default "researcher" worker if none exist, so
         # dispatch_swarm works out of the box without manual setup.

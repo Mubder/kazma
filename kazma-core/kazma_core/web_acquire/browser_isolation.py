@@ -5,21 +5,57 @@ import os
 import sys
 from pathlib import Path
 
+# Imports stay inside the functions: this file also runs as the launcher
+# inside the new namespace (``__main__`` below), before anything is verified.
+
+_NO_ISOLATION = ('Strict local browser rendering requires OS network isolation. This host has no '
+                 'qualified implementation; launch refused. HTTP extraction remains available. '
+                 'KAZMA_BROWSER_NETWORK_MODE=compatibility is an explicit weaker operator mode.')
+_NO_UNSHARE = 'Strict local browser rendering requires Linux unshare and delegated cgroup v2; launch refused.'
+_NO_BOUNDARY = ('Bounded local Chromium currently requires Windows Job Objects or Linux cgroup v2; '
+                'launch was refused.')
+
+
+def launch_refusal():
+    """Why this host would refuse to start the browser, or None.
+
+    The same decision ``network_command`` and the driver start make, asked
+    without starting anything, so a browser tool can refuse before its
+    approval card and before it acts (live 2026-10-18: an approved
+    ``browser_navigate`` on Windows ended the turn as "effects unknown").
+    Reads the environment and PATH: call it off the loop.
+    """
+    from kazma_core.web_acquire.policy import AcquisitionPolicyError, acquisition_policy
+    try:
+        mode = acquisition_policy().browser_network
+    except AcquisitionPolicyError as exc:
+        return str(exc)
+    if not (os.name == 'nt' or sys.platform.startswith('linux')):
+        return _NO_BOUNDARY
+    if mode == 'compatibility':
+        return None
+    if not sys.platform.startswith('linux'):
+        return _NO_ISOLATION
+    import shutil
+    if shutil.which('unshare') is None:
+        return _NO_UNSHARE
+    return None
+
 
 def network_command(command):
     from kazma_core.web_acquire.policy import acquisition_policy
-    from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
+    from kazma_core.web_acquire.result import BrowserLaunchRefused
     mode = acquisition_policy().browser_network
     if mode == 'compatibility':
         import logging
         logging.getLogger(__name__).warning('Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.')
         return command
     if not sys.platform.startswith('linux'):
-        raise AcquisitionError(FetchErrorCode.UNAVAILABLE, 'Strict local browser rendering requires OS network isolation. This host has no qualified implementation; launch refused. HTTP extraction remains available. KAZMA_BROWSER_NETWORK_MODE=compatibility is an explicit weaker operator mode.')
+        raise BrowserLaunchRefused(_NO_ISOLATION)
     import shutil
     unshare = shutil.which('unshare')
     if unshare is None:
-        raise AcquisitionError(FetchErrorCode.UNAVAILABLE, 'Strict local browser rendering requires Linux unshare and delegated cgroup v2; launch refused.')
+        raise BrowserLaunchRefused(_NO_UNSHARE)
     namespace = os.readlink('/proc/self/ns/net')
     return [unshare, '--user', '--map-current-user', '--net', '--', sys.executable, '-I', str(Path(__file__).resolve()), namespace, *command]
 

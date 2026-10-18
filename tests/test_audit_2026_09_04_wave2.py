@@ -9,18 +9,17 @@
 from __future__ import annotations
 
 import ast
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from kazma_core.config_store import get_config_store
 from kazma_core.http_pool import close_http_client
 from kazma_core.settings_manager import SettingsManager
 from kazma_core.tools.file_write import file_write
 from kazma_ui.workspace_api import _scan_recent_files
 
+from tests._tool_answer import answer
 
 # ── H1: SettingsManager Log Tail Bounding ───────────────────────────────────
 
@@ -146,7 +145,7 @@ class TestWave2M11FileWrite:
         target = tmp_path / "oversize.txt"
         oversized = "x" * (8 * 1024 * 1024 + 1)
         with patch("kazma_core.tools.file_write.resolve_active_root", return_value=tmp_path):
-            res = await file_write(str(target), oversized)
+            res = await answer(file_write(str(target), oversized))
             assert "Error: Content exceeds maximum write limit of 8 MB" in res
             assert not target.exists()
 

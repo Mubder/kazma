@@ -21,13 +21,13 @@ hold; the migration of a store made under the old key is there too.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sqlite3
 from types import SimpleNamespace
 
 import pytest
 
+from tests._tool_answer import answer as tool_answer
 from tests.test_memory_routes_tenant_scope import _as_tenant, _beta_rows, _memory_tools, _seed
 
 
@@ -113,7 +113,7 @@ def test_s04_renaming_your_own_self_entity_leaves_another_tenants_hub(mem):
 def test_s04_the_agent_merge_tool_keeps_to_its_tenant(mem):
     _two_tenants(mem)
     tools = _memory_tools()
-    out = json.loads(_as_tenant("alpha", tools["memory_merge_entities"], "beta_proj", "alpha_proj"))
+    out = json.loads(_as_tenant("alpha", lambda: tool_answer(tools["memory_merge_entities"]("beta_proj", "alpha_proj"))))
     assert out == {"ok": False, "error": "source or target not found"}
     src = mem.db.execute("SELECT metadata_json FROM entities WHERE id='beta_proj' AND tenant_id='beta'").fetchone()
     tgt = mem.db.execute("SELECT aliases_json FROM entities WHERE id='alpha_proj' AND tenant_id='alpha'").fetchone()
@@ -171,7 +171,7 @@ def _call(tools, name, args, tenant):
 
     fn = tools[name]
     params = list(inspect.signature(fn).parameters)
-    return _as_tenant(tenant, lambda: fn(**dict(zip(params, args, strict=False))))
+    return _as_tenant(tenant, lambda: tool_answer(fn(**dict(zip(params, args, strict=False)))))
 
 
 @pytest.mark.parametrize(("name", "args"), ID_TOOL_CALLS, ids=[f"{n}:{a[0]}" for n, a in ID_TOOL_CALLS])

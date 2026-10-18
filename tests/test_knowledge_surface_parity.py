@@ -11,12 +11,12 @@ multi-user install the same way.
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests._tool_answer import answer_now
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -139,8 +139,7 @@ def multi_user(monkeypatch):
 
 
 def _call(tool, **kwargs):
-    out = tool.func(**kwargs)
-    return asyncio.run(out) if inspect.isawaitable(out) else out
+    return answer_now(tool.func, **kwargs)
 
 
 TOOL_CALLS = {

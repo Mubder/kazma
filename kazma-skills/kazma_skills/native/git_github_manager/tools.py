@@ -14,6 +14,7 @@ from kazma_core.tools.file_write import _get_workspace
 # Network-bound git push/pull used to run ON the event loop (audit F-4).
 from kazma_skills.native._subprocess import run_off_loop
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 # Disable interactive terminal credential prompts across all Git sub-processes
 os.environ["GIT_TERMINAL_PROMPT"] = "0"
@@ -133,7 +134,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT") or ""
 
     if not token:
-        return "Error: No active GitHub token or App credentials found. Please configure GitHub App or PAT in the Web UI."
+        raise RefusedBeforeEffect("Error: No active GitHub token or App credentials found. Please configure GitHub App or PAT in the Web UI.")
 
     # Strip token in case of whitespace/newlines from .env or db
     token = token.strip()
@@ -547,7 +548,7 @@ async def github_create_pr(title: str, body: str, head: str, base: str = "main")
     # Fallback: direct httpx with env-var token (headless deployment).
     token = os.getenv("GITHUB_TOKEN")
     if not token:
-        return "Error: No GitHub token configured. Set GITHUB_TOKEN or connect GitHub in the Web UI."
+        raise RefusedBeforeEffect("Error: No GitHub token configured. Set GITHUB_TOKEN or connect GitHub in the Web UI.")
     try:
         async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.post(
@@ -590,7 +591,7 @@ async def github_merge_pr(number: int, commit_title: str | None = None, merge_me
 
     token = os.getenv("GITHUB_TOKEN")
     if not token:
-        return "Error: No GitHub token configured."
+        raise RefusedBeforeEffect("Error: No GitHub token configured.")
     try:
         async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.put(
@@ -628,7 +629,7 @@ async def github_create_issue(title: str, body: str, labels: list[str] | None = 
 
     token = os.getenv("GITHUB_TOKEN")
     if not token:
-        return "Error: No GitHub token configured."
+        raise RefusedBeforeEffect("Error: No GitHub token configured.")
     try:
         async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.post(
@@ -665,7 +666,7 @@ async def github_comment_issue(number: int, body: str) -> str:
 
     token = os.getenv("GITHUB_TOKEN")
     if not token:
-        return "Error: No GitHub token configured."
+        raise RefusedBeforeEffect("Error: No GitHub token configured.")
     try:
         async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.post(

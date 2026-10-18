@@ -9,14 +9,14 @@ denial notifications, and the scheduling context plumbing.
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
-import pytest
-
-import importlib
-
 import kazma_core.cron.scheduler as sched
+import pytest
 from kazma_core.cron.scheduler import ScheduledJob, get_cron_parent
+
+from tests._tool_answer import answer
 
 
 def _sm_mod():
@@ -120,7 +120,7 @@ async def test_schedule_task_fails_closed_when_undeliverable(monkeypatch):
     )
     monkeypatch.setattr(_sm_mod(), "get_current_delivery_target", lambda: "")
     monkeypatch.setattr(_sm_mod(), "operator_telegram_target", lambda: "")
-    out = await tst.schedule_task("2m", "Test schedule")
+    out = await answer(tst.schedule_task("2m", "Test schedule"))
     payload = __import__("json").loads(out)
     assert payload["ok"] is False
     assert "delivery" in payload["error"].lower()

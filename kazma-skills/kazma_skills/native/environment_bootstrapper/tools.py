@@ -12,6 +12,7 @@ from kazma_core.tools.file_write import _get_workspace
 
 # 90s pip/npm installs used to run ON the event loop (audit 2026-09-16 F-4).
 from kazma_skills.native._subprocess import run_off_loop
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +27,12 @@ async def install_python_packages(packages: list[str]) -> str:
         Status message of the installation command.
     """
     if not packages:
-        return "Error: No packages specified."
+        raise RefusedBeforeEffect("Error: No packages specified.")
 
     # Validate package names to avoid shell injection
     for pkg in packages:
         if not pkg or any(char in pkg for char in ";|&<>`$()"):
-            return f"Error: Invalid package name: {pkg}"
+            raise RefusedBeforeEffect(f"Error: Invalid package name: {pkg}")
 
     cwd = await asyncio.to_thread(_get_workspace)
 
@@ -69,16 +70,16 @@ async def install_npm_packages(packages: list[str]) -> str:
         Status message of the installation.
     """
     if not packages:
-        return "Error: No packages specified."
+        raise RefusedBeforeEffect("Error: No packages specified.")
 
     for pkg in packages:
         if not pkg or any(char in pkg for char in ";|&<>`$()"):
-            return f"Error: Invalid package name: {pkg}"
+            raise RefusedBeforeEffect(f"Error: Invalid package name: {pkg}")
 
     cwd = await asyncio.to_thread(_get_workspace)
     npm_path = shutil.which("npm")
     if not npm_path:
-        return "Error: npm command not found on PATH."
+        raise RefusedBeforeEffect("Error: npm command not found on PATH.")
 
     cmd = [npm_path, "install"] + packages
     try:

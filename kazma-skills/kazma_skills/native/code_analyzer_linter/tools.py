@@ -14,6 +14,7 @@ from kazma_core.tools.file_write import _get_workspace
 # through run_off_loop so a 60s pytest does not freeze the whole server
 # (audit 2026-09-16 F-4).
 from kazma_skills.native._subprocess import run_off_loop
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -70,14 +71,14 @@ async def format_code(path: str) -> str:
     """
     p, scope_err = await resolve_in_scope(path, "writes")
     if scope_err:
-        return scope_err
+        raise RefusedBeforeEffect(scope_err)
 
     if not p.exists():
-        return f"Error: Path not found: {path}"
+        raise RefusedBeforeEffect(f"Error: Path not found: {path}")
 
     ruff_path = shutil.which("ruff")
     if not ruff_path:
-        return "Error: ruff formatter command not found. Run 'pip install ruff' to enable code formatting."
+        raise RefusedBeforeEffect("Error: ruff formatter command not found. Run 'pip install ruff' to enable code formatting.")
 
     cmd = [ruff_path, "format", str(p)]
     try:
@@ -102,10 +103,10 @@ async def run_unit_tests(test_path: str) -> str:
     """
     p, scope_err = await resolve_in_scope(test_path, "searches")
     if scope_err:
-        return scope_err
+        raise RefusedBeforeEffect(scope_err)
 
     if not p.exists():
-        return f"Error: Test path not found: {test_path}"
+        raise RefusedBeforeEffect(f"Error: Test path not found: {test_path}")
 
     pytest_path = shutil.which("pytest")
     if not pytest_path:

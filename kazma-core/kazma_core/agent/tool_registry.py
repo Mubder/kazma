@@ -689,15 +689,15 @@ class LocalToolRegistry:
         except Exception as exc:
             logger.debug("[ToolRegistry] division check skipped: %s", exc)
 
-        # ── A shell command that cannot run is refused before any card ──
-        # (safety/shell_preflight): the bus must not ask the operator to
-        # approve a call the policy or the tool would refuse anyway.
-        if tool_name == "shell_exec":
-            from kazma_core.safety.shell_preflight import shell_refusal
+        # ── A call that cannot run is refused before any card ──
+        # (safety/call_preflight): the bus must not ask the operator to
+        # approve a call the policy, the host or the tool would refuse anyway.
+        from kazma_core.safety.call_preflight import PREFLIGHT_TOOLS, call_refusal
 
-            _shell_refused = await shell_refusal(str(arguments.get("command") or ""))
-            if _shell_refused:
-                return {"content": f"Error: {_shell_refused} Nothing was run.", "is_error": True}
+        if tool_name in PREFLIGHT_TOOLS:
+            _preflight_refused = await call_refusal(tool_name, arguments)
+            if _preflight_refused:
+                return {"content": f"Error: {_preflight_refused} Nothing was run.", "is_error": True}
 
         # ── Safety check — gate danger-tier tools (HITL) ───────────
         # Use the async check() so a real bus adapter can post an approval
@@ -917,7 +917,7 @@ class LocalToolRegistry:
                 _invoked = False
                 logger.info("Tool '%s' refused before running: %s", tool_name, exc)
                 _record_procedural_outcome(tool_name, arguments, success=False)
-                return await _with_post({"content": f"Error: {exc}", "is_error": True})
+                return await _with_post({"content": exc.content(), "is_error": True})
 
             except TypeError as exc:
                 # Argument-shape mismatch (e.g. wrong types from the model).

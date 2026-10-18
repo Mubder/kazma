@@ -5165,17 +5165,35 @@ post-invocation error into a retryable ordinary result.
 **A refusal before anything ran is not uncertain** (2026-10-18,
 `agent/tool_refusal.RefusedBeforeEffect`): a tool raises it only before it
 writes, sends or starts anything, and the registry answers it as an ordinary
-`Error:` result. Live, an approved `shell_exec` refused by the host-shell
-policy was recorded "effects unknown; must not be repeated" and the turn
-failed. `shell_exec` (every refusal before its process starts) and
-`python_exec` (no code, a Kazma store, an unreadable policy) raise it. **And a
-shell call that cannot run gets no card**: `safety/shell_preflight.shell_refusal`
-(the policy, off the loop, then an empty command or a shell metacharacter) is
-asked by the chat tool worker before the commitment gate (`outcome="policy"`,
-the turn goes on) and by the registry before the swarm bus. The card had said
-"BLOCKED: host shell is disabled" and still asked for approval. Gate:
-`tests/test_shell_refused_before_card.py` (the live command; the old code
-fails 7; a runnable call still gets its card).
+`Error:` result (`exc.content()`; a JSON `{"ok": false}` answer stays as it
+is). Live, two turns in a row on Telegram: an approved `shell_exec` refused by
+the host-shell policy, then an approved `browser_navigate` this host cannot
+launch, each recorded "effects unknown; must not be repeated" and the turn
+failed. **Every tool that is not read-only refuses this way**:
+`tests/test_tools_refuse_before_effect.py` reads each one's own body (and the
+helper it hands the work to, `DELEGATES`) and fails on an error it RETURNS
+outside an exception handler -- an `"Error..."`/`"Safety:"` text, a refusal a
+helper built (`denied`, `refusal`...), or `{"ok": false}` -- and on a
+`raise RefusedBeforeEffect` that the tool's own `except Exception` would turn
+back into a returned error (pass it through with `except RefusedBeforeEffect:
+raise`). An error returned from a handler (the action raised) stays uncertain;
+one known to come after the action (`send_file`'s "was not sent", the patch
+set's restored hunk) is marked `effect_unknown(...)`. A typed refusal raised
+from inside an action counts too: the browser's launch refusal is
+`web_acquire.result.BrowserLaunchRefused` (an `AcquisitionError`, rebuilt
+whole by Playwright's `type(error)(message)`). A test that calls a tool
+directly reads its answer through `tests/_tool_answer.answer`. **And a call
+that cannot run gets no card**: `safety/call_preflight.call_refusal` (shell:
+`shell_preflight.shell_refusal`, the policy then an empty command or a shell
+metacharacter; the browser tools and `computer_use`:
+`browser_isolation.launch_refusal`, the strict network mode's own decision,
+off the loop) is asked by the chat tool worker before the commitment gate
+(`_refuse_unrunnable_calls`, `outcome="policy"`, the turn goes on) and by the
+registry before the swarm bus. The cards had said "BLOCKED: host shell is
+disabled" and asked to approve a navigation Windows refuses. Gates:
+`tests/test_shell_refused_before_card.py`, `tests/test_browser_refused_before_card.py`
+(the live URL; the old browser tools give exactly the live `effect_uncertain`;
+a launchable or runnable call still gets its card).
 `dispatch_effects` tracks actual local/MCP mutator invocation across the worker
 retry boundary, after validation and HITL. An unsuccessful dispatch after such
 an invocation carries `retry_safe=False`; keep it on `WorkerResult` through

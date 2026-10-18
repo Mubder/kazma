@@ -19,6 +19,8 @@ import sqlite3
 
 import pytest
 
+from tests._tool_answer import answer_now
+
 _ENTITIES = [
     # id, type, name, aliases, metadata, is_protected, is_major
     ("user", "person", "Layla", ["Layla", "user", "You", "layla"], {}, 0, 0),
@@ -173,9 +175,9 @@ def test_the_pages_purge_takes_only_plain_shells(db):
 
 def test_the_agents_purge_takes_only_plain_shells(db):
     tool = _memory_tools()["memory_purge_empty_entities"]
-    dry = json.loads(asyncio.run(tool(confirm=False)))
+    dry = json.loads(answer_now(tool, confirm=False))
     assert [e["id"] for e in dry["entities"]] == ["mubder", "plain_one"]
-    done = json.loads(asyncio.run(tool(confirm=True)))
+    done = json.loads(answer_now(tool, confirm=True))
     assert done["deleted"] == ["mubder", "plain_one"]
     assert "Layla" in _ids(db) and "acme_app" in _ids(db)
 
@@ -202,8 +204,8 @@ def test_delete_refuses_the_owners_own_names(db):
     assert _delete_entity_sync("mubder")["ok"] is True
 
     tool = _memory_tools()["memory_delete_entity"]
-    assert "refusing" in asyncio.run(tool(entity_id="Layla"))
-    assert json.loads(asyncio.run(tool(entity_id="someone")))["ok"] is True
+    assert "refusing" in answer_now(tool, entity_id="Layla")
+    assert json.loads(answer_now(tool, entity_id="someone"))["ok"] is True
 
 
 def test_merge_refuses_the_owners_names_anywhere_but_the_hub(db):
@@ -214,8 +216,8 @@ def test_merge_refuses_the_owners_names_anywhere_but_the_hub(db):
     assert _merge_entities_sync({"source_id": "Layla", "target_id": "user"})["ok"] is True
 
     tool = _memory_tools()["memory_merge_entities"]
-    assert "cannot merge protected source" in asyncio.run(tool(source_id="guarded", target_id="acme"))
-    assert "cannot merge protected source" in asyncio.run(tool(source_id="kazma", target_id="acme"))
+    assert "cannot merge protected source" in answer_now(tool, source_id="guarded", target_id="acme")
+    assert "cannot merge protected source" in answer_now(tool, source_id="kazma", target_id="acme")
 
 
 def test_the_entity_list_marks_the_owners_names_core(db):

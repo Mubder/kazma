@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from kazma_core.tools.send_message import send_failed
 from kazma_core.tools.send_message import send_message as _core_send_message
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +22,13 @@ async def dispatch_notification(channel: str, recipient_id: str, text: str) -> s
         The delivery status response.
     """
     if not recipient_id or not text:
-        return "Error: Recipient ID and text must be provided."
+        raise RefusedBeforeEffect("Error: Recipient ID and text must be provided.")
 
     # Validate channels
     allowed_channels = {"telegram", "discord", "slack"}
     chan = channel.lower().strip()
     if chan not in allowed_channels:
-        return f"Error: Channel '{channel}' not supported. Supported: {', '.join(allowed_channels)}"
+        raise RefusedBeforeEffect(f"Error: Channel '{channel}' not supported. Supported: {', '.join(allowed_channels)}")
 
     try:
         res = await _core_send_message(target_id=recipient_id, text=text, backend=chan)
@@ -66,16 +67,16 @@ async def send_approval_request(
     from kazma_core.tools.send_message import get_current_delivery_target
 
     if not title:
-        return "Error: Title must be specified."
+        raise RefusedBeforeEffect("Error: Title must be specified.")
 
     recipient_id = (recipient_id or "").strip() or (get_current_delivery_target() or "")
     if not recipient_id:
-        return "Error: Recipient ID and title must be specified."
+        raise RefusedBeforeEffect("Error: Recipient ID and title must be specified.")
 
     allowed_channels = {"telegram", "discord", "slack"}
     chan = (channel or "telegram").lower().strip()
     if chan not in allowed_channels:
-        return f"Error: Channel '{channel}' not supported. Supported: {', '.join(sorted(allowed_channels))}"
+        raise RefusedBeforeEffect(f"Error: Channel '{channel}' not supported. Supported: {', '.join(sorted(allowed_channels))}")
 
     if not actions:
         actions = ["Approve", "Deny"]

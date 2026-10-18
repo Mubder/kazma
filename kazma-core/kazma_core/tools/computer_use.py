@@ -14,6 +14,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -232,10 +233,17 @@ async def computer_use(
     desktop session — the actuator is the existing Playwright page.
     """
     if not computer_use_enabled():
-        return "Error: computer_use is disabled (KAZMA_COMPUTER_USE=0)."
+        raise RefusedBeforeEffect("Error: computer_use is disabled (KAZMA_COMPUTER_USE=0).")
     text = (goal or "").strip()
     if not text:
-        return "Error: goal is required."
+        raise RefusedBeforeEffect("Error: goal is required.")
+    # Its actuator is the native browser: a host that refuses to start it
+    # refuses here, before any step (safety/call_preflight).
+    from kazma_core.safety.call_preflight import browser_refusal
+
+    refused = await browser_refusal()
+    if refused:
+        raise RefusedBeforeEffect(f"Error: {refused} Nothing was run.")
     try:
         steps = max(1, min(int(max_steps or DEFAULT_MAX_STEPS), HARD_CAP))
     except (TypeError, ValueError):
