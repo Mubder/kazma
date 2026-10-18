@@ -190,7 +190,7 @@ Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an 
 | `memory.per_turn_retrieval` | bool | `true` | Inject top-k memories on every user turn. |
 | `memory.auto_store` | bool | `true` | Heuristic durable / turn writes after each reply. |
 | `memory.auto_store_mode` | str | `both` | `durable` \| `turns` \| `both`. |
-| `memory.max_context_tokens` | int | `128000` | Context window for compaction (fires at 80%). |
+| `memory.max_context_tokens` | int | `1000000` | The context window: compaction fires at 80 %, the history trim at 95 %. `models.context_window.<model>` sets a smaller window for one model. |
 | `memory.retrieval_top_k` | int | `5` | Top-K for per-turn RAG and compaction. |
 | `memory.provenance` | bool | `true` | Tag memories with source metadata. |
 | `memory.consolidation.enabled` | bool | `true` | Post-turn librarian (facts + graph triples). |

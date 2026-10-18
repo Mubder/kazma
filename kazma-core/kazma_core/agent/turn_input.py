@@ -1296,27 +1296,29 @@ def filter_tools_for_constraints(
 def resolve_trim_token_budget(
     *,
     last_model: str | None = None,
-    default: int = 24000,
+    default: int | None = None,
 ) -> int:
     """Token budget for deterministic mid-turn trimming (chars/4 estimate).
 
-    Default: ``max(4000, min(24000, window × 0.6))`` — UNCHANGED by design.
-    The context-integrity plan (2026-08-30) defers any budget re-tuning
-    until ``kazma_context_trims_total`` has been read in production; raising
-    it now would mask whether the real fixes work.
+    Default: the context window, ``max(4000, window × 0.95)`` (the rest is
+    the reply's). Until 2026-10-18 it was ``min(24000, window × 0.6)``, kept
+    from the 2026-08-30 context-integrity plan until real traffic was read:
+    on the live install (a 1,000,000-token window) a day-long Telegram chat
+    was trimmed to its latest message on every step, the model read 67 posts
+    three times in one turn and lost the goal of the chat. The owner's
+    decision that day: the context is the window. ``default`` caps it (a
+    caller's own smaller budget).
 
-    Operator override (deferred-item enabler): ConfigStore key
-    ``agent.trim.token_budget`` — an absolute budget that replaces the 24K
-    cap (still clamped to [4000, window × 0.95] so a misconfiguration cannot
-    exceed the context window or trim to nothing). Live-read; unset → the
-    default behavior above.
+    Operator override: ConfigStore key ``agent.trim.token_budget`` — an
+    absolute budget (clamped to [4000, window × 0.95] so a misconfiguration
+    cannot exceed the context window or trim to nothing). Live-read.
     """
     try:
         from kazma_core.token_counter import resolve_context_window
 
         window = resolve_context_window(None, last_model)
-        # Keep headroom under 60% of window, capped at *default*.
-        base = max(4000, min(int(default), int(window * 0.6)))
+        ceiling = int(window * 0.95)
+        base = max(4000, ceiling if default is None else min(int(default), ceiling))
         try:
             from kazma_core.config_store import get_config_store
 
@@ -1329,7 +1331,7 @@ def resolve_trim_token_budget(
             pass
         return base
     except Exception:
-        return default
+        return default if default is not None else 24000
 
 
 def trim_messages_deterministic(
@@ -1440,6 +1442,12 @@ def trim_messages_deterministic(
         trimmed = anchor_system + [user] + rest
         trimmed = _drop_orphan_tool_messages(trimmed)
 
+    if latest_user_idx > 0:
+        trimmed = _with_conversation_skeleton(
+            trimmed, normalized[:latest_user_idx], anchor_count=len(anchor_system),
+            max_tokens=max_tokens,
+        )
+
     logger.info(
         "[turn_input] Deterministic trim: %d → %d msgs (~%d tokens budget=%d)",
         len(normalized),
@@ -1448,6 +1456,65 @@ def trim_messages_deterministic(
         max_tokens,
     )
     return trimmed
+
+
+#: Earlier turns kept by the trim: at most this many messages, each shortened
+#: to this many characters.
+_SKELETON_MAX_MESSAGES = 16
+_SKELETON_MAX_CHARS = 1500
+
+
+def _with_conversation_skeleton(
+    trimmed: list[dict[str, Any]],
+    earlier: list[dict[str, Any]],
+    *,
+    anchor_count: int,
+    max_tokens: int,
+) -> list[dict[str, Any]]:
+    """The trimmed context with the earlier turns' requests and replies, as
+    many as fit, newest first: the user's messages and the assistant's plain
+    replies, no tool chains (they are what made the context too big).
+
+    The trim kept the latest message and its tool rounds and dropped every
+    earlier turn. Live 2026-10-18 (Telegram): over a day-long chat building
+    a PDF archive of the X posts, "send me the file here" reached the model
+    with nothing before it -- it listed the workspace, read the posts again
+    and asked which file was meant; the turns that made and named the PDF
+    were gone. These are the conversation the user sees, kept in order
+    between the anchors and the latest message.
+    """
+    from kazma_core.summarizer import estimate_tokens
+
+    picked: list[dict[str, Any]] = []
+    budget_left = max_tokens - estimate_tokens(trimmed)
+    for m in reversed(earlier):
+        if len(picked) >= _SKELETON_MAX_MESSAGES or budget_left <= 0:
+            break
+        role = m.get("role")
+        content = m.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, str) or not content.strip():
+            continue
+        if role == "assistant" and m.get("tool_calls"):
+            continue
+        if role == "user" and content.lstrip().startswith("SYSTEM:"):
+            continue
+        text = content if len(content) <= _SKELETON_MAX_CHARS else (
+            content[:_SKELETON_MAX_CHARS] + " …[shortened by the context trim]"
+        )
+        kept = {"role": role, "content": text}
+        cost = estimate_tokens([kept])
+        if cost > budget_left:
+            break
+        picked.append(kept)
+        budget_left -= cost
+    if not picked:
+        return trimmed
+    picked.reverse()
+    # A turn starts with its question: an assistant reply first would read as
+    # an answer to nothing.
+    while picked and picked[0]["role"] != "user":
+        picked.pop(0)
+    return trimmed[:anchor_count] + picked + trimmed[anchor_count:]
 
 
 def _drop_orphan_tool_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

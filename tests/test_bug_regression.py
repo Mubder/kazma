@@ -453,16 +453,18 @@ class TestBug20_ContextAuthorityWired:
         from kazma_core.agent import KazmaAgent
 
         agent = KazmaAgent()
+        counter = agent.authority.counter
 
-        # Create a state with many tokens to trigger compaction
+        # Past 80 % of the agent's own window (~4 characters a token). Sized
+        # from the window since 2026-10-18, when the default became 1,000,000
+        # (the fixed 500,000 characters assumed 128,000).
         big_state = {
             "messages": [
-                {"role": "user", "content": "x" * 500_000}  # ~125k tokens
+                {"role": "user", "content": "x" * int(counter.window * 4 * 0.9)}
             ],
             "tool_results": {},
             "context_tokens": 0,
         }
 
         # The authority should detect this exceeds threshold
-        counter = agent.authority.counter
         assert counter.should_compact(big_state["messages"]) is True

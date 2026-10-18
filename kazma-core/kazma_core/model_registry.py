@@ -49,37 +49,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TASKS = ("chat", "code", "summarize", "translate", "research", "vision", "general", "fast")
 _PROFILE_FIELDS = ("base_url", "api_key", "model", "provider")
 
-# ── Known model context windows (audit §2.6: static 128k window) ──────
-# Ordered prefix table — first match wins, so list specific variants before
-# family prefixes. Values are the provider's advertised context windows;
-# the compaction gate (ContextAuthority) fires at 80% of the resolved value.
-# Override per model via ConfigStore ``models.context_window.<model>``.
-_CONTEXT_WINDOWS: tuple[tuple[str, int], ...] = (
-    ("gpt-4.1", 1_000_000),
-    ("gpt-5", 400_000),
-    ("o1", 200_000),
-    ("o3", 200_000),
-    ("o4", 200_000),
-    ("gpt-4o", 128_000),
-    ("gpt-4-turbo", 128_000),
-    ("gpt-4", 8_192),
-    ("gpt-3.5", 16_385),
-    ("claude", 200_000),
-    ("gemini", 1_000_000),
-    ("deepseek", 64_000),
-    ("llama-3", 128_000),
-    ("llama3", 128_000),
-    ("qwen", 128_000),
-    ("mistral", 128_000),
-    ("mixtral", 32_000),
-)
-
-
 def lookup_context_window(model: str | None) -> int | None:
-    """Return the known context window for *model*, or ``None`` if unknown.
+    """The owner's context window for *model* (ConfigStore
+    ``models.context_window.<model>``), or ``None``. Never raises.
 
-    Resolution: ConfigStore per-model override
-    (``models.context_window.<model>``) → ordered prefix table. Never raises.
+    There is no built-in table any more (2026-10-18): it guessed sizes by
+    model-name prefix (deepseek 64,000, gpt-4o 128,000...), went stale, and
+    capped models below the window the owner had set. A model that really is
+    smaller gets its own entry here.
     """
     if not model:
         return None
@@ -97,10 +74,6 @@ def lookup_context_window(model: str | None) -> int | None:
                 pass
     except Exception:
         pass
-    lowered = model_id.lower()
-    for prefix, window in _CONTEXT_WINDOWS:
-        if lowered.startswith(prefix):
-            return window
     return None
 
 # ── Singleton lifecycle ──────────────────────────────────────────────

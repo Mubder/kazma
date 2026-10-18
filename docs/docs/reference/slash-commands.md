@@ -483,9 +483,10 @@ Model: deepseek-chat  Provider: deepseek
 Role breakdown: assistant=5,902, system=1,840, tool=911, user=561
 ```
 
-**Window:** the active model's context window (`context.max_context_tokens`,
-or the model's known window). **Threshold:** the trim budget — 60% of the
-window, at most 24,000 tokens unless `agent.trim.token_budget` sets it.
+**Window:** the context window (`models.context_window.<model>` for the
+active model, else `context.max_context_tokens`, else 1,000,000).
+**Threshold:** the trim budget — 95% of the window, unless
+`agent.trim.token_budget` sets it.
 
 **Required permissions:** None.
 

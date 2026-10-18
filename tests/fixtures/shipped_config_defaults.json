@@ -79,7 +79,7 @@
  "memory.embedding.model": "BAAI/bge-m3",
  "memory.embedding.provider": "local",
  "memory.enabled": true,
- "memory.max_context_tokens": 128000,
+ "memory.max_context_tokens": 1000000,
  "memory.per_turn_retrieval": true,
  "memory.provenance": true,
  "memory.retrieval_top_k": 5,

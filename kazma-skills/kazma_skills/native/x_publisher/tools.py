@@ -19,6 +19,17 @@ def _json(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2)
 
 
+def _when(epoch: object, zone: object) -> str | None:
+    """An epoch as "YYYY-MM-DD HH:MM" in *zone*, or None."""
+    from datetime import datetime, timezone
+
+    try:
+        moment = datetime.fromtimestamp(float(epoch), tz=timezone.utc)  # type: ignore[arg-type]
+        return moment.astimezone(zone).strftime("%Y-%m-%d %H:%M")  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
 async def x_status(recent: int = 5, offset: int = 0) -> str:
     """Read-only connector status. Never returns secret values.
 
@@ -44,12 +55,15 @@ async def x_status(recent: int = 5, offset: int = 0) -> str:
             n_offset = max(0, int(offset or 0))
         except (TypeError, ValueError):
             n_offset = 0
-        day, month, total, recent_rows = await asyncio.to_thread(
+        from kazma_core.cron.scheduler import resolve_cron_zone
+
+        day, month, total, recent_rows, (zone, zone_name) = await asyncio.to_thread(
             lambda: (
                 ledger.count_since(time.time() - 86400),
                 ledger.count_since(time.time() - 30 * 86400),
                 ledger.count_all(),
                 ledger.recent(n_recent, n_offset),
+                resolve_cron_zone(),
             )
         )
         shown_to = n_offset + len(recent_rows)
@@ -77,11 +91,16 @@ async def x_status(recent: int = 5, offset: int = 0) -> str:
                     "tweet_id": r.get("tweet_id"),
                     "preview": r.get("text_preview"),
                     "created_at": r.get("created_at"),
+                    # Readable, in the operator's zone: the epoch alone sent
+                    # the model to python_exec (an approval card) to convert
+                    # it (live 2026-10-18, twice in one archive).
+                    "created": _when(r.get("created_at"), zone),
                     "deleted": bool(r.get("deleted_at")),
                 }
                 for r in recent_rows
             ],
             "posts_total": total,
+            "time_zone": zone_name or "UTC",
             "recent_offset": n_offset,
             "next_offset": shown_to if shown_to < total else None,
             "setup": (

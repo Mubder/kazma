@@ -522,11 +522,8 @@ class KazmaAgent:
         the yaml has ``memory.max_context_tokens``. Check both so the Settings
         UI value actually takes effect (previously only the yaml was read).
 
-        Model-aware layer (audit §2.6): when no *explicit* non-default value
-        is configured (the shipped default is 128000), the known context
-        window of the active model wins (e.g. Claude → 200k, GPT-4 → 8k),
-        so compaction fires at the model's real 80% instead of a global
-        constant. Per-model override: ConfigStore ``models.context_window.<model>``.
+        Per-model override: ConfigStore ``models.context_window.<model>``
+        (``token_counter.resolve_context_window``, the one ladder).
         """
         try:
             from kazma_core.token_counter import resolve_context_window
@@ -540,7 +537,9 @@ class KazmaAgent:
             return resolve_context_window(self.config.raw, active_model)
         except Exception:
             pass
-        return 128_000
+        from kazma_core.token_counter import DEFAULT_CONTEXT_WINDOW
+
+        return DEFAULT_CONTEXT_WINDOW
 
     def _make_compaction_client(self) -> Any:
         """Create a lightweight LLM client for the compaction engine."""

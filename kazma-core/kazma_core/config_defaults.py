@@ -88,6 +88,16 @@ RETIRED_DEFAULTS: tuple[RetiredDefault, ...] = (
             "message a minute, the rest left unanswered; 30, like Telegram"
         ),
     ),
+    RetiredDefault(
+        key="memory.max_context_tokens",
+        old=(128000,),
+        since="2026-10-18",
+        why=(
+            "the context is the model's window (the owner's decision): at "
+            "128,000 with a 24,000-token trim a long chat lost its goal; a "
+            "model Kazma knows to be smaller keeps its own window"
+        ),
+    ),
 )
 
 #: Settings keys whose new shipped value applies to new installs only: key
