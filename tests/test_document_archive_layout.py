@@ -6,8 +6,10 @@ out of the document worker container in DejaVu Sans (Arabic) and Noto Serif
 had no Plex --, each tweet's lines ran into one justified paragraph, the
 quotes were italic (Arabic slanted by LibreOffice), ``##`` groups and
 ``###`` entries were the same size, the heading bar of a Latin heading sat
-on the right, the divider was a row of "─" in a fallback font, and table
-rows were tall with their text at the top.
+on the right, the divider was a row of "─" in a fallback font, table rows
+were tall with their text at the top, a date after an Arabic word drew as
+"18-10-2026", and a deleted tweet's heading ("10 · 2026-10-05 — 15:15 UTC ·
+<id> — محذوفة") came out in reverse group order.
 """
 
 from __future__ import annotations
@@ -245,3 +247,121 @@ def test_libreoffice_in_the_worker_image_renders_in_plex_only_with_the_bundle(tm
         fonts[profile] = {f[3].split("+")[-1] for page in doc for f in page.get_fonts()}
     assert fonts["with"] == {"IBMPlexSansArabic", "IBMPlexSansArabic-Bold"}, fonts
     assert not any("Plex" in f for f in fonts["without"]), fonts
+
+
+# ── left-to-right runs inside right-to-left text ────────────────────────
+
+LRI, PDI = "\u2066", "\u2069"
+DELETED = "10 · 2026-10-05 — 15:15 UTC · 2107127443748266448 — محذوفة"
+
+
+def _shown(text: str) -> str:
+    return text.replace(LRI, "[").replace(PDI, "]")
+
+
+@pytest.mark.parametrize(("text", "isolated"), [
+    (DELETED, "[10 · 2026-10-05 — 15:15 UTC · 2107127443748266448] — محذوفة"),
+    # a number alone keeps the Arabic convention (W2), which the readers expect
+    ("تاريخ التوثيق: 2026-10-18", "تاريخ التوثيق: 2026-10-18"),
+    ("الحساب: @KazmaAI · المصدر", "الحساب: [@KazmaAI] · المصدر"),
+    ("بتوقيت الكويت (+3).", "بتوقيت الكويت (+3)."),
+    ("الساعة +3 UTC هنا", "الساعة [+3 UTC] هنا"),
+    ("**قيد:** أحدث N سجلاً", "**قيد:** أحدث [N] سجلاً"),
+    ("كلمة-كلمة #كاظمه", "كلمة-كلمة #كاظمه"),
+    ("Latin only 2026-10-18", "Latin only 2026-10-18"),
+])
+def test_each_ltr_run_in_rtl_text_is_isolated(text, isolated):
+    from kazma_core.documents.arabic import isolate_ltr_runs
+
+    assert _shown(isolate_ltr_runs(text)) == isolated
+
+
+def test_the_docx_isolates_ltr_runs_in_rtl_blocks_only(tmp_path):
+    root = _docx(tmp_path, f"## {DELETED}\n\nتاريخ التوثيق: 2026-10-18\n\nKazma, counted 2026-10-16")
+    texts = [t for _, t in _paragraphs(root)]
+    assert f"{LRI}10 · 2026-10-05 — 15:15 UTC · 2107127443748266448{PDI} — محذوفة" in texts
+    assert "تاريخ التوثيق: 2026-10-18" in texts  # a number alone is not isolated
+    assert "Kazma, counted 2026-10-16" in texts  # an LTR block is left as written
+
+
+def test_kazma_reads_its_own_pdf_without_the_marks():
+    from kazma_core.documents.arabic import isolate_ltr_runs, to_logical
+
+    assert to_logical(isolate_ltr_runs(DELETED)) == DELETED
+
+
+def _word_x(pdf: Path, words: list[str]) -> list[float]:
+    import pymupdf
+
+    doc = pymupdf.open(pdf)
+    page_words = [w for page in doc for w in page.get_text("words")]
+    # The words on the line of the last one asked for (the heading's id).
+    line_y = next(w[1] for w in page_words if w[4] == words[-1])
+    found = {w[4]: w[0] for w in page_words if abs(w[1] - line_y) < 2}
+    return [found[w] for w in words]
+
+
+def _soffice_pdf(tmp_path: Path, monkeypatch, *, isolate: bool) -> Path:
+    from kazma_core.documents.binaries import find_soffice, run_soffice_cli
+
+    if not isolate:
+        monkeypatch.setattr(DocxEngine, "_isolated", lambda self, text: text)
+    out = tmp_path / ("on" if isolate else "off")
+    out.mkdir()
+    model = ContentModel()
+    model.add(BodyBlock(text=f"## {DELETED}\n\nتاريخ التوثيق: 2026-10-18"))
+    DocxEngine(DocProfile.for_content(DELETED)).render(model, out / "a.docx")
+    give_soffice_the_bundled_fonts(out / "profile")
+    assert find_soffice()
+    run_soffice_cli(("--headless", "--nologo", "--norestore",
+                     f"-env:UserInstallation={(out / 'profile').as_uri()}",
+                     "--convert-to", "pdf", "--outdir", str(out), str(out / "a.docx")),
+                    timeout=120, cwd=out)
+    return out / "a.pdf"
+
+
+def _soffice_available() -> bool:
+    try:
+        import pymupdf  # noqa: F401
+        from kazma_core.documents.binaries import find_soffice
+
+        return bool(find_soffice())
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _soffice_available(), reason="needs LibreOffice and PyMuPDF")
+def test_libreoffice_draws_the_heading_and_the_date_in_reading_order(tmp_path, monkeypatch):
+    """On the page: "10" left of the date left of the id (one LTR unit);
+    without the isolates (the negative control) LibreOffice drew the groups
+    reversed."""
+    order = ["10", "2026-10-05", "2107127443748266448"]
+    pdf = _soffice_pdf(tmp_path, monkeypatch, isolate=True)
+    xs = _word_x(pdf, order)
+    assert xs == sorted(xs), xs
+
+    old = _soffice_pdf(tmp_path, monkeypatch, isolate=False)
+    old_xs = _word_x(old, order)
+    assert old_xs != sorted(old_xs), "the old drawing reversed the groups"
+
+
+# ── reading a document back: a bidi mark is not a cut ──────────────────
+
+
+def test_a_paragraph_with_a_bidi_mark_does_not_end_the_parse(tmp_path):
+    """``to_logical`` strips bidi controls, so the block came back shorter
+    and ``IRBuilder.add_page`` took it for a limit cut: every paragraph after
+    the first one holding an RLM or an isolate was dropped, with no warning."""
+    import docx
+    from kazma_core.documents.service import DocumentService
+
+    source = tmp_path / "marks.docx"
+    document = docx.Document()
+    document.add_paragraph("مرحبا \u200f بكم في التقرير")
+    document.add_paragraph("second paragraph after the mark")
+    document.add_paragraph("third paragraph")
+    document.save(source)
+    ir = DocumentService().parse_ingested_blob(source, force_ocr=False, ocr_language="ara")
+    texts = [b.text for page in ir.pages for b in page.blocks]
+    assert texts[-1] == "third paragraph", texts
+    assert "\u200f" not in texts[0]

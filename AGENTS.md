@@ -3357,7 +3357,21 @@ count relative to the shallowest heading below the title
 (`renderer_worker._build_model_and_profile`; every section was level 1). A
 heading's bar sits on the heading's own reading side (`_edge_bar`, which also
 keeps `w:pBdr` in schema order). A divider is a rule, never a row of "─".
-Table cells are compact and vertically centred.
+Table cells are compact and vertically centred. **In a right-to-left block a
+left-to-right run that holds a Latin letter is isolated**
+(`arabic.isolate_ltr_runs`, LRI…PDI, applied by `DocxEngine._isolated` to body
+runs, headings and cells): "10 · 2026-10-05 — 15:15 UTC · <id> — محذوفة" came
+out in reverse group order around "UTC". A run of digits alone is NOT isolated:
+"في 2026-09-30" drawing "30-09-2026" (W2) is the Arabic convention, read right
+to left as the date, and the PDF and OCR readers (§19H) read it back by that
+rule -- isolating it broke the fidelity corpus. An attached `@ # $` (or `+ -`
+before a digit) joins its run. The marks reach the PDF's text layer;
+`to_logical` strips them when Kazma reads a PDF back. And a block
+`to_logical` shortened is no longer taken for a limit cut
+(`IRBuilder.add_page`): every block after the first one holding an RLM or an
+isolate was dropped from a parse, silently. Gates in
+`tests/test_document_archive_layout.py`: the LibreOffice word-order test (no
+isolation as the control), the bidi-mark parse (the old check fails it).
 
 `tests/test_document_layout.py` measures all of this against a rendered PDF
 with PyMuPDF rather than grepping the source — every defect it covers was

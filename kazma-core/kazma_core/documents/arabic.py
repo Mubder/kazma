@@ -62,6 +62,7 @@ __all__ = [
     "to_logical",
     "fold_for_search",
     "strip_bidi_controls",
+    "isolate_ltr_runs",
     "shape_spans",
     "shape_text",
     "shaping_available",
@@ -217,6 +218,63 @@ def direction_of(text: str, *, threshold: float = 0.35) -> Direction:
 def strip_bidi_controls(text: str) -> str:
     """Remove explicit bidi formatting controls (LRM/RLM/isolates/embeds)."""
     return _BIDI_CONTROL_RE.sub("", text or "")
+
+
+_LRI, _PDI = "\u2066", "\u2069"
+#: Bidi classes a left-to-right run may carry between its strong characters.
+_LTR_RUN_INNER = frozenset({"L", "EN", "ES", "ET", "CS", "ON", "WS", "NSM", "BN"})
+#: Classes a run may start and end on (a strong letter or a digit).
+_LTR_RUN_EDGE = frozenset({"L", "EN"})
+
+
+def isolate_ltr_runs(text: str) -> str:
+    """In right-to-left text, wrap each left-to-right run that holds a Latin
+    letter in LRI ... PDI.
+
+    A run is a stretch of Latin letters and European digits with the
+    separators between them ("10 · 2026-10-05 — 15:15 UTC · 2107127443748266448"),
+    up to the next right-to-left letter. Without the isolate the digits
+    before the Latin word are Arabic numbers to the bidi algorithm (rule W2)
+    and the run's groups came out in reverse order around it (live
+    2026-10-18, a deleted tweet's heading in a tweet archive). A run of
+    digits alone is left to that convention: a date reads right to left
+    there, and Kazma's readers expect it. Text with no right-to-left letter,
+    and text already isolated, is returned as it is.
+    """
+    if not text or not has_rtl(text) or _LRI in text:
+        return text
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        # "@KazmaAI", "#Kazma", "$5", "+3", "-5": the sign belongs to the run
+        # it touches ("(+3)" drew as "(3+)").
+        nxt = unicodedata.bidirectional(text[i + 1]) if i + 1 < n else ""
+        attached = ((text[i] in "@#$" and nxt in _LTR_RUN_EDGE)
+                    or (text[i] in "+-\u2212" and nxt == "EN"))
+        if not attached and unicodedata.bidirectional(text[i]) not in _LTR_RUN_EDGE:
+            out.append(text[i])
+            i += 1
+            continue
+        j = i
+        last_edge = i
+        while j < n:
+            cls = unicodedata.bidirectional(text[j])
+            if cls in _LTR_RUN_EDGE:
+                last_edge = j
+            elif cls not in _LTR_RUN_INNER or text[j] == "\n":
+                break
+            j += 1
+        run = text[i:last_edge + 1]
+        # Only a run holding a Latin letter. A number alone keeps the Arabic
+        # convention (rule W2: "في 2026-09-30" draws "30-09-2026", read right
+        # to left as the date): Word draws it so, and Kazma's PDF and OCR
+        # readers read it back by that rule (parsers/pdf_rtl).
+        if any(unicodedata.bidirectional(c) == "L" for c in run):
+            out.append(_LRI + run + _PDI)
+        else:
+            out.append(run)
+        i = last_edge + 1
+    return "".join(out)
 
 
 def to_logical(text: str) -> str:

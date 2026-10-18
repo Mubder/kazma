@@ -712,6 +712,14 @@ class DocxEngine:
     # ================================================================== #
     # heading bar (full-width filled single-cell table)
     # ================================================================== #
+    def _isolated(self, text: str) -> str:
+        """*text* with its left-to-right runs isolated when the block reads
+        right to left (``arabic.isolate_ltr_runs``): a date or an id after
+        an Arabic word otherwise draws in reverse group order."""
+        from kazma_core.documents.arabic import isolate_ltr_runs
+
+        return isolate_ltr_runs(text) if self.profile.block_is_rtl(text) else text
+
     #: Children of ``w:pPr`` that follow ``w:pBdr`` (ECMA-376 order).
     _AFTER_PBDR = (
         "w:shd", "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap",
@@ -777,7 +785,7 @@ class DocxEngine:
             return
 
         p = document.add_paragraph()
-        run = p.add_run(text or "")
+        run = p.add_run(self._isolated(text or ""))
         run.bold = True
         run.font.size = Pt(size)
         run.font.name = fonts["latin"]
@@ -879,7 +887,7 @@ class DocxEngine:
 
         def _fill(cell: Any, text: str, *, header: bool) -> None:
             p = cell.paragraphs[0]
-            run = p.add_run(str(text))
+            run = p.add_run(self._isolated(str(text)))
             # Latin cell size stays 10pt; Arabic is sized via w:szCs in _mark_run.
             run.font.size = Pt(10)
             run.font.name = theme_fonts(rtl=self.profile.rtl)["latin"]
@@ -1026,6 +1034,7 @@ class DocxEngine:
             r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)|"
             r"`([^`]+)`"
         )
+        text = self._isolated(text or "")
 
         def _md_chunk(chunk: str) -> None:
             pos = 0
