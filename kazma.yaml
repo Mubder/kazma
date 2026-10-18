@@ -87,7 +87,7 @@ memory:
   per_turn_retrieval: true
   auto_store: true
   auto_store_mode: both
-  max_context_tokens: 128000
+  max_context_tokens: 1000000
   retrieval_top_k: 5
   provenance: true
   consolidation:

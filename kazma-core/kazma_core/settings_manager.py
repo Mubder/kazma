@@ -18,6 +18,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.token_counter import DEFAULT_CONTEXT_WINDOW
 
 logger = logging.getLogger(__name__)
 
@@ -693,7 +694,7 @@ class SettingsManager:
     def get_context_settings(self) -> dict[str, Any]:
         """Get context window settings."""
         return {
-            "max_context_tokens": self._cs.get("context.max_context_tokens", 128000),
+            "max_context_tokens": self._cs.get("context.max_context_tokens", DEFAULT_CONTEXT_WINDOW),
             "context_strategy": self._cs.get("context.context_strategy", "sliding_window"),
             "summarization_threshold": self._cs.get("context.summarization_threshold", 0.8),
         }

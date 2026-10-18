@@ -5005,10 +5005,18 @@ assistant turns including 8 enumerated draft items"); under ~2K dropped
 tokens the heuristic summarizer runs (zero extra LLM cost). Trims are
 counted: `kazma_context_trims_total{summary=fired|missed}` +
 `kazma_context_trim_dropped_messages_total` — a growing `missed` is a bug
-report. Re-tuning the 24K budget is a SETTINGS change
-(`agent.trim.token_budget`, clamped to [4000, window×0.95]) decided after
-reading those counters for real traffic — the default is deliberately
-unchanged.
+report. **The budget is the context window** (95 %; the owner's decision
+2026-10-18, `turn_input.resolve_trim_token_budget`): the 24K cap this plan
+kept until real traffic was read trimmed a live day-long chat to its latest
+message on every step. `agent.trim.token_budget` still sets an absolute
+budget (clamped to [4000, window×0.95]). **The window is configured, never
+guessed** (`token_counter.resolve_context_window`): per model
+`models.context_window.<model>`, else `context.max_context_tokens`, else
+`memory.max_context_tokens`, else `DEFAULT_CONTEXT_WINDOW` -- 1,000,000,
+shipped in kazma.yaml with installs on the old 128,000 following
+(`config_defaults.RETIRED_DEFAULTS`). The prefix table that guessed windows by
+model name (deepseek 64,000, gpt-4o 128,000...) is gone: stale, it capped
+models below what the owner had set.
 
 **E. `shift` is split — recall is disarmed only by an explicit pivot.**
 `shift_explicit` (regex — the user verifiably said so; legacy `"shift"`
@@ -5034,6 +5042,22 @@ passes `emit_deltas=False`, and `LLMProvider.chat_stream` tracks
 `StreamDelta(response=…)`. Removing any one of these brings back the
 `The proposal turn is The proposal turn is` incident string (locked by
 `tests/test_s32_stream_duplication.py`).
+
+**I. The trim keeps the conversation's skeleton** (2026-10-18,
+`turn_input._with_conversation_skeleton`). Over budget, the deterministic
+trim kept the latest message and its last tool rounds and dropped every
+earlier turn: live, a day-long Telegram chat building a PDF archive of the X
+posts was over its 24,000 tokens, and "send me the file here" reached the
+model with nothing before it -- it listed the workspace, read all 67 posts
+again (three times in one turn, each page trimmed away as the next came) and
+asked which file was meant. The leftover budget now holds the earlier
+requests and plain replies, newest first (16 messages, 1,500 characters
+each, no tool chains), between the anchors and the latest message; it never
+spends budget the trim did not leave; with the budget now the window (D
+above) it is the net for a chat that outgrows even that. `x_status` gives each post's time in the operator's zone
+(`created`, `time_zone`): the epoch alone sent the model to `python_exec`, an
+approval card, to read it. Gate: `tests/test_trim_keeps_the_conversation.py`
+(the old trim as the control), `tests/test_x_status_pages.py`.
 
 **H. The running turn's tool outputs are not cut to fit** (2026-10-18,
 `summarizer.prune_tool_outputs`). The supervisor prunes tool outputs when the

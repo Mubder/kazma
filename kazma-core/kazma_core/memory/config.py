@@ -35,7 +35,7 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
     "auto_store_mode": "both",
     "tenant_mode": "shared",
     "retrieval_top_k": 5,
-    "max_context_tokens": 128_000,
+    "max_context_tokens": 1_000_000,  # token_counter.DEFAULT_CONTEXT_WINDOW
     "provenance": True,
     "consolidation": {
         "enabled": True,

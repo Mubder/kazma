@@ -74,7 +74,7 @@ flowchart LR
 
 - **HITL** is active only when `hitl_config` is passed at **all three** build sites: `agent_runner.get_streaming_graph()`, `agent_runner._ensure_graph`, and `app.py` startup recompile into `_graph_holder`. Live config is `get_hitl_config()`; YAML default timeout is **300s** (`safety.hitl.approval_timeout_seconds`), not 60.
 - **Decision vs execution:** `hitl_gates.db` owns whether the gate was answered; the LangGraph checkpoint owns whether the graph is paused. Web paints from the registry (`chat.js` `_serverGates`). See [AGENTS.md](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §7 + §30 + §31.
-- **Context:** two layers, do not flatten. `ContextAuthority` / `TokenCounter.should_compact` still trips at **80% of the model window**. Independently, **context-integrity trim** fires at `min(24K, window×0.6)` and the summary net runs on every drop of user/assistant turns (AGENTS.md §29). The old “summary at 80% of window” dead band is gone.
+- **Context:** two layers, do not flatten. `ContextAuthority` / `TokenCounter.should_compact` still trips at **80% of the model window**. Independently, **context-integrity trim** fires at 95% of the window (`agent.trim.token_budget` sets another budget) and the summary net runs on every drop of user/assistant turns (AGENTS.md §29). The old “summary at 80% of window” dead band is gone.
 - **Turn Delivery:** the SSE/WS bubble is a **projection** of the turn journal. `close_turn` is the only closer. Token deltas append; only `turn_complete` replaces. Do not restore a second painter.
 
 ### 3.2 Durable execution

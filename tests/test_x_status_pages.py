@@ -47,3 +47,16 @@ async def test_every_post_is_reached_page_by_page(ledger):
 async def test_negative_control_the_first_page_alone_misses_posts(ledger):
     page = await _status(recent=3)
     assert len(page["recent_posts"]) == 3 and page["next_offset"] == 3
+
+
+@pytest.mark.anyio
+async def test_each_post_says_when_in_the_operators_zone(ledger, monkeypatch):
+    """The epoch alone sent the model to python_exec, an approval card, to
+    turn it into a date (live 2026-10-18, twice in one archive)."""
+    from datetime import timezone
+
+    monkeypatch.setattr("kazma_core.cron.scheduler.resolve_cron_zone", lambda: (timezone.utc, "UTC"))
+    page = await _status(recent=1)
+    post = page["recent_posts"][0]
+    assert page["time_zone"] == "UTC"
+    assert len(post["created"]) == 16 and post["created"][4] == "-" and post["created"][13] == ":"

@@ -283,7 +283,7 @@ class SafetySettingsUpdate(BaseModel):
 class ContextSettingsUpdate(BaseModel):
     """Update context window settings."""
 
-    max_context_tokens: int = 128000
+    max_context_tokens: int = 1_000_000  # token_counter.DEFAULT_CONTEXT_WINDOW
     context_strategy: str = "sliding_window"
     summarization_threshold: float = 0.8
 

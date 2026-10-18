@@ -9,7 +9,9 @@ from kazma_core.summarizer import _normalize_msg
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONTEXT_WINDOW = 128_000
+#: The shipped context window (the owner's decision, 2026-10-18; it was
+#: 128,000, and a guessed table cut known model names lower).
+DEFAULT_CONTEXT_WINDOW = 1_000_000
 
 
 def resolve_context_window(raw_config: dict | None = None, model: str | None = None) -> int:
@@ -17,49 +19,45 @@ def resolve_context_window(raw_config: dict | None = None, model: str | None = N
 
     Resolution ladder (first hit wins):
       1. Per-model ConfigStore override ``models.context_window.<model>``
-         (via ``lookup_context_window`` — handled inside, but only consulted
-         at step 4 below to keep explicit globals authoritative).
+         (``lookup_context_window``): the owner's word for that model.
       2. Settings UI global: ConfigStore ``context.max_context_tokens``.
       3. YAML: ``memory.max_context_tokens``.
-      4. Model-aware table for *model* (only when the configured value is the
-         shipped 128k default — an explicit non-default value always wins).
-      5. ``DEFAULT_CONTEXT_WINDOW``.
+      4. ``DEFAULT_CONTEXT_WINDOW`` (1,000,000).
+
+    No guessed per-model table (removed 2026-10-18, the owner's decision).
 
     Never raises; always returns >= 1024. Shared by ``agent_runner`` (the
     ContextAuthority gate) and the graph's saturation routing so every
     compaction trigger reads the same window (audit: unification).
     """
-    explicit: int | None = None
+    if model:
+        try:
+            from kazma_core.model_registry import lookup_context_window
+
+            per_model = lookup_context_window(model)
+            if per_model:
+                return per_model
+        except Exception:
+            pass
     try:
         from kazma_core.config_store import get_config_store
 
         cs_val = get_config_store().get("context.max_context_tokens")
         if cs_val is not None:
             try:
-                explicit = max(1024, int(cs_val))
+                return max(1024, int(cs_val))
             except (TypeError, ValueError):
                 pass
     except Exception:
         pass
-    if explicit is None and raw_config:
+    if raw_config:
         yaml_val = (raw_config.get("memory", {}) or {}).get("max_context_tokens")
         if yaml_val is not None:
             try:
-                explicit = max(1024, int(yaml_val))
+                return max(1024, int(yaml_val))
             except (TypeError, ValueError):
                 pass
-    if explicit is not None and explicit != DEFAULT_CONTEXT_WINDOW:
-        return explicit
-    if model:
-        try:
-            from kazma_core.model_registry import lookup_context_window
-
-            model_window = lookup_context_window(model)
-            if model_window:
-                return model_window
-        except Exception:
-            pass
-    return explicit or DEFAULT_CONTEXT_WINDOW
+    return DEFAULT_CONTEXT_WINDOW
 
 # Try to import tiktoken; fall back to None if not installed
 try:

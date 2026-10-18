@@ -313,16 +313,18 @@ class TestS14DeadBand:
         assert "enumerated draft items" in notes[0]["content"]
 
     def test_dead_band_math(self):
-        """The 24K/160K band is real: trim budget vs should_compact gate."""
+        """The 24K/160K band is gone: since 2026-10-18 the trim's budget is
+        the window (95 %), so compaction's 80 % gate comes first. Re-pointed
+        that day (the owner's decision: the context is the window); at 24K a
+        live day-long chat was trimmed to its latest message on every step."""
         from kazma_core.agent.turn_input import resolve_trim_token_budget
-        from kazma_core.token_counter import TokenCounter
+        from kazma_core.token_counter import TokenCounter, resolve_context_window
 
+        window = resolve_context_window(None, "gpt-4o-200k")
         trim_budget = resolve_trim_token_budget(last_model="gpt-4o-200k")
-        counter = TokenCounter(model="x", window=200000)
-        assert trim_budget <= 24000
-        assert counter.threshold == 160000
-        # The band between them is where turns used to vanish silently.
-        assert trim_budget < counter.threshold
+        counter = TokenCounter(model="x", window=window)
+        assert trim_budget == int(window * 0.95)
+        assert trim_budget > counter.threshold
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -857,15 +859,19 @@ class TestTrimMeasurement:
 
 
 class TestTrimBudgetKnob:
-    def test_default_behavior_unchanged(self):
-        """Unset config → exactly the old formula (the plan forbids masking
-        the fixes by re-tuning the default)."""
+    def test_default_is_the_window(self):
+        """Unset config -> the window (95 %). Re-pointed 2026-10-18: the old
+        formula, min(24000, window x 0.6), was kept by the 2026-08-30 plan
+        until real traffic was read; it trimmed a live chat to its latest
+        message on every step, and the owner decided the context is the
+        window."""
         from kazma_core.agent.turn_input import resolve_trim_token_budget
         from kazma_core.token_counter import resolve_context_window
 
         window = resolve_context_window(None, "gpt-4o-200k")
-        expected = max(4000, min(24000, int(window * 0.6)))
-        assert resolve_trim_token_budget(last_model="gpt-4o-200k") == expected
+        assert resolve_trim_token_budget(last_model="gpt-4o-200k") == max(4000, int(window * 0.95))
+        # A caller's own smaller cap still holds.
+        assert resolve_trim_token_budget(last_model="gpt-4o-200k", default=24000) == 24000
 
     def test_operator_override_wins_and_is_clamped(self, monkeypatch):
         from kazma_core.agent import turn_input as ti
@@ -902,7 +908,7 @@ class TestTrimBudgetKnob:
         )
         assert (
             ti.resolve_trim_token_budget(last_model="gpt-4o-200k")
-            == max(4000, min(24000, int(window * 0.6)))
+            == max(4000, int(window * 0.95))
         )
 
 
