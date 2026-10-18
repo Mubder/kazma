@@ -28,10 +28,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from kazma_core.agent.tool_builtins import filesystem
 from kazma_core.ide.workspace_scope import workspace_path_scope
 from kazma_core.workspace.binding import resolve_active_root, resolve_tool_path
+
+from tests._tool_answer import answer
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -200,7 +201,7 @@ async def test_file_delete_refuses_the_workspace_root(places, tools, target):
     """With "." meaning the workspace, ``file_delete(".")`` would remove it."""
     ws, _cwd = places
     async with workspace_path_scope(ws):
-        out = await tools["file_delete"](target)
+        out = await answer(tools["file_delete"](target))
     assert out.startswith(("Error: refusing", "Safety")), out
     assert (ws / "notes.txt").exists()
 

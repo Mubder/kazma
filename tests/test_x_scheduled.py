@@ -24,6 +24,8 @@ from kazma_core.x_api.schedule import (
     x_schedule_enabled,
 )
 
+from tests._tool_answer import answer
+
 
 @pytest.fixture()
 def store(tmp_path: Path) -> XScheduledStore:
@@ -220,10 +222,10 @@ async def test_cancel_scheduled_post(booking_env) -> None:
     assert sched.count_pending() == 0
 
     # Cancelling again reports it's not pending.
-    again = _json.loads(await t.x_cancel_scheduled_post(pid))
+    again = _json.loads(await answer(t.x_cancel_scheduled_post(pid)))
     assert again["ok"] is False
 
-    missing = _json.loads(await t.x_cancel_scheduled_post(99999))
+    missing = _json.loads(await answer(t.x_cancel_scheduled_post(99999)))
     assert missing["ok"] is False
 
 

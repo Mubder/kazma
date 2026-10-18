@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from kazma_core.tools.computer_use import (
     HARD_CAP,
     computer_use,
@@ -11,6 +10,8 @@ from kazma_core.tools.computer_use import (
     parse_action,
     plan_next_action,
 )
+
+from tests._tool_answer import answer
 
 
 class TestParseAction:
@@ -41,12 +42,12 @@ class TestKillSwitch:
     @pytest.mark.asyncio
     async def test_tool_respects_kill(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("KAZMA_COMPUTER_USE", "0")
-        out = await computer_use("open settings")
+        out = await answer(computer_use("open settings"))
         assert "disabled" in out.lower()
 
     @pytest.mark.asyncio
     async def test_empty_goal(self) -> None:
-        out = await computer_use("  ")
+        out = await answer(computer_use("  "))
         assert "goal" in out.lower()
 
 

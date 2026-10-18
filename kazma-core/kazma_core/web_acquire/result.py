@@ -45,6 +45,17 @@ class AcquisitionError(Exception):
         self.code, self.transient = code, transient
 
 
+class BrowserLaunchRefused(AcquisitionError):
+    """The browser was refused before any process started: nothing ran.
+
+    Distinct from a launch that failed: a tool turns this one into a refusal
+    made before acting (``RefusedBeforeEffect``), never an uncertain effect.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(FetchErrorCode.UNAVAILABLE, message)
+
+
 @dataclass(frozen=True)
 class FetchAttempt:
     backend: str

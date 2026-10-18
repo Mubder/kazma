@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests._tool_answer import answer
+
 
 def test_router_has_no_vault_stub() -> None:
     from kazma_skills.native.calendar import router
@@ -143,7 +145,7 @@ async def test_list_events_google_without_token_is_honest(
     monkeypatch.setattr(creds, "google_access_token", lambda: "")
     monkeypatch.setattr(creds, "google_refresh_token", lambda: "")
     monkeypatch.setattr(creds, "google_connected", lambda: False)
-    out = await list_events(provider="google")
+    out = await answer(list_events(provider="google"))
     assert out.startswith("Error:")
     assert "sandbox" not in out.lower()
     assert "Connect Calendar" in out or "Connect with Google" in out

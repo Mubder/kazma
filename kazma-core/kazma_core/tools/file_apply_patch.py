@@ -19,6 +19,7 @@ from pathlib import Path
 from kazma_core.tools.text_newlines import in_newline_style, newline_of, read_exact
 from kazma_core.workspace.binding import resolve_tool_path
 from kazma_core.workspace.path_policy import check_path_access, denied_message
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect, effect_unknown
 
 __all__ = [
     "PatchError",
@@ -316,13 +317,13 @@ async def file_apply_patch_set(
     """
     items = list(patches or [])
     if not items:
-        return "Error: patches is empty."
+        raise RefusedBeforeEffect("Error: patches is empty.")
     if len(items) > MAX_PATCH_SET:
-        return f"Error: at most {MAX_PATCH_SET} patches per set (got {len(items)})."
+        raise RefusedBeforeEffect(f"Error: at most {MAX_PATCH_SET} patches per set (got {len(items)}).")
 
     paths = [str(p.get("path") or "") for p in items]
     if any(not p.strip() for p in paths):
-        return "Error: every patch needs a path."
+        raise RefusedBeforeEffect("Error: every patch needs a path.")
 
     checkpoint_id = ""
     try:
@@ -346,10 +347,8 @@ async def file_apply_patch_set(
                 from kazma_core.ide.file_checkpoints import restore_checkpoint as _restore
 
                 _restore(checkpoint_id)
-                return (
-                    f"Error: hunk failed on {item.get('path')}: {msg} "
-                    f"(restored checkpoint {checkpoint_id})"
-                )
+                return effect_unknown(f"Error: hunk failed on {item.get('path')}: {msg} "
+                    f"(restored checkpoint {checkpoint_id})")
             lines.append(str(msg))
     except Exception as exc:
         try:

@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 from typing import Any
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ def register_memory_tools(registry: Any) -> None:
 
         bid = (belief_id or "").strip()
         if not bid:
-            return "Error: belief_id required (from list_beliefs)"
+            raise RefusedBeforeEffect("Error: belief_id required (from list_beliefs)")
         try:
             # The turn's tenant, like the list tools above: an id from another
             # tenant reads as not found.
@@ -241,9 +242,9 @@ def register_memory_tools(registry: Any) -> None:
         src_id = (source_id or "").strip()
         tgt_id = (target_id or "").strip()
         if not src_id or not tgt_id:
-            return "Error: source_id and target_id required"
+            raise RefusedBeforeEffect("Error: source_id and target_id required")
         if src_id == tgt_id:
-            return "Error: source and target must differ"
+            raise RefusedBeforeEffect("Error: source and target must differ")
         try:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
@@ -265,7 +266,7 @@ def register_memory_tools(registry: Any) -> None:
             # assistant only.
             if merge_refusal(conn, src_id, tgt_id, tenant_id=tenant or caller):
                 conn.close()
-                return f"Error: cannot merge protected source {src_id}"
+                raise RefusedBeforeEffect(f"Error: cannot merge protected source {src_id}")
             src = conn.execute(
                 "SELECT id, name, aliases_json FROM entities WHERE id=? AND tenant_id=?", (src_id, tenant)
             ).fetchone() if tenant else None
@@ -274,10 +275,10 @@ def register_memory_tools(registry: Any) -> None:
             ).fetchone() if tenant else None
             if not src or not tgt:
                 conn.close()
-                return json.dumps(
+                raise RefusedBeforeEffect(json.dumps(
                     {"ok": False, "error": "source or target not found"},
                     ensure_ascii=False,
-                )
+                ))
             try:
                 src_aliases = _json.loads(src["aliases_json"] or "[]")
             except Exception:
@@ -359,6 +360,8 @@ def register_memory_tools(registry: Any) -> None:
                 ensure_ascii=False,
                 indent=2,
             )
+        except RefusedBeforeEffect:
+            raise
         except Exception as exc:
             logger.warning("[memory_merge_entities] failed: %s", exc)
             return f"Error: memory_merge_entities failed — {exc}"
@@ -377,13 +380,13 @@ def register_memory_tools(registry: Any) -> None:
         pred = (predicate or "related_to").strip() or "related_to"
         object_ = (obj or "").strip()
         if not sub or not object_:
-            return "Error: subject and object required"
+            raise RefusedBeforeEffect("Error: subject and object required")
         thread, turn = _chat_of_call()
         if _chat_kept_out(thread, get_current_tenant_id()):
             return _KEPT_OUT
         refusal, method = _agent_write(sub, pred, object_)
         if refusal:
-            return refusal
+            raise RefusedBeforeEffect(refusal)
         try:
             primary = sqlite3.connect(
                 primary_memory_db(), check_same_thread=False
@@ -426,7 +429,7 @@ def register_memory_tools(registry: Any) -> None:
             ops.close()
             primary.close()
             if result.get("blocked") == "lower_trust_source":
-                return json.dumps({"ok": False, "error": "user_fact_stands", "hint": _USER_FACT_STANDS})
+                raise RefusedBeforeEffect(json.dumps({"ok": False, "error": "user_fact_stands", "hint": _USER_FACT_STANDS}))
             return json.dumps(
                 {
                     "ok": True,
@@ -439,6 +442,8 @@ def register_memory_tools(registry: Any) -> None:
                 ensure_ascii=False,
                 indent=2,
             )
+        except RefusedBeforeEffect:
+            raise
         except Exception as exc:
             logger.warning("[memory_link_entities] failed: %s", exc)
             return f"Error: memory_link_entities failed — {exc}"
@@ -451,7 +456,7 @@ def register_memory_tools(registry: Any) -> None:
 
         eid = (entity_id or "").strip()
         if not eid:
-            return "Error: entity_id required"
+            raise RefusedBeforeEffect("Error: entity_id required")
         try:
             conn = sqlite3.connect(
                 primary_memory_db(), check_same_thread=False
@@ -465,16 +470,16 @@ def register_memory_tools(registry: Any) -> None:
 
             if protection(conn, eid, tenant_id=tenant):
                 conn.close()
-                return f"Error: refusing to delete protected entity '{eid}'"
+                raise RefusedBeforeEffect(f"Error: refusing to delete protected entity '{eid}'")
             row = conn.execute(
                 "SELECT id, type, name FROM entities WHERE id=? AND tenant_id=?",
                 (eid, tenant),
             ).fetchone()
             if not row:
                 conn.close()
-                return json.dumps(
+                raise RefusedBeforeEffect(json.dumps(
                     {"ok": False, "error": "not_found", "entity_id": eid}
-                )
+                ))
             try:
                 from kazma_core.memory.entity_resolution import preserve_merge_ledger
 
@@ -500,6 +505,8 @@ def register_memory_tools(registry: Any) -> None:
                 },
                 ensure_ascii=False,
             )
+        except RefusedBeforeEffect:
+            raise
         except Exception as exc:
             logger.warning("[memory_delete_entity] failed: %s", exc)
             return f"Error: memory_delete_entity failed — {exc}"
@@ -806,10 +813,8 @@ def register_memory_tools(registry: Any) -> None:
             return await asyncio.to_thread(
                 _mem_link_entities, subject or id, predicate, object or target
             )
-        return (
-            f"Error: unknown action {action!r}. "
-            "Use action=help for the list."
-        )
+        raise RefusedBeforeEffect(f"Error: unknown action {action!r}. "
+            "Use action=help for the list.")
     @registry.register(
         description=(
             "WRITE: Merge memory entity source into target. Beliefs rewired; "

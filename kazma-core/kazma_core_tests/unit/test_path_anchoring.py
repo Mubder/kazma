@@ -1,10 +1,13 @@
 """Tests for O2 path anchoring — workspace scoping for file operations."""
 
 import os
-import pytest
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
-import tempfile
+
+import pytest
+
+from tests._tool_answer import answer
 
 
 @pytest.fixture
@@ -82,7 +85,7 @@ async def test_file_write_workspace_scoping(anchored_workspace):
 
     # Should fail for file outside workspace
     outside_new = Path(workspace).parent / "outside_new.txt"
-    result = await file_write(str(outside_new), "outside content")
+    result = await answer(file_write(str(outside_new), "outside content"))
     assert "Safety" in result or "not allowed" in result
 
 

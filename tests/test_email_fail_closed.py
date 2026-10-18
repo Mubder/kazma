@@ -15,6 +15,8 @@ import os
 
 import pytest
 
+from tests._tool_answer import answer
+
 
 @pytest.fixture
 def no_mail(tmp_path, monkeypatch):
@@ -116,7 +118,7 @@ async def test_every_email_tool_refuses_a_named_unconnected_provider(no_mail, na
     from kazma_skills.native.email_manager import tools
 
     fn = getattr(tools, name)
-    out = await fn(provider="gmail", **_ARGS.get(name, {}))
+    out = await answer(fn(provider="gmail", **_ARGS.get(name, {})))
     assert out.startswith("Error: Gmail is not connected"), out
     assert "sandbox" not in out.lower(), out
     # An expected refusal is the answer, not a logged crash.

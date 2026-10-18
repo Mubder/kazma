@@ -19,6 +19,7 @@ from typing import Any
 from kazma_core.agent.tool_scope import resolve_in_scope
 from kazma_core.workspace.binding import resolve_tool_path
 from kazma_core.workspace.project_files import GENERATED_DIRS
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect, effect_unknown
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ def _request_path_access_sync(path: str, mode: str, scope: str, label: str) -> s
     from kazma_core.workspace.path_policy import check_path_access
 
     if not path or not str(path).strip():
-        return "Error: path is required."
+        raise RefusedBeforeEffect("Error: path is required.")
     mode_n = "write" if str(mode).lower() in ("write", "rw", "readwrite") else "read"
     scope_n = "durable" if str(scope).lower() in ("durable", "permanent", "always") else "session"
     # Resolved once, here, the way every file tool resolves it -- so the
@@ -254,7 +255,7 @@ def _request_path_access_sync(path: str, mode: str, scope: str, label: str) -> s
     existing = check_path_access(path, mode_n)
     if existing.via == "store":
         # No grant opens a Kazma store; granting one would change nothing.
-        return f"Error: {existing.reason}"
+        raise RefusedBeforeEffect(f"Error: {existing.reason}")
     if existing.allowed and existing.via != "absolute":
         return (
             f"Already allowed via {existing.via}: {existing.grant_path or existing.resolved} "
@@ -286,10 +287,8 @@ def _request_path_access_sync(path: str, mode: str, scope: str, label: str) -> s
 
     tid = get_current_thread_id()
     if not tid:
-        return (
-            "Error: no active chat thread for a session grant. "
-            "Use scope='durable' or open this from a chat turn."
-        )
+        raise RefusedBeforeEffect("Error: no active chat thread for a session grant. "
+            "Use scope='durable' or open this from a chat turn.")
     try:
         grant = grant_session_path(
             tid,
@@ -399,7 +398,7 @@ def register_filesystem_tools(registry: Any) -> None:
     async def file_append(path: str, content: str, encoding: str = "utf-8") -> str:
         p, scope_err = await resolve_in_scope(path, "writes")
         if scope_err:
-            return scope_err
+            raise RefusedBeforeEffect(scope_err)
 
         def _run() -> str:
             from kazma_core.tools.text_newlines import existing_newline, in_newline_style
@@ -438,7 +437,7 @@ def register_filesystem_tools(registry: Any) -> None:
 
         p, scope_err = await resolve_in_scope(path, "deletions")
         if scope_err:
-            return scope_err
+            raise RefusedBeforeEffect(scope_err)
         # "." is the workspace root now that relative paths mean the
         # workspace; removing the root, or a folder that holds it, is never
         # one file operation, whatever an approval card says.
@@ -446,13 +445,11 @@ def register_filesystem_tools(registry: Any) -> None:
 
         root = await asyncio.to_thread(resolve_active_root)
         if p == root or root.is_relative_to(p):
-            return (
-                f"Error: refusing to delete {path}: it is the workspace root"
+            raise RefusedBeforeEffect(f"Error: refusing to delete {path}: it is the workspace root"
                 + ("" if p == root else " or a folder containing it")
-                + ". Delete the files inside it instead."
-            )
+                + ". Delete the files inside it instead.")
         if not p.exists():
-            return f"Error: Path not found: {path}"
+            raise RefusedBeforeEffect(f"Error: Path not found: {path}")
 
         def _run() -> str:
             try:
@@ -681,13 +678,13 @@ def register_filesystem_tools(registry: Any) -> None:
         # model which files exist there.
         p, scope_err = await resolve_in_scope(file_path, "file sends")
         if scope_err:
-            return scope_err
+            raise RefusedBeforeEffect(scope_err)
         if not p.exists():
-            return f"Error: file not found: {file_path}"
+            raise RefusedBeforeEffect(f"Error: file not found: {file_path}")
         if not p.is_file():
-            return f"Error: not a file: {file_path}"
+            raise RefusedBeforeEffect(f"Error: not a file: {file_path}")
         if p.stat().st_size > 50 * 1024 * 1024:
-            return f"Error: file too large ({p.stat().st_size // 1024 // 1024} MB; max 50 MB)"
+            raise RefusedBeforeEffect(f"Error: file too large ({p.stat().st_size // 1024 // 1024} MB; max 50 MB)")
 
         # A web conversation gets the file in the chat itself. Its delivery
         # target is the operator's Telegram (where reminders booked there
@@ -700,7 +697,7 @@ def register_filesystem_tools(registry: Any) -> None:
 
             thread = web_chat_thread()
             if not thread:
-                return "Error: this web chat has no conversation to share the file into."
+                raise RefusedBeforeEffect("Error: this web chat has no conversation to share the file into.")
             try:
                 shared = await asyncio.to_thread(share_file, p, thread_id=thread)
             except (OSError, ValueError) as exc:
@@ -748,7 +745,7 @@ def register_filesystem_tools(registry: Any) -> None:
             if send_failed(result):
                 # "File sent: ... -> Error: ..." until 2026-10-02: the model
                 # told the user a file went out that never did.
-                return f"Error: {p.name} was not sent: {result}"
+                return effect_unknown(f"Error: {p.name} was not sent: {result}")
             size = (await asyncio.to_thread(p.stat)).st_size
             return f"File sent: {p.name} ({size // 1024} KB) → {result}"
         except Exception as exc:

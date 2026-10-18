@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,8 @@ async def list_events(
         backend = await asyncio.to_thread(get_backend, provider, account or None)
         events = await backend.list_events(lo, hi, max_results)
     except CalendarNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not list events — {type(exc).__name__}: {exc}"
     listing = f"Calendar: {backend.name}\n{_fmt(events)}"
@@ -83,9 +85,9 @@ async def create_event(
 ) -> str:
     """Create a calendar event (start/end in ISO 8601)."""
     if not summary or not summary.strip():
-        return "Error: event summary is required."
+        raise RefusedBeforeEffect("Error: event summary is required.")
     if not start or not end:
-        return "Error: start and end (ISO 8601) are required."
+        raise RefusedBeforeEffect("Error: start and end (ISO 8601) are required.")
     from kazma_skills.native.calendar.router import (
         CalendarNotConnectedError,
         get_backend,
@@ -99,7 +101,8 @@ async def create_event(
             summary.strip(), start, end, location, description
         )
     except CalendarNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not create event — {type(exc).__name__}: {exc}"
     return f"Event created ({backend.name}):\n{json.dumps(ev, indent=2, default=str)}"
@@ -113,7 +116,7 @@ async def update_event(
 ) -> str:
     """Update an event by id. ``fields`` keys: summary, start, end, location, description."""
     if not event_id or not event_id.strip():
-        return "Error: event_id is required."
+        raise RefusedBeforeEffect("Error: event_id is required.")
     from kazma_skills.native.calendar.router import (
         CalendarNotConnectedError,
         get_backend,
@@ -125,7 +128,8 @@ async def update_event(
         backend = await asyncio.to_thread(get_backend, provider, account or None)
         ev = await backend.update_event(event_id.strip(), fields or {})
     except CalendarNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not update event — {type(exc).__name__}: {exc}"
     return f"Event updated ({backend.name}):\n{json.dumps(ev, indent=2, default=str)}"
@@ -134,7 +138,7 @@ async def update_event(
 async def delete_event(event_id: str, provider: str = "auto", account: str = "") -> str:
     """Delete a calendar event by id."""
     if not event_id or not event_id.strip():
-        return "Error: event_id is required."
+        raise RefusedBeforeEffect("Error: event_id is required.")
     from kazma_skills.native.calendar.router import (
         CalendarNotConnectedError,
         get_backend,
@@ -146,7 +150,8 @@ async def delete_event(event_id: str, provider: str = "auto", account: str = "")
         backend = await asyncio.to_thread(get_backend, provider, account or None)
         ok = await backend.delete_event(event_id.strip())
     except CalendarNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not delete event — {type(exc).__name__}: {exc}"
     return f"Event {event_id} deleted ({backend.name})." if ok else f"Event {event_id} not found."
@@ -172,7 +177,8 @@ async def find_free_slots(
         backend = await asyncio.to_thread(get_backend, provider, account or None)
         slots = await backend.find_free_slots(date.strip(), duration_minutes)
     except CalendarNotConnectedError as exc:
-        return f"Error: {exc.hint}"
+        # Raised while choosing the account, before anything was read or sent.
+        raise RefusedBeforeEffect(f"Error: {exc.hint}") from exc
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not find free slots — {type(exc).__name__}: {exc}"
     if not slots:

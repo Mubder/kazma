@@ -59,8 +59,9 @@ def _start_driver():
         from kazma_core.web_acquire.browser_cgroup import start_linux_driver
 
         return start_linux_driver(command, env=env, memory_bytes=_MEMORY, lifetime=_LIFETIME)
-    raise AcquisitionError(FetchErrorCode.UNAVAILABLE,
-        'Bounded local Chromium currently requires Windows Job Objects or Linux cgroup v2; launch was refused.')
+    from kazma_core.web_acquire.browser_isolation import _NO_BOUNDARY
+    from kazma_core.web_acquire.result import BrowserLaunchRefused
+    raise BrowserLaunchRefused(_NO_BOUNDARY)
 
 
 class _Transport:

@@ -12,6 +12,7 @@ import asyncio
 import json as _json
 import logging
 from typing import Any
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -84,13 +85,13 @@ async def schedule_task(timing: str, prompt: str, kind: str = "reminder", tools:
     """
     refused = await _refused()
     if refused:
-        return refused
+        raise RefusedBeforeEffect(refused)
     from kazma_core.cron.scheduler import CronLimitError, get_cron_scheduler
     from kazma_core.tools.send_message import resolve_delivery_target
 
     scheduler = get_cron_scheduler()
     if scheduler is None:
-        return "Error: Cron scheduler not initialized."
+        raise RefusedBeforeEffect("Error: Cron scheduler not initialized.")
 
     # Capture the chat this reminder was booked from so the result routes back
     # to the right conversation at fire time (AGENTS §16B). Web SSE/WS never
@@ -98,14 +99,14 @@ async def schedule_task(timing: str, prompt: str, kind: str = "reminder", tools:
     # `target=(none)` and UNDELIVERABLE at fire time (2026-09-02).
     delivery_target = await asyncio.to_thread(resolve_delivery_target)
     if not delivery_target:
-        return _out({
+        raise RefusedBeforeEffect(_out({
             "ok": False,
             "error": (
                 "Cannot schedule: no delivery address. Book from Telegram, or "
                 "set connectors.telegram.swarm_chat_id / allowed_users so a "
                 "Web-booked reminder can alert you."
             ),
-        })
+        }))
     platform = delivery_target.split(":", 1)[0] if ":" in delivery_target else "telegram"
     ctx = await asyncio.to_thread(_context)
     try:
@@ -174,12 +175,12 @@ async def cancel_scheduled(job_id: str) -> str:
     """
     refused = await _refused()
     if refused:
-        return refused
+        raise RefusedBeforeEffect(refused)
     from kazma_core.cron.scheduler import get_cron_scheduler
 
     scheduler = get_cron_scheduler()
     if scheduler is None:
-        return "Error: Cron scheduler not initialized."
+        raise RefusedBeforeEffect("Error: Cron scheduler not initialized.")
     try:
         ctx = await asyncio.to_thread(_context)
         result = await scheduler.cancel(job_id, tenant_id=ctx["tenant"], actor=ctx["actor"], source=ctx["source"])
@@ -207,15 +208,15 @@ async def edit_scheduled(job_id: str, timing: str = "", prompt: str = "") -> str
     """
     refused = await _refused()
     if refused:
-        return refused
+        raise RefusedBeforeEffect(refused)
     from kazma_core.cron.scheduler import get_cron_scheduler
 
     scheduler = get_cron_scheduler()
     if scheduler is None:
-        return "Error: Cron scheduler not initialized."
+        raise RefusedBeforeEffect("Error: Cron scheduler not initialized.")
 
     if not (timing or "").strip() and not (prompt or "").strip():
-        return "Error: provide at least one of timing or prompt to edit."
+        raise RefusedBeforeEffect("Error: provide at least one of timing or prompt to edit.")
 
     try:
         ctx = await asyncio.to_thread(_context)

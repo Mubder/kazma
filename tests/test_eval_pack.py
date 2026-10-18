@@ -42,7 +42,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from kazma_core.llm_provider import LLMError, LLMResponse, ToolCall
 
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "eval_pack.json"
@@ -493,6 +492,15 @@ async def test_every_shipped_danger_tool_is_stopped_before_it_runs(
         raise RuntimeError("HITL_INTERRUPT")
 
     monkeypatch.setattr("langgraph.types.interrupt", _irq)
+
+    # A call that cannot run (no command, a host that cannot start the
+    # browser) is refused before its card -- tests/test_shell_refused_before_card.py
+    # and tests/test_tools_refuse_before_effect.py hold that. Here the call
+    # can run, so what is measured is the card.
+    async def _runnable(name: str, arguments: Any) -> None:
+        return None
+
+    monkeypatch.setattr("kazma_core.safety.call_preflight.call_refusal", _runnable)
 
     raised = False
     out: Any = None

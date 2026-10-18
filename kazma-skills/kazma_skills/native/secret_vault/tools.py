@@ -23,6 +23,7 @@ import json
 # ``get_vault`` was when this file was first imported, so a replacement
 # (tests, a reset vault) never reaches these tools.
 from kazma_core.security import vault as _vault
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 
 async def vault_store(
@@ -44,7 +45,7 @@ async def vault_store(
     """
     vault = _vault.get_vault()
     if vault is None:
-        return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
+        raise RefusedBeforeEffect("Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable.")
     try:
         meta = json.loads(metadata) if isinstance(metadata, str) else metadata
     except (json.JSONDecodeError, TypeError):
@@ -75,7 +76,7 @@ async def vault_retrieve(name: str) -> str:
     """
     vault = _vault.get_vault()
     if vault is None:
-        return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
+        raise RefusedBeforeEffect("Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable.")
     # `retrieve_scoped`, not `vault.retrieve`. A bare retrieve resolves the
     # tenant from the ContextVar and falls back tenant -> global, which is
     # right when a tenant is installed and wrong when one is not: a
@@ -125,7 +126,7 @@ async def vault_delete(name: str) -> str:
     """
     vault = _vault.get_vault()
     if vault is None:
-        return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
+        raise RefusedBeforeEffect("Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable.")
     deleted = vault.delete(name)
     if deleted:
         return f"Secret '{name}' deleted."

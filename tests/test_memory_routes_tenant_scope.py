@@ -47,6 +47,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests._tool_answer import answer as tool_answer
+
 #: Every beta id and every beta text carries this; alpha is never shown it.
 MARK = "beta9"
 
@@ -828,7 +830,7 @@ def test_an_agent_memory_tool_runs_off_the_loop(seeded, monkeypatch, name):
     tool = _memory_tools()[name]
     for kwargs in TOOL_CALLS[name]:
         on_loop.clear()
-        answer = _as_tenant("alpha", lambda kw=kwargs: tool(**kw))
+        answer = _as_tenant("alpha", lambda kw=kwargs: tool_answer(tool(**kw)))
         assert isinstance(answer, str)
         assert on_loop == [], f"{name}({kwargs}) ran SQL on the event loop: {on_loop[:3]}"
 

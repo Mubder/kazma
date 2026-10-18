@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from tests._tool_answer import answer
+
 
 @pytest.fixture
 def shell(tmp_path, monkeypatch):
@@ -45,7 +47,7 @@ def shell(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_glued_flags_refuse_before_execution(shell, command):
     execute, run = shell
-    assert (await execute(command)).startswith("Error:")
+    assert (await answer(execute(command))).startswith("Error:")
     run.assert_not_called()
 
 
@@ -57,12 +59,13 @@ async def test_unresolved_binary_never_falls_back_to_os_search(shell, monkeypatc
     execute, run = shell
     monkeypatch.setenv("KAZMA_SHELL_STRICT", strict)
     monkeypatch.setattr(post_hitl, "resolve_shell_binary", lambda *a, **k: None)
-    assert "could not resolve" in await execute("git status")
+    assert "could not resolve" in await answer(execute("git status"))
     run.assert_not_called()
 
 
 def test_binary_search_uses_absolute_directories_without_current_directory(tmp_path, monkeypatch):
     import os
+
     from kazma_core.safety.post_hitl import resolve_shell_binary
 
     trusted = tmp_path / "trusted"
@@ -82,6 +85,7 @@ def test_binary_search_uses_absolute_directories_without_current_directory(tmp_p
 
 def test_trusted_directory_cannot_redirect_a_binary_outside_it(tmp_path):
     import os
+
     from kazma_core.safety.post_hitl import resolve_shell_binary
 
     trusted = tmp_path / "trusted"

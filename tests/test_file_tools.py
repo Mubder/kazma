@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 from kazma_core.tools.file_write import configure_workspace
+
+from tests._tool_answer import answer
 
 
 class _Allow:
@@ -156,7 +157,7 @@ class TestFileWrite:
         from kazma_core.tools.file_write import file_write
 
         escape_path = str(tmp_path / ".." / ".." / "escaped.txt")
-        result = await file_write(escape_path, "evil content")
+        result = await answer(file_write(escape_path, "evil content"))
 
         assert "Safety" in result
         assert "not allowed" in result
@@ -166,8 +167,9 @@ class TestFileWrite:
         """file_write returns a friendly error on permission denied."""
         configure_workspace(workspace="/", allow_absolute=True)
 
-        from kazma_core.tools.file_write import file_write
         from unittest.mock import patch
+
+        from kazma_core.tools.file_write import file_write
 
         with patch.object(Path, "write_text", side_effect=PermissionError("Permission denied")):
             result = await file_write("/root/kazma_test_no_permission.txt", "test")

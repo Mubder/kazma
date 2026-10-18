@@ -18,7 +18,6 @@ that writes the user's label.
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
 import sqlite3
 import time
@@ -26,6 +25,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from tests._tool_answer import answer_now
 
 REPO = Path(__file__).resolve().parents[1]
 CORPUS = REPO / "tests" / "fixtures" / "injection_corpus.json"
@@ -74,7 +75,7 @@ def _call(name: str, user_said: str = "Summarize this page for me.", **kwargs) -
     t_tok = set_current_thread_id(THREAD)
     m_tok = set_current_session_messages(messages)
     try:
-        return asyncio.run(_tool(name).func(**kwargs))
+        return answer_now(_tool(name).func, **kwargs)
     finally:
         reset_current_session_messages(m_tok)
         reset_current_thread_id(t_tok)

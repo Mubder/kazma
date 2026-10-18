@@ -78,7 +78,30 @@ def _proactor_policy_for_boot():
 
 
 from kazma_core.web_acquire.resources import _CapacityPool
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+from kazma_core.web_acquire.result import BrowserLaunchRefused
 _NATIVE_CALLS = _CapacityPool('interactive browser calls', 1, 8)
+
+
+async def _refuse_if_unlaunchable() -> None:
+    """Refuse before acting when this host would refuse to start the browser.
+
+    The same answer the approval step asks (``safety/call_preflight``): a
+    launch the host refuses ran nothing, so it is a refusal made before the
+    action, never an effect of unknown outcome (live 2026-10-18, an approved
+    ``browser_navigate`` on Windows ended the turn that way).
+    """
+    if _state.get("page") is not None:
+        return
+    from kazma_core.safety.call_preflight import browser_refusal
+
+    reason = await browser_refusal()
+    if reason:
+        raise RefusedBeforeEffect(f"Error: {reason} Nothing was run.")
+
+
+def _launch_refused(exc: BaseException) -> RefusedBeforeEffect:
+    return RefusedBeforeEffect(f"Error: {exc} Nothing was run.")
 
 
 async def _run_sync(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -272,7 +295,7 @@ async def browser_navigate(url: str) -> str:
     Use for JavaScript-rendered pages a plain HTTP fetch cannot read.
     """
     if not url or not url.strip():
-        return "Error: No URL provided."
+        raise RefusedBeforeEffect("Error: No URL provided.")
     url = url.strip()
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
@@ -283,10 +306,13 @@ async def browser_navigate(url: str) -> str:
         from kazma_core.web_acquire.dns_worker import validate_public_url
         await validate_public_url(url, validator=validate_url)
     except Exception as exc:
-        return f"Error: URL blocked by security policy — {exc}"
+        raise RefusedBeforeEffect(f"Error: URL blocked by security policy — {exc}") from exc
 
+    await _refuse_if_unlaunchable()
     try:
         title, text = await _run_sync(_navigate_sync, url)
+    except BrowserLaunchRefused as exc:
+        raise _launch_refused(exc) from exc
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -301,9 +327,12 @@ async def browser_navigate(url: str) -> str:
 async def browser_click(selector: str) -> str:
     """Click the first element matching *selector* (CSS) and return updated text."""
     if not selector or not selector.strip():
-        return "Error: No CSS selector provided."
+        raise RefusedBeforeEffect("Error: No CSS selector provided.")
+    await _refuse_if_unlaunchable()
     try:
         text = await _run_sync(_click_sync, selector.strip())
+    except BrowserLaunchRefused as exc:
+        raise _launch_refused(exc) from exc
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -316,8 +345,11 @@ async def browser_click(selector: str) -> str:
 
 async def browser_extract_text(selector: str = "") -> str:
     """Extract text from elements matching *selector*, or full body if empty."""
+    await _refuse_if_unlaunchable()
     try:
         text = await _run_sync(_extract_sync, selector.strip())
+    except BrowserLaunchRefused as exc:
+        raise _launch_refused(exc) from exc
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -328,8 +360,11 @@ async def browser_extract_text(selector: str = "") -> str:
 
 async def browser_screenshot(full_page: bool = True) -> str:
     """Capture a full-page screenshot and save it to kazma-data/images/."""
+    await _refuse_if_unlaunchable()
     try:
         dest = await _run_sync(_screenshot_sync, bool(full_page))
+    except BrowserLaunchRefused as exc:
+        raise _launch_refused(exc) from exc
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -348,11 +383,14 @@ async def browser_fill_form(
     resulting page text.
     """
     if not fields or not isinstance(fields, dict):
-        return "Error: 'fields' must be a non-empty {selector: value} mapping."
+        raise RefusedBeforeEffect("Error: 'fields' must be a non-empty {selector: value} mapping.")
+    await _refuse_if_unlaunchable()
     try:
         result = await _run_sync(
             _fill_form_sync, fields, (submit_selector or "").strip()
         )
+    except BrowserLaunchRefused as exc:
+        raise _launch_refused(exc) from exc
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -367,9 +405,12 @@ async def browser_eval_js(expression: str) -> str:
     Executes arbitrary page-side code — use with care.
     """
     if not expression or not expression.strip():
-        return "Error: No JavaScript expression provided."
+        raise RefusedBeforeEffect("Error: No JavaScript expression provided.")
+    await _refuse_if_unlaunchable()
     try:
         result = await _run_sync(_eval_js_sync, expression.strip())
+    except BrowserLaunchRefused as exc:
+        raise _launch_refused(exc) from exc
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001

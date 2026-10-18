@@ -10,6 +10,7 @@ from typing import Any
 from kazma_core.documents.service import DocumentService
 
 from kazma_core.paths import data_dir as _data_dir
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect, effect_unknown
 
 #: Resolved via paths so KAZMA_DATA_DIR is honoured.
 DOC_DIR = _data_dir() / "documents"
@@ -197,7 +198,7 @@ async def generate_pdf(
             p = root / p
         p = p.resolve()
         if not p.is_file():
-            return f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write."
+            raise RefusedBeforeEffect(f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write.")
         md = p.read_text(encoding="utf-8", errors="replace")
         # Parse markdown headings into sections (same split as the export endpoints).
         parsed: list[dict[str, str]] = []
@@ -240,7 +241,7 @@ async def generate_pdf(
         _path = getattr(result.data, "export_path", None) if result.data else None
         _err = _verify_pdf_content(_path, _sections(sections), tables)
         if _err:
-            return _err
+            return effect_unknown(_err)
     return _output(result, "PDF")
 
 
@@ -275,7 +276,7 @@ async def generate_docx(
             p = root / p
         p = p.resolve()
         if not p.is_file():
-            return f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write."
+            raise RefusedBeforeEffect(f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write.")
         md = p.read_text(encoding="utf-8", errors="replace")
         parsed: list[dict[str, str]] = []
         cur_h = "Report"

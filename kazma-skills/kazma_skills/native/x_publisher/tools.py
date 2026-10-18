@@ -10,6 +10,7 @@ from kazma_core.x_api.booking import delete_x_post, publish_x_post
 from kazma_core.x_api.config import get_x_config
 from kazma_core.x_api.ledger import get_ledger
 from kazma_core.x_api.schedule import get_x_scheduled_store
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
 
@@ -263,11 +264,13 @@ async def x_cancel_scheduled_post(post_id: int) -> str:
             return _json({"ok": True, "cancelled": True, "id": pid})
         existing = await asyncio.to_thread(store.get, pid, tenant_id=tenant_id)
         if existing is None:
-            return _json({"ok": False, "cancelled": False, "error": f"No scheduled post with id {pid}."})
-        return _json({
+            raise RefusedBeforeEffect(_json({"ok": False, "cancelled": False, "error": f"No scheduled post with id {pid}."}))
+        raise RefusedBeforeEffect(_json({
             "ok": False, "cancelled": False,
             "error": f"Post {pid} is already '{existing.status}' and cannot be cancelled.",
-        })
+        }))
+    except RefusedBeforeEffect:
+        raise
     except Exception as exc:
         logger.exception("x_cancel_scheduled_post failed")
         return _json({"ok": False, "cancelled": False, "error": str(exc)})

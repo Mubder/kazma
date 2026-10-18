@@ -14,11 +14,12 @@ import ast
 from pathlib import Path
 
 import pytest
-
 from kazma_core.safety.protected_config import (
     PROTECTED_CONFIG_PREFIXES,
     is_protected_config_key,
 )
+
+from tests._tool_answer import answer_now
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -66,7 +67,7 @@ def test_config_save_blocks_a_hook_and_an_mcp_server(monkeypatch) -> None:
     fn = save.func
     for key in ("agent.hooks.post_tool", "mcp.servers", "safety.hitl_enabled",
                 "task_grant.t1", "tenant.acme.mcp.servers"):
-        out = fn(key=key, value='["echo x"]')
+        out = answer_now(fn, key=key, value='["echo x"]')
         assert out.startswith("Error: Cannot modify restricted key"), (key, out)
     # The value checks the Settings page applies (settings_validation).
     bad = fn(key="cron.timezone", value="Mars/Olympus")

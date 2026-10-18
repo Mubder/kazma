@@ -16,6 +16,7 @@ from kazma_core.workspace.binding import resolve_tool_path
 logger = logging.getLogger(__name__)
 
 from kazma_core.paths import data_dir as _data_dir
+from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 #: Resolved via paths so KAZMA_DATA_DIR is honoured.
 #:
@@ -254,7 +255,7 @@ async def pdf_fill_form(
 
     source, error = await asyncio.to_thread(_resolve_input, file_path, "PDF form reads")
     if error:
-        return error
+        raise RefusedBeforeEffect(error)
     assert source is not None
     result = await DocumentService().pdf_fill_form(
         source,
@@ -274,7 +275,7 @@ async def pdf_redact(
 
     source, error = await asyncio.to_thread(_resolve_input, file_path, "PDF redaction reads")
     if error:
-        return error
+        raise RefusedBeforeEffect(error)
     assert source is not None
     result = await DocumentService().redact(
         source,
