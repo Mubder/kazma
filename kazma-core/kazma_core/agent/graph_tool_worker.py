@@ -92,6 +92,42 @@ def _last_user_text(state: SupervisorState) -> str:
     return ""
 
 
+async def _refuse_unrunnable_shell(
+    pending: list[PendingToolCall],
+) -> tuple[list[PendingToolCall], list[ToolResult]]:
+    """Take out the ``shell_exec`` calls that cannot run, before any card.
+
+    Live 2026-10-18: an approval card said the host shell was disabled and
+    still asked the owner to approve; the approved call was then refused and
+    the turn failed. A refused call here gets an ordinary error the model can
+    act on (``outcome="policy"``), and no card (``safety/shell_preflight``).
+    """
+    if not any(str(tc.get("name") or "") == "shell_exec" for tc in pending):
+        return pending, []
+    from kazma_core.safety.shell_preflight import shell_refusal
+
+    kept: list[PendingToolCall] = []
+    refused: list[ToolResult] = []
+    for tc in pending:
+        if str(tc.get("name") or "") == "shell_exec":
+            args = tc.get("arguments")
+            command = str(args.get("command") or "") if isinstance(args, dict) else ""
+            reason = await shell_refusal(command)
+            if reason:
+                logger.info("[ToolWorker] shell_exec refused before approval: %s", reason[:120])
+                refused.append(ToolResult(
+                    tool_call_id=str(tc.get("id") or ""),
+                    name="shell_exec",
+                    content=f"Error: {reason} Nothing was run, and no approval was asked.",
+                    is_error=True,
+                    duration_ms=0,
+                    outcome="policy",
+                ))
+                continue
+        kept.append(tc)
+    return kept, refused
+
+
 def _commitment_resolve_gate(
     state: SupervisorState,
     pending: list[PendingToolCall],
@@ -773,7 +809,9 @@ async def tool_worker_node(
         allow_interrupt = False
 
     try:
+        pending, shell_refused = await _refuse_unrunnable_shell(pending)
         pending, semantic_blocked = _commitment_resolve_gate(state, pending, allow_interrupt=allow_interrupt)
+        semantic_blocked = [*shell_refused, *semantic_blocked]
 
         # ── HITL: separate safe and danger tools ──────────────────────
         safe_tools: list[PendingToolCall] = []

@@ -97,8 +97,38 @@ def _env(data_dir: Path) -> dict[str, str]:
         "KAZMA_DB_BACKEND": "sqlite",
         "KAZMA_PROCESS_PRIORITY": "keep",
         "PYTHONIOENCODING": "utf-8",
+        # A native crash in a child still names the Python stack that ran it.
+        "PYTHONFAULTHANDLER": "1",
     })
     return env
+
+
+#: How long a child keeps rebuilding after a restore before the soak calls it
+#: unfinished (a violation of its own, never "turns lost").
+_REBUILD_PASSES = 40
+_REBUILD_DEADLINE_S = 900.0
+
+
+def _finish_rebuild(first: dict[str, Any], run_pass: Any, *, max_passes: int = _REBUILD_PASSES,
+                    deadline_s: float = _REBUILD_DEADLINE_S) -> dict[str, Any]:
+    """Run turn reconcile until a restore's rebuild is done.
+
+    ``restore_memory_backup`` rebuilds within its own budget and says
+    ``more`` when turns are left for the next pass -- in the product the
+    15-minute cadence takes them. The soak checks right after the cycle,
+    so it finishes the rebuild first and records how long it took (the
+    restore's recovery time): on 2026-10-16 a loaded machine left 799
+    turns for the next pass and the check called them lost.
+    """
+    t0 = time.monotonic()
+    passes, written, more = 0, 0, bool(first.get("more"))
+    while more and passes < max_passes and time.monotonic() - t0 < deadline_s:
+        res = run_pass() or {}
+        passes += 1
+        written += int(res.get("turns_written") or 0)
+        more = not res.get("done", True)
+    return {"passes": passes, "turns_written": written, "seconds": round(time.monotonic() - t0, 2),
+            "finished": not more}
 
 
 # ── the child: one cycle ─────────────────────────────────────────────────
@@ -198,6 +228,8 @@ def _child(plan: dict[str, Any]) -> dict[str, Any]:
         step("backup")
     if plan.get("restore"):
         out["restore"] = restore_memory_backup(Path(plan["restore"]))
+        out["restore"]["rebuild"] = _finish_rebuild(
+            out["restore"], lambda: turn_reconcile.run_turn_reconcile_pass(time_budget_s=120))
         step("restore")
 
     for q in plan["ask"]:
@@ -350,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
     backups: list[Path] = []
     report: dict[str, Any] = {"cycles": 0, "crashes": 0, "restores": 0, "backups": 0,
                               "violations": [], "recall_ms": [], "child_seconds": [],
-                              "peak_rss_mb": [], "data_dir": str(data_dir)}
+                              "peak_rss_mb": [], "rebuild_seconds": [], "data_dir": str(data_dir)}
     started = time.monotonic()
     cycle = 0
     while time.monotonic() - started < args.duration and (not args.max_cycles or cycle < args.max_cycles):
@@ -363,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         t0 = time.monotonic()
         proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--child", str(plan_file)],
                               env=_env(data_dir), capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=900, check=False)
+                              errors="replace", timeout=900 + _REBUILD_DEADLINE_S, check=False)
         plan_file.unlink(missing_ok=True)  # thousands of cycles in a multi-day run
         report["child_seconds"].append(round(time.monotonic() - t0, 3))
         report["cycles"] = cycle
@@ -381,6 +413,15 @@ def main(argv: list[str] | None = None) -> int:
                     if name.startswith("memory_state_")]
         report["backups"] += bool(result.get("backup"))
         report["restores"] += bool(result.get("restore"))
+        rebuild = (result.get("restore") or {}).get("rebuild")
+        if rebuild:
+            report["rebuild_seconds"].append(rebuild["seconds"])
+            if not rebuild["finished"]:
+                report["violations"].append(
+                    f"cycle {cycle}: the rebuild after a restore did not finish in {rebuild['passes']} "
+                    f"passes ({rebuild['seconds']} s)")
+                _write_report(args.report, _summary(report, started, memory, data_dir, "running"))
+                break
         report["recall_ms"] += result["recall_ms"]
         if result.get("peak_rss_mb"):
             report["peak_rss_mb"].append(result["peak_rss_mb"])
@@ -417,7 +458,9 @@ def _summary(report: dict[str, Any], started: float, memory: list[dict[str, Any]
     ``passed`` or ``failed``. Written after every cycle, so a run that a
     reboot or a kill ends early still leaves its evidence."""
     lat, secs, rss = report["recall_ms"], report["child_seconds"], report["peak_rss_mb"]
-    out = {k: v for k, v in report.items() if k not in ("recall_ms", "child_seconds", "peak_rss_mb")}
+    rebuilt = report.get("rebuild_seconds") or []
+    out = {k: v for k, v in report.items()
+           if k not in ("recall_ms", "child_seconds", "peak_rss_mb", "rebuild_seconds")}
     out.update({
         "status": status,
         "updated_at": utc_stamp(),
@@ -427,6 +470,8 @@ def _summary(report: dict[str, Any], started: float, memory: list[dict[str, Any]
                       "max": max(lat) if lat else None, "n": len(lat)},
         "cycle_seconds": {"p50": statistics.median(secs) if secs else None, "max": max(secs) if secs else None},
         "peak_rss_mb": max(rss) if rss else None,
+        "restore_rebuild_seconds": {"p50": statistics.median(rebuilt) if rebuilt else None,
+                                    "max": max(rebuilt) if rebuilt else None, "n": len(rebuilt)},
         "memory_state_mb": _size_mb(data_dir / "memory_state.db"),
         "memory_ops_mb": _size_mb(data_dir / "memory_ops.db"),
         "healthy": not report["violations"],

@@ -79,3 +79,30 @@ def test_the_check_sees_a_memory_taken_from_the_store(run):
     finally:
         conn.close()
     assert any(p.startswith("lost:") for p in memory_soak._check(data, {}))
+
+
+def test_a_restore_left_unfinished_is_rebuilt_before_the_check():
+    """2026-10-16: a restore's rebuild ran out of its budget under load
+    (``more``), the check ran at once and called 799 turns lost."""
+    passes = iter([{"turns_written": 300, "done": False}, {"turns_written": 499, "done": True}])
+    done = memory_soak._finish_rebuild({"more": True}, lambda: next(passes))
+    assert done["finished"] and done["passes"] == 2 and done["turns_written"] == 799
+
+
+def test_a_finished_restore_runs_no_extra_pass():
+    def boom():
+        raise AssertionError("no pass needed")
+
+    assert memory_soak._finish_rebuild({"more": False}, boom) == {
+        "passes": 0, "turns_written": 0, "seconds": 0.0, "finished": True}
+
+
+def test_a_rebuild_that_never_ends_is_reported_unfinished():
+    """Negative control: the bound holds, and says so (never a silent pass)."""
+    done = memory_soak._finish_rebuild({"more": True}, lambda: {"done": False}, max_passes=3)
+    assert done["passes"] == 3 and not done["finished"]
+
+
+def test_the_short_soak_recorded_each_restores_rebuild(run):
+    _code, report, _data = run
+    assert report["restore_rebuild_seconds"]["n"] == report["restores"] > 0

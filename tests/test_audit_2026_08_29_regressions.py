@@ -242,12 +242,15 @@ async def test_shell_exec_blocks_exec_capable_arguments(command, blocked_flag):
     from kazma_core.agent.tool_builtins import register_builtin_tools
     from kazma_core.agent.tool_registry import LocalToolRegistry
 
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
     registry = LocalToolRegistry()
     register_builtin_tools(registry)
-    result = await registry._tools["shell_exec"].func(command, timeout=10)
-
-    assert result.startswith("Error:"), f"{command!r} was not blocked: {result[:200]}"
-    assert blocked_flag in result
+    # A refusal before the process starts is RefusedBeforeEffect (the
+    # registry answers it as "Error: ..."; agent/tool_refusal).
+    with pytest.raises(RefusedBeforeEffect) as refused:
+        await registry._tools["shell_exec"].func(command, timeout=10)
+    assert blocked_flag in str(refused.value)
 
 
 async def test_shell_exec_still_allows_ordinary_commands(tmp_path):

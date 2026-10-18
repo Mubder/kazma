@@ -300,7 +300,9 @@ class TestHitlGraphInterrupt:
         config = {"configurable": {"thread_id": "persist-1"}}
         await graph1.ainvoke(
             {"messages": [{"role": "user", "content": "test"}],
-             "tool_calls_pending": [{"id": "tc1", "name": "shell_exec", "arguments": {}}]},
+             # A runnable command: an empty one is refused before any card
+             # (safety/shell_preflight), and this test is about the resume.
+             "tool_calls_pending": [{"id": "tc1", "name": "shell_exec", "arguments": {"command": "git --version"}}]},
             config,
         )
         await conn1.close()

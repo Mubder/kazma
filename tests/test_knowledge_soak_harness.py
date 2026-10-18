@@ -490,3 +490,26 @@ def test_a_collection_one_process_cannot_read_is_a_finding_until_it_survives_a_r
     # Without the read failure the same facts are violations (negative control).
     problems, confined = knowledge_soak.check_facts(plan, {**facts, "vector_read_failures": {}})
     assert confined == {} and len(problems) == 4, problems
+
+
+def _crash(env):
+    import subprocess
+
+    return subprocess.run([sys.executable, "-c", "import faulthandler; faulthandler._sigsegv()"], env=env,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=60, check=False)
+
+
+def test_a_native_crash_in_a_child_leaves_its_python_stack(tmp_path):
+    """2026-10-17: a cycle died with 0xc0000005 inside chromadb's Rust
+    bindings and its kept log held nothing to say where."""
+    proc = _crash(knowledge_soak._env(tmp_path))
+    assert proc.returncode != 0
+    assert "fatal" in proc.stderr.lower() and "line 1" in proc.stderr, proc.stderr
+
+
+def test_negative_control_without_faulthandler_the_crash_says_nothing(tmp_path):
+    env = knowledge_soak._env(tmp_path)
+    env.pop("PYTHONFAULTHANDLER")
+    proc = _crash(env)
+    assert proc.returncode != 0 and "line 1" not in proc.stderr

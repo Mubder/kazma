@@ -253,14 +253,16 @@ def register_system_tools(registry: Any) -> None:
     async def shell_exec(command: str, timeout: int = 30) -> str:
         import shlex
 
-        from kazma_core.safety.post_hitl import host_shell_allowed
+        from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+        from kazma_core.safety.shell_preflight import shell_refusal
 
-        if not host_shell_allowed():
-            return (
-                "Error: host shell_exec is disabled by the execution policy. "
-                "Use python_exec or the native file/git tools. "
-                "An administrator must change the policy to enable host shell."
-            )
+        # Every refusal before the process starts is RefusedBeforeEffect:
+        # nothing ran, so the turn goes on (agent/tool_refusal). The policy
+        # and the command's text are the same check the approval step runs
+        # (safety/shell_preflight); the policy is a settings read, off the loop.
+        _refused = await shell_refusal(command)
+        if _refused:
+            raise RefusedBeforeEffect(_refused)
         # Log all shell_exec invocations — this is a dangerous tool
         logger.warning(
             "[SECURITY] shell_exec called: %s",
@@ -303,10 +305,10 @@ def register_system_tools(registry: Any) -> None:
             else:
                 args = shlex.split(command)
         except ValueError as exc:
-            return f"Error: Invalid command syntax: {exc}"
+            raise RefusedBeforeEffect(f"Invalid command syntax: {exc}")
 
         if not args:
-            return "Error: Empty command"
+            raise RefusedBeforeEffect("Empty command")
 
         # Restricted PATH — only allow read-only / build-safe binaries.
         # NO interpreters (python/node/bash/sh) — those are RCE vectors
@@ -393,8 +395,8 @@ def register_system_tools(registry: Any) -> None:
                         "\n\nInterpreters are blocked in shell_exec. Use python_exec "
                         "or code_exec for short scripts."
                     )
-                return (
-                    f"Error: '{binary}' is not in the allowed binary list. "
+                raise RefusedBeforeEffect(
+                    f"'{binary}' is not in the allowed binary list. "
                     f"Allowed: {', '.join(sorted(_SAFE_BINARIES))}"
                     f"{hint}"
                 )
@@ -431,8 +433,8 @@ def register_system_tools(registry: Any) -> None:
             )
             if not resolved:
                 path_label = "restricted PATH" if shell_strict_mode() else "tool PATH"
-                return (
-                    f"Error: could not resolve '{args[0]}' under the {path_label}. "
+                raise RefusedBeforeEffect(
+                    f"could not resolve '{args[0]}' under the {path_label}. "
                     "Install the allowlisted executable or use a native tool."
                 )
             args = [resolved, *args[1:]]
@@ -450,11 +452,11 @@ def register_system_tools(registry: Any) -> None:
                 try:
                     attached = short_option_values(binary, a)
                 except ValueError as exc:
-                    return f"Error: {exc}"
+                    raise RefusedBeforeEffect(f"{exc}")
                 for flag, value in attached:
                     blocked = {"tar": {"-I", "-T"}, "git": {"-c"}, "grep": {"-f"}, "jq": {"-f"}}
                     if flag in blocked.get(binary, set()):
-                        return f"Error: '{flag}' is not allowed for {binary}; use a native tool."
+                        raise RefusedBeforeEffect(f"'{flag}' is not allowed for {binary}; use a native tool.")
                     candidates_a.append(value)
                 if a.startswith("-") and "=" in a:
                     candidates_a.append(a.split("=", 1)[1])
@@ -469,8 +471,8 @@ def register_system_tools(registry: Any) -> None:
                     if targeted:
                         from kazma_core.store_registry import store_refusal
 
-                        return (
-                            "Error: Kazma control-plane store — shell_exec may "
+                        raise RefusedBeforeEffect(
+                            "Kazma control-plane store — shell_exec may "
                             "not open it. "
                             + store_refusal(targeted, door="shell_exec")
                         )
@@ -493,11 +495,13 @@ def register_system_tools(registry: Any) -> None:
                         if _os.name == "nt":
                             cand, root_n = cand.lower(), root_n.lower()
                         if cand != root_n and not cand.startswith(root_n + _os.sep):
-                            return (
-                                f"Error: path '{check}' (argument '{a}') is outside "
+                            raise RefusedBeforeEffect(
+                                f"path '{check}' (argument '{a}') is outside "
                                 f"the workspace ({cwd_s}). Absolute paths must stay "
                                 "inside the workspace."
                             )
+                    except RefusedBeforeEffect:
+                        raise
                     except Exception:
                         pass
 
@@ -532,15 +536,15 @@ def register_system_tools(registry: Any) -> None:
             for _a in args[1:]:
                 _flag = _a.split("=", 1)[0]
                 if _flag in _EXEC_CAPABLE_ARGS.get(binary, ()):
-                    return (
-                        f"Error: '{_flag}' is not allowed for {binary} — it runs "
+                    raise RefusedBeforeEffect(
+                        f"'{_flag}' is not allowed for {binary} — it runs "
                         f"another program (or writes/deletes outside the vetted "
                         f"argument set) and would bypass the binary allowlist. "
                         f"Use python_exec for multi-step work, or a native "
                         f"file_*/git_* tool."
                     )
             if binary == "tar" and args[1:] and not args[1].startswith("-"):
-                return "Error: tar requires explicit dash options; old-style option clusters are refused."
+                raise RefusedBeforeEffect("tar requires explicit dash options; old-style option clusters are refused.")
 
             # git subcommand denylist (destructive / credential / rewrite)
             if binary == "git" and len(args) > 1:
@@ -564,8 +568,8 @@ def register_system_tools(registry: Any) -> None:
                     or "--force" in joined
                     or " -f " in f" {joined} "
                 ):
-                    return (
-                        f"Error: git subcommand/args not allowed: {' '.join(args[1:])}. "
+                    raise RefusedBeforeEffect(
+                        f"git subcommand/args not allowed: {' '.join(args[1:])}. "
                         "push/force/credential/reset/rebase/global config/clean -fd are blocked."
                     )
 
@@ -577,8 +581,8 @@ def register_system_tools(registry: Any) -> None:
             has_pipe = any(op in command for op in ("|", "&&", ";", ">", "<"))
 
             if has_pipe:
-                return (
-                    "Error: Shell metacharacters (|, &&, ;, >, <) are blocked "
+                raise RefusedBeforeEffect(
+                    "Shell metacharacters (|, &&, ;, >, <) are blocked "
                     "for security — they bypass the safe-binary allowlist. "
                     "Use python_exec for multi-step operations, or chain "
                     "native tools (file_read, file_write, git_*) individually."
@@ -612,6 +616,8 @@ def register_system_tools(registry: Any) -> None:
             if result.returncode != 0:
                 output += f"\n[exit code: {result.returncode}]"
             return output[:10_000]  # cap output
+        except RefusedBeforeEffect:
+            raise
         except FileNotFoundError:
             # Say WHY, not just "not found". The operator has already approved
             # this command, so a bare "not found" reads as a Kazma fault on a
@@ -625,8 +631,8 @@ def register_system_tools(registry: Any) -> None:
             # only inside cmd.exe, and running a shell is the thing this tool
             # exists to avoid.
             if _name in ("echo", "printf", "pwd", "cd", "set", "type", "dir"):
-                return (
-                    f"Error: '{_name}' is a shell builtin, not an executable, "
+                raise RefusedBeforeEffect(
+                    f"'{_name}' is a shell builtin, not an executable, "
                     "so it cannot be run without a shell — and shell_exec "
                     "deliberately does not start one. It is on the allowlist "
                     "because that list is shared with POSIX, where it is a "
@@ -634,8 +640,8 @@ def register_system_tools(registry: Any) -> None:
                     "Use a native tool instead (file_read / file_list), or "
                     "python_exec for a one-line computation."
                 )
-            return (
-                f"Error: Command not found: {args[0]}\n"
+            raise RefusedBeforeEffect(
+                f"Command not found: {args[0]}\n"
                 "The name is allowlisted but no executable for it exists on "
                 "the restricted PATH. If it is a Python console script, it "
                 "should be resolvable from the interpreter's own script "

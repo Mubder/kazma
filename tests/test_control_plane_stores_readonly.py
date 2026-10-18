@@ -191,8 +191,12 @@ def test_shell_and_python_refuse_a_named_control_plane_store(tmp_path, monkeypat
         "workspace/project.db", cwd=data
     ) is None
 
-    out = asyncio.run(python_exec("open('hitl_gates.db','wb').write(b'x')"))
-    assert "control-plane" in out
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+    # Refused before anything runs (the registry answers it as an ordinary
+    # error, never "effects unknown").
+    with pytest.raises(RefusedBeforeEffect, match="control-plane"):
+        asyncio.run(python_exec("open('hitl_gates.db','wb').write(b'x')"))
     assert store.read_bytes() == b""
 
 
