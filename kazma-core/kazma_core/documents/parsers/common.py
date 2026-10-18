@@ -74,7 +74,8 @@ class IRBuilder:
             # character *order* is also reversed still fail the gate and still
             # go to OCR, which is the correct remaining case.
             normalized = to_logical(str(text))
-            if len(normalized) > allowed:
+            truncated = len(normalized) > allowed
+            if truncated:
                 normalized = normalized[:allowed]
                 self.warnings.append(
                     f"Output truncated on page {page_number} at the configured character limit"
@@ -89,7 +90,11 @@ class IRBuilder:
                     metadata=block_metadata or {},
                 )
             )
-            if len(normalized) < len(str(text)):
+            # Only the limit ends the page. ``to_logical`` shortens a block
+            # too (it strips bidi controls), and that was read as a cut: every
+            # block after the first paragraph holding an LRM or an isolate was
+            # dropped without a warning (found 2026-10-18).
+            if truncated:
                 break
         self.pages.append(
             DocumentPage(

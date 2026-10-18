@@ -316,6 +316,45 @@ def try_parse_pipe_table_blob(text: str) -> dict[str, Any] | None:
     return {"type": "table", "headers": headers, "rows": rows}
 
 
+#: Marks a Markdown hard line break on a buffered line (stripped before use).
+_BR = "\ue000"  # private use: not whitespace, so strip() keeps it
+
+
+def _hard_break(raw: str) -> bool:
+    """A Markdown hard line break: the line ends in two spaces or a backslash."""
+    return raw.endswith("  ") or raw.rstrip().endswith("\\")
+
+
+def _broken_line(raw: str, text: str) -> str:
+    """*text* (the line's content) marked with :data:`_BR` when *raw* ends in a
+    hard break; a trailing backslash is the marker, not text."""
+    if not _hard_break(raw):
+        return text
+    if text.endswith("\\"):
+        text = text[:-1].rstrip()
+    return text + _BR
+
+
+def _join_broken(lines: list[str]) -> str:
+    """Join lines as Markdown does: a space, or a newline after a hard break
+    (a blank line inside a quote is a break too)."""
+    out = ""
+    pending = ""
+    for line in lines:
+        text = line.strip()
+        hard = text.endswith(_BR)
+        text = text.rstrip(_BR).strip()
+        if not text:
+            if out:
+                pending = "\n"
+            continue
+        if out:
+            out += pending or " "
+        out += text
+        pending = "\n" if hard else ""
+    return out
+
+
 def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
     """Parse lightweight markdown into typed blocks for PDF/DOCX emitters.
 
@@ -326,6 +365,10 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
       - horizontal rules
       - paragraphs (blank-line separated); inner lines join with space
       - blockquotes (``>``)
+      - hard line breaks (a line ending in two spaces or a backslash) kept as
+        ``\\n`` inside a paragraph's or a quote's text: the engines draw a
+        line break there (a tweet's lines ran into one justified paragraph,
+        live 2026-10-18)
     """
     if not (body or "").strip():
         return []
@@ -339,9 +382,9 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
 
     def flush_para() -> None:
         nonlocal para_buf
-        joined = "\n".join(ln.strip() for ln in para_buf if ln.strip()).strip()
-        # Also try space-joined collapsed tables
-        space_joined = " ".join(ln.strip() for ln in para_buf if ln.strip()).strip()
+        joined = "\n".join(ln.strip().rstrip(_BR) for ln in para_buf if ln.strip(_BR + " \t")).strip()
+        # Also try space-joined collapsed tables (a hard break stays a newline)
+        space_joined = _join_broken(para_buf)
         para_buf = []
         if not joined:
             return
@@ -470,12 +513,12 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
         if stripped.startswith(">"):
             flush_para()
             flush_list()
-            quote_lines = [stripped.lstrip("> ").strip()]
+            quote_lines = [_broken_line(raw, stripped.lstrip("> ").strip())]
             i += 1
             while i < len(lines) and lines[i].strip().startswith(">"):
-                quote_lines.append(lines[i].strip().lstrip("> ").strip())
+                quote_lines.append(_broken_line(lines[i], lines[i].strip().lstrip("> ").strip()))
                 i += 1
-            blocks.append({"type": "quote", "text": " ".join(quote_lines)})
+            blocks.append({"type": "quote", "text": _join_broken(quote_lines)})
             continue
 
         um = _UL_RE.match(raw)
@@ -503,7 +546,7 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
             continue
 
         flush_list()
-        para_buf.append(stripped)
+        para_buf.append(_broken_line(raw, stripped))
         i += 1
 
     flush_para()
@@ -829,12 +872,17 @@ def pdf_flowables_from_body(
             )
             _heading_bar(text_html, st, level)
         elif btype == "paragraph":
-            text_html = inline_markdown_to_reportlab(
-                block["text"],
-                shape_arabic=shape_arabic,
-                col_width=col_width,
-                font_name=font_name,
-                font_size=font_size,
+            # Each hard-broken line on its own: shaped as one string, an
+            # Arabic paragraph's lines came out in reverse order.
+            text_html = "<br/>".join(
+                inline_markdown_to_reportlab(
+                    line,
+                    shape_arabic=shape_arabic,
+                    col_width=col_width,
+                    font_name=font_name,
+                    font_size=font_size,
+                )
+                for line in block["text"].split("\n")
             )
             # body_para is TA_RIGHT for Arabic (ragged-right, v4 layout) and
             # TA_JUSTIFY for English (full-column justified). Falls back to
@@ -842,10 +890,13 @@ def pdf_flowables_from_body(
             flow.append(Paragraph(text_html, styles.get("body_para", body_style)))
             flow.append(Spacer(1, 8))
         elif btype == "quote":
-            text_html = inline_markdown_to_reportlab(
-                block["text"], shape_arabic=shape_arabic
+            # Upright (Arabic has no italic face) and line by line, as the
+            # DOCX route draws it.
+            text_html = "<br/>".join(
+                inline_markdown_to_reportlab(line, shape_arabic=shape_arabic)
+                for line in block["text"].split("\n")
             )
-            flow.append(Paragraph(f"<i>{text_html}</i>", quote_style))
+            flow.append(Paragraph(text_html, quote_style))
             flow.append(Spacer(1, 8))
         elif btype == "code":
             raw = block.get("text") or ""

@@ -119,6 +119,14 @@ class PdfEngine:
                 tmp_dir = Path(tmp)
                 docx_path = tmp_dir / (output.stem + ".docx")
                 DocxEngine(self.profile).render(model, docx_path, assets_dir=assets_dir)
+                # The DOCX names the bundled face; LibreOffice finds it only in
+                # the system or this profile (the worker image holds no Plex).
+                from kazma_core.documents.fonts import give_soffice_the_bundled_fonts
+
+                if not give_soffice_the_bundled_fonts(tmp_dir):
+                    self.warnings.append(
+                        "No bundled document fonts found; LibreOffice may substitute the document's typeface"
+                    )
                 run_soffice_cli(
                     ("--headless", "--nologo", "--norestore",
                      f"-env:UserInstallation={tmp_dir.as_uri()}",
