@@ -105,7 +105,7 @@ STRUCTURAL_BASELINE = {
     "shared_temp_names": 0,
     "async_inline_db_calls": 8,
     "async_tools_never_await": 2,
-    "functions_over_complexity_50": 36,
+    "functions_over_complexity_50": 35,
 }
 
 

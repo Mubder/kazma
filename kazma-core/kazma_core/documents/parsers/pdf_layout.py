@@ -202,8 +202,48 @@ def reading_order_text(
     }
 
 
+def _inside(block: Mapping[str, Any], rect: Sequence[float], slack: float = 1.0) -> bool:
+    return (rect[0] - slack <= block["cx"] <= rect[2] + slack
+            and rect[1] - slack <= block["cy"] <= rect[3] + slack)
+
+
+def _segments_around_tables(
+    blocks: Sequence[Mapping[str, Any]], tables: Sequence[Sequence[float]],
+) -> list[tuple[str, Any]]:
+    """The page in reading order as ``("text", str)`` and ``("table", index)``.
+
+    A table's cells are text blocks too: read as page text AND as the table,
+    every table came back twice (live 2026-10-18, an archive's scope table,
+    which the agent then took for a rendering defect). A block whose centre
+    lies in a table stands for that table, once, where it begins; a table no
+    block reaches is placed after the text.
+    """
+    out: list[tuple[str, Any]] = []
+    pending: list[str] = []
+    placed: set[int] = set()
+    for block in blocks:
+        owner = next((i for i, rect in enumerate(tables) if _inside(block, rect)), None)
+        if owner is None:
+            pending.append(str(block["text"]))
+            continue
+        if owner in placed:
+            continue
+        if pending:
+            out.append(("text", "\n".join(pending).strip()))
+            pending = []
+        out.append(("table", owner))
+        placed.add(owner)
+    if pending:
+        out.append(("text", "\n".join(pending).strip()))
+    out += [("table", i) for i in range(len(tables)) if i not in placed]
+    return [seg for seg in out if seg[0] == "table" or seg[1]]
+
+
 def extract_pymupdf_page_text(
-    page: Any, glyph_lines: Sequence[Sequence[Any]] | None = None
+    page: Any,
+    glyph_lines: Sequence[Sequence[Any]] | None = None,
+    *,
+    tables: Sequence[Sequence[float]] = (),
 ) -> tuple[str, dict[str, object]]:
     """Best-effort text for one PyMuPDF page: layout when multi-column, else plain.
 
@@ -212,6 +252,9 @@ def extract_pymupdf_page_text(
     ``glyph_lines`` (``pdf_rtl.page_glyph_lines``, given when the page holds
     right-to-left script) re-reads every block in logical order: PyMuPDF's
     own reversal turned numbers and ligatures around (2026-10-13, F09).
+    ``tables`` (the page's table rectangles): a single-column page then also
+    returns ``meta["segments"]`` (``_segments_around_tables``), the text
+    without the tables' cells and each table where it stands.
     """
 
     plain = (page.get_text("text") or "").strip()
@@ -239,6 +282,8 @@ def extract_pymupdf_page_text(
         if int(layout_meta.get("column_count") or 1) >= 2 and layout_text.strip():
             meta["method"] = "dict_layout"
             return layout_text.strip(), meta
+        if tables:
+            meta["segments"] = _segments_around_tables(blocks, tables)
         if plain:
             meta["method"] = "text"
             return plain, meta

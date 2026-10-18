@@ -127,86 +127,97 @@ def _estimate_text_tokens(text: str) -> int:
     return (other // 4) + (arabic * 2) // 5
 
 
+#: Older turns' tool outputs are cut to this many characters first.
+_OLDER_TURN_KEEP_CHARS = 250
+#: Then, still over budget, any older turn's output past this length.
+_OLDER_TURN_CAP_CHARS = 1500
+#: The running turn's outputs are cut only past this length, newest last,
+#: and only while the context is still over its budget.
+_CURRENT_TURN_FLOOR_CHARS = 8000
+
+
+def _current_turn_start(messages: list[dict[str, Any]]) -> int:
+    """Index of the running turn's question: the last user message."""
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if isinstance(m, dict) and m.get("role") == "user":
+            return i
+    return 0
+
+
+def _cut(msg: dict[str, Any], keep: int, why: str) -> dict[str, Any]:
+    content = msg.get("content", "")
+    if not isinstance(content, str) or len(content) <= keep:
+        return msg
+    out = dict(msg)
+    out["content"] = (
+        content[:keep]
+        + f"\n\n[Tool output truncated from {len(content)} to {keep} chars to fit "
+        f"context budget{why}]"
+    )
+    return out
+
+
 def prune_tool_outputs(
     messages: list[Any],
     max_tokens: int = 24000,
     keep_recent_tool_outputs: int = 3,
 ) -> list[dict[str, Any]]:
-    """Prune older tool/function output messages when conversation exceeds max_tokens.
+    """Cut tool outputs, older turns first, when the conversation is over budget.
 
-    Retains schema validity, system prompts, user request, and the most recent
-    `keep_recent_tool_outputs` tool results, while compacting older tool output
-    bodies to prevent context saturation.
+    The running turn's outputs (after the last user message) are what the
+    model is working from, and the supervisor saves the pruned list back to
+    the checkpoint, so a cut is permanent. Live 2026-10-18 (Telegram, an
+    X archive): the newest result of the turn, ``x_status`` at 1,571
+    characters, was cut to 1,500 as it arrived -- the fourth post's id lost
+    -- and two tool calls later to 250, "the most recent 3" being counted
+    over the whole chat. The model built the archive from what was left and
+    then told the owner the tool could not return more.
 
-    Args:
-        messages: List of message dicts/objects.
-        max_tokens: Estimated token budget threshold.
-        keep_recent_tool_outputs: Number of recent tool outputs to keep intact.
-
-    Returns:
-        New message list with older tool output bodies truncated if budget exceeded.
+    Order: older turns' outputs beyond the newest ``keep_recent_tool_outputs``
+    to 250 characters; still over, any older turn's output past 1,500; still
+    over, the running turn's outputs past 8,000 characters, oldest first,
+    stopping as soon as the context fits (each cut says what to do).
     """
     normalized = [_normalize_msg(m) for m in messages]
     if estimate_tokens(normalized) <= max_tokens:
         return normalized
 
-    # Find indices of tool/function output messages
+    turn_start = _current_turn_start(normalized)
     tool_indices = [
         i for i, m in enumerate(normalized)
         if isinstance(m, dict) and m.get("role") in ("tool", "function")
     ]
+    older = [i for i in tool_indices if i < turn_start]
+    current = [i for i in tool_indices if i > turn_start]
+    protected_recent = set(tool_indices[-keep_recent_tool_outputs:]) if keep_recent_tool_outputs > 0 else set()
 
-    # Older tool output indices to prune
-    indices_to_prune = (
-        set(tool_indices[:-keep_recent_tool_outputs])
-        if len(tool_indices) > keep_recent_tool_outputs
-        else set()
-    )
-    pruned_messages: list[dict[str, Any]] = []
+    pruned = list(normalized)
+    for i in older:
+        if i not in protected_recent:
+            pruned[i] = _cut(pruned[i], _OLDER_TURN_KEEP_CHARS, "")
 
-    for i, msg in enumerate(normalized):
-        if i in indices_to_prune:
-            content = msg.get("content", "")
-            if isinstance(content, str) and len(content) > 250:
-                truncated_content = (
-                    content[:250] + f"\n\n[Tool output truncated from {len(content)} to 250 chars to fit context budget]"
-                )
-                msg_copy = dict(msg)
-                msg_copy["content"] = truncated_content
-                pruned_messages.append(msg_copy)
-            else:
-                pruned_messages.append(msg)
-        else:
-            pruned_messages.append(msg)
+    if estimate_tokens(pruned) > max_tokens:
+        for i in older:
+            pruned[i] = _cut(pruned[i], _OLDER_TURN_CAP_CHARS, "")
 
-    # CRITICAL: If estimate_tokens is STILL > max_tokens, then even recent tool outputs
-    # that are massive (e.g. > 1500 chars) must be capped to protect the context budget.
-    if estimate_tokens(pruned_messages) > max_tokens and tool_indices:
-        further_pruned: list[dict[str, Any]] = []
-        for msg in pruned_messages:
-            if isinstance(msg, dict) and msg.get("role") in ("tool", "function"):
-                content = msg.get("content", "")
-                if isinstance(content, str) and len(content) > 1500:
-                    truncated = (
-                        content[:1500] + f"\n\n[Tool output truncated from {len(content)} to 1500 chars to fit context budget]"
-                    )
-                    msg_copy = dict(msg)
-                    msg_copy["content"] = truncated
-                    further_pruned.append(msg_copy)
-                else:
-                    further_pruned.append(msg)
-            else:
-                further_pruned.append(msg)
-        pruned_messages = further_pruned
+    if estimate_tokens(pruned) > max_tokens:
+        for i in current:
+            if estimate_tokens(pruned) <= max_tokens:
+                break
+            pruned[i] = _cut(
+                pruned[i], _CURRENT_TURN_FLOOR_CHARS,
+                "; call the tool again with a narrower request for the rest",
+            )
 
     before_tokens = estimate_tokens(normalized)
-    after_tokens = estimate_tokens(pruned_messages)
+    after_tokens = estimate_tokens(pruned)
     logger.info(
         "[Summarizer] Pruned tool outputs: tokens %d -> %d",
         before_tokens,
         after_tokens,
     )
-    return pruned_messages
+    return pruned
 
 
 def get_summary(thread_id: str) -> str | None:

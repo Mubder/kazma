@@ -229,19 +229,11 @@ class PdfParser:
                     builder.warnings.append(f"Glyph order unavailable on PDF page {page_index + 1}")
                 if not has_rtl_glyphs(glyph_lines):
                     glyph_lines = []
-                text, layout_meta = extract_pymupdf_page_text(page, glyph_lines or None)
-                if text:
-                    blocks.append(
-                        (
-                            BlockType.TEXT,
-                            text,
-                            {
-                                "layout_method": layout_meta.get("method"),
-                                "column_count": layout_meta.get("column_count"),
-                            },
-                        )
-                    )
 
+                # Tables first: the page text is then read around them, each
+                # table once, where it stands (a table's cells are text
+                # blocks too, and every table used to come back twice).
+                table_blocks: list[tuple[tuple[float, float, float, float], tuple[BlockType, str, dict[str, object] | None]]] = []
                 try:
                     finder = page.find_tables()
                     tables = list(getattr(finder, "tables", None) or [])
@@ -258,7 +250,8 @@ class PdfParser:
                             builder=builder,
                         )
                         if rows:
-                            blocks.append(
+                            table_blocks.append((
+                                tuple(float(v) for v in table.bbox),
                                 (
                                     BlockType.TABLE,
                                     "\n".join(rows),
@@ -267,14 +260,33 @@ class PdfParser:
                                         "rows": len(rows),
                                         "extractor": "pymupdf",
                                     },
-                                )
-                            )
+                                ),
+                            ))
                 except DocumentLimitError:
                     raise
                 except Exception:
                     builder.warnings.append(
                         f"Table extraction failed on PDF page {page_index + 1}"
                     )
+
+                text, layout_meta = extract_pymupdf_page_text(
+                    page, glyph_lines or None, tables=[rect for rect, _ in table_blocks],
+                )
+                text_meta: dict[str, object] = {
+                    "layout_method": layout_meta.get("method"),
+                    "column_count": layout_meta.get("column_count"),
+                }
+                segments = layout_meta.get("segments")
+                if isinstance(segments, list):
+                    for kind, value in segments:
+                        if kind == "table":
+                            blocks.append(table_blocks[int(value)][1])
+                        elif value:
+                            blocks.append((BlockType.TEXT, str(value), dict(text_meta)))
+                else:
+                    if text:
+                        blocks.append((BlockType.TEXT, text, text_meta))
+                    blocks.extend(block for _, block in table_blocks)
 
                 image_count = 0
                 try:

@@ -220,7 +220,8 @@ def strip_bidi_controls(text: str) -> str:
     return _BIDI_CONTROL_RE.sub("", text or "")
 
 
-_LRI, _PDI = "\u2066", "\u2069"
+_LRM = "\u200e"
+_ISOLATE_RE = re.compile("[\u2066-\u2069]")
 #: Bidi classes a left-to-right run may carry between its strong characters.
 _LTR_RUN_INNER = frozenset({"L", "EN", "ES", "ET", "CS", "ON", "WS", "NSM", "BN"})
 #: Classes a run may start and end on (a strong letter or a digit).
@@ -228,8 +229,8 @@ _LTR_RUN_EDGE = frozenset({"L", "EN"})
 
 
 def isolate_ltr_runs(text: str) -> str:
-    """In right-to-left text, wrap each left-to-right run that holds a Latin
-    letter in LRI ... PDI.
+    """In right-to-left text, mark each left-to-right run that holds a Latin
+    letter with LRM on both sides.
 
     A run is a stretch of Latin letters and European digits with the
     separators between them ("10 · 2026-10-05 — 15:15 UTC · 2107127443748266448"),
@@ -239,9 +240,17 @@ def isolate_ltr_runs(text: str) -> str:
     2026-10-18, a deleted tweet's heading in a tweet archive). A run of
     digits alone is left to that convention: a date reads right to left
     there, and Kazma's readers expect it. Text with no right-to-left letter,
-    and text already isolated, is returned as it is.
+    and text already marked, is returned as it is.
+
+    LRM, not the isolates LRI ... PDI: the strong mark before the run makes
+    its digits left to right (rule W7) and its separators with them, which is
+    the isolate's effect for these runs. The DOCX engine draws each mark in
+    a face that has its glyph (``fonts.direction_mark_family``): the bundled
+    Plex has none, LibreOffice drew the isolates with its space glyph, and
+    the PDF's text map then named every space of the bold face U+2066
+    (live 2026-10-18: spaces gone from copied text and the reader failing).
     """
-    if not text or not has_rtl(text) or _LRI in text:
+    if not text or not has_rtl(text) or _LRM in text:
         return text
     out: list[str] = []
     i, n = 0, len(text)
@@ -270,7 +279,7 @@ def isolate_ltr_runs(text: str) -> str:
         # to left as the date): Word draws it so, and Kazma's PDF and OCR
         # readers read it back by that rule (parsers/pdf_rtl).
         if any(unicodedata.bidirectional(c) == "L" for c in run):
-            out.append(_LRI + run + _PDI)
+            out.append(_LRM + run + _LRM)
         else:
             out.append(run)
         i = last_edge + 1
@@ -494,6 +503,9 @@ def visual_order(text: str, base_dir: str) -> str | None:
         from bidi.algorithm import get_display
     except ImportError:
         return None
+    # python-bidi has no isolates ("LRI not allowed here"): a PDF whose text
+    # layer holds one failed the reading of its whole page.
+    text = _ISOLATE_RE.sub("", text)
     return str(get_display(text, base_dir="R" if base_dir == "R" else "L"))
 
 

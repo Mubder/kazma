@@ -3358,20 +3358,43 @@ count relative to the shallowest heading below the title
 heading's bar sits on the heading's own reading side (`_edge_bar`, which also
 keeps `w:pBdr` in schema order). A divider is a rule, never a row of "─".
 Table cells are compact and vertically centred. **In a right-to-left block a
-left-to-right run that holds a Latin letter is isolated**
-(`arabic.isolate_ltr_runs`, LRI…PDI, applied by `DocxEngine._isolated` to body
-runs, headings and cells): "10 · 2026-10-05 — 15:15 UTC · <id> — محذوفة" came
-out in reverse group order around "UTC". A run of digits alone is NOT isolated:
+left-to-right run that holds a Latin letter is marked with LRM on both sides**
+(`arabic.isolate_ltr_runs`, applied by `DocxEngine._isolated` to body runs,
+headings and cells): "10 · 2026-10-05 — 15:15 UTC · <id> — محذوفة" came out
+in reverse group order around "UTC"; the strong mark makes the run's digits
+and separators left to right (W7). A run of digits alone is NOT marked:
 "في 2026-09-30" drawing "30-09-2026" (W2) is the Arabic convention, read right
 to left as the date, and the PDF and OCR readers (§19H) read it back by that
-rule -- isolating it broke the fidelity corpus. An attached `@ # $` (or `+ -`
-before a digit) joins its run. The marks reach the PDF's text layer;
-`to_logical` strips them when Kazma reads a PDF back. And a block
+rule -- marking it broke the fidelity corpus. An attached `@ # $` (or `+ -`
+before a digit) joins its run. **Every direction mark is drawn in a face that
+has its glyph** (`DocxEngine._give_direction_marks_a_face`, the last step
+before saving: each mark its own run in `fonts.direction_mark_family`, Amiri;
+none bundled, the marks are dropped). IBM Plex Sans Arabic has no glyph for
+any mark, and LibreOffice draws a missing mark with the face's space glyph:
+the PDF's text map then named every space of the bold face U+2066 (the first
+version used LRI…PDI in Plex runs, deployed for an afternoon: copied text lost
+its spaces, and Kazma's reader failed on the page). `to_logical` strips the
+marks when Kazma reads a PDF back. And a block
 `to_logical` shortened is no longer taken for a limit cut
 (`IRBuilder.add_page`): every block after the first one holding an RLM or an
 isolate was dropped from a parse, silently. Gates in
 `tests/test_document_archive_layout.py`: the LibreOffice word-order test (no
-isolation as the control), the bidi-mark parse (the old check fails it).
+marks as the control), the text read back from the real LibreOffice PDF (its
+spaces, the heading in order, a table once; the morning's isolates as the
+control), the bidi-mark parse (the old check fails it).
+
+**Kazma reads past the faults LibreOffice writes into a text map, and reads a
+table once** (2026-10-18, the same archive read back by the agent, which took
+the duplicate for a rendering defect and tried to "fix" it). `pdf_rtl`: a
+direction mark with a visible advance is the space it was drawn with; a digit
+or Latin letter of no width is a misnamed mark (Plex's shadda as "8"/"3"); a
+Latin letter under `_KASHIDA_EM` (0.15 em) is a misnamed kashida ("G"); Arabic
+letters of no width stay (a ligature's parts). `arabic.visual_order` drops
+isolates (python-bidi asserts on them; the whole page's reading failed). The
+PDF parser finds the tables first and reads a single-column page's text
+around them (`pdf_layout.segments_around_tables`): each table once, where it
+stands; a table's cells were also page text. Gates:
+`tests/test_document_pdf_text_map_faults.py`, `tests/test_document_pdf_rtl.py`.
 
 `tests/test_document_layout.py` measures all of this against a rendered PDF
 with PyMuPDF rather than grepping the source — every defect it covers was
@@ -5012,6 +5035,20 @@ passes `emit_deltas=False`, and `LLMProvider.chat_stream` tracks
 `The proposal turn is The proposal turn is` incident string (locked by
 `tests/test_s32_stream_duplication.py`).
 
+**H. The running turn's tool outputs are not cut to fit** (2026-10-18,
+`summarizer.prune_tool_outputs`). The supervisor prunes tool outputs when the
+chat is over its budget and SAVES the pruned list to the checkpoint, so a cut
+is permanent. The rule kept the newest 3 outputs of the whole chat and capped
+every output past 1,500 characters, the running turn's included: live, an X
+archive turn's `x_status` (1,571 characters) lost its fourth post as it
+arrived and was cut to 250 two calls later; the archive held three posts, and
+the model told the owner the tool could return no more. Now older turns' outputs
+go first (to 250, then past 1,500), and only then the running turn's, past
+8,000 characters, oldest first, stopping once the context fits. The running
+turn starts at the last user message. Gate:
+`kazma-core/tests/test_prune_tool_outputs.py` (the live shape; the old rule as
+the control).
+
 **G. Recovery spirals get an honest exit.** ≥3 turn-cumulative queries
 against session/checkpoint/audit stores hunting the assistant's own prior
 output force RESPOND with "what's missing + one concrete question"
@@ -5131,6 +5168,26 @@ the 15-min commitment GC cadence in `worker_bootstrap.py` (no new scheduler
 loop). Metrics: `kazma_hitl_gates_total{state,mechanism}`,
 `kazma_hitl_gate_parity_mismatch_total{site}` (must trend to zero),
 `kazma_hitl_gate_reconciled_total{action}`.
+
+**E2. An approval that expires is said for what it is, in the chat it was
+asked in** (2026-10-18). Live on Telegram: the watchdog auto-denied a
+`file_apply_patch` card nobody had answered in 300 s; the model read "denied by
+user", asked for `send_file`, and that card and the turn's answer went to the
+web journal only (`_drive_graph_to_journal`): never seen, it expired too, and
+the owner was told twice that they had refused. Twelve minutes later a tap on
+the first card answered "Already handled -- this approval was applied
+earlier". Now: (1) the tool worker gives a timed-out answer (`timed_out` in the
+resume) its own result -- "expired unanswered ... the user did not decide",
+the watchdog's instruction, outcome `terminal` (`_denied_result`); (2) a chat
+app's turn (the checkpoint's `_gateway` routing: platform and
+`delivery_target`, never the session store) is resumed by the gateway
+(`hitl_timeout.register_chat_app_resumer`, registered by
+`create_graph_handler`; `agent_handler.hitl.make_timeout_resumer`) under its
+thread lock, and the chat gets a notice, the answer and any next card through
+the same `_run_resume` / `_deliver_resume` a tap uses; a turn with no address
+stays in the journal; (3) a late tap reads the card's own gate
+(`_decided_card_message`): expired, denied, or the approve path. Gate:
+`tests/test_approval_timeout_reaches_the_chat.py` (each with its control).
 
 **F. Honesty limits.** `hitl_gates.db` is single-process truth (like the
 turn journal) — no multi-replica claims; a Postgres backend goes next to §21

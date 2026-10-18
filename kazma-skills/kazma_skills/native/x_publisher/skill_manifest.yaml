@@ -13,9 +13,12 @@ tools:
     arabic_name: "حالة إكس"
     description: >
       Read-only X connector status: configured?, handle, remaining Kazma
-      caps, and the latest posts. Args: recent (how many latest posts to
-      list, 1-50, default 5) — this is how to read Kazma's post history;
-      its database is not queryable directly. Never returns secrets. If
+      caps, and the latest posts. Args: recent (how many posts to list,
+      1-50, default 5) and offset (how many of the newest to skip) — this is
+      how to read Kazma's post history; its database is not queryable
+      directly. posts_total is how many the ledger holds; for every post,
+      call again with offset=next_offset until it is null. Never returns
+      secrets. If
       unconfigured, tell the operator to open Settings → X (not chat) and
       paste the four OAuth 1.0a keys with Read + Write app permissions.
     category: social
