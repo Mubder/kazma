@@ -3446,6 +3446,21 @@ PDF parser finds the tables first and reads a single-column page's text
 around them (`pdf_layout.segments_around_tables`): each table once, where it
 stands; a table's cells were also page text. Gates:
 `tests/test_document_pdf_text_map_faults.py`, `tests/test_document_pdf_rtl.py`.
+**Reading Kazma's own bilingual PDF back** (2026-10-20: the agent read a
+house-style PDF as broken and dropped the house style): a kashida glyph with
+no name (U+FFFD, narrower than 0.15 em) is no text; table cells are left out
+of column detection (a table is read from its grid), and two sides are
+columns only when they stand side by side (`_side_by_side`: short Arabic and
+English lines stacked one above the other made a "second column", which put
+a title's last word after the paragraph and read the table twice); on a
+single-column right-to-left page each block is read once
+(`_without_contained`), top to bottom (`_reading_order`); a number-only cell
+of a right-to-left table runs right to left ("٤٣ – ٤٦", `text_in_rect(...,
+base="R")`); a cell's wrapped lines are one value; and a left-to-right line
+whose brackets read inside out ("Avg high )°C(": one glyph draws "(" in an
+English cell and ")" in an Arabic one, and the text map names it once) is set
+right. Gate: `tests/test_document_table_direction.py` (a bilingual PDF made
+through real LibreOffice and read back).
 
 `tests/test_document_layout.py` measures all of this against a rendered PDF
 with PyMuPDF rather than grepping the source — every defect it covers was

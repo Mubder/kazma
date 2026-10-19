@@ -93,6 +93,22 @@ def _page_width(data: Mapping[str, Any], blocks: Sequence[Mapping[str, Any]]) ->
     return 1.0
 
 
+def _side_by_side(left: Sequence[Mapping[str, Any]], right: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether the two sides share their height: at least 30 % of the shorter
+    side's height lies beside the other side's blocks."""
+    def height(blocks: Sequence[Mapping[str, Any]]) -> float:
+        return sum(max(0.0, float(b["y1"]) - float(b["y0"])) for b in blocks)
+
+    shorter = min(height(left), height(right))
+    if shorter <= 0:
+        return False
+    beside = sum(
+        max(0.0, min(float(a["y1"]), float(b["y1"])) - max(float(a["y0"]), float(b["y0"])))
+        for a in left for b in right
+    )
+    return beside >= 0.3 * shorter
+
+
 def _split_columns(
     narrow: list[Mapping[str, Any]],
     page_width: float,
@@ -111,6 +127,11 @@ def _split_columns(
     right_min = min(float(b["x0"]) for b in right)
     gutter_slop = page_width * 0.08
     if right_min + gutter_slop < left_max:
+        return None
+    # Columns stand side by side: a short right-aligned Arabic line and a
+    # short left-aligned English one, stacked one above the other, are one
+    # column (a bilingual report read as two, live 2026-10-20).
+    if not _side_by_side(left, right):
         return None
     # Both sides should look like columns (not one wide + one caption).
     max_col_width = page_width * 0.62
@@ -202,6 +223,21 @@ def reading_order_text(
     }
 
 
+def _without_contained(blocks: list[dict[str, Any]], slack: float = 1.0) -> list[dict[str, Any]]:
+    """The blocks less those lying wholly inside a larger one."""
+    def inside(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+        return (a is not b and b["x0"] - slack <= a["x0"] and a["x1"] <= b["x1"] + slack
+                and b["y0"] - slack <= a["y0"] and a["y1"] <= b["y1"] + slack
+                and (b["x1"] - b["x0"]) * (b["y1"] - b["y0"]) > (a["x1"] - a["x0"]) * (a["y1"] - a["y0"]))
+
+    return [a for a in blocks if not any(inside(a, b) for b in blocks)]
+
+
+def _reading_order(blocks: list[dict[str, Any]], *, rtl: bool) -> list[dict[str, Any]]:
+    """Top to bottom; on one line, from the reading start."""
+    return sorted(blocks, key=lambda b: (round(float(b["y0"]) / 4.0), -float(b["x1"]) if rtl else float(b["x0"])))
+
+
 def _inside(block: Mapping[str, Any], rect: Sequence[float], slack: float = 1.0) -> bool:
     return (rect[0] - slack <= block["cx"] <= rect[2] + slack
             and rect[1] - slack <= block["cy"] <= rect[3] + slack)
@@ -277,11 +313,27 @@ def extract_pymupdf_page_text(
         width = float(getattr(getattr(page, "rect", None), "width", 0) or 0) or _page_width(
             data, blocks
         )
-        layout_text, layout_meta = reading_order_text(blocks, page_width=width)
+        # A table is read from its own grid: its cells are no columns. Each
+        # narrow cell counted, and a single-column Arabic page with a table
+        # read as two columns -- its title's last word moved below the table
+        # and the table came back twice (live 2026-10-20).
+        layout_text, layout_meta = reading_order_text(
+            [b for b in blocks if not any(_inside(b, rect) for rect in tables)] or blocks,
+            page_width=width,
+        )
         meta.update(layout_meta)
         if int(layout_meta.get("column_count") or 1) >= 2 and layout_text.strip():
             meta["method"] = "dict_layout"
             return layout_text.strip(), meta
+        if glyph_lines:
+            # One column re-read from the glyphs: a block lying inside another
+            # reads the same glyphs again (PyMuPDF splits a justified Arabic
+            # line into a fragment and the full line: "من الأمطار ..." twice),
+            # and PyMuPDF's block order put a title's last word, on a line of
+            # its own, after the paragraph below it (live 2026-10-20). Each
+            # block once, top to bottom.
+            blocks = _reading_order(_without_contained(blocks), rtl=True)
+            plain = "\n".join(block["text"] for block in blocks).strip() or plain
         if tables:
             meta["segments"] = _segments_around_tables(blocks, tables)
         if plain:
