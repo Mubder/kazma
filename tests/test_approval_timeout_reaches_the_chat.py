@@ -72,6 +72,8 @@ async def test_an_expired_approval_reaches_the_model_as_a_timeout(monkeypatch):
     })
     assert "denied by user" not in done["content"]
     assert "expired unanswered" in done["content"] and "did not decide" in done["content"]
+    # The card is gone: the model told the owner to approve it (live 2026-10-20).
+    assert "can no longer be approved" in done["content"]
     assert LIVE_REASON in done["content"], "the watchdog's instruction reaches the model"
     assert done.get("outcome") == "terminal", "the round ends: nobody is there to approve more"
 
