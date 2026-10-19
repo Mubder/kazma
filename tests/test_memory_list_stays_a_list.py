@@ -292,3 +292,59 @@ def test_forget_mentions_refuses_before_doing_anything(mem, text):
     tool = _memory_tools()["memory_forget_mentions"]
     with pytest.raises(RefusedBeforeEffect):
         _as_tenant("default", lambda: tool(text))
+
+
+def test_forget_mentions_removes_the_lessons_that_quote_it(mem, monkeypatch):
+    """Live 2026-10-19: two self-improvement lessons quoted the codeword --
+    one the user's own message -- and joined every later prompt."""
+    from kazma_core.skills import self_improvement as si
+
+    store = {"agents": {"supervisor": {
+        "soul": "You are Kazma.\n\n[SelfImprovement] Confirm exact values.\nTask context: "
+                "'Remember this: my test codeword is BLUE-HERON-42.'\n\n[SelfImprovement] Cite sources.",
+        "history": [{"ts": "t1", "delta": "as done here with blue-heron-42"}, {"ts": "t2", "delta": "Cite sources."}],
+    }}}
+    monkeypatch.setattr(si, "_load_agent_evolution", lambda: store)
+    monkeypatch.setattr(si, "_save_agent_evolution", lambda data: store.update(data))
+    monkeypatch.setattr(si, "_migrate_legacy_evolution_if_present", lambda: None)
+    tool = _memory_tools()["memory_forget_mentions"]
+    out = json.loads(_as_tenant("default", lambda: tool_answer(tool("BLUE-HERON-42"))))
+    assert out["lessons_removed"] == 2
+    entry = store["agents"]["supervisor"]
+    assert "HERON" not in entry["soul"] and "Cite sources." in entry["soul"]
+    assert entry["soul"].startswith("You are Kazma.")
+    assert [h["ts"] for h in entry["history"]] == ["t2"]
+
+
+def test_a_lesson_never_quotes_the_task():
+    from pathlib import Path
+
+    import kazma_core.skills.self_improvement as si
+
+    source = Path(si.__file__).read_text(encoding="utf-8")
+    for quote in ("Task context: '{task", "Task hint: '{task", "Review: {task"):
+        assert quote not in source, quote
+
+
+def test_the_turn_asking_to_forget_is_kept_out_of_memory(mem, monkeypatch):
+    """Live 2026-10-19: written after the forget, the request "Forget every
+    memory that mentions BLUE-HERON-42" became a memory holding it."""
+    from kazma_core.agent.tool_builtins import memory as tools_mod
+
+    asked = "Forget every memory that mentions BLUE-HERON-42"
+    _a_later_answer_elsewhere(mem)
+    monkeypatch.setattr(tools_mod, "_chat_of_call", lambda: ("forget-chat", 1))
+    monkeypatch.setattr("kazma_core.tools.export_session.get_current_session_messages",
+                        lambda: [{"role": "user", "content": asked}])
+    tool = _memory_tools()["memory_forget_mentions"]
+    out = json.loads(_as_tenant("default", lambda: tool_answer(tool("BLUE-HERON-42"))))
+    assert out["this_turn_kept_out"] is True
+    written = _live_turn(turn=1, question=asked, answer="Done.", key="forget-chat")
+    tiers = [r[0] for r in mem.db.execute("SELECT tier FROM episodes WHERE user_text = ?", (asked,))]
+    assert written is None or tiers in ([], ["forgotten"]), (written, tiers)
+
+
+def test_negative_control_without_the_keep_out_the_request_is_written(mem):
+    asked = "Forget every memory that mentions BLUE-HERON-42"
+    written = _live_turn(turn=1, question=asked, answer="Done.", key="forget-chat")
+    assert written and mem.db.execute("SELECT COUNT(*) FROM episodes WHERE user_text = ?", (asked,)).fetchone()[0] == 1

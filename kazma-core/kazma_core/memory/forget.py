@@ -50,6 +50,7 @@ __all__ = [
     "forget_chat",
     "forget_episode",
     "forget_mentions",
+    "keep_turn_out",
     "forgotten_in_chat",
     "forgotten_turns",
     "question_sha",
@@ -1045,6 +1046,32 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
 MENTION_MIN_CHARS = 4
 
 
+def keep_turn_out(session_key: str, turn: int, question: str, *, tenant_id: str) -> bool:
+    """Keep a turn not yet written out of memory: the ledger row its writer
+    asks first (:func:`refuses_write`), under every key of its chat.
+
+    For the turn in which the user asks to forget something: written after
+    the forget, "Forget every memory that mentions BLUE-HERON-42" became a
+    memory holding the codeword (live 2026-10-19). False when there is no
+    chat turn to name."""
+    sha = question_sha(question)
+    if not session_key or int(turn or 0) <= 0 or not sha:
+        return False
+    keys = chat_keys(session_key) or [session_key]
+    conn = _open()
+    try:
+        with conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO memory_forgotten "
+                "(tenant_id, session_key, turn_number, question_sha, episode_id, forgotten_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [(tenant_id or "default", k, int(turn), sha, "", time.time()) for k in keys],
+            )
+    finally:
+        conn.close()
+    return True
+
+
 def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
     """Forget every memory and current fact of the tenant that holds *text*
     (any case): the user's "forget everything that mentions X".
@@ -1073,7 +1100,10 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
         ).fetchall()]
     finally:
         conn.close()
-    if not episodes and not facts:
+    from kazma_core.skills.self_improvement import forget_text
+
+    lessons = forget_text(needle)
+    if not episodes and not facts and not lessons:
         return {"ok": False, "error": "nothing_holds_it"}
     from kazma_core.memory.hygiene import invalidate_belief
 
@@ -1083,7 +1113,7 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
                 len(episodes), "y" if len(episodes) == 1 else "ies", len(facts), caller)
     return {
         "ok": all(r.get("ok", True) for r in [*fact_results, *memory_results]),
-        "memories_forgotten": episodes, "facts_invalidated": facts,
+        "memories_forgotten": episodes, "facts_invalidated": facts, "lessons_removed": lessons,
     }
 
 

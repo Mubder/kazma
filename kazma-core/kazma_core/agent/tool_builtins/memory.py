@@ -244,6 +244,7 @@ def register_memory_tools(registry: Any) -> None:
                 from kazma_core.memory.forget import forget_belief_source
 
                 result["source_turn"] = forget_belief_source(bid, tenant_id=tenant or "default")
+                result["this_turn_kept_out"] = _keep_this_turn_out()
             return json.dumps(result, ensure_ascii=False, indent=2)
         except RefusedBeforeEffect:
             raise
@@ -267,7 +268,26 @@ def register_memory_tools(registry: Any) -> None:
             return f"Error: memory_forget_mentions failed — {exc}"
         if result.get("error") == "nothing_holds_it":
             raise RefusedBeforeEffect(f"Error: no memory or current fact holds {needle!r}")
+        result["this_turn_kept_out"] = _keep_this_turn_out()
         return json.dumps(result, ensure_ascii=False, indent=2)
+
+    def _keep_this_turn_out() -> bool:
+        """The turn asking to forget names what it forgets: keep it out of
+        memory (``forget.keep_turn_out``)."""
+        import sqlite3
+
+        from kazma_core.memory.forget import keep_turn_out
+        from kazma_core.memory.provenance import latest_user_message
+        from kazma_core.safety.hitl import get_current_tenant_id
+        from kazma_core.tools.export_session import get_current_session_messages
+
+        chat, turn = _chat_of_call()
+        question = latest_user_message(get_current_session_messages() or [])
+        try:
+            return keep_turn_out(chat, turn, question, tenant_id=get_current_tenant_id() or "default")
+        except (sqlite3.Error, OSError):
+            logger.warning("[memory] could not keep the forgetting turn out of memory", exc_info=True)
+            return False
 
     def _forget_memory(episode_id: str, tenant: str) -> str:
         import sqlite3
@@ -281,6 +301,7 @@ def register_memory_tools(registry: Any) -> None:
             return f"Error: forgetting {episode_id} failed — {exc}"
         if result.get("error") == "not_found":
             raise RefusedBeforeEffect(f"Error: memory {episode_id} not found (ids come from memory_search)")
+        result["this_turn_kept_out"] = _keep_this_turn_out()
         return json.dumps(result, ensure_ascii=False, indent=2)
     def _mem_merge_entities(source_id: str, target_id: str) -> str:
         """Merge source into target (beliefs rewired, aliases union)."""

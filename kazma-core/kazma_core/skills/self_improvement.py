@@ -19,7 +19,7 @@ from typing import Any
 
 from kazma_core.config_store import get_config_store
 
-__all__ = ["SelfImprovementSkill", "get_self_improvement"]
+__all__ = ["SelfImprovementSkill", "forget_text", "get_self_improvement"]
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +226,10 @@ Output ONLY the delta text, no preamble."""
                     )
                     return {"action": "skip", "delta": "",
                             "reason": "rejected: prompt-injection override marker"}
-                delta = f"\n\n[SelfImprovement] {response.content}\nTask context: '{task[:100]}'"
+                # No quote of the task: a lesson joins every later prompt, and
+                # "Task context: '<the user's message>'" put the user's own
+                # words there for good, out of Forget's reach (live 2026-10-19).
+                delta = f"\n\n[SelfImprovement] {response.content}"
                 reason = f"LLM-generated reinforcement from {len(stages)} stages ({rate:.0%} rate)"
                 logger.info("[SelfImprovement] %s SUCCESS — %s", worker_name, reason)
                 return {"action": "mutate", "delta": delta, "reason": reason}
@@ -234,7 +237,7 @@ Output ONLY the delta text, no preamble."""
             logger.warning("[SelfImprovement] LLM delta failed: %s", exc)
 
         # Fallback: minimal template (static text — not injection-derived)
-        delta = f"\n\n[SelfImprovement] Task successfully completed ({rate:.0%} rate).\nTask hint: '{task[:100]}'."
+        delta = f"\n\n[SelfImprovement] Task successfully completed ({rate:.0%} rate)."
         return {"action": "mutate", "delta": delta, "reason": f"Template fallback — {len(stages)} stages"}
 
     # ── Failure analysis ────────────────────────────────────────────────
@@ -311,14 +314,17 @@ Output ONLY the delta text, no preamble."""
                     )
                     return {"action": "skip", "delta": "",
                             "reason": "rejected: prompt-injection override marker"}
-                delta = f"\n\n[SelfImprovement] {response.content}\nTask context: '{task[:100]}'"
+                # No quote of the task: a lesson joins every later prompt, and
+                # "Task context: '<the user's message>'" put the user's own
+                # words there for good, out of Forget's reach (live 2026-10-19).
+                delta = f"\n\n[SelfImprovement] {response.content}"
                 reason = f"LLM-generated correction from {failed_count} failures"
                 logger.warning("[SelfImprovement] %s FAILURE — %s", worker_name, reason)
                 return {"action": "mutate", "delta": delta, "reason": reason}
         except Exception as exc:
             logger.warning("[SelfImprovement] LLM delta failed: %s", exc)
 
-        delta = f"\n\n[SelfImprovement] {failed_count}/{len(stages)} stages failed. Review: {task[:100]}"
+        delta = f"\n\n[SelfImprovement] {failed_count}/{len(stages)} stages failed."
         return {"action": "mutate", "delta": delta, "reason": f"Template fallback — {failed_count} failures"}
 
     # ── Apply mutation ──────────────────────────────────────────────────
@@ -639,6 +645,44 @@ def _load_agent_evolution() -> dict[str, Any]:
 def _save_agent_evolution(data: dict[str, Any]) -> None:
     """Persist the agent evolution doc via ConfigStore (atomic single-key set)."""
     get_config_store().set(_AGENT_EVO_KEY, data)
+
+
+_LESSON_MARK = "\n\n[SelfImprovement]"
+
+
+def forget_text(text: str) -> int:
+    """Remove every main-agent lesson that holds *text* (any case), from the
+    Soul injected into every prompt and from its history. Returns how many.
+
+    The user's "forget everything that mentions X" (``memory.forget.
+    forget_mentions``): a lesson quoted the user's message and its own
+    example ("as done here with BLUE-HERON-42"), and the codeword reached
+    every later prompt after every memory of it was forgotten (live
+    2026-10-19).
+    """
+    needle = (text or "").strip().casefold()
+    if not needle:
+        return 0
+    removed = 0
+    with _agent_evo_lock:
+        _migrate_legacy_evolution_if_present()
+        data = _load_agent_evolution()
+        for entry in (data.get("agents") or {}).values():
+            soul = str(entry.get("soul") or "")
+            base, *lessons = soul.split(_LESSON_MARK)
+            kept = [b for b in lessons if needle not in b.casefold()]
+            hist = list(entry.get("history") or [])
+            kept_hist = [h for h in hist if needle not in str(h.get("delta") or "").casefold()]
+            if len(kept) == len(lessons) and len(kept_hist) == len(hist):
+                continue
+            removed += (len(lessons) - len(kept)) + (len(hist) - len(kept_hist))
+            entry["soul"] = base + "".join(_LESSON_MARK + b for b in kept)
+            entry["history"] = kept_hist
+        if removed:
+            _save_agent_evolution(data)
+    if removed:
+        logger.info("[SelfImprovement] forgot %d lesson(s) holding the text the user forgot", removed)
+    return removed
 
 
 def self_improvement_enabled() -> bool:

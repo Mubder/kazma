@@ -274,6 +274,13 @@ EXTERNAL_STORES: tuple[MemoryStore, ...] = (
         bound="50 steps a chat, 2,000 and 512 MB in all (time_travel.DEFAULT_*)",
     ),
     MemoryStore(
+        "self-improvement lessons (settings self_improvement.agent_evolution)", "external", "forget",
+        "derived_text",
+        forget="forget_mentions removes every lesson holding the text, from the Soul and its history "
+               "(self_improvement.forget_text); since 2026-10-19 a lesson no longer quotes the task",
+        export="", excluded="the agent's own guidance, not the user's memory",
+    ),
+    MemoryStore(
         "chat store and checkpoints", "external", "retention", "turn_text",
         forget="not memory: forgetting a memory does not delete the conversation (§15I)",
         export="", excluded="the conversation itself",

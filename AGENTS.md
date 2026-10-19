@@ -1530,7 +1530,13 @@ four injected were noise.
   (`forget.forget_mentions`, danger tier, 4+ characters): every memory and
   current fact of the tenant holding the text, any case. `memory_search`
   ranks the best few matches, so forgetting its hits one by one left 5 of 7
-  (live). The memory tool also takes a
+  (live). It also removes every self-improvement lesson holding the text
+  (`self_improvement.forget_text`, the Soul and its history: a lesson quoted
+  the codeword into every prompt), and a forget keeps its own turn out of
+  memory (`forget.keep_turn_out`, the ledger row the writer asks first: the
+  request "Forget every memory that mentions X" was written as a memory of
+  X). A lesson never quotes the task (it appended "Task context: '<the
+  user's message>'"). The memory tool also takes a
   memory id (`e_...`, from `memory_search`) and forgets that memory, and an id
   it cannot find is refused before anything is done (`RefusedBeforeEffect`):
   the model passed memory ids the first day, and "not found" was recorded as
