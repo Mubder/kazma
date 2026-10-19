@@ -14,6 +14,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "tool.desc.memory_merge_entities": {"en": "Merge duplicate entities in memory.", "ar": "دمج الكيانات المكررة في الذاكرة."},
     "tool.desc.memory_link_entities": {"en": "Link related memory entities.", "ar": "ربط كيانات الذاكرة المرتبطة."},
     "tool.desc.memory_list_beliefs": {"en": "List stored beliefs with their sources and confidence.", "ar": "عرض المعتقدات المخزنة ومصادرها ودرجة الثقة بها."},
+    "tool.desc.memory_forget_mentions": {"en": "Forget every memory that mentions a text.", "ar": "نسيان كل ذكرى تذكر نصًا معينًا."},
     "tool.desc.memory_invalidate": {"en": "Invalidate outdated memory facts.", "ar": "إبطال حقائق الذاكرة التي لم تعد صالحة."},
     "tool.desc.memory_list_entities": {"en": "List stored memory entities.", "ar": "عرض كيانات الذاكرة المخزنة."},
     "tool.desc.memory_delete_entity": {"en": "Delete a stored memory entity.", "ar": "حذف كيان مخزن في الذاكرة."},

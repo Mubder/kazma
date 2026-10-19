@@ -99,6 +99,8 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "memory_list_entities": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "memory_invalidate": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
                           "store_fact|revise_fact", ("belief_id",)),
+    "memory_forget_mentions": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
+                               "store_fact|revise_fact", ("text",)),
     "memory_merge_entities": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
                               "store_fact|revise_fact",
                               ("source_id", "target_id")),

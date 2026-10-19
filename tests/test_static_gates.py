@@ -2175,6 +2175,7 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
         "memory_merge_entities": False,
         "memory_link_entities": False,
         "memory_invalidate": False,
+        "memory_forget_mentions": False,
         "memory_delete_entity": False,
         "memory_purge_empty_entities": False,
         "memory_store": False,

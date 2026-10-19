@@ -49,6 +49,7 @@ __all__ = [
     "forget_belief_source",
     "forget_chat",
     "forget_episode",
+    "forget_mentions",
     "forgotten_in_chat",
     "forgotten_turns",
     "question_sha",
@@ -1037,6 +1038,53 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
     return {"ok": all(r.get("ok", True) for r in results), "episodes_forgotten": episodes,
             "source_turn": source, "repeated_value": [e for e in episodes if e not in source],
             "chat": session, "turn": int(turn) if turn is not None else None}
+
+
+#: The shortest text :func:`forget_mentions` takes: shorter matches half the
+#: memory store ("ok", "the").
+MENTION_MIN_CHARS = 4
+
+
+def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
+    """Forget every memory and current fact of the tenant that holds *text*
+    (any case): the user's "forget everything that mentions X".
+
+    The agent could only forget what ``memory_search`` showed it, and search
+    ranks the few best matches: asked to forget every memory mentioning a
+    codeword, it forgot the 2 of 7 it was shown and reported the job done
+    (live 2026-10-19), and the next new chat answered with the codeword.
+    Each memory goes through :func:`forget_episode` (``by="user"``), each fact
+    through ``hygiene.invalidate_belief``.
+    """
+    needle = (text or "").strip()
+    if len(needle) < MENTION_MIN_CHARS:
+        return {"ok": False, "error": "text_too_short", "min_chars": MENTION_MIN_CHARS}
+    caller = tenant_id or "default"
+    from kazma_core.db.sql_patterns import like_literal
+
+    conn = _open()
+    try:
+        episodes = _episodes_holding(conn, needle, tenant_id=caller)
+        pattern = f"%{like_literal(needle)}%"
+        facts = [str(r["id"]) for r in conn.execute(
+            "SELECT id FROM beliefs WHERE COALESCE(tenant_id, 'default') = ? "
+            "AND valid_until IS NULL AND invalidated_at IS NULL AND object LIKE ? ESCAPE '!'",
+            (caller, pattern),
+        ).fetchall()]
+    finally:
+        conn.close()
+    if not episodes and not facts:
+        return {"ok": False, "error": "nothing_holds_it"}
+    from kazma_core.memory.hygiene import invalidate_belief
+
+    fact_results = [invalidate_belief(bid, remove_graph=True, tenant_id=caller) for bid in facts]
+    memory_results = [forget_episode(eid, tenant_id=caller, by="user") for eid in episodes]
+    logger.info("[forget] mentions: %d memor%s and %d fact(s) forgotten for tenant %s",
+                len(episodes), "y" if len(episodes) == 1 else "ies", len(facts), caller)
+    return {
+        "ok": all(r.get("ok", True) for r in [*fact_results, *memory_results]),
+        "memories_forgotten": episodes, "facts_invalidated": facts,
+    }
 
 
 def _distinctive_value(value: str) -> str:

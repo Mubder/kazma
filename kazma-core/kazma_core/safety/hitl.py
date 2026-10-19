@@ -211,6 +211,7 @@ TOOL_TIERS: dict[str, str] = {
     "memory_admin": "danger",
     "memory_delete_entity": "danger",
     "memory_invalidate": "danger",
+    "memory_forget_mentions": "danger",
     "memory_merge_entities": "danger",
     "memory_purge_empty_entities": "danger",
     "create_event": "danger",       # external calendar write
@@ -376,6 +377,7 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "memory_admin",
     "memory_delete_entity",
     "memory_invalidate",
+    "memory_forget_mentions",
     "memory_merge_entities",
     "memory_purge_empty_entities",
     "create_event",

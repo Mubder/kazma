@@ -261,3 +261,34 @@ def test_a_plain_word_is_not_swept(mem):
     out = forget_belief_source(fact["belief_id"], tenant_id="default")
     assert out["ok"] and out["repeated_value"] == []
     assert mem.db.execute("SELECT tier FROM episodes WHERE id=?", (other,)).fetchone()[0] != "forgotten"
+
+
+def test_forget_mentions_reaches_every_memory_search_would_not_show(mem):
+    """Live 2026-10-19: asked to forget every memory mentioning the codeword,
+    the agent forgot the 2 memory_search showed of 7, and a new chat answered
+    with it. The tool takes every one, whatever search ranks first."""
+    from kazma_core.memory.forget import FORGOTTEN_TIER
+
+    _chat(mem)
+    held = [_live_turn(turn=n, question=f"question {n}", answer=f"Answer {n}: your codeword is blue-heron-42.",
+                       key=f"chat-{n}") for n in range(1, 8)]
+    kept = _live_turn(turn=1, question="unrelated", answer="Nothing about it.", key="chat-x")
+    fact = mutate_belief(mem.db, "user", "test_codeword", "BLUE-HERON-42", predicate_type="set",
+                         extraction_method="user_explicit")
+    mem.db.commit()
+    tool = _memory_tools()["memory_forget_mentions"]
+    out = json.loads(_as_tenant("default", lambda: tool_answer(tool("BLUE-HERON-42"))))
+    assert out["ok"] and sorted(out["memories_forgotten"]) == sorted(held)
+    assert out["facts_invalidated"] == [fact["belief_id"]]
+    tiers = dict(mem.db.execute("SELECT id, tier FROM episodes").fetchall())
+    assert all(tiers[e] == FORGOTTEN_TIER for e in held) and tiers[kept] != FORGOTTEN_TIER
+    assert not _recalled(mem)
+
+
+@pytest.mark.parametrize("text", ["ok", "no-such-text-anywhere"])
+def test_forget_mentions_refuses_before_doing_anything(mem, text):
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+    tool = _memory_tools()["memory_forget_mentions"]
+    with pytest.raises(RefusedBeforeEffect):
+        _as_tenant("default", lambda: tool(text))

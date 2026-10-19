@@ -251,6 +251,24 @@ def register_memory_tools(registry: Any) -> None:
             logger.warning("[memory_invalidate] failed: %s", exc)
             return f"Error: memory_invalidate failed — {exc}"
 
+    def _forget_mentions(text: str) -> str:
+        import sqlite3
+
+        from kazma_core.memory.forget import MENTION_MIN_CHARS, forget_mentions
+        from kazma_core.safety.hitl import get_current_tenant_id
+
+        needle = (text or "").strip()
+        if len(needle) < MENTION_MIN_CHARS:
+            raise RefusedBeforeEffect(f"Error: text must be at least {MENTION_MIN_CHARS} characters")
+        try:
+            result = forget_mentions(needle, tenant_id=get_current_tenant_id() or "default")
+        except (sqlite3.Error, OSError) as exc:
+            logger.warning("[memory_forget_mentions] failed: %s", exc, exc_info=True)
+            return f"Error: memory_forget_mentions failed — {exc}"
+        if result.get("error") == "nothing_holds_it":
+            raise RefusedBeforeEffect(f"Error: no memory or current fact holds {needle!r}")
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
     def _forget_memory(episode_id: str, tenant: str) -> str:
         import sqlite3
 
@@ -904,6 +922,19 @@ def register_memory_tools(registry: Any) -> None:
     )
     async def memory_invalidate(belief_id: str, forget_source_turn: bool = False) -> str:
         return await asyncio.to_thread(_mem_invalidate, belief_id, bool(forget_source_turn))
+    @registry.register(
+        description=(
+            "WRITE: Forget EVERY memory of a conversation and every current fact that "
+            "contains this exact text (any case, at least 4 characters). Use when the user "
+            "asks to forget everything that mentions something (a codeword, a number, a "
+            "name): memory_search shows only the best few matches, so forgetting its hits "
+            "one by one leaves the rest. Each memory is forgotten as the Memory page's "
+            "Forget does. Returns the ids forgotten."
+        ),
+        category="memory",
+    )
+    async def memory_forget_mentions(text: str) -> str:
+        return await asyncio.to_thread(_forget_mentions, text)
     @registry.register(
         description=(
             "List memory entities with belief counts. "

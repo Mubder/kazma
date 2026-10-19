@@ -1525,8 +1525,12 @@ four injected were noise.
   thing (`forget._distinctive_value`: one token of 6+ characters with a
   digit, `-` or `_` -- a codeword, an order or phone number) is forgotten in
   every memory of the tenant that holds it: Kazma's own later answers quoting
-  it kept it, and a new chat recalled one. A plain word is never swept. The
-  tool also takes a
+  it kept it, and a new chat recalled one. A plain word is never swept.
+  **"Forget everything that mentions X"** is `memory_forget_mentions(text)`
+  (`forget.forget_mentions`, danger tier, 4+ characters): every memory and
+  current fact of the tenant holding the text, any case. `memory_search`
+  ranks the best few matches, so forgetting its hits one by one left 5 of 7
+  (live). The memory tool also takes a
   memory id (`e_...`, from `memory_search`) and forgets that memory, and an id
   it cannot find is refused before anything is done (`RefusedBeforeEffect`):
   the model passed memory ids the first day, and "not found" was recorded as

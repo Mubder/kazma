@@ -424,6 +424,7 @@ TOOL_WRITES: dict[str, Write] = {
     "memory_admin": Write(("memory_state.db",), _MEMORY_READERS),
     "memory_delete_entity": Write(("memory_state.db",), _MEMORY_READERS),
     "memory_invalidate": Write(("memory_state.db",), _MEMORY_READERS),
+    "memory_forget_mentions": Write(("memory_state.db",), _MEMORY_READERS),
     "memory_merge_entities": Write(("memory_state.db",), _MEMORY_READERS),
     "memory_purge_empty_entities": Write(("memory_state.db",), _MEMORY_READERS),
     "knowledge_create_library": Write(
