@@ -219,3 +219,45 @@ def test_a_memory_id_forgets_that_memory(mem):
     assert out["ok"]
     assert mem.db.execute("SELECT tier FROM episodes WHERE id=?", (eid,)).fetchone()[0] == FORGOTTEN_TIER
     assert not _recalled(mem)
+
+
+def _a_later_answer_elsewhere(mem):
+    """Kazma's answer in another chat, quoting the value (live 2026-10-19:
+    a new chat recalled such an answer after the forget)."""
+    return _live_turn(turn=1, question="What's my test codeword?",
+                      answer="Your test codeword is **BLUE-HERON-42**.", key="other-chat")
+
+
+def test_every_memory_repeating_a_distinctive_value_is_forgotten(mem):
+    later = _a_later_answer_elsewhere(mem)
+    out = _forget_through_the_tool(mem, forget_source_turn=True)
+    assert later in out["source_turn"]["repeated_value"]
+    from kazma_core.memory.forget import FORGOTTEN_TIER
+
+    assert mem.db.execute("SELECT tier FROM episodes WHERE id=?", (later,)).fetchone()[0] == FORGOTTEN_TIER
+    assert not _recalled(mem)
+
+
+def test_negative_control_the_source_turn_alone_leaves_the_repeat(mem, monkeypatch):
+    from kazma_core.memory import forget
+
+    monkeypatch.setattr(forget, "_episodes_holding", lambda conn, value, **kw: [])
+    _a_later_answer_elsewhere(mem)
+    _forget_through_the_tool(mem, forget_source_turn=True)
+    assert _recalled(mem)
+
+
+def test_a_plain_word_is_not_swept(mem):
+    from kazma_core.memory.forget import _distinctive_value, forget_belief_source
+
+    assert _distinctive_value("London") == "" and _distinctive_value("in London 4") == ""
+    assert _distinctive_value("BLUE-HERON-42") == "BLUE-HERON-42"
+    _chat(mem)
+    _live_turn(turn=1, question="I live in London", answer="Noted.", key="th1")
+    other = _live_turn(turn=1, question="Best parks in London?", answer="Hyde Park.", key="other-chat")
+    fact = mutate_belief(mem.db, "user", "lives_in", "London", extraction_method="user_explicit",
+                         source_session="th1", source_turn=1)
+    mem.db.commit()
+    out = forget_belief_source(fact["belief_id"], tenant_id="default")
+    assert out["ok"] and out["repeated_value"] == []
+    assert mem.db.execute("SELECT tier FROM episodes WHERE id=?", (other,)).fetchone()[0] != "forgotten"

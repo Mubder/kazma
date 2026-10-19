@@ -991,14 +991,19 @@ def _delete_remote_vector(conn: sqlite3.Connection, eid: str, tenant_id: str) ->
 
 def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
     """Forget the conversation turn a fact came from, as the Memory page's
-    Forget does (:func:`forget_episode`, ``by="user"``).
+    Forget does (:func:`forget_episode`, ``by="user"``), and every memory
+    that repeats a distinctive value of it.
 
     For a user who asks in chat to forget something they said: invalidating
     the fact alone left the turn a memory, so recall found it at once and the
     next turn that repeated it learned the fact again (live 2026-10-19). The
     turn is the fact's ``source_session`` / ``source_turn``, under every key
-    of its chat. A fact with no source turn (the Memory page, an import) has
-    none to forget, and says so.
+    of its chat. Kazma's own later answers that quoted the value ("Your test
+    codeword is BLUE-HERON-42") kept it too, and a new chat recalled one: a
+    value that names one thing (:func:`_distinctive_value`: one token with a
+    digit, ``-`` or ``_``) is forgotten wherever a memory of the tenant holds
+    it. A plain word ("London") is not swept: it would take every turn that
+    mentions it. A fact with neither a source turn nor such a value says so.
     """
     bid = (belief_id or "").strip()
     if not bid:
@@ -1007,26 +1012,54 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
     conn = _open()
     try:
         row = conn.execute(
-            "SELECT tenant_id, source_session, source_turn FROM beliefs WHERE id = ?", (bid,),
+            "SELECT tenant_id, source_session, source_turn, object FROM beliefs WHERE id = ?", (bid,),
         ).fetchone()
         if row is None or (caller != "default" and str(row["tenant_id"] or "default") != caller):
             return {"ok": False, "error": "not_found"}
+        owner = str(row["tenant_id"] or "default")
         session, turn = str(row["source_session"] or ""), row["source_turn"]
-        if not session or turn is None:
-            return {"ok": False, "error": "no_source_turn"}
-        keys = chat_keys(session) or [session]
-        marks = ",".join("?" * len(keys))
-        episodes = [str(r["id"]) for r in conn.execute(
-            f"SELECT id FROM episodes WHERE session_id IN ({marks}) AND turn_number = ?",  # nosec B608 -- placeholders only
-            (*keys, int(turn)),
-        ).fetchall()]
+        source: list[str] = []
+        if session and turn is not None:
+            keys = chat_keys(session) or [session]
+            marks = ",".join("?" * len(keys))
+            source = [str(r["id"]) for r in conn.execute(
+                f"SELECT id FROM episodes WHERE session_id IN ({marks}) AND turn_number = ?",  # nosec B608 -- placeholders only
+                (*keys, int(turn)),
+            ).fetchall()]
+        value = _distinctive_value(str(row["object"] or ""))
+        repeats = _episodes_holding(conn, value, tenant_id=owner) if value else []
     finally:
         conn.close()
+    episodes = list(dict.fromkeys([*source, *repeats]))
     if not episodes:
         return {"ok": False, "error": "no_source_turn"}
     results = [forget_episode(eid, tenant_id=caller, by="user") for eid in episodes]
     return {"ok": all(r.get("ok", True) for r in results), "episodes_forgotten": episodes,
-            "chat": session, "turn": int(turn)}
+            "source_turn": source, "repeated_value": [e for e in episodes if e not in source],
+            "chat": session, "turn": int(turn) if turn is not None else None}
+
+
+def _distinctive_value(value: str) -> str:
+    """*value* when it names one thing -- one token of 6+ characters holding a
+    digit, ``-`` or ``_`` (a codeword, an account or order number, a phone
+    number) -- else ``""``."""
+    value = (value or "").strip()
+    if len(value) < 6 or any(ch.isspace() for ch in value):
+        return ""
+    return value if any(ch.isdigit() or ch in "-_" for ch in value) else ""
+
+
+def _episodes_holding(conn: sqlite3.Connection, value: str, *, tenant_id: str) -> list[str]:
+    """The tenant's remembered episodes whose text holds *value* (any case)."""
+    from kazma_core.db.sql_patterns import like_literal
+
+    pattern = f"%{like_literal(value)}%"
+    return [str(r["id"]) for r in conn.execute(
+        "SELECT id FROM episodes WHERE COALESCE(tenant_id, 'default') = ? AND tier != ? "
+        "AND (user_text LIKE ? ESCAPE '!' OR assistant_text LIKE ? ESCAPE '!' "
+        "OR summary_text LIKE ? ESCAPE '!')",
+        (tenant_id, FORGOTTEN_TIER, pattern, pattern, pattern),
+    ).fetchall()]
 
 
 def forget_chat(

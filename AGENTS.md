@@ -1521,7 +1521,12 @@ four injected were noise.
   forgets the turn too**: `memory_invalidate(forget_source_turn=true)` runs
   `forget.forget_belief_source` -- the fact's source turn through
   `forget_episode(by="user")`, as the Memory page's Forget -- or recall found
-  the turn and the next turn learned the fact again. The tool also takes a
+  the turn and the next turn learned the fact again. A value that names one
+  thing (`forget._distinctive_value`: one token of 6+ characters with a
+  digit, `-` or `_` -- a codeword, an order or phone number) is forgotten in
+  every memory of the tenant that holds it: Kazma's own later answers quoting
+  it kept it, and a new chat recalled one. A plain word is never swept. The
+  tool also takes a
   memory id (`e_...`, from `memory_search`) and forgets that memory, and an id
   it cannot find is refused before anything is done (`RefusedBeforeEffect`):
   the model passed memory ids the first day, and "not found" was recorded as
