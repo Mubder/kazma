@@ -280,6 +280,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مزامنة الفرع المحلي عبر git pull/push.",
         "en": "Sync local branch via git pull/push.",
     },
+    "tool.desc.git_log": {
+        "ar": "عرض آخر التعديلات المؤكدة في المستودع.",
+        "en": "Show the latest commits of the repository.",
+    },
+    "tool.desc.git_diff": {
+        "ar": "عرض الفروقات في ملفات المستودع.",
+        "en": "Show changes in the repository's files.",
+    },
     "tool.desc.git_status": {
         "ar": "الحصول على حالة مستودع Git والفرع.",
         "en": "Get git repository status and branch.",

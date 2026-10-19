@@ -2105,6 +2105,9 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
     },
     "kazma-skills/kazma_skills/native/git_github_manager/tools.py": {
         "git_status": False,
+        # Commit messages and file contents are whoever committed them.
+        "git_log": True,
+        "git_diff": True,
         "git_commit": False,
         "git_push": False,
         "git_pull": False,

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import subprocess
 from typing import Any
 
 import httpx
@@ -59,6 +60,75 @@ async def git_status() -> str:
         return f"On branch {branch}\nChanges:\n{status_lines}"
     except Exception as e:
         return f"Error executing git status: {e}"
+
+
+#: Bounds of the read-only history tools (the model's context, not git's).
+_LOG_MAX_COMMITS = 100
+_DIFF_MAX_CHARS = 60_000
+
+
+async def _git_read(args: list[str], *, timeout: int = 15) -> tuple[int, str, str]:
+    """A read-only git command in the active workspace, with the repository's
+    own fsmonitor hook off (it is code the repository chose) and the tool
+    child environment (``run_off_loop``)."""
+    cwd = await asyncio.to_thread(_get_workspace)
+    res = await run_off_loop(
+        ["git", "-c", "core.fsmonitor=false", *args],
+        cwd=cwd, capture_output=True, text=True, timeout=timeout,
+        encoding="utf-8", errors="replace",
+    )
+    return res.returncode, res.stdout or "", res.stderr or ""
+
+
+async def git_log(count: int = 10, path: str = "", oneline: bool = True) -> str:
+    """Show the most recent commits of the workspace repository (read-only).
+
+    The history had no tool: with host shell off and the Python sandbox
+    refusing subprocess, "git log -3 --oneline" could not be answered at all
+    (live 2026-10-19, Telegram).
+    """
+    n = max(1, min(int(count or 10), _LOG_MAX_COMMITS))
+    fmt = "--pretty=format:%h %ad %an  %s" if oneline else "--pretty=format:commit %H%nAuthor: %an <%ae>%nDate:   %ad%n%n%w(0,4,4)%B"
+    args = ["log", f"-{n}", "--date=iso-strict", fmt]
+    if (path or "").strip():
+        args += ["--", path.strip()]
+    try:
+        code, out, err = await _git_read(args)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"Error executing git log: {e}"
+    if code != 0:
+        return f"Error: git log failed: {err.strip()[:300] or 'not a git repository'}"
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    # Commit messages are written by whoever committed: data, not instructions.
+    return fence_untrusted(out.strip() or "No commits.", source="git_log")
+
+
+async def git_diff(target: str = "", path: str = "", stat: bool = False) -> str:
+    """Show uncommitted changes, or the changes of *target* (a commit, or a
+    range like ``main..HEAD``), read-only. ``stat`` lists the files only."""
+    args = ["diff"]
+    ref = (target or "").strip()
+    if ref.startswith("-"):
+        return "Error: target must be a commit or a range, not an option"
+    if ref:
+        args = ["show", "--format=%h %s", ref] if ".." not in ref else ["diff", ref]
+    if stat:
+        args.append("--stat")
+    if (path or "").strip():
+        args += ["--", path.strip()]
+    try:
+        code, out, err = await _git_read(args, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"Error executing git diff: {e}"
+    if code != 0:
+        return f"Error: git diff failed: {err.strip()[:300] or 'not a git repository'}"
+    text = out.strip() or "No changes."
+    if len(text) > _DIFF_MAX_CHARS:
+        text = text[:_DIFF_MAX_CHARS] + f"\n... [cut at {_DIFF_MAX_CHARS} characters; pass path= or stat=true]"
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    return fence_untrusted(text, source="git_diff")
 
 
 async def git_commit(message: str, files: list[str] | None = None) -> str:

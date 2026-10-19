@@ -201,6 +201,8 @@ These modules implement or support tools (some registered at startup, some via s
 | `install_npm_packages` | environment-bootstrapper | system | **danger** | Install Node/npm packages inside the active workspace. |
 | `check_environment` | environment-bootstrapper | system | safe/read | Diagnose system binaries, active Python interpreter, PATH variables, and compile resources. |
 | `git_status` | git-github-manager | git | safe/read | Get the current git repository status, branch, and staged/unstaged changes. |
+| `git_log` | git-github-manager | git | safe/read | Show the most recent commits of the workspace repository (read-only): count (default 10, at most 100), optional path, oneline (default true). |
+| `git_diff` | git-github-manager | git | safe/read | Show changes (read-only): uncommitted changes by default, or a commit / range (target, e.g. HEAD~1 or main..HEAD); optional path; stat=true lists the files only. |
 | `git_commit` | git-github-manager | git | **danger** | Commit modified or untracked files with a detailed commit message. |
 | `git_push` | git-github-manager | git | **danger** | Push (upload) local commits to the remote repository on GitHub. Use this to publish local commits. |
 | `git_pull` | git-github-manager | git | **danger** | Pull (fetch and merge) the latest changes FROM the remote GitHub repository into the local branch. Does NOT push anything. |
