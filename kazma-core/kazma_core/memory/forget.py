@@ -46,6 +46,7 @@ __all__ = [
     "FORGOTTEN_TIER",
     "chat_keys",
     "chat_remembered",
+    "forget_belief_source",
     "forget_chat",
     "forget_episode",
     "forgotten_in_chat",
@@ -986,6 +987,46 @@ def _delete_remote_vector(conn: sqlite3.Connection, eid: str, tenant_id: str) ->
         logger.warning("[forget] remote vector of %s not deleted yet; retried each pass", eid)
         forget_journal.queue_remote_delete(eid, tenant_id)
     return done
+
+
+def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
+    """Forget the conversation turn a fact came from, as the Memory page's
+    Forget does (:func:`forget_episode`, ``by="user"``).
+
+    For a user who asks in chat to forget something they said: invalidating
+    the fact alone left the turn a memory, so recall found it at once and the
+    next turn that repeated it learned the fact again (live 2026-10-19). The
+    turn is the fact's ``source_session`` / ``source_turn``, under every key
+    of its chat. A fact with no source turn (the Memory page, an import) has
+    none to forget, and says so.
+    """
+    bid = (belief_id or "").strip()
+    if not bid:
+        return {"ok": False, "error": "belief_id required"}
+    caller = tenant_id or "default"
+    conn = _open()
+    try:
+        row = conn.execute(
+            "SELECT tenant_id, source_session, source_turn FROM beliefs WHERE id = ?", (bid,),
+        ).fetchone()
+        if row is None or (caller != "default" and str(row["tenant_id"] or "default") != caller):
+            return {"ok": False, "error": "not_found"}
+        session, turn = str(row["source_session"] or ""), row["source_turn"]
+        if not session or turn is None:
+            return {"ok": False, "error": "no_source_turn"}
+        keys = chat_keys(session) or [session]
+        marks = ",".join("?" * len(keys))
+        episodes = [str(r["id"]) for r in conn.execute(
+            f"SELECT id FROM episodes WHERE session_id IN ({marks}) AND turn_number = ?",  # nosec B608 -- placeholders only
+            (*keys, int(turn)),
+        ).fetchall()]
+    finally:
+        conn.close()
+    if not episodes:
+        return {"ok": False, "error": "no_source_turn"}
+    results = [forget_episode(eid, tenant_id=caller, by="user") for eid in episodes]
+    return {"ok": all(r.get("ok", True) for r in results), "episodes_forgotten": episodes,
+            "chat": session, "turn": int(turn)}
 
 
 def forget_chat(
