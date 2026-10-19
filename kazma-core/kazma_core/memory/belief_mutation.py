@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "derive_memory_class",
+    "kazma_classifies",
     "mutate_belief",
     "FunctionalBelief",
     "SetBelief",
@@ -186,6 +187,48 @@ def _classify_predicate(predicate: str, explicit: str | None) -> str:
     if p.startswith("favorite_"):
         return "functional"
     return "set"
+
+
+def kazma_classifies(predicate: str) -> bool:
+    """Whether Kazma itself says how many values *predicate* holds (the
+    functional and state lists, ``favorite_*``, the rotating current facts),
+    whatever the extractor's label."""
+    if predicate in _FUNCTIONAL_PREDICATES or predicate in _STATE_PREDICATES or predicate.startswith("favorite_"):
+        return True
+    from kazma_core.memory.current_facts import is_functional_current_predicate
+
+    return bool(is_functional_current_predicate(predicate))
+
+
+def _established_kind(
+    conn: sqlite3.Connection, *, tenant_id: str, subject: str, predicate: str, ptype: str,
+) -> str:
+    """A predicate the subject already keeps as a list stays a list.
+
+    The extractor labels each fact's type itself, and a single-valued label
+    on a list's predicate made the write supersede the newest entry and close
+    every other one as "extra current values": live 2026-10-19 the deep pass
+    stored ``user noted "test codeword is ..."`` as functional and closed 57
+    of the owner's notes. A predicate Kazma itself classifies (the functional
+    and state lists, ``favorite_*``, the rotating current facts) keeps the
+    type Kazma gives it.
+    """
+    if ptype not in ("functional", "state") or kazma_classifies(predicate):
+        return ptype
+    try:
+        holds_list = conn.execute(
+            "SELECT 1 FROM beliefs WHERE tenant_id=? AND subject=? AND predicate=? "
+            "AND predicate_type='set' AND valid_until IS NULL AND invalidated_at IS NULL LIMIT 1",
+            (tenant_id, subject, predicate),
+        ).fetchone()
+    except sqlite3.Error:
+        logger.debug("[belief_mutate] could not read %s %s's kind; keeping %s", subject, predicate, ptype)
+        return ptype
+    if holds_list:
+        logger.info("[belief_mutate] %s %s holds a list: writing this %s value as one more entry",
+                    subject, predicate, ptype)
+        return "set"
+    return ptype
 
 
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
@@ -390,6 +433,8 @@ def mutate_belief(
                 )
             except sqlite3.Error:
                 logger.debug("[belief_mutate] predicate names unreadable; keeping %r", pred)
+            ptype = _established_kind(primary_conn, tenant_id=tenant_id, subject=sub,
+                                      predicate=pred, ptype=ptype)
             if ptype == "functional":
                 result = _mutate_functional(
                     primary_conn, ops_conn, sub, pred, obj,
@@ -707,12 +752,18 @@ def _mutate_functional_locked(
     # The currently-active belief for this (subject, predicate): the newest,
     # and only one (Memory audit M26 -- ``LIMIT 1`` with no order read any of
     # several). Extra current rows (a crash between two writes) are closed at
-    # the newest's start, so a single-valued fact has one value again.
+    # the newest's start, so a single-valued fact has one value again. A list
+    # entry ('set') is never one of them: closing those closed 57 notes on
+    # live (2026-10-19, ``_established_kind``) -- unless Kazma itself says
+    # the predicate holds one value, where an older row labelled a list is a
+    # stale value of it.
+    lists_kept = "" if kazma_classifies(pred) else "AND COALESCE(predicate_type, '') != 'set'"
     current = conn.execute(
-        """SELECT id, object, extraction_method, valid_from, source_session, source_turn FROM beliefs
+        f"""SELECT id, object, extraction_method, valid_from, source_session, source_turn FROM beliefs
            WHERE subject=? AND predicate=? AND tenant_id=?
+             {lists_kept}
              AND valid_until IS NULL AND invalidated_at IS NULL
-           ORDER BY valid_from DESC, ingested_at DESC""",
+           ORDER BY valid_from DESC, ingested_at DESC""",  # nosec B608 -- a fixed clause, values bound
         (sub, pred, tenant_id),
     ).fetchall()
     existing = current[0] if current else None

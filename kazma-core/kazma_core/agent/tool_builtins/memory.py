@@ -214,7 +214,7 @@ def register_memory_tools(registry: Any) -> None:
         except Exception as exc:
             logger.warning("[memory_list_entities] failed: %s", exc)
             return f"Error: memory_list_entities failed — {exc}"
-    def _mem_invalidate(belief_id: str) -> str:
+    def _mem_invalidate(belief_id: str, forget_source_turn: bool = False) -> str:
         from kazma_core.memory.hygiene import invalidate_belief
         from kazma_core.safety.hitl import get_current_tenant_id
 
@@ -224,7 +224,15 @@ def register_memory_tools(registry: Any) -> None:
         try:
             # The turn's tenant, like the list tools above: an id from another
             # tenant reads as not found.
-            result = invalidate_belief(bid, remove_graph=True, tenant_id=get_current_tenant_id())
+            tenant = get_current_tenant_id()
+            result = invalidate_belief(bid, remove_graph=True, tenant_id=tenant)
+            if forget_source_turn and result.get("ok"):
+                # The user asked to forget: the turn the fact came from goes
+                # too, or recall finds it and the next turn learns it again
+                # (memory.forget.forget_belief_source, live 2026-10-19).
+                from kazma_core.memory.forget import forget_belief_source
+
+                result["source_turn"] = forget_belief_source(bid, tenant_id=tenant or "default")
             return json.dumps(result, ensure_ascii=False, indent=2)
         except Exception as exc:
             logger.warning("[memory_invalidate] failed: %s", exc)
@@ -857,12 +865,17 @@ def register_memory_tools(registry: Any) -> None:
     @registry.register(
         description=(
             "WRITE: Soft-invalidate one belief by id (from memory_list_beliefs). "
-            "Removes stale/duplicate facts. Also: memory_admin action=invalidate id=…"
+            "Removes stale/duplicate facts. Also: memory_admin action=invalidate id=… "
+            "When the USER asks you to forget something they told you, pass "
+            "forget_source_turn=true: the conversation turn the fact came from is "
+            "forgotten too (as the Memory page's Forget does), so it is neither "
+            "recalled nor learned again. Leave it false for clean-up of stale or "
+            "duplicate facts."
         ),
         category="memory",
     )
-    async def memory_invalidate(belief_id: str) -> str:
-        return await asyncio.to_thread(_mem_invalidate, belief_id)
+    async def memory_invalidate(belief_id: str, forget_source_turn: bool = False) -> str:
+        return await asyncio.to_thread(_mem_invalidate, belief_id, bool(forget_source_turn))
     @registry.register(
         description=(
             "List memory entities with belief counts. "

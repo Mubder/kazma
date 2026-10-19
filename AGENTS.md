@@ -1508,6 +1508,22 @@ four injected were noise.
   marks its episode (`metadata.deep_pass`, `_DEEP_PASS_VERSION`) and a
   second task for it does nothing; the embedder singleton is built once
   under a lock. Gate: `tests/test_memory_write_path_items.py`.
+- **A list stays a list** (2026-10-19, `belief_mutation._established_kind`).
+  The extractor labels each fact's type; a single-valued label on a predicate
+  the subject keeps as a list (current `set` rows) is written as one more
+  entry, and the "extra current rows" close never takes a list entry --
+  unless Kazma itself classifies the predicate (`kazma_classifies`: the
+  functional and state lists, `favorite_*`, the rotating current facts).
+  Live, `user noted "test codeword is ..."` labelled functional superseded one
+  of the owner's notes and closed 57 more. `scripts/memory_reopen_lists.py`
+  (`memory/list_reopen.py`; `size`, then `apply --db --yes`, copy first)
+  reopens entries closed that way, one audit row each. **"Forget" in chat
+  forgets the turn too**: `memory_invalidate(forget_source_turn=true)` runs
+  `forget.forget_belief_source` -- the fact's source turn through
+  `forget_episode(by="user")`, as the Memory page's Forget -- or recall found
+  the turn and the next turn learned the fact again. Gate:
+  `tests/test_memory_list_stays_a_list.py` (the old write and invalidating
+  alone as negative controls).
 - **Small talk is kept, never recalled (W5).** `episode_text.is_small_talk`:
   the whole message is small talk by its words, never by length ("Pixel's
   age?" is short and a question). A greeting, thanks or goodbye with a reply
