@@ -10,7 +10,7 @@ from typing import Any
 from kazma_core.documents.service import DocumentService
 
 from kazma_core.paths import data_dir as _data_dir
-from kazma_core.agent.tool_refusal import RefusedBeforeEffect, effect_unknown
+from kazma_core.agent.tool_refusal import KnownEffectError, RefusedBeforeEffect
 
 #: Resolved via paths so KAZMA_DATA_DIR is honoured.
 DOC_DIR = _data_dir() / "documents"
@@ -111,7 +111,15 @@ def _verify_pdf_content(
             rendered = " ".join(page.get_text() for page in doc)
         finally:
             doc.close()
-        norm = _re.sub(r"[^a-z0-9]+", " ", rendered.lower())
+        import unicodedata
+
+        def _norm(text: str) -> str:
+            # NFKC unfolds the ligatures a PDF's text layer can hold ("fi" as
+            # one glyph); punctuation becomes a space on BOTH sides.
+            return " " + " ".join(_re.sub(r"[^a-z0-9]+", " ",
+                                         unicodedata.normalize("NFKC", text).lower()).split()) + " "
+
+        norm = _norm(rendered)
 
         def _tokens(text: str) -> list[str]:
             words = _re.sub(r"[^a-zA-Z0-9]+", " ", str(text or "").lower()).split()
@@ -138,7 +146,11 @@ def _verify_pdf_content(
             rows = table.get("rows") or []
             if rows:
                 cells.extend(str(c) for c in (rows[0] or []))
-            missing = [c for c in cells if c.strip() and str(c).lower() not in norm]
+            # A cell is compared as the rendered text is: its punctuation and
+            # symbols dropped ("Avg high (°C)", "Jun – Sep" never matched the
+            # punctuation-free text, and every such table failed, live
+            # 2026-10-20). A cell of symbols alone proves nothing and is skipped.
+            missing = [c for c in cells if _norm(c).strip() and _norm(c) not in norm]
             if missing:
                 return (
                     f"Error: PDF VERIFICATION FAILED — table {t_i + 1} is "
@@ -241,7 +253,9 @@ async def generate_pdf(
         _path = getattr(result.data, "export_path", None) if result.data else None
         _err = _verify_pdf_content(_path, _sections(sections), tables)
         if _err:
-            return effect_unknown(_err)
+            # The incomplete file is known and named; a new call writes a new
+            # file: a correctable error, not an unknown effect.
+            raise KnownEffectError(f"{_err} (incomplete file: {_path})")
     return _output(result, "PDF")
 
 

@@ -53,7 +53,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+from kazma_core.agent.tool_refusal import KnownEffectError, RefusedBeforeEffect
 
 __all__ = [
     "CallAuthority",
@@ -915,7 +915,10 @@ class LocalToolRegistry:
                 # The tool refused before it changed anything: an ordinary,
                 # correctable error, never "effects unknown" (tool_refusal).
                 _invoked = False
-                logger.info("Tool '%s' refused before running: %s", tool_name, exc)
+                if isinstance(exc, KnownEffectError):
+                    logger.info("Tool '%s' failed with a known, repeatable effect: %s", tool_name, exc)
+                else:
+                    logger.info("Tool '%s' refused before running: %s", tool_name, exc)
                 _record_procedural_outcome(tool_name, arguments, success=False)
                 return await _with_post({"content": exc.content(), "is_error": True})
 

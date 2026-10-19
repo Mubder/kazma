@@ -22,7 +22,7 @@ still counts the call: it stays conservative and only costs a retry.
 
 from __future__ import annotations
 
-__all__ = ["RefusedBeforeEffect", "effect_unknown"]
+__all__ = ["KnownEffectError", "RefusedBeforeEffect", "effect_unknown"]
 
 
 def effect_unknown(message: str) -> str:
@@ -44,3 +44,16 @@ class RefusedBeforeEffect(Exception):
         if text.startswith(("Error", "Safety:", "{", "[", "⚠")):
             return text
         return f"Error: {text}"
+
+
+class KnownEffectError(RefusedBeforeEffect):
+    """The tool's action ran, the tool knows exactly what it did, and calling
+    again is safe: an ordinary, correctable error, never "effects unknown".
+
+    ``generate_pdf``'s check that the requested text reached the PDF: the
+    file is written either way, a new call writes a new file, and the error
+    asks the model to call again. Returned as ``effect_unknown`` it failed
+    the turn and forbade the very retry it asked for (live 2026-10-20). Use
+    it only where the effect is named in the message and a repeat duplicates
+    nothing anyone sees (a send, a post, a payment never qualify).
+    """
