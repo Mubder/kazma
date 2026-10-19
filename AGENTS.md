@@ -5306,8 +5306,16 @@ set's restored hunk) is marked `effect_unknown(...)`. A typed refusal raised
 from inside an action counts too: the browser's launch refusal is
 `web_acquire.result.BrowserLaunchRefused` (an `AcquisitionError`, rebuilt
 whole by Playwright's `type(error)(message)`). A test that calls a tool
-directly reads its answer through `tests/_tool_answer.answer`. **And a call
-that cannot run gets no card**: `safety/call_preflight.call_refusal` (shell:
+directly reads its answer through `tests/_tool_answer.answer`. **A failure
+whose effect the tool knows, where a repeat duplicates nothing anyone sees,**
+raises `tool_refusal.KnownEffectError` (a `RefusedBeforeEffect`: the registry
+answers it as an ordinary error). `generate_pdf`'s check that the requested
+text reached the PDF names the incomplete file and asks for a new call;
+returned as `effect_unknown` it failed the turn and forbade the retry it asked
+for (live 2026-10-20). The check also compared table cells raw against
+punctuation-free text, so every table with "°C" or "Jun – Sep" failed; cells
+and text are normalized alike now (`tests/test_pdf_verification.py`). Never
+for a send, a post or a payment. **And a call that cannot run gets no card**: `safety/call_preflight.call_refusal` (shell:
 `shell_preflight.shell_refusal`, the policy then an empty command or a shell
 metacharacter; the browser tools and `computer_use`:
 `browser_isolation.launch_refusal`, the strict network mode's own decision,
