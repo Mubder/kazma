@@ -709,6 +709,7 @@ WRITE_EXECUTE_TOOL_NAMES = frozenset(
         "memory_store",
         "memory_delete_entity",
         "memory_invalidate",
+        "memory_forget_mentions",
         "memory_merge_entities",
         "memory_link_entities",
         "git_commit",

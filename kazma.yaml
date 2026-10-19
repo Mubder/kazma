@@ -180,6 +180,7 @@ safety:
     - install_python_packages
     - memory_admin
     - memory_delete_entity
+    - memory_forget_mentions
     - memory_invalidate
     - memory_merge_entities
     - memory_purge_empty_entities

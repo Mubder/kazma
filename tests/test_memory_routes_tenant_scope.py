@@ -800,6 +800,7 @@ TOOL_CALLS: dict[str, list[dict]] = {
     "memory_link_entities": [{"subject": "alice", "object": "Carol"}],
     "memory_list_beliefs": [{"q": "Paris"}],
     "memory_invalidate": [{"belief_id": "alpha_b1"}],
+    "memory_forget_mentions": [{"text": "Paris"}],
     "memory_list_entities": [{"q": "Alice"}],
     "memory_delete_entity": [{"entity_id": "alice_pet"}],
     "memory_purge_empty_entities": [{"confirm": False}],
