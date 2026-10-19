@@ -8,7 +8,10 @@ tools:
   generate_pdf:
     arabic_name: "إنشاء PDF"
     description: >
-      Generate a styled PDF (headings, bullets, bold/italic, justified body).
+      Generate a PDF in Kazma's house style (brand fonts, headings, bullets,
+      bold/italic, justified body; each paragraph and table laid out in its own
+      language's direction, so one document can hold an Arabic and an English
+      part). The way to make any report or document as a PDF.
       LARGE DOCUMENTS (>5 sections or >2000 words): first write the content
       to a .md file via file_write (chunked), then pass markdown_path="file.md"
       — inline sections that exceed the model's output token limit get

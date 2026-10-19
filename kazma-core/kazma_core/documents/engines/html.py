@@ -380,8 +380,10 @@ class HtmlEngine:
         for row in rows:
             cells = "".join(f"<td>{self._isolate(esc(str(c)))}</td>" for c in row)
             body.append(f"<tr>{cells}</tr>")
+        # A table reads in its own language (profile.table_direction).
+        table_dir = self.profile.table_direction(headers, rows)
         return (
-            "<table>\n"
+            f'<table dir="{table_dir}">\n'
             f"  <thead><tr>{head}</tr></thead>\n"
             f"  <tbody>{''.join(body)}</tbody>\n"
             "</table>"

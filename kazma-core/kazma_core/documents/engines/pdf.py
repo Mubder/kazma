@@ -662,9 +662,12 @@ class PdfEngine:
             s = str(val)
             return shape_for_pdf(s) if self.shape_ar else s
 
+        # A table reads in its own language (profile.table_direction), judged
+        # on the text before shaping.
+        table_rtl = self.profile.table_direction(block.headers, block.rows) == "rtl"
         headers = [_cell(c) for c in block.headers]
         rows = [[_cell(c) for c in row] for row in block.rows]
-        if self.profile.rtl:
+        if table_rtl:
             # Columns must read right-to-left, matching ``w:bidiVisual`` in the
             # DOCX engine and ``dir="rtl"`` in HTML. ReportLab has no bidi table
             # model, so the reversal is done on the data. Without this the PDF
@@ -693,7 +696,7 @@ class PdfEngine:
             ("TEXTCOLOR", (0, 1), (-1, -1), th["body"]),
             ("GRID", (0, 0), (-1, -1), 0.5, th["table_grid"]),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("ALIGN", (0, 0), (-1, -1), "RIGHT" if self.profile.rtl else "LEFT"),
+            ("ALIGN", (0, 0), (-1, -1), "RIGHT" if table_rtl else "LEFT"),
             ("TOPPADDING", (0, 0), (-1, -1), 6),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
             ("LEFTPADDING", (0, 0), (-1, -1), 8),

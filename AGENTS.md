@@ -3381,7 +3381,15 @@ and for table cells (`theme_cs_size(10)`).
 
 RTL tables must read right-to-left in every format: `w:bidiVisual` (DOCX),
 `dir="rtl"` (HTML), and an explicit column reversal in the PDF engine, which
-has no bidi table model of its own.
+has no bidi table model of its own. **Which tables are RTL is the table's own
+language** (`DocProfile.table_direction`, 2026-10-20), and a cell with no
+letter ("29 – 32") takes its table's direction (`block_direction(text,
+neutral)`): an English table in an Arabic document was mirrored and its
+ranges read "32 – 29", and the agent dropped the house style for hand-written
+HTML to get a readable table. `convert_document` says it converts an existing
+file in its own styling and that reports are made with `generate_pdf` /
+`generate_docx`. Gate: `tests/test_document_table_direction.py` (through real
+LibreOffice; the document's direction as the negative control).
 
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
@@ -5254,7 +5262,12 @@ thread lock, and the chat gets a notice, the answer and any next card through
 the same `_run_resume` / `_deliver_resume` a tap uses; a turn with no address
 stays in the journal; (3) a late tap reads the card's own gate
 (`_decided_card_message`): expired, denied, or the approve path. Gate:
-`tests/test_approval_timeout_reaches_the_chat.py` (each with its control).
+`tests/test_approval_timeout_reaches_the_chat.py` (each with its control). **After an approval the chat gets what the resume
+added** (`hitl._new_assistant_text`, 2026-10-20): the newest assistant text of
+the running turn that the turn had not said before the resume. "The latest
+assistant text" over the whole history re-sent the previous turn's failure
+after every approval of a step that only called tools.
+`tests/test_resume_sends_only_new_text.py` (the old search as the control).
 
 **F. Honesty limits.** `hitl_gates.db` is single-process truth (like the
 turn journal) — no multi-replica claims; a Postgres backend goes next to §21

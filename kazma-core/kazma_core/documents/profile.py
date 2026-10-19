@@ -220,7 +220,7 @@ class DocProfile:
     # ------------------------------------------------------------------ #
     # per-block direction
     # ------------------------------------------------------------------ #
-    def block_direction(self, text: str) -> Direction:
+    def block_direction(self, text: str, neutral: Direction | None = None) -> Direction:
         """Direction for ONE block, which is not always the document's.
 
         ``direction`` is a whole-document property — it drives margins, the
@@ -237,15 +237,27 @@ class DocProfile:
 
         Blocks with no strong directional character of their own — a divider, a
         bare number, a date — inherit the document direction rather than
-        silently defaulting to LTR.
+        silently defaulting to LTR -- or, for a cell of a table, its table's
+        direction (*neutral*, :meth:`table_direction`).
         """
         strong = first_strong(text)
         if strong is None:
-            return self.direction
+            return neutral or self.direction
         return direction_of(text)  # type: ignore[return-value]
 
     def block_is_rtl(self, text: str) -> bool:
         return self.block_direction(text) == "rtl"
+
+    def table_direction(self, headers: list[Any], rows: list[list[Any]]) -> Direction:
+        """A table reads in its own language, whatever the document's.
+
+        An English table in an Arabic document was laid out right to left --
+        its first column on the right -- and every range cell with no letter
+        ("29 – 32") took the document's direction and read "32 – 29" (live
+        2026-10-20, a bilingual weather report; the agent then dropped the
+        house style to get a readable table)."""
+        text = " ".join(str(c) for c in [*headers, *(c for row in rows for c in row)])
+        return self.block_direction(text)
 
     # ------------------------------------------------------------------ #
     # run-script policy
