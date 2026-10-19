@@ -1125,6 +1125,8 @@ async def tool_worker_node(
             not seen the card), and went on to ask for another approval
             nobody was there to give. A timeout says what happened, carries
             the watchdog's instruction and ends the round (``terminal``).
+            It also says the card is closed: live 2026-10-20 the model told
+            the owner to "approve the pending card" after it had expired.
             """
             if isinstance(answer, dict) and answer.get("timed_out"):
                 reason = str(answer.get("reason") or "").strip()
@@ -1133,7 +1135,9 @@ async def tool_worker_node(
                     name=tc["name"],
                     content=(
                         f"Approval for tool '{tc['name']}' expired unanswered. "
-                        "Nothing was run; the user did not decide."
+                        "Nothing was run; the user did not decide. The card is "
+                        "closed: nothing is pending and it can no longer be "
+                        "approved; to run it, the user asks again."
                         + (f" {reason}" if reason else "")
                     ),
                     is_error=True,
