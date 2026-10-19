@@ -292,6 +292,8 @@ TOOL_TIERS: dict[str, str] = {
     "parse_document": "read",
     "pdf_info": "read",
     "git_status": "read",
+    "git_log": "read",
+    "git_diff": "read",
     "repository_metrics": "read",
     "github_list_issues": "read",
     "knowledge_list_libraries": "read",

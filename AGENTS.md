@@ -801,6 +801,14 @@ workspace. Three new modules; understanding their interaction is essential.
   #20 (2026-09-28). Pull requests are dropped BEFORE the list is cut.
   `tests/test_github_list_issues.py`.
 
+**E1b. Git history has read-only tools** (2026-10-19): `git_log` (count up
+to 100, path, oneline) and `git_diff` (uncommitted, a commit or a range,
+path, stat) beside `git_status`, read tier, git run with the tool child
+environment and `core.fsmonitor` off, output fenced (commit messages are
+whoever committed them). With host shell off and the Python sandbox refusing
+subprocess, "git log -3 --oneline" had no way to run on live (Telegram).
+`tests/test_git_read_tools.py`.
+
 **E2. A project's files are what its repository keeps**
 (`workspace/project_files.git_project_files`, 2026-10-02): tracked files
 plus untracked ones `.gitignore` does not exclude, for the agent's

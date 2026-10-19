@@ -12,6 +12,18 @@ tools:
     prompt_chain:
       - "احصل على حالة المستودع الحالي"
       - "اعرض التغييرات في صيغة واضحة ومرتبة"
+  git_log:
+    arabic_name: "سجل جيت"
+    description: "Show the most recent commits of the workspace repository (read-only): count (default 10, at most 100), optional path, oneline (default true)."
+    category: "git"
+    prompt_chain:
+      - "اعرض آخر التعديلات المؤكدة في المستودع"
+  git_diff:
+    arabic_name: "فروقات جيت"
+    description: "Show changes (read-only): uncommitted changes by default, or a commit / range (target, e.g. HEAD~1 or main..HEAD); optional path; stat=true lists the files only."
+    category: "git"
+    prompt_chain:
+      - "اعرض الفروقات في الملفات"
   git_commit:
     arabic_name: "تأكيد التغييرات"
     description: "Commit modified or untracked files with a detailed commit message."
