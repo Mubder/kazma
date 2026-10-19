@@ -189,3 +189,33 @@ def test_a_fact_with_no_source_turn_says_so(mem):
     mem.db.commit()
     assert forget_belief_source(fact["belief_id"], tenant_id="default") == {
         "ok": False, "error": "no_source_turn"}
+
+
+def _tool_call(*args, **kwargs):
+    tool = _memory_tools()["memory_invalidate"]
+    return _as_tenant("default", lambda: tool_answer(tool(*args, **kwargs)))
+
+
+@pytest.mark.parametrize("missing", ["b_no_such_fact", "e_no_such_memory"])
+def test_an_unknown_id_is_refused_before_anything_is_done(mem, missing):
+    """Live 2026-10-19 the model passed memory ids as fact ids; the "not
+    found" answer was recorded as an unknown effect and failed the turn."""
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+    tool = _memory_tools()["memory_invalidate"]
+    with pytest.raises(RefusedBeforeEffect):
+        _as_tenant("default", lambda: tool(missing, forget_source_turn=True))
+
+
+def test_a_memory_id_forgets_that_memory(mem):
+    from kazma_core.memory.forget import FORGOTTEN_TIER
+
+    _chat(mem)
+    eid = _live_turn(turn=1, question="Remember this: my test codeword is BLUE-HERON-42.",
+                     answer="Saved.", key="th1")
+    mem.db.commit()
+    assert _recalled(mem)  # negative control: recalled before
+    out = json.loads(_tool_call(eid))
+    assert out["ok"]
+    assert mem.db.execute("SELECT tier FROM episodes WHERE id=?", (eid,)).fetchone()[0] == FORGOTTEN_TIER
+    assert not _recalled(mem)

@@ -221,11 +221,22 @@ def register_memory_tools(registry: Any) -> None:
         bid = (belief_id or "").strip()
         if not bid:
             raise RefusedBeforeEffect("Error: belief_id required (from list_beliefs)")
+        tenant = get_current_tenant_id()
+        if bid.startswith("e_"):
+            # A memory of a conversation turn (memory_search's id): only the
+            # user forgets those, so this is the Memory page's Forget. Live
+            # 2026-10-19 the model passed two; "not found" from the facts
+            # table was recorded as an unknown effect and failed the turn.
+            return _forget_memory(bid, tenant or "default")
         try:
             # The turn's tenant, like the list tools above: an id from another
             # tenant reads as not found.
-            tenant = get_current_tenant_id()
             result = invalidate_belief(bid, remove_graph=True, tenant_id=tenant)
+            if not result.get("ok") and result.get("error") == "not found":
+                raise RefusedBeforeEffect(
+                    f"Error: fact {bid} not found. Fact ids (b_...) come from memory_list_beliefs; "
+                    "a memory of a conversation (e_..., from memory_search) is forgotten by "
+                    "passing its id here.")
             if forget_source_turn and result.get("ok"):
                 # The user asked to forget: the turn the fact came from goes
                 # too, or recall finds it and the next turn learns it again
@@ -234,9 +245,25 @@ def register_memory_tools(registry: Any) -> None:
 
                 result["source_turn"] = forget_belief_source(bid, tenant_id=tenant or "default")
             return json.dumps(result, ensure_ascii=False, indent=2)
+        except RefusedBeforeEffect:
+            raise
         except Exception as exc:
             logger.warning("[memory_invalidate] failed: %s", exc)
             return f"Error: memory_invalidate failed — {exc}"
+
+    def _forget_memory(episode_id: str, tenant: str) -> str:
+        import sqlite3
+
+        from kazma_core.memory.forget import forget_episode
+
+        try:
+            result = forget_episode(episode_id, tenant_id=tenant, by="user")
+        except (sqlite3.Error, OSError) as exc:
+            logger.warning("[memory_invalidate] forgetting %s failed: %s", episode_id, exc, exc_info=True)
+            return f"Error: forgetting {episode_id} failed — {exc}"
+        if result.get("error") == "not_found":
+            raise RefusedBeforeEffect(f"Error: memory {episode_id} not found (ids come from memory_search)")
+        return json.dumps(result, ensure_ascii=False, indent=2)
     def _mem_merge_entities(source_id: str, target_id: str) -> str:
         """Merge source into target (beliefs rewired, aliases union)."""
         import json as _json
@@ -870,7 +897,8 @@ def register_memory_tools(registry: Any) -> None:
             "forget_source_turn=true: the conversation turn the fact came from is "
             "forgotten too (as the Memory page's Forget does), so it is neither "
             "recalled nor learned again. Leave it false for clean-up of stale or "
-            "duplicate facts."
+            "duplicate facts. A memory id (e_..., from memory_search) forgets that "
+            "conversation memory and the facts its turn produced (the user's Forget)."
         ),
         category="memory",
     )

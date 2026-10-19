@@ -764,7 +764,11 @@ def seeded(tmp_path, monkeypatch):
 def test_the_agent_invalidate_tool_keeps_to_the_turns_tenant(seeded):
     """memory_invalidate takes a belief id from the model: the turn's tenant decides."""
     before = _beta_rows(seeded)
-    answer = _as_tenant("alpha", _memory_tools()["memory_invalidate"], "beta9_lives")
+    from tests._tool_answer import answer as tool_answer
+
+    tool = _memory_tools()["memory_invalidate"]
+    # Refused before anything is done (RefusedBeforeEffect), read as the registry hands it on.
+    answer = _as_tenant("alpha", lambda: tool_answer(tool("beta9_lives")))
     assert "not found" in answer
     assert _beta_rows(seeded) == before
 

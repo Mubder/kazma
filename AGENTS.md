@@ -1521,7 +1521,11 @@ four injected were noise.
   forgets the turn too**: `memory_invalidate(forget_source_turn=true)` runs
   `forget.forget_belief_source` -- the fact's source turn through
   `forget_episode(by="user")`, as the Memory page's Forget -- or recall found
-  the turn and the next turn learned the fact again. Gate:
+  the turn and the next turn learned the fact again. The tool also takes a
+  memory id (`e_...`, from `memory_search`) and forgets that memory, and an id
+  it cannot find is refused before anything is done (`RefusedBeforeEffect`):
+  the model passed memory ids the first day, and "not found" was recorded as
+  an unknown effect that failed the turn. Gate:
   `tests/test_memory_list_stays_a_list.py` (the old write and invalidating
   alone as negative controls).
 - **Small talk is kept, never recalled (W5).** `episode_text.is_small_talk`:
