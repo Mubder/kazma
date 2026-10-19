@@ -348,7 +348,7 @@ class DocxEngine:
     # ================================================================== #
     # paragraph + run direction — the alignment policy application point
     # ================================================================== #
-    def _set_paragraph(self, p: Any, intent: _Intent) -> None:
+    def _set_paragraph(self, p: Any, intent: _Intent, *, neutral: str | None = None) -> None:
         """Set paragraph direction + alignment from an *intent*.
 
         This is the single place that maps intent → ``w:jc``. Under RTL it also
@@ -369,7 +369,9 @@ class DocxEngine:
         # section both carry bidi, so an English paragraph that says nothing
         # inherits RTL.
         p_pr = p._p.get_or_add_pPr()
-        block_rtl = self.profile.block_is_rtl(p.text or "")
+        # *neutral*: the direction of a paragraph with no letter -- a table
+        # cell's is its table's (profile.table_direction).
+        block_rtl = self.profile.block_direction(p.text or "", neutral) == "rtl"  # type: ignore[arg-type]
         bidi = p_pr.find(qn("w:bidi"))
         if bidi is None:
             bidi = OxmlElement("w:bidi")
@@ -948,6 +950,7 @@ class DocxEngine:
         if not headers:
             return
         ncols = len(headers)
+        table_dir = self.profile.table_direction(headers, rows)
         table = document.add_table(rows=1 + len(rows), cols=ncols)
         try:
             table.style = "Table Grid"
@@ -974,7 +977,7 @@ class DocxEngine:
                 _shade(cell, (self.theme.get("table_header_bg") or "#eff6ff").lstrip("#").upper())
             else:
                 _shade(cell, (self.theme.get("table_row_bg") or "#f8fafc").lstrip("#").upper())
-            self._set_paragraph(p, "start")
+            self._set_paragraph(p, "start", neutral=table_dir)
             # A cell is not a body paragraph: the body's 8pt after-space and
             # 1.65 leading left every row tall with its text at the top.
             from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
@@ -991,7 +994,7 @@ class DocxEngine:
                 val = row[ci] if ci < len(row) else ""
                 _fill(table.rows[ri + 1].cells[ci], val, header=False)
 
-        if self.profile.rtl:
+        if table_dir == "rtl":
             self._mark_table_rtl(table)
 
         self._decorate_table_paging(table, header=True)

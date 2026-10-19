@@ -790,6 +790,30 @@ def apply_hitl_approval_markup(
 
 
 
+_SAID_BEFORE = "_kazma_said_before_resume"
+
+
+def _turn_assistant_texts(messages: list[Any]) -> list[str]:
+    """The assistant texts of the running turn: after its last user message."""
+    start = 0
+    for i, m in enumerate(messages):
+        if isinstance(m, dict) and m.get("role") == "user":
+            start = i + 1
+    return [str(m["content"]) for m in messages[start:]
+            if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content")]
+
+
+def _new_assistant_text(messages: list[Any], said_before: list[str]) -> str:
+    """The newest text of the running turn that it had not said before."""
+    earlier = list(said_before)
+    for text in reversed(_turn_assistant_texts(messages)):
+        if text in earlier:
+            earlier.remove(text)
+            continue
+        return text
+    return ""
+
+
 async def _run_resume(
     graph: Any, resume_cmd: Any, resume_config: dict[str, Any], thread_id: str,
 ) -> tuple[Any, dict[str, Any] | None]:
@@ -799,12 +823,20 @@ async def _run_resume(
     """
     from kazma_ui.turn_runtime import invoke_turn as _invoke_hitl
 
+    # What the turn had already said before this resume, so the delivery
+    # sends only what the resume added (``_new_assistant_text``).
+    # The checkpoint the resume reads anyway: one that cannot be read fails
+    # the resume as it would have.
+    before = await graph.aget_state(resume_config)
+    said_before = _turn_assistant_texts((getattr(before, "values", None) or {}).get("messages") or [])
     result_state = await _invoke_hitl(
         graph,
         resume_cmd,
         resume_config,
         thread_id=thread_id,
     )
+    if isinstance(result_state, dict):
+        result_state = {**result_state, _SAID_BEFORE: said_before}
 
     # Re-surface a chained interrupt (a second danger tool paused in
     # the same resumed turn). Without this the user sees "Approved —
@@ -844,13 +876,13 @@ async def _deliver_resume(
     """Send a resumed turn's answer, then the card it paused on next, to the chat."""
     from .graph import _prepare_outbound
 
-    # Extract the assistant's response from the resumed turn.
-    assistant_text = ""
+    # What the resume added: the newest assistant text of THIS turn that the
+    # turn had not said before it. Searching the whole history sent the last
+    # turn's failure ("generate_pdf: ... must not be repeated") again after
+    # every approval of the next turn whose step said nothing (live 2026-10-20).
     messages = result_state.get("messages", []) if isinstance(result_state, dict) else []
-    for m in reversed(messages):
-        if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
-            assistant_text = m["content"]
-            break
+    said_before = result_state.get(_SAID_BEFORE, []) if isinstance(result_state, dict) else []
+    assistant_text = _new_assistant_text(messages, said_before)
 
     # If there is assistant text, send it first
     if assistant_text:

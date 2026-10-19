@@ -53,7 +53,11 @@ tools:
   convert_document:
     arabic_name: "تحويل المستندات"
     description: >
-      TRANSIENT, PATH-BASED. Converts a file at a workspace path. For a document
+      TRANSIENT, PATH-BASED. Converts an EXISTING file at a workspace path, in
+      that file's own styling. To MAKE a report or document, use generate_pdf /
+      generate_docx: they apply Kazma's house style (brand fonts, headings,
+      tables, bilingual direction) -- never write your own HTML and convert it
+      for that. For a document
       already in the platform, use document_convert (document-platform) — it
       converts the immutable stored bytes and returns a downloadable
       artifact_id under the tenant ACL.
