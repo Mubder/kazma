@@ -91,8 +91,22 @@ def _logical_table(table: Any, matrix: list, glyph_lines: list) -> list:
         return matrix
     sample = " ".join(str(cell) for row in rows for cell in row if cell)
     if is_rtl_dominant(sample):
+        # A cell with no letter ("43 – 46") reads in its table's direction:
+        # PyMuPDF and the line reader gave the drawn order, "46 – 43".
+        for row, table_row in zip(rows, getattr(table, "rows", None) or ()):
+            for col_index, bbox in enumerate(getattr(table_row, "cells", None) or ()):
+                if bbox is not None and row[col_index] and not _has_letter(str(row[col_index])):
+                    row[col_index] = text_in_rect(
+                        glyph_lines, bbox, margins=(float(bbox[0]), float(bbox[2])), base="R",
+                    ) or row[col_index]
         rows = [list(reversed(row)) for row in rows]
     return rows
+
+
+def _has_letter(text: str) -> bool:
+    import unicodedata
+
+    return any(unicodedata.category(ch)[0] == "L" for ch in text)
 
 
 def _table_rows_from_matrix(
@@ -109,7 +123,9 @@ def _table_rows_from_matrix(
     for row in table[:max_rows]:
         if row is None:
             continue
-        cells = [str(cell) if cell is not None else "" for cell in row]
+        # A cell's wrapped lines are one value: kept as lines, a two-line
+        # cell broke its row in two ("حرارة قاسية" / "وجفاف تام").
+        cells = [" ".join(str(cell).split()) if cell is not None else "" for cell in row]
         builder.count_cells(len(cells))
         rows.append(" | ".join(cells))
     return rows

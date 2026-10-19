@@ -42,6 +42,7 @@ a mark whose mapping the PDF got wrong -- LibreOffice maps the tanween of
 from __future__ import annotations
 
 import itertools
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
@@ -125,6 +126,11 @@ def page_glyph_lines(page: Any) -> list[list[Glyph]]:
             glyph = Glyph(char, float(bbox[0]), float(bbox[2]), float(origin[1]), size)
             category = unicodedata.category(char)
             zero_advance = glyph.x1 - glyph.x0 < 0.01
+            if ord(char) == 0xFFFD and glyph.x1 - glyph.x0 < _KASHIDA_EM * size:
+                # The same kashida with no name at all: U+FFFD in the text map
+                # (live 2026-10-20, IBM Plex Sans Arabic glyph 36, 1.18 pt:
+                # "الح\ufffdرارة"). Narrower than any letter; never text.
+                continue
             if (category[0] == "L" and unicodedata.bidirectional(char) == "L"
                     and glyph.x1 - glyph.x0 < _KASHIDA_EM * size):
                 # Narrower than any letter: the kashida LibreOffice stretches
@@ -265,6 +271,31 @@ def _drawn(glyphs: Sequence[Glyph]) -> str:
     return _canonical("".join(g.text[::-1] if _bidi(g.text) == "R" else g.text for g in glyphs))
 
 
+_NUMBER_RUN = re.compile(r"(\d[\d.,\u066b\u066c]*)")
+
+
+_BRACKET_PAIRS = (("(", ")"), ("[", "]"), ("{", "}"))
+
+
+def _brackets_outward(text: str) -> str:
+    """A left-to-right line whose brackets read inside out, set right.
+
+    One bracket glyph draws "(" in an English cell and, mirrored, ")" in an
+    Arabic one; a PDF's text map names a glyph once, so LibreOffice named it
+    ")" and the English header read "Avg high )°C(" (live 2026-10-20). A
+    pair whose first bracket closes and whose last opens is swapped."""
+    for opener, closer in _BRACKET_PAIRS:
+        found = [ch for ch in text if ch in (opener, closer)]
+        if found and found[0] == closer and found[-1] == opener and found.count(opener) == found.count(closer):
+            text = text.translate(str.maketrans({opener: closer, closer: opener}))
+    return text
+
+
+def _numbers_right_to_left(drawn: str) -> str:
+    """The logical order of a drawn line of numbers set right to left."""
+    return "".join(reversed(_NUMBER_RUN.split(drawn)))
+
+
 def logical_line(glyphs: Sequence[Glyph], *, base: str | None = None) -> str:
     """One visual line (glyphs left to right) in logical order.
 
@@ -276,7 +307,13 @@ def logical_line(glyphs: Sequence[Glyph], *, base: str | None = None) -> str:
     if not glyphs:
         return ""
     if not any(_bidi(g.text) == "R" for g in glyphs):
-        return "".join(g.text for g in glyphs)
+        drawn = "".join(g.text for g in glyphs)
+        if base == "R" and not any(_bidi(ch) == "L" for ch in drawn):
+            # Numbers alone in a right-to-left paragraph (a table cell
+            # "43 – 46"): each number reads left to right, the numbers run
+            # right to left -- drawn "46 – 43" (live 2026-10-20).
+            return _numbers_right_to_left(drawn)
+        return _brackets_outward(drawn)
     line = _with_word_gaps(list(glyphs))
     kinds = [_bidi(g.text) for g in line]
     # The line's base direction is Kazma's one rule (arabic.is_rtl_dominant,
@@ -326,13 +363,15 @@ def text_in_rect(
     rect: Sequence[float],
     *,
     margins: tuple[float, float] | None = None,
+    base: str | None = None,
 ) -> str:
     """Logical text of the glyphs whose centre lies in ``rect`` (x0, y0, x1, y1).
 
     The block's base direction comes from its layout when a line shows it
     (Kazma's engines set a right-to-left paragraph against the right margin):
     a line shorter than the measure, against one margin, decides for the whole
-    block. Otherwise each line falls back to ``arabic.is_rtl_dominant``.
+    block. Otherwise *base* when given (a cell of a right-to-left table),
+    else each line falls back to ``arabic.is_rtl_dominant``.
     """
     x0, y0, x1, y1 = (float(v) for v in rect[:4])
     selected = []
@@ -340,7 +379,6 @@ def text_in_rect(
         inside = [g for g in line if x0 <= g.cx <= x1 and y0 - 0.5 * g.size <= g.y <= y1 + 0.5 * g.size]
         if inside:
             selected.append(inside)
-    base = None
     if margins is not None:
         votes = [side for side in (_aligned_side(line, margins) for line in selected) if side]
         if votes:

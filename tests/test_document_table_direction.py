@@ -131,3 +131,79 @@ def test_on_the_page_the_english_table_reads_left_to_right(tmp_path):
 
     assert x("Season") < x("Months")
     assert x("29") < x("32")
+
+
+# ── Reading the house-style PDF back (the agent's evidence) ─────────────
+
+LONG_ARABIC = (
+    "مناخ الكويت صحراوي حار جاف: صيف طويل شديد الحرارة وشبه خال من الأمطار، وشتاء قصير "
+    "معتدل يحمل معظم التساقط. المعدل السنوي للأمطار نحو ١١٠ ملم، معظمها بين نوفمبر وأبريل، "
+    "مع رياح شمالية غربية وموجات غبار متكررة في الربيع."
+)
+
+
+def _bilingual_pdf(tmp_path: Path) -> Path:
+    from kazma_core.documents.binaries import find_soffice, run_soffice_cli
+    from kazma_core.documents.content_model import TitleBlock
+    from kazma_core.documents.fonts import give_soffice_the_bundled_fonts
+
+    model = ContentModel()
+    model.add(TitleBlock(text="طقس الكويت عبر الفصول · Kuwait Weather by Season", level=0))
+    model.add(BodyBlock(text=LONG_ARABIC))
+    model.add(TableBlock(headers=["الفصل", "الأشهر", "أعلى معدل (م°)", "السمة الغالبة"],
+                         rows=[["الصيف", "يونيو – سبتمبر", "٤٣ – ٤٦", "حرارة قاسية وجفاف تام"]]))
+    model.add(BodyBlock(text="Kuwait has a hot desert climate."))
+    model.add(EN_TABLE)
+    DocxEngine(DocProfile.for_content(LONG_ARABIC)).render(model, tmp_path / "a.docx")
+    give_soffice_the_bundled_fonts(tmp_path / "profile")
+    run_soffice_cli(("--headless", "--nologo", "--norestore",
+                     f"-env:UserInstallation={(tmp_path / 'profile').as_uri()}",
+                     "--convert-to", "pdf", "--outdir", str(tmp_path), str(tmp_path / "a.docx")),
+                    timeout=120, cwd=tmp_path)
+    return tmp_path / "a.pdf"
+
+
+def _read_back(path: Path) -> list[tuple[str, str]]:
+    import tempfile
+
+    from kazma_core.documents.config import DocumentConfig
+    from kazma_core.documents.parsers.common import ParseContext, sha256_path
+    from kazma_core.documents.parsers.pdf import PdfParser
+
+    config = DocumentConfig(storage_root=Path(tempfile.mkdtemp()), worker_timeout_seconds=60)
+    context = ParseContext(config=config, source_sha256=sha256_path(path), mime_type="application/pdf",
+                           extension=".pdf", parser_id="pdf", parser_version="1")
+    ir = PdfParser().parse(path, context)
+    return [(str(b.block_type), b.text) for page in ir.pages for b in page.blocks]
+
+
+@pytest.mark.skipif(not _soffice_available(), reason="needs LibreOffice and PyMuPDF")
+def test_the_house_style_pdf_reads_back_whole_and_once(tmp_path):
+    """Live 2026-10-20 the reader turned this kind of PDF into "الح�رارة",
+    a title missing its last word, the table twice and "٤٦ – ٤٣" -- and the
+    agent, reading that, dropped the house style."""
+    blocks = _read_back(_bilingual_pdf(tmp_path))
+    text = "\n".join(t for _, t in blocks)
+    assert chr(0xFFFD) not in text
+    tables = [t for kind, t in blocks if "TABLE" in kind.upper()]
+    assert len(tables) == 2, blocks
+    assert "٤٣ – ٤٦" in tables[0] and "حرارة قاسية وجفاف تام" in tables[0]
+    assert "Season | Months" in tables[1] and "29 – 32" in tables[1]
+    prose = "\n".join(t for kind, t in blocks if "TABLE" not in kind.upper())
+    assert "يونيو – سبتمبر" not in prose and "Jun – Sep" not in prose, "a table read twice"
+    assert prose.index("Kuwait Weather by") < prose.index("Season") < prose.index("مناخ الكويت")
+
+
+def test_table_cells_do_not_make_columns():
+    from kazma_core.documents.parsers import pdf_layout
+
+    def block(x0, y0, x1, y1, text):
+        return {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "cx": (x0 + x1) / 2, "cy": (y0 + y1) / 2, "text": text}
+
+    cells = [block(60, 300, 200, 320, "left cell"), block(400, 300, 540, 320, "right cell")]
+    title = [block(400, 50, 540, 70, "Season")]
+    _, with_cells = pdf_layout.reading_order_text(title + cells, page_width=595)
+    assert with_cells["column_count"] == 2  # negative control: cells read as columns
+    kept = [b for b in title + cells if not any(pdf_layout._inside(b, r) for r in [(50, 290, 550, 330)])]
+    _, without = pdf_layout.reading_order_text(kept, page_width=595)
+    assert without["column_count"] == 1
