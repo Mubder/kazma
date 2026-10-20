@@ -308,6 +308,7 @@ def _run_pytest(test_files: list[str], cwd: Path) -> str:
 async def file_apply_patch_set(
     patches: list[dict] | None = None,
     verify: bool = True,
+    path: str = "",
 ) -> str:
     """Apply several surgical edits under one HITL card. Rolls back on failure.
 
@@ -315,7 +316,13 @@ async def file_apply_patch_set(
     successful apply so the coding loop is apply → tests, not a plan note.
     Test failure does **not** restore the checkpoint — the model must patch again.
     """
-    items = list(patches or [])
+    # *path*: the file of every patch that names none. The model passed one
+    # file once beside its patches; the card read "?" for each, and the set
+    # was refused only after the user approved it (live 2026-10-20).
+    items = [
+        {**p, "path": p.get("path") or path} if isinstance(p, dict) and path else p
+        for p in (patches or [])
+    ]
     if not items:
         raise RefusedBeforeEffect("Error: patches is empty.")
     if len(items) > MAX_PATCH_SET:

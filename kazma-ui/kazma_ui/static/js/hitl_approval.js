@@ -41,7 +41,7 @@
     var out = [patches.length + ' file(s):'];
     patches.slice(0, 20).forEach(function (item, i) {
       if (!item || typeof item !== 'object') return;
-      out.push('\n' + (i + 1) + '. ' + (item.path || '?'));
+      out.push('\n' + (i + 1) + '. ' + (item.path || args.path || '?'));
       var patch = String(item.patch || '').trim();
       if (patch) {
         out = out.concat(patch.split('\n').slice(0, 80));

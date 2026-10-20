@@ -121,3 +121,33 @@ async def test_patch_set_rolls_back_on_second_hunk(
     assert "checkpoint" in msg.lower()
     assert a.read_text(encoding="utf-8").strip() == "n = 1"
     assert b.read_text(encoding="utf-8").strip() == "m = 1"
+
+
+@pytest.mark.asyncio
+async def test_patch_set_takes_one_path_for_every_patch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live 2026-10-20 the model passed the file once beside its patches: the
+    card read "?" for each patch and the set was refused only after the user
+    approved it ("every patch needs a path"), then asked for again."""
+    monkeypatch.setenv("KAZMA_FILE_CHECKPOINTS_DB", str(tmp_path / "ck.db"))
+    _pin_workspace(tmp_path, monkeypatch)
+    page = tmp_path / "report.html"
+    page.write_text(".item { a: 1; }\n.en .item { b: 2; }\n", encoding="utf-8")
+    msg = await file_apply_patch_set(
+        [{"old_string": ".item { a: 1; }", "new_string": ".item { a: 9; }"},
+         {"old_string": ".en .item { b: 2; }", "new_string": ".en .item { b: 8; }"}],
+        verify=False, path=str(page),
+    )
+    assert not msg.startswith("Error"), msg
+    assert page.read_text(encoding="utf-8") == ".item { a: 9; }\n.en .item { b: 8; }\n"
+
+
+def test_the_card_names_the_file_given_once():
+    from kazma_gateway.agent_handler.hitl import _format_patch_preview
+
+    card = _format_patch_preview("file_apply_patch_set", {
+        "path": "reports/report.html",
+        "patches": [{"old_string": "a", "new_string": "b"}],
+    })
+    assert "1. reports/report.html" in card and "1. ?" not in card

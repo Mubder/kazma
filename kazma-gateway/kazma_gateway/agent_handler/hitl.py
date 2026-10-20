@@ -419,7 +419,7 @@ def _format_patch_preview(tool: str, args: Any) -> str | None:
     for i, item in enumerate(patches[:20], 1):
         if not isinstance(item, dict):
             continue
-        path = str(item.get("path") or "?")
+        path = str(item.get("path") or args.get("path") or "?")
         out.append(f"\n{i}. {path}")
         patch = str(item.get("patch") or "").strip()
         if patch:
