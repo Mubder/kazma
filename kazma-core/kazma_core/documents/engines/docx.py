@@ -152,8 +152,48 @@ class DocxEngine:
             except Exception:
                 logger.debug("[docx] block render failed: %r", block, exc_info=True)
 
+        self._house_bullets(document)
         self._give_direction_marks_a_face(document)
         document.save(str(output))
+
+    def _house_bullets(self, document: Any) -> None:
+        """Draw every bullet level as the house bullet, in the house face.
+
+        The template's bullet levels name the Symbol font and its private
+        glyph; LibreOffice drew them in OpenSymbol, the one face in the PDF
+        that was not the house's (live 2026-10-20, "house every thing").
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        from kazma_core.documents.style_theme import theme_fonts
+
+        try:
+            numbering = document.part.numbering_part._element
+        except Exception:  # no numbering part: no list in this document
+            return
+        family = theme_fonts(rtl=self.profile.rtl)["latin"]
+        for lvl in numbering.iterdescendants(tag=qn("w:lvl")):
+            fmt = lvl.find(qn("w:numFmt"))
+            if fmt is None or fmt.get(qn("w:val")) != "bullet":
+                continue
+            text = lvl.find(qn("w:lvlText"))
+            if text is None:
+                text = OxmlElement("w:lvlText")
+                lvl.append(text)
+            text.set(qn("w:val"), "•")
+            r_pr = lvl.find(qn("w:rPr"))
+            if r_pr is None:
+                r_pr = OxmlElement("w:rPr")
+                lvl.append(r_pr)
+            r_fonts = r_pr.find(qn("w:rFonts"))
+            if r_fonts is None:
+                r_fonts = OxmlElement("w:rFonts")
+                r_pr.insert(0, r_fonts)
+            for attr in list(r_fonts.attrib):
+                del r_fonts.attrib[attr]
+            for slot in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+                r_fonts.set(qn(slot), family)
 
     #: Direction marks the body may hold (Kazma's own and the author's).
     _MARKS_RE = re.compile("([\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069])")

@@ -3411,7 +3411,12 @@ the text nodes, `_isolate_latin_in_rtl`): "50 °C" in an Arabic note drew
 thing"): paragraphs written as list items ("▪ <b>Summer:</b> ...") become a
 list (`_house_lists`), and a bullet or check symbol the face lacks is drawn
 as the house draws it (`_house_symbols`: ■ ▪ ● ◆ ► ▸ ○ □ as •, ✔ as ✓) --
-they fell back to DejaVu.
+they fell back to DejaVu. A generated document's list bullets too
+(`DocxEngine._house_bullets`): every bullet level is "•" in the house face;
+the template's levels named Symbol and LibreOffice drew them in OpenSymbol,
+the one face of the first house-style report that was not the house's. Gate:
+`tests/test_document_house_bullets.py` (real LibreOffice, the PDF's embedded
+faces; the template's levels as the negative control).
 
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
