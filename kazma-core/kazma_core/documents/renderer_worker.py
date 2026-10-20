@@ -375,6 +375,8 @@ def _house_style_html(text: str) -> str:
             del element.attrib[name]
         if breaks:
             element.set("style", "; ".join(b.strip() for b in breaks))
+    _house_lists(root)
+    _house_symbols(root)
     _isolate_latin_in_rtl(root, rtl=(root.get("dir") or "").lower() == "rtl")
     body = root.find("body")
     container = body if body is not None else root
@@ -383,6 +385,66 @@ def _house_style_html(text: str) -> str:
     )
     profile = DocProfile.for_content(container.text_content() or "")
     return HtmlEngine(profile).render_html_body(inner, title=title, extra_css="\n".join(rules))
+
+
+#: A paragraph written as a list item: a bullet symbol, then a space.
+_HAND_BULLET = re.compile(r"^\s*[\u2022\u25a0\u25aa\u25cf\u25c6\u25ba\u25b8\u25e6\u25cb\u25a1\u25ab\u2023\u2043\u2219*-]\s+")
+#: Symbols the house face lacks, as the house draws them (DejaVu otherwise).
+_HOUSE_SYMBOLS = str.maketrans({
+    "\u25a0": "\u2022", "\u25aa": "\u2022", "\u25cf": "\u2022", "\u25c6": "\u2022",
+    "\u25ba": "\u2022", "\u25b8": "\u2022", "\u25e6": "\u2022", "\u25cb": "\u2022",
+    "\u25a1": "\u2022", "\u25ab": "\u2022", "\u2023": "\u2022", "\u2043": "\u2022",
+    "\u2219": "\u2022", "\u2714": "\u2713",
+})
+
+
+def _house_lists(root: Any) -> None:
+    """Runs of paragraphs written as list items ("\u25aa <b>Summer:</b> ...")
+    become a list in the house style: the hand-written marker was a glyph the
+    house face lacks, drawn in DejaVu (live 2026-10-20: "house every thing")."""
+    import lxml.html
+
+    def bulleted(element: Any) -> bool:
+        return (isinstance(element.tag, str) and element.tag in ("p", "div")
+                and bool(_HAND_BULLET.match(element.text or "")))
+
+    for parent in list(root.iter()):
+        if not isinstance(parent.tag, str):
+            continue
+        children = list(parent)
+        i = 0
+        while i < len(children):
+            if not bulleted(children[i]):
+                i += 1
+                continue
+            j = i
+            while j < len(children) and bulleted(children[j]):
+                j += 1
+            run = children[i:j]
+            listing = lxml.html.Element("ul")
+            parent.insert(parent.index(run[0]), listing)
+            listing.tail = run[-1].tail
+            for item in run:
+                entry = lxml.html.Element("li")
+                if item.get("dir"):
+                    entry.set("dir", item.get("dir"))
+                entry.text = _HAND_BULLET.sub("", item.text or "", count=1)
+                for child in list(item):
+                    entry.append(child)
+                listing.append(entry)
+                parent.remove(item)
+            i = j
+
+
+def _house_symbols(root: Any) -> None:
+    """Bullet and check symbols the house face lacks, as the house draws them."""
+    for element in root.iter():
+        if not isinstance(element.tag, str):
+            continue
+        if element.text:
+            element.text = element.text.translate(_HOUSE_SYMBOLS)
+        if element.tail:
+            element.tail = element.tail.translate(_HOUSE_SYMBOLS)
 
 
 def _isolate_latin_in_rtl(element: Any, *, rtl: bool) -> None:
