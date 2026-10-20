@@ -3402,7 +3402,12 @@ converted it again. The house CSS ends paragraphs and lays out tables by each
 block's own direction (`text-align-last: start`, no `direction` on `table`):
 an English section of an Arabic report was set right to left. Gate:
 `tests/test_document_html_house_style.py`; checked in the worker image on the
-live file.
+live file. The printed page carries the DOCX engine's chrome
+(`HtmlEngine.page_chrome_css`: the short brand on top, the brand and the page
+number at the bottom, on the reading-start side, as `@page` margin boxes),
+and a Latin run in right-to-left text is marked (`arabic.isolate_ltr_runs` on
+the text nodes, `_isolate_latin_in_rtl`): "50 °C" in an Arabic note drew
+"C° 50".
 
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`

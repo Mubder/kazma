@@ -101,3 +101,26 @@ def test_the_tool_offers_keep_source_style():
 @pytest.mark.parametrize("source", ["<p>plain</p>", "text only", ""])
 def test_any_html_shape_is_wrapped(source):
     assert 'class="content-body"' in _house_style_html(source or "<p></p>")
+
+
+def test_a_converted_pdf_has_the_house_header_and_footer():
+    """Live 2026-10-20: "why has this file no header and footer like the
+    documents Kazma created before?" The DOCX engine draws them; the printed
+    HTML page now carries the same: the short brand on top, the brand and the
+    page number at the bottom, on the reading-start side."""
+    out = _house_style_html(AGENT_HTML)
+    assert '@top-right { content: "كاظمه";' in out
+    assert '@bottom-right { content: "منظومة كاظمة للذكاء الاصطناعي    —    صفحة " counter(page);' in out
+    english = _house_style_html("<html dir='ltr'><body><p>Kuwait has a hot climate.</p></body></html>")
+    assert '@top-left { content: "Kazma";' in english
+    assert '@bottom-left { content: "Kazma AI Platform    —    Page " counter(page);' in english
+
+
+def test_a_latin_run_in_arabic_text_is_isolated_and_english_is_left_alone():
+    """"50 °C" in an Arabic note drew "C° 50" (live 2026-10-20)."""
+    lrm = chr(0x200E)
+    out = _house_style_html(
+        '<html dir="rtl"><body><p>تتجاوز الحرارة 50 °C صيفا</p>'
+        '<section dir="ltr"><p>Summer passes 50 °C</p></section></body></html>')
+    assert f"{lrm}50 °C{lrm}" in out
+    assert "Summer passes 50 °C</p>" in out

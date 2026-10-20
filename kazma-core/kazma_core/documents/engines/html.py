@@ -93,9 +93,41 @@ class HtmlEngine:
         source's own styling was. *extra_css* is appended (the page breaks the
         source asked for)."""
         page = self._document(title, body_html, header_card=False)
-        if extra_css:
-            page = page.replace("  </style>\n", f"{extra_css}\n  </style>\n", 1)
-        return page
+        css = "\n".join(part for part in (self.page_chrome_css(), extra_css) if part)
+        return page.replace("  </style>\n", f"{css}\n  </style>\n", 1)
+
+    def page_chrome_css(self) -> str:
+        """The printed page's header and footer, as the DOCX engine draws them
+        (``_write_header_footer``): the short brand at the top and the brand
+        with the page number at the bottom, on the reading-start side. Pages
+        printed from HTML had neither (live 2026-10-20: "why has this file no
+        header and footer like the documents Kazma created before?")."""
+        from kazma_core.documents.fonts import embedded_font_face_css
+        from kazma_core.documents.style_theme import theme_fonts
+
+        chrome = self.profile.chrome
+        side = "right" if self.profile.rtl else "left"
+        _face, embedded = embedded_font_face_css(arabic=bool(self.profile.shape_arabic))
+        family = f"'{embedded}', {theme_fonts(rtl=self.profile.rtl)['html']}" if embedded else (
+            theme_fonts(rtl=self.profile.rtl)["html"])
+        style = (f"font-family: {family}; font-size: 8pt; color: {self.theme.get('muted', '#64748b')}; "
+                 f"direction: {self.profile.html_dir}; text-align: {side};")
+
+        def text(value: str) -> str:
+            return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+        counter = "counter(page, arabic-indic)" if chrome.get("numerals") == "arab" else "counter(page)"
+        before, _n, after = str(chrome.get("page_fmt") or "{n}").partition("{n}")
+        footer = f'{text(str(chrome["brand"]) + "    —    " + before)} {counter}'
+        if after:
+            footer += f" {text(after)}"
+        header = text(chrome.get("brand_short") or chrome["brand"])
+        return (
+            "    @page {\n"
+            f"      @top-{side} {{ content: {header}; {style} }}\n"
+            f"      @bottom-{side} {{ content: {footer}; {style} }}\n"
+            "    }"
+        )
 
     # ================================================================== #
     # document shell + theme CSS
