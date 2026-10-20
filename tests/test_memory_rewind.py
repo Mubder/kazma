@@ -194,12 +194,12 @@ def test_a_fork_leaves_the_original_chats_memory(mem):
 def test_an_aborted_turn_is_never_written_later(mem):
     """Abort keeps the question, not its turn: a deferred write of the turn,
     or turn reconcile, is refused by the ledger."""
-    from kazma_core.agent.steer import abort_marker
+    from kazma_core.agent.steer import _abort_marker
     from kazma_core.memory.dual_write import mirror_episode
 
     _remember_both_turns(mem)
     before = [*MESSAGES, {"role": "user", "content": "draft the quokkahaven memo"}]
-    after = [*before, {"role": "system", "content": abort_marker()}]
+    after = [*before, {"role": "system", "content": _abort_marker()}]
     asyncio.run(forget.rewind_memory(THREAD, before, after))
     assert mirror_episode(session_id=THREAD, turn_number=3, user_text="draft the quokkahaven memo",
                           assistant_text="Here is the memo.") is None

@@ -424,7 +424,7 @@ def test_auto_steer_requires_live_card_not_fossil_flag() -> None:
     assert "no_active_task" in body
     assert "sending as a new message" in body
     assert "function _releaseHitlComposer" in js
-    abort = js.split("appendMessage('user', '/abort')", 1)[1][:500]
+    abort = js.split("appendMessage('user', _cmdLow);", 1)[1][:500]  # /abort or /stop
     assert "_releaseHitlComposer('abort')" in abort
 
 

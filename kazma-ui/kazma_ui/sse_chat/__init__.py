@@ -2267,7 +2267,7 @@ def create_sse_chat_router(
         if not thread_id:
             return {"ok": False, "reason": "missing_session"}
 
-        from kazma_core.agent.steer import abort_marker, clear_all_steers
+        from kazma_core.agent.steer import abort_messages, clear_all_steers
 
         # Drop any pending steers first so a stray drain/resume can't fire.
         clear_all_steers(thread_id)
@@ -2287,7 +2287,7 @@ def create_sse_chat_router(
                 values = (snap.values if snap and snap.values else {})
                 msgs = list(values.get("messages") or [])
                 before = list(msgs)
-                msgs.append({"role": "system", "content": abort_marker()})
+                msgs = abort_messages(msgs)
                 await graph_inst.aupdate_state(config, {
                     "messages": msgs,
                     "task_status": "abandoned",

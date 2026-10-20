@@ -103,8 +103,8 @@ def test_framing_prefixes_are_present():
     assert "X" in steer.soft_steer_note("X")
     assert steer.hard_steer_note("Y").startswith("[KAZMA STEER!]")
     assert "Y" in steer.hard_steer_note("Y")
-    assert steer.abort_marker().startswith("[KAZMA ABORT]")
-    assert "abandoned" in steer.abort_marker().lower()
+    assert steer._abort_marker().startswith("[KAZMA ABORT]")
+    assert "abandoned" in steer._abort_marker().lower()
 
 
 def test_hard_steer_payload_shape():
