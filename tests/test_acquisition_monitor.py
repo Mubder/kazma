@@ -327,3 +327,33 @@ def test_standalone_result_link_never_opens_another_workspaces_same_named_report
             assert link is None
         else:
             assert client.get(link).text == 'Saved original research'
+
+
+def test_an_agents_own_crawl_and_pipeline_raise_no_alert_but_a_knowledge_crawl_does(fixture, monkeypatch, tmp_path):
+    """Live 2026-10-20: "Partial results -- Sources: 0" for a crawl_site a
+    swarm worker ran and worked around, under its complete answer. The agent
+    gets its own call's result; the owner's alerts are for work the owner
+    started (a Research session, a Knowledge crawl)."""
+    from kazma_core.tools import research_session
+    from kazma_core.web_acquire import crawl_jobs
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    options = dict(mode='local_only', schema=1, workspace=str(tmp_path), output='research/reports/pipeline-agent')
+    crawl = dict(options, max_pages=5, max_depth=1, path_prefix='')
+    crawl_jobs.start('agent-crawl', 'https://fixture.example/', crawl, kind='research_crawl')
+    crawl_jobs.start('agent-pipeline', 'https://fixture.example/', options, kind='research_pipeline')
+    kb = crawl_jobs.start('kb-library', 'https://docs.fixture.example/',
+                          dict(mode='local_only', robots=False, max_pages=1, scope='tree', delay_ms=0))
+    keys = [job['key'] for job in _REAL_COLLECT()[0]]
+    assert keys == ['job:' + kb.job_id], keys
+
+
+def test_negative_control_without_the_rule_the_agents_crawl_is_alerted(fixture, monkeypatch, tmp_path):
+    from kazma_core.tools import research_session
+    from kazma_core.web_acquire import crawl_jobs
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    monkeypatch.setattr(monitor, '_AGENT_RUN_KINDS', frozenset())
+    job = crawl_jobs.start('agent-crawl', 'https://fixture.example/',
+                           dict(mode='local_only', schema=1, workspace=str(tmp_path), output='research/x',
+                                max_pages=5, max_depth=1, path_prefix=''),
+                           kind='research_crawl')
+    assert 'job:' + job.job_id in [j['key'] for j in _REAL_COLLECT()[0]]

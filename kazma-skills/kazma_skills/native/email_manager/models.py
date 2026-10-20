@@ -63,9 +63,12 @@ class EmailMessage:
         # Microsoft Graph ids run to ~150 characters behind a shared mailbox
         # prefix, so the old 60-character cut gave every row the SAME id and
         # opening one failed "Id is malformed" (live, 2026-09-28).
+        # A whole subject and sender (bounded): cut at 50 and 40, the agent
+        # opened each long one to answer "what's in my inbox" (live
+        # 2026-10-20: three extra reads for seven mails).
         return (
-            f"| `{_cell(self.id, None)}` | {flag}{star} | {_cell(self.from_addr, 40)} | "
-            f"{_cell(self.subject, 50)} | {_cell(self.date, 25)} | {labs} | {snip} |"
+            f"| `{_cell(self.id, None)}` | {flag}{star} | {_cell(self.from_addr, 80)} | "
+            f"{_cell(self.subject, 150)} | {_cell(self.date, 25)} | {labs} | {snip} |"
         )
 
 

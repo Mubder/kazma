@@ -228,6 +228,10 @@ _LTR_RUN_INNER = frozenset({"L", "EN", "ES", "ET", "CS", "ON", "WS", "NSM", "BN"
 _LTR_RUN_EDGE = frozenset({"L", "EN"})
 
 
+#: Sentence punctuation that belongs to the left-to-right run it follows.
+_LTR_TRAILING_PUNCT = frozenset(".!?,;:")
+
+
 def isolate_ltr_runs(text: str) -> str:
     """In right-to-left text, mark each left-to-right run that holds a Latin
     letter with LRM on both sides.
@@ -279,6 +283,15 @@ def isolate_ltr_runs(text: str) -> str:
         # to left as the date): Word draws it so, and Kazma's PDF and OCR
         # readers read it back by that rule (parsers/pdf_rtl).
         if any(unicodedata.bidirectional(c) == "L" for c in run):
+            # The sentence's own punctuation, right after its last letter,
+            # is the sentence's: left outside, an English sentence ending an
+            # Arabic paragraph drew its full stop on the far side of the
+            # next line (".long-term ...", live 2026-10-20).
+            end = last_edge + 1
+            while end < n and text[end] in _LTR_TRAILING_PUNCT:
+                end += 1
+            run = text[i:end]
+            last_edge = end - 1
             out.append(_LRM + run + _LRM)
         else:
             out.append(run)

@@ -77,6 +77,10 @@ def _read():
     return state
 
 
+#: Crawl-journal jobs an agent runs inside a turn: the owner is not alerted.
+_AGENT_RUN_KINDS = frozenset({'research_crawl', 'research_pipeline'})
+
+
 def _collect():
     """Fresh local reads only. Session and pipeline rows describe ONE run."""
     from kazma_core.tools import research_session
@@ -102,6 +106,14 @@ def _collect():
     crawl_jobs.recover()
     for row in crawl_jobs._read()[1].values():
         if row['job_id'] in linked:
+            continue
+        if row.get('kind') in _AGENT_RUN_KINDS:
+            # An agent's own call (crawl_site; run_research_pipeline outside
+            # a Research session): its result goes back to the agent, which
+            # answers in its turn. Alerting the owner too told of a problem
+            # already handled ("Partial results -- Sources: 0" for a crawl a
+            # swarm worker worked around, under a complete answer; live
+            # 2026-10-20). The job stays on the Research page.
             continue
         counts = crawl_jobs._summary_counts(row)
         progress = row['progress']

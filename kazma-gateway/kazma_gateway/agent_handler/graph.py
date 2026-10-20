@@ -274,6 +274,27 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
 
 
 
+def _turn_tool_names(messages: list) -> list[str]:
+    """The tools the running turn called: after its last user message."""
+    start = 0
+    for i, m in enumerate(messages):
+        if isinstance(m, dict) and m.get("role") in ("user", "human"):
+            start = i + 1
+    names: list[str] = []
+    for m in messages[start:]:
+        if not isinstance(m, dict):
+            continue
+        for call in m.get("tool_calls") or []:
+            if isinstance(call, dict):
+                fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+                name = call.get("name") or fn.get("name")
+                if name:
+                    names.append(str(name))
+        if m.get("role") == "tool" and m.get("name"):
+            names.append(str(m["name"]))
+    return list(dict.fromkeys(names))
+
+
 def _settle_recursion_partial(thread_id: str, partial: str) -> bool:
     """A turn hit the recursion limit with salvaged progress (AGENTS.md §25).
 
@@ -1748,6 +1769,10 @@ def create_graph_handler(
                         config=config,
                     )
                     result_state = _turn.state or {}
+                    # What the agent did, for the gateway's tool hints: a
+                    # turn that used a tool needs no "I can read that URL".
+                    msg.context_metadata["turn_tools"] = _turn_tool_names(
+                        result_state.get("messages") or [])
                     if _turn.error and not _turn.interrupted and not result_state.get("messages"):
                         raise RuntimeError(_turn.error)
                 finally:

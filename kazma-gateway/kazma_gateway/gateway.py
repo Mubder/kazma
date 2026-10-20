@@ -564,6 +564,26 @@ _PLATFORM_LABELS = {"telegram": "Telegram", "discord": "Discord", "slack": "Slac
 _MONITOR_STATUS = {"connected": "connected", "running": "connected", "connecting": "connecting", "down": "offline"}
 
 
+
+def _tool_hints(msg: Any, suggester: Any) -> list[str]:
+    """The "💡" hints to send after a finished turn, if any.
+
+    Only with the switch on (``gateway.suggestions.enabled``: the hints went
+    out whatever it said), and only after a turn that used no tool: the
+    agent chooses its tools, and a hint after it acted is noise ("I can read
+    and summarize that" under a swarm's summary, "I can read that URL" under
+    a browser refusal; live 2026-10-20). The handler records the turn's tools
+    in ``context_metadata["turn_tools"]``.
+    """
+    if suggester is None or not getattr(suggester, "enabled", True) or not getattr(msg, "text", ""):
+        return []
+    turn_tools = (getattr(msg, "context_metadata", None) or {}).get("turn_tools")
+    if turn_tools:
+        return []
+    from kazma_gateway.suggestions import detect_tool_intent
+
+    return detect_tool_intent(msg.text)
+
 class GatewayManager:
     """Orchestrates all adapters and the unified message bus.
 
@@ -909,11 +929,9 @@ class GatewayManager:
                         # detect_tool_intent analyzes the user's message for
                         # patterns that suggest a tool could help. Hints are
                         # already "💡 "-prefixed; do not prefix them again.
-                        if handler_ok and suggester is not None and msg.text:
+                        if handler_ok:
                             try:
-                                from kazma_gateway.suggestions import detect_tool_intent
-
-                                hints = detect_tool_intent(msg.text)
+                                hints = _tool_hints(msg, suggester)
                                 if hints:
                                     hint_text = "\n".join(hints[:2])
                                     try:
