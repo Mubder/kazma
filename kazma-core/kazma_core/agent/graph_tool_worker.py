@@ -247,13 +247,19 @@ def _commitment_resolve_gate(
                         _block_unhealthy(_tname, _tc.get("id"))
                         continue
                     if _dec.decision == "deny":
+                        # A refusal the model can act on, as EffectDecision
+                        # says ("return an error to the model"), not a
+                        # turn-ender: "terminal" is for an unresolved clarify
+                        # card. Live 2026-10-20 a python_exec the sandbox
+                        # refused (it imported os) ended "make me a PDF"
+                        # report turn before generate_pdf was tried.
                         semantic_blocked.append(ToolResult(
                             tool_call_id=str(_tc.get("id") or ""),
                             name=_tname,
                             content=_dec.reason or f"Semantic policy blocked {_tname}",
                             is_error=True,
                             duration_ms=0,
-                            outcome="terminal",
+                            outcome="policy",
                         ))
                         _record_terminal("denied")
                     elif _dec.decision in ("clarify", "confirm"):
