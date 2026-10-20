@@ -256,6 +256,34 @@ def _reset_shutdown_event():
     yield
 
 
+#: X stores kept as process singletons, each opened in the data folder of
+#: the first test that asked. That folder is deleted with its test, and a
+#: later test read an empty file there: "no such table: x_replies" failed
+#: two e2e tests depending on which ran first (2026-10-20).
+_X_STORE_SINGLETONS = (
+    ("kazma_core.x_api.reply_store", "_store"),
+    ("kazma_core.x_api.publication_store", "_store"),
+    ("kazma_core.x_api.schedule", "_store"),
+    ("kazma_core.x_api.ledger", "_ledger"),
+    ("kazma_core.x_api.audit", "_audit"),
+)
+
+
+@_pytest.fixture(autouse=True)
+def _fresh_x_stores():
+    """Each test opens the X stores in its own data folder."""
+    import importlib
+
+    def clear() -> None:
+        for module_name, attr in _X_STORE_SINGLETONS:
+            module = importlib.import_module(module_name)
+            setattr(module, attr, None)
+
+    clear()
+    yield
+    clear()
+
+
 @_pytest.fixture(autouse=True)
 def _isolated_tenant_context():
     """Restore the tenant ContextVar after every test.
