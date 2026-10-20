@@ -397,6 +397,27 @@ class XClient:
             self._canonical_includes(includes),
         )
 
+    async def get_public_metrics(self, tweet_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """``GET /2/tweets?ids=`` -- each post's public counts, ONE read for
+        up to 100 posts (``public_metrics``: likes, reposts, replies, quotes,
+        bookmarks, impressions). A post X no longer returns (deleted, not
+        visible) is left out. Live 2026-10-20: asked for the last five posts'
+        likes, the agent had no read for them and fetched each post's public
+        page, which shows views only."""
+        ids = [str(t).strip() for t in tweet_ids if str(t).strip().isdigit()][:100]
+        if not ids:
+            return {}
+        data = await self._request(
+            "GET", f"/2/tweets?ids={','.join(ids)}&tweet.fields=public_metrics",
+            audit_action="read_metrics",
+        )
+        posts = data.get("data") or []
+        return {
+            str(post.get("id")): dict(post.get("public_metrics") or {})
+            for post in (posts if isinstance(posts, list) else [posts])
+            if isinstance(post, dict) and post.get("id")
+        }
+
     async def _read_context(self, path: str, *, action: str, tweet_id: str = "") -> dict[str, Any]:
         """Bounded read-only negotiation for legacy/current long-form field names."""
         try:

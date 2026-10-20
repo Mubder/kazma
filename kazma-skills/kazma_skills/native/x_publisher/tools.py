@@ -30,7 +30,29 @@ def _when(epoch: object, zone: object) -> str | None:
         return None
 
 
-async def x_status(recent: int = 5, offset: int = 0) -> str:
+async def _attach_metrics(posts: list[dict], cfg: object) -> dict:
+    """Each listed post's public counts from X, in ONE budgeted read; what
+    could not be read is said, never shown as zero."""
+    from kazma_core.x_api.client import XApiError, XClient
+
+    ids = [p["tweet_id"] for p in posts if p.get("tweet_id") and not p.get("deleted")]
+    if not ids:
+        return {}
+    if not cfg.credentials.complete():  # type: ignore[attr-defined]
+        return {"metrics_error": "X is not configured (Settings → X)."}
+    try:
+        found = await XClient(cfg.credentials).get_public_metrics(ids)  # type: ignore[attr-defined]
+    except XApiError as exc:
+        return {"metrics_error": f"X did not return the counts: {exc}"}
+    for post in posts:
+        counts = found.get(str(post.get("tweet_id")))
+        if counts is not None:
+            post["metrics"] = counts
+    missing = [i for i in ids if i not in found]
+    return {"metrics_missing": missing} if missing else {}
+
+
+async def x_status(recent: int = 5, offset: int = 0, metrics: bool = False) -> str:
     """Read-only connector status. Never returns secret values.
 
     Args:
@@ -41,6 +63,9 @@ async def x_status(recent: int = 5, offset: int = 0) -> str:
             how many the ledger holds and ``next_offset`` where the next
             page starts (null on the last): live 2026-10-18 an archive of
             "every post" read the newest 50 at most and stopped, 17 short.
+        metrics: Also read each listed post's public counts from X (likes,
+            reposts, replies, quotes, bookmarks, impressions): one read
+            from Kazma's X read budget for the whole page.
     """
     try:
         cfg = await asyncio.to_thread(get_x_config)
@@ -110,6 +135,8 @@ async def x_status(recent: int = 5, offset: int = 0) -> str:
                 "Label the X account as Automated. Bearer tokens cannot post."
             ),
         }
+        if metrics:
+            payload.update(await _attach_metrics(payload["recent_posts"], cfg))
         from kazma_core.x_api.publication_service import operation_inventory
 
         payload.update(await asyncio.to_thread(operation_inventory, limit=n_recent))
