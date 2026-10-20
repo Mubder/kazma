@@ -294,9 +294,9 @@ async def close_turn(
             try:
                 snap = await graph.aget_state(config)
                 if snap and getattr(snap, "values", None):
-                    from kazma_ui.sse_chat._helpers import _last_assistant_text
+                    from kazma_ui.sse_chat._helpers import _this_turn_assistant_text
 
-                    asst = _last_assistant_text(snap.values.get("messages") or [])
+                    asst = _this_turn_assistant_text(snap.values.get("messages") or [])
             except Exception:
                 logger.debug("[turn] close_turn aget_state failed", exc_info=True)
         paused = _snapshot_paused(snap)

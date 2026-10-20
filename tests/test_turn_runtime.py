@@ -247,3 +247,48 @@ def test_core_ainvoke_only_in_turn_py() -> None:
         "graph.ainvoke in kazma_core must live in agent/turn.py so every "
         "mouth runs the closer. Offenders:\n  " + "\n  ".join(offenders)
     )
+
+
+PREVIOUS = "Task completed. Kuwait Towers: three towers, 187 m, opened 1 March 1979."
+
+
+class _CancelledAfterPrevious:
+    """The checkpoint of a turn cancelled before it said anything: the
+    previous turn's answer is the last assistant message."""
+
+    async def aget_state(self, config: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            values={"messages": [
+                {"role": "user", "content": "Check swarm task task-88ae"},
+                {"role": "assistant", "content": PREVIOUS},
+                {"role": "user", "content": "Write a 2,000-word history of Kuwait"},
+            ]},
+            tasks=[], next=(),
+        )
+
+
+def _abort_closes(store: _Store) -> list[dict]:
+    store.session.messages = [{"role": "user", "content": "Write a 2,000-word history of Kuwait"}]
+    turn = reply_sink.open_reply_turn("thread-1")
+    config = {"configurable": {"thread_id": "thread-1", "checkpoint_ns": ""}}
+    asyncio.run(close_turn(_CancelledAfterPrevious(), config, session_id="sess-1",
+                           thread_id="thread-1", turn_id=turn, interrupted=True))
+    return _assistant_rows(store)
+
+
+def test_an_aborted_turn_is_never_saved_with_the_previous_answer(store: _Store) -> None:
+    """Live 2026-10-20: /abort 32 s into "Write a 2,000-word history of
+    Kuwait" saved the swarm summary before it (1,928 characters) as that
+    turn's reply."""
+    rows = _abort_closes(store)
+    assert all(PREVIOUS not in str(r.get("content")) for r in rows), rows
+
+
+def test_negative_control_the_last_assistant_text_of_the_whole_chat(
+    store: _Store, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kazma_ui.sse_chat import _helpers
+
+    monkeypatch.setattr(_helpers, "_this_turn_assistant_text", _helpers._last_assistant_text)
+    rows = _abort_closes(store)
+    assert any(PREVIOUS in str(r.get("content")) for r in rows), rows

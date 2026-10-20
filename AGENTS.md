@@ -5450,7 +5450,12 @@ decides whether a turn is open, waiting on HITL, or done. A pending
 registry row keeps the turn **open**. Absence of a row is an unregistered
 pending gate (backfill), never an inferred Approved stamp. Do not add a
 client-side `forceEndTurn` wall-clock that marks CoT Done while the server
-is still working.
+is still working. Its reply text is the RUNNING turn's
+(`_helpers._this_turn_assistant_text`: after the last user message): a turn
+cancelled before it said anything was saved with the previous turn's answer
+(live 2026-10-20, `/abort` on a history request stored the swarm summary
+before it). Gate: `test_an_aborted_turn_is_never_saved_with_the_previous_answer`
+(`tests/test_turn_runtime.py`, the whole chat's last text as the control).
 
 **B. The client projects; it does not author.** `chat.js` paints from the
 TurnDocument / `_serverGates`. Token deltas APPEND; only `turn_complete`
@@ -7086,7 +7091,9 @@ and the sibling suites):**
   (`tests/test_slash_help_and_menu.py`): `BOT_MENU_COMMANDS` and
   `_cmd_help()` name the same commands, and
   `docs/docs/reference/slash-commands.md` shows `_cmd_help()`'s text and
-  names every menu command. A new command needs all three.
+  names every menu command. A new command needs all three. `/stop` is
+  `/abort` on every surface (catalog, gateway, web chat): three "/stop"s
+  answered "Unknown command" while a turn ran (live 2026-10-20).
 
 ### 47. Settings backup and restore keep the owner's keys (`kazma_core/settings_restore.py`, 2026-10-01)
 

@@ -1336,8 +1336,8 @@ def create_graph_handler(
                 ))
             return
 
-        # ── /abort: cancel + abandon the running task ──────────────
-        if msg.text and msg.text.strip().lower() == "/abort":
+        # ── /abort (or /stop): cancel + abandon the running task ────
+        if msg.text and msg.text.strip().lower() in ("/abort", "/stop"):
             from kazma_core.agent.steer import abort_marker, clear_all_steers
 
             ctx = await _store.get(thread_id) or msg.context_metadata

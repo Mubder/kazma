@@ -146,6 +146,10 @@ COMMANDS: tuple[Command, ...] = (
         arguments="<text>",
     ),
     Command("abort", "Stop and abandon the running task", "إيقاف المهمة الجارية", web=True, page=None, arguments=""),
+    # The word people type to stop a turn (live 2026-10-20: three "/stop"s,
+    # each "Unknown command", before /abort).
+    Command("stop", "Stop the running task (alias of /abort)", "إيقاف المهمة الجارية (مرادف abort)",
+            web=True, page=None, arguments=""),
     Command("replay", "Time travel snapshots", "لقطات خطوات المحادثة", web=True, page=None, arguments=""),
     Command(
         "fork",
