@@ -124,3 +124,27 @@ def test_a_latin_run_in_arabic_text_is_isolated_and_english_is_left_alone():
         '<section dir="ltr"><p>Summer passes 50 °C</p></section></body></html>')
     assert f"{lrm}50 °C{lrm}" in out
     assert "Summer passes 50 °C</p>" in out
+
+
+def test_hand_written_bullets_become_a_house_list():
+    """The agent wrote each note as <p>▪ ...</p>; ▪ is not in the house face and
+    drew in DejaVu (live 2026-10-20, "house every thing")."""
+    out = _house_style_html(
+        '<html dir="rtl"><body><p>مقدمة</p>'
+        '<p class="item">▪ <strong>الصيف:</strong> حار</p>'
+        '<p class="item">▪ <strong>الشتاء:</strong> بارد</p>'
+        '<p>خاتمة</p></body></html>')
+    body = out[out.index('class="content-body"'):]
+    assert "<ul><li><strong>الصيف:</strong> حار</li><li><strong>الشتاء:</strong> بارد</li></ul>" in body
+    assert body.index("مقدمة") < body.index("<ul>") < body.index("خاتمة")
+    assert "▪" not in body
+
+
+def test_a_symbol_the_house_face_lacks_is_drawn_as_the_house_draws_it():
+    body = _house_style_html("<p>Done ✔ and ● next</p>")
+    assert "Done ✓ and • next" in body
+
+
+def test_a_paragraph_that_only_starts_with_a_dash_word_is_left_alone():
+    body = _house_style_html("<p>-5 degrees at night</p><p>Ordinary text</p>")
+    assert "<ul>" not in body and "-5 degrees at night" in body

@@ -3407,7 +3407,11 @@ live file. The printed page carries the DOCX engine's chrome
 number at the bottom, on the reading-start side, as `@page` margin boxes),
 and a Latin run in right-to-left text is marked (`arabic.isolate_ltr_runs` on
 the text nodes, `_isolate_latin_in_rtl`): "50 °C" in an Arabic note drew
-"C° 50".
+"C° 50". Everything in the house face (the owner's word, "house every
+thing"): paragraphs written as list items ("▪ <b>Summer:</b> ...") become a
+list (`_house_lists`), and a bullet or check symbol the face lacks is drawn
+as the house draws it (`_house_symbols`: ■ ▪ ● ◆ ► ▸ ○ □ as •, ✔ as ✓) --
+they fell back to DejaVu.
 
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
