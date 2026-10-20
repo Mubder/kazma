@@ -153,8 +153,32 @@ class DocxEngine:
                 logger.debug("[docx] block render failed: %r", block, exc_info=True)
 
         self._house_bullets(document)
+        self._complex_script_emphasis(document)
         self._give_direction_marks_a_face(document)
         document.save(str(output))
+
+    def _complex_script_emphasis(self, document: Any) -> None:
+        """Bold and italic for Arabic too: every w:b / w:i gets its
+        complex-script twin (w:bCs / w:iCs, same value), in the body and the
+        styles. Word and LibreOffice draw Arabic letters by the twin alone,
+        and only Arabic runs of right-to-left paragraphs had it: the Arabic
+        half of a bilingual title, and bold lead-ins in an Arabic list, came
+        out regular (live 2026-10-20)."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        roots = [document.element, document.styles.element]
+        for root in roots:
+            for r_pr in root.iter(qn("w:rPr")):
+                for latin, script in (("w:b", "w:bCs"), ("w:i", "w:iCs")):
+                    mark = r_pr.find(qn(latin))
+                    if mark is None or r_pr.find(qn(script)) is not None:
+                        continue
+                    twin = OxmlElement(script)
+                    value = mark.get(qn("w:val"))
+                    if value is not None:
+                        twin.set(qn("w:val"), value)
+                    mark.addnext(twin)
 
     def _house_bullets(self, document: Any) -> None:
         """Draw every bullet level as the house bullet, in the house face.
