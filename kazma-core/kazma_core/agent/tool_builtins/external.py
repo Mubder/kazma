@@ -264,6 +264,15 @@ def register_external_tools(registry: Any) -> None:
     # (x_post / x_schedule_post) REFUSE without a resolvable proposal_id —
     # approval must never depend on the drafts still being in context.
     try:
+        def _x_length_limit(kind: str) -> int:
+            """X's length limit when *kind* names posts for X, else 0."""
+            words = set(kind.lower().replace("-", "_").replace(" ", "_").split("_"))
+            if not words & {"tweet", "tweets", "post", "posts", "x", "thread", "reply", "replies"}:
+                return 0
+            from kazma_core.x_api.config import get_x_config  # never raises
+
+            return int(get_x_config().max_chars or 280)
+
         async def save_proposal(kind: str, items: list) -> str:
             """Persist outbound drafts durably; returns stable proposal IDs."""
             import asyncio
@@ -284,8 +293,21 @@ def register_external_tools(registry: Any) -> None:
             except ValueError as ve:
                 return f"Error: {ve}"
             lines = [f"Proposal saved: {payload['proposal_id']} ({payload['kind']}, {len(payload['items'])} items)."]
+            # A post's length as X counts it, so no code runs to count it
+            # (live 2026-10-20: a draft asked to approve a python_exec that
+            # printed len(draft)).
+            x_limit = await asyncio.to_thread(_x_length_limit, str(payload["kind"]))
             for i in payload["items"]:
-                lines.append(f"  - {i['id']}: {str(i['text'])[:80]}")
+                line = f"  - {i['id']}: {str(i['text'])[:80]}"
+                if x_limit:
+                    from kazma_core.x_api.text_length import validate_text
+
+                    counted = validate_text(str(i["text"]), maximum=x_limit)
+                    line += (f"  [X length {counted.weighted}/{x_limit}"
+                             f"{'' if counted.valid else ', TOO LONG'}]")
+                lines.append(line)
+            if x_limit:
+                lines.append("X lengths are counted above as X counts them; no need to count again.")
             lines.append(
                 "IDs survive context trim, restarts, and thread switches. Reference "
                 "proposal_id when posting — posting tools refuse without it. Read "

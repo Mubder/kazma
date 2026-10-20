@@ -17,7 +17,11 @@ tools:
       1-50, default 5) and offset (how many of the newest to skip) — this is
       how to read Kazma's post history; its database is not queryable
       directly. posts_total is how many the ledger holds; for every post,
-      call again with offset=next_offset until it is null. Never returns
+      call again with offset=next_offset until it is null. metrics=true also
+      reads each listed post's likes, reposts, replies, quotes, bookmarks and
+      impressions from X (one read from the X read budget); a post X did not
+      return is in metrics_missing, and metrics_error says why none came
+      back -- never report a missing count as zero. Never returns
       secrets. If
       unconfigured, tell the operator to open Settings → X (not chat) and
       paste the four OAuth 1.0a keys with Read + Write app permissions.

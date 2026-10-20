@@ -117,7 +117,7 @@ Media, polls, quote posts and analytics remain disabled pending individual capab
 
 | Tool | HITL | What |
 |------|------|------|
-| `x_status` | no | Configured?, handle, remaining caps. Never returns secrets. |
+| `x_status` | no | Configured?, handle, remaining caps, the latest posts. With `metrics=true` it also reads each listed post's likes, reposts, replies, quotes, bookmarks and impressions from X (one read from the X read budget). Never returns secrets. |
 | `x_post` | **always** | `text`, optional `reply_to_id` for a thread hop. Chat path requires a resolvable `proposal_id` (stored draft wins). |
 | `x_delete_post` | **always** | `tweet_id` from a previous post. |
 | `x_schedule_post` | **always** | `text` + `when` (`5m`, `1h`, or an ISO time such as `2026-12-01T09:00` in the cron time zone) + optional `reply_to_id`. One post, one time: a recurring time is refused. Approve once at booking. The reply gives the stored time and state, and says `ok` only when the post is scheduled. |

@@ -168,10 +168,8 @@ class DocxEngine:
 
         from kazma_core.documents.style_theme import theme_fonts
 
-        try:
-            numbering = document.part.numbering_part._element
-        except Exception:  # no numbering part: no list in this document
-            return
+        # python-docx makes the numbering part when the template has none.
+        numbering = document.part.numbering_part._element
         family = theme_fonts(rtl=self.profile.rtl)["latin"]
         for lvl in numbering.iterdescendants(tag=qn("w:lvl")):
             fmt = lvl.find(qn("w:numFmt"))

@@ -5157,6 +5157,13 @@ above) it is the net for a chat that outgrows even that. `x_status` gives each p
 (`created`, `time_zone`): the epoch alone sent the model to `python_exec`, an
 approval card, to read it. Gate: `tests/test_trim_keeps_the_conversation.py`
 (the old trim as the control), `tests/test_x_status_pages.py`.
+`x_status(metrics=true)` reads the listed posts' `public_metrics` in ONE
+budgeted request (`XClient.get_public_metrics`); a post X did not return is
+`metrics_missing`, a failed read `metrics_error`, never a zero. And
+`save_proposal` gives each X draft's length as X counts it
+(`text_length.validate_text`). Live 2026-10-20 the agent answered "likes
+unknown" from the posts' public pages, and asked to approve a `python_exec`
+that printed `len(draft)`. Gate: `tests/test_x_post_metrics_and_draft_length.py`.
 
 **H. The running turn's tool outputs are not cut to fit** (2026-10-18,
 `summarizer.prune_tool_outputs`). The supervisor prunes tool outputs when the
