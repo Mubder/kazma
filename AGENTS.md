@@ -5456,6 +5456,12 @@ cancelled before it said anything was saved with the previous turn's answer
 (live 2026-10-20, `/abort` on a history request stored the swarm summary
 before it). Gate: `test_an_aborted_turn_is_never_saved_with_the_previous_answer`
 (`tests/test_turn_runtime.py`, the whole chat's last text as the control).
+**An aborted request is answered "cancelled"** (`steer.abort_messages`, both
+abort paths): the abort's system note alone is hoisted to the head by the
+OpenAI-compatible path, the request was left unanswered, and the NEXT turn
+wrote the aborted 2,000-word history (live 2026-10-20). Gate:
+`tests/test_abort_leaves_no_pending_request.py` (the turn rebuild and the
+hoist; the note alone as the negative control).
 
 **B. The client projects; it does not author.** `chat.js` paints from the
 TurnDocument / `_serverGates`. Token deltas APPEND; only `turn_complete`

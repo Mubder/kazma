@@ -1338,7 +1338,7 @@ def create_graph_handler(
 
         # ── /abort (or /stop): cancel + abandon the running task ────
         if msg.text and msg.text.strip().lower() in ("/abort", "/stop"):
-            from kazma_core.agent.steer import abort_marker, clear_all_steers
+            from kazma_core.agent.steer import abort_messages, clear_all_steers
 
             ctx = await _store.get(thread_id) or msg.context_metadata
             clear_all_steers(thread_id)
@@ -1356,7 +1356,7 @@ def create_graph_handler(
                         (_snap.values if _snap and _snap.values else {}).get("messages") or []
                     )
                     _before = list(_msgs)
-                    _msgs.append({"role": "system", "content": abort_marker()})
+                    _msgs = abort_messages(_msgs)
                     await graph.aupdate_state(config, {
                         "messages": _msgs,
                         "task_status": "abandoned",

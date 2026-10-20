@@ -195,7 +195,7 @@ def hard_steer_note(text: str) -> str:
     )
 
 
-def abort_marker(ts: str | None = None) -> str:
+def _abort_marker(ts: str | None = None) -> str:
     """System marker written to the checkpoint on /abort (suppresses resume)."""
     return (
         "[KAZMA ABORT] System note: the user cancelled this task "
@@ -203,6 +203,34 @@ def abort_marker(ts: str | None = None) -> str:
         "abandoned. Only revisit the work if the user explicitly asks you to "
         "redo it."
     )
+
+
+#: The answer an aborted request is left with: it was cancelled, not pending.
+_ABORTED_ANSWER = "⛔ Cancelled with /abort before an answer -- not continued."
+
+
+def _role(message: object) -> str:
+    if isinstance(message, dict):
+        return str(message.get("role") or message.get("type") or "").lower()
+    return str(getattr(message, "type", None) or getattr(message, "role", None) or "").lower()
+
+
+def abort_messages(messages: list) -> list:
+    """*messages* as /abort leaves them: the marker, and an answer for a
+    request the cancelled turn never answered.
+
+    The marker is a system note, and the OpenAI-compatible path moves every
+    system note to the head (``hoist_system_messages``), away from the turn
+    it was about: the next turn found the aborted request with no answer and
+    answered it (live 2026-10-20: /abort on "Write a 2,000-word history of
+    Kuwait", and the next request -- open a page -- came back with the
+    history). An assistant message keeps its place."""
+    out = list(messages)
+    last = next((m for m in reversed(out) if _role(m) not in ("system", "developer")), None)
+    if last is not None and _role(last) in ("user", "human"):
+        out.append({"role": "assistant", "content": _ABORTED_ANSWER})
+    out.append({"role": "system", "content": _abort_marker()})
+    return out
 
 
 def _now_iso() -> str:
