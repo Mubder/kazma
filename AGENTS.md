@@ -3423,7 +3423,15 @@ they fell back to DejaVu. A generated document's list bullets too
 the template's levels named Symbol and LibreOffice drew them in OpenSymbol,
 the one face of the first house-style report that was not the house's. Gate:
 `tests/test_document_house_bullets.py` (real LibreOffice, the PDF's embedded
-faces; the template's levels as the negative control).
+faces; the template's levels as the negative control). **Arabic bold and
+italic** (`DocxEngine._complex_script_emphasis`): every `w:b`/`w:i` in the
+body and styles gets its `w:bCs`/`w:iCs` twin, which is what draws Arabic
+bold; only Arabic runs of right-to-left paragraphs had it, so a bilingual
+title's Arabic half and an Arabic list's bold lead-ins came out regular. And
+a bilingual title's halves in either order are one heading
+(`heading_text.headings_equivalent`): the title was drawn twice (live
+2026-10-20). Gate: `tests/test_document_bilingual_title_and_arabic_bold.py`
+(real LibreOffice; the engine without the twins as the negative control).
 
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`

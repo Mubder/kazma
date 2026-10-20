@@ -26,12 +26,26 @@ def heading_key(text: str) -> str:
     return _WS.sub(" ", s).casefold().strip(" \t.:;—-")
 
 
+#: Between the halves of a bilingual title ("Kuwait's Weather — طقس الكويت").
+_TITLE_PARTS = re.compile(r"\s+[—–·|/-]\s+")
+
+
+def _title_parts(key: str) -> frozenset[str]:
+    return frozenset(part.strip() for part in _TITLE_PARTS.split(key) if part.strip())
+
+
 def headings_equivalent(a: str, b: str) -> bool:
     """True when two headings are the same title written two ways."""
     ka, kb = heading_key(a), heading_key(b)
     if not ka or not kb:
         return False
     if ka == kb:
+        return True
+    # The halves of a bilingual title in the other order: the markdown's
+    # "# طقس الكويت — Kuwait's Weather" under the title "Kuwait's Weather —
+    # طقس الكويت" was drawn twice (live 2026-10-20).
+    parts_a, parts_b = _title_parts(ka), _title_parts(kb)
+    if len(parts_a) > 1 and parts_a == parts_b:
         return True
     # One is the other plus leftover title debris (min length avoids
     # matching a short word like "الخلاصة" inside a longer heading).
