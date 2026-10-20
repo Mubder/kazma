@@ -3586,7 +3586,12 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   render on Web (chat.js + sidebar), Telegram, Discord, and Slack. Resume
   applies the chosen `slots_patch`. The existing Approve/Deny buttons map to
   best-option / cancel via `build_resume_value`.
-- `deny`: blocked with a clear error; no card.
+- `deny`: blocked with a clear error; no card. The tool worker returns it
+  as a `policy` refusal and the model goes on (2026-10-20: it was
+  `terminal`, the clarify-card outcome, and a sandbox-refused `python_exec`
+  ended a report turn before `generate_pdf`; gate
+  `tests/test_policy_deny_keeps_the_turn.py`, the terminal outcome as the
+  negative control).
 - Audit-only: read tools, `mutate_fs` (containment in `IdeService.resolve`),
   `delegate` (HMAC trust at skill-load).
 
