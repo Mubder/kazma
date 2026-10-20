@@ -5877,6 +5877,13 @@ in the vault and does **not** automatically feed Calendar.
   answers only `auto` with nothing connected, `sandbox` itself, or an
   account whose TYPE is `sandbox`. Every email tool returns the refusal as
   its answer (`tests/test_email_fail_closed.py` enumerates the tools).
+- **A Gmail listing asks for each header by its own parameter**
+  (`gmail_api._LIST_HEADERS`, 2026-10-20): Gmail read
+  `metadataHeaders=From,To,Subject,Date` as one header's name, so every
+  listed mail had no sender or date and its preview as the subject; the agent
+  opened mails one by one to answer "what's in my inbox today".
+  `tests/test_gmail_list_headers.py` (a fake Gmail that answers only the
+  headers named; the comma-joined form as the negative control).
 - Connect with Google requests Calendar as a **soft** extra (like
   `drive.file`): Gmail connect still succeeds if Calendar API is off.
   Settings → Email → **Connect Google Calendar** is the dedicated grant (same
