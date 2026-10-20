@@ -375,6 +375,7 @@ def _house_style_html(text: str) -> str:
             del element.attrib[name]
         if breaks:
             element.set("style", "; ".join(b.strip() for b in breaks))
+    _isolate_latin_in_rtl(root, rtl=(root.get("dir") or "").lower() == "rtl")
     body = root.find("body")
     container = body if body is not None else root
     inner = _html.escape(container.text or "") + "".join(
@@ -382,6 +383,24 @@ def _house_style_html(text: str) -> str:
     )
     profile = DocProfile.for_content(container.text_content() or "")
     return HtmlEngine(profile).render_html_body(inner, title=title, extra_css="\n".join(rules))
+
+
+def _isolate_latin_in_rtl(element: Any, *, rtl: bool) -> None:
+    """Mark each Latin run of right-to-left text (``arabic.isolate_ltr_runs``),
+    as the DOCX engine does: "50 °C" in an Arabic paragraph drew "C° 50"
+    (live 2026-10-20). Text only; the markup is untouched."""
+    from kazma_core.documents.arabic import isolate_ltr_runs
+
+    if not isinstance(element.tag, str):
+        return
+    own = (element.get("dir") or "").lower()
+    here = rtl if own not in ("rtl", "ltr") else own == "rtl"
+    if here and element.text:
+        element.text = isolate_ltr_runs(element.text)
+    for child in element:
+        _isolate_latin_in_rtl(child, rtl=here)
+        if here and child.tail:
+            child.tail = isolate_ltr_runs(child.tail)
 
 
 def _markdown_html(text: str) -> str:
