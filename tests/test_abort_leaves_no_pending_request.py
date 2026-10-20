@@ -54,7 +54,7 @@ def test_the_aborted_request_is_answered_as_cancelled():
     read = _what_the_model_reads(steer.abort_messages(HISTORY))
     assert _unanswered_requests(read) == [], read
     history = next(i for i, m in enumerate(read) if m.get("content") == HISTORY[2]["content"])
-    assert read[history + 1] == {"role": "assistant", "content": steer._ABORTED_ANSWER}
+    assert read[history + 1] == {"role": "assistant", "content": steer.ABORTED_ANSWER}
     assert any("[KAZMA ABORT]" in str(m.get("content")) for m in read)
 
 

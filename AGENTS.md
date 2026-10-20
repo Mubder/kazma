@@ -5473,6 +5473,10 @@ cancelled before it said anything was saved with the previous turn's answer
 (live 2026-10-20, `/abort` on a history request stored the swarm summary
 before it). Gate: `test_an_aborted_turn_is_never_saved_with_the_previous_answer`
 (`tests/test_turn_runtime.py`, the whole chat's last text as the control).
+**An abort closes its turn** (`turn_runtime.close_aborted_turn`, both abort
+paths): the cancelled run saved its row open and nothing closed it, so the
+liveness watchdog paged `turn.stuck_open` ten minutes later (2026-10-20). A
+partial answer is kept; an empty turn gets the cancellation note.
 **An aborted request is answered "cancelled"** (`steer.abort_messages`, both
 abort paths): the abort's system note alone is hoisted to the head by the
 OpenAI-compatible path, the request was left unanswered, and the NEXT turn
@@ -5873,7 +5877,11 @@ and no DSN, and the pager skipped every page for a day (from 2026-09-24
 guard's own environment (every server inherits it), and never let a test
 run the real lookup (`_settings_lookup_allowed` is False under pytest). The
 daily digest counts `notify.skipped`/`notify.failed`, so a silent pager shows
-up through the app's channel.
+up through the app's channel. **A page it cannot send is held, not dropped**
+(`Notifier._held`, `_NOTIFY_HELD_MAX` 20): the credentials live in Kazma's
+settings database, so a guard started while Postgres starts (a reboot,
+2026-10-17: three "never became healthy" pages lost) sends them, marked
+"⏳ Delayed", before its next page or on a probe tick once they resolve.
 
 Cooldown default 900s per key (`KAZMA_OPS_ALERT_COOLDOWN_S`). Never raises.
 Kill-switch `KAZMA_OPS_ALERTS=0` (does not mute lifecycle). Mute theorem:

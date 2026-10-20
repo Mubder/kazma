@@ -292,3 +292,38 @@ def test_negative_control_the_last_assistant_text_of_the_whole_chat(
     monkeypatch.setattr(_helpers, "_this_turn_assistant_text", _helpers._last_assistant_text)
     rows = _abort_closes(store)
     assert any(PREVIOUS in str(r.get("content")) for r in rows), rows
+
+
+def _aborted_row(store: _Store, monkeypatch: pytest.MonkeyPatch, *, partial: str = "", close: bool = True):
+    import kazma_ui.turn_runtime as rt
+
+    monkeypatch.setattr(rt, "resolve_session_id", lambda thread_id, session_id="": "sess-1")
+    turn = reply_sink.open_reply_turn("thread-1")
+    # What the cancelled run writes on its way out: its row, left open.
+    persist_reply("sess-1", turn, partial, interrupted=True, thread_id="thread-1")
+    if close:
+        asyncio.run(rt.close_aborted_turn("thread-1"))
+    rows = [m for m in store.session.messages if m.get("turn_id") == turn]
+    return rows[-1] if rows else {}
+
+
+def test_an_aborted_turn_is_closed_with_its_cancellation(store: _Store, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live 2026-10-20: /abort left the cancelled turn's row open, and the
+    liveness watchdog paged "turn.stuck_open" ten minutes later."""
+    from kazma_core.agent.steer import ABORTED_ANSWER
+
+    row = _aborted_row(store, monkeypatch)
+    assert row.get("lifecycle") == "closed", row
+    assert row.get("content") == ABORTED_ANSWER
+    assert "thread-1" not in reply_sink.open_turns_snapshot()
+
+
+def test_an_aborted_partial_answer_is_kept(store: _Store, monkeypatch: pytest.MonkeyPatch) -> None:
+    partial = "A History of Bahrain\n\nBahrain is an archipelago in the western Gulf, " * 3
+    row = _aborted_row(store, monkeypatch, partial=partial)
+    assert row.get("lifecycle") == "closed" and row.get("content") == partial.strip()
+
+
+def test_negative_control_without_the_close_the_turn_stays_open(store: _Store, monkeypatch: pytest.MonkeyPatch) -> None:
+    _aborted_row(store, monkeypatch, close=False)
+    assert "thread-1" in reply_sink.open_turns_snapshot(), "the watchdog's stuck-open report"
