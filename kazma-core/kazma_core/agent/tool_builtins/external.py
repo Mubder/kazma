@@ -332,7 +332,9 @@ def register_external_tools(registry: Any) -> None:
                 "posting an enumerated draft set; then SHOW the drafts to the user "
                 "and stop. Post with proposal_id=<id> only after the user asks in "
                 "a later message: a draft is never published in the turn that "
-                "wrote it. "
+                "wrote it. For X drafts it returns each draft's length as X "
+                "counts it (and TOO LONG past the limit): save first, never "
+                "run code to count characters. "
                 "Args: kind (e.g. 'tweets'), items (list of draft texts)."
             ),
             category="memory",

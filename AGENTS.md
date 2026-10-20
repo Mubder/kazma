@@ -3455,7 +3455,11 @@ left-to-right run that holds a Latin letter is marked with LRM on both sides**
 (`arabic.isolate_ltr_runs`, applied by `DocxEngine._isolated` to body runs,
 headings and cells): "10 · 2026-10-05 — 15:15 UTC · <id> — محذوفة" came out
 in reverse group order around "UTC"; the strong mark makes the run's digits
-and separators left to right (W7). A run of digits alone is NOT marked:
+and separators left to right (W7). The sentence punctuation right after
+the run's last letter (`. ! ? , ; :`, `_LTR_TRAILING_PUNCT`) is inside it: an
+English sentence ending an Arabic paragraph drew its full stop on the far
+side of the next line (2026-10-20, `tests/test_document_english_sentence_in_arabic.py`).
+A run of digits alone is NOT marked:
 "في 2026-09-30" drawing "30-09-2026" (W2) is the Arabic convention, read right
 to left as the date, and the PDF and OCR readers (§19H) read it back by that
 rule -- marking it broke the fidelity corpus. An attached `@ # $` (or `+ -`
@@ -5847,7 +5851,10 @@ interrupted outcomes link to saved results. Stalls use meaningful stage/count/
 effect changes, not heartbeat timestamps, and never fail/retry the job. Fresh
 balances and actual provider HTTP failures are separate from request allowances;
 no monitor provider probes. Settings controls are admin-scoped. Initial old
-terminal history is quiet. Delivery callbacks persist platform acceptance,
+terminal history is quiet. A crawl or pipeline an agent runs in its turn
+(`research_crawl`, an unlinked `research_pipeline`: `_AGENT_RUN_KINDS`) is not
+alerted: its result goes to the agent (2026-10-20, "Partial results" under a
+complete swarm answer). Delivery callbacks persist platform acceptance,
 refusal or uncertainty; a requested send is never proof of delivery. Unknown
 delivery after a crash is not replayed. The loop follows the pytest scheduler
 gate and is cancelled/joined before stores close. Soft navigation initializes
@@ -5915,6 +5922,8 @@ in the vault and does **not** automatically feed Calendar.
   opened mails one by one to answer "what's in my inbox today".
   `tests/test_gmail_list_headers.py` (a fake Gmail that answers only the
   headers named; the comma-joined form as the negative control).
+  A listed mail's subject and sender are whole (150 and 80 characters, they
+  were cut at 50 and 40): the agent opened each long one to answer.
 - Connect with Google requests Calendar as a **soft** extra (like
   `drive.file`): Gmail connect still succeeds if Calendar API is off.
   Settings → Email → **Connect Google Calendar** is the dedicated grant (same
@@ -6787,6 +6796,11 @@ Test on every adapter; Telegram and Slack had the same blind spots.
   (`set_allowed_guilds`, boot and `apply_adapter_allowlists`).
 - **A check may carry a `link`** (the DM check: the one conversation between
   the user and this bot); the card renders only `https://discord.com/` links.
+- **A "💡" tool hint follows what the agent did** (`gateway._tool_hints`,
+  2026-10-20): sent only with `gateway.suggestions.enabled` on (it was never
+  read) and only after a turn that used no tool -- the handler records the
+  turn's tools (`context_metadata["turn_tools"]`). "I can read and summarize
+  that" came under a swarm's summary. Gate: `tests/test_gateway_tool_hints.py`.
 - **No chat app shows a markdown table**: `GatewayManager.send` rewrites
   tables outside code fences as lines (`kazma_gateway/chat_tables.py`) for
   Telegram, Discord and Slack alike. `tests/test_chat_tables.py`.
