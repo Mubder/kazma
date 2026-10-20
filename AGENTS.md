@@ -625,6 +625,13 @@ compatibility. **All public API methods and constructors are unchanged.**
   edit goes through `_post_message` / `_patch_message` / `_update_message`,
   which apply the chat adapters' `sanitize_outbound` (and Discord's
   `allowed_mentions: {"parse": []}`).
+- **`check_swarm_task` waits for the result** (`wait_seconds`, default 60,
+  at most 90: below the 120 s tool timeout), answering the moment the task
+  finishes. Answering "still running" at once, with "poll every few seconds"
+  in its description, had the chat model poll three times in two seconds;
+  the stagnation guard ended the turn 3.8 s into a 36 s task (live
+  2026-10-20). Gate: `tests/test_check_swarm_task_waits.py` (no wait as the
+  negative control).
 - **The task store** strips NUL from every Postgres parameter
   (`_pg_execute`) and runs SQLite at `synchronous=FULL` (the RUNNING row is
   crash evidence, SW-E16); worker-metric days follow the task retention.
