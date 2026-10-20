@@ -69,24 +69,36 @@ def _pdf_metadata(
     return metadata
 
 
-def _logical_table(table: Any, matrix: list, glyph_lines: list) -> list:
+def _logical_table(table: Any, matrix: list, glyph_lines: list, *, rtl_page: bool = True) -> list:
     """Cells re-read in logical order; a right-to-left table's columns too.
 
     PyMuPDF returned each Arabic cell character-reversed and the columns of
-    a right-to-left table left to right (2026-10-13, F09).
+    a right-to-left table left to right (2026-10-13, F09). On a page with no
+    right-to-left script (*rtl_page* False) the cells are read left to right
+    from the glyphs too: PyMuPDF's table reader put a ligature's second
+    letter after the next glyph ("frist" for the "fi" ligature, live
+    2026-10-20), and a cell the glyphs leave empty keeps PyMuPDF's text.
     """
     from kazma_core.documents.arabic import is_rtl_dominant
+
+    def original(row_index: int, col_index: int) -> Any:
+        if row_index < len(matrix) and col_index < len(matrix[row_index] or ()):
+            return matrix[row_index][col_index]
+        return None
 
     rows = []
     for row_index, row in enumerate(getattr(table, "rows", None) or ()):
         cells = []
         for col_index, bbox in enumerate(getattr(row, "cells", None) or ()):
             if bbox is None:
-                original = matrix[row_index][col_index] if row_index < len(matrix) and col_index < len(matrix[row_index]) else None
-                cells.append(original)
+                cells.append(original(row_index, col_index))
+            elif not rtl_page:
+                cells.append(text_in_rect(glyph_lines, bbox, base="L") or original(row_index, col_index))
             else:
                 cells.append(text_in_rect(glyph_lines, bbox, margins=(float(bbox[0]), float(bbox[2]))) or None)
         rows.append(cells)
+    if not rtl_page:
+        return rows or matrix
     if not rows:
         return matrix
     sample = " ".join(str(cell) for row in rows for cell in row if cell)
@@ -243,7 +255,12 @@ class PdfParser:
                 except (RuntimeError, ValueError, TypeError, KeyError):
                     glyph_lines = []
                     builder.warnings.append(f"Glyph order unavailable on PDF page {page_index + 1}")
-                if not has_rtl_glyphs(glyph_lines):
+                # Table cells are read from the glyphs on every page (a
+                # ligature, _logical_table); the page text only where
+                # right-to-left script needs it.
+                cell_glyphs = glyph_lines
+                rtl_page = has_rtl_glyphs(glyph_lines)
+                if not rtl_page:
                     glyph_lines = []
 
                 # Tables first: the page text is then read around them, each
@@ -258,8 +275,8 @@ class PdfParser:
                             matrix = table.extract()
                         except Exception:
                             continue
-                        if glyph_lines:
-                            matrix = _logical_table(table, matrix, glyph_lines)
+                        if cell_glyphs:
+                            matrix = _logical_table(table, matrix, cell_glyphs, rtl_page=rtl_page)
                         rows = _table_rows_from_matrix(
                             matrix,
                             max_rows=context.config.max_rows_per_sheet,

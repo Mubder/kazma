@@ -3487,7 +3487,13 @@ base="R")`); a cell's wrapped lines are one value; and a left-to-right line
 whose brackets read inside out ("Avg high )°C(": one glyph draws "(" in an
 English cell and ")" in an Arabic one, and the text map names it once) is set
 right. Gate: `tests/test_document_table_direction.py` (a bilingual PDF made
-through real LibreOffice and read back).
+through real LibreOffice and read back). **Table cells are read from the
+glyphs on every page** (`pdf._logical_table(rtl_page=False)`: left to right,
+PyMuPDF's text only for a cell the glyphs leave empty): on the all-English
+page PyMuPDF's table reader put the "fi" ligature's "i" after the next glyph,
+and Kazma quoted its own cell as "frist rains" (test 18, live 2026-10-20).
+Gate: `tests/test_document_pdf_ligature_cells.py` (PyMuPDF's reader as the
+negative control).
 
 `tests/test_document_layout.py` measures all of this against a rendered PDF
 with PyMuPDF rather than grepping the source — every defect it covers was
