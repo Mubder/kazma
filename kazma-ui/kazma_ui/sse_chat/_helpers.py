@@ -156,6 +156,27 @@ def _last_assistant_text(messages: list[Any] | None) -> str:
             return text
     return ""
 
+def _is_user_message(m: Any) -> bool:
+    if isinstance(m, dict):
+        return str(m.get("role") or m.get("type") or "").lower() in ("user", "human")
+    role = (getattr(m, "type", None) or getattr(m, "role", None) or "").lower()
+    return m.__class__.__name__ == "HumanMessage" or role in ("human", "user")
+
+
+def _this_turn_assistant_text(messages: list[Any] | None) -> str:
+    """The last assistant text of the running turn: after its last user
+    message, never an earlier turn's. A turn cancelled before it said
+    anything was saved with the PREVIOUS answer (live 2026-10-20: /abort on
+    "Write a 2,000-word history of Kuwait" stored the swarm summary before
+    it as that turn's reply)."""
+    items = list(messages or [])
+    start = 0
+    for i, m in enumerate(items):
+        if _is_user_message(m):
+            start = i + 1
+    return _last_assistant_text(items[start:])
+
+
 def _user_facing_reply(*parts: str) -> str:
     """Best user-facing assistant payload (plan fence un-glued). Never raises."""
     try:

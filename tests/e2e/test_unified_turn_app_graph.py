@@ -176,9 +176,25 @@ def test_approved_tools_actually_execute(harness: Harness) -> None:
     assert not os.path.exists(os.path.join(harness.data_dir, "src", "old.js"))
 
 
-def test_failed_mutator_stops_before_followup_fixture_actions(harness: Harness) -> None:
-    """An approved tool failure cannot be hidden by the scripted final answer."""
-    harness.script.steps[1].args = {"command": "npm init -y"}
+def test_failed_mutator_stops_before_followup_fixture_actions(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An approved tool failure cannot be hidden by the scripted final answer.
+
+    The failure comes AFTER the command started: an allowed command whose run
+    times out. "npm init -y" no longer serves -- since 2026-10-18 a command
+    the policy refuses is refused before anything runs, an ordinary error
+    the turn carries on from (agent/tool_refusal), and this test failed from
+    then on (found by bisecting, 2026-10-20)."""
+    import subprocess
+
+    from kazma_core.security import process_budget
+
+    async def times_out(args, **_kw):
+        raise subprocess.TimeoutExpired(args, 30)
+
+    monkeypatch.setattr(process_budget, "run_bounded_async", times_out)
+    harness.script.steps[1].args = {"command": "git --version"}
     run = drive_turn(harness, "Set up the project scaffold.", [True] * 4, leg_timeout=120.0)
     assert _tools(run) == ["file_write", "shell_exec"]
     assert run.finished

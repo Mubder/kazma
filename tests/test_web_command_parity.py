@@ -52,7 +52,10 @@ def test_abort_is_visible_in_the_transcript():
     """`/abort` must append a user bubble — a toast-only command reads as
     'not really working' (the /about report: toast shown, nothing in chat)."""
     js = _CHAT_JS.read_text(encoding="utf-8")
-    assert "appendMessage('user', '/abort')" in js
+    # The bubble shows the command typed: /abort, or its alias /stop.
+    branch = js[js.index("if (_abortCmd) {"):]
+    assert "appendMessage('user', _cmdLow);" in branch[:600]
+    assert "head === '/abort' || head === '/stop'" in js
 
 
 def test_unknown_slash_gets_a_hint():

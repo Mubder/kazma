@@ -273,7 +273,7 @@ def _cmd_help() -> str:
         "🧭 *Running task*\n"
         "• `/steer <text>` — Add context to the running task (applies next step)\n"
         "• `/steer! <text>` — Pause the task, inject a requirement, then resume\n"
-        "• `/abort` — Stop and abandon the running task (won't continue unless re-asked)\n"
+        "• `/abort` or `/stop` — Stop and abandon the running task (won't continue unless re-asked)\n"
         "• `/hitl approve` · `/hitl deny` — Answer a pending approval "
         "(`/hitl approve_task` — every approval of this task)\n\n"
         "⚡ *Capacity & YOLO*\n"

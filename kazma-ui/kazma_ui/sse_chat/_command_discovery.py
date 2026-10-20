@@ -25,7 +25,7 @@ def discovery_reply(text: str, lang: str = "en") -> str | None:
             description = command["description_ar"] if ar else command["description"]
             lines.append(f"• `/{command['name']}` — {description}")
         return "\n".join(lines)
-    if name in ("new", "steer", "steer!", "abort"):
+    if name in ("new", "steer", "steer!", "abort", "stop"):
         return (
             "استخدم هذا الأمر من مربع كتابة المحادثة لتطبيقه على المحادثة أو المهمة الجارية."
             if ar else "Use this command in the chat composer to apply it to the current chat or running task."

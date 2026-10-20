@@ -1258,7 +1258,8 @@
   }
 
   function isAbortCommand(text) {
-    return _cmdHead(text) === '/abort';
+    var head = _cmdHead(text);
+    return head === '/abort' || head === '/stop';
   }
 
   function isSteerCommand(text) {
@@ -2831,7 +2832,7 @@
     var _cmdLow = text.toLowerCase();
     var _steerHard = _cmdLow === '/steer!' || _cmdLow.startsWith('/steer! ');
     var _steerSoft = !_steerHard && (_cmdLow === '/steer' || _cmdLow.startsWith('/steer '));
-    var _abortCmd = _cmdLow === '/abort';
+    var _abortCmd = isAbortCommand(_cmdLow);
     if (_steerHard || _steerSoft || _abortCmd) {
       if (_abortCmd) {
         inputEl.value = '';
@@ -2840,7 +2841,7 @@
         // Visible in the transcript (parity with /steer) — an invisible
         // command that only toasts reads as "not really working"
         // (command audit 2026-08-19).
-        appendMessage('user', '/abort');
+        appendMessage('user', _cmdLow);
         if (window.showToast) window.showToast(ti('aborting_task', '⛔ Aborting task…'), 'warning', 2500);
         _releaseHitlComposer('abort');
         if (activeStream) { try { activeStream.abort(); } catch (_e) {} activeStream = null; }

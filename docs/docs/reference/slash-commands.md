@@ -313,7 +313,7 @@ the new requirement.
 
 Cancels and **abandons** the running task. The turn is marked `abandoned`,
 `auto_continue` is cleared, and an abort marker is injected so the agent will
-not continue the task unless you ask it to redo it.
+not continue the task unless you ask it to redo it. `/stop` does the same.
 
 **Usage:**
 ```
@@ -572,7 +572,7 @@ Lists all available commands grouped by category.
 🧭 *Running task*
 • `/steer <text>` — Add context to the running task (applies next step)
 • `/steer! <text>` — Pause the task, inject a requirement, then resume
-• `/abort` — Stop and abandon the running task (won't continue unless re-asked)
+• `/abort` or `/stop` — Stop and abandon the running task (won't continue unless re-asked)
 • `/hitl approve` · `/hitl deny` — Answer a pending approval (`/hitl approve_task` — every approval of this task)
 
 ⚡ *Capacity & YOLO*
