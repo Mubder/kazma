@@ -206,7 +206,7 @@ def _abort_marker(ts: str | None = None) -> str:
 
 
 #: The answer an aborted request is left with: it was cancelled, not pending.
-_ABORTED_ANSWER = "⛔ Cancelled with /abort before an answer -- not continued."
+ABORTED_ANSWER = "⛔ Cancelled with /abort before an answer -- not continued."
 
 
 def _role(message: object) -> str:
@@ -228,7 +228,7 @@ def abort_messages(messages: list) -> list:
     out = list(messages)
     last = next((m for m in reversed(out) if _role(m) not in ("system", "developer")), None)
     if last is not None and _role(last) in ("user", "human"):
-        out.append({"role": "assistant", "content": _ABORTED_ANSWER})
+        out.append({"role": "assistant", "content": ABORTED_ANSWER})
     out.append({"role": "system", "content": _abort_marker()})
     return out
 

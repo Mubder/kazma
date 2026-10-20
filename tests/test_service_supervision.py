@@ -1202,3 +1202,63 @@ def test_the_foreign_server_check_survives_as_the_backstop():
 
     src = inspect.getsource(guard.Guard._wait_ready)
     assert "foreign_server_holds_port" in src
+
+
+def _capture_posts(monkeypatch):
+    sent: list[str] = []
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def urlopen(req, timeout=10):
+        from urllib.parse import parse_qs
+
+        sent.append(parse_qs(req.data.decode())["text"][0])
+        return _Resp()
+
+    monkeypatch.setattr(guard.urllib.request, "urlopen", urlopen)
+    return sent
+
+
+def test_a_page_the_guard_cannot_send_is_held_then_sent_delayed(monkeypatch, tmp_path):
+    """2026-10-17: a Windows reboot started the guard while Postgres was
+    starting; its credentials live there, and three "never became healthy"
+    pages were dropped ("notify.skipped: not configured"). They are held and
+    sent, marked delayed, once the guard can page."""
+    _clear_notifier_env(monkeypatch)
+    answers = [("", ""), ("tok", "chat")]
+    monkeypatch.setattr(guard.Notifier, "_from_config_store", lambda self: answers.pop(0))
+    sent = _capture_posts(monkeypatch)
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    n.send("Kazma stopped: never became healthy")
+    assert sent == []
+    n._looked_up_at -= guard._NOTIFY_RELOOKUP_S + 1  # the database is back
+    n.flush_held()
+    assert len(sent) == 1 and sent[0].startswith("⏳ Delayed") and "never became healthy" in sent[0]
+    n.send("Kazma is healthy again")
+    assert sent[1] == "Kazma is healthy again", "a held page goes once"
+
+
+def test_held_pages_go_before_the_next_page(monkeypatch, tmp_path):
+    _clear_notifier_env(monkeypatch)
+    answers = [("", ""), ("tok", "chat")]
+    monkeypatch.setattr(guard.Notifier, "_from_config_store", lambda self: answers.pop(0))
+    sent = _capture_posts(monkeypatch)
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    n.send("first")
+    n._looked_up_at -= guard._NOTIFY_RELOOKUP_S + 1
+    n.send("second")
+    assert [s.split("\n")[-1] for s in sent] == ["first", "second"]
+
+
+def test_the_hold_is_bounded(monkeypatch, tmp_path):
+    _clear_notifier_env(monkeypatch)
+    monkeypatch.setattr(guard.Notifier, "_from_config_store", lambda self: ("", ""))
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    for i in range(guard._NOTIFY_HELD_MAX + 5):
+        n.send(f"page {i}")
+    assert len(n._held) == guard._NOTIFY_HELD_MAX and n._held[0][1] == "page 5"

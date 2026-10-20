@@ -500,6 +500,8 @@ _NOTIFY_LOOKUP_TIMEOUT_S = 90.0
 #: A lookup that found nothing is tried again when a page is due, at most
 #: this often.
 _NOTIFY_RELOOKUP_S = 600.0
+#: Pages kept while the guard cannot send them (oldest dropped past this).
+_NOTIFY_HELD_MAX = 20
 
 
 def _settings_lookup_allowed() -> bool:
@@ -559,6 +561,7 @@ class Notifier:
             or ""
         ).strip()
         self._source = "env" if (self.token and self.chat) else "unresolved"
+        self._held: list[tuple[float, str]] = []
 
     def _resolve(self) -> None:
         """Fill in missing credentials from the app's settings. Lazily, retried.
@@ -638,8 +641,33 @@ class Notifier:
 
     def send(self, text: str) -> None:
         if not self.configured:
-            self._log("info", "notify.skipped", reason="not configured", text=text)
+            # Held, not dropped: the credentials live in Kazma's settings
+            # database, so the guard cannot page while it is down -- the
+            # moment a page matters most. After the 2026-10-17 Windows
+            # reboot three "never became healthy" pages were dropped this
+            # way while Postgres started (19 of 237 pages that week).
+            if len(self._held) >= _NOTIFY_HELD_MAX:
+                self._held.pop(0)
+            self._held.append((time.time(), text))
+            self._log("info", "notify.skipped", reason="not configured", text=text, held=True)
             return
+        self._flush_held()
+        self._post(text)
+
+    def flush_held(self) -> None:
+        """Send held pages once the credentials resolve (rate-limited)."""
+        if self._held and self.configured:
+            self._flush_held()
+
+    def _flush_held(self) -> None:
+        held, self._held = self._held, []
+        now = time.time()
+        for at, text in held:
+            minutes = max(1, round((now - at) / 60))
+            self._post(f"⏳ Delayed {minutes} min (the guard could not page then):\n{text}",
+                       delayed=True)
+
+    def _post(self, text: str, *, delayed: bool = False) -> None:
         try:
             url = f"https://api.telegram.org/bot{self.token}/sendMessage"
             body = urllib.parse.urlencode(
@@ -648,7 +676,10 @@ class Notifier:
             req = urllib.request.Request(url, data=body, method="POST")
             with urllib.request.urlopen(req, timeout=10):
                 pass
-            self._log("info", "notify.sent")
+            if delayed:
+                self._log("info", "notify.sent", delayed=True)
+            else:
+                self._log("info", "notify.sent")
         except Exception as exc:
             # An alert that fails must not take the supervisor down with it.
             self._log("warn", "notify.failed", error=str(exc)[:200])
@@ -2951,6 +2982,9 @@ class Guard:
                                      wake_on_pause=True)
             if self._stop:
                 return "guard shutting down"
+            notify = getattr(self, "notify", None)
+            if not woke_early and notify is not None:
+                notify.flush_held()  # pages held while the guard could not send
 
             if read_pause() is not None:
                 # Operator asked for quiet. Stop the child so diagnosis

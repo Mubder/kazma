@@ -1388,6 +1388,9 @@ def create_graph_handler(
 
                     await rewind_memory(thread_id, _before, _msgs, tenant_id=str(
                         (_snap.values if _snap and _snap.values else {}).get("tenant_id") or "default"))
+                from kazma_ui.turn_runtime import close_aborted_turn
+
+                await close_aborted_turn(thread_id)  # never raises
                 try:
                     from kazma_ui.hitl_gate_bridge import abort_thread_hitl
 

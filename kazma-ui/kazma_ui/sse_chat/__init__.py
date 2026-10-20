@@ -2297,6 +2297,9 @@ def create_sse_chat_router(
                 from kazma_core.memory.forget import rewind_memory
 
                 await rewind_memory(thread_id, before, msgs, tenant_id=str(values.get("tenant_id") or "default"))
+            from kazma_ui.turn_runtime import close_aborted_turn
+
+            await close_aborted_turn(thread_id)  # never raises
             try:
                 from kazma_ui.hitl_gate_bridge import abort_thread_hitl
 

@@ -105,6 +105,32 @@ def _snapshot_paused(snap: Any) -> bool:
         return False
 
 
+async def close_aborted_turn(thread_id: str) -> bool:
+    """Close the reply turn /abort cancelled. Never raises.
+
+    The cancelled run saves its row open (interrupted) and nothing closed it:
+    the turn-liveness watchdog reported it stuck ten minutes later and a page
+    would show it still running (live 2026-10-20). The row keeps a partial
+    answer that is longer; an empty one gets the cancellation note."""
+    from kazma_core.agent.steer import ABORTED_ANSWER
+    from kazma_ui.reply_sink import current_reply_turn
+
+    turn_id = current_reply_turn(thread_id)
+    if not thread_id or not turn_id:
+        return False
+    return await asyncio.to_thread(_close_aborted, thread_id, turn_id, ABORTED_ANSWER)
+
+
+def _close_aborted(thread_id: str, turn_id: str, note: str) -> bool:
+    """Never raises: both callees never do. A content-only write (no parts)
+    never shrinks the row, so a longer partial answer stays."""
+    session_id = resolve_session_id(thread_id)
+    if not session_id:
+        return False
+    return persist_reply(session_id, turn_id, note, interrupted=False,
+                         thread_id=thread_id, parts=[], allow_shrink=False)
+
+
 def persist_reply(
     session_id: str,
     reply_turn_id: str,
