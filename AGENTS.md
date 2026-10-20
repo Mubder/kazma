@@ -3390,6 +3390,19 @@ HTML to get a readable table. `convert_document` says it converts an existing
 file in its own styling and that reports are made with `generate_pdf` /
 `generate_docx`. Gate: `tests/test_document_table_direction.py` (through real
 LibreOffice; the document's direction as the negative control).
+**An HTML file converted to PDF is in the house style** (2026-10-20,
+`renderer_worker._house_style_html`): its content -- headings, paragraphs,
+lists, tables, `dir` marks -- in `HtmlEngine.render_html_body`'s themed shell
+(brand face embedded, heading bars, table style), its own fonts, colours,
+presentational attributes and CSS dropped, the page breaks it asked for kept;
+`convert_document(keep_source_style=true)` keeps a file's own design, only
+when the user asks. The agent made a bilingual report as its own HTML four
+times (DejaVu/Noto), and memory then held the file, so every later request
+converted it again. The house CSS ends paragraphs and lays out tables by each
+block's own direction (`text-align-last: start`, no `direction` on `table`):
+an English section of an Arabic report was set right to left. Gate:
+`tests/test_document_html_house_style.py`; checked in the worker image on the
+live file.
 
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
