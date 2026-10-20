@@ -370,7 +370,8 @@ def register_filesystem_tools(registry: Any) -> None:
     @registry.register(
         description=(
             "Apply several surgical edits in one step (one HITL card). Each item "
-            "is {path, old_string, new_string} or {path, patch}. Prefer this over "
+            "is {path, old_string, new_string} or {path, patch}; a top-level path is "
+            "the file of every patch that names none. Prefer this over "
             "N× file_apply_patch / file_write for a multi-file fix. Max 20 hunks. "
             "Failed hunks restore a workspace checkpoint. After a successful apply, "
             "runs nearby pytest files (verify=true, default) so you stop when tests pass."
@@ -380,12 +381,13 @@ def register_filesystem_tools(registry: Any) -> None:
     async def file_apply_patch_set(
         patches: list[dict] | None = None,
         verify: bool = True,
+        path: str = "",
     ) -> str:
         from kazma_core.tools.file_apply_patch import (
             file_apply_patch_set as _set_tool,
         )
 
-        return await _set_tool(patches, verify=verify)
+        return await _set_tool(patches, verify=verify, path=path)
     @registry.register(
         description=(
             "Append content to the end of a local file. Creates the file and parent "
