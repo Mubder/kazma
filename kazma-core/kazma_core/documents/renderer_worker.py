@@ -330,6 +330,60 @@ def _markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+#: Presentation attributes a source's HTML loses in the house style.
+_PRESENTATION_ATTRS = frozenset({
+    "style", "bgcolor", "color", "face", "size", "width", "height", "border",
+    "cellpadding", "cellspacing", "align", "valign", "background",
+})
+_BREAK_DECLARATION = re.compile(r"(?:page-)?break-(?:before|after|inside)\s*:\s*[^;{}]+", re.IGNORECASE)
+_CSS_RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+
+
+def _house_style_html(text: str) -> str:
+    """An HTML source in Kazma's house style: its content (headings,
+    paragraphs, lists, tables, direction) in the themed shell, its own fonts,
+    colours and layout CSS dropped; the page breaks it asked for kept.
+
+    Live 2026-10-20 the agent made a bilingual report by writing its own HTML
+    ("Segoe UI, Tahoma, Arial", none in the worker: DejaVu and Noto) and
+    converting it; memory then held the file, and every later request for the
+    report converted it again. Every PDF Kazma converts from HTML is now in
+    the house style; ``keep_source_style`` keeps a file's own design.
+    """
+    import html as _html
+
+    import lxml.html
+
+    from kazma_core.documents.engines.html import HtmlEngine
+    from kazma_core.documents.profile import DocProfile
+
+    root = lxml.html.document_fromstring(text)
+    title = (root.findtext(".//title") or "").strip()
+    rules: list[str] = []
+    for style in root.iter("style"):
+        for selectors, body in _CSS_RULE.findall(style.text or ""):
+            breaks = _BREAK_DECLARATION.findall(body)
+            if breaks and "@" not in selectors:
+                rules.append(f"    {selectors.strip()} {{ {'; '.join(b.strip() for b in breaks)}; }}")
+    for element in list(root.iter("style", "link", "script", "meta", "title")):
+        element.drop_tree()
+    for element in root.iter():
+        if not isinstance(element.tag, str):
+            continue
+        breaks = _BREAK_DECLARATION.findall(element.get("style") or "")
+        for name in _PRESENTATION_ATTRS.intersection(element.attrib):
+            del element.attrib[name]
+        if breaks:
+            element.set("style", "; ".join(b.strip() for b in breaks))
+    body = root.find("body")
+    container = body if body is not None else root
+    inner = _html.escape(container.text or "") + "".join(
+        lxml.html.tostring(child, encoding="unicode") for child in container
+    )
+    profile = DocProfile.for_content(container.text_content() or "")
+    return HtmlEngine(profile).render_html_body(inner, title=title, extra_css="\n".join(rules))
+
+
 def _markdown_html(text: str) -> str:
     """Themed, direction-aware HTML wrap of a Markdown string.
 
@@ -687,6 +741,8 @@ def _render(request: dict[str, Any], output: Path) -> tuple[str, str, list[str]]
         text = source.read_text(encoding="utf-8")
         if operation.startswith("convert:markdown"):
             text = _markdown_html(text)
+        elif not (request.get("payload") or {}).get("keep_source_style"):
+            text = _house_style_html(text)
         _weasy_pdf(output, text, output.parent / "assets")
     elif renderer == "reportlab-office":
         assert source is not None

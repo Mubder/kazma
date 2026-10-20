@@ -209,8 +209,12 @@ class DocumentService:
         document_id: Any = None,
         version_id: Any = None,
         job_id: Any = None,
+        keep_source_style: bool = False,
     ) -> DocumentResult[Any]:
-        """Convert a caller-approved source through an isolated renderer."""
+        """Convert a caller-approved source through an isolated renderer.
+
+        An HTML source comes out in Kazma's house style unless
+        *keep_source_style* (``renderer_worker._house_style_html``)."""
 
         try:
             source = self._validate_approved_path(path, approved_path)
@@ -244,6 +248,7 @@ class DocumentService:
             output_name=output_name,
             export_dir=export_dir,
             approved_assets=assets,
+            keep_source_style=keep_source_style,
         )
 
     def _convert_isolated(
@@ -255,6 +260,7 @@ class DocumentService:
         output_name: str | None,
         export_dir: str | Path | None,
         approved_assets: tuple[Path, ...],
+        keep_source_style: bool = False,
     ) -> DocumentResult[Any]:
         try:
             source_sha = sha256_path(source)
@@ -270,6 +276,7 @@ class DocumentService:
                 output_name=output_name,
                 export_dir=export_dir,
                 approved_assets=approved_assets,
+                keep_source_style=keep_source_style,
             )
         except DocumentParseError as exc:
             return self._operation_error(exc.code, exc.safe_message)

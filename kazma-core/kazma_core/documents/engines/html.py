@@ -87,6 +87,16 @@ class HtmlEngine:
         safe_title = title or ""
         return self._document(safe_title, body_html, header_card=False)
 
+    def render_html_body(self, body_html: str, *, title: str = "", extra_css: str = "") -> str:
+        """Kazma's document shell around HTML content (the HTML->PDF convert
+        path): the house fonts, headings, tables and direction, whatever the
+        source's own styling was. *extra_css* is appended (the page breaks the
+        source asked for)."""
+        page = self._document(title, body_html, header_card=False)
+        if extra_css:
+            page = page.replace("  </style>\n", f"{extra_css}\n  </style>\n", 1)
+        return page
+
     # ================================================================== #
     # document shell + theme CSS
     # ================================================================== #
@@ -120,7 +130,10 @@ class HtmlEngine:
 
         t = self.theme
         direction = self.profile.html_dir
-        text_align_last = "right" if self.profile.rtl else "left"
+        # Logical, so a block in the other language ends its paragraphs on
+        # its own side (an English section of an Arabic report was set
+        # right-aligned throughout, live 2026-10-20).
+        text_align_last = "start"
         fonts = theme_fonts(rtl=self.profile.rtl)
         # When a font is pinned, inline it so the export renders identically
         # wherever it is opened. Naming a family the recipient does not have
@@ -201,7 +214,7 @@ class HtmlEngine:
     p {{ text-align: justify; margin: 0 0 0.8em 0; }}
     table {{
       width: 100%; border-collapse: collapse; margin: 16px 0;
-      direction: {direction}; font-size: {table_pt}pt;
+      font-size: {table_pt}pt;
     }}
     thead {{ display: table-header-group; }}
     tr {{ break-inside: avoid; page-break-inside: avoid; }}

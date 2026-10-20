@@ -191,6 +191,7 @@ class DocumentOperations:
         output_name: str | None,
         export_dir: str | Path | None,
         approved_assets: Sequence[Path] = (),
+        keep_source_style: bool = False,
     ) -> DocumentResult[DocumentArtifact]:
         source_format = source.suffix.lower().lstrip(".")
         if source_format == "md":
@@ -231,7 +232,7 @@ class DocumentOperations:
                 operation=operation,
                 capability=capability,
                 extension=_EXTENSIONS.get(target, target),
-                payload={},
+                payload={"keep_source_style": True} if keep_source_style else {},
                 sources=(source,),
                 scope=scope,
                 output_name=output_name or source.stem,

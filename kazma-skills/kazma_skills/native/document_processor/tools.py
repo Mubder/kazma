@@ -229,9 +229,12 @@ async def pdf_info(file_path: str) -> str:
 
 
 async def convert_document(
-    file_path: str, target_format: str, output_name: str = ""
+    file_path: str, target_format: str, output_name: str = "", keep_source_style: bool = False
 ) -> str:
-    """Convert a document through an isolated, runtime-probed renderer."""
+    """Convert a document through an isolated, runtime-probed renderer.
+
+    HTML to PDF comes out in Kazma's house style; ``keep_source_style`` keeps
+    the file's own design (only when the user asks for it)."""
 
     source, error = await asyncio.to_thread(_resolve_input, file_path, "document conversion reads")
     if error:
@@ -243,6 +246,7 @@ async def convert_document(
         approved_path=source,
         output_name=output_name or source.stem,
         export_dir=DOC_DIR,
+        keep_source_style=bool(keep_source_style),
         **_scope(),
     )
     return _artifact_output(result, "Document conversion")
