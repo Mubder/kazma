@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 
 
+
+#: The headers an inbox listing shows.
+_LIST_HEADERS = ("From", "To", "Subject", "Date")
+
+
 class GmailApiBackend:
     """Full mailbox ops via Gmail API — preferred for Workspace OAuth."""
 
@@ -219,7 +224,11 @@ class GmailApiBackend:
             meta = await self._request(
                 "GET",
                 f"/users/me/messages/{quote(mid, safe='')}",
-                params={"format": "metadata", "metadataHeaders": "From,To,Subject,Date"},
+                # One parameter per header: Gmail reads "From,To,Subject,Date"
+                # as ONE header's name, matched none, and every listed mail
+                # came back with no sender or date and its preview as the
+                # subject (live 2026-10-20). httpx repeats a list's key.
+                params={"format": "metadata", "metadataHeaders": list(_LIST_HEADERS)},
             )
             out.append(self._map(meta))
         return out
