@@ -839,15 +839,18 @@ def register_system_tools(registry: Any) -> None:
         )
     @registry.register(
         description=(
-            "Check the status and result of a dispatched Swarm task. "
-            "Returns the full result when the task is complete, or a "
-            "status message if still running. Poll this every few seconds "
-            "until you get a completed result."
+            "Wait for a dispatched Swarm task and return its result. Waits up "
+            "to wait_seconds (default 60, at most 90) for the task to finish "
+            "and returns the full result as soon as it does; if it is still "
+            "running then, says so -- call again with the same id to keep "
+            "waiting (a research task takes one to three minutes). "
+            "wait_seconds=0 checks once without waiting."
         ),
         category="swarm",
     )
-    async def check_swarm_task(task_id: str) -> str:
+    async def check_swarm_task(task_id: str, wait_seconds: int = 60) -> str:
         import asyncio as _asyncio
+        import time as _time
 
         from kazma_core.swarm import get_swarm_engine
         from kazma_core.swarm.single_operator import swarm_refusal
@@ -857,15 +860,32 @@ def register_system_tools(registry: Any) -> None:
         if refusal:
             return f"Error: {refusal}"
         engine = get_swarm_engine()
-        # Check in-memory active tasks first, then TaskStore (persisted) --
-        # a database read, in a thread (this tool runs on the event loop).
-        task = None
-        if engine:
-            task = engine.get_active_task(task_id)
-        if task is None and engine and getattr(engine, "_task_store", None):
-            import asyncio as _asyncio
 
-            task = await _asyncio.to_thread(engine._task_store.get_task, task_id)
+        async def lookup() -> Any:
+            # In-memory active tasks first, then TaskStore (persisted) -- a
+            # database read, in a thread (this tool runs on the event loop).
+            found = engine.get_active_task(task_id) if engine else None
+            if found is None and engine and getattr(engine, "_task_store", None):
+                found = await _asyncio.to_thread(engine._task_store.get_task, task_id)
+            return found
+
+        def unfinished(found: Any) -> bool:
+            return str(found.status).lower().replace("taskstatus.", "") in ("running", "pending")
+
+        # Wait for the task here, not in the model's loop: a call that
+        # returned at once had the model poll three times in two seconds,
+        # the stagnation guard ended the turn 3.8 s into a task that took
+        # minutes, and the answer was "partial" (live 2026-10-20).
+        try:
+            # Below the tool timeout (agent.tool_timeout_seconds, 120 s).
+            wait = max(0.0, min(float(wait_seconds or 0), 90.0))
+        except (TypeError, ValueError):
+            wait = 60.0
+        deadline = _time.monotonic() + wait
+        task = await lookup()
+        while task is not None and unfinished(task) and _time.monotonic() < deadline:
+            await _asyncio.sleep(min(1.0, max(0.0, deadline - _time.monotonic())))
+            task = await lookup()
         if task is None:
             return f"Task {task_id} not found."
 
@@ -883,9 +903,10 @@ def register_system_tools(registry: Any) -> None:
                 except Exception:
                     pass
             workers_str = f", worker: {task.workers[0]}" if task.workers else ""
+            waited = f" Waited {wait:.0f}s." if wait else ""
             return (
-                f"Task {task_id} is still {status_str}{elapsed_str}{workers_str}. "
-                f"Check again in a moment."
+                f"Task {task_id} is still {status_str}{elapsed_str}{workers_str}.{waited} "
+                f"Call check_swarm_task again with the same id to keep waiting."
             )
 
         # A worker's text is what it read and wrote -- web pages, files, other
