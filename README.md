@@ -36,7 +36,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~706K LOC** (563K Python code + 44K JS) | **17,370 tests** (1,246 test files) | **4,370+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~706K LOC** (563K Python code + 44K JS) | **17,370 tests** (1,246 test files) | **4,371+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
@@ -155,6 +155,17 @@ instead of killing `python` by hand, which the guard would fight:
 ```bash
 .venv/bin/python scripts/service/kazma_guard.py --reload   # Windows: .venv\Scripts\python.exe
 .venv/bin/python scripts/service/kazma_guard.py --status
+```
+
+With documents in the container profile (Settings → Documents), build the
+document worker image for the pulled code **before** the reload, so Kazma
+starts on it (otherwise it runs on the old image and raises a "worker image
+outdated" alert until you build):
+
+```bash
+git pull
+.venv/bin/python scripts/document_worker_image.py build
+.venv/bin/python scripts/service/kazma_guard.py --reload --when-idle
 ```
 
 `--reload` waits for `Kazma is up. build …`; `--status` reports

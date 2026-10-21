@@ -107,8 +107,18 @@ does not wait behind a running backup's dump or deadlock with another start.
 
 The update does **not** rebuild the document worker image. With the container
 profile on a native install, run `python scripts/document_worker_image.py
-build` after the update (Kazma raises an ops alert naming it once per build);
-the guard's broker serves the older image until then and switches by itself.
+build` right after the update; the guard's broker serves the older image
+until then and switches by itself, and Kazma raises one ops alert naming the
+build. Updating by hand avoids that alert: pull, build, then reload --
+
+```bash
+git pull
+python scripts/document_worker_image.py build
+python scripts/service/kazma_guard.py --reload --when-idle
+```
+
+-- so Kazma starts on the image for its code (the image is named after the
+code it was built from, so a reload before the build finds only the old one).
 Under docker compose, rebuild the image from `deploy/document-worker/Dockerfile`
 and restart `document-broker`: the broker pins the image it started with. Until then readiness
 reports `worker_isolation.image_code_matches: false` and
