@@ -609,9 +609,15 @@ broker killed and brought back by the guard, and nothing left behind.
 
 ### Rebuild and rotate
 
-Native install: `python scripts/document_worker_image.py build` after an
-update; the guard's broker switches to the new image within a minute, no
-restart. To rotate the token, delete `.kazma/document_broker.token` and reload
+Native install: `python scripts/document_worker_image.py build` after a
+`git pull` and before the reload (`kazma_guard.py --reload --when-idle`), so
+Kazma starts on the image for its code; a reload first runs on the old image
+and raises a "worker image outdated" alert until the build. Built later, the
+guard's broker switches to the new image within a minute, no restart.
+`kazma update` restarts Kazma itself, so with it build right after (one
+alert). The image is named after every file of `kazma_core` the build
+sends, so any change there needs a build, not only a change to the document
+code. To rotate the token, delete `.kazma/document_broker.token` and reload
 Kazma: the guard makes a new one and restarts the broker. Compose: the broker
 pins the worker image by id at start, so after rebuilding the worker image,
 restart `document-broker`; the token file is read per run on the Kazma side
