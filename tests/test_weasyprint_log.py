@@ -18,8 +18,17 @@ from kazma_core.documents import weasyprint_log
 
 @pytest.fixture
 def weasy_logger():
+    """The weasyprint logger without the filter, restored afterwards.
+
+    A rendering test earlier in the same process installs the filter
+    (``quiet_own_stylesheet_warnings`` runs once per process), so each test
+    here starts from a logger that has none -- the negative control failed
+    in a full run whenever a document render ran before it.
+    """
     logger = logging.getLogger("weasyprint")
     saved = list(logger.filters)
+    logger.filters[:] = [f for f in saved
+                         if not isinstance(f, weasyprint_log._OwnStylesheetSelectors)]
     yield logger
     logger.filters[:] = saved
 
