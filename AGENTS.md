@@ -5877,7 +5877,9 @@ no monitor provider probes. Settings controls are admin-scoped. Initial old
 terminal history is quiet. A crawl or pipeline an agent runs in its turn
 (`research_crawl`, an unlinked `research_pipeline`: `_AGENT_RUN_KINDS`) is not
 alerted: its result goes to the agent (2026-10-20, "Partial results" under a
-complete swarm answer). Delivery callbacks persist platform acceptance,
+complete swarm answer). An alert stored for such a run before that rule is
+settled at the next scan (`_collect` names the runs it leaves to the agent):
+yesterday's stayed in the bell a day after the fix (2026-10-21). Delivery callbacks persist platform acceptance,
 refusal or uncertainty; a requested send is never proof of delivery. Unknown
 delivery after a crash is not replayed. The loop follows the pytest scheduler
 gate and is cancelled/joined before stores close. Soft navigation initializes

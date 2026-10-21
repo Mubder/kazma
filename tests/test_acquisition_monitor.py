@@ -18,8 +18,10 @@ def fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor, '_LAUNCHED_AT', None)
     monkeypatch.setattr(monitor, 'time', SimpleNamespace(time=lambda: 1000))
     monkeypatch.setenv('KAZMA_ACQUISITION_MODE', 'local_only')
-    rows = SimpleNamespace(jobs=[], balances=[], allowance=dict(recent=[], days={}, jobs={}), sent=[])
-    monkeypatch.setattr(monitor, '_collect', lambda: copy.deepcopy((rows.jobs, rows.balances, rows.allowance)))
+    rows = SimpleNamespace(jobs=[], balances=[], allowance=dict(recent=[], days={}, jobs={}), sent=[],
+                           left_to_agent=set())
+    monkeypatch.setattr(monitor, '_collect',
+                        lambda: copy.deepcopy((rows.jobs, rows.balances, rows.allowance, rows.left_to_agent)))
     monkeypatch.setattr(ops_alerts, 'alert', lambda *args, **kwargs: rows.sent.append((args, kwargs)) or True)
     rows.store = store
     yield rows
@@ -357,3 +359,41 @@ def test_negative_control_without_the_rule_the_agents_crawl_is_alerted(fixture, 
                                 max_pages=5, max_depth=1, path_prefix=''),
                            kind='research_crawl')
     assert 'job:' + job.job_id in [j['key'] for j in _REAL_COLLECT()[0]]
+
+
+def _stored_partial(key, link):
+    return dict(id='acquisition-stored-' + key[-4:], key=key, condition='partial', timestamp=990, link=link,
+                sources=0, result_available=False, resolved=False, dispatch='delivered', provider=None,
+                remaining=None, observed_at=None, http_status=None)
+
+
+def test_an_alert_stored_for_an_agents_own_run_leaves_the_bell(fixture):
+    """Live 2026-10-21: yesterday's "Partial results -- Sources: 0" for a
+    swarm worker's crawl_site was still in the bell, raised 21 minutes before
+    the rule that leaves an agent's runs to the agent was deployed."""
+    agent, owner = 'job:agent-crawl-0001', 'job:kb-crawl-0002'
+    fixture.store.set('acquisition.monitor', {
+        'started': 900, 'checked_at': 990, 'jobs': {}, 'providers': {},
+        'events': [_stored_partial(agent, '/research?job=agent-crawl-0001'),
+                   _stored_partial(owner, '/knowledge?job=kb-crawl-0002')]}, category='acquisition_monitor')
+    assert {a['id'] for a in monitor.recent_alerts()} >= {'acquisition-stored-0001', 'acquisition-stored-0002'}
+    fixture.left_to_agent = {agent}
+    monitor.tick()
+    shown = {a['id'] for a in monitor.recent_alerts()}
+    assert 'acquisition-stored-0001' not in shown  # the agent's run: settled
+    assert 'acquisition-stored-0002' in shown  # the owner's Knowledge crawl: still shown
+    assert fixture.sent == []  # settling raises nothing
+
+
+def test_the_real_collect_names_the_runs_it_leaves_to_the_agent(fixture, monkeypatch, tmp_path):
+    from kazma_core.tools import research_session
+    from kazma_core.web_acquire import crawl_jobs
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    crawl = crawl_jobs.start('agent-crawl', 'https://fixture.example/',
+                             dict(mode='local_only', schema=1, workspace=str(tmp_path), output='research/x',
+                                  max_pages=5, max_depth=1, path_prefix=''), kind='research_crawl')
+    kb = crawl_jobs.start('kb-library', 'https://docs.fixture.example/',
+                          dict(mode='local_only', robots=False, max_pages=1, scope='tree', delay_ms=0))
+    jobs, _, _, left_to_agent = _REAL_COLLECT()
+    assert left_to_agent == {'job:' + crawl.job_id}
+    assert 'job:' + kb.job_id not in left_to_agent
