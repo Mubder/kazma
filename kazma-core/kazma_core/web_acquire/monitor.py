@@ -82,7 +82,8 @@ _AGENT_RUN_KINDS = frozenset({'research_crawl', 'research_pipeline'})
 
 
 def _collect():
-    """Fresh local reads only. Session and pipeline rows describe ONE run."""
+    """Fresh local reads only. Session and pipeline rows describe ONE run.
+    The last item is the keys of the jobs left to the agent that ran them."""
     from kazma_core.tools import research_session
     from kazma_core.web_acquire import accounting, crawl_jobs, credits
 
@@ -104,10 +105,12 @@ def _collect():
             progress=[s['stage'], s['sources']], link='/research?session=' + quote(s['id'], safe=''),
             result_available=bool(s['report_path'] or s['has_summary']), kind='research'))
     crawl_jobs.recover()
+    left_to_agent = set()
     for row in crawl_jobs._read()[1].values():
         if row['job_id'] in linked:
             continue
         if row.get('kind') in _AGENT_RUN_KINDS:
+            left_to_agent.add('job:' + row['job_id'])
             # An agent's own call (crawl_site; run_research_pipeline outside
             # a Research session): its result goes back to the agent, which
             # answers in its turn. Alerting the owner too told of a problem
@@ -128,7 +131,7 @@ def _collect():
                       progress.get('discovered'), progress.get('visited')],
             link=('/research?job=' if research else '/knowledge?job=') + quote(row['job_id'], safe=''),
             result_available=row['fetched'] > 0 or effects.get('terminal-summary', {}).get('status') == 'completed', kind='research' if research else 'crawl'))
-    return jobs, credits.snapshot(), accounting._read_evidence()
+    return jobs, credits.snapshot(), accounting._read_evidence(), left_to_agent
 
 
 def _identity(key):
@@ -231,7 +234,7 @@ def tick(*, now=None):
     cfg = settings()
     if not cfg['enabled']:
         return []
-    jobs, balances, allowance = _collect()
+    jobs, balances, allowance, left_to_agent = _collect()
     emitted = []
 
     def change(state):
@@ -259,6 +262,13 @@ def tick(*, now=None):
 
         retained = _observe_jobs(state, jobs, cfg, now, event)
         _observe_providers(state, balances, allowance, jobs, cfg, now, event)
+        # An alert stored before an agent's own runs were left to the agent
+        # stays in the bell for 30 days (live 2026-10-21: yesterday's
+        # "Partial results -- Sources: 0" for a swarm worker's crawl_site,
+        # raised 21 minutes before that rule was deployed). It is settled.
+        for old in state['events']:
+            if old['key'] in left_to_agent and not old['resolved']:
+                old['resolved'] = True
         # Keep active warnings even when a burst of results ages out old history.
         active = [r for r in state['events'] if r['condition'] == 'stalled' and not r['resolved']
                   and r['key'] in retained]
