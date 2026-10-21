@@ -221,14 +221,18 @@ the old behaviour as a negative control).
 | F06 | Verified SQLite backup; coordinated Postgres backup at one snapshot with GC pins; restore only into empty targets; index reconciled at every worker start | `backup.py`, `backup_pg.py`, `retention.py`, `knowledge.py`, `scripts/document_pg_backup.py` | `test_document_backup_restore_hardening`, `test_document_pg_backup_restore`, `test_document_backup_pins`, `test_document_reindex_after_restore`, `test_document_pg_restore_drill_scale` (opt-in) |
 | F07 | Outages (scanner, disk, metadata store, broker) retried then dead-lettered; only content is rejected; a failed outcome write never ends the worker loop | `errors.py`, `worker.py`, `ingestion.py` | `test_document_fault_transitions` |
 | F08 | Durable admission reservations; Web upload answered before its body; bounded JSON bodies; spools under the storage root; tenant quota enforced on Postgres metadata; claims fair across tenants | `admission.py`, `capacity.py`, `jobs.py`, `jobs_pg.py`, `repository_pg.py`, `documents_api.py` | `test_document_admission_hardening`, `test_document_capacity_hardening`, `test_document_upload_admission`, `test_document_json_body_cap`, `test_document_claim_fairness`, `test_document_quota_both_backends` |
-| F09 / Q02 | Versioned fidelity corpus (version 3: 19 cases, 16 meet the release targets); Arabic PDF lines re-read glyph by glyph with bidi-checked numbers; OCR numbers in logical order; ruled scanned tables read cell by cell | `fidelity.py`, `parsers/pdf_rtl.py`, `arabic.py`, `ocr/tables.py`, `ocr/tesseract.py` | `test_document_fidelity`, `test_document_pdf_rtl`, `test_document_number_order`, `test_document_ocr_tables`, `test_document_real_scans` (opt-in) |
+| F09 / Q02 | Versioned fidelity corpus (version 5: 19 cases; all 19 meet the release targets with the neural OCR engine, 16 with Tesseract); Arabic PDF lines re-read glyph by glyph with bidi-checked numbers; OCR numbers in logical order; ruled scanned tables read cell by cell | `fidelity.py`, `parsers/pdf_rtl.py`, `arabic.py`, `ocr/tables.py`, `ocr/tesseract.py`, `ocr/neural.py` | `test_document_fidelity`, `test_document_pdf_rtl`, `test_document_number_order`, `test_document_ocr_tables`, `test_document_ocr_neural`, `test_document_ocr_reading_rules`, `test_document_real_scans` (opt-in) |
 | F10 | The certification report names the isolation profile, image and backends it ran with; `process` is CONDITIONAL; soak and external review NOT RUN | `certification.py` | `test_document_certification_phase10`, `test_document_certification_honesty` |
 | Q01 | Process death at every intake and job stage recovered; owners proven dead rolled back at start and every minute; cross-host intakes hold a lease and are fenced after a takeover | `admission.py`, `ingestion.py`, `jobs.py` | `test_document_crash_recovery`, `test_document_intake_lease`, `test_document_intake_lease_containers` (opt-in) |
 
-**Open:** a 48–72 hour soak (`scripts/document_soak.py` has run a two-minute
-pilot only), an independent security review, multi-replica qualification,
+**Done since:** a 48-hour soak passed (`scripts/document_soak.py`,
+2026-10-17 to 2026-10-19, the `process` profile on private SQLite stores:
+12,865 documents, 190 restarts, no errors), and the independent security
+review (Q04) is closed (`docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`).
+
+**Open:** a soak on Postgres and in the `container` profile, multi-replica qualification,
 rootless/Kubernetes and stronger-kernel (gVisor/Kata) container profiles, a
-filesystem/network jail for the `process` profile, Arabic OCR, and deployment
+filesystem/network jail for the `process` profile, OCR measured on more than one real scan, and deployment
 RPO/RTO. [Document Intelligence](./document-intelligence.md#not-qualified)
 lists the limits for operators.
 

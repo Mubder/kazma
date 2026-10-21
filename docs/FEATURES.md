@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-12**, and the document lines on **2026-10-15**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**, and the document lines on **2026-10-15** and **2026-10-21**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -68,7 +68,7 @@ Every line below describes that setup.
 | Every answer shows which memories it used | Shipped | chat activity: "Memory used" |
 | "About me": a short text you write, read at the start of every reply | Shipped | Settings → Memory |
 | Weekly topic summaries of long threads | Shipped | Memory page |
-| Forget one memory or a whole chat; keep a chat out of memory; export everything | Shipped | chat menu → Memory…, Memory page |
+| Forget one memory or a whole chat, from the page or by asking in chat ("forget everything that mentions X" reaches every memory holding it); keep a chat out of memory; export everything | Shipped | chat menu → Memory…, Memory page, `memory_forget_mentions` |
 | Works in Arabic and English, Gulf dialect included | Shipped | `memory/query_terms.py` |
 | Nothing lost by accident: archiving never erases a memory's text | Shipped | `memory/macro_sleep.py` |
 | Shared memory between installs through Postgres | Partial — memories and facts mirror; each install keeps its own vectors and graph | [Postgres](docs/ops/postgres-and-saas.md) |
@@ -81,9 +81,9 @@ Every line below describes that setup.
 | Documents: upload into quarantine with file-type checks; macro-enabled Office files and PDFs with scripts, outside actions, attachments or links to files and network shares are refused; text from PDF, Word, Excel, PowerPoint, HTML, Markdown, CSV and plain text, Arabic included (legacy .doc/.xls/.ppt through LibreOffice) | Shipped | `/documents` |
 | OCR of scanned PDFs and images, Arabic and Arabic-Indic digits included; ruled tables on a scanned page read cell by cell | Partial — Arabic is read by the neural engine (ONNX Runtime; its models installed by `scripts/ocr_models.py install`, and built into the document worker image); without them Tesseract reads, and it does not read Arabic-Indic digits. Every OCR case of Kazma's measured corpus qualifies with the neural engine; it is measured on one real scan so far | `documents/ocr/` |
 | Virus scanning of uploads | Opt-in — needs ClamAV installed; with `KAZMA_PRODUCTION=1` an upload is refused until a scan can run | `documents/malware.py` |
-| Convert, split, merge and redact documents; generate reports as Word, PDF or HTML with correct Arabic typography | Shipped — full-quality Arabic PDFs need LibreOffice; without it a limited fallback, with a warning | `/documents` |
+| Convert, split, merge and redact documents; generate reports as Word, PDF or HTML in one house style, with correct Arabic typography and each paragraph and table in its own language's direction | Shipped — full-quality Arabic PDFs need LibreOffice; without it a limited fallback, with a warning | `/documents` |
 | Untrusted documents parsed in a separate worker with memory and CPU limits; optionally one container per job, with no network and no mounts | Partial — the default worker does not confine files or network and is not qualified for hostile documents; the container profile is a Settings choice that needs Docker, and the guard runs its broker | `KAZMA_DOCUMENT_WORKER_ISOLATION`, [Document security](docs/security/document-security.md) |
-| Durable document jobs: limits answered before an upload is read, outages retried, interrupted uploads rolled back after a crash, a Postgres document store backed up as one point in time | Partial — no 48–72 hour soak and no independent review yet | [Document processing](docs/ops/document-processing.md) |
+| Durable document jobs: limits answered before an upload is read, outages retried, interrupted uploads rolled back after a crash, a Postgres document store backed up as one point in time | Partial — a 48-hour soak passed on the default `process` profile with SQLite stores (12,865 documents, 190 restarts, 143 injected crashes, 0 errors); not soaked on the container profile or on Postgres, and multi-replica is not qualified. An independent security review found one issue, fixed and confirmed by the reviewer | [Document processing](docs/ops/document-processing.md) |
 | A hard PDF sent to a third-party parser (LlamaParse, Reducto) when local extraction is weak | Opt-in — off by default; every upload is audited first | `documents.security.remote_parse` |
 | Deep web research with sources: search, read, crawl, summarize | Shipped | `/research` |
 | Web search through SearXNG (self-hosted metasearch, in the Docker setup) | Shipped | `tools/web_search.py` |
@@ -101,7 +101,7 @@ Every line below describes that setup.
 |---|---|---|
 | Web IDE: browse, edit, patch, run, git — every write through the approval gate | Shipped | `/ide` |
 | Clone and switch repositories; the agent always works in the active one | Shipped | `/workspace` |
-| GitHub: branches, commits, pull requests, through a GitHub App or a token | Shipped | `git_github_manager` skill |
+| GitHub: branches, commits, pull requests and issues, through a GitHub App or a token; read-only history and diffs (`git_log`, `git_diff`) need no approval | Shipped | `git_github_manager` skill |
 | Code search across the repository (ripgrep plus symbols) | Shipped | `kazma_core/code_index/` |
 | Steer a running task (`/steer`), abort it, plan first (`/plan`), long missions (`/long`) | Shipped | chat commands |
 | Rewind or branch a conversation from any earlier step | Shipped | `/replay`, `/fork`, [Time travel](docs/guide/time-travel-and-replay.md) |

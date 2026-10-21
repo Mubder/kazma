@@ -127,6 +127,12 @@ covers `kazma_core/documents` only, while the image holds all of
 `kazma_core`). See
 [Document processing → Isolated document workers](./document-processing#isolated-document-workers-container-profile).
 
+## Open browser tabs after an update
+
+A tab opened before the update keeps the page code it loaded. It shows
+"Kazma was updated" with a **Refresh** button within 5 minutes, or as soon
+as you return to it; refresh to load the new version.
+
 ## Developer clones
 
 Use normal git on feature branches. Do not rely on hard-reset update while

@@ -415,10 +415,15 @@ Two cross-cutting subsystems sit across the supervisor and the tools:
   a `proposal_id`) always surface their card on every path; the gateway's
   3-cards-per-4-minutes burst limit applies only to exec retry-loop storms on
   platform adapters and exempts X/proposal cards by design. Unattended cards
-  auto-deny at `safety.hitl.approval_timeout_seconds` (default 300); the
-  deadline is stamped as `approval_deadline` on the SSE payload, session-status
-  gates, and pending-approval items, and the chat card counts down to it.
-  **"Allow tool (session)"** grants one tool for ~30 minutes in the thread.
+  expire at `safety.hitl.approval_timeout_seconds` (default 300): the tool is
+  not run, the model is told the approval expired (not that you refused it),
+  and the card is closed; in Telegram, Discord and Slack the chat gets a
+  notice and the rest of the turn. The deadline is stamped as
+  `approval_deadline` on the SSE payload, session-status gates, and
+  pending-approval items, and the chat card counts down to it.
+  **"Allow tool (session)"** grants one tool for ~30 minutes in the thread. An
+  always-ask tool (the X writes) offers only a one-time approval and Deny: no
+  "Allow tool", no YOLO.
 - **Turn Delivery V2.** Journal + `close_turn` are SoT; SSE/WS/`chat.js` project.
   A pending registry row keeps the turn open. No second painter.
 - **Ops alerting.** Three paths only: Guard Telegram-direct (child is down),

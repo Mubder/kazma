@@ -31,6 +31,10 @@ Without credentials, every response is prefixed with **`[sandbox mode]`**. Data 
 | `email_categorize` | read/star/labels/move | **Yes** |
 | `email_analyze` | summary, actions, phishing | No |
 
+A listing gives each mail's sender, date and subject (subjects up to 150
+characters, senders up to 80), so the agent can answer "what came today"
+without opening each mail.
+
 Common args: `provider` (`auto`\|`sandbox`\|`gmail`\|`microsoft`\|`imap`\|`pop`), optional `account` (which mailbox: an account's name or its address; see [More than one account](#more-than-one-account)).
 
 ## Provider resolution (`auto`)

@@ -28,7 +28,9 @@ tools:
     arabic_name: "إنشاء DOCX"
     description: >
       Generate a styled Word document with Heading styles, bullet/number lists,
-      justified paragraphs, and RTL (w:bidi) when Arabic is detected.
+      justified paragraphs, in Kazma's house style; each paragraph and table is
+      laid out in its own language's direction (w:bidi per paragraph), so one
+      document can hold an Arabic and an English part.
       LARGE DOCUMENTS: write content to a .md file first, then pass
       markdown_path="file.md" (same as generate_pdf). Small docs: inline
       sections with markdown bodies.

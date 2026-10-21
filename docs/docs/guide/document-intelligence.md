@@ -105,7 +105,8 @@ do not allow writes. See `kazma_core.workspace.path_policy`.
   relationships, nested archives, compression bombs), and one PDF
   active-content policy (`documents/pdf_policy.py`). Refused PDFs: encrypted
   ones, script (JavaScript, XFA forms), actions that run, open, submit or fetch
-  outside the document (Launch, remote GoTo, SubmitForm, ImportData,
+  outside the document (Launch, remote GoTo — a GoTo or Thread naming another
+  file included — SubmitForm, ImportData,
   renditions, rich media, sound, movie), embedded files, and links whose target
   is not an absolute `http`, `https` or `mailto` URI. Navigation inside the
   document and web links stay. No setting turns these refusals off. The same
@@ -181,6 +182,14 @@ Electronic (text-layer) PDFs are **not** OCR’d by default. The parser runs a
   date written "في 2026-09-30" comes back as written although the page draws
   it "30-09-2026". An RTL table's columns are read right to left. A gap wider
   than half a font size is a word break.
+- **Tables and bilingual pages:** each table is read once, from its grid,
+  where it stands on the page. Cell text comes from the glyphs on every page,
+  so a ligature such as "fi" reads as written; a cell's wrapped lines are one
+  value, and a number-only cell of a right-to-left table reads right to left.
+  Two sides of a page count as columns only when they stand side by side, so
+  short Arabic and English lines stacked one above the other stay in one
+  column. A paragraph holding a bidi mark (RLM, an isolate) no longer ends the
+  page's text.
 - **Metadata:** `extractor`, `extraction_score`, `extractors_tried`, per-page
   `layout.method` / `column_count`.
 - **Round-trip generate→parse:** RTL titles use fuzzy token coverage (glyph
@@ -295,7 +304,12 @@ citations. In the `container` profile there is no Docling tier.
   with a `library_id` — see [Knowledge Library](./knowledge-library.md).
 - **Deleting a document leaves every library first.** A library it cannot
   leave stops the delete (`document_unindex_failed`, naming the library), so a
-  retry can finish it; a deleted document is never still searchable.
+  retry can finish it; a deleted document is never still searchable. While
+  the Knowledge Library is unavailable, a document the store records as
+  indexed is not deleted either (`document_unindex_failed`, "nothing was
+  deleted"); try again once it is back. The delete holds the document's
+  publication lock throughout, so an index published meanwhile cannot survive
+  it.
 - **The index is reconciled at every worker start**
   (`DocumentIngestionService.reconcile_index`): each version the store records
   as indexed but no library holds is re-published from its own manifest, under
@@ -311,6 +325,12 @@ citations. In the `container` profile there is no Docling tier.
   re-ingested as tenant-owned documents.
 - **Format conversion:** Transform a processed document into a target format
   (opaque `document_id` only — no raw server paths from clients).
+- **One house style:** generated documents, and every HTML file converted to
+  PDF, use Kazma's brand face, headings, tables and header/footer, each
+  paragraph and table laid out in its own language's direction. The path-based
+  `convert_document` tool takes `keep_source_style=true` to keep an HTML
+  file's own design; platform conversions always use the house style. See
+  [Document rendering](./document-rendering.md).
 - **PDF operations:** Info extraction, split, merge, form field fill.
 - **Redaction:** Verified physical/raster redaction pipeline with post-checks.
   **Web UI** confirms via `kazmaConfirm` before calling the API. **API and agent
@@ -328,7 +348,12 @@ citations. In the `container` profile there is no Docling tier.
 / …) renders through the same isolated workers (`DocumentService.generate`)
 but writes plain files under `kazma-data/documents/` and does **not** go
 through the durable platform. Prefer `document-platform` tools for opaque-ID,
-tenant-scoped, restart-safe work.
+tenant-scoped, restart-safe work. `generate_pdf` reads the finished PDF back
+and checks that the distinctive words of each section and every table header
+and first-row cell reached it, comparing punctuation and ligatures the same
+way on both sides. If they did not, the call answers with an error naming the
+incomplete file and asking for a new call: an ordinary error the agent can
+correct, not an unknown effect.
 
 ---
 
@@ -403,8 +428,10 @@ Side paths: `retry_wait` (transient / lease recovery), `cancelled`, `dead_letter
   [Backpressure](#backpressure)).
 - **Fair claims:** workers take jobs from the tenant with the fewest running
   first, then by when the job became ready (both backends).
-- **Every job read names its caller.** Job status, events, the jobs of a
-  document, cancel and retry check that the actor can read the job's document.
+- **Every job read names its caller.** Job status, events and the jobs of a
+  document check that the actor can read the job's document; cancel and retry
+  need write access. A call that names no caller is refused before the job is
+  looked up.
   A job the caller cannot read answers exactly like an unknown one (404 on the
   Web routes) on every surface; a replay of another actor's upload key is an
   `idempotency_conflict`. On a single-operator install the Web page, chat and
@@ -575,14 +602,12 @@ with Kazma's own engines — English, Arabic and bilingual DOCX, PDF and HTML,
 long documents, two columns from another producer, wide tables, OCR pages
 (plain, ruled table, degraded scan) — measured on the real parser for word,
 segment, number and table-cell recall, reading order, page honesty, alignment
-and OCR CER/WER. Corpus version 4 has 19 cases (the OCR reference now holds
-all the text a page shows, its footer included). The five OCR cases are
-measured with each engine against its own floors: with the neural engine
-**17** of 19 meet the release targets (`ar-ocr` among them); with Tesseract
-16. Not qualified: `ar-ocr-table` with the neural engine (one word,
-`ريالاً`, misread; every number and cell right) and with Tesseract (Arabic-Indic
-digits not read), `ar-ocr` with Tesseract, and `en-ocr-degraded` with both (a
-decimal point read as a comma or a colon). `python scripts/document_fidelity.py`
+and OCR CER/WER. Corpus version 5 has 19 cases (version 4 put the page
+furniture into the OCR reference; version 5 counts punctuation). The five OCR
+cases are measured with each engine against its own floors: with the neural
+engine all **19** meet the release targets; with Tesseract 16. Not qualified
+with Tesseract: `ar-ocr` and `ar-ocr-table` (Arabic-Indic digits not read) and
+`en-ocr-degraded` (3.75 read as 3:75). `python scripts/document_fidelity.py`
 measures it again with every engine installed here.
 
 **Note:** Architecture, a11y, and full crash-matrix gates live in
@@ -779,19 +804,28 @@ the fidelity corpus — not plans:
 - **Hostile documents on the default `process` profile.** It bounds memory, CPU
   and time but does not confine the filesystem or the network. Only the
   `container` profile does, and its containers share the host kernel.
-- **Arabic OCR with Tesseract** (`ar-ocr`, `ar-ocr-table` below the release
-  targets: Arabic-Indic digits are not read). With the neural engine, the
-  Arabic page with a ruled table (`ar-ocr-table`, one word misread), Arabic
-  decimals and dates written with the Arabic separators, and real scans at the
-  release targets (measured on one real scan only, where it beat Tesseract on
-  most pages and lost on some words). Numbers read from degraded scans
-  (`en-ocr-degraded`) with either engine. Tables without ruling lines and
-  merged cells are not read cell by cell.
+- **OCR with Tesseract:** Arabic (`ar-ocr`, `ar-ocr-table`: Arabic-Indic
+  digits are not read) and numbers from degraded scans (`en-ocr-degraded`:
+  3.75 read as 3:75). With the neural engine every OCR case of the corpus meets
+  the release targets, but real scans are measured on one scan only (it beat
+  Tesseract on most pages and lost on some words). Tables without ruling lines
+  and merged cells are not read cell by cell.
 - **Multi-replica operation** (the certifier's `postgres_multi_replica` and
   `metadata_multi_replica` are NOT RUN).
-- **Sustained operation:** no 48–72 hour mixed-load soak has been run; `--soak`
-  is an extended smoke.
-- **Independent security review:** none (`external_security_review` is NOT RUN).
+- **Sustained operation:** one 48-hour mixed-load soak passed
+  (`scripts/document_soak.py`, 2026-10-17 to 2026-10-19, one Windows host,
+  private SQLite stores, the `process` profile): 12,865 documents submitted and
+  finished, 190 restarts, 143 injected crashes, no errors, no scratch left;
+  4.5 documents a minute (ClamAV scans every upload), p95 14.1 s. Postgres and
+  the `container` profile have not been soaked. The certifier's `--soak` is
+  still an extended smoke.
+- **Independent security review:** one review of the Documents security
+  profile (2026-10-15, `docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`): 13 of
+  14 claims held, and the one finding (FIND-01) was fixed and confirmed by the
+  reviewer's retest. It covered one Windows Docker Desktop host; the `process`
+  profile as a hostile-document defence, Linux supervision, multi-replica and
+  sustained load were out of scope. The certifier's `external_security_review`
+  still reads NOT RUN: a local run cannot perform one.
 - **Recovery-point and recovery-time objectives** for a deployment: the restore
   drills measure them; no figure is promised.
 - **Docling salvage in the `container` profile:** not in the worker image.

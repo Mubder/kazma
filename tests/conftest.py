@@ -14,6 +14,7 @@ import pathlib
 # ``t`` global) is applied before any test creates a Jinja2Templates instance.
 import kazma_ui.i18n  # noqa: F401
 import pytest
+import pytest_asyncio
 
 
 @pytest.fixture(autouse=True)
@@ -315,10 +316,20 @@ def agent_config() -> AgentConfig:
     )
 
 
-@pytest.fixture
-def agent(agent_config: AgentConfig) -> KazmaAgent:
-    """Return a KazmaAgent instance for testing."""
-    return KazmaAgent(config=agent_config)
+@pytest_asyncio.fixture
+async def agent(agent_config: AgentConfig):
+    """Return a KazmaAgent instance for testing, its checkpointer closed after.
+
+    A test that runs the agent opens the shared checkpoint saver (an aiosqlite
+    worker thread, non-daemon); left open, the thread outlived the session and
+    the root conftest's thread guard failed the run (2026-10-21, after
+    ``test_run_returns_response``). The saver belongs to the test's event
+    loop, so it is released here, on that loop -- from a new loop
+    ``release_shared_checkpoints`` finds no saver to close.
+    """
+    instance = KazmaAgent(config=agent_config)
+    yield instance
+    await instance._close_checkpointer()
 
 
 @pytest.fixture(autouse=True)

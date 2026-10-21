@@ -763,7 +763,7 @@ def _mutate_functional_locked(
            WHERE subject=? AND predicate=? AND tenant_id=?
              {lists_kept}
              AND valid_until IS NULL AND invalidated_at IS NULL
-           ORDER BY valid_from DESC, ingested_at DESC""",  # nosec B608 -- a fixed clause, values bound
+           ORDER BY valid_from DESC, ingested_at DESC""",  # nosec B608 - a fixed clause, values bound
         (sub, pred, tenant_id),
     ).fetchall()
     existing = current[0] if current else None

@@ -391,6 +391,13 @@ traceback, the stacks of a native crash — `serve.py` enables
 `faulthandler` — or a refusal at boot) and quotes its last lines in the
 `guard.restarting` event and the page.
 
+**A page the guard cannot send yet is held.** The guard's Telegram
+credentials can live in Kazma's settings database. When the guard cannot read
+them -- for example after a reboot that starts Kazma before Postgres -- it
+keeps up to 20 pages and sends them, marked "⏳ Delayed N min", once the
+credentials resolve. Held pages live in the guard's memory: a guard restart
+loses them.
+
 **Settings → "Restart server"** asks the guard for a reload when a guard
 started the server (the same graceful reload as `kazma_guard.py --reload`);
 without a guard the server restarts itself as before.

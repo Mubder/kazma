@@ -1025,7 +1025,7 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
             keys = chat_keys(session) or [session]
             marks = ",".join("?" * len(keys))
             source = [str(r["id"]) for r in conn.execute(
-                f"SELECT id FROM episodes WHERE session_id IN ({marks}) AND turn_number = ?",  # nosec B608 -- placeholders only
+                f"SELECT id FROM episodes WHERE session_id IN ({marks}) AND turn_number = ?",  # nosec B608 - placeholders only
                 (*keys, int(turn)),
             ).fetchall()]
         value = _distinctive_value(str(row["object"] or ""))

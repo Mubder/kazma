@@ -241,16 +241,16 @@ Consequences worth knowing:
   `shell_exec`. To run a danger tool without prompting, use YOLO mode or an
   explicit per-tool grant — both deliberate, audited, and revocable.
 
-56 tools currently require approval:
+59 tools currently require approval:
 
-`browser_click`, `browser_eval_js`, `browser_fill_form`, `browser_navigate`, `cancel_scheduled`, `code_exec`, `computer_use`, `config_save`, `create_event`, `delete_event`, `dispatch_notification`, `document_cancel`, `document_redact`, `edit_scheduled`, `email_categorize`, `email_delete`, `email_send`, `file_append`, `file_apply_patch`, `file_delete`, `file_write`, `git_checkout`, `git_commit`, `git_merge`, `git_pull`, `git_push`, `github_comment_issue`, `github_create_issue`, `github_create_pr`, `github_merge_pr`, `install_agent_skill`, `install_npm_packages`, `install_python_packages`, `memory_admin`, `memory_delete_entity`, `memory_forget_mentions`, `memory_invalidate`, `memory_merge_entities`, `memory_purge_empty_entities`, `pdf_fill_form`, `pdf_redact`, `python_exec`, `request_path_access`, `run_tests`, `schedule_task`, `send_file`, `send_message`, `shell_exec`, `uninstall_agent_skill`, `update_event`, `vault_delete`, `vault_retrieve`, `vault_store`, `x_cancel_scheduled_post`, `x_delete_post`, `x_post`, `x_schedule_post`
+`browser_click`, `browser_eval_js`, `browser_fill_form`, `browser_navigate`, `cancel_scheduled`, `code_exec`, `computer_use`, `config_save`, `create_event`, `delete_event`, `dispatch_notification`, `document_cancel`, `document_redact`, `edit_scheduled`, `email_categorize`, `email_delete`, `email_send`, `file_append`, `file_apply_patch`, `file_apply_patch_set`, `file_delete`, `file_write`, `git_checkout`, `git_commit`, `git_merge`, `git_pull`, `git_push`, `github_comment_issue`, `github_create_issue`, `github_create_pr`, `github_merge_pr`, `install_agent_skill`, `install_npm_packages`, `install_python_packages`, `memory_admin`, `memory_delete_entity`, `memory_forget_mentions`, `memory_invalidate`, `memory_merge_entities`, `memory_purge_empty_entities`, `pdf_fill_form`, `pdf_redact`, `python_exec`, `request_path_access`, `run_tests`, `run_unit_tests`, `schedule_task`, `send_file`, `send_message`, `shell_exec`, `uninstall_agent_skill`, `update_event`, `vault_delete`, `vault_retrieve`, `vault_store`, `x_cancel_scheduled_post`, `x_delete_post`, `x_post`, `x_schedule_post`
 
 These can never be skipped — not by YOLO, not by a grant, not by
 `hitl.enabled: false` (X's automation rules require a human per outbound post):
 
 `x_cancel_scheduled_post`, `x_delete_post`, `x_post`, `x_schedule_post`
 
-Approval cards are posted to Telegram with `[👍 Approve] [👎 Reject]` buttons and expire after 60 seconds.
+In Telegram, Discord and Slack an approval card has ✅ Approve, ❌ Deny and 🔓 Approve for task (every approval of this task until your next message). An X card names its action instead ("Post now", "Schedule post", "Delete post", "Cancel scheduled post") and offers no task approval. A card nobody answers expires after `safety.hitl.approval_timeout_seconds` (default 300 s): the tool is not run, and the chat is told.
 
 A CI gate (`tests/test_static_gates.py::test_every_registered_tool_has_a_tier`)
 fails the build if a newly registered tool has no tier, so the map stays

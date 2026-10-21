@@ -313,6 +313,7 @@ Optional package: Playwright via `pip install -e ".[web]"` then `playwright inst
 | `KAZMA_KB_MAX_PAGES` | `200` | Pages one library ingest job may fetch (1–1000). |
 | `KAZMA_KB_MAX_DEPTH` | `10` | Link depth of an ingest crawl when the site has no sitemap (0–20). |
 | `KAZMA_KB_DELAY_MS` | `300` | Pause between page fetches of one ingest job (0–5000 ms). |
+| `RAYON_NUM_THREADS` | set to 1 by Kazma when unset | Not a Kazma variable: the thread count of the Rust thread pool in chromadb (and tokenizers). Kazma sets it to 1 before the Knowledge Library's vector store starts, because Chroma's parallel replay of a library's write log can crash the process. A value you set yourself is kept, with a WARNING in the log; leave it unset. See [Knowledge Library](../guide/knowledge-library). |
 | `KAZMA_KB_SCOPE_MODE` | `tree` | Which links an ingest crawl follows: `tree` (same host and a shared topic path segment), `prefix` (strict path prefix), `domain` (same host, any path) or `exact` (the one page). |
 | `KAZMA_KB_JINA_FALLBACK` | policy-gated | Jina discovery fallback requires remote mode plus `jina` allowlist permission. `0`, or `KAZMA_JINA_READER=0`, vetoes it; `1` cannot grant permission. |
 
@@ -524,7 +525,7 @@ whole.
 | `KAZMA_USER_HOME` | `<install>/.kazma` | Logs, guard state, the hub registry, the restic passphrase. A legacy `~/.kazma` is moved here once at startup. |
 | `KAZMA_SKILLS_HOME` | the user's home folder | The folder whose skill folders Kazma reads and installs Agent Skills to: `.agents/skills` (shared with other agentskills.io clients), `.claude/skills`, `.cursor/skills` and the legacy `.kazma/agent-skills`. Set it when Kazma runs as a service account that should read another user's skills; the test suite sets it so a test run never reads or changes the real ones. |
 | `KAZMA_PROJECT_ROOT` | found by walking up to `pyproject.toml` | Install root, used only when that walk finds nothing (the working directory is the last resort). `kazma mcp` pins it when set. |
-| `KAZMA_LOG_FILE` | `<.kazma>/kazma.log` | Application log file. |
+| `KAZMA_LOG_FILE` | `<.kazma>/kazma.log` | Application log file. The agent's `read_system_logs`, Settings → System → Logs and the weekly resilience report all read this file. |
 | `KAZMA_BACKUPS_DIR` | `<data>/backups` | Universal backups. |
 | `KAZMA_EXPORTS_DIR` | `<data>/exports` | JSONL / GraphML memory exports. |
 | `KAZMA_FTS5_PATH` | `<data>/memory.db` | Full-text memory store. |

@@ -51,7 +51,7 @@ Result is PASS, FAIL, or SKIP (SKIP only if the feature is honestly not configur
 3. ConfigStore — config_read agent.max_iterations and safety.hitl.enabled.
 4. Memory — memory_search q="kazma" (or memory_list_beliefs). Empty beliefs = PASS "empty", not FAIL.
 5. Workspace — file_list "."
-6. Git — git_status. SKIP only if not a repo.
+6. Git — git_status and git_log. SKIP only if not a repo.
 7. Web search — web_search q="Kazma AI agent".
 8. Fetch — read_url of ONE https URL from step 7. FAIL if SSRF/timeout/empty. Confirm body is fenced (kazma:data).
 9. Research stack — research_readiness.

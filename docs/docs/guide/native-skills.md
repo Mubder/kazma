@@ -254,8 +254,8 @@ refused. Install the `[database]` extra for SQLGlot and the remote drivers.
 
 | Skill | Tools | Notes |
 |---|---|---|
-| `email_manager` | email_list/get/send/delete/categorize/analyze | Gmail, MS Graph, IMAP/POP, sandbox |
-| `git_github_manager` | git_status/commit/push_pull, github_create_pr/list_issues | |
+| `email_manager` | email_accounts/list/get/send/delete/categorize/analyze | Gmail, MS Graph, IMAP/POP, sandbox |
+| `git_github_manager` | git_status/log/diff/commit/push/pull/checkout/merge, github_create_pr/merge_pr/create_issue/comment_issue/list_issues | `git_log` and `git_diff` are read-only (no approval) |
 | `secret_vault` | vault_store/retrieve/list/delete | AES-256-GCM encrypted |
 | `advanced_web_crawler` | web_search_duckduckgo, crawl_page, parse_document | CSV/JSON/XLS/PDF parsing |
 | `system_health_monitor` | get_system_stats, list_active_processes, read_system_logs | |
