@@ -450,7 +450,8 @@ _STALE_NOTICE_VALUE = (
     "show providers as disabled with empty keys while the real store has them "
     "enabled -- debugging credentials against this file gives a confident "
     "wrong answer. DO NOT DELETE THIS FILE: the same file holds the live "
-    "Knowledge Library (knowledge_chunks), which is SQLite-only and not stale. "
+    "workspaces and bookmarks, which are SQLite-only and not stale (and, until "
+    "its first open moves them to knowledge.db, the Knowledge Library). "
     "This row is written by ConfigStore at boot and removed automatically if "
     "SQLite ever becomes the live backend again."
 )

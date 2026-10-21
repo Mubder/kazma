@@ -78,6 +78,15 @@ tools. It cannot bypass `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`,
 re-gated regardless. But for everything else, YOLO means the boundary above is
 not in place.
 
+The approval of an always-ask tool is one-time only: there is no session
+grant, no task approval and no YOLO answer for it, and the card names the
+public action ("Post now"). A draft the agent saves with `save_proposal`
+cannot be posted in the turn that saved it: the agent shows it, and the post
+waits for your next message. Separately, a call the host would refuse anyway
+(a shell command the host-shell policy or the shell syntax rules refuse, a
+browser this host cannot launch) is refused before its card, so you are never
+asked to approve something that cannot run.
+
 **An MCP server names its own tools. The name is not an approval.**
 `classify_mcp_tool` reads the tool name — supplied by the third-party server
 — and a safe-looking verb still classifies `safe` (`get_file`, `read_env`,

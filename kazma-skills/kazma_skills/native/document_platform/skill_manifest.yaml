@@ -70,7 +70,7 @@ tools:
       Convert an already-processed document (by opaque document_id) to another
       format through the isolated renderer. Only the immutable original bytes
       are used; no raw file path is accepted. Returns a downloadable
-      artifact_id.
+      artifact_id. HTML to PDF comes out in Kazma's house style.
     category: document
     prompt_chain:
       - "حوّل المستند المعالَج إلى صيغة أخرى"

@@ -88,7 +88,7 @@ bodies and credential-bearing request URLs are excluded from diagnostics.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/pending-approvals` | Pending HITL approvals. (`hitl_approval.py:146`) |
-| `POST` | `/api/approve/\{thread_id\}` | Approve/deny a paused tool. Body `\{action: "approve"|"deny", reason?\}`. Protected by `KAZMA_SECRET`. (`routes_direct/misc.py`) |
+| `POST` | `/api/approve/\{thread_id\}` | Approve/deny a paused tool. Body `\{action: "approve"|"deny", scope?: "once"|"tool"|"yolo", interrupt_id?, reason?\}`. `scope` defaults to `once`; `tool` grants the tool for ~30 minutes, `yolo` the session; an always-ask tool (an X write) refuses `tool` and `yolo` with 409 `one_time_only`. Protected by `KAZMA_SECRET`. (`routes_direct/misc.py`) |
 
 ### 2.4 Dashboard
 
@@ -152,12 +152,12 @@ criterion. Restore remains available through
 | `tool_result` | The tool finished. | `tool_name`, `tool_call_id`, `result` (at most 5,000 characters) |
 | `memory_explain` | The supervisor was given memories for this question; the turn stores the same record. | `query`, `empty`, `detail`, `beliefs`, `episodes`, `weekly_summaries`, `knowledge` (each item: `id`, `kind`, `content`, `score`, `sources`), `summary` (the counts) |
 | `turn_heartbeat` | About every 10 seconds with no other frame (every 8 while a turn resumes after an approval). | `phase` (`llm`, `supervisor`, `tool` or `resuming`), `current` (the tool), `detail`, `step`, `elapsed_s` |
-| `status_update` | The graph reached its end and the answer is being written (`status: "synthesizing"`, `active_node: "Respond"`). Or the client's cursor is older than the journal keeps (`status: "resync"`, `seq`): the stream ends there, and the client reloads the chat from the store. | `status`, then `active_node` or `seq` |
+| `status_update` | The graph reached its end and the answer is being written (`status: "synthesizing"`, `active_node: "Respond"`). Or the client's cursor is not in the journal (`status: "resync"`, `seq`): it is older than the journal keeps, or ahead of it after a server restart or an hour idle, when the journal starts again at 1. The stream ends there. The client reloads the chat from the store and takes `seq` as its new cursor (a `resumed` frame with `gap` means the same). | `status`, then `active_node` or `seq` |
 | `status` | A second resume reached a turn that is already running; this stream follows that turn. | `content`, `status` (`thinking`) |
 | `context_compacted` | This turn trimmed the model's context or collapsed old tool output. | `detail`, with counts such as `stubbed_segments`, `dropped_user`, `dropped_assistant` |
 | `approval_required` | The graph paused for an approval. No `done` follows: the stream stays open, and the turn continues in it after `POST /api/approve/{thread_id}`. | `thread_id`, `interrupt_id`, `kind`, `tool`, `args`, `tools`, `items`, `message`, `yolo_allowed`, `always_ask` (an always-ask tool such as an X write: approve once or deny only, no session grant), `approval_deadline`, and the gate registry's `view` and `gate_views` |
 | `hitl` | An approval was decided, in this tab, another tab or a chat app. | `state` (`approved`, `denied` or `timeout`), `interrupt_id`, `tool`, `thread_id`, `turn_id`, `actor`, `view`, `gate_views` |
-| `approval_timeout` | Nobody answered in time: the tool is skipped and the turn goes on. | `thread_id`, `interrupt_id`, `tool`, `turn_id`, `message` |
+| `approval_timeout` | Nobody answered in time: the tool is not run, the model is told the approval expired (not that it was refused), and the turn ends with its answer. | `thread_id`, `interrupt_id`, `tool`, `turn_id`, `message` |
 | `capacity` | `/long`, `/plan` or `/yolo`, answered without the model; a `done` with `capacity: true` follows. | `action`, `reply`, and `long_active` and `yolo_active`, or `plan_active` |
 | `error` | The request or the turn failed. Before a turn starts (a body that is not JSON, a message over 512,000 characters, an empty message, no API key for a cloud provider, the session budget used up) it is the only frame. | `content` (internals removed) |
 | `done` | The turn ended. `content` is the answer and replaces what the `token` frames built. | `content`, `tokens`, `cost`, `duration_ms`, `interrupted`, `empty`, `model`, `turn_id`, `session_tokens`, `session_cost`, `gate_views` |

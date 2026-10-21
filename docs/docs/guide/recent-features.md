@@ -7,6 +7,30 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-10-16 through 2026-10-21 — approvals, forgetting, documents
+and tools that answer in one call.** An X card offers one approval and Deny,
+names what it does ("Post now"), and a draft the agent saves is posted only
+after you have seen it, in a later message. A shell command or browser call
+the host would refuse gets no card, and a refusal before anything ran is an
+ordinary error the agent corrects. An unanswered card expires as "expired",
+not "denied"; in Telegram, Discord and Slack the chat is told and gets the
+rest of the turn. `/stop` is `/abort`, and an aborted request is answered
+"cancelled". Asking in chat to forget a fact forgets the turn it came from,
+and "forget everything that mentions X" reaches every memory, fact and lesson
+holding it. Generated documents and HTML converted to PDF share one house
+style, each table reads in its own language, and Kazma reads its own
+bilingual PDFs back as they are. Two read-only git tools, `git_log` and
+`git_diff`, answer "what changed" without the shell; `check_swarm_task` waits
+for the task (60 seconds by default, at most 90) and answers the moment it
+finishes; a Gmail listing shows each mail's sender, date and subject. A
+crawl or pipeline the agent runs in its own turn no longer raises a research
+alert. The Knowledge Library's vector store replays a library's write log on
+one thread, after a race in Chroma's parallel replay crashed the process (see
+[Knowledge Library](knowledge-library)). Dependency minimums were raised on
+2026-10-17; an install updated with `git pull` reports the packages it is
+behind at boot until `python -m kazma_cli update --reinstall -y` runs (see
+[Updating Kazma](../ops/kazma-update)).
+
 **New in 2026-10-13 — documents: refusal, recovery and measured limits.** PDFs
 with scripts, outside actions, attachments or links to files and network
 shares are refused on upload, on every edit and on every PDF Kazma renders,
@@ -21,8 +45,11 @@ ligatures and table cells in order, and ruled tables on scans are read cell by
 cell. An optional `container` worker profile runs each job in its own
 container with no network or mounts. Limits: the default `process` profile
 does not confine files or network and is not qualified for hostile documents;
-Arabic OCR is not qualified (Tesseract does not read Arabic-Indic digits); no
-48–72 hour soak and no independent review have been done. See
+Arabic OCR with Tesseract is not qualified (it does not read Arabic-Indic
+digits). Since then, the neural OCR engine (2026-10-15) meets the release
+targets on every OCR case of the corpus; an independent review closed on
+2026-10-15 with one finding fixed; and a 48-hour soak passed on 2026-10-19 on
+the `process` profile with SQLite stores. See
 [Document Intelligence](document-intelligence) and the
 [hardening tracker](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md).
 
@@ -368,7 +395,7 @@ The August tranche — beyond the items in the table above:
 - **Guard `--reload` skips crash backoff** — a deploy kill is not a crash, so
   the fifth reload of the day is not a 300s wait. Restart **KazmaAgent** once
   if an old guard is still climbing. [Deployment](./deployment).
-- **Steer & Abort (`/steer`, `/steer!`, `/abort`)** — out-of-band signals to a
+- **Steer & Abort (`/steer`, `/steer!`, `/abort`, `/stop`)** — out-of-band signals to a
   *running* task. Soft steer folds text into the next step; hard steer pauses,
   injects a requirement, and resumes (demoting to soft if the task is
   finalizing); `/abort` cancels and abandons. See
@@ -664,7 +691,7 @@ An enterprise-grade self-healing execution layer designed for long-horizon auton
 | **Model Failover Chain** | Exhausted primary models fail over down `agent.nonstop.failover.chain` with per-model cooldowns (default 300s) without mutating active settings profiles. |
 | **LLM Execution Ledger** | Durable SQLite WAL (`kazma-data/llm_calls.db`) recording thread, iteration, model, token usage, cost, latency, status, and failover origin for every LLM call. |
 | **Startup Orphan Recovery** | Swarm tasks stranded in `status='running'` by process crashes or restarts are requeued to `pending` on startup up to 3 attempts. |
-| **HITL Approval Timeout** | Background watchdog scans pending HITL approval interrupts every 15s and auto-denies stale turns after `safety.hitl.approval_timeout_seconds` (default 60s). |
+| **HITL Approval Timeout** | Background watchdog scans pending HITL approval interrupts every 15s and expires unanswered approvals after `safety.hitl.approval_timeout_seconds` (default 300 s); the model is told the card expired, not that you refused it. |
 | **Resilient Chat** | Non-graph LLM calls (swarm workers, research planner, research synthesizer) use `resilient_chat` with transient retries, failover chain, and tool-execution timeouts (`agent.tool_timeout_seconds`, 120s). |
 | **Settings UI Card** | Agent Settings tab includes a Non-Stop & Self-Healing section with live-re-read toggles, thresholds, and failover chain controls (EN/AR i18n supported). |
 

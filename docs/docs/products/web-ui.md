@@ -191,6 +191,15 @@ Coverage matrix: [Recent features → Non-Stop Execution](../guide/recent-featur
   stream. The input field stays enabled so the user can type their next
   message while the agent works.
 - **Toasts**: `window.showToast` / Alpine `$store.toast`.
+- **After an update**: a tab opened before Kazma was updated shows one
+  "Kazma was updated. Refresh to load the new version." toast with a
+  **Refresh** button. It checks the server's build when the tab becomes
+  visible and every 5 minutes; a restart of the same build shows nothing.
+- **Returning to a running turn**: leaving a Chat while its turn runs and
+  coming back, by the sidebar or a refresh, shows the turn live, including an
+  approval it paused for. After a server restart the page takes the server's
+  position in the turn's event journal instead of the one it saved, which
+  the journal no longer holds.
 - **Research archive**: each research card has an archive button. Archived
   items move to the "Archived" tab (with restore + delete). Uses the JSON
   `metadata.archived` flag — no schema migration.

@@ -546,7 +546,12 @@ sessions, standalone research pipelines and crawls, and Knowledge crawls every
 saved run and results. Partial, failed, cancelled and interrupted outcomes have
 distinct alerts. Linked session/pipeline records describe one run and do not
 produce duplicate completion alerts. Ordinary chat-search rows keep their own
-chat reply instead. Existing finished history is seeded quietly on first boot;
+chat reply instead. A crawl or pipeline the agent runs inside its own turn
+(`crawl_site`, or `run_research_pipeline` outside a Research session) is not
+alerted either: its result goes back to the agent, which answers in that
+turn, and an alert an older build stored for such a run is settled at the
+next check. The run stays on the Research page. Research sessions and
+Knowledge crawls you start still alert. Existing finished history is seeded quietly on first boot;
 new outcomes and previously observed runs survive server restarts.
 
 After 180 seconds without a stage, source-count or durable-effect change, the

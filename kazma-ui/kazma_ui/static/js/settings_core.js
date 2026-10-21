@@ -66,7 +66,9 @@
         personalities: [],
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 300, auto_deny_on_timeout: true, soul_requires_confirm: false, outbound_allowed_targets: [] },
         soulPending: [],
-        context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
+        // The shipped window (token_counter.DEFAULT_CONTEXT_WINDOW): Save sends
+        // the whole form, so a failed load must not write a smaller window.
+        context: { max_context_tokens: 1000000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
         nonstop: {
             enabled: false,
             stall_threshold_seconds: 180,

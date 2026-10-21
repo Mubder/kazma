@@ -357,8 +357,7 @@ KAZMA_PUBLIC_URL=https://kazma.example.com
 Optional packages:
 
 ```bash
-pip install 'psycopg[binary,pool]>=3.1' 'langgraph-checkpoint-postgres>=2.0'
-# or: pip install -e ".[postgres]"
+pip install -e ".[postgres]"     # psycopg[binary,pool]>=3.3.6, langgraph-checkpoint-postgres>=3.1.3
 ```
 
 ### Postgres backup
@@ -449,7 +448,13 @@ dispatch. A saved error with `result_uncertain` also holds the turn: completed
 means the receipt was committed, not that the action succeeded. The local
 registry invokes mutating and unknown tools once; only classified reads receive
 automatic retries. A post-invocation error is uncertain because an action may
-have completed partially. Reads are not cached.
+have completed partially. A refusal a tool makes before it writes, sends or
+starts anything (an argument, a policy, an account not connected, a refused
+URL, a browser the host cannot launch) is an ordinary error, not an uncertain
+one: the model may correct the call, and the turn goes on. So is a failure
+whose effect the tool names exactly and that is safe to repeat
+(`generate_pdf`'s check that the text reached the PDF). A send, a post or a
+payment is never treated that way. Reads are not cached.
 Failed MCP mutator dispatches also carry uncertainty, including when an output
 hook rewrites the error. Direct IDE tool calls and in-process swarm tool loops
 also write receipts. An uncertain swarm tool stops without a synthesis call.

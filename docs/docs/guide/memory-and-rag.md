@@ -174,6 +174,21 @@ after a later turn -- is kept as history in its place on the timeline and
 never replaces the current fact. Before, whichever statement was written
 last won.
 
+**A list stays a list** (2026-10-19). When you keep several notes of one
+kind ("user noted ..."), a new one is added to them, even when the fact pass
+labels it as a fact with one value. Before, one such note could end all the
+others: on the live install one note replaced one and closed 57. Notes closed
+that way can be reopened. Size it first (this only reads, and lists entries
+by id):
+
+```bash
+python scripts/memory_reopen_lists.py size
+```
+
+Then, when Kazma is idle, run `apply --db <path to memory_state.db> --yes`.
+The file is copied to `memory_state.db.pre_reopen` first, and each reopened
+entry is written to the memory audit log.
+
 - Mirror working/recall episode (the question and ITS answer; the episode's
   turn number is the conversation's turn index). Recall shows the model
   both sides ("User: ... / Assistant: ...", `memory/episode_text.py`,
@@ -278,7 +293,7 @@ Do **not** set `KAZMA_MEMORY_STATE_ROLE=primary` until that check is clean — c
 
 - **Inject** — supervisor can add labeled KB observation blocks next to V2 memory.  
 - **Federated search** — `POST /api/memory/v2/federated-search` and Dashboard “Search all knowledge” (`MEM` / `KB` chips).  
-- **Promote** — optional soft-copy of top KB hits into episodes (not belief SPO without provenance).
+- **Never written into memory** — Knowledge Library text is shown to the model for the turn and never stored as a memory of the conversation. Copies earlier builds made are emptied by the maintenance pass (the library keeps the text).
 
 Deep dive: [Knowledge Library](./knowledge-library.md).
 
@@ -335,6 +350,20 @@ You decide what Kazma keeps:
   value, their vector and their edit history, wherever a copy was kept: the
   fact archive, the record of changes to facts, a turn still waiting to be
   processed, the search index. The chat itself stays as it is.
+- **Ask in chat.** "Forget my codeword" ends the fact and forgets the part of
+  the conversation it came from, as **Forget** on the Memory page does --
+  otherwise recall would find that turn and the next turn would learn the
+  fact again. When the fact's value names one thing (one word of six
+  characters or more with a digit, `-` or `_`: a codeword, an order or phone
+  number), every memory that repeats it is forgotten too, Kazma's own earlier
+  answers quoting it included; a plain word such as a city is not swept.
+  "Forget everything that mentions BLUE-HERON-42" forgets every memory of a
+  conversation and every current fact that holds that text (four characters
+  at least; Latin letters in any case), not only the few a memory search
+  shows, and removes every lesson Kazma wrote for itself that holds it. Each
+  of these asks for your approval first, and the message in which you ask to
+  forget is not remembered either. A fact that had already ended keeps its
+  value in the fact history.
 - **Don't remember a chat.** In the chat list, a chat's menu has
   **Memory...**: turn it off and Kazma remembers nothing new from that chat
   and forgets what it already remembered from it. In Telegram, Discord or
@@ -370,7 +399,10 @@ full backups (seven), the offsite backups (up to twelve monthly), the
 memory export written every six hours, the copy kept before an embedding
 rebuild, the copies the operator's repair scripts keep before they change the
 database (`memory_state.db.pre_entity_key`, `memory_state.db.pre_relabel`,
-until removed), and space the database has freed but not yet reused. The
+`memory_state.db.pre_reopen`, until removed), and space the database has
+freed but not yet reused. Kazma's lessons for itself are reached only by
+"forget everything that mentions ..."; lessons written before 2026-10-19
+could quote the message they came from. The
 Forget dialog says so too.
 
 ## About me
@@ -799,8 +831,9 @@ turns live and missed, forgets and chats kept out, the maintenance passes,
 backups and restores from older ones. After every cycle it checks that each
 chat turn is a memory unless forgotten, that a forget leaves nothing behind,
 that both databases are intact and that recall finds what it is asked. A
-60-cycle pilot (10 killed, 13 restores) was clean; the multi-day run the
-audit asks for has not been run.
+60-cycle pilot (10 killed, 13 restores) was clean. A 72-hour run passed on
+2026-10-20 (commit `de461eae`): 7,050 cycles, 811 of them killed, 405
+restores, 1,008 backups, 26,389 turns, 0 violations.
 
 ---
 

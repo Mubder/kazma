@@ -80,9 +80,9 @@ mechanics, reading direction/theme/alignment from the profile:
 
 | Engine | RTL mechanism |
 |---|---|
-| `docx.py` | `w:bidi` per paragraph from `profile.block_direction` (an LTR paragraph is stamped `w:bidi val="0"`) + `w:jc` from `profile.docx_jc`; complex-script `w:szCs`/`w:bCs`; `w:rtl` on Arabic runs only; `w:bidiVisual` on RTL tables; `w:keepNext` on headings; `w:outlineLvl` for the TOC field. |
+| `docx.py` | `w:bidi` per paragraph from `profile.block_direction` (an LTR paragraph is stamped `w:bidi val="0"`) + `w:jc` from `profile.docx_jc`; complex-script `w:szCs`, and a `w:bCs`/`w:iCs` twin for every `w:b`/`w:i` (Arabic bold and italic are drawn by the twin); `w:rtl` on Arabic runs only; in a right-to-left block, each left-to-right run holding a Latin letter is marked with LRM on both sides (a run of digits alone keeps the Arabic convention); direction marks drawn in a face that has their glyph; `w:bidiVisual` on tables whose own language is right-to-left; heading bars on the heading's own reading side; every bullet level "•" in the house face; `w:keepNext` on headings; `w:outlineLvl` for the TOC field. |
 | `pdf.py` | Any document that needs shaping (`profile.shape_arabic`) routes **DOCX→LibreOffice→PDF**; everything else, and the fallback when LibreOffice is absent or fails, is reportlab with per-block alignment and RTL table columns reversed. |
-| `html.py` | `dir` attribute + CSS `unicode-bidi`; a `dir` wrapper on the blocks whose direction differs from the document's; `<bdi dir="ltr">` isolators for embedded Latin; the pinned font inlined for Arabic exports (`documents.render.embed_html_fonts`). |
+| `html.py` | `dir` attribute + CSS `unicode-bidi`; `dir` on each table from `profile.table_direction`; `text-align-last: start`, so each block ends its paragraphs on its own side; a `dir` wrapper on the blocks whose direction differs from the document's; `<bdi dir="ltr">` isolators for embedded Latin; the pinned font inlined for Arabic exports (`documents.render.embed_html_fonts`). |
 | `xlsx.py` | `sheet_view.rightToLeft` + complex-script `readingOrder`. |
 | `pptx.py` | `<a:pPr rtl="1">` **and** `algn="r"` (rtl alone does not right-align; the DrawingML attr is `algn`, not `al`). |
 
@@ -90,8 +90,10 @@ mechanics, reading direction/theme/alignment from the profile:
 
 These are the non-obvious facts each engine encodes once:
 
-- **DOCX** — bold/size for Arabic must set the *complex-script* variants
-  (`w:bCs`/`w:szCs`); python-docx's `run.bold`/`run.font.size` only write the
+- **DOCX** — bold/italic/size for Arabic must set the *complex-script*
+  variants (`w:bCs`/`w:iCs`/`w:szCs`); the engine adds the twin to every bold
+  and italic mark at the end of rendering, so the Arabic half of a bilingual
+  title and bold lead-ins in an Arabic list are bold. python-docx's `run.bold`/`run.font.size` only write the
   Latin `w:b`/`w:sz`, so Arabic silently falls back to the default size with
   faux bold — the heading-bar "junk letters" symptom. `DocxEngine._mark_run`
   writes them. **Do not copy `w:sz` onto `w:szCs`:** an older Arabic face
@@ -106,7 +108,10 @@ These are the non-obvious facts each engine encodes once:
   `PdfEngine` routes every document containing right-to-left script
   (`profile.shape_arabic`, not only RTL-dominant ones) through the DOCX engine
   (correct bidi) then LibreOffice headless → PDF, in a bounded call that kills
-  the process tree on timeout. Without LibreOffice, or when it fails, the
+  the process tree on timeout. Each conversion first copies the bundled faces
+  into LibreOffice's own profile (`fonts.give_soffice_the_bundled_fonts`):
+  LibreOffice uses only system and profile fonts, and a host or worker image
+  without IBM Plex rendered DejaVu Sans and Noto Serif. Without LibreOffice, or when it fails, the
   reportlab path is used with a warning; it shapes each paragraph once
   (`arabic.shape_spans`) and refuses to render (`arabic_font_unavailable`)
   rather than emit a blank Arabic PDF when no font covers the Arabic
@@ -114,9 +119,14 @@ These are the non-obvious facts each engine encodes once:
 - **Per block, not per document** — a bilingual document keeps each language's
   blocks aligned to their own reading start in every engine: `w:bidi` per
   paragraph (DOCX), per-block styles (PDF), a `dir` wrapper (HTML).
-- **Tables** read right-to-left in RTL documents in every format:
-  `w:bidiVisual` (DOCX), CSS `direction: rtl` on tables (HTML), reversed
-  columns (reportlab PDF).
+- **Tables** read in their own language, whatever the document's
+  (`profile.table_direction`): an English table in an Arabic document reads
+  left to right, an Arabic table in an English one right to left. The
+  mechanism is `w:bidiVisual` (DOCX), `dir` on the table (HTML) and reversed
+  columns (reportlab PDF). A cell with no letter (a range like "29 – 32")
+  takes its table's direction, so it reads as written.
+  `tests/test_document_table_direction.py` checks this through real
+  LibreOffice.
 - **One type scale** — `theme_cs_size()` sizes complex script in DOCX
   (`w:szCs`), HTML and the PDF engine alike, so the same document paginates the
   same way in each. `tests/test_document_layout.py` measures this on rendered
@@ -134,9 +144,33 @@ All generation and Markdown→X conversion flows through one translator:
 endpoint all reach the engines through this single door, so a design change
 applies to every output at once.
 
+**A Markdown source keeps its shape:** a hard line break (two trailing spaces
+or a backslash) stays a line break in paragraphs and quotes; a section's
+heading level is its `#` count relative to the shallowest heading below the
+title; a quote is upright, in muted ink, with a bar on its own reading side,
+and stays on one page with the line that introduces it; `---` is drawn as a
+rule; a heading that repeats the title is dropped, a bilingual title whose
+halves come in the other order included (`tests/test_document_archive_layout.py`,
+`tests/test_document_bilingual_title_and_arabic_bold.py`).
+
 **Faithful conversions are intentional bypasses** (do not "unify" them):
 LibreOffice Office→PDF and `mutation_worker` redaction preserve the source's
-formatting by design — re-theming an uploaded file would be a regression.
+formatting by design.
+
+**HTML→PDF is the exception: it comes out in the house style**
+(`renderer_worker._house_style_html`). The file's content (headings,
+paragraphs, lists, tables, `dir` marks) goes into the `HtmlEngine` shell, with
+the brand face embedded, heading bars and the table style; its own fonts,
+colours, presentation attributes and CSS are dropped, and the page breaks it
+asked for are kept. The printed page carries the DOCX engine's chrome: the
+short brand at the top, and the brand with the page number at the bottom, on
+the reading-start side (`HtmlEngine.page_chrome_css`). Paragraphs written as
+list items ("▪ …") become a list, bullet and check symbols the face lacks are
+drawn as • and ✓, and a Latin run in right-to-left text is marked, so
+"50 °C" does not draw "C° 50". The path-based tool
+`convert_document(keep_source_style=true)` keeps a file's own design; the
+platform's `document_convert`, the Web route and `/docs convert` have no such
+option (`tests/test_document_html_house_style.py`).
 
 **Where it runs.** Rendering happens in the isolated renderer worker
 (`renderer_worker.py`) — a host subprocess in the `process` profile, a fresh
@@ -188,7 +222,11 @@ complex-script `szCs/bCs`, the PPTX `algn`, and the cross-format theme tokens.
 `tests/test_document_layout.py` measures rendered PDFs with PyMuPDF: the
 complex-script type scale, RTL table column order, per-block direction and
 alignment, headings kept with their text, and shaped lines inside their
-column. `tests/test_docx_rtl_visual.py` skips without LibreOffice or PyMuPDF.
+column. `tests/test_document_table_direction.py` (each table in its own
+language), `tests/test_document_house_bullets.py` (bullets in the house face)
+and `tests/test_document_html_house_style.py` (HTML→PDF in the house style)
+render through real LibreOffice. `tests/test_docx_rtl_visual.py` skips without
+LibreOffice or PyMuPDF.
 The fidelity corpus (`kazma_core/documents/fidelity.py`) also renders English,
 Arabic and bilingual DOCX, HTML and PDF with these engines and parses them
 back, so a rendering change that breaks extraction shows there.

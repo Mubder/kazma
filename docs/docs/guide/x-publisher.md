@@ -86,7 +86,7 @@ The Web operator surface for posting. Alpine page `xStudioPage()` (`static/js/x_
 
 - Upcoming X posts from `GET /api/x/queue`, with a date-time field + **Reschedule** and **Cancel** (`POST /api/x/queue/{operation_id}/reschedule` and `.../cancel`). Each carries the revision it read: a booking that changed meanwhile answers **409**, so a stale page never moves a post it did not show. The Scheduled page uses the same two routes.
 - **Posted** rows: open on X, **Reply** (loads the id into the composer), **Delete** (`POST /api/x/delete` — confirm first). Chat `x_delete_post` is still always-HITL.
-- **Drafts** from `GET /api/x/drafts` (artifact store `list_proposals`). The agent reads the same drafts with the `list_proposals` tool (read-tier, no approval), which also shows which drafts went out and how.
+- **Drafts** from `GET /api/x/drafts` (artifact store `list_proposals`). The agent reads the same drafts with the `list_proposals` tool (read-tier, no approval), which also shows which drafts went out and how. `save_proposal` gives each X draft's length as X counts it, and marks one that is too long.
 - **Audit** from `GET /api/x/audit` (`x_audit.db`).
 - **All clocks** → `/scheduled` (cron + X together). The Studio queue stays X-only so a reminder job does not sit next to a tweet.
 
@@ -99,7 +99,7 @@ These are Kazma caps **on top of** X's own quota. They fail closed.
 | Guard | Default | Why |
 |-------|---------|-----|
 | Always-HITL (`ALWAYS_HITL_TOOLS`) | `x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post` | Chat/agent tools: human sees the exact text. YOLO / grants / HITL-off cannot skip. Web Studio does not call these tools — the operator click *is* the approval. |
-| Drafted, shown, then posted | `x_post`, `x_schedule_post`, `book_x_post` | A draft the agent saves (`save_proposal`) is never published in the same turn: the agent shows it and stops, and you ask to post it in a later message. Then the card says what it does — "Publish to X — public, can't be undone", the post shown whole, a **Post now** button — on the web and in Telegram, Discord and Slack. It offers no "Allow tool", YOLO or "Approve for task": those answers are refused and approve nothing. (2026-10-16: "check the metrics" ended in a post approved as part of the reading.) |
+| Drafted, shown, then posted | `x_post`, `x_schedule_post`, `book_x_post` | A draft the agent saves (`save_proposal`) is never published in the same turn: the agent shows it and stops, and you ask to post it in a later message. Then the card says what it does — "Publish to X — public, can't be undone", the post shown whole, a **Post now** button (the other X cards say "Schedule post", "Delete post" or "Cancel scheduled post") — on the web and in Telegram, Discord and Slack. It offers no "Allow tool", YOLO or "Approve for task": those answers are refused and approve nothing. (2026-10-16: "check the metrics" ended in a post approved as part of the reading.) |
 | Official API only | `POST /2/tweets` | Automation must use the API, not the website. |
 | No extra verbs | no like / follow / DM / search | Stays inside posting. |
 | No write retry | network drop ≠ second POST | Avoids double-posts. |
@@ -111,13 +111,13 @@ These are Kazma caps **on top of** X's own quota. They fail closed.
 | Volume | 8/day, 80/30d | Local rolling-window defaults, independent of X endpoint limits and billing. Raise only after checking your account's permissions and budget. |
 | User-Agent | `Kazma/<ver> (self-hosted; official X API v2)` | X requires a UA. |
 
-Media, polls, quote posts and analytics remain disabled pending individual capability verification. X's [create-post reference](https://docs.x.com/x-api/posts/create-post) currently restricts quote posts to Enterprise; the [pricing guide](https://docs.x.com/x-api/getting-started/pricing) describes usage credits. Check the Developer Console for your own access and budget before enabling a richer-content increment. Any such increment must retain the same approval and durable publication contracts.
+Media, polls, quote posts and campaign analytics remain disabled pending individual capability verification. A post's public counts are read only on request, by `x_status` with `metrics=true`. X's [create-post reference](https://docs.x.com/x-api/posts/create-post) currently restricts quote posts to Enterprise; the [pricing guide](https://docs.x.com/x-api/getting-started/pricing) describes usage credits. Check the Developer Console for your own access and budget before enabling a richer-content increment. Any such increment must retain the same approval and durable publication contracts.
 
 ## Tools
 
 | Tool | HITL | What |
 |------|------|------|
-| `x_status` | no | Configured?, handle, remaining caps, the latest posts. With `metrics=true` it also reads each listed post's likes, reposts, replies, quotes, bookmarks and impressions from X (one read from the X read budget). Never returns secrets. |
+| `x_status` | no | Configured?, handle, remaining caps, the latest posts. `recent` (1–50, default 5) and `offset` page through every post Kazma made: `posts_total` is how many there are, and `next_offset` the next page's offset until it is null; each post's time is given in the cron time zone. With `metrics=true` it also reads each listed post's likes, reposts, replies, quotes, bookmarks and impressions from X (one read from the X read budget); a post X did not return is listed in `metrics_missing`, and a failed read in `metrics_error` -- a missing count is never shown as zero. Never returns secrets. |
 | `x_post` | **always** | `text`, optional `reply_to_id` for a thread hop. Chat path requires a resolvable `proposal_id` (stored draft wins). |
 | `x_delete_post` | **always** | `tweet_id` from a previous post. |
 | `x_schedule_post` | **always** | `text` + `when` (`5m`, `1h`, or an ISO time such as `2026-12-01T09:00` in the cron time zone) + optional `reply_to_id`. One post, one time: a recurring time is refused. Approve once at booking. The reply gives the stored time and state, and says `ok` only when the post is scheduled. |

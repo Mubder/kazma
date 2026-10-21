@@ -408,7 +408,9 @@ On an install the guard supervises (`scripts/service/kazma_guard.py`, the
 - **The guard hands Kazma the address.** It starts every server with
   `KAZMA_DOCUMENT_BROKER_URL` (a loopback port it keeps for the install),
   `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` (`.kazma/document_broker.token`, made once
-  by the guard, readable by its account only, never logged) and
+  by the guard, restricted to its account before the secret is written and
+  again at every start -- a file that cannot be restricted stops the broker --
+  never logged) and
   `KAZMA_GUARD_BROKER_REQUEST_FILE`. A `.env` that names another broker wins;
   the guard then runs none.
 - **The image for this code.** The broker asks for
@@ -559,10 +561,11 @@ worker image, 5 Docker does not answer, 6 the image asked for appeared.
   lacks reads unavailable with the image's reason.
 - **A stale image is visible.** The image reports a fingerprint of its
   document code, and the build script labels it with the fingerprint of
-  everything it was built from. `image_code_matches: false` or
-  `image_current: false` (and the readiness reason
-  `document_worker_image_outdated`) means the image was built from other code
-  than this Kazma runs: `python scripts/document_worker_image.py build`.
+  everything it was built from. `image_code_matches: false`,
+  `image_current: false` or `image_fallback: true` (each adds the readiness
+  reason `document_worker_image_outdated`, and the certifier's
+  `worker_isolation` check fails) means the image serving is not known to run
+  the code this Kazma runs: `python scripts/document_worker_image.py build`.
 
 ### Failures and what they mean
 
@@ -900,8 +903,13 @@ mid-publication every `--crash-every` seconds, with throughput, intake-to-ready
 p50/p95/p99, process-tree RSS and what is left pending or in scratch in its
 `--report`. It runs on private SQLite stores unless `--use-env` is given, and
 fails when a job does not finish, a reservation stays pending or scratch
-outlives the run. Only a 2-minute pilot has been run (13 of 13 ready, 3
-restarts, 2 injected crashes); the 48–72 hour run is still open.
+outlives the run. A 48-hour run passed on 2026-10-19 (commit `de461eae`, the
+default `process` profile, private SQLite stores, one Windows workstation):
+all 12,865 documents submitted were ready, with 190 service restarts, 143
+intakes killed mid-publication, 0 errors, no reservation pending and no
+scratch left. It ran at about 4.5 documents a minute: intake-to-ready p50
+13.2 s, p95 14.1 s, p99 24.3 s, process-tree RSS at most 1,034 MiB. It has not
+been run on the `container` profile or on Postgres stores.
 
 ```bash
 python scripts/document_soak.py --duration 172800 --report soak.json

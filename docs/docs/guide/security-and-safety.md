@@ -93,11 +93,12 @@ There is **no** `create_supervisor_graph()` factory. Do not pin `app.py` line nu
 
 `tool_worker_node` lives in **`graph_tool_worker.py`**, not `graph_builder.py`. When `hitl_config` is supplied:
 
+0. A call the host will refuse anyway gets no card: a `shell_exec` the host-shell policy refuses, or an empty command or shell metacharacter; a browser tool or `computer_use` this host cannot launch (`safety/call_preflight.call_refusal`). The model gets an ordinary error and the turn goes on.
 1. Commitment `authorize_effect` runs **first** (may rewrite args or raise a semantic card).
 2. Each tool is tested with `requires_approval(name, hitl_config)` (`safety/hitl.py`). Unclassified tools are **gated** (`TOOL_TIERS`; default-deny F-04).
 3. Danger tools call LangGraph **`interrupt()`** — the graph suspends. A registry row is registered (`pending`).
 4. On approval, `_hitl_approved` is injected so `execute()` does not re-prompt the bus. The registry **claims** then **settles**.
-5. On denial, a `ToolResult` with `is_error=True` is returned.
+5. On denial, a `ToolResult` with `is_error=True` is returned. An approval nobody answers within `approval_timeout_seconds` expires: the tool is not run, the model is told the card is closed and nobody decided, and the turn ends with an answer saying so.
 
 If `hitl_config` is falsy, **all** tools skip this gate. That is why every resumable build site must pass it.
 
@@ -224,7 +225,7 @@ Canonical + YAML + Settings must stay one **set**. Swarm `_EXTENDED_DANGER` is a
 
 Default (`kazma.yaml` `safety.hitl.require_approval_for`, must match `CANONICAL_DANGER_TOOLS`): includes `file_write`, `file_apply_patch`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `computer_use`, git/GitHub mutators, vault, installers, email send/delete, `request_path_access`, `x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post`. Parity-tested.
 
-**Always-HITL (X ToU):** `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post`) require approval even when YOLO, standing grants, or HITL-disabled would skip other danger tools. That is the **chat/agent** path. On the Web, X Studio (`/x`) and `/api/scheduled/x` treat the operator click as the approval (they call `publish_x_post` / `book_x_post` / `delete_x_post` directly — they do not invoke the chat tools). Official API only — see [X publisher](x-publisher).
+**Always-HITL (X ToU):** `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post`) require approval even when YOLO, standing grants, or HITL-disabled would skip other danger tools. Their card offers a one-time approval only (Approve once / Deny; on chat apps no "Approve for task") and names the public action ("Publish to X — public, can't be undone", **Post now**). The approve route refuses a `tool` or `yolo` answer for one with 409 `one_time_only`, and the card stays pending. That is the **chat/agent** path. On the Web, X Studio (`/x`) and `/api/scheduled/x` treat the operator click as the approval (they call `publish_x_post` / `book_x_post` / `delete_x_post` directly — they do not invoke the chat tools). Official API only — see [X publisher](x-publisher).
 
 **Git-write always-gate (2026-08):** `git commit`, `push`, `merge`,
 `rebase`, `reset`, `checkout --`, `restore`, `clean`, `rm` and friends

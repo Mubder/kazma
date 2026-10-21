@@ -154,7 +154,7 @@ Typical list: `file_write`, `file_apply_patch_set`, `file_delete`, `shell_exec`,
 - Web chat approval cards have **no rate limit**: every gate surfaces immediately, however many in a batch.
 - Distinct outbound posts (`x_post` / `x_schedule_post` with a `proposal_id`) **always** surface their card on every path — web and platform.
 - The gateway's 3-cards-per-4-minutes burst limit exists ONLY for exec retry-loop storms (e.g. repeated `shell_exec` variants after an auto-deny) on Telegram/Discord/Slack, and it exempts X/proposal-backed cards by design. Never tell the operator to batch posts, wait between waves, or expect delayed cards — that is fiction.
-- Unattended cards auto-deny after `approval_timeout_seconds` (default 300). "Allow tool (session)" grants one tool for ~30 min — suggest it when several approvals of the same tool are coming.
+- Unattended cards expire after `approval_timeout_seconds` (default 300): the tool is not run, and an expiry is not the user refusing — never say they denied it. "Allow tool (session)" grants one tool for ~30 min — suggest it when several approvals of the same tool are coming, but never for an X write (`x_post`, `x_schedule_post`, `x_delete_post`, `x_cancel_scheduled_post`): those take a one-time approval only.
 
 ### Troubleshooting (prefer real fixes)
 | Symptom | Likely cause | What to suggest |

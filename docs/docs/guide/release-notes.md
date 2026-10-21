@@ -4,6 +4,20 @@ sidebar_label: Release notes
 description: Dated changes and links to the Kazma upgrade guides.
 ---
 
+## What's new (2026-10-21)
+
+| Area | Change |
+|---|---|
+| **X posts wait for you** | An X card offers one approval and Deny and names what it does ("Post now"); a draft the agent saves is posted only after you've seen it, in a later message ([X publisher](x-publisher)). `x_status` reads post counts on request, and `save_proposal` gives each draft's X length. |
+| **Approvals that can't help, and approvals that expire** | A shell command or browser call the host would refuse gets no card; a refusal before anything ran is an ordinary error and the turn goes on. An unanswered card expires as "expired", not "denied", and in Telegram, Discord and Slack the chat is told and gets the rest of the turn. |
+| **/abort and /stop** | `/stop` is `/abort`. The aborted request is answered "cancelled", the turn closes with its own reply, and the next message is not taken as asking for it again. |
+| **The web chat stays live** | A turn you leave and return to stays live after a server restart, and an open tab tells you when Kazma was updated (**Refresh**). |
+| **Forgetting** | Asking in chat to forget a fact forgets the turn it came from; "forget everything that mentions X" reaches every memory, fact and lesson holding it ([Memory](memory-and-rag)). |
+| **Documents** | One house style for generated documents and HTML converted to PDF; each table in its own language; Kazma reads its own bilingual PDFs back as they are ([Document rendering](document-rendering)). |
+| **Tools** | Read-only `git_log` and `git_diff`; `check_swarm_task` waits for the result; Gmail listings show sender, date and subject. |
+| **Knowledge** | Chroma replays a library's write log on one thread, after a race in its parallel replay crashed the process ([Knowledge Library](knowledge-library)). |
+| **Endurance** | The Documents 48-hour soak passed (2026-10-19); the Memory and Time Travel 72-hour soaks passed (2026-10-20). |
+
 ## What's new (2026-10-10)
 
 Telegram, Discord and Slack preserve finalized answer text and save one reply
@@ -17,7 +31,7 @@ Native command registration and private reply delivery, IDE draft protection,
 durable retry receipts and Windows-service Docker execution were also updated.
 The owner's 60 development and 24 fresh bilingual responses are fully reviewed;
 approved replacements remain separate from the original failed responses.
-The operational pilot is in progress through 2026-10-17. Neither these small
+The operational pilot was scheduled to end on 2026-10-17; its result is not recorded yet. Neither these small
 review sets nor live smoke checks establish a production accuracy or uptime SLO.
 See [Recent features](recent-features), [Native chat commands](../ops/native-slash-commands)
 and [Known gaps](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md).

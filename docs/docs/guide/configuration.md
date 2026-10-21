@@ -190,7 +190,7 @@ Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an 
 | `memory.per_turn_retrieval` | bool | `true` | Inject top-k memories on every user turn. |
 | `memory.auto_store` | bool | `true` | Heuristic durable / turn writes after each reply. |
 | `memory.auto_store_mode` | str | `both` | `durable` \| `turns` \| `both`. |
-| `memory.max_context_tokens` | int | `1000000` | The context window: compaction fires at 80 %, the history trim at 95 %. `models.context_window.<model>` sets a smaller window for one model. |
+| `memory.max_context_tokens` | int | `1000000` | The context window: compaction fires at 80 %, the history trim at 95 %. Which window applies, first match wins: `models.context_window.<model>` (one model's own window), Settings → Agent → Context Window (`context.max_context_tokens`), this key, then 1,000,000. `agent.trim.token_budget` (settings store) sets the trim budget instead (kept between 4,000 and 95 % of the window). A chat that still outgrows it keeps your earlier requests and Kazma's plain replies, newest first (up to 16, each cut to 1,500 characters), so the conversation's thread survives the trim. |
 | `memory.retrieval_top_k` | int | `5` | Top-K for per-turn RAG and compaction. |
 | `memory.provenance` | bool | `true` | Tag memories with source metadata. |
 | `memory.consolidation.enabled` | bool | `true` | Post-turn librarian (facts + graph triples). |
@@ -232,7 +232,7 @@ switch, run the rebuild so every row lives in the same vector space.
 | `gateway.rate_limits.telegram` | int | `30` | Messages one person may send per minute on Telegram. Past it Kazma answers "Slow down" (at most every 30 s) and leaves the rest unanswered; each one is logged and shows in the platform's Test. A flood guard, not Telegram's own send limit. |
 | `gateway.rate_limits.discord` | int | `30` | The same for Discord. Shipped as `5` until 2026-10-01; an install still holding `5` moves to `30` at its next start. |
 | `gateway.rate_limits.slack` | int | `30` | The same for Slack. Shipped as `1` until 2026-10-01, which allowed one Slack message a minute; an install still holding `1` moves to `30` at its next start. |
-| `gateway.suggestions.enabled` | bool | `true` | Suggested-followup UI. |
+| `gateway.suggestions.enabled` | bool | `true` | Telegram, Discord and Slack: after a turn in which the agent used no tool, up to two "💡" hints when your message looks like a job for a tool (a link to read, something to search). `false` sends none. Read at startup. |
 | `gateway.voice.enabled` | bool | `false` | Voice (STT inbound + TTS outbound) across **all platforms** (Telegram, Discord, Slack) + Web. Also settable at runtime via Settings → Voice. |
 | `gateway.voice.stt_provider` | string | `openai` | Speech-to-text **name**: `openai`, `groq`, `cohere`, `nvidia`, or `faster-whisper`. API keys come from Settings → Providers, not this block. Whisper is not a chat model. |
 | `gateway.voice.stt_language` | string | `auto` | STT language (`auto`, `ar`, `en`, …). Settings uses the same `form-select` as the other Voice fields. |
@@ -245,7 +245,7 @@ switch, run the rebuild so every row lives in the same vector space.
 |---|---|---|---|
 | `safety.hitl.enabled` | bool | `true` | Master HITL switch (graph path). |
 | `safety.hitl.require_approval_for` | list | see below | Danger tools for the **graph** path. |
-| `safety.hitl.approval_timeout_seconds` | int | `60` | Pipeline-checkpoint auto-reject timeout. |
+| `safety.hitl.approval_timeout_seconds` | int | `300` | How long an approval card waits for an answer. The tool is then not run, and the model and the chat are told the approval expired. Also the swarm bus's request deadline. |
 | `safety.hitl.auto_deny_on_timeout` | bool | `true` | Auto-reject paused tasks on timeout. |
 
 Default `require_approval_for`:

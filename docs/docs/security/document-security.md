@@ -77,8 +77,8 @@ each one stops.
   request's tenant context and the actor from the signed-in principal, never
   from the request body.
 - **Job reads are authorized like document reads:** every job status, history,
-  cancel and retry names its caller and checks the document's ACL (retry needs
-  write access); a job the caller cannot read is indistinguishable from one
+  cancel and retry names its caller and checks the document's ACL (cancel and
+  retry need write access); a job the caller cannot read is indistinguishable from one
   that does not exist (Web, agent tools, gateway), and an idempotency key used
   by another actor answers `idempotency_conflict`. The operations audit trail
   is admin-only. On a single-operator install every surface (Web, chat, the
@@ -94,7 +94,7 @@ checks:
 | Check | Defense |
 |---|---|
 | OOXML structural analysis | Rejects unsafe member paths (absolute, drive letter, `..`), symbolic-link members, encrypted archives, XXE (`<!DOCTYPE`, `<!ENTITY`, also UTF-16/32 encoded), external relationships (`TargetMode="External"`), macro payloads (`vbaProject.bin`, and macro-enabled extensions such as `.docm`), embedded objects (`embeddings/`, `activeX/`, `oleObjects/`), nested archives, and compression bombs (expanded size, expansion ratio and image count over configurable budgets) |
-| PDF policy | Rejects encrypted PDFs, polyglot (PDF/ZIP) files and active content: JavaScript, XFA forms, launch, remote and embedded GoTo, SubmitForm, ImportData, rendition/rich-media/sound/movie actions, embedded files (with or without `/Type`) and links that are not absolute `http`/`https`/`mailto` (file and network-share targets leak credentials). In-document navigation stays. One bounded walk (`documents/pdf_policy.py`: at most 100,000 objects and depth 128; an unreadable or indeterminate structure is refused) applied in the worker on intake, every mutation input and output (redaction included), and every rendered PDF. A PDF a user supplies is opened only inside the worker; the three in-process openers left check PDFs Kazma itself just rendered, each declared in `tests/test_pdf_openers_stay_in_workers.py` |
+| PDF policy | Rejects encrypted PDFs, polyglot (PDF/ZIP) files and active content: JavaScript, XFA forms, launch, remote and embedded GoTo (including a `/GoTo` or `/Thread` action that names another file through `/F`), SubmitForm, ImportData, rendition/rich-media/sound/movie actions, embedded files (with or without `/Type`) and links that are not absolute `http`/`https`/`mailto` (file and network-share targets leak credentials). In-document navigation stays. Action and key names are matched case-insensitively. One bounded walk (`documents/pdf_policy.py`: at most 100,000 objects and depth 128; an unreadable or indeterminate structure is refused) applied in the worker on intake, every mutation input and output (redaction included), and every rendered PDF. A PDF a user supplies is opened only inside the worker; the three in-process openers left check PDFs Kazma itself just rendered, each declared in `tests/test_pdf_openers_stay_in_workers.py` |
 | UTF-8 validity | Rejects invalid byte sequences without attempting lossy decode |
 | Content-type validation | Rejects binaries claiming to be text, HTML claiming to be plain |
 | Archive member count | Enforces configurable max archive members |
@@ -182,7 +182,9 @@ documents you do not trust.
   runs only for the broker's own attestation and engine report (and stress
   jobs from a broker started with `--qualification`, never in production).
 - **Attestation:** before it serves, the broker runs a probe inside a real job
-  container and checks identity (not root), capabilities, `no_new_privs`,
+  container and checks identity (exactly uid and gid 10001, not merely non-root),
+  capabilities (the effective, permitted, ambient and bounding sets all empty),
+  `no_new_privs`,
   seccomp, network interfaces (`lo` only), a refused outside connection and
   DNS lookup, visible host paths, every mount, the read-only root, the cgroup
   memory/swap/PID/CPU limits and the tmpfs size. Any mismatch refuses to start
@@ -209,11 +211,19 @@ client-disconnect cancellation, descendant cleanup, a stale-container sweep,
 and a broker-container/client-container topology run (evidence and its
 limits: `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md`, F02).
 
+**Independent review.** On 2026-10-15 an independent reviewer (no Kazma
+authorship, no owner infrastructure) tested these layers against the claims
+in `docs/audits/Q04_DOCUMENTS_SECURITY_REVIEW_PACK_2026-10-15.md`. Thirteen of
+fourteen held. The finding (a `/GoTo` or `/Thread` naming another file passed
+the PDF policy) was fixed and retested:
+`docs/audits/Q04_REVIEW_RESULTS_2026-10-15.md`.
+
 - **Engine readiness is the image's.** The broker collects the image's own
   parser, renderer, mutator and OCR report at start (and refuses to serve
   without it); in this profile Kazma decides what it can run from that report,
   never from the host's packages, and readiness flags an image built from
-  other document code (`image_code_matches`).
+  other code, an older image or a fallback build (`image_code_matches`,
+  `image_current`, `image_fallback`).
 - `security.execution.container_required` (the strict execution profile)
   refuses the `process` profile for documents (`worker_isolation_required`);
   a policy that cannot be read refuses as well.
@@ -243,7 +253,9 @@ the **original document bytes** to LlamaParse or Reducto.
   carrying the job's tenant, actor, document, version and job is written.
   Failure to persist it, or a job with no actor, refuses the upload. The
   outcome is audited as `remote_parse_success` or `remote_parse_failure`, and
-  a failed provider falls through to the next configured one.
+  a failed provider falls through to the next configured one. A refused or
+  failed remote parse is logged at WARNING with its error type; the local
+  reading is kept.
 - The provider client ignores proxy environment variables, follows no
   redirects and refuses an answer over 32 MiB. Salvaged text carries no
   physical page numbers.
@@ -288,6 +300,7 @@ Document text reaches the model inside an untrusted-data fence, for example:
 | A document read through the agent's document tools | `document` |
 | A chat attachment's auto-excerpt (the first 2,000 characters, after a best-effort transient `DocumentService` parse) | `document_attachment` |
 | Document hits from a Knowledge library search | `document_knowledge` |
+| A document's text in the "organize this into Markdown" prompt (the document intent handler and pipeline) | `document` |
 
 Each of these surfaces fences its output itself (`format_untrusted_block()`).
 It is not a setting: nothing switches the fence off (the unused

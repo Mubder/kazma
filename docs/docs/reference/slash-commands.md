@@ -314,6 +314,11 @@ the new requirement.
 Cancels and **abandons** the running task. The turn is marked `abandoned`,
 `auto_continue` is cleared, and an abort marker is injected so the agent will
 not continue the task unless you ask it to redo it. `/stop` does the same.
+The aborted request is answered "⛔ Cancelled with /abort before an answer --
+not continued." in the conversation, so your next message is not taken as a
+request to finish it. The turn is closed with whatever it had written so far,
+or with that note if it had written nothing; an earlier turn's answer is never
+saved as its reply.
 
 **Usage:**
 ```
@@ -386,12 +391,16 @@ Answers a paused danger-tool approval from the chat, as its buttons do.
 |:---|:---|
 | `/hitl approve [thread_id]` | Approve (also `yes`, `y`, `allow`) |
 | `/hitl deny [thread_id]` | Deny |
-| `/hitl approve_task [thread_id]` | Approve every danger tool of this task, until your next message (at most 10 minutes, `KAZMA_TASK_GRANT_TTL_SECONDS`) |
+| `/hitl approve_task [thread_id]` | Approve every danger tool of this task, until your next message (at most 10 minutes, `KAZMA_TASK_GRANT_TTL_SECONDS`). Not for an X card (`x_post`, `x_schedule_post`, `x_delete_post`, `x_cancel_scheduled_post`): those take a one-time approval only, and `approve_task` approves nothing. |
 | `/hitl opt <thread_id> <option>` | Choose an option on a clarify / confirm card |
 
 The thread defaults to this chat's. Only the person who started the paused
 task can answer it, and a card whose turn has moved on says it expired
-instead of approving anything.
+instead of approving anything. A card nobody answers within
+`safety.hitl.approval_timeout_seconds` (default 300 s) expires: the chat gets
+"⏱ The approval for *tool* expired after *N* minutes with no answer, so it
+was not run.", then the rest of the turn. Tapping that card later says it
+expired; send the request again if you still want it.
 
 ---
 
@@ -472,8 +481,8 @@ message role. It is the same report as the agent's `context_info` tool.
 **Response:**
 ```
 📊 Context Window
-Tokens: 9,214 / 128,000 (7%)
-Summarization threshold: 24,000 tokens (38% utilized)
+Tokens: 9,214 / 1,000,000 (1%)
+Summarization threshold: 950,000 tokens (1% utilized)
 Workspace: /home/you/kazma/kazma-data/workspace
 Model: deepseek-chat  Provider: deepseek
 ```
@@ -875,7 +884,7 @@ A chat-app message that starts with `/` reaches the gateway's handler
 1. The commands that act on the chat's saved conversation or on a running
    turn: `/model`, `/hitl`, the session commands, `/reset`, `/compact`,
    `/long` / `/mission` / `/yolo` / `/unrestricted`, `/plan`, `/undo`,
-   `/edit`, `/replay <step>`, `/fork`, `/steer`, `/abort`.
+   `/edit`, `/replay <step>`, `/fork`, `/steer`, `/abort` (`/stop`).
 2. The resolver. `_build_slash_ctx()` (`agent_handler/commands.py`) reads
    what the command reports from where it lives, and `resolve_slash_command()`
    (`kazma_gateway/slash_commands.py`) answers `/help`, `/status`, `/memory`,

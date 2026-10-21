@@ -70,8 +70,11 @@ _ANNOUNCED_TOOLS = (
     "shell_exec",
     "python_exec",
     "git_status",
+    "git_log",
+    "git_diff",
     "git_commit",
-    "git_push_pull",
+    "git_push",
+    "git_pull",
     "github_create_pr",
     "github_list_issues",
 )

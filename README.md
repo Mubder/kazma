@@ -16,7 +16,7 @@
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%E2%80%93%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 to 3.14"></a>
-    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-17%2C370-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-17%2C372-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="https://kazma.ai/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection measured"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
@@ -36,7 +36,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~706K LOC** (563K Python code + 44K JS) | **17,370 tests** (1,246 test files) | **4,371+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~706K LOC** (564K Python code + 44K JS) | **17,372 tests** (1,247 test files) | **4,372+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
@@ -231,7 +231,8 @@ circuit breakers per worker. → [Swarm orchestration](https://kazma.ai/docs/swa
 **Documents.** Quarantined intake, policy checks and optional ClamAV,
 parsing and OCR in resource-limited subprocesses, conversion, redaction, and
 indexing into knowledge libraries. Arabic and mixed-direction documents
-render correctly, block by block. → [Document intelligence](https://kazma.ai/docs/document-intelligence/)
+render correctly, block by block and table by table, in one house style
+(HTML converted to PDF included). → [Document intelligence](https://kazma.ai/docs/document-intelligence/)
 
 **Any model.** Every OpenAI-compatible API, plus native Anthropic, Gemini,
 Azure OpenAI and AWS Bedrock, local Ollama and LM Studio, and tools from any

@@ -4,7 +4,7 @@ title: Swarm Orchestration
 sidebar_label: Swarm Orchestration
 description: Kazma Swarm Orchestration — code-audited reference
 ---
-> The complete swarm system: the engine, six dispatch patterns, aggregation strategies, the reliability layer (circuit breakers, retries, timeouts, validators, concurrency), the worker registry, pipeline checkpoints, HITL bus (tri-state FanOut), and metrics. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §4–§7, §9, §14, §30.
+> The complete swarm system: the engine, six dispatch patterns, aggregation strategies, the reliability layer (circuit breakers, retries, timeouts, validators, concurrency), the worker registry, pipeline checkpoints, HITL bus (one shared decision per request), and metrics. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §4–§7, §9, §14, §30.
 
 ---
 
@@ -144,6 +144,11 @@ model).
 | Worker dispatches in parallel, all tasks | 64 | same |
 | Task streams per client / in all | 16 / 128 | `kazma_ui/swarm_sse.py` |
 | Stream heartbeat / lifetime | 15 s / 30 min (the client resumes) | same |
+| The agent's wait for a result (`check_swarm_task`) | 60 s by default, at most 90 s (`wait_seconds`; 0 checks once) | `agent/tool_builtins/system.py` |
+
+`check_swarm_task` answers the moment the task finishes; a task still running
+after the wait is reported as running, and the model calls again with the same
+id. The cap stays below the 120 s tool timeout.
 
 The Web API refuses an out-of-range request with `422`; the engine refuses one
 from any other entry before admission. A full swarm answers `429

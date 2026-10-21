@@ -1,5 +1,114 @@
 # CHANGELOG
 
+## Knowledge: one insert thread for Chroma, and an agent's own research runs settled (2026-10-21)
+
+- **Chroma replays a library's write log on one thread.** The Knowledge soak
+  died three times with an access violation inside chromadb's index during
+  the first replay of a write log after a client starts, which Chroma does on
+  parallel threads. `scripts/chroma_replay_race.py` measured 6 crashes in
+  about 28,200 client starts with Chroma's own threads and none in 28,000
+  with one. Kazma sets `RAYON_NUM_THREADS=1` before Chroma starts (a value the
+  operator set is kept, with a warning). Price: 20,000 vectors insert in 60 s
+  instead of 8 s, and a 999-record replay takes 6 s instead of 0.7 s
+  (`tests/test_chroma_serial_inserts.py`).
+- **An agent's own crawl raises no research alert, and an old one is
+  settled.** A `crawl_site`, or a `run_research_pipeline` outside a Research
+  session, returns its result to the agent; an alert stored for such a run is
+  settled at the next scan. Research sessions and Knowledge crawls still
+  alert (`tests/test_acquisition_monitor.py`).
+- **Endurance:** the Documents 48 h soak passed on 2026-10-19 (`process`
+  profile, SQLite stores), the Memory and Time Travel 72 h soaks on
+  2026-10-20; the Knowledge 72 h soak runs again on the one-thread fix.
+- **Docs:** a full check of the user-facing docs against the changes since
+  2026-10-15 (approvals, forgetting, documents, tools, soaks and the review),
+  and the document worker image is built before the reload (README, Kazma
+  update, Document processing). The environment block names the real git
+  tools (`git_log`, `git_diff`, `git_push`, `git_pull`;
+  `tests/test_announced_tools_exist.py`), and Settings starts its context
+  window at the shipped 1,000,000, so a failed load cannot save 128,000.
+
+## Approvals, aborts and X posts: what a card offers, and what happens when nobody answers (2026-10-16 to 2026-10-21)
+
+- **An always-ask tool takes a one-time approval only.** An X write's card
+  (`x_post`, `x_schedule_post`, `x_delete_post`, `x_cancel_scheduled_post`)
+  offers Approve once and Deny, names its action ("Publish to X — public,
+  can't be undone", **Post now**) and shows the post whole, on the web, the
+  approvals panel, Telegram, Discord and Slack. The approve route answers a
+  `tool` or `yolo` answer for one with 409 `one_time_only`, and `/hitl
+  approve_task` on one approves nothing.
+- **A draft is posted only after you have seen it.** Posting a draft saved in
+  the same turn is refused; the agent shows it and waits for your next
+  message. `save_proposal` gives each X draft's length as X counts it, and
+  `x_status(metrics=true)` reads the listed posts' public counts in one read
+  (never a missing count as zero); `x_status` pages every post with `offset`.
+- **No card for a call that cannot run; a refusal before acting is an
+  ordinary error.** A `shell_exec` the host-shell policy or the shell syntax
+  rules refuse, and a browser or `computer_use` call the host cannot launch,
+  are refused before their card. A tool that refuses before it acts no longer
+  ends the turn as "effects unknown", and a commitment-layer deny is an error
+  the model acts on, not the turn's end.
+- **An expired approval is said and delivered.** The model is told the card
+  expired unanswered (not "denied by user"); in chat apps the chat gets a
+  notice and the rest of the turn, and a late tap says the card expired.
+- **/abort.** `/stop` is `/abort` on every surface. The aborted request is
+  answered "cancelled", so the next turn does not answer it, and the turn is
+  closed with its own partial reply, never the previous turn's.
+- **Web chat.** A turn left and returned to stays live after a server
+  restart, and an open tab shows "Kazma was updated" with a Refresh button.
+- **Also:** the chat apps' "💡" tool hints follow `gateway.suggestions.enabled`
+  and come only after a turn that used no tool; every log reader reads the
+  file the server writes; the guard holds pages it cannot send yet and sends
+  them, marked delayed, once its credentials resolve.
+
+## Forgetting reaches everything that holds it; the context is the window (2026-10-18 to 2026-10-19)
+
+- **"Forget" in chat forgets where a fact came from.**
+  `memory_invalidate(forget_source_turn=true)` forgets the fact's source turn
+  too, as the Memory page's Forget does; a memory id (`e_...`) forgets that
+  memory, and an unknown id is refused before anything runs.
+- **A distinctive value is forgotten wherever it was repeated** (a codeword,
+  an order or phone number), Kazma's own earlier answers included.
+- **"Forget everything that mentions X"** is `memory_forget_mentions` (danger
+  tier, 4+ characters): every memory, current fact and self-improvement
+  lesson holding the text. The message that asks to forget is kept out of
+  memory.
+- **A list of notes stays a list.** `scripts/memory_reopen_lists.py`
+  reopens entries an earlier build closed.
+- **Knowledge: a question naming an identifier finds the one chunk that
+  names it**, ahead of look-alikes; what is shown is unchanged.
+- **The context is the window.** The shipped window is 1,000,000 tokens; the
+  history trim fires at 95 % of it, and a chat that still outgrows it keeps
+  its earlier requests and plain replies.
+- **Read-only `git_log` and `git_diff`** (no approval);
+  **`check_swarm_task` waits** for the result (60 s by default, at most 90);
+  **a Gmail listing shows each mail's sender, date and subject**; Settings →
+  Packages installs without pruning; dependency minimums raised.
+
+## Documents: one house style, tables in their own language, and Kazma reads its PDFs back (2026-10-17 to 2026-10-20)
+
+- **An HTML file converted to PDF is in the house style:** the brand face,
+  heading bars, the table style and the brand header and page-numbered
+  footer; its own fonts, colours and CSS are dropped.
+  `convert_document(keep_source_style=true)` keeps a file's own design
+  (`tests/test_document_html_house_style.py`).
+- **A table reads in its own language**, in DOCX, HTML and PDF
+  (`tests/test_document_table_direction.py`).
+- **Generated PDFs are in the brand face in the container too**, Markdown
+  line breaks, heading levels and quotes are kept, Arabic bold is bold, a
+  bilingual title is drawn once, and list bullets are "•" in the house face.
+- **A Latin run in Arabic text keeps its order**, and a paragraph holding a
+  bidi mark no longer ends a page's text when Kazma reads it back.
+- **Kazma reads its own bilingual PDF back as it is:** each table once,
+  cells from the glyphs (a "fi" ligature reads "first"), stacked Arabic and
+  English lines kept in one column.
+- **A PDF table with punctuation verifies**, and a check that really fails is
+  an ordinary error naming the incomplete file.
+- **Q04 defensive check:** cancelling a job needs write access; a document is
+  not deleted while Knowledge is down and the document is indexed; document
+  text in the "organize this" prompt is fenced; the broker attests the exact
+  worker uid, gid and an empty capability bounding set; readiness flags an
+  older or fallback worker image.
+
 ## Q04 independent review: a remote-file PDF reference refused (FIND-01, 2026-10-15)
 
 - **An independent reviewer** (no Kazma authorship, no owner infrastructure)

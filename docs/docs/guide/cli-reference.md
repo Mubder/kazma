@@ -476,7 +476,7 @@ same commands as Telegram's "/" menu.
 | `/reset` · `/compact` | Clear the conversation, or compact its context now. |
 | `/undo` · `/edit <text>` | Remove the last reply, or replace it with corrected text. |
 | `/replay list \| <iter> \| compare <a> <b> \| clear` · `/fork <iter>` | Time travel: snapshots, rewind in place, compare, clear, branch. |
-| `/steer <text>` · `/steer! <text>` · `/abort` | Add to, interrupt or abandon the running task. |
+| `/steer <text>` · `/steer! <text>` · `/abort` (`/stop`) | Add to, interrupt or abandon the running task. |
 | `/long` · `/mission` · `/yolo` · `/unrestricted` | Tool-round budget and approval bypass for this chat. |
 | `/plan` | Plan mode: inspect and propose, execute on approval. |
 | `/hitl approve \| deny \| approve_task` | Answer a pending approval from the chat. |

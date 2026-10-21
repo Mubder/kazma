@@ -45,7 +45,8 @@ Background research session history has a combined 256-row/128MiB admission
 bound, including older chat-search rows. Existing installs above that bound
 refuse new sessions until the operator deliberately frees settled history;
 archiving does not release capacity. Monitoring excludes ordinary chat-search
-rows before its bounded query and continues to observe deep/brief runs. The
+rows before its bounded query, and crawls or pipelines an agent runs in its own
+turn, and continues to observe deep/brief runs. The
 legacy-history regression is covered without deleting or widening saved data.
 
 Settings offers cached status and explicit credit refresh; policy editing uses
@@ -182,8 +183,24 @@ prose, bare JSON and English bullets across Telegram, Discord and Slack.
 Native live continuations preserved those formats and saved one reply per turn.
 The English/Arabic literal-JSON and one-paragraph safeguards remain deliberately
 narrow; they do not guarantee arbitrary output-format compliance. The local
-seven-day operational pilot is still in progress, with close-out scheduled for
-2026-10-17; it is not a completed soak or an availability SLO.
+seven-day operational pilot was scheduled to close on 2026-10-17; its close-out
+result is not recorded here yet. It is not a completed soak or an availability
+SLO.
+
+**Endurance runs (2026-10-14 through 2026-10-21).** Each area's soak harness
+ran the real product code on private stores on one Windows workstation, with
+restarts and killed processes. Passed: Documents, 48 h on `de461eae` (default
+`process` profile, SQLite stores): 12,865 documents, 190 restarts, 143 killed
+intakes, 0 errors. Memory, 72 h: 7,050 cycles, 811 killed, 405 restores, 0
+violations. Time Travel, 72 h: 14,967 cycles, 0 violations. Swarm, 24 h on
+`35670ff4`: 719 restarts, 0 violations. Scheduled, 28 simulated days: 68,397
+occurrences, 251 restarts, 0 violations. The Knowledge 72 h run failed three
+times on a native crash inside chromadb's parallel log replay; Kazma now
+replays on one thread (`RAYON_NUM_THREADS=1`, 2026-10-21) and the run is being
+repeated, so Knowledge has no passed multi-day run yet. None of these runs
+covers the document `container` profile, Postgres stores, multi-replica
+operation or another machine. Results: `docs/plans/REMAINING_WORK_2026-10-15.md`,
+"Measurements".
 
 **Human review started (2026-10-07).** The owner graded four synthetic development
 answers from the installed Deepseek model. Both ordinary status reads failed
@@ -209,7 +226,7 @@ holds it), **accepted** (a limit kept on purpose, with the reason), or an
 **Owner decisions** (all settled on 2026-09-27):
 
 - **Branch protection on `main`: done.** Ruleset `KazmaLatestRule` requires
-  the eleven CI checks, blocks deletions and force pushes, and lets the
+  every CI check (eleven then, 21 since 2026-10-15), blocks deletions and force pushes, and lets the
   repository admin bypass (`docs/docs/ops/branch-protection.md`). The metrics
   bot no longer commits to `main`; it keeps a pull request open on the
   website repository instead (`docs/docs/ops/website-metrics.md`).
@@ -1390,10 +1407,11 @@ frame above the storage layer is the next gate entry (AGENTS.md §35).
 **A Postgres install leaves a dead `settings` TABLE behind in
 `kazma-data/settings.db` — and live data in the same file.** Switching backends
 does not remove the table, nothing reads it again, and it looks exactly like
-the live configuration. The FILE is not dead: the Knowledge Library,
-workspaces and bookmarks are SQLite-only stores that keep living in it on a
-Postgres install (the boot warning names the Knowledge Library and says not
-to delete the file). Measured on the operator's box, 2026-09-12:
+the live configuration. The FILE is not dead: workspaces and bookmarks are
+SQLite-only stores that keep living in it on a Postgres install (the boot
+warning says not to delete the file). The Knowledge Library lived there too
+until 2026-10-14; it has its own `knowledge.db` now, and its old tables are
+dropped from `settings.db` on the first open. Measured on the operator's box, 2026-09-12:
 
 ```
 sqlite settings.db :  90 keys        postgres: 884 keys

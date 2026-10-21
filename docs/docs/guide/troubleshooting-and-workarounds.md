@@ -189,9 +189,9 @@ While a fallback lasts, the chat message repeats at most twice a day (a failover
 
 **Cause:** the `[rag]` extra is not installed, or the embedder failed to load.
 
-**What happens:** V2 `recall()` catches all failures and returns an empty `RecallResult` — tools return `"No relevant memories found."`, compaction gets `[]`. The system never crashes; it just has no semantic recall (FTS5 keyword match may still surface hits).
+**What happens:** V2 `recall()` catches all failures and returns an empty `RecallResult` — `memory_search` says the search was incomplete (keyword matches only), never `"No relevant memories found."`, compaction gets `[]`. The system never crashes; it just has no semantic recall (FTS5 keyword match may still surface hits).
 
-**Fix:** `pip install -e ".[rag]"`. The embedder (local MiniLM by default) loads on first use; check the boot log for `[Memory] V2 embedder ready`. If remote embeddings are configured (`memory.embedding.provider: openai-compatible`), verify the API key + `base_url`.
+**Fix:** `pip install -e ".[rag]"`. The embedder (local `BAAI/bge-m3` by default) loads on first use; check the boot log for `[Memory] V2 embedder ready`. If remote embeddings are configured (`memory.embedding.provider: openai-compatible`), verify the API key + `base_url`.
 
 ### 2.3 Embedding dimension mismatch (cosmetic)
 
@@ -642,8 +642,10 @@ For a full reset: `rm kazma-data/settings.db` (loses **all** runtime settings) a
 
 **Fix:**
 ```bash
-uv sync --all-extras
-uv pip install -e .
+# Kazma is installed but the command is missing: reinstall its packages, keeping your extras
+python -m kazma_cli update --reinstall -y
+# Not installed in this venv: from the install folder, with Kazma stopped (adds packages, removes none)
+uv pip install -e ".[rag,tui]"     # put the extras you use in the brackets
 which kazma && kazma --help          # PowerShell: Get-Command kazma
 # fallback if the entry point won't work:
 python -m kazma_cli --help
@@ -882,7 +884,7 @@ and the [operator runbook](https://github.com/Mubder/kazma/blob/main/docs/DURABL
 
 | Symptom | What to inspect | Next step |
 |---|---|---|
-| Research finished but no completion alert | Settings → System → Web acquisition → Read alert settings; monitoring and completion must be enabled | Open the saved run. Old finished history is quiet on first monitor boot; ordinary chat searches keep their chat reply. |
+| Research finished but no completion alert | Settings → System → Web acquisition → Read alert settings; monitoring and completion must be enabled | Open the saved run. Old finished history is quiet on first monitor boot; ordinary chat searches keep their chat reply. A `crawl_site` or `run_research_pipeline` the agent ran in its own turn is not alerted; its result is in the agent's answer. |
 | No observed progress warning | Saved stage, source count and durable effects; a heartbeat alone is not progress | Inspect the run before cancelling. The warning does not fail or retry it; resumed progress clears it. |
 | Result list unavailable or live stream disconnected | Persistent page warning and saved session/job status | Restore the connection and reload status; do not infer empty results or success from a failed read. |
 | External notification requested, failed or uncertain | Notification receipt and configured ops routes | Only platform acceptance is delivered. Inspect the route; uncertain sends are not automatically replayed. |

@@ -199,6 +199,12 @@ The full SSE event contract (`token`, `tool_call`, `tool_result`, `approval_requ
 | **Slack** | Interactive callback | swarm approval block | `slack.py:401` |
 | **Web UI** | Button → `POST /api/approve/\{thread_id\}` + `approval_required` SSE event | — | `routes_direct/misc.py` |
 
+The Discord and Slack rows are the swarm bus's approvals. Chat approval cards
+use the same `hitl:approve:<id>` / `hitl:deny:<id>` / `hitl:approve_task:<id>`
+actions on all three platforms. An X card names its action and has no
+"Approve for task". An expired card is announced in the chat, and the turn is
+delivered there.
+
 > The **bus adapter singleton** priority is Telegram > Discord > Slack (only one active at a time, wired in `app.py:506-556`). See [Security & Safety](security-and-safety#bus-adapter-priority).
 
 ---
@@ -244,5 +250,3 @@ A read-mostly observability dashboard over the same core singletons.
 
 - **`agent_handler.py` no longer exists** as a single file — it is the `agent_handler/` package. Older docs referencing the file are stale.
 - **Graph transport is SSE.** `/ws/chat/{session_id}` is live as a telemetry / cursor bus; it does not run the graph.
-- **`/undo` and `/edit` slash commands are stubs** and should not be advertised as functional.
-- **`/help` omits `/hitl` and `/swarm`** even though both work. This is a documentation gap in the in-app help text, not a missing feature.
