@@ -54,6 +54,22 @@ Kazma stores no documents and only the metadata it reads
 Chroma's own ``chroma utils vacuum`` does), so no deleted row stays
 readable in ``chroma.sqlite3``. :func:`holds_text` finds a collection an
 older build wrote text into.
+
+**A replay's parallel insert can crash the process.** The first read of a
+collection after a client starts (every boot, and every client the repair
+pass closes and opens again) applies its write log to the index Chroma
+loads from disk, inserting the records on its own worker threads (rayon,
+one per CPU). That insert races in hnswlib: an access violation in its
+graph search, at the same address every time (the Knowledge soak,
+2026-10-17/19, three times). ``scripts/chroma_replay_race.py`` measured it
+on 2026-10-21: 6 crashes in about 28,200 client starts with Chroma's own
+pool (in-process reopens and fresh processes alike), 0 in 28,000 with one
+insert thread; replaying a crashed store again never crashes, so it is a
+race, not bad data. :func:`serial_index_inserts` gives Chroma's pool one
+thread before the first client starts. The price, measured at 1,024
+dimensions: 20,000 vectors insert in 60 s instead of 8 s, and a new
+client's replay of 999 pending records takes 6 s instead of 0.7 s (the
+real embedder makes about 18 chunks a second, so ingest stays bound by it).
 """
 
 from __future__ import annotations
@@ -88,6 +104,7 @@ __all__ = [
     "mark_compaction_due",
     "raise_stream_limits",
     "remove_orphan_segment_folders",
+    "serial_index_inserts",
     "start_system",
     "vector_store_id",
 ]
@@ -261,6 +278,32 @@ def vector_store_id(persist_dir: str | Path | None, *, create: bool = False) -> 
     except OSError:
         logger.warning("[chroma] could not record the vector store's id in %s", path, exc_info=True)
         return ""
+
+
+#: The variable Chroma's thread pool (rayon) reads when it first starts.
+INSERT_THREADS_ENV = "RAYON_NUM_THREADS"
+_INSERT_THREADS_SAID = threading.Event()
+
+
+def serial_index_inserts() -> str:
+    """Give Chroma's index inserts one thread (module docstring), before
+    the first client starts; returns the value in effect.
+
+    The pool reads :data:`INSERT_THREADS_ENV` when it first runs, so this
+    must come before the first read of any collection in the process. A
+    value the operator set is kept, with a WARNING once when it allows more
+    than one thread. It applies to every Rust library in the process that
+    uses rayon (tokenizers too: a batch is tokenized on one thread)."""
+    current = (os.environ.get(INSERT_THREADS_ENV) or "").strip()
+    if not current:
+        os.environ[INSERT_THREADS_ENV] = "1"
+        return "1"
+    if current != "1" and not _INSERT_THREADS_SAID.is_set():
+        _INSERT_THREADS_SAID.set()
+        logger.warning("[chroma] %s=%s lets Chroma insert a replayed log on several threads, which can "
+                       "crash the process (an access violation in hnswlib); unset it or set it to 1",
+                       INSERT_THREADS_ENV, current)
+    return current
 
 
 def raise_stream_limits() -> dict[str, Any]:

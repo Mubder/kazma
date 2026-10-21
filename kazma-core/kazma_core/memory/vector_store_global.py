@@ -308,6 +308,7 @@ def _shared_client(persist_dir: str | None) -> Any:
         client = _CLIENTS.get(key)
         if client is not None:
             return client
+    chroma_local.serial_index_inserts()  # before Chroma's thread pool first runs
     import chromadb
     from chromadb.config import Settings
 
