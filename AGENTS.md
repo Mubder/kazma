@@ -4499,6 +4499,25 @@ module was deleted and the import's `except` said "chromadb not installed".
     again (WARNING, `kazma_kb_vector_index_reloads_total`).
     `hnsw:sync_threshold` does not fix it (minimum 2, and a persist rewrites
     the whole index).
+  - *A log is replayed on one thread* (2026-10-21,
+    `chroma_local.serial_index_inserts`, called by `_shared_client` before
+    Chroma's pool first runs). The first read of a collection after a
+    client starts (every boot, every client the repair pass reopens)
+    applies its write log to the index Chroma loads from disk, on rayon
+    worker threads, and that parallel insert races in hnswlib: an access
+    violation in its graph search, always at one address, the Knowledge
+    soak's crash (2026-10-17/19, three runs). Measured with
+    `scripts/chroma_replay_race.py`: 6 crashes in about 28,200 client
+    starts with Chroma's own pool, 0 in 28,000 with `RAYON_NUM_THREADS=1`;
+    a crashed store replayed again never crashes (a race, not bad data).
+    Price: 20,000 vectors at 1,024 dimensions insert in 60 s instead of
+    8 s, a new client's replay of 999 records 6 s instead of 0.7 s. An
+    operator's other value is kept and named once (WARNING). Every Chroma
+    client in product code and scripts is built after the call; the drill
+    alone measures Chroma's own pool. Gate:
+    `tests/test_chroma_serial_inserts.py` (a real replay adds one thread,
+    Chroma's own pool as the negative control; a planted client without
+    the call fails the gate). Re-run the drill after a chromadb upgrade.
   - *No text beside a vector.* An older build stored each chunk's first
     2,000 characters as the Chroma document and its title, heading, address
     and hash as metadata -- read by nothing -- and SQLite keeps a deleted

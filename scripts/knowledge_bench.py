@@ -612,6 +612,9 @@ def _cmd_run(real: bool, chroma: bool, as_json: bool, details: bool) -> int:
 
     client = None
     if chroma:
+        from kazma_core.memory.chroma_local import serial_index_inserts
+
+        serial_index_inserts()  # before Chroma's thread pool first runs
         import chromadb
         from chromadb.config import Settings
 
