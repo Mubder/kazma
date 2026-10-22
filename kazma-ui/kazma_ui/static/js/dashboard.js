@@ -7,8 +7,11 @@
   'use strict';
   var KS = window.KazmaStream;
   var ws = null;
-  var historyData = [];
-  var maxHistory = 60;
+  // The charts' range. They draw the LLM ledger's per-bucket tokens and
+  // cost (/api/dashboard/usage); they used to draw the running totals the
+  // open page had sampled, kept only in its memory (2026-10-22).
+  var chartRange = 'hour';
+  var chartBuckets = [];
 
   function $(id) { return document.getElementById(id); }
 
@@ -36,6 +39,10 @@
         fetchAnswerQuality();
       }
     }, 10000);
+    // The charts' buckets are minutes to hours wide: once a minute is enough.
+    setInterval(function() {
+      if (!document.hidden) refreshCharts();
+    }, 60000);
 
     // Time range selector
     var rangeBtns = document.querySelectorAll('.range-btn');
@@ -130,6 +137,7 @@
   // ── Data Fetching ─────────────────────────────────────
   function fetchInitialData() {
     fetchAnswerQuality();
+    refreshCharts();
     fetch('/api/dashboard/status')
       .then(function(r) { return r.json(); })
       .then(function(data) {
@@ -139,6 +147,15 @@
       .catch(function() {});
   }
 
+  // The reading on screen (its JSON), and the reads that failed since. The
+  // block was emptied and rebuilt on every 10 s poll, and emptied to one line
+  // on any failed read until the next: on the live install it vanished and
+  // came back while Kazma was idle (2026-10-22). Now an unchanged reading is
+  // not redrawn, and a failed read keeps the last one on screen -- a second
+  // failure in a row says so (tests/js/test_dashboard_quality_block.js).
+  var _qualityShown = null;
+  var _qualityFailures = 0;
+
   function fetchAnswerQuality() {
     var status = $('answer-quality-status');
     var counts = $('answer-quality-counts');
@@ -147,39 +164,51 @@
     fetch('/api/dashboard/answer-quality')
       .then(function(r) { if (!r.ok) throw new Error('unavailable'); return r.json(); })
       .then(function(data) {
-        counts.replaceChildren();
-        recent.replaceChildren();
-        if (!data.available) throw new Error('unavailable');
-        var totals = data.totals || {};
-        status.textContent = window.tOr('dashboard.quality_window', 'Retained graph turns: {count} (30 days, at most 10,000 turns).').replace('{count}', String(totals.turns || 0));
-        ['empty_draft', 'empty_answer', 'argument_recheck', 'plan_block', 'paragraph_miss', 'paragraph_repaired', 'turn_failed'].forEach(function(signal) {
-          var item = document.createElement('span');
-          item.textContent = window.tOr('dashboard.quality_' + signal, signal) + ': ' + String(totals[signal] || 0);
-          if (totals[signal] && ['empty_answer', 'paragraph_miss', 'turn_failed'].indexOf(signal) >= 0) item.style.color = 'var(--warning)';
-          counts.appendChild(item);
-        });
-        (data.recent || []).forEach(function(row) {
-          var item = document.createElement('li');
-          var labels = (row.signals || []).map(function(s) { return window.tOr('dashboard.quality_' + s, s); }).join(' · ');
-          item.appendChild(document.createTextNode(new Date(row.ts).toLocaleString() + ' — ' + labels + ' '));
-          var identity = document.createElement('bdi');
-          identity.textContent = row.turn_id || '';
-          item.appendChild(identity);
-          item.appendChild(document.createTextNode(' '));
-          if (row.session_id) {
-            var link = document.createElement('a');
-            link.href = '/chat?s=' + encodeURIComponent(row.session_id);
-            link.textContent = window.tOr('dashboard.quality_open', 'Open chat');
-            item.appendChild(link);
-          }
-          recent.appendChild(item);
-        });
+        if (!data || !data.available) throw new Error('unavailable');
+        var wasStale = _qualityFailures >= 2;
+        _qualityFailures = 0;
+        var key = JSON.stringify([data.totals, data.recent]);
+        if (key === _qualityShown && !wasStale) return;
+        _qualityShown = key;
+        renderAnswerQuality(data, status, counts, recent);
       })
       .catch(function() {
-        counts.replaceChildren();
-        recent.replaceChildren();
-        status.textContent = window.tOr('dashboard.quality_unavailable', 'Answer-quality monitoring is unavailable or requires administrator access.');
+        _qualityFailures += 1;
+        if (_qualityShown === null) {
+          status.textContent = window.tOr('dashboard.quality_unavailable', 'Answer-quality monitoring is unavailable or requires administrator access.');
+        } else if (_qualityFailures === 2) {
+          status.textContent = status.textContent + ' ' + window.tOr('dashboard.quality_stale', 'Could not refresh; showing the last reading.');
+        }
       });
+  }
+
+  function renderAnswerQuality(data, status, counts, recent) {
+    counts.replaceChildren();
+    recent.replaceChildren();
+    var totals = data.totals || {};
+    status.textContent = window.tOr('dashboard.quality_window', 'Retained graph turns: {count} (30 days, at most 10,000 turns).').replace('{count}', String(totals.turns || 0));
+    ['empty_draft', 'empty_answer', 'argument_recheck', 'plan_block', 'paragraph_miss', 'paragraph_repaired', 'turn_failed'].forEach(function(signal) {
+      var item = document.createElement('span');
+      item.textContent = window.tOr('dashboard.quality_' + signal, signal) + ': ' + String(totals[signal] || 0);
+      if (totals[signal] && ['empty_answer', 'paragraph_miss', 'turn_failed'].indexOf(signal) >= 0) item.style.color = 'var(--warning)';
+      counts.appendChild(item);
+    });
+    (data.recent || []).forEach(function(row) {
+      var item = document.createElement('li');
+      var labels = (row.signals || []).map(function(s) { return window.tOr('dashboard.quality_' + s, s); }).join(' · ');
+      item.appendChild(document.createTextNode(new Date(row.ts).toLocaleString() + ' — ' + labels + ' '));
+      var identity = document.createElement('bdi');
+      identity.textContent = row.turn_id || '';
+      item.appendChild(identity);
+      item.appendChild(document.createTextNode(' '));
+      if (row.session_id) {
+        var link = document.createElement('a');
+        link.href = '/chat?s=' + encodeURIComponent(row.session_id);
+        link.textContent = window.tOr('dashboard.quality_open', 'Open chat');
+        item.appendChild(link);
+      }
+      recent.appendChild(item);
+    });
   }
 
   function fetchStatusFallback() {
@@ -278,15 +307,6 @@
       else costEl.style.color = 'var(--text-primary)';
     }
 
-    // Add to history for charts
-    historyData.push({
-      time: Date.now(),
-      tokens: totalTokens,
-      cost: displayCost,
-      tools: toolCalls,
-      traces: traces,
-    });
-    if (historyData.length > maxHistory) historyData.shift();
   }
 
   function updateFromTrace(trace, metrics) {
@@ -352,15 +372,29 @@
 
   // ── Charts ────────────────────────────────────────────
   function refreshCharts(range) {
-    drawTokenChart(range);
-    drawCostChart(range);
+    if (range) chartRange = range;
+    var asked = chartRange;
+    fetch('/api/dashboard/usage?range=' + encodeURIComponent(asked))
+      .then(function(r) { if (!r.ok) throw new Error('unavailable'); return r.json(); })
+      .then(function(data) {
+        if (asked !== chartRange) return;  // another range was chosen meanwhile
+        if (!data || !data.available) throw new Error('unavailable');
+        chartBuckets = Array.isArray(data.buckets) ? data.buckets : [];
+        drawTokenChart();
+        drawCostChart();
+      })
+      .catch(function() { /* keep the bars on screen; the next refresh tries again */ });
   }
 
-  function drawTokenChart(range) {
+  function chartSeries(field) {
+    return chartBuckets.map(function(b) { return { t: b.start * 1000, v: Number(b[field]) || 0 }; });
+  }
+
+  function drawTokenChart() {
     var canvas = $('token-chart');
     if (!canvas) return;
     var ctx = canvas.getContext('2d');
-    var data = filterByRange(historyData, range, 'tokens');
+    var data = chartSeries('tokens');
 
     // Clear and redraw simple bar chart
     var w = canvas.width, h = canvas.height;
@@ -415,11 +449,11 @@
     ctx.fillText(text, rtl ? canvas.width - inset : inset, 12);
   }
 
-  function drawCostChart(range) {
+  function drawCostChart() {
     var canvas = $('cost-chart');
     if (!canvas) return;
     var ctx = canvas.getContext('2d');
-    var data = filterByRange(historyData, range, 'cost');
+    var data = chartSeries('cost');
 
     var w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
@@ -464,21 +498,6 @@
     ctx.font = '10px "IBM Plex Sans", sans-serif';
     drawChartLabel(ctx, canvas, window.kazmaT('dashboard.chart_cost_max', '{n} max',
       { n: '$' + max.toFixed(4) }), 18);
-  }
-
-  function filterByRange(data, range, field) {
-    if (!data.length) return [];
-    var now = Date.now();
-    var cutoff;
-    switch (range) {
-      case 'hour': cutoff = now - 3600000; break;
-      case 'day': cutoff = now - 86400000; break;
-      case 'week': cutoff = now - 604800000; break;
-      default: cutoff = now - 3600000;
-    }
-    return data
-      .filter(function(d) { return d.time >= cutoff; })
-      .map(function(d) { return { t: d.time, v: d[field] || 0 }; });
   }
 
   // ── System Resources (via Telemetry SSE) ──────────────

@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const source = fs.readFileSync(path.join(__dirname, '../../kazma-ui/kazma_ui/static/js/dashboard.js'), 'utf8');
-const start = source.indexOf('  function fetchAnswerQuality()');
+// The loader's state sits just above it (2026-10-22).
+const start = source.indexOf('  var _qualityShown = null;');
 const end = source.indexOf('  function fetchStatusFallback()', start);
 assert(start >= 0 && end > start);
 function element(tag) {
@@ -35,13 +36,24 @@ async function refresh() {
   const link = nodes['answer-quality-recent'].children[0].children[3];
   assert.strictEqual(link.href, '/chat?s=%3Cscript%3Ealert(1)%3C%2Fscript%3E%26s%3Dother');
   assert.strictEqual(nodes['answer-quality-counts'].children.length, 7);
+  // An unavailable answer after a reading keeps the reading on screen; a
+  // second failure in a row says it is old (2026-10-22: the block was
+  // emptied on every failed read and vanished on the live Dashboard).
   response = {ok: true, json: async () => ({available:false, totals:null, recent:[]})};
   await refresh();
-  assert(nodes['answer-quality-status'].textContent.includes('unavailable'));
-  assert.strictEqual(nodes['answer-quality-counts'].children.length, 0);
-  assert.strictEqual(nodes['answer-quality-recent'].children.length, 0);
+  assert.strictEqual(nodes['answer-quality-counts'].children.length, 7);
+  assert.strictEqual(nodes['answer-quality-recent'].children.length, 1);
+  assert(!nodes['answer-quality-status'].textContent.includes('Could not refresh'));
   response = {ok:false};
   await refresh();
+  assert(nodes['answer-quality-status'].textContent.includes('Could not refresh; showing the last reading.'));
+  assert.strictEqual(nodes['answer-quality-counts'].children.length, 7);
+  // A page that never read anything says it is unavailable.
+  const fresh = vm.createContext({...context, $: id => nodes[id]});
+  for (const id of Object.keys(nodes)) nodes[id] = element('div');
+  vm.runInContext(source.slice(start, end), fresh);
+  vm.runInContext('fetchAnswerQuality()', fresh);
+  await new Promise(resolve => setImmediate(resolve));
   assert(nodes['answer-quality-status'].textContent.includes('administrator'));
-  console.log('Dashboard quality: safe links, counters and unavailable state passed.');
+  console.log('Dashboard quality: safe links, counters, a kept reading and the unavailable state passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

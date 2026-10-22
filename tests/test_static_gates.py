@@ -1013,6 +1013,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # turn's totals and the recent rows are SQLite reads of the same file.
     "record_llm_call", "_record_if_enabled", "turn_usage", "turn_totals",
     "query_recent", "turn_started_epoch",
+    # The Dashboard's usage over time (2026-10-22): the same file, read by
+    # a plain-def route.
+    "usage_series",
     # The non-stop settings (2026-10-15): kazma.yaml's section, then the
     # settings store over it -- a Postgres round trip on a cache miss. The
     # supervisor's and resilient_chat's failover, the turn's envelope and the

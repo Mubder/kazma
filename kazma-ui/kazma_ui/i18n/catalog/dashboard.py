@@ -23,6 +23,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.quality_paragraph_repaired": {"en": "Paragraph layouts repaired", "ar": "تنسيق فقرة مصحح"},
     "dashboard.quality_turn_failed": {"en": "Failed turns", "ar": "أدوار فاشلة"},
     "dashboard.quality_open": {"en": "Open chat", "ar": "افتح المحادثة"},
+    "dashboard.quality_stale": {"en": "Could not refresh; showing the last reading.", "ar": "تعذر التحديث؛ تُعرض آخر قراءة."},
     "dashboard.quality_unavailable": {"en": "Answer-quality monitoring is unavailable or requires administrator access.", "ar": "مراقبة جودة الإجابات غير متاحة أو تتطلب صلاحية المسؤول."},
     "dashboard.active_capabilities": {
         "ar": "القدرات النشطة",

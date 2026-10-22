@@ -33,6 +33,7 @@ __all__ = [
     "record_llm_call",
     "thread_usage",
     "turn_usage",
+    "usage_series",
 ]
 
 logger = logging.getLogger(__name__)
@@ -275,6 +276,50 @@ def thread_usage(thread_id: str) -> dict[str, Any] | None:
         logger.warning("[llm-ledger] a chat's usage is unreadable: %s", exc)
         return None
     return {"calls": int(calls or 0), "tokens": int(tokens or 0), "cost": float(cost or 0.0)}
+
+
+def usage_series(
+    since: datetime, until: datetime, bucket_seconds: int,
+) -> list[dict[str, Any]] | None:
+    """Tokens, cost and calls of the LLM calls in ``[since, until)``, per bucket.
+
+    What the Dashboard's "Tokens Over Time" and "Cost Over Time" draw. They
+    drew the process's running totals, sampled by the open page every 10 s
+    and kept only in that page's memory (60 samples): bars that only grew,
+    reset by a restart or a reload, and "Day" / "Week" never more than the
+    tab had seen (2026-10-22). Every bucket is returned, empty ones as
+    zeros. ``None`` when the ledger cannot be read, never an empty chart.
+    Blocking: callers run it off the loop.
+    """
+    if bucket_seconds <= 0 or until <= since:
+        return []
+    count = int((until - since).total_seconds() // bucket_seconds)
+    buckets = [{"start": since.timestamp() + i * bucket_seconds,
+                "tokens": 0, "cost": 0.0, "calls": 0} for i in range(count)]
+    try:
+        with _lock:
+            conn = _get_conn()
+            rows = conn.execute(
+                "SELECT ts, total_tokens, cost_usd FROM llm_calls "
+                "WHERE ts >= ? AND ts < ?",
+                (since.isoformat(), until.isoformat()),
+            ).fetchall()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[llm-ledger] usage over time is unreadable: %s", exc)
+        return None
+    start = since.timestamp()
+    for ts, tokens, cost in rows:
+        try:
+            at = datetime.fromisoformat(ts).timestamp()
+        except (TypeError, ValueError):
+            continue
+        index = int((at - start) // bucket_seconds)
+        if 0 <= index < count:
+            bucket = buckets[index]
+            bucket["tokens"] += int(tokens or 0)
+            bucket["cost"] += float(cost or 0.0)
+            bucket["calls"] += 1
+    return buckets
 
 
 def close_llm_ledger() -> None:
