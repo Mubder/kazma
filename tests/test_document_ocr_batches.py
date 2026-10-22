@@ -176,11 +176,41 @@ def test_the_note_names_page_ranges() -> None:
     assert ocr_continuation_note(read=(1,), remaining=(), total_pages=1) == ""
 
 
-def test_the_job_status_carries_ocr_progress() -> None:
-    ocr_progress.record("job-1", 12, 54)
-    assert ocr_progress.get("job-1")["ocr_pages_done"] == 12
+def test_the_job_status_carries_ocr_progress(monkeypatch) -> None:
+    now = [1000.0]
+    monkeypatch.setattr(ocr_progress.time, "time", lambda: now[0])
+    ocr_progress.start("job-1")
+    now[0] += 90
+    started = ocr_progress.get("job-1")
+    assert started["elapsed_seconds"] == 90 and "ocr_pages_done" not in started
+    now[0] += 30
+    ocr_progress.record("job-1", 3, 54)
+    value = ocr_progress.get("job-1")
+    assert value["ocr_pages_done"] == 3 and value["seconds_per_page"] == 40.0
+    assert value["seconds_left"] == 40 * 51
     ocr_progress.clear("job-1")
     assert ocr_progress.get("job-1") is None
+
+
+def test_document_status_says_the_job_is_working_and_not_to_wait() -> None:
+    """Live 2026-10-22: the status said only "parsing" for the first minutes,
+    the model checked three times in 80 s and told the user the job never
+    progressed. It now says the job is working, its pace and the time left."""
+    from kazma_skills.native.document_platform.tools import _format_status
+
+    base = {"job_id": "j", "document_id": "d", "state": "parsing", "stage": "parsing",
+            "attempt": 1, "max_attempts": 3}
+    starting = _format_status({**base, "progress": {"elapsed_seconds": 80, "started_epoch": 1}})
+    assert "the first pages are being read" in starting
+    assert "Do not wait for it in this turn" in starting
+    running = _format_status({**base, "progress": {
+        "ocr_pages_done": 3, "ocr_pages_total": 54, "elapsed_seconds": 180,
+        "seconds_per_page": 60.0, "seconds_left": 3060}})
+    assert "3 of 54 pages read in about 3 minutes" in running
+    assert "about 51 minutes left at this pace" in running
+    # The control: the status before 2026-10-22 had no line for a job with no
+    # pages read yet.
+    assert "OCR" not in _format_status(base)
 
 
 # ── A stopped call stops its worker ─────────────────────────────────────

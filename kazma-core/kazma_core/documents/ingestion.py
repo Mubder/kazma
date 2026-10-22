@@ -1248,6 +1248,8 @@ class DocumentIngestionService:
             )
 
         with salvage_audit_scope(audit_egress):
+            # Its status says the stage is running before a page is read.
+            ocr_progress.start(str(job.id))
             try:
                 self._parse_to_manifest_impl(job, force_ocr=force_ocr, context=context)
             finally:

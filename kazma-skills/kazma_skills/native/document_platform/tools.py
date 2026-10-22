@@ -157,6 +157,10 @@ async def document_import(path: str, title: str = "") -> str:
             reply += (
                 f"\n  Still processing after {_INGEST_WAIT_SECONDS:g} s: "
                 "check document_status with this job_id."
+                "\n  A scanned document is OCR'd in the background, about 15-45 s "
+                "a page (a 50-page scan takes half an hour or more). Do not wait for "
+                "it in this turn: tell the user it is running, and check "
+                "document_status when they ask."
             )
         return reply
     except Exception as exc:  # noqa: BLE001
@@ -433,14 +437,41 @@ def _format_status(status: dict[str, Any]) -> str:
         f"  attempt: {status['attempt']}/{status['max_attempts']}",
     ]
     progress = status.get("progress") or {}
-    if progress.get("ocr_pages_total"):
-        # A long scan is OCR'd a few pages per worker run (2026-10-22).
-        lines.append(
-            f"  OCR: {progress.get('ocr_pages_done', 0)} of {progress['ocr_pages_total']} pages read"
-        )
+    if progress:
+        # A long scan is OCR'd a few pages per worker run (2026-10-22). Said
+        # with its pace, and from the stage's start: a status that showed
+        # nothing for the first minutes read as stuck, and the model gave up
+        # on a job that was working.
+        lines.append(_progress_line(progress))
     if status.get("error_code"):
         lines.append(f"  error: {status['error_code']} — {status.get('error_message')}")
     return "\n".join(lines)
+
+
+def _minutes(seconds: float) -> str:
+    minutes = max(1, round(float(seconds) / 60))
+    return "about 1 minute" if minutes == 1 else f"about {minutes} minutes"
+
+
+def _progress_line(progress: dict[str, Any]) -> str:
+    """The job's OCR so far, its pace and the time left, and what to do."""
+
+    done = int(progress.get("ocr_pages_done") or 0)
+    total = int(progress.get("ocr_pages_total") or 0)
+    elapsed = float(progress.get("elapsed_seconds") or 0)
+    advice = (
+        "  The job is working. Do not wait for it in this turn: tell the user it "
+        "is running and when to expect it, and check again when they ask."
+    )
+    if not total:
+        return (
+            f"  OCR: started {_minutes(elapsed)} ago; the first pages are being read "
+            "(a scanned document takes about 15-45 s a page).\n" + advice
+        )
+    line = f"  OCR: {done} of {total} pages read in {_minutes(elapsed)}"
+    if progress.get("seconds_left") is not None and done < total:
+        line += f"; {_minutes(progress['seconds_left'])} left at this pace"
+    return line + ("\n" + advice if done < total else "")
 
 
 def _platform_overview(svc: Any, tenant: str, actor: str) -> str:
