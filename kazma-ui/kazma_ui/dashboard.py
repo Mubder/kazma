@@ -340,6 +340,49 @@ def answer_quality_status(request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
+#: A range's span and its bucket, in seconds: 12 five-minute bars for the
+#: hour, 24 hourly bars for the day, 28 six-hour bars for the week.
+_USAGE_RANGES: dict[str, tuple[int, int]] = {
+    "hour": (3600, 300),
+    "day": (86400, 3600),
+    "week": (7 * 86400, 6 * 3600),
+}
+
+
+@router.get("/api/dashboard/usage")
+def usage_over_time(request: Request, range: str = "hour") -> JSONResponse:  # noqa: A002
+    """Tokens and cost per bucket from the per-call LLM ledger.
+
+    The charts drew the process's running totals sampled by the open page
+    (2026-10-22); this is what was actually spent, when, across restarts.
+    """
+    if (denied := require_admin(request)) is not None:
+        return denied
+    from datetime import UTC, datetime
+
+    from kazma_core.observability.llm_ledger import usage_series
+
+    span, step = _USAGE_RANGES.get(range, _USAGE_RANGES["hour"])
+    now = datetime.now(UTC).timestamp()
+    end = (int(now) // step + 1) * step  # the current bucket included
+    until = datetime.fromtimestamp(end, UTC)
+    since = datetime.fromtimestamp(end - span, UTC)
+    buckets = usage_series(since, until, step)
+    if buckets is None:
+        return JSONResponse({"available": False})
+    return JSONResponse({
+        "available": True,
+        "range": range if range in _USAGE_RANGES else "hour",
+        "bucket_seconds": step,
+        "buckets": buckets,
+        "totals": {
+            "tokens": sum(b["tokens"] for b in buckets),
+            "cost": sum(b["cost"] for b in buckets),
+            "calls": sum(b["calls"] for b in buckets),
+        },
+    })
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Session Management API
 # ══════════════════════════════════════════════════════════════════════════

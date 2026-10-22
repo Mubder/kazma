@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Dashboard: the usage charts are the ledger's; the quality block stays put (2026-10-22)
+
+- **"Tokens Over Time" and "Cost Over Time" draw what was spent.** They drew
+  the process's running totals, sampled by the open page every 10 s and kept
+  only in that page's memory (60 samples): bars that only grew, reset by a
+  restart or a reload, and "Day" / "Week" never more than the tab had seen.
+  They now draw `/api/dashboard/usage` (admin), the per-call LLM ledger
+  summed per bucket: 12 five-minute bars for the hour, 24 hourly for the day,
+  28 six-hour for the week, across restarts (`llm_ledger.usage_series`;
+  `tests/test_dashboard_usage_over_time.py`, the running totals as the
+  negative control).
+- **The "Answer-quality signals" block no longer vanishes.** It was emptied
+  and rebuilt on every 10 s poll and emptied to one line on any failed read
+  until the next. An unchanged reading is no longer redrawn, a failed read
+  keeps the last one on screen, and a second failure in a row says so; a
+  snapshot the server cannot read is now a WARNING naming the error type
+  (`tests/js/test_dashboard_quality_block.js`, the old loader as the
+  negative control).
+
 ## Web UI: "Alerts could not be refreshed" only when they could not (2026-10-22)
 
 - **One lost request no longer shows the banner.** The notifications poll

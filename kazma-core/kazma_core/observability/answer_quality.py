@@ -148,6 +148,9 @@ def snapshot() -> dict[str, Any]:
                     "max_turns": MAX_ROWS, "totals": totals,
                     "recent": [{"thread_id": r["thread_id"], "turn_id": r["turn_id"], "ts": r["ts"],
                                 "signals": [s for s in SIGNALS if r[s]]} for r in rows]}
-    except (sqlite3.Error, OSError, ValueError, TypeError, RuntimeError):
+    except (sqlite3.Error, OSError, ValueError, TypeError, RuntimeError) as exc:
+        # Said, by type: the Dashboard polls this every 10 s, and a silent
+        # "unavailable" could not be told from a page fault (2026-10-22).
+        logger.warning("[AnswerQuality] snapshot unreadable (%s)", type(exc).__name__)
         return {"available": False, "retention_days": RETENTION_DAYS,
                 "max_turns": MAX_ROWS, "totals": None, "recent": []}
