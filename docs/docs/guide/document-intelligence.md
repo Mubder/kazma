@@ -230,6 +230,10 @@ citations. In the `container` profile there is no Docling tier.
   allows (`agent.tool_timeout_seconds`, less a margin) and names the pages it
   did not reach, with the call that continues and `document_import` for the
   whole file.
+- **A scanned document's Word file is its OCR text.** `document_convert`
+  to `docx` or `md` of a document whose read came from OCR builds the file
+  from that text, one section a page; the scan itself converted would be page
+  images with no text. A document with a text layer converts from its file.
 - **A stopped call stops its worker.** When a tool call is ended (its time
   limit, Stop), its worker run is stopped too: the container is removed, or
   the local process tree killed. It used to run on to its own limit.

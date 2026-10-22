@@ -3276,7 +3276,9 @@ cancel signal, the broker exchange closes its connection (the broker removes
 the container) and the local sandbox kills the tree -- timed-out tool calls
 left their OCR containers running and each retry shared the CPU with them.
 Gate: `tests/test_document_ocr_batches.py` (the one-run parse, a read without
-a cancel check and the old excerpt as negative controls).
+a cancel check and the old excerpt as negative controls). `document_convert` to
+Word or Markdown of a document read by OCR exports that text
+(`DocumentIngestionService._ocr_text_payload`), never the scan's images.
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
 `documents/arabic.py` is the ONLY home for Arabic text policy. Do not
@@ -5170,7 +5172,11 @@ report. **The budget is the context window** (95 %; the owner's decision
 2026-10-18, `turn_input.resolve_trim_token_budget`): the 24K cap this plan
 kept until real traffic was read trimmed a live day-long chat to its latest
 message on every step. `agent.trim.token_budget` still sets an absolute
-budget (clamped to [4000, window×0.95]). **The window is configured, never
+budget (clamped to [4000, window×0.95]). No other pruner caps the history
+at a fixed size: `prune_messages_if_exceeding_cap` (30,000 tokens, every
+tool output cut to 2,000 characters, saved to the checkpoint) ran first and
+undid the window budget until 2026-10-22 (`tests/test_no_fixed_context_cap.py`).
+**The window is configured, never
 guessed** (`token_counter.resolve_context_window`): per model
 `models.context_window.<model>`, else `context.max_context_tokens`, else
 `memory.max_context_tokens`, else `DEFAULT_CONTEXT_WINDOW` -- 1,000,000,

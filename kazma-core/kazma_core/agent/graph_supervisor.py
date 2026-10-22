@@ -18,7 +18,6 @@ from kazma_core.agent.graph_helpers import (
     _memory_explain_cv,
     _rag_top_k,
     is_unusable_assistant_content,
-    prune_messages_if_exceeding_cap,
     sanitize_tool_chains,
 )
 from kazma_core.agent.plan_fence import (
@@ -1256,7 +1255,12 @@ async def supervisor_node(
     # provider call forever. Sanitizing here also heals the thread: the
     # repaired list is what gets persisted by the return paths below.
     messages = sanitize_tool_chains(messages)
-    messages = prune_messages_if_exceeding_cap(messages)
+    # No fixed token cap here: the budget is the context window
+    # (resolve_trim_token_budget, the owner's decision 2026-10-18). A 30,000
+    # token cap ran first and cut every tool output past 2,000 characters --
+    # the running turn's included, saved to the checkpoint -- so a model that
+    # read 20,000 characters of an OCR'd document found 2,000 on its next
+    # step and re-read it in ever smaller windows (2026-10-22).
     from kazma_core.summarizer import prune_tool_outputs
 
     _lm_for_trim = state.get("last_model") or routed_model

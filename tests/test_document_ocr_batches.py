@@ -213,6 +213,42 @@ def test_document_status_says_the_job_is_working_and_not_to_wait() -> None:
     assert "OCR" not in _format_status(base)
 
 
+def _ingestion_with(ir: DocumentIR):
+    from kazma_core.documents.ingestion import DocumentIngestionService
+
+    class _Storage:
+        def read_manifest(self, *, document_id, version_id):
+            return {"ir": ir.to_dict()}
+
+    class _Version:
+        id = "v"
+
+    svc = DocumentIngestionService.__new__(DocumentIngestionService)
+    svc.storage = _Storage()
+    return svc, _Version()
+
+
+def test_a_scanned_documents_word_file_is_its_ocr_text(svc, tmp_path) -> None:
+    """Live 2026-10-22: document_convert to docx converted the scan itself --
+    page images, no text -- and timed out at 120 s. A document whose read came
+    from OCR is exported from that text, a section a page."""
+    service, _worker, _clock = svc
+    ocrd = service.ocr_in_batches(tmp_path / "scan.pdf", force=True).document
+    ingestion, version = _ingestion_with(ocrd)
+    fmt, payload = ingestion._ocr_text_payload("d", version, "docx", title="Scan")
+    assert fmt == "docx" and len(payload["sections"]) == PAGES
+    assert payload["sections"][0] == {"heading": "Page 1", "body": "OCR page 1"}
+    assert ingestion._ocr_text_payload("d", version, "md", title="Scan")[0] == "markdown"
+    # Other targets convert the original file, as before.
+    assert ingestion._ocr_text_payload("d", version, "pdf", title="Scan") is None
+
+
+def test_negative_control_a_text_document_converts_from_its_file() -> None:
+    text = replace(_scan(), pages=(DocumentPage(1, (DocumentBlock("b", BlockType.TEXT, text="typed"),)),))
+    ingestion, version = _ingestion_with(text)
+    assert ingestion._ocr_text_payload("d", version, "docx", title="Doc") is None
+
+
 # ── A stopped call stops its worker ─────────────────────────────────────
 
 

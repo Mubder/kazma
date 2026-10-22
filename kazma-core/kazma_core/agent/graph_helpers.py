@@ -249,40 +249,6 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
     return out
 
 
-def prune_messages_if_exceeding_cap(messages: list[dict[str, Any]], max_tokens: int = 30000) -> list[dict[str, Any]]:
-    """Prune message history if estimated tokens exceeds max_tokens.
-
-    Preserves system messages and the most recent turn history while truncating
-    large intermediate tool outputs and dropping older turns to keep the LLM
-    from exceeding vendor context limits and returning empty completions.
-    """
-    from kazma_core.summarizer import estimate_tokens
-
-    if estimate_tokens(messages) <= max_tokens:
-        return messages
-
-    system_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
-    non_system = [m for m in messages if isinstance(m, dict) and m.get("role") != "system"]
-
-    truncated_non_system = []
-    for m in non_system:
-        m_copy = dict(m)
-        if m_copy.get("role") == "tool" and isinstance(m_copy.get("content"), str):
-            if len(m_copy["content"]) > 2000:
-                m_copy["content"] = m_copy["content"][:2000] + "\n[Tool output truncated for context limits]"
-        truncated_non_system.append(m_copy)
-
-    while len(truncated_non_system) > 6 and estimate_tokens(system_msgs + truncated_non_system) > max_tokens:
-        truncated_non_system.pop(0)
-
-    repaired = sanitize_tool_chains(system_msgs + truncated_non_system)
-    logger.info(
-        "[ContextPruner] Pruned message history from %d tokens to %d tokens",
-        estimate_tokens(messages), estimate_tokens(repaired),
-    )
-    return repaired
-
-
 # ══════════════════════════════════════════════════════════════════════════
 # HITL approval summary (compact, never dumps large blob args verbatim)
 # ══════════════════════════════════════════════════════════════════════════
