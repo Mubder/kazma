@@ -476,31 +476,65 @@ export function registerStores() {
             // is a guess (tests/test_empty_states_after_load.py).
             loaded: false,
             error: '',
+            // Reads that failed in a row, and the one quick retry pending.
+            // One lost request is a network blip, not stale alerts: on the
+            // live install (behind a tunnel) about 1 % of these polls never
+            // reached the server while it answered every one that did, and
+            // the banner turned on at each and off at the next poll, a
+            // minute later in a background tab (2026-10-22). A failed read is
+            // tried again after 5 s; the banner shows once that fails too
+            // (tests/js/test_notifications_stale.js).
+            _failures: 0,
+            _retry: null,
 
             init() {
                 this.refresh();
                 try {
                     setInterval(() => this.refresh(), 15000);
                 } catch (e) { /* no window timers in some tests */ }
+                try {
+                    // A background tab polls once a minute: read again the
+                    // moment it is looked at.
+                    document.addEventListener('visibilitychange', () => {
+                        if (!document.hidden) this.refresh();
+                    });
+                } catch (e) { /* no document in some tests */ }
             },
 
             async refresh() {
+                let alerts;
                 try {
                     const res = await fetch('/api/alerts/recent', {
                         headers: { 'Accept': 'application/json' },
                         credentials: 'same-origin',
                     });
-                    if (!res.ok) {
-                        this.error = 'alerts unavailable';
-                        return;
-                    }
-                    const alerts = await res.json();
-                    this.items = Array.isArray(alerts) ? alerts : [];
-                    this.count = this.items.length;
-                    this.loaded = true;
-                    this.error = '';
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    alerts = await res.json();
                 } catch (e) {
-                    this.error = 'alerts unavailable';
+                    this._failed();
+                    return;
+                }
+                this.items = Array.isArray(alerts) ? alerts : [];
+                this.count = this.items.length;
+                this.loaded = true;
+                this.error = '';
+                this._failures = 0;
+                if (this._retry) {
+                    try { clearTimeout(this._retry); } catch (e) { /* ignore */ }
+                    this._retry = null;
+                }
+            },
+
+            _failed() {
+                this._failures += 1;
+                if (this._failures >= 2) this.error = 'alerts unavailable';
+                if (!this._retry) {
+                    try {
+                        this._retry = setTimeout(() => {
+                            this._retry = null;
+                            this.refresh();
+                        }, 5000);
+                    } catch (e) { /* no window timers in some tests */ }
                 }
             },
         });
