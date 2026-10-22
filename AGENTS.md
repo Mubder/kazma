@@ -3279,6 +3279,12 @@ Gate: `tests/test_document_ocr_batches.py` (the one-run parse, a read without
 a cancel check and the old excerpt as negative controls). `document_convert` to
 Word or Markdown of a document read by OCR exports that text
 (`DocumentIngestionService._ocr_text_payload`), never the scan's images.
+`document_convert` and `document_redact` save their artifact under
+`<data dir>/documents` and name the path for `send_file`
+(`document_platform/tools._saved_copy`, through `resolve_artifact_blob`'s
+ACL): an `artifact_id` alone is something no agent tool takes, and the model
+hunted the disk for the file and remade it (2026-10-22). Gate:
+`tests/test_document_convert_saves_a_file.py`.
 
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
 `documents/arabic.py` is the ONLY home for Arabic text policy. Do not

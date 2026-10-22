@@ -330,8 +330,9 @@ async def document_convert(
     """Convert a processed document (by opaque ID) to another format.
 
     Delegates to the coordinator, which materializes only the immutable
-    original bytes — no raw file path is accepted. Returns the new artifact's
-    opaque ``artifact_id`` (downloadable) plus any warnings.
+    original bytes — no raw file path is accepted. The new file is saved
+    under the data folder's ``documents`` and its path returned, ready for
+    ``send_file``, with its ``artifact_id`` and any warnings.
     """
 
 
@@ -351,7 +352,8 @@ async def document_convert(
             target_format=target_format.strip(),
             output_name=output_name.strip() or None,
         )
-        return _format_artifact("Converted", data)
+        saved = await _saved_copy(svc, tenant, actor, data, output_name.strip())
+        return _format_artifact("Converted", data, saved)
     except Exception as exc:  # noqa: BLE001
         from kazma_core.documents.ingestion import DocumentIngestionError
 
@@ -388,7 +390,8 @@ async def document_redact(
             terms=[str(term) for term in terms],
             output_name=output_name.strip() or None,
         )
-        return _format_artifact("Redacted", data)
+        saved = await _saved_copy(svc, tenant, actor, data, output_name.strip())
+        return _format_artifact("Redacted", data, saved)
     except Exception as exc:  # noqa: BLE001
         from kazma_core.documents.ingestion import DocumentIngestionError
 
@@ -398,7 +401,55 @@ async def document_redact(
         return f"Error redacting document: {type(exc).__name__}"
 
 
-def _format_artifact(action: str, data: dict[str, Any]) -> str:
+async def _saved_copy(
+    svc: Any, tenant: str, actor: str, data: dict[str, Any], output_name: str
+) -> Path | None:
+    """The produced file, copied where the agent can send it, or None.
+
+    A convert or redact stores its result as an artifact in the document
+    store, and its answer named only the ``artifact_id``: no agent tool takes
+    one, so the model had no file to send (live 2026-10-22: a converted Word
+    file the model then hunted for on disk for two and a half minutes, and
+    remade with ``generate_docx``). The copy goes where the generators write
+    (``<data dir>/documents``), read through the artifact's own ACL check.
+    """
+
+    artifact_id = data.get("artifact_id") if isinstance(data, dict) else None
+    if not artifact_id:
+        return None
+
+    def _copy() -> Path:
+        from kazma_core.documents.operations import DocumentOperations
+        from kazma_core.paths import data_dir
+
+        info = svc.resolve_artifact_blob(
+            tenant_id=tenant, actor_id=actor, artifact_id=artifact_id
+        )
+        filename = Path(str(info["filename"]))
+        return DocumentOperations._export_atomic(
+            Path(info["path"]),
+            data_dir() / "documents",
+            output_name or filename.stem,
+            filename.suffix.lstrip(".") or "bin",
+            artifact_id,
+        )
+
+    from kazma_core.documents.ingestion import DocumentIngestionError
+
+    try:
+        return await asyncio.to_thread(_copy)
+    except (DocumentIngestionError, OSError, KeyError, ValueError) as exc:
+        # The artifact stands; only the copy for sending failed.
+        logger.warning(
+            "[document_platform] artifact %s not copied for sending (%s)",
+            artifact_id, type(exc).__name__, exc_info=True,
+        )
+        return None
+
+
+def _format_artifact(
+    action: str, data: dict[str, Any], saved: Path | None = None
+) -> str:
     manifest = data.get("manifest", {}) if isinstance(data, dict) else {}
     output = manifest.get("output", {}) if isinstance(manifest, dict) else {}
     lines = [
@@ -406,6 +457,14 @@ def _format_artifact(action: str, data: dict[str, Any]) -> str:
         f"  document_id: {data.get('document_id')}",
         f"  output: {output.get('extension')} ({output.get('size')} bytes)",
     ]
+    if saved is not None:
+        lines.append(f"  Saved to: {saved}")
+        lines.append("  To give it to the user, call send_file with that path.")
+    elif data.get("artifact_id"):
+        lines.append(
+            "  No file copy was saved; the artifact is in the Documents page "
+            "for download."
+        )
     warnings = data.get("warnings") or []
     if warnings:
         lines.append(f"  warnings: {'; '.join(str(w) for w in warnings)}")
