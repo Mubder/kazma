@@ -274,21 +274,63 @@ def test_scheduler_is_off_under_pytest_and_shutdown_joins(fixture, monkeypatch):
     asyncio.run(main())
 
 
-def test_monitor_failure_has_a_banner_and_a_dead_watchdog_is_visible(fixture, monkeypatch):
-    from kazma_core.observability.alerts import AlertDispatcher
-    banners = []
+class _Checks:
+    """Runs the monitor loop over a list of check outcomes on a fake clock."""
+
+    def __init__(self, monkeypatch, outcomes, *, step=15):
+        from kazma_core.observability.alerts import AlertDispatcher
+        self.banners, self.resolved, self.clock = [], [], [1000.0]
+        monkeypatch.setattr(monitor, 'time', SimpleNamespace(time=lambda: self.clock[0]))
+        monkeypatch.setattr(monitor, '_failing_since', None, raising=False)
+        monkeypatch.setattr(monitor, '_paged', False, raising=False)
+        monkeypatch.setattr(AlertDispatcher, 'post_banner', lambda **kwargs: self.banners.append(kwargs))
+        monkeypatch.setattr(AlertDispatcher, 'resolve_alerts_for_subsystem',
+                            lambda subsystem: self.resolved.append(subsystem))
+        pending = list(outcomes)
+
+        def check():
+            if pending.pop(0) == 'down':
+                raise OSError('fixture database unavailable')
+        monkeypatch.setattr(monitor, 'tick', check)
+
+        async def sleep(_):
+            if not pending:
+                raise asyncio.CancelledError()
+            self.clock[0] += step
+        monkeypatch.setattr(asyncio, 'sleep', sleep)
+
+    def run(self):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(monitor._loop())
+
+
+def _keys(fixture):
+    return [args[0] for args, _kwargs in fixture.sent]
+
+
+def test_a_short_database_outage_pages_nobody(fixture, monkeypatch):
+    """Live 2026-10-22: a 35-second Postgres restart (Docker) failed three
+    checks and paged "Research/crawl monitoring unavailable" in red, with no
+    word when it came back. The old loop paged on the first failed check."""
+    checks = _Checks(monkeypatch, ['ok', 'down', 'down', 'down', 'ok'])
+    checks.run()
+    assert _keys(fixture) == [] and checks.banners == []
+    assert getattr(monitor, '_failing_since', None) is None
+
+
+def test_an_outage_that_lasts_pages_once_with_its_cause_and_its_recovery(fixture, monkeypatch):
+    lasting = int(getattr(monitor, '_UNAVAILABLE_AFTER_S', 300) // 15) + 3
+    checks = _Checks(monkeypatch, ['down'] * lasting + ['ok'])
+    checks.run()
+    assert _keys(fixture) == ['acquisition.monitor_unavailable', 'acquisition.monitor_recovered']
+    page = fixture.sent[0][0][2]
+    assert 'settings database could not be reached (OSError)' in page and 'min' in page
+    assert len(checks.banners) == 1 and checks.banners[0]['subsystem'] == 'AcquisitionMonitor'
+    assert fixture.sent[1][1]['severity'] == 'info' and checks.resolved
+
+
+def test_a_dead_watchdog_is_visible_in_the_bell_at_once(fixture, monkeypatch):
     monkeypatch.setattr(monitor, '_LAUNCHED_AT', 900)
-    monkeypatch.setattr(AlertDispatcher, 'post_banner', lambda **kwargs: banners.append(kwargs))
-    def broken():
-        raise OSError('fixture database unavailable')
-    monkeypatch.setattr(monitor, 'tick', broken)
-    async def finish(_):
-        raise asyncio.CancelledError()
-    monkeypatch.setattr(asyncio, 'sleep', finish)
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(monitor._loop())
-    assert banners[0]['subsystem'] == 'AcquisitionMonitor'
-    assert fixture.sent[0][0][0] == 'acquisition.monitor_unavailable'
     assert monitor.recent_alerts()[0]['status'] == 'unavailable'
 
 

@@ -331,7 +331,10 @@ async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bo
         outcome = {}
     sent = outcome.setdefault("sent", [])
     failed = outcome.setdefault("failed", [])
-    channels = _ops_channels()
+    # A settings read: on Postgres a round trip that waits the pool's timeout
+    # while the database is away -- on the loop it froze the server 15 s to
+    # deliver the alert about that very outage (2026-10-22).
+    channels = await asyncio.to_thread(_ops_channels)
     # The group route is Telegram-direct only (it is not a bus adapter):
     # always fire it alongside whatever the bus delivers.
     sent_group = False

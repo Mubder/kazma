@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## A database restart no longer pages "monitoring unavailable" or freezes the server (2026-10-23)
+
+- **The research/crawl monitor pages only an outage that lasts**
+  (`web_acquire/monitor.py`): it paged on its first failed check, every 15 s,
+  so a 35-second Postgres restart during a Docker restart sent a red
+  "Research/crawl monitoring unavailable" ("Check the settings database and
+  server logs") and nothing when it recovered. It now pages after 5 minutes
+  without a check (`_UNAVAILABLE_AFTER_S`), the message names the cause and
+  how long ("the settings database could not be reached (PoolTimeout)"), and
+  a "monitoring is back" message follows a page. The bell still shows a
+  missed check at once. Tests: `tests/test_acquisition_monitor.py` (the old
+  loop pages three times on the short outage: the negative control).
+- **Sending an ops alert reads its routes off the event loop**
+  (`ops_alerts._deliver`): it read `notifications.ops.channels` on the loop,
+  and with Postgres away that read waited the pool's timeout -- the server
+  froze 15.5 s (stall dump 2026-10-22 23:46:16) to send the outage's own
+  alert. `_ops_channels` is a loop-stall helper now
+  (`tests/test_ops_alert_delivery.py`, the old call as the control).
+
 ## A converted document is a file the agent can send (2026-10-22)
 
 - **`document_convert` and `document_redact` save their file and name its
