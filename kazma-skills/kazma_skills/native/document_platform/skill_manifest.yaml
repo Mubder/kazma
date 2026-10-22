@@ -74,8 +74,10 @@ tools:
     description: >
       Convert an already-processed document (by opaque document_id) to another
       format through the isolated renderer. Only the immutable original bytes
-      are used; no raw file path is accepted. Returns a downloadable
-      artifact_id. HTML to PDF comes out in Kazma's house style.
+      are used; no raw file path is accepted. Saves the new file under the
+      data folder's documents and returns its path -- give it to the user
+      with send_file -- and its artifact_id. HTML to PDF comes out in Kazma's
+      house style.
     category: document
     prompt_chain:
       - "حوّل المستند المعالَج إلى صيغة أخرى"
@@ -83,8 +85,9 @@ tools:
     arabic_name: "تنقيح مستند"
     description: >
       Physically redact a list of terms from a processed PDF document by opaque
-      document_id, creating a new independently-verified immutable artifact.
-      Terms are never logged; mixed image/vector PDFs fail closed.
+      document_id, creating a new independently-verified immutable artifact,
+      saved under the data folder's documents (the path is returned, for
+      send_file). Terms are never logged; mixed image/vector PDFs fail closed.
     category: document
     prompt_chain:
       - "نقّح المصطلحات المحددة من المستند"

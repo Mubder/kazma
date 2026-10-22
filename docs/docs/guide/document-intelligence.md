@@ -234,6 +234,12 @@ citations. In the `container` profile there is no Docling tier.
   to `docx` or `md` of a document whose read came from OCR builds the file
   from that text, one section a page; the scan itself converted would be page
   images with no text. A document with a text layer converts from its file.
+- **A converted or redacted file is ready to send.** `document_convert` and
+  `document_redact` save the new file under the data folder's `documents`
+  (where the generators write) and name its path, so the agent passes it to
+  `send_file`. They used to answer with an `artifact_id` alone, which no agent
+  tool takes. The artifact also stays in the document store, downloadable
+  from the Documents page.
 - **A stopped call stops its worker.** When a tool call is ended (its time
   limit, Stop), its worker run is stopped too: the container is removed, or
   the local process tree killed. It used to run on to its own limit.

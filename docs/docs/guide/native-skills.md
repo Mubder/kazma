@@ -97,8 +97,8 @@ See [Document Intelligence](./document-intelligence.md).
 | `document_index` | Publish into a Knowledge library (`library_id`) |
 | `document_search` | Search library (`library_id`, `query`, `top_k`; fenced hits) |
 | `document_cancel` | Cancel job by id (**danger**: asks for approval) |
-| `document_convert` | Convert format → artifact id |
-| `document_redact` | Physical PDF redaction → new artifact (**danger**: asks for approval) |
+| `document_convert` | Convert format → a saved file (its path, for `send_file`) and its artifact id |
+| `document_redact` | Physical PDF redaction → new artifact and a saved file (**danger**: asks for approval) |
 
 The tools act as the install's operator, like the `/documents` chat command
 and the Web **Documents** page, so they read what was uploaded there and the

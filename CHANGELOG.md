@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## A converted document is a file the agent can send (2026-10-22)
+
+- **`document_convert` and `document_redact` save their file and name its
+  path** (`document_platform/tools._saved_copy`: the artifact read through
+  its own access check, `resolve_artifact_blob`, and copied atomically into
+  `<data dir>/documents`, where the generators write), with the hint to give
+  it to the user with `send_file`. They answered with an `artifact_id` only,
+  which no agent tool takes. Live, the same day: the owner asked for the
+  scanned booklet as a Word file; the convert took 4 s, then the model
+  searched the disk for 2.5 minutes (a filesystem search timed out at 120 s),
+  read the document store's internals, and made a new file with
+  `generate_docx`. A copy that fails leaves the convert standing and says the
+  file is on the Documents page (`tests/test_document_convert_saves_a_file.py`,
+  the old answer as the negative control).
+
 ## A Word file Kazma makes carries the house fonts (2026-10-22)
 
 - **Every DOCX embeds IBM Plex Sans Arabic** (regular and bold, the bundled

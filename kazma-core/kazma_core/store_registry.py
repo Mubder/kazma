@@ -467,8 +467,8 @@ TOOL_WRITES: dict[str, Write] = {
     "document_import": Write(
         ("documents.db",), ("document_status", "document_read", "document_search")),
     "document_index": Write(("documents.db",), ("document_search", "document_status")),
-    "document_convert": Write(("documents.db",), ("document_status", "document_read")),
-    "document_redact": Write(("documents.db",), ("document_read", "document_status")),
+    "document_convert": Write(("documents.db", "workspace"), ("document_status", "document_read", "read_document", "file_list")),
+    "document_redact": Write(("documents.db", "workspace"), ("document_read", "document_status", "read_document", "file_list")),
     "document_cancel": Write(("documents.db",), ("document_status",)),
     "convert_document": Write(("workspace",), ("read_document", "file_list")),
     "ocr_document": Write(("none",), note=_OUTPUT_ONLY),
