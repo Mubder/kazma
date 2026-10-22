@@ -890,7 +890,7 @@ and the [operator runbook](https://github.com/Mubder/kazma/blob/main/docs/DURABL
 | External notification requested, failed or uncertain | Notification receipt and configured ops routes | Only platform acceptance is delivered. Inspect the route; uncertain sends are not automatically replayed. |
 | Credit balance unknown/stale or provider failure | Cached status, actual response code and last balance observation | An explicit permitted refresh obtains a newer supported balance; local request allowances are not billed credits. |
 | New background session refused for history capacity | Combined session history, including older chat-search rows; 256 rows/128MiB | Review/export and deliberately delete settled history to free capacity. Archiving alone does not free it; no automatic deletion occurs. |
-| Research/crawl monitoring unavailable | Server logs, settings storage and last local monitor check | Restore storage or the monitor fault. Missed checks remain visible rather than being treated as healthy. |
+| Research/crawl monitoring unavailable | The alert's own text names the cause and how long; server logs and settings storage | The alert is sent only after the monitor has not run for 5 minutes (a database or Docker restart passes before then), and a "monitoring is back" message follows when it runs again. The bell shows a missed check at once. Restore storage or the monitor fault. |
 
 See [Web research](web-research#progress-and-result-alerts) for local-first
 scope, explicit recovery and browser platform limits.

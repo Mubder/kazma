@@ -5918,7 +5918,10 @@ terminal history is quiet. A crawl or pipeline an agent runs in its turn
 alerted: its result goes to the agent (2026-10-20, "Partial results" under a
 complete swarm answer). An alert stored for such a run before that rule is
 settled at the next scan (`_collect` names the runs it leaves to the agent):
-yesterday's stayed in the bell a day after the fix (2026-10-21). Delivery callbacks persist platform acceptance,
+yesterday's stayed in the bell a day after the fix (2026-10-21). The monitor pages its own failure only after
+`_UNAVAILABLE_AFTER_S` (5 min) without a check, naming the cause, and follows a page with
+`acquisition.monitor_recovered`: it paged on the first failed 15 s check, so a 35 s Postgres restart
+sent a red page and no recovery (2026-10-22). Delivery callbacks persist platform acceptance,
 refusal or uncertainty; a requested send is never proof of delivery. Unknown
 delivery after a crash is not replayed. The loop follows the pytest scheduler
 gate and is cancelled/joined before stores close. Soft navigation initializes

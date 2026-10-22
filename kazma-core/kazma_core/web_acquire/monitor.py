@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 _TASK = None
 _LAUNCHED_AT = None
 _POLL_SECONDS = 15
+#: How long the monitor must have been unable to run before it pages. A
+#: database or Docker restart takes well under a minute, and the guard
+#: already pages a database that stays down (2026-10-22: a 35-second
+#: Postgres restart sent a red "monitoring unavailable" page and no word
+#: when it recovered). The bell says it at once ("has not refreshed").
+_UNAVAILABLE_AFTER_S = 300
+_failing_since: float | None = None
+_failure_cause = ''
+_paged = False
 _DEFAULTS = dict(enabled=True, stall_seconds=180, low_credit_threshold=100,
                  notify_completed=True)
 _TERMINAL = {'done', 'partial', 'error', 'cancelled', 'interrupted'}
@@ -398,15 +407,56 @@ async def _loop():
     while True:
         try:
             await call(tick)
-            AlertDispatcher.resolve_alerts_for_subsystem('AcquisitionMonitor')
         except (*_storage_failures(), AcquisitionError, ValueError, TypeError, KeyError, AttributeError) as exc:
-            logger.error('Acquisition monitoring unavailable (%s)', type(exc).__name__, exc_info=True)
-            AlertDispatcher.post_banner(subsystem='AcquisitionMonitor', title='Research/crawl monitoring unavailable',
-                reason='Progress and result alerts cannot be verified. Check the settings database and server logs.',
-                severity='ERROR', link='/settings?tab=system')
-            alert('acquisition.monitor_unavailable', 'Research/crawl monitoring unavailable',
-                  'Check the settings database and server logs.', severity='error')
+            _monitor_failed(exc, alert=alert, banner=AlertDispatcher.post_banner)
+        else:
+            _monitor_ran(alert=alert, resolve=AlertDispatcher.resolve_alerts_for_subsystem)
         await asyncio.sleep(_POLL_SECONDS)
+
+
+def _cause_of(exc):
+    if isinstance(exc, _storage_failures()):
+        return 'the settings database could not be reached (%s)' % type(exc).__name__
+    return 'its saved state could not be read (%s)' % type(exc).__name__
+
+
+def _minutes(seconds):
+    return '%d min' % max(1, round(seconds / 60))
+
+
+def _monitor_failed(exc, *, alert, banner):
+    """One failed check: said at once in the log, paged only if it lasts."""
+    global _failing_since, _failure_cause, _paged
+    now = time.time()
+    _failure_cause = _cause_of(exc)
+    if _failing_since is None:
+        _failing_since = now
+        logger.warning('Acquisition monitoring could not run: %s', _failure_cause, exc_info=True)
+    if _paged or now - _failing_since < _UNAVAILABLE_AFTER_S:
+        return
+    _paged = True
+    detail = 'It has not run for %s: %s. Research and crawl alerts are not being checked.' % (
+        _minutes(now - _failing_since), _failure_cause)
+    logger.error('Acquisition monitoring unavailable: %s', detail)
+    banner(subsystem='AcquisitionMonitor', title='Research/crawl monitoring unavailable',
+           reason=detail, severity='ERROR', link='/settings?tab=system')
+    alert('acquisition.monitor_unavailable', 'Research/crawl monitoring unavailable', detail, severity='error')
+
+
+def _monitor_ran(*, alert, resolve):
+    """A check ran: a page that was sent is followed by its recovery."""
+    global _failing_since, _paged
+    if _failing_since is not None:
+        down_for = time.time() - _failing_since
+        if _paged:
+            logger.warning('Acquisition monitoring is running again after %s', _minutes(down_for))
+            alert('acquisition.monitor_recovered', 'Research/crawl monitoring is back',
+                  'It could not run for %s (%s).' % (_minutes(down_for), _failure_cause), severity='info')
+        else:
+            logger.info('Acquisition monitoring is running again after %.0f s', down_for)
+    _failing_since = None
+    _paged = False
+    resolve('AcquisitionMonitor')
 
 
 def start():

@@ -888,6 +888,10 @@ _LOOP_STALL_HELPERS = frozenset({
     # Waits up to 45 s for a test alert's delivery ON the loop: called on the
     # loop it would wait for itself (it refuses, but no async code may try).
     "send_test_alert",
+    # Where ops alerts go: a settings read. `_deliver` called it on the loop
+    # and a 35-second Postgres outage froze the server for 15.5 s while it
+    # sent the outage's own alert (stall dump 2026-10-22 23:46:16).
+    "_ops_channels",
     # Who a document surface acts as (DOC-A3): a settings read, and the
     # operator's ACL grants (a catalog walk and writes).
     "grant_operator_access", "operator_for",

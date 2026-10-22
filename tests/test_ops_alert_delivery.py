@@ -117,6 +117,29 @@ def test_a_bus_that_took_nothing_falls_back_to_direct(
     assert bool(direct) is direct_called
 
 
+def test_the_channels_are_read_off_the_loop(sender: _Sender, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live 2026-10-22: a 35-second Postgres restart froze the server 15.5 s
+    while `_deliver` read `notifications.ops.channels` on the loop to send
+    the outage's own alert. A read that waits must not wait on the loop."""
+    import threading
+
+    loop_threads: list[int] = []
+    read_on: list[int] = []
+
+    def slow_read() -> list[str]:
+        read_on.append(threading.get_ident())
+        return []
+
+    monkeypatch.setattr(ops_alerts, "_ops_channels", slow_read)
+
+    async def main() -> bool:
+        loop_threads.append(threading.get_ident())
+        return await ops_alerts._deliver("hello")
+
+    assert asyncio.run(main()) is True
+    assert read_on and read_on[0] != loop_threads[0]
+
+
 def test_chosen_channels_that_refuse_are_a_failed_delivery(
     sender: _Sender, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
