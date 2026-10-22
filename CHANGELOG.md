@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Web UI: "Alerts could not be refreshed" only when they could not (2026-10-22)
+
+- **One lost request no longer shows the banner.** The notifications poll
+  showed "Alerts could not be refreshed; displayed notifications may be
+  stale." after any single failed read, and cleared it at the next one. On
+  the live install (behind a tunnel) the server answered all 6,560 polls it
+  received from 2026-10-19 to 2026-10-22 with 200, while about 1 % never
+  reached it (some during deploy reloads, the rest network blips), so the
+  banner came and went while Kazma was idle. A failed read is now tried again
+  after 5 s and the banner shows only when that fails too; a background tab
+  reads again the moment it is shown (`tests/js/test_notifications_stale.js`,
+  the old rule as the negative control).
+- **Tests:** two order-dependent failures fixed (the WeasyPrint log control
+  and the shared `agent` fixture's checkpoint thread), and the operational
+  pilot recorded as closed on 2026-10-17.
+
 ## Knowledge: one insert thread for Chroma, and an agent's own research runs settled (2026-10-21)
 
 - **Chroma replays a library's write log on one thread.** The Knowledge soak
