@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## A Word file Kazma makes carries the house fonts (2026-10-22)
+
+- **Every DOCX embeds IBM Plex Sans Arabic** (regular and bold, the bundled
+  files) the way Word does: obfuscated font parts related from the font
+  table, and `w:embedTrueTypeFonts` in the settings
+  (`documents/engines/docx_fonts.py`, run by `DocxEngine` after every save).
+  A DOCX named the house face and carried nothing, so wherever Plex is not
+  installed -- a phone, another computer, a mail or Drive preview -- Word drew
+  another face. Live: the owner's OCR'd booklet "did not adopt the Kazma house
+  style" though every run named Plex; the PDF route embeds its fonts when it
+  renders. The encoding is checked against a font Word 16 itself embedded
+  (`tests/fixtures/word_embedded_font_sample.json`); a file that cannot take
+  the fonts is still written, said at WARNING
+  (`tests/test_docx_embeds_house_fonts.py`, the engine without the step as the
+  negative control). About 210 KB a file, compressed.
+- **An Arabic scan's Word file has Arabic page headings** ("صفحة 3", not
+  "Page 3"): the headings follow the text's language.
+
 ## The context is the window, everywhere; a scan's Word file is its OCR text (2026-10-22)
 
 - **A fixed 30,000-token pruner is gone.** `prune_messages_if_exceeding_cap`

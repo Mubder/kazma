@@ -475,13 +475,14 @@ async def test_document_processor_and_crawler_delegate(
     from kazma_skills.native.document_processor import tools as processor
 
     service = Mock()
+    # read_document OCRs scanned pages within the call's budget (2026-10-22).
+    service.read_with_ocr_budget = AsyncMock(return_value=(_ToolResult("delegated"), ""))
     service.read_transient = AsyncMock(return_value=_ToolResult("delegated"))
     monkeypatch.setattr(processor, "DocumentService", Mock(return_value=service))
     monkeypatch.setattr(processor, "_workspace_scope_error", Mock(return_value=None))
     assert await processor.read_document(str(path)) == "delegated"
-    service.read_transient.assert_awaited_once()
+    service.read_with_ocr_budget.assert_awaited_once()
 
-    service.read_transient.reset_mock()
     monkeypatch.setattr(crawler, "DocumentService", Mock(return_value=service))
     # The crawler resolves and checks the path in one threaded call.
     monkeypatch.setattr(crawler, "resolve_in_scope", AsyncMock(return_value=(path, None)))
@@ -497,10 +498,13 @@ def test_attachment_excerpt_delegates_without_double_fence(
     path = tmp_path / "delegate.txt"
     path.write_text("hello", encoding="utf-8")
     service = Mock()
-    service.read_transient_sync.return_value = _ToolResult("delegated")
+    # The excerpt is the text layer only, never OCR (2026-10-22).
+    service.text_layer_sync.return_value = Mock(pages=(object(),))
+    service.pages_needing_ocr.return_value = ()
+    service.read_ir.return_value = _ToolResult("delegated")
     monkeypatch.setattr(attachments, "DocumentService", Mock(return_value=service))
     assert attachments._try_parse_attachment(str(path)) == "delegated"
-    assert service.read_transient_sync.call_args.kwargs["fence"] is False
+    assert service.read_ir.call_args.kwargs["fence"] is False
 
 
 def test_available_optional_ooxml_and_pdf_parsers(

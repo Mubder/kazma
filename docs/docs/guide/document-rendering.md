@@ -116,6 +116,11 @@ These are the non-obvious facts each engine encodes once:
   (`arabic.shape_spans`) and refuses to render (`arabic_font_unavailable`)
   rather than emit a blank Arabic PDF when no font covers the Arabic
   presentation forms. Documents without RTL script stay on reportlab directly.
+- **A DOCX carries its fonts** — a Word file names its fonts and does not
+  carry them, so every DOCX the engine writes embeds the bundled IBM Plex Sans
+  Arabic, regular and bold, as Word embeds fonts (obfuscated font parts and
+  `w:embedTrueTypeFonts`, `engines/docx_fonts.py`). Without it, a device with
+  no IBM Plex drew the file in another face. It adds about 210 KB a file, compressed.
 - **Per block, not per document** — a bilingual document keeps each language's
   blocks aligned to their own reading start in every engine: `w:bidi` per
   paragraph (DOCX), per-block styles (PDF), a `dir` wrapper (HTML).
