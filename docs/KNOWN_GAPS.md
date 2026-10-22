@@ -183,9 +183,9 @@ prose, bare JSON and English bullets across Telegram, Discord and Slack.
 Native live continuations preserved those formats and saved one reply per turn.
 The English/Arabic literal-JSON and one-paragraph safeguards remain deliberately
 narrow; they do not guarantee arbitrary output-format compliance. The local
-seven-day operational pilot was scheduled to close on 2026-10-17; its close-out
-result is not recorded here yet. It is not a completed soak or an availability
-SLO.
+seven-day operational pilot closed on 2026-10-17: 40 turns in 20 chats, no
+failed turn, one argument recheck (the answer-quality ledger). It is not a
+completed soak or an availability SLO.
 
 **Endurance runs (2026-10-14 through 2026-10-21).** Each area's soak harness
 ran the real product code on private stores on one Windows workstation, with

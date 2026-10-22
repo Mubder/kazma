@@ -31,7 +31,7 @@ Native command registration and private reply delivery, IDE draft protection,
 durable retry receipts and Windows-service Docker execution were also updated.
 The owner's 60 development and 24 fresh bilingual responses are fully reviewed;
 approved replacements remain separate from the original failed responses.
-The operational pilot was scheduled to end on 2026-10-17; its result is not recorded yet. Neither these small
+The operational pilot closed on 2026-10-17: 40 turns in 20 chats, no failed turn, one argument recheck. Neither these small
 review sets nor live smoke checks establish a production accuracy or uptime SLO.
 See [Recent features](recent-features), [Native chat commands](../ops/native-slash-commands)
 and [Known gaps](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md).
