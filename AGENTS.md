@@ -3259,6 +3259,25 @@ end to end on the corpus's table page, clean page and degraded scan, the old
 rules re-run on the same model outputs), `tests/test_document_fidelity.py`, `tests/test_document_real_scans.py`, and in
 the image `test_the_neural_ocr_engine_reads_inside_the_container`.
 
+**G5. A long scan is OCR'd a few pages per run; a stopped call stops its
+worker** (2026-10-22: a 54-page Arabic scan sent to the chat, ~35 s a page
+on one core with the neural engine). The worker takes `ocr.max_pages` and
+names the rest in `ocr.deferred_pages`; `DocumentService.ocr_in_batches`
+reads them in further runs, each sized from the seconds a page has taken. A
+durable job reads every page (`parse_ingested_blob`, progress through
+`documents/ocr_progress.py` into `job_status`'s `progress`); a tool call
+(`read_with_ocr_budget`, `ocr_transient_within`) reads what fits in
+`tool_ocr_budget()` and names the rest (`ocr_continuation_note`). A chat
+attachment's excerpt is the text layer only (`text_layer_sync`, `ocr.disable`):
+it OCR'd the whole scan for five minutes before the model saw the message.
+Every async `DocumentService` worker call goes through
+`documents/cancellation.run_cancellable`: a cancelled await sets the run's
+cancel signal, the broker exchange closes its connection (the broker removes
+the container) and the local sandbox kills the tree -- timed-out tool calls
+left their OCR containers running and each retry shared the CPU with them.
+Gate: `tests/test_document_ocr_batches.py` (the one-run parse, a read without
+a cancel check and the old excerpt as negative controls).
+
 **H. Arabic / RTL — one module, one shaping pass, one fold.**
 `documents/arabic.py` is the ONLY home for Arabic text policy. Do not
 reintroduce a codepoint-block regex, a second shaping routine, or a

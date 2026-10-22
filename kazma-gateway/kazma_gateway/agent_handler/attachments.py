@@ -199,6 +199,19 @@ def _persist_attachment(attachment: Attachment) -> str:
     return str(dest.resolve())
 
 
+def _scanned_note(total: int, scanned: tuple[int, ...]) -> str:
+    """What the model is told about pages that have no text layer."""
+
+    which = "This is a scanned document" if len(scanned) == total else "Some pages are scanned"
+    count = f"{len(scanned)} of {total} pages" if len(scanned) != total else f"all {total} pages"
+    return (
+        f"{which}: {count} have no text layer, so their text needs OCR "
+        f"(about 15-45 s a page). ocr_document reads a few pages per call; "
+        f"document_import reads the whole file in the background, and "
+        f"document_status shows how many pages are done."
+    )
+
+
 def _try_parse_attachment(path: str, *, max_chars: int = 2000) -> str:
     """Best-effort synchronous parse of a document attachment for prompt injection.
 
@@ -211,13 +224,20 @@ def _try_parse_attachment(path: str, *, max_chars: int = 2000) -> str:
     """
     try:
         p = Path(path).expanduser().resolve(strict=True)
-        result = DocumentService().read_transient_sync(
-            p,
-            approved_path=p,
-            max_chars=max_chars,
-            fence=False,
-        )
-        return result.as_tool_output()
+        # The text layer only. A scanned PDF was OCR'd here before the model
+        # saw the message: a 54-page scan spent the worker's whole five
+        # minutes on it and gave nothing (2026-10-22). The model is told what
+        # the file is and which tools read it.
+        service = DocumentService()
+        document = service.text_layer_sync(p, approved_path=p)
+        scanned = service.pages_needing_ocr(document)
+        total = len(document.pages)
+        if scanned and len(scanned) == total:
+            return _scanned_note(total, scanned)
+        excerpt = service.read_ir(document, max_chars=max_chars, fence=False).as_tool_output()
+        if scanned:
+            excerpt += "\n" + _scanned_note(total, scanned)
+        return excerpt
     except DocumentParseError as exc:
         return f"Error: {exc.safe_message}"
     except Exception as exc:

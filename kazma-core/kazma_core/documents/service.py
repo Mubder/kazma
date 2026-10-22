@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import hashlib
 import json
@@ -10,14 +9,17 @@ import logging
 import os
 import shutil
 import sys
+import time
 import uuid
-from dataclasses import asdict, dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from kazma_core.safety.prompt_fence import format_untrusted_block
 
 from .config import DocumentConfig
+from .cancellation import run_cancellable
 from .errors import (
     DocumentFormatError,
     DocumentOcrError,
@@ -98,6 +100,100 @@ def _resolve_python_executable(repo_root: Path) -> str:
             return str(candidate)
 
     return sys.executable
+
+
+#: One page's OCR time before any page of the document has been read: the
+#: neural engine on one core read the pages of a live Arabic scan in 14-45 s
+#: (2026-10-22).
+_FIRST_PAGE_SECONDS = 45.0
+#: A worker run's fixed cost: the worker starting, the models loading, the
+#: document parsed again.
+_RUN_OVERHEAD_SECONDS = 10.0
+#: At most this many pages in one run, however fast they go.
+_MAX_BATCH_PAGES = 12
+#: A run is sized to this share of its time limit: room for a slow page.
+_BATCH_SHARE = 0.6
+
+
+@dataclass(frozen=True, slots=True)
+class OcrPass:
+    """What one :meth:`DocumentService.ocr_in_batches` pass read.
+
+    ``document`` holds every page, the ones OCR read in this pass included;
+    ``remaining`` names the pages it did not reach (a caller's time budget
+    ran out), for the next pass.
+    """
+
+    document: DocumentIR
+    read: tuple[int, ...]
+    failed: tuple[int, ...]
+    remaining: tuple[int, ...]
+    seconds: float
+
+
+def _page_ranges(numbers: tuple[int, ...] | list[int]) -> str:
+    """1, 2, 3, 5 -> "1-3, 5"."""
+
+    ordered = sorted(set(int(n) for n in numbers))
+    parts: list[str] = []
+    start = prev = None
+    for n in ordered:
+        if start is None:
+            start = prev = n
+        elif n == prev + 1:
+            prev = n
+        else:
+            parts.append(f"{start}" if start == prev else f"{start}-{prev}")
+            start = prev = n
+    if start is not None:
+        parts.append(f"{start}" if start == prev else f"{start}-{prev}")
+    return ", ".join(parts)
+
+
+#: Seconds of a tool call's limit kept for its answer once OCR stops: the
+#: reply to build, a page that ran longer than the ones before it.
+_OCR_MARGIN_SECONDS = 25.0
+
+
+async def tool_ocr_budget() -> float:
+    """How long a tool may OCR: the tool's own time limit, less a margin.
+
+    A chat tool call is ended at ``agent.tool_timeout_seconds`` (120 s by
+    default). OCR is about 15-45 s a page on one core, so a call that tried
+    the whole document, or six pages, ended with nothing (2026-10-22); it
+    now reads what fits and names the rest.
+    """
+
+    from kazma_core.agent.graph_helpers import _resolve_tool_timeout
+
+    timeout = await run_cancellable(_resolve_tool_timeout)
+    if not timeout or timeout <= 0:
+        return 600.0
+    return max(20.0, float(timeout) - _OCR_MARGIN_SECONDS)
+
+
+def ocr_continuation_note(
+    *, read: tuple[int, ...], remaining: tuple[int, ...], total_pages: int,
+) -> str:
+    """What a tool tells the model when OCR did not reach every page.
+
+    Its next step is named: a few more pages per call, or the whole document
+    as a background job. Without it the model asked for six pages at once,
+    then three, then two, each call timing out (2026-10-22).
+    """
+
+    if not remaining:
+        return ""
+    head = (f"OCR read pages {_page_ranges(read)} of {total_pages} in this call. "
+            if read else "OCR read no page in this call. ")
+    nxt = list(remaining[:3])
+    return (
+        f"\n\n{head}Pages {_page_ranges(remaining)} are not read yet "
+        f"(OCR takes about 15-45 s a page here). To continue, call ocr_document "
+        f"with pages={nxt} -- a few pages a call. To read the whole document, "
+        f"use document_import with this file: it runs in the background with no "
+        f"per-call time limit, and document_status shows how many pages are done."
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,7 +278,7 @@ class DocumentService:
             )
         except (TypeError, ValueError) as exc:
             return self._operation_error("invalid_document_scope", str(exc))
-        return await asyncio.to_thread(
+        return await run_cancellable(
             self.operations.generate,
             target_format=target_format,
             payload=payload,
@@ -218,7 +314,7 @@ class DocumentService:
 
         try:
             source = self._validate_approved_path(path, approved_path)
-            sniffed = await asyncio.to_thread(self.inspect_path, source)
+            sniffed = await run_cancellable(self.inspect_path, source)
             self.registry.resolve(
                 mime_type=sniffed.mime_type,
                 extension=sniffed.extension,
@@ -240,7 +336,7 @@ class DocumentService:
             return self._operation_error(exc.code, exc.safe_message)
         except (OSError, TypeError, ValueError) as exc:
             return self._operation_error("invalid_document_request", str(exc))
-        return await asyncio.to_thread(
+        return await run_cancellable(
             self._convert_isolated,
             source,
             target_format=target_format,
@@ -303,7 +399,7 @@ class DocumentService:
     ) -> DocumentResult[Any]:
         """Merge bounded, approved PDFs in an isolated mutation worker."""
 
-        prepared = await asyncio.to_thread(self._prepare_pdf_request,
+        prepared = await run_cancellable(self._prepare_pdf_request,
             paths,
             approved_paths,
             tenant_id,
@@ -316,7 +412,7 @@ class DocumentService:
         if isinstance(prepared, DocumentResult):
             return prepared
         sources, scope = prepared
-        return await asyncio.to_thread(
+        return await run_cancellable(
             self.operations.pdf_operation,
             "pdf:merge",
             sources,
@@ -342,7 +438,7 @@ class DocumentService:
         version_id: Any = None,
         job_id: Any = None,
     ) -> DocumentResult[Any]:
-        prepared = await asyncio.to_thread(self._prepare_pdf_request,
+        prepared = await run_cancellable(self._prepare_pdf_request,
             (path,),
             (approved_path,),
             tenant_id,
@@ -355,7 +451,7 @@ class DocumentService:
         if isinstance(prepared, DocumentResult):
             return prepared
         source, scope = prepared
-        return await asyncio.to_thread(
+        return await run_cancellable(
             self.operations.pdf_operation,
             "pdf:split",
             source,
@@ -375,14 +471,14 @@ class DocumentService:
         workspace_id: str,
         actor_id: str,
     ) -> DocumentResult[Any]:
-        prepared = await asyncio.to_thread(self._prepare_pdf_request,
+        prepared = await run_cancellable(self._prepare_pdf_request,
             (path,), (approved_path,), tenant_id, workspace_id, actor_id
         )
         if isinstance(prepared, DocumentResult):
             return prepared
         sources, scope = prepared
         source = sources[0]
-        return await asyncio.to_thread(self.operations.pdf_info, source, scope=scope)
+        return await run_cancellable(self.operations.pdf_info, source, scope=scope)
 
     @policy_operation
     async def pdf_fill_form(
@@ -400,7 +496,7 @@ class DocumentService:
         version_id: Any = None,
         job_id: Any = None,
     ) -> DocumentResult[Any]:
-        prepared = await asyncio.to_thread(self._prepare_pdf_request,
+        prepared = await run_cancellable(self._prepare_pdf_request,
             (path,),
             (approved_path,),
             tenant_id,
@@ -413,7 +509,7 @@ class DocumentService:
         if isinstance(prepared, DocumentResult):
             return prepared
         source, scope = prepared
-        return await asyncio.to_thread(
+        return await run_cancellable(
             self.operations.pdf_operation,
             "pdf:fill-form",
             source,
@@ -441,7 +537,7 @@ class DocumentService:
     ) -> DocumentResult[Any]:
         """Physically redact and independently verify a flattened PDF, or refuse."""
 
-        prepared = await asyncio.to_thread(self._prepare_pdf_request,
+        prepared = await run_cancellable(self._prepare_pdf_request,
             (path,),
             (approved_path,),
             tenant_id,
@@ -454,7 +550,7 @@ class DocumentService:
         if isinstance(prepared, DocumentResult):
             return prepared
         source, scope = prepared
-        return await asyncio.to_thread(
+        return await run_cancellable(
             self.operations.pdf_operation,
             "pdf:redact",
             source,
@@ -481,7 +577,7 @@ class DocumentService:
         if not all(str(value).strip() for value in (tenant_id, workspace_id, actor_id)):
             raise ValueError("tenant_id, workspace_id, and actor_id are required")
         source = self._validate_path(path)
-        return await asyncio.to_thread(
+        return await run_cancellable(
             self._parse_isolated,
             source,
             force_ocr=force_ocr,
@@ -554,16 +650,18 @@ class DocumentService:
         force_ocr: bool = False,
         ocr_language: str | None = None,
         ocr_pages: tuple[int, ...] | None = None,
+        allow_ocr: bool = True,
     ) -> DocumentIR:
         """Compatibility parse after a caller has approved the resolved path."""
 
         source = self._validate_approved_path(path, approved_path)
-        return await asyncio.to_thread(
+        return await run_cancellable(
             self._parse_isolated,
             source,
             force_ocr=force_ocr,
             ocr_language=ocr_language,
             ocr_pages=ocr_pages,
+            allow_ocr=allow_ocr,
         )
 
     @policy_operation
@@ -585,6 +683,235 @@ class DocumentService:
             ocr_pages=pages,
         )
 
+    def pages_needing_ocr(self, document: DocumentIR) -> tuple[int, ...]:
+        """Pages whose text layer is too thin to read: OCR's own rule.
+
+        Only a PDF or an image has pages OCR can read; an empty page of a
+        word-processing file is just empty.
+        """
+
+        from .quality import assess_document_quality
+
+        mime = str(document.metadata.get("source_mime", ""))
+        if mime != "application/pdf" and not mime.startswith("image/"):
+            return ()
+        return tuple(
+            quality.page_number
+            for quality in assess_document_quality(
+                document, min_text_chars=self.config.ocr_min_text_chars_per_page)
+            if quality.needs_ocr
+        )
+
+    @policy_operation
+    def text_layer_sync(self, path: str | Path, *, approved_path: str | Path) -> DocumentIR:
+        """The document as its text layer has it: no OCR, however long it is.
+
+        A chat attachment's excerpt was read with OCR before the model saw
+        the message: a 54-page scan spent the worker's whole five minutes on
+        it and gave nothing (2026-10-22).
+        """
+
+        source = self._validate_approved_path(path, approved_path)
+        return self._parse_isolated(source, allow_ocr=False)
+
+    @policy_operation
+    async def read_with_ocr_budget(
+        self,
+        path: str | Path,
+        *,
+        approved_path: str | Path,
+        budget_seconds: float,
+        page: int | None = None,
+        page_start: int | None = None,
+        page_end: int | None = None,
+        block: str | int | None = None,
+        offset: int = 0,
+        max_chars: int = 20_000,
+        fence: bool = True,
+        language: str | None = "auto",
+    ) -> tuple[DocumentReadResult, str]:
+        """Read a document; OCR its scanned pages in range within the budget.
+
+        The text layer first (fast, whatever the length); then OCR for the
+        requested pages that have none, as many as fit in *budget_seconds*.
+        Returns the read and a note for the caller naming the pages OCR did
+        not reach (empty when there are none). A tool call used to OCR the
+        whole document in one run and time out with nothing.
+        """
+
+        source = self._validate_approved_path(path, approved_path)
+        started = time.monotonic()
+        document = await run_cancellable(self._parse_isolated, source, allow_ocr=False)
+        note = ""
+        if self.config.ocr_enabled and document.pages:
+            first = page if page is not None else (page_start or 1)
+            last = page if page is not None else (page_end or len(document.pages))
+            scanned = tuple(n for n in self.pages_needing_ocr(document) if first <= n <= last)
+            if scanned:
+                left = budget_seconds - (time.monotonic() - started)
+                result = await run_cancellable(
+                    self.ocr_in_batches, source, force=True, language=language,
+                    pages=scanned, budget_seconds=left,
+                )
+                document = result.document
+                note = ocr_continuation_note(
+                    read=result.read, remaining=result.remaining,
+                    total_pages=len(document.pages))
+        return self.read_ir(
+            document, page=page, page_start=page_start, page_end=page_end,
+            block=block, offset=offset, max_chars=max_chars, fence=fence,
+        ), note
+
+    @policy_operation
+    async def ocr_transient_within(
+        self,
+        path: str | Path,
+        *,
+        approved_path: str | Path,
+        budget_seconds: float,
+        language: str | None = "auto",
+        pages: tuple[int, ...] | None = None,
+        force: bool = True,
+    ) -> OcrPass:
+        """OCR as many of *pages* as fit in *budget_seconds*, in page order.
+
+        For a tool call, which its caller ends at a fixed time: the rest are
+        named in ``remaining`` instead of the call timing out with nothing
+        (2026-10-22: every chat OCR of a 54-page scan past page 2 did).
+        """
+
+        source = self._validate_approved_path(path, approved_path)
+        return await run_cancellable(
+            self.ocr_in_batches, source, force=force, language=language,
+            pages=pages, budget_seconds=budget_seconds,
+        )
+
+    def ocr_in_batches(
+        self,
+        source: Path,
+        *,
+        force: bool,
+        language: str | None = None,
+        pages: tuple[int, ...] | None = None,
+        budget_seconds: float | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
+        check_cancelled: Callable[[], None] | None = None,
+    ) -> OcrPass:
+        """Parse *source* with OCR read a few pages per worker run.
+
+        One worker run had to OCR every page within its time limit: a
+        54-page scan needs ~30 minutes on one core and never finished
+        (2026-10-22). The first run parses the document and OCRs as many
+        pages as fit (``max_ocr_pages``); the pages it defers are read by
+        further runs, each sized from the seconds a page has taken so far,
+        and merged in. A document that needs no OCR, or few pages of it, is
+        one run, as before. Without *budget_seconds* every page is read
+        (the durable job, whose lease the worker pool renews); with it, the
+        pass stops when the next page would not fit and names the rest.
+        """
+
+        started = time.monotonic()
+        limit = float(self.config.worker_timeout_seconds)
+        per_page: float | None = None
+
+        def left() -> float | None:
+            if budget_seconds is None:
+                return None
+            return budget_seconds - (time.monotonic() - started)
+
+        def fits(seconds: float) -> int:
+            page = per_page or _FIRST_PAGE_SECONDS
+            return max(1, min(_MAX_BATCH_PAGES,
+                              int((seconds * _BATCH_SHARE - _RUN_OVERHEAD_SECONDS) // page)))
+
+        remaining_time = left()
+        run_limit = limit if remaining_time is None else min(limit, remaining_time)
+        first = time.monotonic()
+        document = self._parse_isolated(
+            source, force_ocr=force, ocr_language=language, ocr_pages=pages,
+            timeout_seconds=None if budget_seconds is None else run_limit,
+            max_ocr_pages=1 if budget_seconds is not None else fits(run_limit),
+        )
+        summary = dict(document.metadata.get("ocr") or {})
+        read = [int(n) for n in summary.get("completed_pages") or []]
+        failed = [int(n) for n in summary.get("failed_pages") or []]
+        todo = [int(n) for n in summary.get("deferred_pages") or []]
+        total = len(read) + len(failed) + len(todo)
+        first_done = len(read) + len(failed)
+        if read:
+            per_page = (time.monotonic() - first) / len(read)
+        if on_progress is not None and total:
+            on_progress(first_done, total)
+        by_number = {page.page_number: page for page in document.pages}
+        warnings = [str(item) for item in document.metadata.get("warnings") or []]
+        while todo:
+            if check_cancelled is not None:
+                check_cancelled()
+            remaining_time = left()
+            if remaining_time is not None:
+                if remaining_time < (per_page or _FIRST_PAGE_SECONDS) + _RUN_OVERHEAD_SECONDS:
+                    break
+                run_limit = min(limit, remaining_time)
+            else:
+                run_limit = limit
+            batch = tuple(todo[: fits(run_limit)])
+            run_started = time.monotonic()
+            try:
+                run = self._parse_isolated(
+                    source, force_ocr=True, ocr_language=language, ocr_pages=batch,
+                    timeout_seconds=None if budget_seconds is None else run_limit,
+                )
+            except DocumentSandboxError as exc:
+                if exc.code != "parser_timeout":
+                    raise
+                if len(batch) > 1:
+                    # Slower than measured: one page a run from here.
+                    per_page = run_limit
+                    continue
+                if budget_seconds is not None:
+                    break
+                raise
+            per_page = (time.monotonic() - run_started) / len(batch)
+            run_summary = dict(run.metadata.get("ocr") or {})
+            run_pages = {page.page_number: page for page in run.pages}
+            for number in batch:
+                if number in run_pages:
+                    by_number[number] = run_pages[number]
+            read.extend(int(n) for n in run_summary.get("completed_pages") or [])
+            failed.extend(int(n) for n in run_summary.get("failed_pages") or [])
+            warnings.extend(str(item) for item in run.metadata.get("warnings") or [])
+            todo = todo[len(batch):]
+            if on_progress is not None:
+                on_progress(len(read) + len(failed), total)
+        if len(read) + len(failed) > first_done or todo:
+            status = "completed" if read and not failed and not todo else (
+                "partial" if read else "failed")
+            summary.update({
+                "status": status,
+                "completed_pages": sorted(read),
+                "failed_pages": sorted(failed),
+                "selected_pages": sorted(set(read) | set(failed) | set(todo)),
+            })
+            summary.pop("deferred_pages", None)
+            if todo:
+                summary["deferred_pages"] = list(todo)
+            document = replace(
+                document,
+                pages=tuple(by_number[page.page_number] for page in document.pages),
+                metadata={
+                    **dict(document.metadata),
+                    "warnings": list(dict.fromkeys(warnings)),
+                    "ocr": summary,
+                },
+            )
+        return OcrPass(
+            document=document,
+            read=tuple(sorted(read)),
+            failed=tuple(sorted(failed)),
+            remaining=tuple(todo),
+            seconds=time.monotonic() - started,
+        )
+
     @policy_operation
     def parse_ingested_blob(
         self,
@@ -593,21 +920,30 @@ class DocumentService:
         force_ocr: bool = False,
         ocr_language: str | None = None,
         ocr_pages: tuple[int, ...] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
+        check_cancelled: Callable[[], None] | None = None,
     ) -> DocumentIR:
         """Parse a durable-ingestion staged blob through the isolated worker.
 
         This is the sync entry the :class:`DocumentIngestionService` stage
         handlers call. The path is a coordinator-materialized copy of an
         immutable CAS ``originals`` blob (never a remote-client path), so no
-        approval handshake is required — it is the single parsing path.
+        approval handshake is required — it is the single parsing path. A
+        document that needs OCR is read a few pages per worker run
+        (:meth:`ocr_in_batches`), *on_progress* told as pages are read.
         """
 
-        return self._parse_isolated(
-            Path(source),
-            force_ocr=force_ocr,
-            ocr_language=ocr_language,
-            ocr_pages=ocr_pages,
-        )
+        if not (self.config.ocr_enabled or force_ocr):
+            return self._parse_isolated(
+                Path(source),
+                force_ocr=force_ocr,
+                ocr_language=ocr_language,
+                ocr_pages=ocr_pages,
+            )
+        return self.ocr_in_batches(
+            Path(source), force=force_ocr, language=ocr_language, pages=ocr_pages,
+            on_progress=on_progress, check_cancelled=check_cancelled,
+        ).document
 
     @policy_operation
     def ocr_health(self) -> OcrHealth:
@@ -934,8 +1270,10 @@ class DocumentService:
         offset: int = 0,
         max_chars: int = 20_000,
         fence: bool = True,
+        allow_ocr: bool = True,
     ) -> DocumentReadResult:
-        document = await self.parse_transient(path, approved_path=approved_path)
+        document = await self.parse_transient(
+            path, approved_path=approved_path, allow_ocr=allow_ocr)
         return self.read_ir(
             document,
             page=page,
@@ -960,11 +1298,12 @@ class DocumentService:
         offset: int = 0,
         max_chars: int = 20_000,
         fence: bool = True,
+        allow_ocr: bool = True,
     ) -> DocumentReadResult:
         """Synchronous adapter that still executes parser libraries out of process."""
 
         source = self._validate_approved_path(path, approved_path)
-        document = self._parse_isolated(source)
+        document = self._parse_isolated(source, allow_ocr=allow_ocr)
         return self.read_ir(
             document,
             page=page,
@@ -1146,10 +1485,15 @@ class DocumentService:
         force_ocr: bool = False,
         ocr_language: str | None = None,
         ocr_pages: tuple[int, ...] | None = None,
+        allow_ocr: bool = True,
+        timeout_seconds: float | None = None,
+        max_ocr_pages: int | None = None,
     ) -> DocumentIR:
         response, source_sha = self._run_parser_worker(
             source, operation="parse", force_ocr=force_ocr,
             ocr_language=ocr_language, ocr_pages=ocr_pages,
+            allow_ocr=allow_ocr, timeout_seconds=timeout_seconds,
+            max_ocr_pages=max_ocr_pages,
         )
         document = self._validate_response(response, source_sha)
         from .extract_salvage import maybe_salvage_extract
@@ -1180,7 +1524,16 @@ class DocumentService:
     def _run_parser_worker(
         self, source: Path, *, operation: str, force_ocr: bool = False,
         ocr_language: str | None = None, ocr_pages: tuple[int, ...] | None = None,
+        allow_ocr: bool = True, timeout_seconds: float | None = None,
+        max_ocr_pages: int | None = None,
     ) -> tuple[Any, str]:
+        # A run may be given less time than the policy's limit (an OCR batch
+        # sized to its caller's budget); the worker reads the same figure
+        # for its own OCR deadline, so both end together.
+        config = self.config
+        if timeout_seconds is not None:
+            config = replace(config, worker_timeout_seconds=max(
+                1, min(int(timeout_seconds), int(config.worker_timeout_seconds))))
         source_sha = sha256_path(source)
         root = self.config.storage_root / "parser-runs"
         root.mkdir(parents=True, exist_ok=True)
@@ -1200,10 +1553,12 @@ class DocumentService:
             "operation": operation,
             "config": {
                 key: str(value) if isinstance(value, Path) else value
-                for key, value in asdict(self.config).items()
+                for key, value in asdict(config).items()
             },
             "ocr": {
                 "force": force_ocr,
+                "disable": not allow_ocr,
+                "max_pages": max_ocr_pages,
                 "language": ocr_language,
                 "pages": list(ocr_pages) if ocr_pages is not None else None,
                 # The neural engine's models: the worker's environment is
@@ -1235,11 +1590,11 @@ class DocumentService:
                 str(result_abs),
             ),
             work_dir=run_dir,
-            timeout_seconds=self.config.worker_timeout_seconds,
+            timeout_seconds=config.worker_timeout_seconds,
             stdout_limit_bytes=4_096,
             stderr_limit_bytes=65_536,
             memory_limit_bytes=self.config.worker_memory_mb * 1024 * 1024,
-            cpu_limit_seconds=self.config.worker_timeout_seconds,
+            cpu_limit_seconds=config.worker_timeout_seconds,
                 cpu_cores=1 if os.name == "nt" else None,
                 process_limit=32 if os.name == "nt" else None,
             env={
@@ -1263,7 +1618,7 @@ class DocumentService:
                     request=container_request,
                     inputs=staged,
                     run_dir=run_dir,
-                    timeout_seconds=self.config.worker_timeout_seconds,
+                    timeout_seconds=config.worker_timeout_seconds,
                     max_output_bytes=self.config.worker_result_max_bytes + 1024 * 1024,
                 )
             else:

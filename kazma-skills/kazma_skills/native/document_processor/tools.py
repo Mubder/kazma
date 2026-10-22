@@ -10,7 +10,7 @@ from typing import Any
 
 from kazma_core.agent.tool_registry import _workspace_scope_error
 from kazma_core.documents.errors import DocumentParseError
-from kazma_core.documents.service import DocumentService
+from kazma_core.documents.service import DocumentService, ocr_continuation_note, tool_ocr_budget
 from kazma_core.workspace.binding import resolve_tool_path
 
 logger = logging.getLogger(__name__)
@@ -96,16 +96,21 @@ async def read_document(
     offset: int = 0,
     max_chars: int = _MAX_OUTPUT_CHARS,
 ) -> str:
-    """Read a supported document through the isolated parser worker."""
+    """Read a supported document through the isolated parser worker.
+
+    The text layer first; scanned pages in range are OCR'd as far as the
+    call's time allows, and the answer names the pages not reached.
+    """
 
     source, error = await asyncio.to_thread(_resolve_input, path)
     if error:
         return error
     assert source is not None
     try:
-        result = await DocumentService().read_transient(
+        result, note = await DocumentService().read_with_ocr_budget(
             source,
             approved_path=source,
+            budget_seconds=await tool_ocr_budget(),
             page=page,
             page_start=page_start,
             page_end=page_end,
@@ -114,7 +119,7 @@ async def read_document(
             max_chars=max_chars,
             fence=True,
         )
-        return result.as_tool_output()
+        return result.as_tool_output() + note
     except DocumentParseError as exc:
         return f"Error: {exc.safe_message}"
     except Exception as exc:
@@ -128,7 +133,12 @@ async def ocr_document(
     pages: list[int] | None = None,
     language: str | None = None,
 ) -> str:
-    """OCR a document through the isolated parser worker."""
+    """OCR a document through the isolated parser worker.
+
+    Reads the pages (all when none are named) in order, as many as fit in the
+    call's time; the answer holds those pages and names the rest, with the
+    call that continues and the background job for the whole document.
+    """
 
     source, error = await asyncio.to_thread(_resolve_input, path, "document OCR reads")
     if error:
@@ -136,21 +146,27 @@ async def ocr_document(
     assert source is not None
     try:
         service = DocumentService()
-        selected = tuple(pages) if pages is not None else None
-        document = await service.ocr_transient(
+        selected = tuple(pages) if pages else None
+        result = await service.ocr_transient_within(
             source,
             approved_path=source,
+            budget_seconds=await tool_ocr_budget(),
             language=language or lang,
             pages=selected,
         )
-        if selected is not None:
-            document = replace(
-                document,
-                pages=tuple(page for page in document.pages if page.page_number in selected),
-            )
+        shown = set(result.read) | set(result.failed)
+        note = ocr_continuation_note(
+            read=result.read, remaining=result.remaining,
+            total_pages=len(result.document.pages))
+        if not shown:
+            return "Error: OCR read no page within this call's time limit." + note
+        document = replace(
+            result.document,
+            pages=tuple(page for page in result.document.pages if page.page_number in shown),
+        )
         return service.read_ir(
             document, max_chars=_MAX_OUTPUT_CHARS, fence=True
-        ).as_tool_output()
+        ).as_tool_output() + note
     except DocumentParseError as exc:
         return f"Error: {exc.safe_message}"
     except Exception as exc:

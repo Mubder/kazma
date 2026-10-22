@@ -18,7 +18,11 @@ tools:
       document_id/job_id. Waits up to 30 seconds: the state is final if
       processing finished by then, otherwise the reply says it is still
       processing (follow it with document_status). Only files inside the active
-      workspace are accepted; arbitrary server paths are refused.
+      workspace are accepted; arbitrary server paths are refused. The way to
+      read a long scanned document: it is OCR'd in the background a few pages
+      at a time with no per-call time limit (about 15-45 s a page), and
+      document_status shows how many pages are read; document_read then reads
+      its text.
     category: document
     prompt_chain:
       - "استورد المستند المحدد إلى منصة المستندات"
@@ -27,7 +31,8 @@ tools:
     description: >
       With no ids: tenant document-platform overview (enabled, workers,
       queue, catalog count, recent titles). With document_id or job_id:
-      that job's stage, attempt count, and any safe error diagnostics.
+      that job's stage, attempt count, OCR pages read so far for a scan, and
+      any safe error diagnostics.
     category: document
     prompt_chain:
       - "اعرض حالة معالجة المستند"

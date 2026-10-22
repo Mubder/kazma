@@ -218,6 +218,21 @@ citations. In the `container` profile there is no Docling tier.
 
 ### Multilingual OCR
 
+- **A long scan is read a few pages at a time** (2026-10-22). OCR takes about
+  15-45 s a page on one core (the neural engine at the slow end), so a 54-page
+  scan is about half an hour. A worker run reads at most as many pages as fit
+  its time limit and names the rest; further runs read them, each sized from
+  the seconds a page has taken (`DocumentService.ocr_in_batches`). A durable
+  job reads every page this way, and its status shows the pages read so far
+  (`progress`; `document_status` says "OCR: 12 of 54 pages read"). A tool
+  call (`read_document`, `ocr_document`, `file_read`) reads the text layer
+  first, then OCRs the scanned pages in range as far as the call's time
+  allows (`agent.tool_timeout_seconds`, less a margin) and names the pages it
+  did not reach, with the call that continues and `document_import` for the
+  whole file.
+- **A stopped call stops its worker.** When a tool call is ended (its time
+  limit, Stop), its worker run is stopped too: the container is removed, or
+  the local process tree killed. It used to run on to its own limit.
 - **Per-page quality routing:** Pages with high text density can skip OCR
   (native text preserved); image-heavy / text-poor pages, high presentation-form
   / CID-mangled layers, and empty text layers route to OCR.
@@ -710,7 +725,9 @@ every file matches the manifest, and never downloads anything.
 
 ### Chat & agent
 
-- Attach a PDF in chat → auto-parse excerpt (fenced) when a parser is available.
+- Attach a PDF in chat → an excerpt of its text layer (fenced) when a parser
+  is available. A scanned file is not OCR'd before the model sees the message:
+  the model is told it is scanned, how many pages, and which tools read it.
 - Agent tools: `document_import` (workspace path), `document_read`, `document_index`, …
 - Gateway: `/documents list`, `/documents read <id>`, …
 
@@ -789,6 +806,7 @@ More ops detail: [Document processing](../ops/document-processing.md).
 | Concurrent Web uploads | 4 per process | `documents.capacity.max_concurrent_uploads` |
 | Intake lease | 300 s | `documents.intake.lease_seconds` |
 | Table cells read per scanned page | 600 cells / 120 s | fixed (`documents/ocr/pipeline.py`) |
+| OCR pages per worker run | sized to fit the run's limit (at most 12) | fixed (`documents/service.py`) |
 | OCR engine | `auto` | `documents.ocr.engine` (`auto`, `neural`, `tesseract`) |
 | JSON request body | 2 MiB | fixed (`documents_api.py`) |
 | Generation payload | 1 MiB | fixed (`ingestion.py`) |

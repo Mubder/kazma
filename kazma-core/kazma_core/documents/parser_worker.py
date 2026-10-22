@@ -104,6 +104,9 @@ def execute(request_path: Path, result_path: Path) -> int:
         if not isinstance(ocr, dict):
             raise ValueError("invalid OCR worker request")
         force_ocr = bool(ocr.get("force", False))
+        # A text-layer-only read (a chat attachment's excerpt, the first look
+        # of a batched OCR): no OCR at all, however the settings stand.
+        no_ocr = bool(ocr.get("disable", False)) and not force_ocr
         raw_pages = ocr.get("pages")
         if raw_pages is not None and not isinstance(raw_pages, list):
             raise ValueError("invalid OCR page selector")
@@ -123,7 +126,10 @@ def execute(request_path: Path, result_path: Path) -> int:
         models = ocr.get("models")
         if models is not None and not isinstance(models, str):
             raise ValueError("invalid OCR model directory")
-        if config.ocr_enabled or force_ocr:
+        max_pages = ocr.get("max_pages")
+        if max_pages is not None and (isinstance(max_pages, bool) or not isinstance(max_pages, int) or max_pages < 1):
+            raise ValueError("invalid OCR page cap")
+        if (config.ocr_enabled and not no_ocr) or force_ocr:
             ir = apply_ocr(
                 source,
                 ir,
@@ -133,6 +139,7 @@ def execute(request_path: Path, result_path: Path) -> int:
                 pages=ocr_pages,
                 work_dir=result_path.parent,
                 model_dir=Path(models) if models else None,
+                max_pages=max_pages,
                 # The parent ends this worker at worker_timeout_seconds:
                 # OCR leaves a fifth of it for the rest of the parse.
                 deadline=started + 0.8 * config.worker_timeout_seconds,

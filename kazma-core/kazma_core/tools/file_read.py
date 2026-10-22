@@ -280,15 +280,18 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         text_suffixes = {".txt", ".md", ".markdown", ".log"}
         if capability is not None and capability.available and suffix not in text_suffixes:
             try:
-                from kazma_core.documents.service import DocumentService
+                from kazma_core.documents.service import DocumentService, tool_ocr_budget
 
-                parsed = await DocumentService().read_transient(
+                # The text layer first; scanned pages OCR'd only as far as the
+                # call's time allows, the rest named (documents/service.py).
+                parsed, note = await DocumentService().read_with_ocr_budget(
                     p,
                     approved_path=p,
+                    budget_seconds=await tool_ocr_budget(),
                     max_chars=MAX_CHARS,
                     fence=True,
                 )
-                return parsed.as_tool_output()
+                return parsed.as_tool_output() + note
             except Exception as exc:
                 from kazma_core.documents.errors import DocumentParseError
 
