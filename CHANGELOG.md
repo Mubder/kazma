@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## The context is the window, everywhere; a scan's Word file is its OCR text (2026-10-22)
+
+- **A fixed 30,000-token pruner is gone.** `prune_messages_if_exceeding_cap`
+  (2026-08-02) ran first on every supervisor call: past 30,000 tokens it cut
+  every tool output to 2,000 characters -- the running turn's too -- and the
+  cut list was saved to the checkpoint. It overrode the owner's decision
+  that the context budget is the window (2026-10-18). Live: a model reading
+  a 54-page OCR'd document found 2,000 of the 20,000 characters it had just
+  read, re-read the document in ever smaller windows and ended the turn
+  without the text (`tests/test_no_fixed_context_cap.py`, the old pruner as
+  the negative control).
+- **`document_convert` of a scanned document to Word or Markdown exports its
+  OCR text,** one section a page, through the generator. It converted the
+  scan itself -- page images, no text -- and timed out at 120 s. The 54-page
+  scan: 85,757 characters, a verified DOCX in 3.9 s. A document with a text
+  layer converts from its file as before.
+
 ## Documents: a long scan is OCR'd a few pages at a time, and a stopped call stops its worker (2026-10-22)
 
 Live that day: a 54-page Arabic scan sent to the chat for OCR. On one core

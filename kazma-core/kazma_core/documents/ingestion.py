@@ -1865,6 +1865,28 @@ class DocumentIngestionService:
         _record, version = self._resolve_current_version(
             tenant=tenant, actor=actor, doc_id=doc_id
         )
+        ocr_export = self._ocr_text_payload(
+            doc_id, version, fmt, title=output_name or _record.title or "Document")
+        if ocr_export is not None:
+            # A scanned document's Word or Markdown file is its OCR text: the
+            # scan itself converted is page images with no text, and slow
+            # enough to time out (2026-10-22, a 54-page scan).
+            generated_format, payload = ocr_export
+            result = await self.service.generate(
+                generated_format,
+                self._bounded_payload(payload),
+                tenant_id=tenant,
+                workspace_id=workspace,
+                actor_id=actor,
+                output_name=output_name or _record.title or "Document",
+                export_dir=None,
+            )
+            return self._audited_artifact(
+                result, tenant=tenant, actor=actor, doc_id=doc_id,
+                event_type="convert", action="convert",
+                detail={"target_format": fmt, "source": "ocr_text"},
+                failure_metric="generation",
+            )
         with self._materialize_original(version) as staged:
             result = await self.service.convert(
                 staged,
@@ -1883,6 +1905,36 @@ class DocumentIngestionService:
             event_type="convert", action="convert",
             detail={"target_format": fmt}, failure_metric="generation",
         )
+
+    #: Target formats a scanned document is exported to from its OCR text.
+    _OCR_TEXT_FORMATS = {"docx": "docx", "md": "markdown", "markdown": "markdown"}
+
+    def _ocr_text_payload(
+        self, doc_id: DocumentId, version: Any, fmt: str, *, title: str,
+    ) -> tuple[str, dict[str, Any]] | None:
+        """The generator payload of a scanned document's text, or None.
+
+        None unless the target is Word or Markdown and the stored read came
+        from OCR (its manifest names OCR'd pages): a document with a text
+        layer converts from its original file as before. One section a page,
+        headed by the page number, its blocks in reading order.
+        """
+
+        generated = self._OCR_TEXT_FORMATS.get(fmt)
+        if generated is None:
+            return None
+        manifest = self.storage.read_manifest(document_id=doc_id, version_id=version.id)
+        if not manifest or "ir" not in manifest:
+            return None
+        ir = DocumentIR.from_dict(manifest["ir"])
+        ocr = dict(ir.metadata.get("ocr") or {})
+        if not ocr.get("completed_pages"):
+            return None
+        sections = []
+        for page in ir.pages:
+            body = "\n\n".join(block.text.strip() for block in page.blocks if block.text.strip())
+            sections.append({"heading": f"Page {page.page_number}", "body": body or "(no text read)"})
+        return generated, {"title": title, "sections": sections, "tables": []}
 
     @policy_operation
     async def pdf_info_document(
