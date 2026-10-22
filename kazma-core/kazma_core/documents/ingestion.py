@@ -1930,10 +1930,15 @@ class DocumentIngestionService:
         ocr = dict(ir.metadata.get("ocr") or {})
         if not ocr.get("completed_pages"):
             return None
-        sections = []
-        for page in ir.pages:
-            body = "\n\n".join(block.text.strip() for block in page.blocks if block.text.strip())
-            sections.append({"heading": f"Page {page.page_number}", "body": body or "(no text read)"})
+        from kazma_core.documents.arabic import is_rtl_dominant
+
+        bodies = [("\n\n".join(block.text.strip() for block in page.blocks if block.text.strip()),
+                   page.page_number) for page in ir.pages]
+        # The headings are in the document's own language: "Page 3" over an
+        # Arabic page read as an English heading in an Arabic file.
+        arabic = is_rtl_dominant(" ".join(body for body, _ in bodies)[:20000])
+        page_word, empty = ("\u0635\u0641\u062d\u0629", "(\u0644\u0645 \u064a\u064f\u0642\u0631\u0623 \u0646\u0635)") if arabic else ("Page", "(no text read)")
+        sections = [{"heading": f"{page_word} {number}", "body": body or empty} for body, number in bodies]
         return generated, {"title": title, "sections": sections, "tables": []}
 
     @policy_operation

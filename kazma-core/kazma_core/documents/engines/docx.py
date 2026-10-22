@@ -156,6 +156,36 @@ class DocxEngine:
         self._complex_script_emphasis(document)
         self._give_direction_marks_a_face(document)
         document.save(str(output))
+        self._embed_house_fonts(Path(output))
+
+    def _embed_house_fonts(self, output: Path) -> None:
+        """Put the house face inside the file (``engines/docx_fonts.py``).
+
+        A DOCX only names its fonts: opened where IBM Plex Sans Arabic is not
+        installed, Word drew another face and the house style was gone
+        (2026-10-22). The bundled regular and bold go in; a file still opens
+        without them if embedding fails, said at WARNING.
+        """
+        from kazma_core.documents.fonts import _bundled_pair
+
+        import zipfile
+
+        from .docx_fonts import embed_fonts
+
+        try:
+            pair = _bundled_pair(arabic=True)
+            if pair is None:
+                return
+            regular, bold = pair
+            families = {str(self.theme.get("font_latin") or ""), str(self.theme.get("font_arabic") or "")}
+            faces: dict[str, dict[str, Path]] = {}
+            for family in families:
+                if family and family.replace(" ", "").lower() in regular.stem.replace("-", "").lower():
+                    faces[family] = {"regular": regular, **({"bold": bold} if bold else {})}
+            if faces:
+                embed_fonts(output, faces)
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+            logger.warning("[docx] house fonts not embedded (%s)", type(exc).__name__, exc_info=True)
 
     def _complex_script_emphasis(self, document: Any) -> None:
         """Bold and italic for Arabic too: every w:b / w:i gets its

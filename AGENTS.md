@@ -3454,6 +3454,14 @@ a bilingual title's halves in either order are one heading
 2026-10-20). Gate: `tests/test_document_bilingual_title_and_arabic_bold.py`
 (real LibreOffice; the engine without the twins as the negative control).
 
+**A DOCX carries the house fonts** (2026-10-22, `engines/docx_fonts.py`):
+`DocxEngine` embeds the bundled IBM Plex Sans Arabic (regular, bold) after
+every save -- obfuscated font parts, `w:embedTrueTypeFonts` -- because a DOCX
+only names its fonts, and a device without Plex drew the owner's OCR'd booklet
+in another face. A file that cannot take them is still written (WARNING).
+Gate: `tests/test_docx_embeds_house_fonts.py` (Word 16's own encoding as a
+fixture; the engine without the step as the negative control).
+
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
 in HTML) so a heading is never the last thing on a page. Paragraph widows and

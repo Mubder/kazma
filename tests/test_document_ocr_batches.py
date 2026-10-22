@@ -30,7 +30,6 @@ import sys
 import threading
 import time
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 from kazma_core.documents import cancellation, ocr_progress
@@ -241,6 +240,19 @@ def test_a_scanned_documents_word_file_is_its_ocr_text(svc, tmp_path) -> None:
     assert ingestion._ocr_text_payload("d", version, "md", title="Scan")[0] == "markdown"
     # Other targets convert the original file, as before.
     assert ingestion._ocr_text_payload("d", version, "pdf", title="Scan") is None
+
+
+def test_an_arabic_scans_page_headings_are_arabic(svc, tmp_path) -> None:
+    """The owner's booklet is Arabic: "Page 3" headings were English headings
+    in an Arabic file. The headings follow the text's language."""
+    service, _worker, _clock = svc
+    ocrd = service.ocr_in_batches(tmp_path / "scan.pdf", force=True).document
+    arabic = replace(ocrd, pages=tuple(
+        replace(page, blocks=tuple(replace(b, text="المغذيات مواد يحتاجها الجسم") for b in page.blocks))
+        for page in ocrd.pages))
+    ingestion, version = _ingestion_with(arabic)
+    _fmt, payload = ingestion._ocr_text_payload("d", version, "docx", title="مذكرة")
+    assert payload["sections"][0]["heading"] == "صفحة 1"
 
 
 def test_negative_control_a_text_document_converts_from_its_file() -> None:
