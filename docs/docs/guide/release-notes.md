@@ -4,6 +4,13 @@ sidebar_label: Release notes
 description: Dated changes and links to the Kazma upgrade guides.
 ---
 
+## What's new (2026-10-22)
+
+| Area | Change |
+|---|---|
+| **Dashboard charts show what was spent** | "Tokens Over Time" and "Cost Over Time" read the per-call LLM ledger: each bar is one slot's tokens or cost (5 minutes for 1H, an hour for 24H, 6 hours for 7D), kept across restarts and reloads. They drew running totals the open page had sampled, lost on a reload ([Web UI](../products/web-ui#dashboard-metrics)). |
+| **Fewer false "stale" notices** | A single lost request no longer shows "Alerts could not be refreshed" or empties the Dashboard's answer-quality block: the alerts are read again after 5 s, the block keeps its last reading, and either says so only when a second read fails too. |
+
 ## What's new (2026-10-21)
 
 | Area | Change |

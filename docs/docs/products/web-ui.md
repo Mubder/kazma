@@ -77,6 +77,18 @@ Cards are fed by the in-memory **`TraceStore`** (LLM/tool traces) plus the **cos
 
 `GET /api/dashboard/status` and WebSocket `/ws/dashboard` push numeric metrics (legacy string forms like `"$0.00"` / `"1,234"` are parsed safely in `dashboard.js`). Chat footer token/cost on a turn still comes from the SSE `done` event for that session.
 
+**Tokens Over Time** and **Cost Over Time** draw what was spent, from the
+per-call LLM ledger (`GET /api/dashboard/usage?range=hour|day|week`,
+administrators): each bar is one slot's tokens or cost, so the history
+survives restarts and page reloads. 1H shows 12 bars of 5 minutes, 24H 24
+hourly bars, 7D 28 bars of 6 hours; the charts refresh once a minute.
+Until 2026-10-22 they drew the cards' running totals as sampled by the open
+page, which only grew and were lost on a reload.
+
+**Answer-quality signals** (administrators) refresh every 10 s. A failed
+read keeps the last reading on screen; a second failure in a row adds
+"Could not refresh; showing the last reading."
+
 ### Memory & Governance (Dashboard)
 
 - **Component health** from `build_memory_health()` (V2 stack, embedder, packages, optional Neo4j/KB inject).
