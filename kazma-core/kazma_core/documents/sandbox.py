@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
+from .cancellation import WorkerCancelled, cancel_requested
+
 __all__ = [
     "SandboxRequest",
     "SandboxResult",
@@ -560,8 +562,15 @@ def run_isolated_subprocess(request: SandboxRequest) -> SandboxResult:
 
         deadline = started + float(request.timeout_seconds)
         timed_out = False
+        cancelled = False
         while process.poll() is None:
             if output_limit_hit.is_set():
+                _terminate_process_tree(process)
+                break
+            if cancel_requested():
+                # The caller gave up (documents/cancellation.py): the worker
+                # does not run on to its own time limit.
+                cancelled = True
                 _terminate_process_tree(process)
                 break
             if time.monotonic() >= deadline:
@@ -577,6 +586,8 @@ def run_isolated_subprocess(request: SandboxRequest) -> SandboxResult:
             process.wait(timeout=2.0)
         for reader in readers:
             reader.join(timeout=2.0)
+        if cancelled:
+            raise WorkerCancelled()
         duration = time.monotonic() - started
         return SandboxResult(
             command=request.command,

@@ -529,8 +529,14 @@ def apply_ocr(
     provider: Any = None,
     model_dir: Path | None = None,
     deadline: float | None = None,
+    max_pages: int | None = None,
 ) -> DocumentIR:
     """Assess every page, then OCR only selected pages in this worker.
+
+    ``max_pages`` reads at most that many of the selected pages, in page
+    order; the rest are named in the result's ``ocr.deferred_pages`` for a
+    later run (``DocumentService.ocr_in_batches``). A 54-page scan does not
+    fit one worker's time limit (2026-10-22: ~35 s a page on one core).
 
     ``provider`` overrides ``documents.ocr.engine`` (tests, measurements);
     ``model_dir`` is where the neural engine's models are (the worker request
@@ -556,6 +562,11 @@ def apply_ocr(
             raise DocumentFormatError("Explicit OCR supports PDF and image documents")
         return document
     selected = _selected_pages(document, qualities, requested_pages, force=force)
+    deferred: list[int] = []
+    if max_pages is not None and len(selected) > max(1, int(max_pages)):
+        ordered = sorted(selected)
+        deferred = ordered[max(1, int(max_pages)):]
+        selected = set(ordered[: max(1, int(max_pages))])
     if not selected:
         return replace(
             document,
@@ -667,6 +678,7 @@ def apply_ocr(
                 "engine": first_engine,
                 "engine_setting": config.ocr_engine,
                 **({"tesseract_from_page": switched_at} if switched_at is not None else {}),
+                **({"deferred_pages": deferred} if deferred else {}),
             },
         },
     )

@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from . import worker_process
+from .cancellation import WorkerCancelled, cancel_requested
 from .errors import DocumentSandboxError
 from .ocr.base import OcrComponentHealth, OcrEngineReport, OcrHealth, OcrReadiness
 from .registry import ParserCapability, ParserPlugin, ParserReadiness, ParserRegistry
@@ -276,8 +277,16 @@ def _recv_exact(sock: socket.socket, size: int, deadline: float) -> bytes:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("document broker deadline passed")
-        sock.settimeout(remaining)
-        chunk = sock.recv(min(size - len(data), _MAX_FRAME))
+        if cancel_requested():
+            # The caller gave up: leaving makes _exchange close the
+            # connection, and the broker kills and removes the container.
+            raise WorkerCancelled()
+        # Woken every second to see a cancel (documents/cancellation.py).
+        sock.settimeout(min(remaining, 1.0))
+        try:
+            chunk = sock.recv(min(size - len(data), _MAX_FRAME))
+        except TimeoutError:
+            continue
         if not chunk:
             raise ConnectionError("document broker closed the connection")
         data.extend(chunk)

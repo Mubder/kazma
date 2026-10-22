@@ -432,6 +432,12 @@ def _format_status(status: dict[str, Any]) -> str:
         f"  state: {status['state']} (stage: {status['stage']})",
         f"  attempt: {status['attempt']}/{status['max_attempts']}",
     ]
+    progress = status.get("progress") or {}
+    if progress.get("ocr_pages_total"):
+        # A long scan is OCR'd a few pages per worker run (2026-10-22).
+        lines.append(
+            f"  OCR: {progress.get('ocr_pages_done', 0)} of {progress['ocr_pages_total']} pages read"
+        )
     if status.get("error_code"):
         lines.append(f"  error: {status['error_code']} — {status.get('error_message')}")
     return "\n".join(lines)

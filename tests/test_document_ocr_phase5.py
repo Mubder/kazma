@@ -523,15 +523,22 @@ async def test_compatibility_ocr_tool_delegates(
     )
     tool_result = Mock()
     tool_result.as_tool_output.return_value = "fenced delegated"
+    from unittest.mock import ANY
+
+    from kazma_core.documents.service import OcrPass
+
+    # The tool OCRs within its call's time (2026-10-22): the budgeted pass.
     service = Mock()
-    service.ocr_transient = AsyncMock(return_value=document)
+    service.ocr_transient_within = AsyncMock(return_value=OcrPass(
+        document=document, read=(1,), failed=(), remaining=(), seconds=1.0))
     service.read_ir.return_value = tool_result
     monkeypatch.setattr(tools, "DocumentService", Mock(return_value=service))
     monkeypatch.setattr(tools, "_workspace_scope_error", Mock(return_value=None))
     assert await tools.ocr_document(str(path), "eng", [1]) == "fenced delegated"
-    service.ocr_transient.assert_awaited_once_with(
+    service.ocr_transient_within.assert_awaited_once_with(
         path.resolve(),
         approved_path=path.resolve(),
+        budget_seconds=ANY,
         language="eng",
         pages=(1,),
     )

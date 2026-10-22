@@ -15,6 +15,9 @@ tools:
       Read runtime-ready PDF, DOCX, XLSX, PPTX, CSV/TSV, JSON, text/Markdown/log,
       HTML, or RTF with page/sheet/slide/block selectors and deterministic continuation.
       Legacy DOC/XLS/PPT are available only when a healthy headless LibreOffice is detected.
+      Scanned pages (no text layer) in range are OCR'd as far as this call's
+      time allows (about 15-45 s a page); the reply names the pages not reached
+      and how to read them.
     category: document
     prompt_chain:
       - "اقرأ المستند المحدد واستخرج النص الكامل"
@@ -47,6 +50,9 @@ tools:
       isolated DocumentService. Live readiness verifies the Tesseract binary,
       requested eng/ara language data, Pillow, and a one-page PDF rasterizer;
       unavailable components return an actionable error instead of a false claim.
+      OCR takes about 15-45 s a page: a call reads the pages in order as far as
+      its time allows and names the rest, with the call that continues. Ask for
+      a few pages a call. For a whole long scan, use document_import instead.
     category: document
     prompt_chain:
       - "استخرج النص من المستند الممسوح ضوئياً باستخدام OCR"

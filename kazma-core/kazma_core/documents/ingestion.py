@@ -51,7 +51,7 @@ from typing import Any, BinaryIO
 
 from kazma_core.db.pg_helpers import store_errors
 
-from . import telemetry
+from . import ocr_progress, telemetry
 from .admission import IntakeAdmissionStore, current_owner, lease_lapsed, owner_state
 from .audit import DocumentAuditStore
 from .capacity import CapacityError, DocumentCapacityGuard
@@ -1167,13 +1167,13 @@ class DocumentIngestionService:
         self, job: DocumentJobRecord, context: StageContext
     ) -> StageResult:
         context.raise_if_cancelled()
-        self._parse_to_manifest(job, force_ocr=False)
+        self._parse_to_manifest(job, force_ocr=False, context=context)
         return StageResult(DocumentJobState.NORMALIZING, stage="normalizing")
 
     @policy_operation
     def _stage_ocr(self, job: DocumentJobRecord, context: StageContext) -> StageResult:
         context.raise_if_cancelled()
-        self._parse_to_manifest(job, force_ocr=True)
+        self._parse_to_manifest(job, force_ocr=True, context=context)
         return StageResult(DocumentJobState.NORMALIZING, stage="normalizing")
 
     def _stage_normalize(
@@ -1218,7 +1218,9 @@ class DocumentIngestionService:
             )
         return StageResult(DocumentJobState.READY, stage="ready")
 
-    def _parse_to_manifest(self, job: DocumentJobRecord, *, force_ocr: bool) -> None:
+    def _parse_to_manifest(
+        self, job: DocumentJobRecord, *, force_ocr: bool, context: StageContext | None = None,
+    ) -> None:
         from .extract_salvage import salvage_audit_scope
 
         record = self.repository.get_document(
@@ -1246,9 +1248,14 @@ class DocumentIngestionService:
             )
 
         with salvage_audit_scope(audit_egress):
-            self._parse_to_manifest_impl(job, force_ocr=force_ocr)
+            try:
+                self._parse_to_manifest_impl(job, force_ocr=force_ocr, context=context)
+            finally:
+                ocr_progress.clear(str(job.id))
 
-    def _parse_to_manifest_impl(self, job: DocumentJobRecord, *, force_ocr: bool) -> None:
+    def _parse_to_manifest_impl(
+        self, job: DocumentJobRecord, *, force_ocr: bool, context: StageContext | None = None,
+    ) -> None:
         version = self.repository.get_version(
             tenant_id=job.tenant_id, version_id=job.version_id
         )
@@ -1275,7 +1282,13 @@ class DocumentIngestionService:
 
         scan_if_configured(originals_path, self.config)
         with self._materialize(originals_path, version.original_filename) as staged:
-            parsed = self.service.parse_ingested_blob(staged, force_ocr=force)
+            # A long scan is OCR'd a few pages per worker run; its status says
+            # how far it has got, and a cancel stops it between runs.
+            parsed = self.service.parse_ingested_blob(
+                staged, force_ocr=force,
+                on_progress=lambda done, total: ocr_progress.record(str(job.id), done, total),
+                check_cancelled=context.raise_if_cancelled if context is not None else None,
+            )
         # Bind the parsed IR to the durable document/version identity.
         ir = DocumentIR(
             document_id=version.document_id,
@@ -1522,7 +1535,13 @@ class DocumentIngestionService:
         """The job, or None when it does not exist OR the actor cannot read
         its document -- the two are indistinguishable to the caller."""
         job = self._readable_job(tenant_id, job_id, actor_id)
-        return self._job_dict(job) if job is not None else None
+        if job is None:
+            return None
+        status = self._job_dict(job)
+        progress = ocr_progress.get(str(job.id))
+        if progress is not None:
+            status["progress"] = progress
+        return status
 
     def job_events(
         self, *, tenant_id: str, job_id: JobId | str,

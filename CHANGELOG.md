@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## Documents: a long scan is OCR'd a few pages at a time, and a stopped call stops its worker (2026-10-22)
+
+Live that day: a 54-page Arabic scan sent to the chat for OCR. On one core
+OCR is about 35 s a page with the neural engine, so ~30 minutes for the
+file, and every path tried it in one go.
+
+- **A chat attachment reads its text layer only.** The excerpt OCR'd the
+  whole scan before the model saw the message: the worker's full five
+  minutes, nothing read. It now reads the text layer (6 s for the scan) and
+  tells the model the file is scanned and which tools read it
+  (`DocumentService.text_layer_sync`).
+- **A stopped call stops its worker.** A tool call that hit its 120 s limit
+  left its OCR container running, so each smaller retry shared the CPU with
+  it and timed out too. The service runs its workers through
+  `documents/cancellation.run_cancellable`: the broker exchange closes its
+  connection (the broker removes the container) and the local sandbox kills
+  the process tree.
+- **OCR in batches.** The worker takes a page cap (`ocr.max_pages`) and names
+  the pages it deferred; `DocumentService.ocr_in_batches` reads them in
+  further runs, each sized from the seconds a page has taken. `read_document`,
+  `ocr_document` and `file_read` read as many scanned pages as fit in the
+  call's time and name the rest, with the call that continues and
+  `document_import` for the whole file. A durable job reads every page this
+  way, and `document_status` shows "OCR: 12 of 54 pages read".
+- Measured on the scan (dev install, Tesseract): the excerpt's text-layer
+  check 6 s; a 95 s tool call read pages 1-12 and named 13-54.
+
 ## Dashboard: the usage charts are the ledger's; the quality block stays put (2026-10-22)
 
 - **"Tokens Over Time" and "Cost Over Time" draw what was spent.** They drew
