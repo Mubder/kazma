@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Kazma's base prompt reaches the model again, with today's date (2026-10-23)
+
+- **The base system prompt was missing from every real turn.** The
+  supervisor added it only when a call held no system message at all, and
+  every web and chat-app turn carries system notes (working memory, the
+  language lock, the self-improvement note): the model never saw Kazma's
+  identity, product knowledge, the Kuwaiti dialect directive or the date.
+  Live, asked about a certificate on Telegram, it said "today is 20-10-2026",
+  read off an old abort note. `graph_helpers._ensure_base_prompt` now puts the
+  base prompt first on every call, marked (`[KAZMA_BASE_PROMPT]`), in place of
+  any copy a checkpoint holds; the day's date in the operator's zone and the
+  day's cultural context ride in it (`cultural_context_enrichment.
+  daily_prompt_note`, off the loop), changing once a day. They were built into
+  the agent's prompt at boot and kept the boot's date. Gate:
+  `tests/test_base_prompt_every_call.py` (the real supervisor graph with a
+  recording model; the old rule as the negative control).
+- **A file or image sent on a chat app keeps its row in the web transcript**
+  (`agent_handler/graph._convert_messages_to_dicts`): the message carries its
+  parsed excerpt in an untrusted fence, and the whole message was dropped as
+  an inject. With no user row after it, the next turn's approval card made the
+  previous answer look unfinished and that turn's answer was written over it
+  (the 17:16 answer of the live chat). The fence is taken out, the row kept.
+  Gate: `tests/test_gateway_file_message_row.py`.
+
 ## A chat app no longer goes silent behind a cancelled "typing…" (2026-10-23)
 
 - **Live, two hours of no answer on Telegram, and no error anywhere.** At the

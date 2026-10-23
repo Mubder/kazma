@@ -14,6 +14,7 @@ from kazma_core.agent.answer_quality import (
 )
 from kazma_core.agent.graph_helpers import (
     _ensure_about_user,
+    _ensure_base_prompt,
     _ensure_personality,
     _memory_explain_cv,
     _rag_top_k,
@@ -345,14 +346,20 @@ async def supervisor_node(
         logger.debug("[Supervisor] budget probe skipped", exc_info=True)
 
     # ── Ensure system prompt and personality are present ───────────
-    # The personality prompt is injected at position 0, replacing any
-    # stale personality message from a previous personality setting.
-    # The base system_prompt goes at position 0 if no system message
-    # exists yet. Personality goes right after the base system prompt.
+    # The base system prompt goes first on EVERY call, with the day's date
+    # and cultural context, replacing the copy the checkpoint holds; the
+    # personality prompt right after it. It was added only when the call
+    # held no system message -- never, on a real turn (2026-10-23).
+    try:
+        from kazma_core.cultural_context_enrichment import daily_prompt_note
+
+        _daily = await asyncio.to_thread(daily_prompt_note)
+    except RuntimeError:  # the thread pool is shut down: a call without the date beats none
+        logger.debug("[Supervisor] daily note skipped", exc_info=True)
+        _daily = ""
+    messages = _ensure_base_prompt(messages, system_prompt, daily_note=_daily)
     if personality_prompt:
         messages = _ensure_personality(messages, system_prompt, personality_prompt)
-    elif not any(m.get("role") == "system" for m in messages):
-        messages.insert(0, {"role": "system", "content": system_prompt})
 
     # ── The user's "About me" (plan C1), on every call of every turn ──
     # Read per call (one SQLite row, off the loop) so an edit in Settings

@@ -892,6 +892,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # and a 35-second Postgres outage froze the server for 15.5 s while it
     # sent the outage's own alert (stall dump 2026-10-22 23:46:16).
     "_ops_channels",
+    # The day's date for the base prompt: reads cron.timezone from settings,
+    # on every supervisor call (2026-10-23).
+    "daily_prompt_note",
     # Who a document surface acts as (DOC-A3): a settings read, and the
     # operator's ACL grants (a catalog walk and writes).
     "grant_operator_access", "operator_for",
