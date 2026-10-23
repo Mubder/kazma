@@ -9,6 +9,8 @@ description: Dated changes and links to the Kazma upgrade guides.
 | Area | Change |
 |---|---|
 | **Chat apps no longer go silent** | A rare race could leave Telegram showing "typing…" for good while every later message, on every chat app, waited without an answer or an error: the typing indicator's stop waited forever on a request whose cancel had been lost. Every such wait in Kazma is now bounded and says when it gives up. |
+| **Kazma knows who it is, and today's date** | The base system prompt (Kazma's identity, what it can do, the Kuwaiti dialect, today's date) was left out of every web and chat-app turn; it is sent on every call now, with the date in your time zone, refreshed each day. Before, Kazma guessed the date from old messages. |
+| **Files keep their place in the chat** | A file or image sent from Telegram, Discord or Slack now shows as your message when the chat is opened on the web, and the next answer no longer replaces the one before it. |
 | **No page for a short database restart** | The research/crawl monitor alerts only after 5 minutes without a check, names the cause and how long, and says when monitoring is back; a Docker or database restart of a few seconds no longer pages ([Troubleshooting](troubleshooting-and-workarounds)). |
 
 ## What's new (2026-10-22)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -117,12 +118,21 @@ def _is_internal_prompt_inject(content: str) -> bool:
     return False
 
 
+_FENCED_BLOCK = re.compile(r"<kazma:data\b[^>]*>.*?</kazma:data>", re.DOTALL | re.IGNORECASE)
+
+
 def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
     """Project graph messages to a Web UI transcript (user/assistant only).
 
     System injects (self-improvement Soul, knowledge, priority notes) stay in
     the checkpointer for the model but must not surface as "You" bubbles when
     a Telegram season is opened in the Web UI.
+
+    A user message keeps its row with its fenced blocks taken out: a file or
+    an image sent on a chat app carries its parsed excerpt in a fence, and the
+    whole message was dropped as an inject (2026-10-23). With no user row
+    between them, the next turn's approval card made the previous answer look
+    unfinished, and that turn's answer was written over it.
     """
     dicts = []
     for m in langgraph_messages:
@@ -151,6 +161,8 @@ def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
                 for b in content
             )
         text = str(content or "").strip()
+        if role == "user" and "<kazma:data" in text:
+            text = _FENCED_BLOCK.sub("", text).strip()
         if not text:
             continue
         # Never put system/tool injects in the human-readable transcript

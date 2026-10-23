@@ -6941,6 +6941,17 @@ clarify-only lock, a notice to repeat verbatim).
 - **Prompt cache:** every turn note except the environment block is dynamic
   (`prompt_cache.is_dynamic_system`), so the cacheable prefix holds only what
   stays the same from turn to turn.
+- **The base system prompt is sent on EVERY call, first** (2026-10-23,
+  `graph_helpers._ensure_base_prompt`, marked `[KAZMA_BASE_PROMPT]`, in place
+  of any copy a checkpoint holds), with the day's date in the operator's zone
+  and the day's cultural context (`cultural_context_enrichment.
+  daily_prompt_note`, a loop-stall helper; it changes once a day). The
+  supervisor added it only when a call held no system message, so with any
+  turn note -- every web and chat-app turn -- the model ran without Kazma's
+  identity, product knowledge, dialect directive or date, and dated things
+  from old notes. Never gate the base prompt on "no system message", and
+  never build a date into the boot-time prompt. Gate:
+  `tests/test_base_prompt_every_call.py` (the old rule as control).
 - Gates: `tests/test_turn_notes.py`; `tests/e2e/test_turn_notes_route.py`
   (four turns through the real route, a workspace switch, IDE context; CI
   lifecycle job).

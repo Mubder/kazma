@@ -323,14 +323,9 @@ class KazmaAgent:
         except Exception:
             logger.debug("[agent_runner] product knowledge injection skipped", exc_info=True)
 
-        # Inject cultural context enrichment
-        try:
-            from kazma_core.cultural_context_enrichment import get_cultural_prompt_suffix
-            cultural_suffix = get_cultural_prompt_suffix()
-            if cultural_suffix and cultural_suffix not in self.system_prompt:
-                self.system_prompt = self.system_prompt.rstrip() + cultural_suffix
-        except Exception:
-            pass
+        # The day's date and cultural context are added on every model call
+        # (graph_helpers.ensure_base_prompt, cultural_context_enrichment.
+        # daily_prompt_note): built in here at boot, they kept the boot's date.
 
         # ── Environment awareness (IDE/workspace/repo) ──────────────
         # Tell the brain it has an IDE workspace + tools + GitHub. Re-read

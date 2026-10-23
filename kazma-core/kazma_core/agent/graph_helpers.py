@@ -420,6 +420,47 @@ def _format_retrieved_memories(memories: list[dict[str, Any]]) -> str:
     return body
 
 
+#: Marks the base system prompt, so each call replaces the copy a checkpoint
+#: holds with today's.
+_BASE_MARKER = "[KAZMA_BASE_PROMPT]"
+
+
+def _ensure_base_prompt(
+    messages: list[dict[str, Any]],
+    base_system_prompt: str,
+    *,
+    daily_note: str = "",
+) -> list[dict[str, Any]]:
+    """Put this call's base system prompt first, in place of any earlier copy.
+
+    The supervisor added it only when the call held NO system message, and
+    every real turn carries system notes (working memory, the language lock,
+    the Soul): from the web and every chat app the model never saw Kazma's
+    identity, product knowledge, dialect directive or the date (2026-10-23,
+    "today is 20-10-2026" read off an old abort note). *daily_note* is the
+    day's date and cultural context (``daily_prompt_note``), changing once a
+    day so the cacheable prefix holds for the rest of it.
+    """
+    msgs = [_normalize_msg(m) for m in messages]
+    head = (base_system_prompt or "").strip()[:200]
+
+    def _is_base(m: dict[str, Any]) -> bool:
+        if m.get("role") != "system":
+            return False
+        text = str(m.get("content") or "")
+        # A copy an older build left unmarked is the same prompt's start.
+        return _BASE_MARKER in text or (bool(head) and text.strip().startswith(head))
+
+    msgs = [m for m in msgs if not _is_base(m)]
+    if not head and not daily_note:
+        return msgs
+    body = f"{_BASE_MARKER}\n{(base_system_prompt or '').strip()}"
+    if daily_note:
+        body += f"\n\n{daily_note.strip()}"
+    msgs.insert(0, {"role": "system", "content": body})
+    return msgs
+
+
 def _ensure_personality(
     messages: list[dict[str, Any]],
     base_system_prompt: str,

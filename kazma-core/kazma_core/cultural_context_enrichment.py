@@ -11,13 +11,46 @@ code) to the running agent's system prompt.
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 
-__all__ = ["get_cultural_prompt_suffix"]
+__all__ = ["daily_prompt_note"]
 
 logger = logging.getLogger(__name__)
 
+#: (operator date, zone name) -> the note; one entry, rebuilt when the day turns.
+_daily_cache: dict[tuple[date, str], str] = {}
 
-def get_cultural_prompt_suffix() -> str:
+
+def daily_prompt_note() -> str:
+    """Today's date in the operator's zone, then the cultural context of the day.
+
+    Read by the supervisor on every call (blocking: a settings read for the
+    zone; async callers use ``asyncio.to_thread``) and placed in the base
+    system prompt, so it changes once a day. It was built into the agent's
+    prompt at boot -- frozen at the boot's date -- and the base prompt did not
+    reach the model on a turn with system notes at all: on 2026-10-23 Kazma
+    told the owner that "today" was 20-10-2026, the date of an old abort note.
+    """
+    # Falls back to UTC itself on an unreadable store or an unknown name.
+    from kazma_core.cron.scheduler import resolve_cron_zone
+
+    zone, zone_name = resolve_cron_zone()
+    today = datetime.now(zone).date()
+    key = (today, zone_name)
+    cached = _daily_cache.get(key)
+    if cached is not None:
+        return cached
+    note = (
+        f"TODAY: {today.strftime('%A')} {today.isoformat()} ({zone_name}). "
+        "For the time of day, call current_datetime."
+        + _cultural_prompt_suffix(today)
+    )
+    _daily_cache.clear()
+    _daily_cache[key] = note
+    return note
+
+
+def _cultural_prompt_suffix(today: date | None = None) -> str:
     """Build a cultural context suffix for the system prompt.
 
     Returns an empty string if no cultural events are active.
@@ -30,7 +63,7 @@ def get_cultural_prompt_suffix() -> str:
             _hijri_month_name,
         )
 
-        ctx = CulturalContext()
+        ctx = CulturalContext(now=today)
         state = ctx.state
         modifiers = ctx.get_conversation_modifiers()
 
