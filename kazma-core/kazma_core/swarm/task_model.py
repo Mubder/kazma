@@ -26,7 +26,6 @@ callers build the messages with ``fence_untrusted``.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,7 +74,12 @@ async def call_task_model(
 
     call = resilient_chat(client, messages=messages, thread_id=task_id, label=label,
                           max_tokens=max_tokens)
-    response = await (asyncio.wait_for(call, timeout=deadline) if deadline else call)
+    if deadline:
+        from kazma_core.bounded_cancel import wait_for_bounded
+
+        response = await wait_for_bounded(call, deadline, what=f"task model call for {task_id}")
+    else:
+        response = await call
     text = str(getattr(response, "content", "") or "").strip()
     if not text:
         raise TaskModelUnavailableError("the model answered nothing")

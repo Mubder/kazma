@@ -80,11 +80,9 @@ async def stop_mentions_loop() -> None:
     global _loop_task, _identity
     _identity = None
     if _loop_task is not None:
-        _loop_task.cancel()
-        try:
-            await _loop_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+        from kazma_core.bounded_cancel import cancel_and_wait
+
+        await cancel_and_wait(_loop_task, what="X mentions poller")
         _loop_task = None
         logger.info("[x-mentions] poller stopped")
 

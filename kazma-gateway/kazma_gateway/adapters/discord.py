@@ -228,11 +228,9 @@ class DiscordAdapter(BaseAdapter):
 
         finally:
             if self._heartbeat_task:
-                self._heartbeat_task.cancel()
-                try:
-                    await self._heartbeat_task
-                except asyncio.CancelledError:
-                    pass
+                from kazma_core.bounded_cancel import cancel_and_wait
+
+                await cancel_and_wait(self._heartbeat_task, what="Discord heartbeat")
             if self._http:
                 await self._http.aclose()
                 self._http = None

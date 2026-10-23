@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## A chat app no longer goes silent behind a cancelled "typing…" (2026-10-23)
+
+- **Live, two hours of no answer on Telegram, and no error anywhere.** At the
+  end of a turn the typing indicator's `stop()` cancelled its refresh loop
+  while a `sendChatAction` request was in flight and then awaited it while
+  holding the indicator's lock. The cancel was absorbed inside anyio's socket
+  read (measured on the install's own Python, 3.11 with the selector loop: 3
+  cancels in 4,000 of a request; the task stays in the read with
+  `cancelling() == 1`), and the loop, which catches errors and runs again,
+  never ended. Every later message on every chat app then waited on that lock
+  before its turn began: "typing…" for hours, nothing logged, readiness
+  green.
+- **`kazma_core/bounded_cancel.py`**: `cancel_and_wait` (cancel, deliver the
+  cancel again every 0.5 s, give up after a bound with a WARNING naming the
+  task), `wait_then_cancel`, and `wait_for_bounded` (on 3.11
+  `asyncio.wait_for(task, …)` cancels on timeout and then waits without a
+  bound). The typing indicator waits for its loop outside its lock, bounded,
+  and the loop stops at its next pass on a stop flag even when its cancel was
+  absorbed. 22 other cancel-and-wait sites go through the helpers: the LLM
+  event pump, a superseded web or voice turn, the adapter listener and
+  message consumer, the Discord heartbeat, the websocket shutdown watcher,
+  the memory queue, the swarm task model's deadline, and the background
+  loops' stops. Gate: `tests/test_bounded_cancel.py` (no `X.cancel()` then
+  `await X`, no `asyncio.wait_for(<task>)` in product code; the old
+  indicator and the old shapes as negative controls).
+
 ## A database restart no longer pages "monitoring unavailable" or freezes the server (2026-10-23)
 
 - **The research/crawl monitor pages only an outage that lasts**

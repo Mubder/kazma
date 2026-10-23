@@ -2346,13 +2346,9 @@ class KazmaAppBuilder:
             documents = getattr(self, "_documents", None)
             maintenance = getattr(self, "_documents_maintenance", None)
             if maintenance is not None:
-                try:
-                    maintenance.cancel()
-                    await maintenance
-                except asyncio.CancelledError:
-                    pass
-                except Exception:  # noqa: BLE001
-                    pass
+                from kazma_core.bounded_cancel import cancel_and_wait
+
+                await cancel_and_wait(maintenance, what="document maintenance loop")
                 self._documents_maintenance = None
             if documents is not None:
                 # Bounded. The comment above says "never blocks shutdown" and

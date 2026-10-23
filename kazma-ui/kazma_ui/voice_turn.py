@@ -17,7 +17,6 @@ drive a platform thread through ``/ws/voice``.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import inspect
 import json
 import logging
@@ -156,15 +155,16 @@ async def run_voice_user_turn(
         stale = reap_stale_turn(thread_id)
         if stale is not None and stale is detached:
             logger.info("[voice] reaping stale detached turn thread=%s", thread_id[:12])
-            stale.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await stale
+            from kazma_core.bounded_cancel import cancel_and_wait
+
+            await cancel_and_wait(stale, what=f"stale voice turn of {thread_id[:12]}")
     if get_active_turn(thread_id) is not None and not get_active_turn(thread_id).done():
         logger.info("[voice] superseding in-flight turn thread=%s", thread_id[:12])
         old = cancel_turn(thread_id)
         if old is not None:
-            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError, Exception):
-                await asyncio.wait_for(old, timeout=15.0)
+            from kazma_core.bounded_cancel import cancel_and_wait
+
+            await cancel_and_wait(old, what=f"superseded voice turn of {thread_id[:12]}", timeout=15.0)
 
     graph_config = {
         "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},

@@ -63,11 +63,9 @@ async def start_scheduled_x_loop(poll_interval: float = _POLL_INTERVAL) -> None:
 async def stop_scheduled_x_loop() -> None:
     global _loop_task
     if _loop_task is not None:
-        _loop_task.cancel()
-        try:
-            await _loop_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+        from kazma_core.bounded_cancel import cancel_and_wait
+
+        await cancel_and_wait(_loop_task, what="X scheduled-post loop")
         _loop_task = None
         logger.info("[x-schedule] fire loop stopped")
 

@@ -449,8 +449,6 @@ async def stop_health_watchdog() -> None:
     task = _health_task
     _health_task = None
     if task is not None and not task.done():
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+        from kazma_core.bounded_cancel import cancel_and_wait
+
+        await cancel_and_wait(task, what="alert health loop")

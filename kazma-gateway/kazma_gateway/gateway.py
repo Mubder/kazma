@@ -54,6 +54,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: How long shutdown waits for in-flight message handlers before cancelling them.
+_HANDLER_DRAIN_S = 30.0
+
 __all__ = [
     "Attachment",
     "BaseAdapter",
@@ -405,14 +408,9 @@ class BaseAdapter(ABC):
     async def stop(self) -> None:
         """Wait for the adapter task to finish after shutdown signal."""
         if self._task and not self._task.done():
-            try:
-                await asyncio.wait_for(self._task, timeout=5.0)
-            except (TimeoutError, asyncio.CancelledError):
-                self._task.cancel()
-                try:
-                    await self._task
-                except asyncio.CancelledError:
-                    pass
+            from kazma_core.bounded_cancel import wait_then_cancel
+
+            await wait_then_cancel(self._task, what=f"{self.name} adapter listener", wait=5.0)
         self._running = False
         logger.info("[%s] Adapter stopped", self.name)
 
@@ -788,16 +786,30 @@ class GatewayManager:
 
         # 4. Stop the consumer
         if self._consumer_task and not self._consumer_task.done():
-            self._consumer_task.cancel()
-            try:
-                await self._consumer_task
-            except asyncio.CancelledError:
-                pass
+            from kazma_core.bounded_cancel import cancel_and_wait
+
+            await cancel_and_wait(self._consumer_task, what="gateway message consumer")
 
         # 5. Drain in-flight handler tasks (turns still being processed when
-        # shutdown began) so they finish rather than being abandoned.
+        # shutdown began) so they finish rather than being abandoned -- within
+        # a bound: a handler stuck for good (2026-10-23, a typing indicator's
+        # absorbed cancel) held this wait until the guard killed the server,
+        # and the rest of the shutdown never ran.
         if self._handler_tasks:
-            await asyncio.gather(*list(self._handler_tasks), return_exceptions=True)
+            from kazma_core.bounded_cancel import cancel_and_wait
+
+            pending = list(self._handler_tasks)
+            _done, still = await asyncio.wait(pending, timeout=_HANDLER_DRAIN_S)
+            if still:
+                logger.warning(
+                    "[Gateway] %d message handler(s) still running %.0f s into shutdown; cancelling",
+                    len(still), _HANDLER_DRAIN_S,
+                )
+            for task in still:
+                await cancel_and_wait(task, what=f"message handler {task.get_name()}")
+            for task in _done:
+                if not task.cancelled() and task.exception() is not None:
+                    logger.debug("[Gateway] handler ended with %r", task.exception())
             self._handler_tasks.clear()
 
         self._started = False

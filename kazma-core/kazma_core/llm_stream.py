@@ -25,7 +25,6 @@ import inspect
 import logging
 import os
 from collections.abc import AsyncIterator
-from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -308,6 +307,6 @@ async def bridged_event_stream(
     finally:
         unregister_delta_queue(thread_id)
         if not pump.done():
-            pump.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await pump
+            from kazma_core.bounded_cancel import cancel_and_wait
+
+            await cancel_and_wait(pump, what=f"event pump of {thread_id}")

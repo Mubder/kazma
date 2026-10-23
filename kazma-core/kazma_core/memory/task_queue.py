@@ -223,18 +223,13 @@ class _MemoryWorker:
         with self._lock:
             self._running = False
             self._wake.set()
+        from kazma_core.bounded_cancel import cancel_and_wait, wait_then_cancel
+
         if self._renewal_task is not None:
-            self._renewal_task.cancel()
-            try:
-                await self._renewal_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            await cancel_and_wait(self._renewal_task, what="memory queue lease renewal")
             self._renewal_task = None
         if self._task is not None:
-            try:
-                await asyncio.wait_for(self._task, timeout=5.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                self._task.cancel()
+            await wait_then_cancel(self._task, what="memory queue worker", wait=5.0)
             self._task = None
         # Drain handler tasks that were dispatched but not yet finished, so a
         # handler mid-execution (e.g. an LLM belief extraction holding a SQLite
