@@ -223,11 +223,9 @@ async def stop_turn_liveness_watchdog() -> None:
     global _task
     if _task is None:
         return
-    _task.cancel()
-    try:
-        await _task
-    except (asyncio.CancelledError, Exception):
-        pass
+    from kazma_core.bounded_cancel import cancel_and_wait
+
+    await cancel_and_wait(_task, what="turn liveness watchdog")
     _task = None
     _idle_since.clear()
     _reported.clear()

@@ -46,7 +46,6 @@ code to one another).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 import uuid
@@ -795,9 +794,9 @@ def create_sse_chat_router(
                     "[SSE] Reaping stale detached turn for thread=%s",
                     thread_id[:12],
                 )
-                _stale.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await _stale
+                from kazma_core.bounded_cancel import cancel_and_wait
+
+                await cancel_and_wait(_stale, what=f"stale turn of {thread_id[:12]}")
         if is_turn_running(thread_id):
             logger.info(
                 "[SSE] Superseding in-flight turn for thread=%s (new user message)",
@@ -805,10 +804,9 @@ def create_sse_chat_router(
             )
             _old = cancel_turn(thread_id)
             if _old is not None:
-                with contextlib.suppress(
-                    asyncio.CancelledError, asyncio.TimeoutError, Exception
-                ):
-                    await asyncio.wait_for(_old, timeout=15.0)
+                from kazma_core.bounded_cancel import cancel_and_wait
+
+                await cancel_and_wait(_old, what=f"superseded turn of {thread_id[:12]}", timeout=15.0)
 
         # ── Persist UI projection (display only) ───────────────────
         from datetime import UTC

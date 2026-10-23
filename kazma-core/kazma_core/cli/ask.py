@@ -21,9 +21,10 @@ import logging
 import sys
 import uuid
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, TextIO
+
+from kazma_core.bounded_cancel import cancel_and_wait, wait_then_cancel
 
 logger = logging.getLogger(__name__)
 
@@ -668,10 +669,7 @@ async def _invoke_supervisor(
                 token_q.put_nowait(_TOKEN_SENTINEL)
             except Exception:
                 pass
-            try:
-                await asyncio.wait_for(drain_task, timeout=2.0)
-            except Exception:
-                drain_task.cancel()
+            await wait_then_cancel(drain_task, what="ask token drain", wait=2.0)
             unregister_delta_queue(thread_id)
     return last_text
 
@@ -965,9 +963,7 @@ async def run_acp_stdio(
             rpc.reply(resp)
     finally:
         if not reader.done():
-            reader.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await reader
+            await cancel_and_wait(reader, what="ACP stdin reader")
     return 0
 
 
@@ -1092,9 +1088,7 @@ async def _acp_run_prompt(
         {ask_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED,
     )
     for t in pending:
-        t.cancel()
-        with suppress(asyncio.CancelledError, Exception):
-            await t
+        await cancel_and_wait(t, what="ACP prompt task")
     if cancel_task in done and not ask_task.done():
         rpc.fail_pending()
         rpc.reply({

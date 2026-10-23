@@ -4,6 +4,13 @@ sidebar_label: Release notes
 description: Dated changes and links to the Kazma upgrade guides.
 ---
 
+## What's new (2026-10-23)
+
+| Area | Change |
+|---|---|
+| **Chat apps no longer go silent** | A rare race could leave Telegram showing "typing…" for good while every later message, on every chat app, waited without an answer or an error: the typing indicator's stop waited forever on a request whose cancel had been lost. Every such wait in Kazma is now bounded and says when it gives up. |
+| **No page for a short database restart** | The research/crawl monitor alerts only after 5 minutes without a check, names the cause and how long, and says when monitoring is back; a Docker or database restart of a few seconds no longer pages ([Troubleshooting](troubleshooting-and-workarounds)). |
+
 ## What's new (2026-10-22)
 
 | Area | Change |

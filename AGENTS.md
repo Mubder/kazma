@@ -4913,6 +4913,18 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   `loop.create_task` in product code (including `ops_alerts._dispatch`)
   is the same class of bug — prefer `spawn_background`.
 - CI: `test_no_blocking_db_driver_in_async`, `test_no_bare_create_task`.
+- **A cancelled task is waited for with a bound** (`kazma_core/bounded_cancel.py`,
+  2026-10-23). A cancel that lands while anyio reads an httpx socket is
+  sometimes absorbed (3.11 + selector loop, 3 in 4,000), and a loop that
+  catches errors then runs on: the typing indicator's `stop()` awaited one
+  under its lock, and every later message on every chat app waited on it
+  before its turn began -- two hours of silence on Telegram, no error. Use
+  `cancel_and_wait` / `wait_then_cancel` / `wait_for_bounded`; never
+  `X.cancel()` then `await X`, nor `asyncio.wait_for(<task>)` (on timeout it
+  cancels and waits unbounded), and never await a task's end while holding a
+  lock others need. A loop that must stop also checks a stop flag. Gate:
+  `tests/test_bounded_cancel.py` (the old shapes and the old indicator as
+  negative controls).
 - **The LLM ledger row is written off the loop** (2026-10-15). Async code
   awaits `observability.llm_ledger.arecord_llm_call`: the SQLite insert and
   the ledger's switch (a settings read) run in a thread, the caller waits

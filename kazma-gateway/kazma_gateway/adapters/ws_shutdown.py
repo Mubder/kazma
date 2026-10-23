@@ -54,6 +54,6 @@ async def closes_on_shutdown(ws: Any, shutdown_event: asyncio.Event) -> AsyncIte
         if not shutdown_event.is_set():
             raise
     finally:
-        watcher.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await watcher
+        from kazma_core.bounded_cancel import cancel_and_wait
+
+        await cancel_and_wait(watcher, what="websocket shutdown watcher")

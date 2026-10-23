@@ -405,9 +405,7 @@ async def stop_hitl_timeout_watchdog() -> None:
     task = _watchdog_task
     _watchdog_task = None
     if task is not None and not task.done():
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+        from kazma_core.bounded_cancel import cancel_and_wait
+
+        await cancel_and_wait(task, what="approval timeout watchdog")
     _first_seen.clear()
