@@ -5258,6 +5258,14 @@ budgeted request (`XClient.get_public_metrics`); a post X did not return is
 (`text_length.validate_text`). Live 2026-10-20 the agent answered "likes
 unknown" from the posts' public pages, and asked to approve a `python_exec`
 that printed `len(draft)`. Gate: `tests/test_x_post_metrics_and_draft_length.py`.
+**A post's video is downloaded through the X API** (2026-10-24):
+`x_download_media(post)` reads its media (`XClient.get_media`, one budgeted
+read), fetches each file with `web_acquire.http.fetch_public` scoped to X's
+media hosts (`_MEDIA_HOSTS`), a video's best MP4 under 50 MB (send_file's
+limit), and saves into `<workspace>/downloads/x` (gitignored) for `send_file`.
+Every failure is a `KnownEffectError`. Live, the agent searched the owner's
+folders through six approval cards for a file nobody had downloaded. Gate:
+`tests/test_x_download_media.py`.
 
 **H. The running turn's tool outputs are not cut to fit** (2026-10-18,
 `summarizer.prune_tool_outputs`). The supervisor prunes tool outputs when the

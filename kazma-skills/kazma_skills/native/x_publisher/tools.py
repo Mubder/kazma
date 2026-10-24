@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 from kazma_core.x_api.booking import delete_x_post, publish_x_post
 from kazma_core.x_api.config import get_x_config
@@ -333,3 +334,155 @@ async def x_cancel_scheduled_post(post_id: int) -> str:
     except Exception as exc:
         logger.exception("x_cancel_scheduled_post failed")
         return _json({"ok": False, "cancelled": False, "error": str(exc)})
+
+
+# ── media download ────────────────────────────────────────────────────────
+
+#: The only hosts X serves post media from; a variant naming any other host
+#: is not fetched.
+_MEDIA_HOSTS = frozenset({"video.twimg.com", "pbs.twimg.com"})
+#: What send_file sends (a chat app's upload limit), so a download it could
+#: not send is never kept.
+_MAX_MEDIA_BYTES = 50 * 1024 * 1024
+_POST_URL = re.compile(
+    r"(?:x|twitter)\.com/(?:i/web/|i/status/|[A-Za-z0-9_]{1,15}/)status(?:es)?/(\d{1,25})",
+    re.IGNORECASE,
+)
+
+
+def _post_id(post: str) -> str:
+    """The post id in an x.com / twitter.com link, or a bare id; else ''."""
+    text = str(post or "").strip()
+    if text.isdigit() and len(text) <= 25:
+        return text
+    match = _POST_URL.search(text)
+    return match.group(1) if match else ""
+
+
+def _media_files(media: dict) -> list[tuple[str, str]]:
+    """``(url, extension)`` candidates for one media item, best first.
+
+    A video or GIF: its MP4 variants by bit rate, highest first (the caller
+    takes the first that fits). A photo: its full-size file."""
+    from urllib.parse import urlsplit
+
+    kind = str(media.get("type") or "")
+    found: list[tuple[int, str, str]] = []
+    if kind == "photo":
+        url = str(media.get("url") or "")
+        ext = urlsplit(url).path.rsplit(".", 1)[-1].lower() or "jpg"
+        found.append((0, f"{url}?name=orig" if url else "", ext))
+    else:
+        for variant in media.get("variants") or []:
+            if not isinstance(variant, dict) or variant.get("content_type") != "video/mp4":
+                continue
+            found.append((int(variant.get("bit_rate") or 0), str(variant.get("url") or ""), "mp4"))
+        found.sort(key=lambda f: f[0], reverse=True)
+    return [
+        (url, ext) for _, url, ext in found
+        if url.startswith("https://") and (urlsplit(url).hostname or "").lower() in _MEDIA_HOSTS
+    ]
+
+
+async def _download_one(candidates: list[tuple[str, str]]) -> tuple[bytes, str] | str:
+    """The first candidate that downloads whole under the cap, or why none did."""
+    import httpx
+
+    from kazma_core.web_acquire.http import fetch_public
+    from kazma_core.web_acquire.result import AcquisitionError
+
+    def _on_x(url: str) -> bool:
+        from urllib.parse import urlsplit
+
+        return (urlsplit(url).hostname or "").lower() in _MEDIA_HOSTS
+
+    reason = "X listed no file for it"
+    for url, ext in candidates:
+        try:
+            got = await fetch_public(url, max_bytes=_MAX_MEDIA_BYTES, timeout=120.0, scope=_on_x)
+        except (httpx.HTTPError, AcquisitionError, TimeoutError, OSError, ValueError) as exc:
+            # SSRFError is a ValueError. The next, smaller file may still come.
+            reason = f"the download failed ({type(exc).__name__})"
+            continue
+        if got.response.status_code != 200:
+            reason = f"X's media server answered HTTP {got.response.status_code}"
+            continue
+        if got.truncated:
+            reason = "every version of it is larger than 50 MB, the most a chat can be sent"
+            continue
+        return got.response.content, ext
+    return reason
+
+
+def _save_media(tweet_id: str, files: list[tuple[bytes, str]]) -> list[dict]:
+    """Write each file to ``<workspace>/downloads/x`` (blocking: a thread)."""
+    from kazma_core.workspace.binding import resolve_active_root
+
+    folder = resolve_active_root() / "downloads" / "x"
+    folder.mkdir(parents=True, exist_ok=True)
+    saved: list[dict] = []
+    for n, (data, ext) in enumerate(files, start=1):
+        suffix = f"-{n}" if len(files) > 1 else ""
+        path = folder / f"{tweet_id}{suffix}.{ext}"
+        partial = path.with_name(path.name + ".partial")
+        partial.write_bytes(data)
+        partial.replace(path)
+        saved.append({"path": str(path), "size_kb": max(1, len(data) // 1024)})
+    return saved
+
+
+async def x_download_media(post: str) -> str:
+    """Download the video, GIF or photos attached to a public X post.
+
+    Reads the post's media through the official X API (one read from the X
+    read budget) and saves each file in the workspace's ``downloads/x``
+    folder; send it to the user with ``send_file(file_path=<path>)``. A video
+    is saved at the highest quality under 50 MB, the most a chat can be sent.
+
+    Args:
+        post: The post's link (x.com or twitter.com) or its id.
+    """
+    from kazma_core.agent.tool_refusal import KnownEffectError
+    from kazma_core.x_api.client import XApiError, XClient
+
+    tweet_id = _post_id(post)
+    if not tweet_id:
+        raise RefusedBeforeEffect(_json({
+            "ok": False, "error": "Give the post's x.com link or its id.",
+        }))
+    cfg = await asyncio.to_thread(get_x_config)
+    if not cfg.credentials.complete():
+        raise RefusedBeforeEffect(_json({
+            "ok": False,
+            "error": "X is not configured: the operator saves the X keys in Settings → X.",
+        }))
+    try:
+        media = await XClient(cfg.credentials).get_media(tweet_id)
+    except XApiError as exc:
+        # A read: nothing was saved, and asking again repeats nothing anyone sees.
+        raise KnownEffectError(_json({"ok": False, "saved": [], "error": f"X did not return the post: {exc}"})) from exc
+    if not media:
+        raise KnownEffectError(_json({
+            "ok": False, "saved": [],
+            "error": "X returned no photo, video or GIF for this post (none attached, or not visible to Kazma's X app).",
+        }))
+    files: list[tuple[bytes, str]] = []
+    problems: list[str] = []
+    for item in media:
+        got = await _download_one(_media_files(item))
+        if isinstance(got, str):
+            problems.append(f"{item.get('type') or 'media'}: {got}")
+        else:
+            files.append(got)
+    saved = await asyncio.to_thread(_save_media, tweet_id, files) if files else []
+    if not saved:
+        raise KnownEffectError(_json({"ok": False, "saved": [], "error": "; ".join(problems)}))
+    answer: dict = {
+        "ok": True,
+        "post_id": tweet_id,
+        "saved": saved,
+        "next": "Send each file to the user with send_file(file_path=<path>).",
+    }
+    if problems:
+        answer["not_saved"] = problems
+    return _json(answer)
