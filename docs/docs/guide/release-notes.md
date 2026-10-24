@@ -4,6 +4,12 @@ sidebar_label: Release notes
 description: Dated changes and links to the Kazma upgrade guides.
 ---
 
+## What's new (2026-10-24)
+
+| Area | Change |
+|---|---|
+| **X videos, downloaded and sent** | Ask Kazma to download a video, GIF or photos from a public X post and it fetches them through the official X API (one read from the X read budget) and sends them in the chat, a video at the best quality under 50 MB. Before, it said it could not and went looking through your folders. See [X Publisher](x-publisher). |
+
 ## What's new (2026-10-23)
 
 | Area | Change |

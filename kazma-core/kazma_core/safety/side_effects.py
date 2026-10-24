@@ -164,6 +164,8 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "x_delete_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound",
                       ("tweet_id",)),
     "x_status": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    # Reads a post's media from X and saves it in the workspace (downloads/x).
+    "x_download_media": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
     # Scheduling a post is an outbound public write (approve once at booking);
     # cancelling it is the matching outbound mutation. Both ALWAYS-HITL.
     "x_schedule_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound",

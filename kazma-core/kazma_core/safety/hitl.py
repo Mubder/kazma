@@ -190,6 +190,7 @@ TOOL_TIERS: dict[str, str] = {
     "x_cancel_scheduled_post": "danger",
     "x_list_scheduled": "read",
     "x_status": "read",
+    "x_download_media": "write",   # one X read + files saved in the workspace
     # ── Audit F-04: tiers for every remaining registered tool ─────────────
     # `requires_approval` now default-denies anything it cannot classify, so
     # a tool missing from this map is gated rather than silently exempt. That

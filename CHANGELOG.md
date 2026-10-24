@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Kazma downloads an X post's video and sends it (2026-10-24)
+
+- **"Download this X video and send it here" works.** Live on Telegram the
+  agent read the post's page (text only, no media file), found the shell off,
+  `python_exec` without network and the browser refused, and said it could
+  not -- then searched the owner's Downloads and Desktop folders through six
+  approval cards for a file nobody had made. The new tool
+  `x_download_media(post)` reads the post's media through the official X API
+  (`XClient.get_media`: one read from the X read budget), downloads the video
+  at the highest quality under 50 MB (the most a chat can be sent; a larger
+  version falls to the next) or each photo, from X's media hosts only
+  (`video.twimg.com`, `pbs.twimg.com`, through the public-fetch egress
+  checks), saves them in the workspace's `downloads/x` folder and names the
+  paths for `send_file`. Kazma's guide tells the model to use it and never to
+  search the user's folders for a file it was asked to download. Gate:
+  `tests/test_x_download_media.py`.
+
 ## Kazma's base prompt reaches the model again, with today's date (2026-10-23)
 
 - **The base system prompt was missing from every real turn.** The

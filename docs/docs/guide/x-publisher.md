@@ -122,6 +122,7 @@ Media, polls, quote posts and campaign analytics remain disabled pending individ
 | `x_delete_post` | **always** | `tweet_id` from a previous post. |
 | `x_schedule_post` | **always** | `text` + `when` (`5m`, `1h`, or an ISO time such as `2026-12-01T09:00` in the cron time zone) + optional `reply_to_id`. One post, one time: a recurring time is refused. Approve once at booking. The reply gives the stored time and state, and says `ok` only when the post is scheduled. |
 | `x_list_scheduled` | no | List scheduled X posts and their status. |
+| `x_download_media` | no | `post` (an x.com / twitter.com link, or the post id). Downloads the video, GIF or photos attached to a public post through the official X API (one read from the X read budget) into the workspace's `downloads/x` folder -- a video at the highest quality under 50 MB, the most a chat can be sent -- and answers with the paths for `send_file`. Only X's media hosts are fetched. |
 | `x_cancel_scheduled_post` | **always** | Cancel a scheduled post before it fires (releases reserved quota). |
 
 These tools are the **chat** path. X Studio posts through `publish_x_post` / `book_x_post` / `delete_x_post` directly. Swarm workers stay capped by the commitment swarm-scope (outbound CRITICAL denied by default). A `proposal_id` is required on chat `x_post` / `x_schedule_post` — the commitment resolver rewrites `text` to the stored draft.

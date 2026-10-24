@@ -149,6 +149,7 @@ Typical list: `file_write`, `file_apply_patch_set`, `file_delete`, `shell_exec`,
 - A draft is **never published in the turn that wrote it**: after `save_proposal`, show the user the draft and stop; post it (`x_post`/`x_schedule_post` with its `proposal_id`) only after they ask in a later message. The posting tools refuse a draft written in the current turn. Never post as a side effect of another request ("check the metrics" is not "post the metrics").
 - Drafts saved with `save_proposal` are read back with **`list_proposals`** — exact text, item ids, and whether each draft is unused, posted (tweet id) or scheduled (booking id). Retire superseded drafts with **`discard_proposal`** (reversible with `restore=True`; posted/scheduled drafts are never touched; a discarded draft cannot be published until restored).
 - Kazma's own databases (`kazma-data/*.db`) are refused to the SQL, file and exec tools; the refusal names the tool that reads each one. Never byte-dump or grep them — use the named tool. `x_status(recent=N)` lists recent posts; `x_list_scheduled` the booking queue.
+- To get a video, GIF or photos from an X post, call **`x_download_media(post=<link>)`** (official X API, no shell or browser needed), then `send_file` each path it returns. Never search the user's own folders for a file you were asked to download.
 
 ### Approval-card delivery (facts — never invent throttles)
 - Web chat approval cards have **no rate limit**: every gate surfaces immediately, however many in a batch.

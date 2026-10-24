@@ -418,6 +418,24 @@ class XClient:
             if isinstance(post, dict) and post.get("id")
         }
 
+    async def get_media(self, tweet_id: str) -> list[dict[str, Any]]:
+        """``GET /2/tweets/:id`` with its media expanded -- each attached
+        photo, video or GIF (``type``, ``url``, ``variants``, ``duration_ms``),
+        ONE read. Empty when the post has no media or X does not return it.
+        A video's ``variants`` are the files X serves it as (``content_type``,
+        ``bit_rate``, ``url`` on video.twimg.com); a photo's file is ``url``.
+        Live 2026-10-24: asked to download a post's video, the agent had only
+        the post's page, which names no media file."""
+        tid = str(tweet_id).strip()
+        data = await self._request(
+            "GET",
+            f"/2/tweets/{tid}?expansions=attachments.media_keys"
+            "&media.fields=type,url,variants,duration_ms,preview_image_url",
+            audit_action="read_media", audit_tweet_id=tid,
+        )
+        media = (data.get("includes") or {}).get("media") or []
+        return [m for m in media if isinstance(m, dict)]
+
     async def _read_context(self, path: str, *, action: str, tweet_id: str = "") -> dict[str, Any]:
         """Bounded read-only negotiation for legacy/current long-form field names."""
         try:

@@ -3,8 +3,9 @@ version: 0.1.0
 description: >
   Post and delete tweets through the official X API v2 using OAuth 1.0a user
   context (the four keys from developer.x.com). Never paste keys in chat —
-  store them in Settings → X. HITL is mandatory even in YOLO. No scrape,
-  like, follow, or DM. Bearer tokens cannot post.
+  store them in Settings → X. HITL is mandatory even in YOLO. Downloads a
+  public post's video or photos through the same API. No scrape, like,
+  follow, or DM. Bearer tokens cannot post.
 author: Kazma Team
 license: MIT
 
@@ -74,6 +75,20 @@ tools:
     category: social
     prompt_chain:
       - "جدول تغريدة لتنشر لاحقًا بعد موافقتي"
+  x_download_media:
+    arabic_name: "تنزيل وسائط إكس"
+    description: >
+      Download the video, GIF or photos attached to a public X post, through
+      the official X API (one read from the X read budget) -- no browser,
+      shell or yt-dlp needed. Args: post (the x.com / twitter.com link, or
+      the post id). Saves each file in the workspace's downloads/x folder (a
+      video at the highest quality under 50 MB, the most a chat can be sent)
+      and answers with the paths; then send each to the user with
+      send_file(file_path=<path>). A post with no media, or files X would
+      not serve, is said in the answer.
+    category: social
+    prompt_chain:
+      - "نزّل الفيديو من هالتغريدة وأرسله لي"
   x_list_scheduled:
     arabic_name: "عرض التغريدات المجدولة"
     description: >
