@@ -350,6 +350,12 @@ class _PublicationStore:
                              (confirmed_at, tenant_id, row["account_id"], tweet_id))
             return True
 
+    def operation_tenants(self) -> list[str]:
+        """Every tenant holding an operation (the run supervisor's read,
+        which runs with no request tenant, like the other background work)."""
+        with self._connection() as conn:
+            return [str(r[0]) for r in conn.execute("SELECT DISTINCT tenant_id FROM x_operations")]
+
     def unconfirmed_tenants(self) -> list[str]:
         with self._connection() as conn:
             return [str(r[0]) for r in conn.execute("SELECT DISTINCT tenant_id FROM x_operations WHERE state IN ('sending', 'outcome_unknown')")]

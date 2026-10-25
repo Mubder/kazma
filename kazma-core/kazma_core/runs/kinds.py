@@ -109,6 +109,7 @@ NOT_RUNS: dict[str, str] = {
     "hitl_gates": "approval decisions; their waiting turn is a chat_turn run",
     "knowledge_vector_status": "the Knowledge vector sweep's coverage record",
     "llm_calls": "the model-call ledger (one row per finished call)",
+    "run_incidents": "the run supervisor's own incidents about runs (a record, not work)",
     "memory_summaries": "weekly topic summaries; writing them is a memory_task run",
     "memory_summary_periods": "which weeks were summarized; the work is a memory_task run",
     "procedural_dags": "learned tool procedures (memory content)",

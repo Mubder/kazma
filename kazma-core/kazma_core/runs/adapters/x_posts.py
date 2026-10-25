@@ -27,12 +27,22 @@ _LISTED = ("sending", "awaiting_approval", "outcome_unknown", "failed_permanent"
            "published", "cancelled")
 
 
-def _store_and_tenant() -> tuple[Any, str]:
-    """The publication store and this install's X tenant."""
-    from kazma_core.x_api.ownership import x_tenant_id
+def _store_and_tenants() -> tuple[Any, list[str]]:
+    """The publication store and the tenants whose operations are watched.
+
+    The request's tenant when one is bound; else every tenant holding an
+    operation, as the X background workers read them. The supervisor runs
+    with no request tenant, and in production ``x_tenant_id()`` refuses that
+    (live 2026-10-25: every pass failed "X requires an authenticated tenant
+    context"). Run supervision refuses installs with platform users (D1), so
+    every tenant here is the one operator's.
+    """
+    from kazma_core.tenant_context import get_current_tenant_id
     from kazma_core.x_api.publication_store import get_publication_store
 
-    return get_publication_store(), x_tenant_id()
+    store = get_publication_store()
+    bound = str(get_current_tenant_id() or "").strip()
+    return store, [bound] if bound else store.operation_tenants()
 
 
 class _XAdapter:
@@ -53,14 +63,15 @@ class _XAdapter:
         return await asyncio.to_thread(self._read, now, window_s)
 
     def _read(self, now: float, window_s: float) -> list[Run]:
-        store, tenant = _store_and_tenant()
+        store, tenants = _store_and_tenants()
         runs: list[Run] = []
-        for state in _LISTED:
-            for row in store.list_operations(tenant_id=tenant, state=state, limit=50):
-                ongoing = state in ("sending", "awaiting_approval", "outcome_unknown")
-                if not ongoing and float(row["updated_at"] or 0.0) < now - window_s:
-                    continue
-                runs.append(self._run(row, now))
+        for tenant in tenants:
+            for state in _LISTED:
+                for row in store.list_operations(tenant_id=tenant, state=state, limit=50):
+                    ongoing = state in ("sending", "awaiting_approval", "outcome_unknown")
+                    if not ongoing and float(row["updated_at"] or 0.0) < now - window_s:
+                        continue
+                    runs.append(self._run(row, now))
         return runs
 
     def _run(self, row: dict[str, Any], now: float) -> Run:
@@ -93,15 +104,21 @@ class _XAdapter:
 
     @staticmethod
     def _cancel(native_id: str) -> ActionResult:
+        from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.publication_service import update_schedule
 
-        store, tenant = _store_and_tenant()
-        row = store.get(native_id, tenant_id=tenant)
-        if row is None:
-            return ActionResult(False, "not_found", "No such X post.")
-        if update_schedule(native_id, expected_version=int(row["version"]), action="cancel"):
-            return ActionResult(True, "cancelled", "The booking is cancelled.")
-        return ActionResult(False, "conflict", "The booking changed or can no longer be cancelled.")
+        store, tenants = _store_and_tenants()
+        for tenant in tenants:
+            row = store.get(native_id, tenant_id=tenant)
+            if row is None:
+                continue
+            # X Studio's own control, in the operation's own tenant.
+            with tenant_scope(tenant):
+                changed = update_schedule(native_id, expected_version=int(row["version"]), action="cancel")
+            if changed:
+                return ActionResult(True, "cancelled", "The booking is cancelled.")
+            return ActionResult(False, "conflict", "The booking changed or can no longer be cancelled.")
+        return ActionResult(False, "not_found", "No such X post.")
 
 
 ADAPTER = _XAdapter()

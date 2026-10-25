@@ -2031,9 +2031,10 @@ class KazmaAppBuilder:
                     return cron_fire_graph(self.agent, capabilities="read")
 
                 _run_diagnose.set_graph_builder(_diagnosis_graph)
-                _run_supervisor.start()
+                # Started after the cron store opens (below): its first pass
+                # read a store not yet open (live 2026-10-25).
             except (ImportError, RuntimeError, AttributeError) as exc:
-                logger.warning("[runs] failed to start the run supervisor: %s", exc)
+                logger.warning("[runs] failed to wire the run supervisor: %s", exc)
 
             # ── Time Travel ─────────────────────────────────────────
             # The replay API is mounted when the app is built and reads the
@@ -2209,6 +2210,14 @@ class KazmaAppBuilder:
                     logger.info("[Cron] Scheduler started")
             except Exception as e:
                 logger.warning("[Cron] Failed to start: %s", e)
+
+        # ── Run supervision starts once the stores it reads are open ──
+        try:
+            from kazma_core.runs import supervisor as _run_supervisor
+
+            _run_supervisor.start()
+        except (ImportError, RuntimeError, AttributeError) as exc:
+            logger.warning("[runs] failed to start the run supervisor: %s", exc)
 
         # ── Scheduled X posts fire loop ───────────────────────────────
         # Deterministic publisher for scheduled X posts (X has no native
