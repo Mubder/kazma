@@ -48,6 +48,9 @@ _WORDS = {
                         "آثاره غير معروفة: تحقّق قبل إعادة المحاولة."),
     "more": ("Show one: /runs show <id>. Everything from the last day: /runs all.",
              "لعرض واحد: /runs show <id>. كل ما جرى خلال يوم: /runs all."),
+    "more_all": ("Show one: /runs show <id>.", "لعرض واحد: /runs show <id>."),
+    "finished": ("Finished in the last day:", "انتهى خلال آخر يوم:"),
+    "handled": ("dealt with", "تم التعامل معه"),
 }
 _ACTION = {
     "cancel": ("Cancel", "إلغاء"), "retry": ("Retry", "إعادة المحاولة"),
@@ -100,9 +103,15 @@ def _line(run: Run, now: float, lang: str) -> str:
         parts.append(run.detail)
     elif run.progress_note and run.state in ACTIVE_STATES:
         parts.append(run.progress_note)
+    if run.handled:
+        parts.append(_w(_WORDS["handled"], lang))
     # In backticks: chat apps read ``_`` as italics ("swarmtask:").
     parts.append(f"`{run.run_id}`")
     return " · ".join(parts)
+
+
+#: Run lines one ``/runs`` answer shows (a chat message stays readable).
+_MAX_LINES = 40
 
 
 def format_listing(runs: list[Run], errors: dict[str, str], *, lang: str = "en",
@@ -118,13 +127,22 @@ def format_listing(runs: list[Run], errors: dict[str, str], *, lang: str = "en",
                      f"{len(active)} {_w(_WORDS['active'], lang)})")
     else:
         lines.append(_w(_WORDS["none"], lang))
-    lines += [_line(r, stamp, lang) for r in needs + active + rest][:40]
+    shown = 0
+    for group, heading in ((needs + active, ""), (rest, "finished")):
+        if not group or shown >= _MAX_LINES:
+            continue
+        if heading:
+            lines += ["", _w(_WORDS[heading], lang)]
+        group = group[:_MAX_LINES - shown]
+        lines += [_line(r, stamp, lang) for r in group]
+        shown += len(group)
     for kind, reason in sorted(errors.items()):
         spec = KINDS.get(kind)
         label = (spec.label_ar if lang == "ar" else spec.label) if spec else kind
         lines.append(f"⚠️ {_w(_WORDS['unreadable'], lang)}: {label} ({reason})")
     if runs:
-        lines.append(_w(_WORDS["more"], lang))
+        # Already the whole day: no hint to ask for it.
+        lines += ["", _w(_WORDS["more_all" if include_finished else "more"], lang)]
     return "\n".join(lines)
 
 
