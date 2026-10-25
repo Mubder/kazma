@@ -893,7 +893,7 @@ class SlackAdapter(BaseAdapter):
                                             _ia_user_id, action.kind,
                                         )
                                         continue
-                                    if action.kind in ("hitl", "swarm"):
+                                    if action.kind in ("hitl", "swarm", "run"):
                                         # Admin gate for approval buttons
                                         # (audit 2026-09-16 F-8): audit H-8
                                         # made installs admin-grade and left
@@ -975,6 +975,7 @@ class SlackAdapter(BaseAdapter):
                                         route_swarm_bus(value, actor=f"slack:{_ia_user_id}")
                                     elif action.kind in (
                                         "hitl",
+                                        "run",
                                         "personality",
                                         "model_provider",
                                         "model_select",

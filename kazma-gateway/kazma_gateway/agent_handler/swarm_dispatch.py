@@ -496,6 +496,9 @@ async def _dispatch_swarm_from_chat(
         "source_chat_id": ctx.get("chat_id", ""),
         "source_thread_id": thread_id,
         "source_user": ctx.get("username", ""),
+        # Where the run supervisor tells this chat about a stall or failure
+        # (kazma_core.runs): the address reminders use, captured now.
+        "source_delivery_target": _build_target_id(msg.platform, ctx),
     }
 
     swarm_task = SwarmTask(

@@ -192,6 +192,10 @@ def changes_global_config(text: str) -> bool:
         return sub == "repo" and (arg in ("switch", "clone") or "/" in arg)
     if head == "/swarm":
         return sub == "config" and arg in ("group", "clear")
+    if head == "/runs":
+        # Acting on a run (cancel, retry, close, dismiss, diagnose) -- an
+        # incident card's button arrives as "/runs act <incident> <action>".
+        return sub == "act"
     if head == "/kb":
         # Changing the Knowledge Library every chat injects from (KB-S07):
         # adding, crawling, refreshing or deleting a library.
@@ -275,7 +279,9 @@ def _cmd_help() -> str:
         "• `/steer! <text>` — Pause the task, inject a requirement, then resume\n"
         "• `/abort` or `/stop` — Stop and abandon the running task (won't continue unless re-asked)\n"
         "• `/hitl approve` · `/hitl deny` — Answer a pending approval "
-        "(`/hitl approve_task` — every approval of this task)\n\n"
+        "(`/hitl approve_task` — every approval of this task)\n"
+        "• `/runs` — Running work: what is stalled, failed or waiting for you "
+        "(`/runs all`, `/runs show <id>`, `/runs act <incident> <action>`)\n\n"
         "⚡ *Capacity & YOLO*\n"
         "• `/long on` · `/long mission` (`/mission`) — raise tool-round budget (HITL stays on)\n"
         "• `/yolo` — skip danger-tool approvals (does **not** raise the budget)\n"

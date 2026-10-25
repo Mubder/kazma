@@ -885,6 +885,12 @@ def test_dns_gate_catches_the_redirect_hop_shape():
 # names one; a call in an async body must go through asyncio.to_thread.
 
 _LOOP_STALL_HELPERS = frozenset({
+    # Run supervision (kazma_core.runs): the incident store's transactions
+    # (SQLite, BEGIN IMMEDIATE), the bell's read of it, the runbooks' settings
+    # read, the memory queue's retry and the document queue's listing.
+    "open_incident", "claim_decision", "finish_decision", "claim_notification",
+    "finish_notification", "pending_notifications", "open_for_run", "claim_auto_step",
+    "claim_diagnosis", "finish_diagnosis", "bell_alerts", "retry_failed_task", "recent_jobs",
     # Waits up to 45 s for a test alert's delivery ON the loop: called on the
     # loop it would wait for itself (it refuses, but no async code may try).
     "send_test_alert",
@@ -2096,6 +2102,12 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
         "repository_metrics": False,
         "context_info": False,
         "computer_use": False,
+    },
+    # The run registry (kazma_core.runs): a run's title and failure reason are
+    # its own data -- a prompt, a file name, an error a service wrote.
+    "kazma-core/kazma_core/agent/tool_builtins/runs.py": {
+        "list_runs": True,
+        "run_status": True,
     },
     "kazma-core/kazma_core/mcp/spec_tools.py": {
         # Body already fenced in AsyncMCPManager.read_resource (fence_resource).

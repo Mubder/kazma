@@ -7,6 +7,7 @@ selection, and swarm approvals work the same way regardless of adapter::
     personality:<name>
     model_provider:<name> / model_select:<id>
     swarm_approve_<task> / swarm_reject_<task>
+    run:<action>:<incident>   (an incident card, kazma_gateway.run_cards)
     sys_install:<pkg> / install_dependency:<pkg>
 """
 
@@ -24,7 +25,7 @@ __all__ = [
 class CallbackAction:
     """Parsed result of a platform button / keyboard callback."""
 
-    kind: str  # hitl | personality | model_provider | model_select | swarm | sys_install | install_dep | unknown
+    kind: str  # hitl | run | personality | model_provider | model_select | swarm | sys_install | install_dep | unknown
     text: str = ""  # synthetic message text for agent path (if any)
     package_name: str = ""
     swarm_data: str = ""  # raw callback data for swarm bus
@@ -61,6 +62,13 @@ def parse_callback_data(data: str) -> CallbackAction:
                 kind="hitl",
                 text=f"/hitl {action} {request_id}",
             )
+        return CallbackAction(kind="unknown")
+
+    # An incident card's button (kazma_gateway.run_cards): run:<action>:<incident>
+    if data.startswith("run:"):
+        parts = data.split(":", 2)
+        if len(parts) == 3 and parts[1] and parts[2]:
+            return CallbackAction(kind="run", text=f"/runs act {parts[2]} {parts[1]}")
         return CallbackAction(kind="unknown")
 
     if data.startswith(("swarm_approve_", "swarm_reject_")):

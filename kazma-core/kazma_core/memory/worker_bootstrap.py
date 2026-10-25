@@ -1107,6 +1107,16 @@ def _document_broker() -> None:
     document_broker_sweep()
 
 
+def _run_incident_retention() -> None:
+    # Run supervision (kazma_core.runs): an incident nobody answered in a
+    # week expires; finished ones are kept 30 days, then purged.
+    from kazma_core.runs.incidents import get_incident_store
+
+    store = get_incident_store()
+    store.expire_old()
+    store.purge()
+
+
 #: Every sweep on the 15-minute maintenance cadence, in order. A cleanup that
 #: exists but is on no cadence never runs: that is how backups once went inert
 #: (§15) and how swarm task history went unpruned until 2026-09-25. Add a new
@@ -1119,6 +1129,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("task queue purge", _purge_task_queue),
     ("swarm task retention", _prune_swarm_tasks),
     ("swarm approval rows", _purge_swarm_approvals),
+    ("run incident retention", _run_incident_retention),
     ("checkpoint retention", _prune_checkpoints),
     ("supervisor watch", _watch_supervisor),
     ("document worker broker", _document_broker),

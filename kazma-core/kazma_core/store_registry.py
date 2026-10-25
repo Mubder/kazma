@@ -150,6 +150,8 @@ STORES: dict[str, Store] = {
     # ── control plane: decisions, secrets, permissions, evidence ───────
     "hitl_gates.db": Store(
         "approval decisions (the gate registry)", "bundle"),
+    "run_incidents.db": Store(
+        "stuck or failed runs: what the owner was told and what they decided", "bundle"),
     "vault.db": Store("encrypted secrets", "bundle"),
     "settings.db": Store(
         "settings, workspaces and bookmarks", "settings",

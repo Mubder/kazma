@@ -325,6 +325,8 @@ TOOL_TIERS: dict[str, str] = {
     "list_agent_skills": "read",
     "search_agent_skills": "read",
     "check_swarm_task": "read",
+    "list_runs": "read",            # the run registry: what runs, stalled or failed
+    "run_status": "read",
     "check_environment": "read",
     "config_read": "read",
     # Unsafe — always blocked (reserved)

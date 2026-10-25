@@ -11,6 +11,7 @@ from kazma_ui.i18n.catalog import knowledge as _knowledge
 from kazma_ui.i18n.catalog import memory as _memory
 from kazma_ui.i18n.catalog import packages as _packages
 from kazma_ui.i18n.catalog import research as _research
+from kazma_ui.i18n.catalog import runs as _runs
 from kazma_ui.i18n.catalog import scheduled as _scheduled
 from kazma_ui.i18n.catalog import settings as _settings
 from kazma_ui.i18n.catalog import swarm as _swarm
@@ -31,6 +32,7 @@ CATALOG_MODULES = (
     _memory,
     _packages,
     _research,
+    _runs,
     _scheduled,
     _settings,
     _swarm,

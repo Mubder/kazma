@@ -536,6 +536,32 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
+        # /runs: the run supervisor's view, without the model (as /replay).
+        from kazma_ui.sse_chat._runs import is_runs_command, runs_reply
+
+        if is_runs_command(raw_msg):
+            from kazma_ui.i18n import current_language
+
+            try:
+                _rr = await runs_reply(raw_msg, current_language())
+            except (OSError, RuntimeError) as exc:
+                logger.warning("[SSE] /runs could not read running work: %s", exc)
+                from kazma_ui.i18n import t as _t_runs
+
+                _rr = _t_runs("runs.chat_unreadable", current_language())
+            _persist_instant_turn(session, thread_id, raw_msg, _rr)
+
+            async def _runs_gen() -> AsyncGenerator[str, None]:
+                yield await _journal_fast_path(thread_id, "token", {"content": _rr, "capacity": True})
+                yield await _journal_fast_path(thread_id, "done", {"content": _rr, "tokens": 0, "cost": 0.0,
+                                                                   "duration_ms": 0, "capacity": True})
+
+            return StreamingResponse(
+                _runs_gen(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         from kazma_ui.sse_chat._capacity import intercept_capacity_fast_path
 
         _cap_resp, _cap_rewrite = intercept_capacity_fast_path(
@@ -2265,52 +2291,8 @@ def create_sse_chat_router(
         if not thread_id:
             return {"ok": False, "reason": "missing_session"}
 
-        from kazma_core.agent.steer import abort_messages, clear_all_steers
+        from kazma_ui.turn_abort import abort_turn
 
-        # Drop any pending steers first so a stray drain/resume can't fire.
-        clear_all_steers(thread_id)
-        # Cancel the running pump (no-op if no turn is running).
-        cancelled = cancel_turn(thread_id) is not None
-
-        graph_inst = _get_graph()
-        config = {
-            "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
-        }
-        try:
-            # The thread's checkpoint-mutation lock (TT-04), as every rewriter.
-            from kazma_ui.thread_locks import thread_mutation
-
-            async with thread_mutation(thread_id):
-                snap = await graph_inst.aget_state(config)
-                values = (snap.values if snap and snap.values else {})
-                msgs = list(values.get("messages") or [])
-                before = list(msgs)
-                msgs = abort_messages(msgs)
-                await graph_inst.aupdate_state(config, {
-                    "messages": msgs,
-                    "task_status": "abandoned",
-                    "auto_continue": False,
-                })
-                # A turn aborted before its answer leaves memory too (M09).
-                from kazma_core.memory.forget import rewind_memory
-
-                await rewind_memory(thread_id, before, msgs, tenant_id=str(values.get("tenant_id") or "default"))
-            from kazma_ui.turn_runtime import close_aborted_turn
-
-            await close_aborted_turn(thread_id)  # never raises
-            try:
-                from kazma_ui.hitl_gate_bridge import abort_thread_hitl
-
-                await abort_thread_hitl(thread_id, session_id=session_id)
-            except Exception:
-                logger.debug("[SSE] abort HITL release skipped", exc_info=True)
-            logger.info(
-                "[SSE] Abort thread=%s cancelled=%s marker_written=True",
-                thread_id[:12], cancelled,
-            )
-            return {"ok": True, "cancelled": cancelled}
-        except Exception as exc:  # noqa: BLE001 — never fail the HTTP call
-            logger.warning("[SSE] Abort marker write failed thread=%s: %s", thread_id[:12], exc)
-            return {"ok": cancelled, "cancelled": cancelled, "warning": str(exc)}
+        return await abort_turn(thread_id, _get_graph(), session_id=session_id)
 
     return r

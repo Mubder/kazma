@@ -1,4 +1,8 @@
-"""A turn open with nothing working on it must page the operator.
+"""A turn open with nothing working on it must be reported.
+
+Since 2026-10-25 the run supervisor (``kazma_core.runs``) pages it, with a
+Close button; this watchdog logs it and heals it when asked
+(``tests/test_run_supervisor.py`` holds the page).
 
 Every failure in this area reached the operator as a symptom. The stuck turn of
 2026-09-13 sat as "Action required" while the server had logged the reopening
@@ -49,7 +53,9 @@ class TestItFiresOnlyWhenTheTurnIsTrulyAbandoned:
         assert turn_liveness.check_once(now=1000.0) == []      # clock starts
         out = turn_liveness.check_once(now=1000.0 + 61)
         assert len(out) == 1 and out[0]["thread_id"] == "thread-a"
-        assert alerts and alerts[0][0] == "turn.stuck_open"
+        # The run supervisor pages it, with a Close button (kazma_core.runs):
+        # this watchdog no longer sends a second, button-less message.
+        assert alerts == []
 
     def test_a_running_turn_is_never_reported(self, monkeypatch, alerts):
         """A slow tool or a long model call is ordinary work."""
@@ -72,13 +78,13 @@ class TestItFiresOnlyWhenTheTurnIsTrulyAbandoned:
         assert turn_liveness.check_once(now=1000.0 + 59) == []
         assert alerts == []
 
-    def test_it_pages_once_not_every_sweep(self, monkeypatch, alerts):
+    def test_it_reports_once_not_every_sweep(self, monkeypatch, alerts):
         _arrange(monkeypatch, open_turns={"thread-a": "turn-1"})
         turn_liveness.check_once(now=1000.0)
-        turn_liveness.check_once(now=1061.0)
+        reported = turn_liveness.check_once(now=1061.0)
         for tick in range(5):
-            turn_liveness.check_once(now=1100.0 + tick * 30)
-        assert len(alerts) == 1
+            reported += turn_liveness.check_once(now=1100.0 + tick * 30)
+        assert len(reported) == 1
 
     def test_a_turn_that_resumes_resets_the_clock(self, monkeypatch, alerts):
         """A socket reconnecting mid-turn must not inherit an old idle stamp

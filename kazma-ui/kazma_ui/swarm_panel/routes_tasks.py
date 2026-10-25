@@ -309,6 +309,21 @@ def register_tasks_routes(
         if exc is not None:
             logger.info("[Swarm] background task '%s' ended with %s", task_id, type(exc).__name__)
 
+    async def _dispatch_retry(engine: Any, new_task: Any) -> None:
+        """A retried task runs in the background, as the page's dispatch."""
+        handle = asyncio.create_task(_run_and_route_task(engine, new_task, is_broadcast=False))
+        svc = get_swarm_service()
+        svc.register_task_handle(new_task.id, handle)
+        handle.add_done_callback(
+            lambda h, tid=new_task.id: _settle_handle(svc, tid, h)
+        )
+
+    # One Cancel and one Retry for the page and the run supervisor's actions.
+    from kazma_ui.swarm_panel import task_actions as _task_actions
+
+    _task_actions.set_dispatcher(_dispatch_retry)
+    _task_actions.set_engine_resolver(_current_engine)
+
     def _capacity_refusal(cap: int, message: str | None = None) -> JSONResponse:
         """The swarm is full: HTTP 429 with the engine's own message."""
         return JSONResponse(
@@ -905,31 +920,13 @@ def register_tasks_routes(
         _denied = _require_admin(request)
         if _denied is not None:
             return _denied
-        engine = _current_engine()
-        if engine is None:
-            return JSONResponse(
-                {"status": "error", "message": "Swarm engine not available"},
-                status_code=503,
-            )
-        # A task in flight, or a pipeline paused before a restart (restored
-        # as a paused in-flight task, SW-E09): the panel offers Cancel on both.
-        active = engine.get_active_task(task_id) if hasattr(engine, "get_active_task") else getattr(engine, "_active_tasks", {}).get(task_id)
-        if active is None:
-            task_obj = engine.get_task(task_id)
-            if task_obj is None or task_obj.status != "paused":
-                return JSONResponse(
-                    {"status": "error", "message": f"Task '{task_id}' is not active (already completed or not found)"},
-                    status_code=404,
-                )
-        cancelled = await engine.cancel_task(task_id)
-        if cancelled:
-            return JSONResponse(
-                {"status": "ok", "message": f"Task '{task_id}' cancelled", "task_id": task_id}
-            )
-        return JSONResponse(
-            {"status": "error", "message": f"Failed to cancel task '{task_id}'"},
-            status_code=500,
-        )
+        from kazma_ui.swarm_panel.task_actions import cancel_task
+
+        outcome = await cancel_task(task_id)
+        if outcome["ok"]:
+            return JSONResponse({"status": "ok", "message": outcome["message"], "task_id": task_id})
+        status = {"engine_unavailable": 503, "not_active": 404}.get(outcome["code"], 500)
+        return JSONResponse({"status": "error", "message": outcome["message"]}, status_code=status)
 
     @router.post("/api/swarm/tasks/{task_id}/retry")
     async def swarm_retry_task(task_id: str, request: Request) -> JSONResponse:
@@ -937,46 +934,27 @@ def register_tasks_routes(
         if _denied is not None:
             return _denied
         """Retry a failed/timeout/cancelled task by re-dispatching."""
-        engine = _current_engine()
-        if engine is None:
-            return JSONResponse(
-                {"status": "error", "message": "Swarm engine not available"},
-                status_code=503,
-            )
-        from kazma_core.swarm.task_control import RetryNeedsAcknowledgement
+        from kazma_ui.swarm_panel.task_actions import retry_task
 
         acknowledge = request.query_params.get("acknowledge_unknown") in ("1", "true")
-        try:
-            new_task = await engine.retry_task(task_id, acknowledge_unknown=acknowledge)
-        except RetryNeedsAcknowledgement as exc:
+        outcome = await retry_task(task_id, acknowledge_unknown=acknowledge)
+        if outcome["code"] == "retry_outcome_unknown":
             # The original may already have changed things: the page asks the
             # operator, then retries with acknowledge_unknown=1 (SW-E08).
             return JSONResponse(
-                {
-                    "status": "error",
-                    "code": "retry_outcome_unknown",
-                    "message": str(exc),
-                    "tools": exc.tools,
-                },
+                {"status": "error", "code": "retry_outcome_unknown",
+                 "message": outcome["message"], "tools": outcome["tools"]},
                 status_code=409,
             )
-        if new_task is None:
-            return JSONResponse(
-                {"status": "error", "message": f"Task '{task_id}' not found"},
-                status_code=404,
-            )
-        # Dispatch in the background (non-blocking)
-        handle = asyncio.create_task(_run_and_route_task(engine, new_task, is_broadcast=False))
-        svc = get_swarm_service()
-        svc.register_task_handle(new_task.id, handle)
-        handle.add_done_callback(
-            lambda h, tid=new_task.id: _settle_handle(svc, tid, h)
-        )
+        if not outcome["ok"]:
+            status = {"engine_unavailable": 503, "dispatch_unavailable": 503, "not_found": 404}.get(
+                outcome["code"], 500)
+            return JSONResponse({"status": "error", "message": outcome["message"]}, status_code=status)
         return JSONResponse(
             {
                 "status": "ok",
-                "message": f"Retrying task '{task_id}' as '{new_task.id}'",
+                "message": outcome["message"],
                 "old_task_id": task_id,
-                "new_task_id": new_task.id,
+                "new_task_id": outcome["new_task_id"],
             }
         )

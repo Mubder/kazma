@@ -236,6 +236,9 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     # refuses it.
     "handoff_to_worker": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ("worker",)),
     "check_swarm_task": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    # the run registry (kazma_core.runs): read only; acting is the owner's
+    "list_runs": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "run_status": (EffectKind.READ, SemanticTier.NONE, None, ()),
     # native skills commonly loaded
     "lint_code": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "format_code": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),

@@ -29,6 +29,7 @@ from .hitl import (
     apply_hitl_approval_markup,
 )
 from .commands import (
+    _send_model_reply,
     _try_documents_command,
     _try_ide_command,
     _try_kb_command,
@@ -587,6 +588,12 @@ def make_gateway_send_handler(manager: Any, store: Any):
         )
         if kwargs.get("reply_markup"):
             out_ctx["reply_markup"] = kwargs["reply_markup"]
+        if isinstance(kwargs.get("run_card"), dict):
+            # The run supervisor's incident card: one button per action
+            # (kazma_core.runs.notify, kazma_gateway.run_cards).
+            from kazma_gateway.run_cards import apply_run_card_markup
+
+            out_ctx = apply_run_card_markup(out_ctx, platform=platform, run_card=kwargs["run_card"], text=text)
         outbound_attachments = await asyncio.to_thread(
             _outbound_attachments, text, platform, kwargs.get("attachments"),
         )
@@ -1505,6 +1512,17 @@ def create_graph_handler(
         )
         if ide_handled:
             return  # IDE command handled, skip graph
+
+        # ── Running work (/runs) ──────────────────────────────────────
+        # The run supervisor's view, and an incident card's button
+        # ("/runs act <incident> <action>", admin-gated above).
+        from .runs_command import try_runs_command
+
+        async def _runs_reply(text: str) -> None:
+            await _send_model_reply(msg, _store, manager, thread_id, text)
+
+        if await try_runs_command(msg, _runs_reply):
+            return  # /runs handled, skip graph
 
         # ── Knowledge Library slash-command intercept ───────────────
         # /kb list|add|crawl|search|status|delete manages Knowledge

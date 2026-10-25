@@ -162,7 +162,8 @@ def test_gate_covers_every_adapter():
         "kazma-gateway/kazma_gateway/adapters/slack.py",
     ):
         src = (root / rel).read_text(encoding="utf-8", errors="replace")
-        assert 'action.kind in ("hitl", "swarm")' in src, (
+        # The tuple may name more kinds (run supervision's "run", 2026-10-25).
+        assert 'action.kind in ("hitl", "swarm"' in src, (
             f"{rel} does not admin-gate approval callbacks (audit F-8). "
             "Approving a danger tool must be at least as privileged as "
             "installing a package."

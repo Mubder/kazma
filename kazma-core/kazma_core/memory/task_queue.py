@@ -558,6 +558,32 @@ async def stop_worker() -> None:
         await w.stop()
 
 
+def retry_failed_task(task_id: str) -> bool:
+    """Put a failed (dead-letter) or waiting task back to run now.
+
+    The one "Retry" for the Memory page's queue and the run supervisor's
+    action (``kazma_core.runs``). True when a row changed. Blocking.
+    """
+    from kazma_core.memory.schema_v2 import ensure_ops_schema
+    from kazma_core.paths import memory_ops_db
+
+    conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+    try:
+        ensure_ops_schema(conn)
+        cur = conn.execute(
+            """
+            UPDATE memory_task_queue
+            SET status='pending', attempts=0, error_log=NULL, updated_at=?, next_attempt_at=NULL
+            WHERE id=? AND status IN ('failed', 'pending')
+            """,
+            (time.time(), task_id),
+        )
+        conn.commit()
+        return int(cur.rowcount or 0) > 0
+    finally:
+        conn.close()
+
+
 def purge_completed_tasks(retention_days: int = 7) -> int:
     """Delete completed tasks older than retention_days (M2).
 

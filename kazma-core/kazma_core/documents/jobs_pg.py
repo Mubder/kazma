@@ -332,6 +332,21 @@ class PostgresDocumentJobRepository:
             conn.commit()
         return _row_to_record(row) if row is not None else None
 
+    def recent_jobs(self, *, since: str, limit: int = 200) -> list[DocumentJobRecord]:
+        """Every unfinished job, and the finished ones updated since *since*
+        (ISO), newest first, at most *limit* (the SQLite store's twin)."""
+        terminal = ",".join(f"'{s}'" for s in _TERMINAL_STATE_VALUES)
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT * FROM document_jobs WHERE state NOT IN ({terminal}) OR updated_at >= %s "
+                    "ORDER BY updated_at DESC LIMIT %s",
+                    (datetime.fromisoformat(since), max(1, min(int(limit), 1000))),
+                )
+                rows = cur.fetchall()
+            conn.commit()
+        return [_row_to_record(row) for row in rows]
+
     def get_by_idempotency_key(self, *, tenant_id: str, idempotency_key: str) -> DocumentJobRecord | None:
         tenant = _required(tenant_id, "tenant_id")
         key = _required(idempotency_key, "idempotency_key")

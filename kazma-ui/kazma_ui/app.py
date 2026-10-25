@@ -1531,6 +1531,11 @@ class KazmaAppBuilder:
             logger.warning("X auto-reply router failed to mount: %s", e)
             self._init_errors.append({"subsystem": "x_reply_api", "error": str(e)})
 
+        # ── Running work (the run supervisor's view and decisions) ──
+        from kazma_ui.runs_api import create_runs_router
+
+        self.app.include_router(create_runs_router())
+
         # ── Scheduled Tasks (universal page: cron jobs + scheduled X posts) ──
         try:
             from kazma_ui.scheduled_api import create_scheduled_router
@@ -2006,6 +2011,30 @@ class KazmaAppBuilder:
             except Exception as exc:
                 logger.warning("[turn-liveness] failed to start watchdog: %s", exc)
 
+            # ── Run supervision (kazma_core.runs) ───────────────────
+            # Every 30 s, every kind of running work is judged by its
+            # progress; a stalled, stuck or failed run opens an incident
+            # whose card (with buttons) goes to the chat it started from.
+            try:
+                from kazma_core.runs import diagnose as _run_diagnose
+                from kazma_core.runs import supervisor as _run_supervisor
+
+                from kazma_ui.runs_chat_turn import set_graph_getter as _runs_graph_getter
+
+                _runs_graph_getter(lambda: self._hitl_state.get("graph") or self._graph_holder.get("graph"))
+
+                def _diagnosis_graph() -> Any:
+                    from kazma_core.cron.capabilities import cron_fire_graph
+
+                    if self.agent is None or not hasattr(self.agent, "build_child_graph"):
+                        raise RuntimeError("No agent to diagnose with")
+                    return cron_fire_graph(self.agent, capabilities="read")
+
+                _run_diagnose.set_graph_builder(_diagnosis_graph)
+                _run_supervisor.start()
+            except (ImportError, RuntimeError, AttributeError) as exc:
+                logger.warning("[runs] failed to start the run supervisor: %s", exc)
+
             # ── Time Travel ─────────────────────────────────────────
             # The replay API is mounted when the app is built and reads the
             # recorder per request: without one it answers a structured 503
@@ -2338,6 +2367,14 @@ class KazmaAppBuilder:
             await stop_turn_liveness_watchdog()
         except Exception as e:
             logger.debug("[app] turn-liveness watchdog stop: %s", e)
+
+        # Stop the run supervisor (bounded).
+        try:
+            from kazma_core.runs import supervisor as _run_supervisor
+
+            await _run_supervisor.stop()
+        except (ImportError, RuntimeError) as e:
+            logger.debug("[app] run supervisor stop: %s", e)
 
         # Stop document ingestion workers (drain in-flight stages) before
         # cron/agent teardown. Jobs are durable — pending rows resume on the

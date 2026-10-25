@@ -841,33 +841,14 @@ def register_memory_routes(self: Any) -> None:
     def _memory_v2_queue_retry(task_id: str):
         """Re-queue a failed/dead-letter task as pending."""
         import sqlite3
-        import time as _time
 
-        from kazma_core.memory.schema_v2 import ensure_ops_schema
-        from kazma_core.paths import memory_ops_db
+        from kazma_core.memory.task_queue import retry_failed_task
 
-        conn = None
         try:
-            conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
-            ensure_ops_schema(conn)
-            now = _time.time()
-            cur = conn.execute(
-                """
-                UPDATE memory_task_queue
-                SET status='pending', attempts=0, error_log=NULL, updated_at=?, next_attempt_at=NULL
-                WHERE id=? AND status IN ('failed', 'pending')
-                """,
-                (now, task_id),
-            )
-            conn.commit()
-            n = int(cur.rowcount or 0)
-            conn.close()
-            return {"ok": n > 0, "updated": n}
-        except Exception as exc:
+            updated = retry_failed_task(task_id)
+            return {"ok": updated, "updated": int(updated)}
+        except (sqlite3.Error, OSError) as exc:
             return {"ok": False, "error": safe_error(exc)}
-        finally:
-            if conn is not None:
-                conn.close()
     @self.app.post("/api/memory/v2/queue/clear-failed")
     def _memory_v2_queue_clear_failed():
         """Delete dead-letter (failed) tasks from the durable queue."""

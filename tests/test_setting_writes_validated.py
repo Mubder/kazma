@@ -61,14 +61,18 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     from kazma_core.documents.config import OCR_ENGINE_KEY
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
+    from kazma_core.runs.runbooks import RUNBOOKS_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
     # The scheduler's bounded settings joined 2026-10-14 (Scheduled audit
     # SCH-E06/E14/S05), the turn time limit and the OCR engine (Q02: an
     # engine the document policy cannot read would stop every document job)
-    # 2026-10-15, each named by the module that reads it.
+    # 2026-10-15, the run supervisor's runbooks 2026-10-25 (an unknown kind
+    # or step would switch nothing on and say nothing), each named by the
+    # module that reads it.
     assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY, TENANT_MODE_KEY,
-                             *SETTING_BOUNDS, FIRE_WITHOUT_HITL_KEY, TURN_TIMEOUT_KEY, OCR_ENGINE_KEY}
+                             *SETTING_BOUNDS, FIRE_WITHOUT_HITL_KEY, TURN_TIMEOUT_KEY, OCR_ENGINE_KEY,
+                             RUNBOOKS_KEY}
 
 
 # ── the TUI's client: an answered refusal is not "no server" ───────────────

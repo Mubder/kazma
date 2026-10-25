@@ -28,6 +28,7 @@
     {"source": "docs/docs/guide/gateways-and-platforms.md", "site": "gateways-and-platforms"},
     {"source": "docs/MCP_SERVER.md", "site": "mcp-server"},
     {"source": "docs/docs/guide/time-travel-and-replay.md", "site": "time-travel-and-replay"},
+    {"source": "docs/docs/guide/running-work.md", "site": "running-work"},
 
     {"source": "docs/docs/guide/knowledge-library.md", "site": "knowledge-base-and-rag"},
     {"source": "docs/docs/guide/memory-and-rag.md", "site": "memory-and-rag"},

@@ -17,6 +17,7 @@ from kazma_core.agent.tool_builtins.knowledge import register_knowledge_tools
 from kazma_core.agent.tool_builtins.mcp import register_mcp_tools
 from kazma_core.agent.tool_builtins.memory import register_memory_tools
 from kazma_core.agent.tool_builtins.research import register_research_tools
+from kazma_core.agent.tool_builtins.runs import register_run_tools
 from kazma_core.agent.tool_builtins.system import register_system_tools
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ __all__ = [
     "register_knowledge_tools",
     "register_research_tools",
     "register_mcp_tools",
+    "register_run_tools",
 ]
 
 
@@ -46,6 +48,7 @@ def register_builtin_tools(registry: Any) -> None:
     register_system_tools(registry)
     register_knowledge_tools(registry)
     register_research_tools(registry)
+    register_run_tools(registry)
     register_mcp_tools(registry)
     register_external_tools(registry)
     logger.info("Registered %d built-in tools", len(registry._tools))
