@@ -261,8 +261,18 @@ def dashboard(request: Request) -> HTMLResponse:
             "active_model": active_model,
             "active_provider": active_provider,
             "active_page": "dashboard",
+            # A bell or chat link to one incident (/dashboard?incident=inc_...):
+            # the Runs card scrolls to it. Only an incident id shape passes.
+            "focus_incident": _incident_param(request.query_params.get("incident", "")),
         },
     )
+
+
+def _incident_param(value: str) -> str:
+    """*value* when it is an incident id (``inc_`` and 12 hex digits), else ""."""
+    import re
+
+    return value if re.fullmatch(r"inc_[0-9a-f]{12}", value or "") else ""
 
 
 def _safe_silence(sr: Any) -> float | None:

@@ -32,7 +32,10 @@ def test_abort_releases_hitl_gate_and_composer() -> None:
     """ /abort must settle live gates so the next prompt is a new turn."""
     init = _src(_INIT)
     abort = init.split("async def abort_chat_turn", 1)[1]
-    assert "abort_thread_hitl" in abort
+    # The route's body moved to kazma_ui/turn_abort.py (2026-10-25) so the
+    # run supervisor's "Cancel" on a chat turn is the same abort.
+    assert "abort_turn(" in abort
+    assert "abort_thread_hitl" in (_UI / "turn_abort.py").read_text(encoding="utf-8")
     assert 'auto_deny=_hitl_now != "pending"' in init
     chat = _src(_CHAT_JS)
     assert "function _releaseHitlComposer" in chat

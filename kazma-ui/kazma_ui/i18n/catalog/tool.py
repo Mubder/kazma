@@ -369,6 +369,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "سرد المهام المجدولة.",
         "en": "List scheduled background tasks.",
     },
+    "tool.desc.list_runs": {
+        "ar": "سرد الأعمال الجارية وما تعثر أو فشل منها.",
+        "en": "List running work and what got stuck or failed.",
+    },
+    "tool.desc.run_status": {
+        "ar": "عرض حالة عمل جارٍ واحد وما يمكن فعله به.",
+        "en": "Show one running task's state and what can be done about it.",
+    },
     "tool.desc.memory_search": {
         "ar": "البحث في الذاكرة طويلة المدى عن محادثات سابقة ذات صلة.",
         "en": "Search long-term memory for relevant past conversations.",

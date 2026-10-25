@@ -616,7 +616,7 @@ class DiscordAdapter(BaseAdapter):
         # card was less privileged than installing a package. No-op in the
         # shipped posture (allowed_users ⇒ admin); it bites only in allow_all,
         # where any guild member could otherwise answer the operator.
-        if action.kind in ("hitl", "swarm"):
+        if action.kind in ("hitl", "swarm", "run"):
             from kazma_gateway.allowlists import is_gateway_admin
 
             if not is_gateway_admin(f"discord:{_ia_user_id}", "discord"):
@@ -690,7 +690,7 @@ class DiscordAdapter(BaseAdapter):
             return
 
         # Graph HITL / personality / model pickers → synthetic slash into queue
-        if action.kind in ("hitl", "personality", "model_provider", "model_select") and action.text:
+        if action.kind in ("hitl", "run", "personality", "model_provider", "model_select") and action.text:
             try:
                 user = data.get("member", {}).get("user") or data.get("user") or {}
                 channel_id = str(data.get("channel_id") or "")

@@ -65,6 +65,41 @@
     </div>
   </div>
 
+  <!-- ── Running work (run supervision, kazma_core.runs) ── -->
+  {# The incident to show comes from the template (data-incident-id), never
+     location.search: a soft navigation runs the script before the URL. #}
+  <section id="runs-panel" class="card dash-pro-card runs-panel" data-incident-id="{{ focus_incident }}"
+           aria-labelledby="runs-title" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
+    <div class="hitl-panel-head">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <h2 id="runs-title" style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
+          {{ t('runs.title') }}
+        </h2>
+        <span id="runs-summary" class="hitl-panel-desc" role="status" aria-live="polite"></span>
+      </div>
+      <div class="hitl-panel-tools">
+        <span class="hitl-panel-desc">{{ t('runs.description') }}</span>
+      </div>
+    </div>
+    <div class="runs-body">
+      <p id="runs-loading" class="runs-note">{{ t('runs.loading') }}</p>
+      <p id="runs-error" class="runs-note runs-error" role="alert" hidden></p>
+      <p id="runs-supervisor-off" class="runs-note runs-error" hidden>{{ t('runs.supervisor_off') }}</p>
+      <div id="runs-incidents" class="runs-incidents"></div>
+      <p id="runs-empty" class="runs-note" hidden>{{ t('runs.empty') }}</p>
+      <ul id="runs-list" class="runs-list"></ul>
+      <details id="runs-history" class="runs-fold" hidden>
+        <summary>{{ t('runs.history_title') }}</summary>
+        <div id="runs-history-list" class="runs-incidents"></div>
+      </details>
+      <details id="runs-runbooks" class="runs-fold">
+        <summary>{{ t('runs.runbooks_title') }}</summary>
+        <p class="runs-note">{{ t('runs.runbooks_hint') }}</p>
+        <div id="runs-runbook-list" class="runs-runbook-list"></div>
+      </details>
+    </div>
+  </section>
+
   <!-- ── Metrics Row ── -->
   <div class="metrics-grid">
     <div class="metric-card">
@@ -348,6 +383,7 @@
 </script>
 <script src="/static/js/dashboard.js?v={{ js_version() }}"></script>
 <script src="/static/js/hitl_approval.js?v={{ js_version() }}"></script>
+<script src="/static/js/runs_panel.js?v={{ js_version() }}"></script>
 <script>
 (function() {
   // Session management (preserve existing functionality)

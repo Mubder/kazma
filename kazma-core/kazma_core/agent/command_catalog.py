@@ -152,6 +152,14 @@ COMMANDS: tuple[Command, ...] = (
             web=True, page=None, arguments=""),
     Command("replay", "Time travel snapshots", "لقطات خطوات المحادثة", web=True, page=None, arguments=""),
     Command(
+        "runs",
+        "Running work: stalled, failed or waiting for you",
+        "الأعمال الجارية: المتوقفة والفاشلة والمنتظرة",
+        web=True,
+        page=None,
+        arguments="[all | show <id>]",
+    ),
+    Command(
         "fork",
         "Fork from a snapshot into a new thread",
         "إنشاء محادثة من لقطة",

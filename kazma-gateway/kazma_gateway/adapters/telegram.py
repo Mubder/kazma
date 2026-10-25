@@ -1377,7 +1377,7 @@ class TelegramAdapter(BaseAdapter):
         # users who could already approve, so this changes nothing. It bites
         # only in allow_all, where it is supposed to: every member of a group
         # chat could otherwise answer the operator's approvals.
-        if action.kind in ("hitl", "swarm"):
+        if action.kind in ("hitl", "swarm", "run"):
             from kazma_gateway.allowlists import is_gateway_admin
 
             _approver = f"telegram:{from_user.get('id', '')}"
@@ -1409,10 +1409,12 @@ class TelegramAdapter(BaseAdapter):
                 alert_text = "✅ Approved — processing..." if approved else "❌ Denied."
         elif action.kind == "swarm":
             alert_text = "Answer recorded."
+        elif action.kind == "run":
+            alert_text = "Working on it..."
         self._spawn(self._answer_callback_query(cb_id, alert_text))
 
         # Immediately deactivate the inline keyboard to prevent double-click or stale interaction
-        if action.kind == "hitl":
+        if action.kind in ("hitl", "run"):
             chat_id = message.get("chat", {}).get("id")
             message_id = message.get("message_id")
             if chat_id and message_id:

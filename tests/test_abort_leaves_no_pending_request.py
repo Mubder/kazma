@@ -75,7 +75,11 @@ def test_both_abort_paths_use_it():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
+    # The web abort's body is kazma_ui/turn_abort.py since 2026-10-25 (the
+    # route and the run supervisor's Cancel share it).
     for rel in ("kazma-gateway/kazma_gateway/agent_handler/graph.py",
-                "kazma-ui/kazma_ui/sse_chat/__init__.py"):
+                "kazma-ui/kazma_ui/turn_abort.py"):
         text = (root / rel).read_text(encoding="utf-8")
         assert "abort_messages(" in text and "_abort_marker()" not in text, rel
+    route = (root / "kazma-ui/kazma_ui/sse_chat/__init__.py").read_text(encoding="utf-8")
+    assert "return await abort_turn(thread_id, _get_graph(), session_id=session_id)" in route

@@ -28,7 +28,14 @@ class SseBridge:
         return self._bus
 
     def emit(self, task_id: str, event: str, data: dict[str, Any]) -> None:
-        """Emit an event if a bus is registered; swallow bus errors at DEBUG."""
+        """Emit an event if a bus is registered; swallow bus errors at DEBUG.
+
+        Every event is also the task's progress for the run supervisor
+        (``kazma_core.runs.progress``), with or without a bus.
+        """
+        from kazma_core.runs import progress
+
+        progress.note(f"swarm_task:{task_id}", event)
         if self._bus is None:
             return
         try:

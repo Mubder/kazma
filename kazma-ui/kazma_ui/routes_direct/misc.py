@@ -279,10 +279,19 @@ def register_misc_routes(self: Any) -> None:
         # alerts panel goes blank. A bad row must degrade to a placeholder,
         # not take down the endpoint.
         out: list[Any] = []
+        import sqlite3
+
+        from kazma_core.runs.notify import bell_alerts
         from kazma_core.web_acquire.monitor import recent_alerts
         from kazma_ui.i18n import current_language
 
-        for a in [*AlertDispatcher.get_recent_alerts(), *recent_alerts(current_language())]:
+        try:
+            incidents = bell_alerts(current_language())
+        except (OSError, RuntimeError, sqlite3.Error) as exc:
+            # A broken incident store must not erase the other alerts.
+            logger.warning("[alerts] run incidents could not be read: %s", exc)
+            incidents = []
+        for a in [*AlertDispatcher.get_recent_alerts(), *recent_alerts(current_language()), *incidents]:
             item = a.to_dict() if hasattr(a, "to_dict") else a
             try:
                 out.append(jsonable_encoder(item))

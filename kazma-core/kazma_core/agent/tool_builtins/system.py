@@ -20,6 +20,19 @@ logger = logging.getLogger(__name__)
 _pending_dispatch_tasks: set[Any] = set()
 
 
+def _swarm_origin() -> dict[str, str]:
+    """The chat a dispatched task came from, so the run supervisor can tell
+    that chat when the task stalls or fails (``kazma_core.runs``)."""
+    from kazma_core.safety.hitl import get_current_thread_id
+    from kazma_core.tools.send_message import get_current_delivery_target, is_valid_delivery_target
+
+    target = get_current_delivery_target() or ""
+    origin = {"source_thread_id": get_current_thread_id() or ""}
+    if is_valid_delivery_target(target):
+        origin["source_delivery_target"] = target
+    return origin
+
+
 def register_system_tools(registry: Any) -> None:
     """Register the system tools onto *registry*."""
 
@@ -803,7 +816,7 @@ def register_system_tools(registry: Any) -> None:
             type=TaskType.DISPATCH,
             context=context,
             timeout=300.0,
-            metadata={"source": "chat", "kind": "research"},
+            metadata={"source": "chat", "kind": "research", **_swarm_origin()},
         )
         # Dispatch in the background so the tool returns immediately.
         # Register on engine._task_handles so cancel_task / panel Stop

@@ -177,6 +177,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.documents.config import OCR_ENGINE_KEY
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
+    from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
     return {
@@ -190,6 +191,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         RETENTION_KEY: (_checkpoint_retention, "system"),
         TURN_TIMEOUT_KEY: (_turn_timeout, "agent"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
+        RUNBOOKS_KEY: (validate_runbooks, None),
     }
 
 

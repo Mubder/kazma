@@ -33,6 +33,7 @@ const sidebars = {
         'guide/memory-and-rag',
         'guide/memory-best-path',
         'guide/time-travel-and-replay',
+        'guide/running-work',
         'guide/security-and-safety',
         'guide/commitment-layer',
         'guide/task-ledger',

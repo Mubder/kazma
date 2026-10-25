@@ -23,6 +23,11 @@ So a turn is reported only when all three hold:
 * it is not parked on a HITL approval, which is a legitimate open turn with
   its own timeout watchdog.
 
+Telling the owner is the run supervisor's (``kazma_core.runs``, 2026-10-25):
+the chat-turn adapter reports the same turn as "abandoned" and its incident
+card carries a Close button. This module keeps the log line and the opt-in
+heal.
+
 Healing is deliberately separate from reporting and off by default. Closing an
 abandoned turn unsticks the page, but a close is what the bug did wrong, and a
 watchdog that guesses can do the same damage the join was added to prevent.
@@ -163,23 +168,11 @@ def check_once(*, now: float | None = None) -> list[dict[str, Any]]:
             "turn=%s idle=%.0fs",
             thread_id[:12], str(turn_id)[:12], idle_for,
         )
-        try:
-            from kazma_core.observability.ops_alerts import alert
-
-            alert(
-                "turn.stuck_open",
-                "A chat turn is stuck open with nothing working on it.",
-                (
-                    f"thread={thread_id[:12]} turn={str(turn_id)[:12]} "
-                    f"idle={idle_for:.0f}s. The page will show this turn as "
-                    "still running and never present a reply. No task is "
-                    "registered for the thread and it is not waiting on an "
-                    "approval."
-                ),
-                severity="error",
-            )
-        except Exception:
-            logger.debug("[turn-liveness] alert failed", exc_info=True)
+        # The owner is told by the run supervisor (kazma_core.runs): the
+        # chat-turn adapter reports this turn as "abandoned", and its incident
+        # card offers Close -- the heal below, decided by a person. This
+        # watchdog paged ``turn.stuck_open`` itself until 2026-10-25: text
+        # with nothing to press.
 
         if _healing_enabled():
             try:

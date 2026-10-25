@@ -196,6 +196,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "disposable Postgres named on its command line; an install's .env would "
         "aim them at that install's databases"
     ),
+    "scripts/run_supervision_soak.py": (
+        "soaks the run supervisor on a private temporary incident store and a fake "
+        "world of runs; an install's .env would aim its writes and alerts at that install"
+    ),
     "scripts/scheduled_soak.py": (
         "soaks the cron scheduler on a private temporary cron.db and a fake clock; an "
         "install's .env would point thousands of bookings at its schedule and chats"

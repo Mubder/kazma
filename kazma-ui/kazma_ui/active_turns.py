@@ -34,6 +34,7 @@ __all__ = [
     "reap_stale_turn",
     "register_turn",
     "running_turn_count",
+    "running_turns",
     "unregister_turn",
     "active_turns",
 ]
@@ -51,6 +52,9 @@ _turns: dict[str, Any] = {}
 # thread_id → monotonic timestamp of the first detected client disconnect.
 # Side dict so ``active_turns`` and every task-based accessor stay untouched.
 _orphaned_at: dict[str, float] = {}
+# thread_id -> wall-clock time its running segment was registered (the run
+# supervisor's "started", kazma_core.runs).
+_started_at: dict[str, float] = {}
 _lock = threading.RLock()
 
 logger = logging.getLogger(__name__)
@@ -81,6 +85,7 @@ def register_turn(thread_id: str, task: Any) -> None:
     with _lock:
         _turns[thread_id] = task
         _orphaned_at.pop(thread_id, None)
+        _started_at[thread_id] = time.time()
 
 
 def unregister_turn(thread_id: str, task: Any = None) -> None:
@@ -96,6 +101,7 @@ def unregister_turn(thread_id: str, task: Any = None) -> None:
         if task is None or _turns.get(thread_id) is task:
             _turns.pop(thread_id, None)
             _orphaned_at.pop(thread_id, None)
+            _started_at.pop(thread_id, None)
 
 
 def clear_orphan_stamp(thread_id: str) -> None:
@@ -231,6 +237,21 @@ def reset_active_turns() -> None:
     with _lock:
         _turns.clear()
         _orphaned_at.clear()
+        _started_at.clear()
+
+
+def running_turns() -> dict[str, float]:
+    """``thread_id -> started`` (epoch) of every turn still running, on every
+    transport -- the run supervisor's view of chat turns."""
+    with _lock:
+        items = [(tid, task, _started_at.get(tid)) for tid, task in _turns.items()]
+    out: dict[str, float] = {}
+    for tid, task, started in items:
+        done = getattr(task, "done", None)
+        if callable(done) and done():
+            continue
+        out[tid] = started or time.time()
+    return out
 
 
 def get_active_turn(thread_id: str) -> Any | None:

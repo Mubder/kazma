@@ -334,6 +334,29 @@ saved as its reply.
 > (`agent_handler/graph.py`), not the gateway slash resolver — they need live
 > access to the running turn's checkpoint state.
 
+### `/runs` {#runs}
+
+Running work: every chat turn, swarm task, scheduled job, document job,
+research session, crawl, X post, memory task and maintenance sweep Kazma is
+running or ran in the last day. What needs attention comes first: work that
+stalled (no progress past its budget), got stuck (nothing is running it
+anymore) or failed. See [Running work](../guide/running-work.md).
+
+| Command | What it does |
+|:---|:---|
+| `/runs` | What needs attention, then what is running |
+| `/runs all` | The same, with what finished in the last day |
+| `/runs show <id>` | One run (or the run of an incident `inc_…`): its state, last progress, failure reason and the actions it offers |
+| `/runs act <incident> <action>` | Act on an incident: `cancel`, `retry`, `retry_checked`, `close`, `dismiss` or `diagnose`. Admin-only, like the other commands that change Kazma for everyone |
+
+When work stalls, gets stuck or fails, Kazma sends a card to the chat it
+started from, with one button per action; a button press is `/runs act`. The
+first decision wins on every surface: a second press, here or on the
+Dashboard, is told what was decided and by whom. A run whose effects outside
+Kazma are unknown offers only `retry_checked` ("I checked its effects").
+`/runs` in the web chat answers in the page's language and links the
+Dashboard's Running work card, where the buttons are.
+
 ### `/long` — budget/mission mode & the Partial protocol
 
 `/long on` (soft Research budget — may end **Partial**), `/long mission`
@@ -583,6 +606,7 @@ Lists all available commands grouped by category.
 • `/steer! <text>` — Pause the task, inject a requirement, then resume
 • `/abort` or `/stop` — Stop and abandon the running task (won't continue unless re-asked)
 • `/hitl approve` · `/hitl deny` — Answer a pending approval (`/hitl approve_task` — every approval of this task)
+• `/runs` — Running work: what is stalled, failed or waiting for you (`/runs all`, `/runs show <id>`, `/runs act <incident> <action>`)
 
 ⚡ *Capacity & YOLO*
 • `/long on` · `/long mission` (`/mission`) — raise tool-round budget (HITL stays on)

@@ -634,6 +634,22 @@ class DocumentJobRepository:
             ).fetchone()
         return _job(row) if row is not None else None
 
+    def recent_jobs(self, *, since: str, limit: int = 200) -> list[DocumentJobRecord]:
+        """Every unfinished job, and the finished ones updated since *since*
+        (ISO), newest first, at most *limit* -- for the run supervisor's
+        read model (``kazma_core.runs``). Read-only, every tenant."""
+        terminal = ",".join(f"'{s}'" for s in _TERMINAL_STATE_VALUES)
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT * FROM document_jobs
+                WHERE state NOT IN ({terminal}) OR updated_at >= ?
+                ORDER BY updated_at DESC LIMIT ?
+                """,
+                (since, max(1, min(int(limit), 1000))),
+            ).fetchall()
+        return [_job(row) for row in rows]
+
     def interrupted_intake_jobs(
         self, *, tenant_id: str | None = None
     ) -> list[DocumentJobRecord]:

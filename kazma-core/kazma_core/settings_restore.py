@@ -198,6 +198,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("connectors.", SETTING, "chat apps and integrations (their keys follow the key rule)"),
     KeyRule("context.", SETTING, "how much of a chat the model is given"),
     KeyRule("cron.timezone", SETTING, "the reminders' time zone"),
+    KeyRule("runs.runbooks", SETTING, "which automatic first steps the run supervisor may take "
+            "on a stuck or failed run (all off by default)"),
     KeyRule("cron.catchup_minutes", SETTING, "how late a scheduled job may still run after downtime"),
     KeyRule("cron.task_budget_seconds", SETTING, "how long a fired scheduled task may run"),
     KeyRule("cron.max_jobs_per_tenant", SETTING, "how many scheduled jobs an install may hold"),

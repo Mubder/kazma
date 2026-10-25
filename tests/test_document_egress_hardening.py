@@ -32,7 +32,7 @@ def test_concurrent_egress_retains_all_identity_and_phase(tmp_path, monkeypatch,
     second = _svc(tmp_path / 'two') if separate_services else first
     a, b = _job(first, 'tenant-a', 'alice'), _job(second, 'tenant-b', 'bob')
     barrier = threading.Barrier(2)
-    def parse(job, *, force_ocr):
+    def parse(job, *, force_ocr, context=None):
         barrier.wait(timeout=3)
         salvage._record_egress('mock-no-upload', tmp_path, 21)
         barrier.wait(timeout=3)
@@ -69,7 +69,7 @@ def test_required_audit_failure_refuses_upload(tmp_path, monkeypatch):
     get_config_store().set('documents.security.remote_parse', True, category='documents')
     uploaded = []
     monkeypatch.setattr(salvage, '_llamaparse', lambda *a: uploaded.append(True) or '')
-    def parse(job, *, force_ocr):
+    def parse(job, *, force_ocr, context=None):
         # Native connection failure exercises DocumentAuditStore.required,
         # rather than merely replacing the whole store with a raising mock.
         svc.repository.close()
@@ -121,7 +121,7 @@ def test_live_revocation_overrides_existing_service_snapshot(tmp_path, monkeypat
     uploaded = []
     monkeypatch.setattr(salvage, '_llamaparse', lambda *a: uploaded.append(True) or '')
     store.set('documents.security.remote_parse', False, category='documents')
-    def parse(job, *, force_ocr):
+    def parse(job, *, force_ocr, context=None):
         assert svc.config.security_remote_parse  # the original stale boundary
         assert salvage.try_remote_parse(path, _ir('', 0)) is None
     monkeypatch.setattr(svc, '_parse_to_manifest_impl', parse)

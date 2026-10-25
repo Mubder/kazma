@@ -1,6 +1,9 @@
 # Interactive run supervision
 
-Status: PROPOSED -- 2026-10-24. No code yet. Owner decisions are listed in "Open decisions".
+Status: IMPLEMENTED -- 2026-10-25, all five phases. Proposed 2026-10-24.
+What was built, the decisions taken and where the code differs from this plan
+are in "Implementation record" at the end; the sections in between are the
+plan as written.
 
 ## Objective
 
@@ -285,7 +288,7 @@ Deliverables and gates:
   Held by a harness test with planted misses as negative controls.
 - Measured time to detect and false-page rate, recorded in this plan.
 
-## Open decisions (owner)
+## Open decisions (owner, taken 2026-10-25 with the plan's proposals)
 
 1. Default stall budgets per kind. Proposal: chat turn 10 min, swarm task 5
    min without an event, research and crawl 3 min (today's), document job 10
@@ -311,3 +314,93 @@ Deliverables and gates:
 - Multi-user installs: refused (D1).
 - Runs of another install sharing the database.
 - MCP servers' own work outside a tool call.
+
+## Implementation record (2026-10-25)
+
+All five phases are implemented, each with its gates and their negative
+controls. Code: `kazma_core/runs/` (contract, kinds, registry, progress,
+supervisor, incidents, notify, decide, runbooks, diagnose, text, one adapter
+per kind under `adapters/`), `kazma_ui/runs_chat_turn.py`,
+`kazma_ui/runs_api.py`, `kazma_ui/turn_abort.py`,
+`kazma_ui/swarm_panel/task_actions.py`, `kazma_ui/sse_chat/_runs.py`,
+`kazma_ui/static/js/runs_panel.js`, `kazma_gateway/run_cards.py`,
+`kazma_gateway/agent_handler/runs_command.py`,
+`kazma_core/agent/tool_builtins/runs.py`. Guide:
+`docs/docs/guide/running-work.md`; AGENTS.md §52.
+
+### Gates, by phase
+
+| Phase | Gate | What it holds |
+|:---|:---|:---|
+| 0 | `tests/test_run_kinds_declared.py` | Every product table with a status column is a kind's or in `NOT_RUNS`; every native status is mapped, read from the kind's own source; planted table, word and missing mapping caught |
+| 1 | `tests/test_run_adapters.py` | Each kind seeded in its real store, every state compared with an independent table; a wrong mapping caught; one unreadable kind hides nothing |
+| 1 | the existing GET route walk, route inventory, loop-stall, translation, count and page-tour gates | `/api/runs` off the loop; every route called; every word from the catalog, both languages |
+| 2 | `tests/test_run_supervisor.py` | Budget plus one tick opens one incident; waiting on a human never; two runs, two messages (per-condition key as the control); recovery said once; announced and pre-start failures quiet; decided not reopened; no kind read, nothing resolved; own outage paged after five minutes (page-at-once as the control) |
+| 3 | `tests/test_run_decisions.py` | First decision wins and the second is told; a double press acts once; a run that moved on does nothing; unknown effects offer only the checked retry; every action of every kind reaches its page's control (an adapter wired elsewhere as the control); no runs code touches the approval registry; button routing, labels and admin rule on all three chat apps; the web API |
+| 4 | `tests/test_run_runbooks.py` | All off by default; one step per lineage a day; never on unknown effects or through the checked retry (planted entries as controls); the diagnosis is read-only, fenced, one at a time, decides nothing |
+| 5 | `tests/test_run_incident_crash.py` | A real child killed after commit, while sending (before and after the platform took it) and while acting; sending before committing as the control |
+| 5 | `tests/test_run_supervision_soak_harness.py`, `scripts/run_supervision_soak.py` | A short soak is clean; a double send, unreported runs and an action outside the claim are each caught |
+| all | `tests/e2e/test_runs_panel.py` | The Dashboard card in English and Arabic, reached by the sidebar: a real dead letter, Retry through the Memory page's control, the history, the bell link |
+
+### Decisions taken
+
+1. Budgets as proposed: chat turn 10 min, swarm task 10 min (its own
+   deadline usually ends it first), research and crawls 3 min, document job
+   10 min; owners gone 2 min (a chat turn 10, the liveness watchdog's grace).
+2. No Snooze: one message per run and condition already, so Snooze had
+   nothing to hold back. **Dismiss** takes its place: the run is left alone and
+   the same failure is not reported again.
+3. Every runbook is off until the owner switches it on (the Dashboard's
+   Running work card, setting `runs.runbooks`).
+4. Background work with no chat (a memory task, a maintenance sweep) goes to
+   the ops channels.
+
+### Where the code differs from the plan, and why
+
+- **Incidents are their own store, not gate rows.** The plan recommended a
+  `run_incident` mechanism in the approval registry. A gate row there keeps a
+  chat turn open (`close_turn` and the pending-approvals readers), the risk the
+  plan named. `run_incidents.db` gives the same first-decision-wins rule by
+  compare-and-set, and a gate holds the runs code off the approval registry.
+- **A card's outcome on other cards.** A card is sent to one chat. When the
+  owner decides on the Dashboard, that chat's card keeps its buttons; pressing
+  one answers with what was decided, by whom and where, and Telegram removes
+  the keyboard at the press. The Dashboard always reads the current state.
+- **Conditions already announced send no second message**:
+  scheduled-job failures (their alert outbox), research and crawl stalls and
+  outcomes (the acquisition monitor), X post failures (their notices) and
+  memory dead letters. Their incidents are recorded, with buttons on the
+  Dashboard and in `/runs`. The acquisition monitor keeps its own stall
+  detection; the turn-liveness watchdog's page was retired.
+- **`/api/runs` is not inside `read_only_diagnostic`.** Reading research
+  sessions reconciles dead owners the way the Research page does.
+- **The diagnosis graph has no checkpoint**, like a scheduled task's fire, so
+  the turn-note rules (§43) do not apply: there is no history to stack in.
+- **The crash matrix covers the incident pipeline**, which every kind shares.
+  Each kind's own crash behaviour is its audit's.
+- **Failures from before the supervisor started** (more than 15 minutes before
+  this process began watching) are recorded quietly: a restart is not a
+  reason to page about yesterday.
+
+### Soak
+
+`scripts/run_supervision_soak.py --cycles 3000 --runs 80`, on the development
+machine, 2026-10-25 (each run 25 simulated hours, 30-second ticks):
+
+| Seed | Runs | Incidents | Cards sent | Owner decisions | Refused sends | Restarts | Wall time | Violations |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+| 1 | 977 | 595 | 595 | 524 | 36 | 51 | 33 s | none |
+| 2 | 1,025 | 539 | 539 | 494 | 31 | 56 | 35 s | none |
+| 3 | 1,017 | 616 | 616 | 556 | 27 | 74 | 39 s | none |
+
+Every incident's card was sent once. The few incidents marked "uncertain"
+(5, 2 and 3) are ops-channel fallbacks whose delivery a simulated restart
+caught in flight: recorded as such, never resent. The first long soak found a
+real cost, fixed before these runs: every pass opened a write transaction for
+each failed run of the last day, even with its incident already known; a pass
+now reads the known incidents once and writes only for a new one or a change.
+
+### Not done here
+
+- Live verification after the deploy: the supervisor's start line, the
+  Dashboard card, and a real incident on the live install.

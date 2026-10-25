@@ -202,8 +202,11 @@ def _persist_attachment(attachment: Attachment) -> str:
 def _scanned_note(total: int, scanned: tuple[int, ...]) -> str:
     """What the model is told about pages that have no text layer."""
 
+    from kazma_core.english_count import count_noun
+
     which = "This is a scanned document" if len(scanned) == total else "Some pages are scanned"
-    count = f"{len(scanned)} of {total} pages" if len(scanned) != total else f"all {total} pages"
+    pages = count_noun(total, "page")
+    count = f"{len(scanned)} of {pages}" if len(scanned) != total else f"all {pages}"
     return (
         f"{which}: {count} have no text layer, so their text needs OCR "
         f"(about 15-45 s a page). ocr_document reads a few pages per call; "

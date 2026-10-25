@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Kazma watches every task it runs and asks you when one stalls or fails (2026-10-25)
+
+- **One view of running work.** A run registry reads every kind of work from
+  its own store, without writing it: chat turns, swarm tasks, scheduled jobs,
+  document jobs, research sessions, crawls and research pipelines, X posts,
+  memory tasks and maintenance sweeps. It is on the Dashboard (the Running
+  work card), in `/runs` in every chat, and in the agent's read tools
+  `list_runs` and `run_status`.
+- **Stuck is judged by progress.** A run is stalled when its owner is alive
+  but nothing meaningful changed within its kind's budget, stuck when its
+  owner is gone, failed when its store says so. Work waiting for you is never
+  stalled. Every 30 seconds the run supervisor opens an incident for each, and
+  says once when a stalled run moves again.
+- **Incidents come with buttons.** The card goes to the chat the work started
+  from (Telegram, Discord, Slack), else to the ops channels, and into the
+  bell: Cancel, Retry, Retry after checking its effects (the only retry when
+  its effects are unknown), Close the turn, Dismiss, Ask Kazma to diagnose. A
+  button acts through the same control the work's own page uses. The first
+  decision wins on every surface; a second press is told who decided what.
+  Acting is admin-only. A restart never sends a card twice and never repeats
+  an action.
+- **Automatic first steps, off until you switch them on**: retry a failed
+  swarm task that changed nothing outside Kazma, a document job or memory task
+  out of attempts, or close an abandoned chat turn. At most one step per piece
+  of work a day, never on unknown effects.
+- The turn-liveness watchdog no longer sends its own text page; the
+  abandoned turn's incident card offers Close. Plan and gates:
+  `docs/plans/RUN_SUPERVISION_PLAN.md`; guide: `docs/docs/guide/running-work.md`.
+
 ## Kazma downloads an X post's video and sends it (2026-10-24)
 
 - **"Download this X video and send it here" works.** Live on Telegram the
