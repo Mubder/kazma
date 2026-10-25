@@ -10,6 +10,7 @@ and stopped mid-word at the ordinary alert's 600 characters.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 
 from kazma_core.observability import ops_alerts
@@ -81,3 +82,63 @@ def test_an_ordinary_alert_is_still_cut_at_its_default():
     long = "x" * 2000
     assert "x" * 601 not in ops_alerts._format("info", "t", long, 0, 0)
     assert "x" * 2000 in ops_alerts._format("info", "t", long, 0, 0, 3500)
+
+
+# ── A decided failure no longer needs attention ─────────────────────────────
+# Same live test: after the owner retried the first failure and dismissed the
+# second, ``/runs`` still said "2 need attention".
+
+
+def _second_failure() -> Run:
+    return dataclasses.replace(_failed_swarm_task(), run_id="swarm_task:task-87236a49",
+                               native_id="task-87236a49", version="1:timeout")
+
+
+def test_a_retried_or_dismissed_failure_leaves_need_attention(tmp_path, monkeypatch):
+    from kazma_core.runs import registry
+    from kazma_core.runs.incidents import IncidentStore, get_incident_store, reset_incident_store
+
+    first = dataclasses.replace(_failed_swarm_task(), version="1:timeout")
+    second = _second_failure()
+    reset_incident_store(IncidentStore(tmp_path / "inc.db"))
+    try:
+        store = get_incident_store()
+        a, _ = store.open_incident(first, "failed", origin={})
+        b, _ = store.open_incident(second, "failed", origin={})
+        store.claim_decision(a["id"], "retry", actor="telegram:1", platform="telegram")
+        store.finish_decision(a["id"], ok=True, code="retried", message="Retrying")
+        store.claim_decision(b["id"], "dismiss", actor="telegram:1", platform="telegram")
+
+        async def both(kind, now, window_s):
+            return [first, second] if kind == "swarm_task" else []
+
+        monkeypatch.setattr(registry, "_kind_runs", both)
+        listing = asyncio.run(registry.list_runs())
+        text = format_listing(listing.runs, listing.errors)
+        assert "nothing needs attention" in text
+        assert "swarm_task:task-87236a49" in format_listing(listing.runs, listing.errors, include_finished=True)
+
+        # Negative control: the listing without the decisions, as it was.
+        old = asyncio.run(registry.list_runs(mark_handled=False))
+        assert "2 need attention" in format_listing(old.runs, old.errors)
+    finally:
+        reset_incident_store()
+
+
+def test_a_failure_whose_incident_is_still_open_needs_attention(tmp_path, monkeypatch):
+    from kazma_core.runs import registry
+    from kazma_core.runs.incidents import IncidentStore, get_incident_store, reset_incident_store
+
+    run = dataclasses.replace(_failed_swarm_task(), version="1:timeout")
+    reset_incident_store(IncidentStore(tmp_path / "inc.db"))
+    try:
+        get_incident_store().open_incident(run, "failed", origin={})
+
+        async def one(kind, now, window_s):
+            return [run] if kind == "swarm_task" else []
+
+        monkeypatch.setattr(registry, "_kind_runs", one)
+        listing = asyncio.run(registry.list_runs())
+        assert "1 need attention" in format_listing(listing.runs, listing.errors)
+    finally:
+        reset_incident_store()

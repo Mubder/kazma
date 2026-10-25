@@ -117,6 +117,9 @@ class Run:
     #: itself. Empty: the run id.
     lineage: str = ""
     verdict: Verdict | None = None
+    #: The owner already decided about this run as it is now (an incident
+    #: about it was acted on, dismissed or closed): it no longer needs them.
+    handled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

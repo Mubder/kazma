@@ -105,7 +105,7 @@ async def tick(*, now: float | None = None) -> dict[str, int]:
     if _watch_started is None:
         _watch_started = stamp
     store = get_incident_store()
-    listing = await list_runs(now=stamp)
+    listing = await list_runs(now=stamp, mark_handled=False)
     live = await asyncio.to_thread(store.live)
     decided = await asyncio.to_thread(store.decided_keys)
     live_by_key = {(row["run_id"], row["condition"]): row for row in live}
