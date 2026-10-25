@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import dataclasses
 import logging
+import sqlite3
 import time
 from typing import Any, Protocol
 
@@ -94,10 +96,15 @@ async def _kind_runs(kind: str, now: float, window_s: float) -> list[Run]:
 
 async def list_runs(
     *, kinds: tuple[str, ...] | None = None, now: float | None = None,
-    window_s: float = FINISHED_WINDOW_S,
+    window_s: float = FINISHED_WINDOW_S, mark_handled: bool = True,
 ) -> _RunListing:
     """Every run of *kinds* (all by default): the active ones and those that
-    finished within *window_s*, newest first, each judged."""
+    finished within *window_s*, newest first, each judged.
+
+    With *mark_handled*, a run the owner already decided about (an incident
+    about it, at its current version, acted on, dismissed or closed) is
+    marked ``handled``: it no longer needs attention. The supervisor reads
+    the decisions itself and passes False."""
     stamp = time.time() if now is None else now
     wanted = [k for k in (kinds or tuple(KINDS)) if k in KINDS]
     results = await asyncio.gather(*(_kind_runs(k, stamp, window_s) for k in wanted),
@@ -115,7 +122,27 @@ async def list_runs(
             continue
         runs.extend(result)
     runs.sort(key=lambda r: (r.ended_at is None, r.progress_at or r.started_at or 0.0), reverse=True)
+    if mark_handled and runs:
+        runs = await _mark_handled(runs)
     return _RunListing(runs, errors)
+
+
+def _decided_keys() -> set[tuple[str, str, str]]:
+    from kazma_core.runs.incidents import get_incident_store
+
+    return get_incident_store().decided_keys()
+
+
+async def _mark_handled(runs: list[Run]) -> list[Run]:
+    """*runs*, each decided about at its current version marked ``handled``."""
+    try:
+        decided = await asyncio.to_thread(_decided_keys)
+    except (sqlite3.Error, OSError) as exc:
+        # Unread decisions leave every failure listed: never the other way.
+        logger.warning("[runs] decisions could not be read; every failure stays listed: %s", exc)
+        return runs
+    done = {(run_id, version) for run_id, _condition, version in decided}
+    return [dataclasses.replace(r, handled=True) if (r.run_id, r.version) in done else r for r in runs]
 
 
 async def get_run(run_id: str, *, now: float | None = None) -> Run | None:

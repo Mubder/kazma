@@ -82,8 +82,10 @@ def action_word(action: str, lang: str = "en") -> str:
 
 
 def attention(run: Run) -> bool:
-    """Whether the run needs the owner: stalled, stuck, failed or unknown."""
-    return run.state in (RunState.STALLED, RunState.FAILED, RunState.UNKNOWN)
+    """Whether the run needs the owner: stalled, stuck, failed or unknown,
+    and not already decided about (a retried or dismissed failure stays
+    listed under ``/runs all``)."""
+    return run.state in (RunState.STALLED, RunState.FAILED, RunState.UNKNOWN) and not run.handled
 
 
 def _line(run: Run, now: float, lang: str) -> str:
