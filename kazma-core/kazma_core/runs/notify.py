@@ -151,8 +151,19 @@ async def deliver(row: dict[str, Any]) -> str:
 # A follow-up's body on the ops channels: under Telegram's 4,096 with the card around it.
 _FOLLOW_UP_MAX = 3500
 
-async def _send_text(row: dict[str, Any], text: str, key: str) -> None:
-    """A follow-up (recovery, diagnosis) to where the incident went; best effort."""
+def _ids(row: dict[str, Any], *, code: bool) -> tuple[str, str]:
+    """The run and incident ids: code spans in a chat (Markdown reads ``_`` as
+    italics, live 2026-10-25), plain on the ops channels (escaped there)."""
+    if code:
+        return f"`{row['run_id']}`", f"`{row['id']}`"
+    return str(row["run_id"]), str(row["id"])
+
+
+async def _send_text(row: dict[str, Any], text: Any, key: str) -> None:
+    """A follow-up (recovery, diagnosis) to where the incident went; best effort.
+
+    *text* is called with ``code=True`` for a chat and ``code=False`` for the
+    ops channels."""
     origin = row.get("origin") or {}
     platform = str(origin.get("platform") or "")
     target = str(origin.get("target") or "")
@@ -160,7 +171,7 @@ async def _send_text(row: dict[str, Any], text: str, key: str) -> None:
         from kazma_core.tools.send_message import send_failed
 
         try:
-            result = await _send(target, text, backend=platform)
+            result = await _send(target, text(code=True), backend=platform)
         except (RuntimeError, OSError, ValueError) as exc:
             result = f"Error: {exc}"
         if not send_failed(result):
@@ -170,7 +181,7 @@ async def _send_text(row: dict[str, Any], text: str, key: str) -> None:
 
     # The first line is the title; the rest is the body, whole (a diagnosis
     # runs past the ordinary alert's 600 characters).
-    title, _, body = text.partition("\n")
+    title, _, body = text(code=False).partition("\n")
     alert(f"runs.{key}.{row['id']}", title, body.strip(), severity="info", cooldown_s=0,
           max_detail=_FOLLOW_UP_MAX)
 
@@ -178,13 +189,20 @@ async def _send_text(row: dict[str, Any], text: str, key: str) -> None:
 async def send_recovery(row: dict[str, Any], *, finished: bool) -> None:
     """One note when a stalled or stuck run moves again (or finishes)."""
     what = "finished" if finished else "is making progress again"
-    await _send_text(row, f"✅ {_label(row['kind'])} {what}: “{row.get('title', '')}” "
-                          f"(incident {row['id']} closed by itself).", "recovered")
+
+    def text(*, code: bool) -> str:
+        _run, incident = _ids(row, code=code)
+        return (f"✅ {_label(row['kind'])} {what}: “{row.get('title', '')}” "
+                f"(incident {incident} closed by itself).")
+    await _send_text(row, text, "recovered")
 
 
 async def send_diagnosis(row: dict[str, Any], text: str) -> None:
     """The diagnosis, to where the incident went."""
-    await _send_text(row, f"🔎 Diagnosis of {row['run_id']} (incident {row['id']}):\n{text}", "diagnosis")
+    def message(*, code: bool) -> str:
+        run, incident = _ids(row, code=code)
+        return f"🔎 Diagnosis of {run} (incident {incident}):\n{text}"
+    await _send_text(row, message, "diagnosis")
 
 
 def bell_alerts(language: str = "en") -> list[dict[str, Any]]:

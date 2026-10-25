@@ -16,9 +16,24 @@ from typing import Any
 
 from kazma_gateway.adapters.callback_store import encode_callback_data
 
-__all__ = ["apply_run_card_markup"]
+__all__ = ["apply_run_card_markup", "press_keeps_buttons"]
 
 _DANGER = frozenset({"cancel", "close"})
+
+#: Actions that decide nothing: the incident stays open, so the card keeps its
+#: buttons after one of them is pressed (live 2026-10-25: Diagnose took Retry
+#: and Dismiss off the Telegram card with it).
+_KEEPS_CARD = frozenset({"diagnose"})
+
+
+def press_keeps_buttons(action: Any) -> bool:
+    """Whether a pressed button (a parsed ``CallbackAction``) leaves the card's
+    buttons in place: a run card's ``/runs act <incident> <action>`` whose
+    action decides nothing."""
+    if getattr(action, "kind", "") != "run":
+        return False
+    words = str(getattr(action, "text", "") or "").split()
+    return len(words) == 4 and words[:2] == ["/runs", "act"] and words[3] in _KEEPS_CARD
 
 
 def _run_callback(action: str, incident_id: str) -> str:

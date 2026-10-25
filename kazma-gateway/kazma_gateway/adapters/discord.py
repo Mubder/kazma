@@ -728,6 +728,12 @@ class DiscordAdapter(BaseAdapter):
             old_content = data.get("message", {}).get("content", "")
             if private_component:
                 return  # Already acknowledged before enqueueing.
+            from kazma_gateway.run_cards import press_keeps_buttons
+
+            if press_keeps_buttons(action):
+                # A run card's Diagnose decides nothing: leave the card as it is.
+                await _ack({"type": 6})
+                return
             await _ack({"type": 7, "data": {"content": old_content, "components": []}})
             return
 
