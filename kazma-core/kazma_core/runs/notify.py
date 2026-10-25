@@ -66,7 +66,12 @@ def _card_text(row: dict[str, Any], *, now: float | None = None, with_commands: 
     if row.get("decided_action") and row.get("decided_platform") == "runbook":
         outcome = f" Outcome: {row['outcome_message']}" if row.get("outcome_message") else ""
         lines.append(f"Kazma already did its automatic first step: {action_word(row['decided_action'])}.{outcome}")
-    lines.append(f"Run {row['run_id']} · incident {row['id']}")
+    if with_commands:
+        # The ops card is escaped for Telegram's MarkdownV2: ids stay as they are.
+        lines.append(f"Run {row['run_id']} · incident {row['id']}")
+    else:
+        # A chat card is Markdown: ``_`` would turn into italics.
+        lines.append(f"Run `{row['run_id']}` · incident `{row['id']}`")
     if with_commands and row.get("state") == "open":
         offered = ", ".join(row.get("actions") or [])
         lines.append(f"Act on it: /runs act {row['id']} <action> ({offered}), or on the Dashboard.")
@@ -143,6 +148,9 @@ async def deliver(row: dict[str, Any]) -> str:
     return "sending"
 
 
+# A follow-up's body on the ops channels: under Telegram's 4,096 with the card around it.
+_FOLLOW_UP_MAX = 3500
+
 async def _send_text(row: dict[str, Any], text: str, key: str) -> None:
     """A follow-up (recovery, diagnosis) to where the incident went; best effort."""
     origin = row.get("origin") or {}
@@ -160,7 +168,11 @@ async def _send_text(row: dict[str, Any], text: str, key: str) -> None:
         logger.warning("[runs] %s for %s not taken by %s: %s", key, row["id"], platform, str(result)[:200])
     from kazma_core.observability.ops_alerts import alert
 
-    alert(f"runs.{key}.{row['id']}", text.split("\n", 1)[0], text, severity="info", cooldown_s=0)
+    # The first line is the title; the rest is the body, whole (a diagnosis
+    # runs past the ordinary alert's 600 characters).
+    title, _, body = text.partition("\n")
+    alert(f"runs.{key}.{row['id']}", title, body.strip(), severity="info", cooldown_s=0,
+          max_detail=_FOLLOW_UP_MAX)
 
 
 async def send_recovery(row: dict[str, Any], *, finished: bool) -> None:
