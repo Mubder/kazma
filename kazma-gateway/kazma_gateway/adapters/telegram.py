@@ -1414,7 +1414,10 @@ class TelegramAdapter(BaseAdapter):
         self._spawn(self._answer_callback_query(cb_id, alert_text))
 
         # Immediately deactivate the inline keyboard to prevent double-click or stale interaction
-        if action.kind in ("hitl", "run"):
+        # (not after a run card's Diagnose: it decides nothing, the card stays answerable).
+        from kazma_gateway.run_cards import press_keeps_buttons
+
+        if action.kind in ("hitl", "run") and not press_keeps_buttons(action):
             chat_id = message.get("chat", {}).get("id")
             message_id = message.get("message_id")
             if chat_id and message_id:

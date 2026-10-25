@@ -153,3 +153,22 @@ def test_runs_all_heads_the_finished_and_names_what_was_dealt_with():
     assert "dealt with" in text
     assert "/runs all" not in text
     assert "/runs all" in format_listing([handled], {})
+
+
+def test_a_diagnosis_in_the_chat_keeps_its_ids(monkeypatch):
+    """The diagnosis sent to Telegram read "swarmtask:" and "inc51a7..."."""
+    sent: list[str] = []
+
+    async def capture(target, text, *, backend, **kwargs):
+        sent.append(text)
+        return f"sent:{target}"
+
+    monkeypatch.setattr(notify, "_send", capture)
+    row = {"id": "inc_51a752e2ab3c", "run_id": "swarm_task:task-1f65dcab",
+           "origin": {"platform": "telegram", "target": "telegram:1"}}
+    asyncio.run(notify.send_diagnosis(row, "The timeout was too short."))
+    html = md_to_tg_html(sent[0])
+    assert "swarm_task:task-1f65dcab" in html and "inc_51a752e2ab3c" in html
+    # Negative control: the old plain title.
+    old = md_to_tg_html("🔎 Diagnosis of swarm_task:task-1f65dcab (incident inc_51a752e2ab3c):")
+    assert "inc_51a752e2ab3c" not in old

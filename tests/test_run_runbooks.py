@@ -186,7 +186,7 @@ def test_a_diagnosis_runs_read_only_with_the_incident_fenced(world, incident, mo
     assert "run_status('swarm_task:t1')" in system[0]
     assert "kazma:data" in system[1] and "research" in system[1], "the run's own text is fenced"
     assert "research" not in system[0], "nothing of the run's text outside the fence"
-    assert "Diagnosis of swarm_task:t1" in world.sent[-1]["text"]
+    assert "Diagnosis of `swarm_task:t1`" in world.sent[-1]["text"]
     row = get_incident_store().get(incident["id"])
     assert row["diagnosis_state"] == "done" and row["state"] == "open", "a diagnosis decides nothing"
 
