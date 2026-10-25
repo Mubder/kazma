@@ -142,3 +142,14 @@ def test_a_failure_whose_incident_is_still_open_needs_attention(tmp_path, monkey
         assert "1 need attention" in format_listing(listing.runs, listing.errors)
     finally:
         reset_incident_store()
+
+
+def test_runs_all_heads_the_finished_and_names_what_was_dealt_with():
+    """``/runs all`` ran the finished runs straight on from "nothing needs
+    attention" and ended by suggesting ``/runs all`` again."""
+    handled = dataclasses.replace(_failed_swarm_task(), handled=True)
+    text = format_listing([handled], {}, include_finished=True)
+    assert "Finished in the last day:" in text
+    assert "dealt with" in text
+    assert "/runs all" not in text
+    assert "/runs all" in format_listing([handled], {})
