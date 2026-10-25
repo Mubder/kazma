@@ -17,7 +17,7 @@ from typing import Any
 
 from kazma_core.runs import progress
 from kazma_core.runs.adapters._common import epoch, origin_from, short_title
-from kazma_core.runs.contract import ActionResult, Run, RunState
+from kazma_core.runs.contract import ACTIVE_STATES, ActionResult, Run, RunState
 
 __all__ = ["ADAPTER"]
 
@@ -90,7 +90,8 @@ class _SwarmAdapter:
             run_id=f"swarm_task:{task.id}", kind="swarm_task", native_id=task.id,
             title=short_title(task.prompt), state=state, native_state=native,
             started_at=started, progress_at=progress_at,
-            progress_note=stamp[1] if stamp else "",
+            # The engine's last event, said as words, while the task runs.
+            progress_note=(stamp[1] or "").replace("_", " ") if stamp and state in ACTIVE_STATES else "",
             owner_alive=(owned if state == RunState.RUNNING else None),
             ended_at=epoch(task.completed_at), effects=effects,
             version=f"{task.generation}:{native}", actions=actions,

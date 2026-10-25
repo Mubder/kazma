@@ -184,10 +184,10 @@ def _should_send(key: str, cooldown_s: float) -> tuple[bool, int]:
 
 
 def _format(severity: str, title: str, detail: str, suppressed: int,
-            cooldown_s: float) -> str:
+            cooldown_s: float, max_detail: int = MAX_DETAIL_CHARS) -> str:
     from kazma_core.observability.alert_card import format_operator_card
 
-    body = (detail or "")[:MAX_DETAIL_CHARS]
+    body = (detail or "")[:max(0, min(int(max_detail), 3500))]
     if suppressed:
         mins = int(cooldown_s // 60) or 1
         note = (
@@ -636,6 +636,7 @@ def alert(
     severity: str = "warn",
     cooldown_s: float | None = None,
     on_delivery: Any = None,
+    max_detail: int = MAX_DETAIL_CHARS,
 ) -> bool:
     """Report an operational event. True means delivery was requested.
 
@@ -651,6 +652,9 @@ def alert(
         detail: Optional context. Truncated; never a raw stack trace.
         severity: info | warn | error | critical.
         cooldown_s: Override the quiet period for this key.
+        max_detail: Where ``detail`` is cut (at most 3,500, under Telegram's
+            4,096 with the card around it); a diagnosis passes more than the
+            default.
 
     Never raises. Ever. This is called from exception handlers guarding the
     very paths it reports on.
@@ -669,7 +673,7 @@ def alert(
         )
         if not send:
             return False
-        formatted = _format(severity, title, detail, suppressed, cooldown)
+        formatted = _format(severity, title, detail, suppressed, cooldown, max_detail)
         if on_delivery is None:
             _dispatch(formatted)
         else:

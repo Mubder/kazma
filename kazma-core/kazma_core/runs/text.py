@@ -93,9 +93,13 @@ def _line(run: Run, now: float, lang: str) -> str:
     last = run.progress_at or run.started_at
     if run.state == RunState.STALLED and last:
         parts.append(f"{_w(_WORDS['no_progress'], lang)} {ago(now - last, lang)}")
-    elif run.progress_note:
+    elif run.state == RunState.FAILED and run.detail:
+        # A failed run's reason, never its last step ("task_completed").
+        parts.append(run.detail)
+    elif run.progress_note and run.state in ACTIVE_STATES:
         parts.append(run.progress_note)
-    parts.append(run.run_id)
+    # In backticks: chat apps read ``_`` as italics ("swarmtask:").
+    parts.append(f"`{run.run_id}`")
     return " · ".join(parts)
 
 
@@ -130,7 +134,7 @@ def describe_run(run: Run, *, lang: str = "en", now: float | None = None,
     last = run.progress_at or run.started_at
     if last:
         lines.append(f"{_w(_WORDS['progress'], lang)}: {ago(stamp - last, lang)}")
-    if run.detail:
+    if run.detail and run.state != RunState.FAILED:  # a failed run's line holds it
         lines.append(run.detail)
     if run.effects == "unknown":
         lines.append(_w(_WORDS["effects_unknown"], lang))
