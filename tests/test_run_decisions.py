@@ -164,8 +164,8 @@ def _controls(monkeypatch) -> dict[tuple[str, str], list]:
                         rec(("research_session", "cancel"), SimpleNamespace(status="cancelling"))[1])
     monkeypatch.setattr("kazma_core.x_api.publication_service.update_schedule",
                         rec(("x_post", "cancel"), True)[1])
-    monkeypatch.setattr("kazma_core.runs.adapters.x_posts._store_and_tenant",
-                        lambda: (SimpleNamespace(get=lambda ident, tenant_id: {"version": 2}), "t"))
+    monkeypatch.setattr("kazma_core.runs.adapters.x_posts._store_and_tenants",
+                        lambda: (SimpleNamespace(get=lambda ident, tenant_id: {"version": 2}), ["t"]))
     monkeypatch.setattr("kazma_core.memory.task_queue.retry_failed_task",
                         rec(("memory_task", "retry"), True)[1])
     monkeypatch.setattr("kazma_ui.turn_abort.abort_turn", rec(("chat_turn", "cancel"), {"ok": True})[0])

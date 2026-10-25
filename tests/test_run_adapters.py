@@ -265,22 +265,56 @@ X_EXPECTED = {
 }
 
 
-def test_x_operations_are_read_from_the_publication_store(tmp_path, monkeypatch):
+def _x_store(tmp_path, states, *, tenant="t"):
     from kazma_core.x_api.publication_store import _PublicationStore
 
     store = _PublicationStore(tmp_path / "x.db")
     with store._connection(transaction=True) as conn:
-        for i, state in enumerate([*X_EXPECTED, "scheduled", "deferred"]):
+        for i, state in enumerate(states):
             conn.execute(
                 "INSERT INTO x_operations (id, tenant_id, account_id, credential_revision, idempotency_key, "
                 "payload_hash, text, text_hash, origin, state, due_at, created_at, updated_at, lease_until) "
-                "VALUES (?, 't', 'a', 'r', ?, 'h', ?, 'th', 'schedule', ?, ?, ?, ?, ?)",
-                (f"op{i}", f"k{i}", f"post {state}", state, NOW, NOW - 60, NOW - 30, NOW + 60))
-    monkeypatch.setattr("kazma_core.runs.adapters.x_posts._store_and_tenant", lambda: (store, "t"))
+                "VALUES (?, ?, 'a', 'r', ?, 'h', ?, 'th', 'schedule', ?, ?, ?, ?, ?)",
+                (f"op{i}", tenant, f"k{i}", f"post {state}", state, NOW, NOW - 60, NOW - 30, NOW + 60))
+    return store
+
+
+def test_x_operations_are_read_from_the_publication_store(tmp_path, monkeypatch):
+    store = _x_store(tmp_path, [*X_EXPECTED, "scheduled", "deferred"])
+    monkeypatch.setattr("kazma_core.runs.adapters.x_posts._store_and_tenants", lambda: (store, ["t"]))
     _check("x_post", X_EXPECTED)  # a booking waiting for its time is not a run
     runs = _by_native("x_post")
     assert runs["sending"].effects == "unknown" and runs["sending"].owner_alive is True
     assert runs["awaiting_approval"].actions == ("cancel",)
+
+
+def test_x_operations_are_read_with_no_request_tenant_in_production(tmp_path, monkeypatch):
+    """Live 2026-10-25: the supervisor runs with no request tenant, and in
+    production ``x_tenant_id()`` refuses that, so every pass failed. The
+    adapter reads the tenants holding operations, as the X workers do, and a
+    cancel runs in the operation's own tenant."""
+    from kazma_core.tenant_context import get_current_tenant_id
+    from kazma_core.x_api import ownership
+
+    store = _x_store(tmp_path, ["sending", "awaiting_approval"], tenant="default")
+    monkeypatch.setattr("kazma_core.x_api.publication_store._test_store", store)
+    monkeypatch.setenv("KAZMA_PRODUCTION", "1")
+    assert get_current_tenant_id() in (None, "")
+    with pytest.raises(PermissionError):  # the old read: the request tenant only
+        ownership.x_tenant_id()
+    assert {r.native_state for r in _listing("x_post").runs} == {"sending", "awaiting_approval"}
+
+    seen = []
+
+    def update_schedule(ident, *, expected_version, action):
+        seen.append((ident, ownership.x_tenant_id(), expected_version, action))
+        return True
+
+    monkeypatch.setattr("kazma_core.x_api.publication_service.update_schedule", update_schedule)
+    result = asyncio.run(registry.adapter_for("x_post").act("op1", "cancel", actor="owner"))
+    assert result.ok and seen == [("op1", "default", 1, "cancel")]
+    missing = asyncio.run(registry.adapter_for("x_post").act("nope", "cancel", actor="owner"))
+    assert missing.code == "not_found"
 
 
 # ── memory queue ─────────────────────────────────────────────────────────

@@ -400,7 +400,28 @@ real cost, fixed before these runs: every pass opened a write transaction for
 each failed run of the last day, even with its incident already known; a pass
 now reads the known incidents once and writes only for a new one or a change.
 
+### Live deploy (2026-10-25)
+
+The first deploy (76f61b58) started the supervisor on the live install
+("[runs] run supervisor started (every 30s)") and found two faults in its
+first minutes, both fixed in the next commit:
+
+- **Scheduled jobs:** the first pass ran before the cron store had opened
+  ("CronStore DB not initialized", once). The supervisor now starts after
+  the cron store does.
+- **X posts:** every pass failed with "X requires an authenticated tenant
+  context". The supervisor runs with no request tenant, and the production
+  install refuses one for X. The adapter now reads the tenants holding
+  operations, as the X background workers do, and a cancel runs in the
+  operation's own tenant. Gate:
+  `test_x_operations_are_read_with_no_request_tenant_in_production`, with the
+  old read's refusal as its control.
+
+No incident opened on live in that time: nothing there was stalled, stuck or
+newly failed.
+
 ### Not done here
 
-- Live verification after the deploy: the supervisor's start line, the
-  Dashboard card, and a real incident on the live install.
+- A real incident on the live install, with its card pressed in a chat app.
+  None can be made on purpose without a fault, so this waits for the first
+  real one.

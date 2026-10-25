@@ -28,6 +28,10 @@
 - The turn-liveness watchdog no longer sends its own text page; the
   abandoned turn's incident card offers Close. Plan and gates:
   `docs/plans/RUN_SUPERVISION_PLAN.md`; guide: `docs/docs/guide/running-work.md`.
+- First live run: X posts could not be read (the supervisor has no request
+  tenant, and a production install refuses one for X). It now reads the
+  tenants holding operations, as the X workers do. It also starts after the
+  scheduled-jobs store opens, which its first pass had beaten.
 
 ## Kazma downloads an X post's video and sends it (2026-10-24)
 
