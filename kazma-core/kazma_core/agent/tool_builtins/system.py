@@ -33,6 +33,23 @@ def _swarm_origin() -> dict[str, str]:
     return origin
 
 
+#: Bounds of a task's time limit the agent may ask for (``dispatch_swarm``).
+_DISPATCH_TIMEOUT_MIN_S = 5.0
+_DISPATCH_TIMEOUT_MAX_S = 1800.0
+
+
+def _dispatch_timeout(value: Any) -> float:
+    """The time limit a dispatched task runs under: the model's value, kept
+    within the bounds; a value that is not a number is the default."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return 300.0
+    if seconds != seconds:  # NaN
+        return 300.0
+    return min(max(seconds, _DISPATCH_TIMEOUT_MIN_S), _DISPATCH_TIMEOUT_MAX_S)
+
+
 def register_system_tools(registry: Any) -> None:
     """Register the system tools onto *registry*."""
 
@@ -735,7 +752,9 @@ def register_system_tools(registry: Any) -> None:
             "progress, results, cost, and traceability. Returns a task ID "
             "immediately — use check_swarm_task to retrieve the result when "
             "ready. Use this instead of spawn_agent when you want the work "
-            "to be visible and traceable in the panel."
+            "to be visible and traceable in the panel. timeout_seconds "
+            "bounds the task (default 300, from 5 to 1800): pass it when the "
+            "user asks for a time limit."
         ),
         category="swarm",
     )
@@ -743,6 +762,7 @@ def register_system_tools(registry: Any) -> None:
         prompt: str,
         worker: str = "auto",
         context: str = "",
+        timeout_seconds: float = 300.0,
     ) -> str:
         import asyncio as _asyncio
 
@@ -815,7 +835,7 @@ def register_system_tools(registry: Any) -> None:
             workers=[worker],
             type=TaskType.DISPATCH,
             context=context,
-            timeout=300.0,
+            timeout=_dispatch_timeout(timeout_seconds),
             metadata={"source": "chat", "kind": "research", **_swarm_origin()},
         )
         # Dispatch in the background so the tool returns immediately.
