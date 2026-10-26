@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Run supervision, after the first live test (2026-10-26)
+
+- **Diagnose keeps the card's buttons.** Telegram and Discord removed every
+  button on any press, so after Ask Kazma to diagnose the owner had nothing
+  left to retry or dismiss with. A press that decides the incident (Retry,
+  Cancel, Close, Dismiss) still clears them; Diagnose decides nothing and
+  leaves them (`run_cards.press_keeps_buttons`). Gate:
+  `tests/test_run_card_keeps_buttons.py`.
+- **Messages read right on Telegram.** Run and incident ids are code spans in
+  a chat (Markdown read the `_` as italics: "swarmtask:", "inc51a7..."), a
+  failed run shows its reason instead of the engine's last step, and a
+  diagnosis on the ops channels arrives whole, titled once.
+- **A decided failure no longer needs attention.** `/runs` kept counting a
+  failure the owner had already retried or dismissed; `/runs all` now lists
+  it under its own heading as dealt with.
+- **`dispatch_swarm` takes the time limit you ask for** (`timeout_seconds`,
+  5 seconds to 30 minutes, 5 minutes by default): "with a 5-second timeout"
+  had no way to reach the task. It is also the simplest way to see an
+  incident card ([Running work](docs/docs/guide/running-work.md#try-it)).
+
 ## Kazma watches every task it runs and asks you when one stalls or fails (2026-10-25)
 
 - **One view of running work.** A run registry reads every kind of work from

@@ -65,6 +65,29 @@ chat or on the Dashboard, is told what was decided, by whom and where.
 Pressing a button on work that has moved on since does nothing and says so.
 Acting is admin-only.
 
+Retry, Cancel, Close the turn and Dismiss decide the incident: on Telegram
+and Discord the card's buttons go once one is pressed (Slack keeps them, and
+a later press is told what was decided). Ask Kazma to diagnose decides
+nothing: the buttons stay on the card, and the diagnosis arrives below it, so
+you can read it and then retry or dismiss from the same card.
+
+In `/runs`, work you already decided about (retried, dismissed) no longer
+counts as needing attention; `/runs all` lists it, under what finished in the
+last day, as dealt with.
+
+## Try it
+
+To see a card without waiting for a real failure, ask Kazma in Telegram,
+Discord or Slack to run a swarm task with a time limit too short to finish:
+
+> Use the swarm to research the history of kazma.ai in depth, with a 5-second timeout.
+
+The task times out (`dispatch_swarm` takes the limit you ask for, from 5
+seconds to 30 minutes; 5 minutes when you name none), and within about 30
+seconds a card arrives in the same chat with Retry, Dismiss and Ask Kazma to
+diagnose. A retried task gets the same limit, so it fails again and sends a
+second card; dismiss it when you are done.
+
 ## Automatic first steps
 
 On the Dashboard's Running work card, under **Automatic first steps**, you can
