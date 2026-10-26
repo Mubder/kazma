@@ -771,6 +771,7 @@ class LLMProvider:
         temperature: float | None = None,
         model: str | None = None,
         response_format: dict[str, Any] | None = None,
+        reasoning: str | None = None,
     ) -> LLMResponse:
         """Send a chat completion request, wrapped in a GenAI span.
 
@@ -802,6 +803,7 @@ class LLMProvider:
                 temperature=temperature,
                 model=model,
                 response_format=response_format,
+                reasoning=reasoning,
             )
             record_chat_response(_span, response)
             return response
@@ -814,6 +816,7 @@ class LLMProvider:
         temperature: float | None = None,
         model: str | None = None,
         response_format: dict[str, Any] | None = None,
+        reasoning: str | None = None,
     ) -> LLMResponse:
         """Send a chat completion request.
 
@@ -828,6 +831,9 @@ class LLMProvider:
                 ``{"type": "json_object"}``). Never attached by the
                 supervisor loop — callers opt in per request. Unsupported
                 providers are retried once without it.
+            reasoning: ``"off"`` asks a thinking model for the answer alone,
+                where the endpoint has a switch (see
+                :meth:`can_turn_off_reasoning`); ignored elsewhere.
 
         Returns:
             LLMResponse with content, tool_calls, usage, and cost.
@@ -836,7 +842,7 @@ class LLMProvider:
         client = await self._get_client()
 
         payload = self._chat_payload(
-            messages, tools, max_tokens, temperature, model, response_format
+            messages, tools, max_tokens, temperature, model, response_format, reasoning
         )
 
         start = time.monotonic()
@@ -1111,6 +1117,27 @@ class LLMProvider:
                 response = self._parse_response(data, duration_ms)
                 return response
 
+            # ── Reasoning switch fallback ───────────────────────────────
+            # A DeepSeek model without the thinking switch may refuse the
+            # field: answer as before, with the model's own default.
+            if ("thinking" in payload and status_code in (400, 422)
+                    and "thinking" in detail_lower):
+                logger.warning(
+                    "Provider rejected the thinking switch (HTTP %s) — retrying without it.",
+                    status_code,
+                )
+                payload.pop("thinking", None)
+                try:
+                    resp = await client.post("/chat/completions", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except httpx.HTTPStatusError as retry_err:
+                    raise LLMError(
+                        f"LLM call failed (HTTP {retry_err.response.status_code})",
+                        transient=_http_status_is_transient(retry_err.response.status_code),
+                    ) from retry_err
+                return self._parse_response(data, (time.monotonic() - start) * 1000)
+
             # Try fallback model if configured
             if self.config.fallback_model:
                 logger.info("Retrying with fallback model: %s", self.config.fallback_model)
@@ -1321,6 +1348,7 @@ class LLMProvider:
         temperature: float | None,
         model: str | None,
         response_format: dict[str, Any] | None = None,
+        reasoning: str | None = None,
     ) -> dict[str, Any]:
         """Build the OpenAI-compatible request body (hoist applied)."""
         payload: dict[str, Any] = {
@@ -1336,7 +1364,30 @@ class LLMProvider:
             payload["tool_choice"] = "auto"
         if response_format:
             payload["response_format"] = response_format
+        if reasoning == "off" and self._is_deepseek_endpoint():
+            # DeepSeek thinks by default (high effort) and the reasoning
+            # counts against max_tokens: a caller that sized max_tokens for
+            # its answer got 1,800 tokens of reasoning and no answer (live,
+            # 2026-10-26). https://api-docs.deepseek.com/guides/thinking_mode/
+            payload["thinking"] = {"type": "disabled"}
         return payload
+
+    def _is_deepseek_endpoint(self) -> bool:
+        from urllib.parse import urlparse
+
+        host = (urlparse(str(self.config.base_url or "")).hostname or "").lower()
+        return host == "deepseek.com" or host.endswith(".deepseek.com")
+
+    def can_turn_off_reasoning(self) -> bool:
+        """Whether ``chat(reasoning="off")`` reaches this endpoint as a switch.
+
+        True only for DeepSeek's own API through this class's ``chat``: the
+        providers with their own ``chat`` take no such argument, and no other
+        OpenAI-compatible endpoint has a switch Kazma knows (an unknown field
+        can be refused).
+        """
+        return (type(self).chat is LLMProvider.chat and not self._via_gateway
+                and self._is_deepseek_endpoint())
 
     @staticmethod
     def _delta_text(delta: Any) -> str:

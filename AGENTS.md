@@ -399,6 +399,17 @@ any model call. For posts about Kazma itself the reference is
 `docs/docs/guide/what-is-kazma.md`. Gate: `tests/test_x_drafting_references.py`
 (brief-only drafting as the negative control).
 
+**X model calls turn hidden reasoning off** (2026-10-26). `deepseek-flash`
+thinks by default and its reasoning counts against `max_tokens`: an X check
+given 1,800 tokens got 1,800 reasoning tokens and no answer, reported as
+"invalid JSON". `x_chat` passes `reasoning="off"` when the client's
+`can_turn_off_reasoning()` is True; `LLMProvider._chat_payload` then sends
+DeepSeek's `thinking: {"type": "disabled"}` -- to DeepSeek's own API only
+(an unknown field can be refused elsewhere; providers with their own `chat`
+never get the argument). A refused switch is retried once without it. A
+verifier reply cut off at its limit is `_VerifierCutOff`, never "invalid
+JSON". Gate: `tests/test_x_reasoning_off.py`.
+
 **Danger tool list SoT (must stay one list):**
 - **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
 - **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested by
