@@ -31,6 +31,14 @@
   (`LLMResponse.output_detail`). Gate: `tests/test_x_reasoning_off.py`
   (a fake DeepSeek that thinks unless told not to; the switch removed as
   the negative control).
+- **A verifier's quote counts by its words, not its line breaks.** With
+  thinking off, the next live draft lost three checks to "Verifier evidence
+  is not an observed passage": the reference page is wrapped Markdown, and a
+  quote of a sentence that crosses a line break has a space where the file
+  has a newline and indentation (and no ** around a bold phrase). A quote is
+  observed when it is the exact text, or the same words with whitespace and
+  bold/code marks aside (`verification._passage_form`); a quote with no
+  words is never observed. Gate: `tests/test_x_drafting_references.py`.
 
 ## Run supervision, after the first live test (2026-10-26)
 

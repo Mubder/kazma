@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -16,6 +17,21 @@ from kazma_core.x_api.stance import Subject
 
 logger = logging.getLogger(__name__)
 CHECK_NAMES = ("context", "target", "stance", "evidence", "safety")
+
+
+_MARKUP = re.compile(r"[*]{2}|__|`")
+
+
+def _passage_form(text: str) -> str:
+    """A passage as it reads: whitespace runs one space, bold and code marks dropped.
+
+    A reference document is wrapped Markdown. A verifier quoting a sentence
+    that crosses a line break writes a space where the file has a newline and
+    indentation, and drops the ** around a bold phrase: the words are the
+    file's, and the exact-substring rule refused every such quote (live
+    2026-10-26, three checks of one draft).
+    """
+    return " ".join(_MARKUP.sub("", text).split())
 
 
 class _VerifierCutOff(ValueError):
@@ -72,6 +88,7 @@ def parse_checks(raw: str, names: tuple[str, ...], *, draft: str, observed: str,
         raise _CheckSchemaError("Invalid verification envelope")
     results = []
     by_id = {source["source_id"]: source for source in sources}
+    observed_form = _passage_form(observed)
     for row in payload["checks"]:
         if not isinstance(row, dict) or set(row) != {"check", "verdict", "reason", "evidence", "source_ids", "claims"}:
             raise _CheckSchemaError("Invalid check fields")
@@ -87,7 +104,8 @@ def parse_checks(raw: str, names: tuple[str, ...], *, draft: str, observed: str,
             raise _CheckSchemaError("Source IDs must be a list referencing only supplied independent sources")
         if not isinstance(row["claims"], list) or len(row["claims"]) > 12:
             raise _CheckSchemaError("Claims must be a list of at most 12 assertions")
-        if row["evidence"] and row["evidence"] not in observed:
+        quoted = _passage_form(row["evidence"])
+        if row["evidence"] and (not quoted or (row["evidence"] not in observed and quoted not in observed_form)):
             raise _CheckSchemaError("Verifier evidence is not an observed passage")
         if row["verdict"] == "pass" and not row["evidence"]:
             raise _CheckSchemaError("A passing check needs an observed passage")
