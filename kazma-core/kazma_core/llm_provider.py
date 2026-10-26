@@ -258,6 +258,18 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     cost_usd: float = 0.0
     duration_ms: float = 0.0
+    #: Characters of hidden reasoning a thinking model returned beside the
+    #: answer (DeepSeek's ``reasoning_content``). Not shown, not part of
+    #: ``content``; it counts against ``max_tokens``.
+    reasoning_chars: int = 0
+
+    def output_detail(self) -> str:
+        """What the completion's tokens went to, for a truncation warning."""
+        details = self.usage.get("completion_tokens_details") if isinstance(self.usage, dict) else None
+        reasoning = details.get("reasoning_tokens") if isinstance(details, dict) else None
+        return (f"completion_tokens={self.usage.get('completion_tokens') if isinstance(self.usage, dict) else None}, "
+                f"reasoning_tokens={reasoning}, content_chars={len(self.content)}, "
+                f"reasoning_chars={self.reasoning_chars}")
 
 
 # ── Provider ──────────────────────────────────────────────────────────
@@ -1234,8 +1246,8 @@ class LLMProvider:
             retry_cap = min(current_cap * 2, max(self.config.max_tokens * 4, 32768))
             logger.warning(
                 "[LLMProvider] Response truncated at max_tokens=%d — retrying once "
-                "with max_tokens=%d (model=%s)",
-                current_cap, retry_cap, payload.get("model"),
+                "with max_tokens=%d (model=%s; %s)",
+                current_cap, retry_cap, payload.get("model"), response.output_detail(),
             )
             try:
                 retry_resp = await client.post(
@@ -1268,8 +1280,8 @@ class LLMProvider:
                 else:
                     logger.warning(
                         "[LLMProvider] Still truncated at max_tokens=%d — returning "
-                        "truncated response; tool worker will guide chunked writes",
-                        retry_cap,
+                        "truncated response; tool worker will guide chunked writes (%s)",
+                        retry_cap, retry_response.output_detail(),
                     )
                     # Both attempts billed: fold the retry's usage into the
                     # truncated response we keep.
@@ -1706,6 +1718,7 @@ class LLMProvider:
             usage=usage,
             cost_usd=round(cost, 6),
             duration_ms=round(duration_ms, 1),
+            reasoning_chars=len(str(message.get("reasoning_content") or "")),
         )
 
     async def _retry_direct_after_gateway_fail(
