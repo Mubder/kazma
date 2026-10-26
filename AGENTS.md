@@ -4,7 +4,9 @@
 
 Kazma is a multi-platform AI agent framework with a LangGraph supervisor brain,
 swarm orchestration, cross-platform dispatch (Telegram/Discord/Slack/Web/TUI),
-and an OpenAI-compatible LLM provider layer. See `docs/docs/guide/architecture.md`
+and an OpenAI-compatible LLM provider layer. What Kazma is and can do, on one
+page (read it before describing or promoting Kazma):
+`docs/docs/guide/what-is-kazma.md`. See `docs/docs/guide/architecture.md`
 (Docusaurus docs under `docs/docs/`) for the full system architecture and
 `CHANGELOG.md` for recent work. Binding industrial audit (waves 0–8 shipped):
 `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md`. Historical production audit:

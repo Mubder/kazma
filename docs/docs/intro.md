@@ -23,6 +23,7 @@ Dated updates are in [Release notes](guide/release-notes). For an upgrade, follo
 
 | I want to… | Go to |
 |------------|--------|
+| Know what Kazma is and what it can do, on one page | [What Kazma is](guide/what-is-kazma) |
 | Install and send a first message | [Quickstart](guide/quickstart) |
 | Run the agent from the terminal (no web server) | `kazma ask "…"` · `kazma acp` (ACP stdio) — [Quickstart](guide/quickstart) |
 | Understand the engine | [Architecture](guide/architecture) |
@@ -48,7 +49,7 @@ Dated updates are in [Release notes](guide/release-notes). For an upgrade, follo
 
 ### Guide (concepts & how-to)
 
-- [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Configuration](guide/configuration)
+- [What Kazma is](guide/what-is-kazma) · [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Configuration](guide/configuration)
 - [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
 - [Native skills](guide/native-skills) · [Voice & media](guide/voice-and-media)
 - [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Memory best path](guide/memory-best-path) · [Security](guide/security-and-safety) · [Commitment Layer](guide/commitment-layer)

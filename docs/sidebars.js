@@ -8,6 +8,7 @@ const sidebars = {
       label: 'Start & Guide',
       collapsed: false,
       items: [
+        'guide/what-is-kazma',
         'guide/quickstart',
         'guide/architecture',
         'guide/configuration',
