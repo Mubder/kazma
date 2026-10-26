@@ -138,6 +138,7 @@ Every line below describes that setup.
 | Back up your settings to a file and restore them: you see what will change first, the keys you have are never replaced, a lost key comes back from the vault without typing it, and the restore can be undone | Shipped | Settings → System, [Configuration](docs/guide/configuration.md#settings-backup) |
 | Health checks that make a real round trip; alerts to Telegram, Discord or Slack; a daily digest and a weekly resilience report | Shipped | `/health/deep` |
 | Old chat step history pruned on a schedule you set | Shipped | Settings → System |
+| Every task Kazma runs is watched (chat turns, swarm tasks, scheduled jobs, documents, research and crawls, X posts, memory, maintenance): when one stalls, gets stuck or fails, a card in the chat it started from offers Retry, Cancel, Dismiss or Ask Kazma to diagnose; one optional automatic first step | Shipped | [Running work](docs/guide/running-work.md), `/runs` |
 | Postgres for settings, chats, tasks and checkpoints; SQLite with no setup | Shipped | [Postgres](docs/ops/postgres-and-saas.md) |
 | Admin answer-quality signals without storing answer text in the signal record | Shipped | [Documentation](docs/guide/api-and-extension-points.md) |
 | Prometheus metrics; OpenTelemetry and Langfuse traces | Shipped / Opt-in | `/metrics`, [OpenTelemetry](docs/ops/opentelemetry.md) |

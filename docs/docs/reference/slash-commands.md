@@ -354,6 +354,9 @@ started from, with one button per action; a button press is `/runs act`. The
 first decision wins on every surface: a second press, here or on the
 Dashboard, is told what was decided and by whom. A run whose effects outside
 Kazma are unknown offers only `retry_checked` ("I checked its effects").
+`diagnose` decides nothing: the card keeps its buttons, and the diagnosis
+arrives below it. A failure you already retried or dismissed no longer needs
+attention; `/runs all` shows it as dealt with.
 `/runs` in the web chat answers in the page's language and links the
 Dashboard's Running work card, where the buttons are.
 

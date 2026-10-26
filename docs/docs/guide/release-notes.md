@@ -4,6 +4,20 @@ sidebar_label: Release notes
 description: Dated changes and links to the Kazma upgrade guides.
 ---
 
+## What's new (2026-10-26)
+
+| Area | Change |
+|---|---|
+| **Diagnose keeps the card** | Pressing **Ask Kazma to diagnose** on an incident card no longer removes its other buttons on Telegram and Discord: the diagnosis arrives below the card, and you retry or dismiss from the same card. Run and incident ids now read correctly on Telegram, and a failure you already retried or dismissed no longer counts in `/runs` as needing attention. |
+| **Swarm time limits you ask for** | "Use the swarm … with a 5-second timeout" now reaches the task: `dispatch_swarm` takes a limit from 5 seconds to 30 minutes (5 minutes by default). It is also the quickest way to see an incident card ([Running work](running-work#try-it)). |
+
+## What's new (2026-10-25)
+
+| Area | Change |
+|---|---|
+| **Kazma watches every task it runs** | Chat turns, swarm tasks, scheduled jobs, document jobs, research sessions and crawls, X posts, memory tasks and maintenance sweeps are watched in one place. When one stalls, gets stuck or fails, a card arrives in the chat it started from (Telegram, Discord, Slack), else your ops channels, with Retry, Cancel, Close the turn, Dismiss or Ask Kazma to diagnose. The first decision wins everywhere; acting is admin-only. See it all with `/runs` in any chat or the Dashboard's Running work card ([Running work](running-work)). |
+| **Automatic first steps, off until you switch them on** | Kazma can take one step before asking you: retry a failed swarm task that changed nothing outside Kazma, a document job or memory task out of attempts, or close an abandoned chat turn. At most one a day per piece of work, never when its effects are unknown. |
+
 ## What's new (2026-10-24)
 
 | Area | Change |
