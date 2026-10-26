@@ -189,4 +189,5 @@ The run supervisor watches the turn like any other work. A chat turn with no
 step for 10 minutes gets an incident card in the chat, with buttons to close it
 or ask Kazma to diagnose it ([Running work](running-work.md)). Above all of
 this, `kazma_guard.py` watches the server itself. It restarts it only when it
-stops answering, and reloads it only when no turn is running.
+stops answering, and a reload with `--when-idle` waits until no turn is
+running.
