@@ -137,6 +137,15 @@ def score_report_markdown(
 
 def score_report_file(path: str | Path, **kwargs: Any) -> RubricScore:
     p = Path(path)
+    # Kazma's own databases are refused here as at every other door
+    # (store_registry, AGENTS.md section 37): on an install whose workspace
+    # holds kazma-data/, these read-tier readers returned raw store bytes
+    # that file_read refuses (audit 2026-10-26 AUD-086).
+    from kazma_core.store_registry import is_kazma_store
+
+    if is_kazma_store(p):
+        return RubricScore(ok=False, score=0.0, checks={"file_readable": False},
+                           detail=["fail:kazma_store"])
     if not p.is_file():
         return RubricScore(
             ok=False,

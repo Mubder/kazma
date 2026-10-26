@@ -162,6 +162,9 @@ def register_knowledge_tools(registry: Any) -> None:
             )
             if result.pages_failed or not result.pages_fetched:
                 err = "; ".join(result.errors[:3]) if result.errors else "fetch failed"
+                if getattr(result, "refused", False):
+                    # Nothing fetched or stored (AUD-039).
+                    raise RefusedBeforeEffect(f"Error: ingest refused for {page!r} — {err}")
                 return effect_unknown(f"Error: ingest failed for {page!r} — {err}")
             store = await asyncio.to_thread(get_knowledge_store)
             lib = await asyncio.to_thread(store.get_library, lib_id) or {}
@@ -208,11 +211,25 @@ def register_knowledge_tools(registry: Any) -> None:
             try:
                 cap = max(1, min(int(max_pages or 5), 15))
             except (TypeError, ValueError):
-                return "Error: max_pages must be a whole number."
+                raise RefusedBeforeEffect("Error: max_pages must be a whole number.") from None
             # Admit the crawl first; the library exists once it was admitted.
-            prepared = await _prepare_ingest_site(
-                lib_id, seed, max_pages=cap, job_id=resume_job_id or None, resume=bool(resume_job_id)
-            )
+            # A refusal here (a private or unresolvable seed, a store at its
+            # quota, a crawl of this library already running) fetched and
+            # created nothing: the model corrects the call. Returned as an
+            # error from the handler below, it was "effects unknown" and the
+            # turn failed (audit 2026-10-26 AUD-039).
+            from kazma_core.stores.knowledge import KnowledgeStorageFull
+            from kazma_core.web_acquire.result import AcquisitionError
+
+            try:
+                prepared = await _prepare_ingest_site(
+                    lib_id, seed, max_pages=cap, job_id=resume_job_id or None,
+                    resume=bool(resume_job_id),
+                )
+            except (AcquisitionError, KnowledgeStorageFull) as exc:
+                raise RefusedBeforeEffect(
+                    f"Error: knowledge_ingest_site refused — {exc}"
+                ) from exc
             store = await asyncio.to_thread(get_knowledge_store)
 
             def _ensure_library() -> None:

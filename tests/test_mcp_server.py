@@ -222,6 +222,31 @@ class TestSearchCodeTool:
         resp = json.loads(server.handle_request(line))
         assert resp["result"]["content"][0]["text"] == "No matches found."
 
+    @staticmethod
+    def _search(root: Path, glob: str) -> str:
+        server = MCPServer(root=root)
+        line = json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "search_code", "arguments": {"pattern": "SECRET", "glob": glob}},
+        })
+        return json.loads(server.handle_request(line))["result"]["content"][0]["text"]
+
+    @pytest.mark.parametrize("glob", ["../*.env", "../**/*.env", "sub/../../*.env"])
+    def test_a_glob_never_leaves_the_project(self, tmp_path: Path, glob: str):
+        """Audit 2026-10-26 AUD-087: a client's glob walked out of the root."""
+        project = tmp_path / "project"
+        (project / "sub").mkdir(parents=True)
+        (tmp_path / "outside.env").write_text("SECRET=hunter2\n")
+        text = self._search(project, glob)
+        assert "hunter2" not in text
+
+    def test_negative_control_pathlib_does_walk_out(self, tmp_path: Path):
+        """What the guard stops: rglob itself follows the '..'."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (tmp_path / "outside.env").write_text("SECRET=hunter2\n")
+        assert [p.name for p in project.rglob("../*.env")] == ["outside.env"]
+
 
 # ═══════════════════════════════════════════════════════════════════
 # read_file tool

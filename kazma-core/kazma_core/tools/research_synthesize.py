@@ -44,6 +44,14 @@ def _resolve_under_workspace(path: str) -> Path | str:
         resolved.relative_to(root)
     except Exception:
         return f"Error: path must be under workspace ({_workspace_root()})"
+    # Kazma's own databases are refused here as at every other door
+    # (store_registry, AGENTS.md section 37): on an install whose workspace
+    # holds kazma-data/, these read-tier readers returned raw store bytes
+    # that file_read refuses (audit 2026-10-26 AUD-086).
+    from kazma_core.store_registry import is_kazma_store, store_refusal
+
+    if is_kazma_store(resolved):
+        return "Error: " + store_refusal(resolved, door="research readers")
     if not resolved.is_file():
         return f"Error: file not found: {path}"
     return resolved

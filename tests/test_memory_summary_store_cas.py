@@ -189,7 +189,7 @@ def test_a_rebuilt_summary_names_only_the_turns_it_was_written_from(mem):
     sources = {r[0] for r in mem.db.execute(
         "SELECT episode_id FROM memory_summary_sources WHERE summary_id = ?", (sid,))}
     assert sources == {"ship0", "ship1", "ship2", "ship3"}
-    assert forget.enforce_ledger(mem.db) == {"memories": 0, "summaries": 0}
+    assert forget.enforce_ledger(mem.db) == {"memories": 0, "facts": 0, "summaries": 0}
     assert mem.db.execute("SELECT status FROM memory_summaries WHERE id = ?", (sid,)).fetchone()[0] == "active"
 
 
@@ -201,7 +201,7 @@ def test_a_stale_source_row_sends_the_summary_back(mem):
     sid = _rebuilt_without_ship4(mem)
     mem.db.execute("INSERT INTO memory_summary_sources (summary_id, episode_id) VALUES (?, 'ship4')", (sid,))
     mem.db.commit()
-    assert forget.enforce_ledger(mem.db) == {"memories": 0, "summaries": 1}
+    assert forget.enforce_ledger(mem.db) == {"memories": 0, "facts": 0, "summaries": 1}
     assert mem.db.execute("SELECT status FROM memory_summaries WHERE id = ?", (sid,)).fetchone()[0] == "rebuild"
 
 

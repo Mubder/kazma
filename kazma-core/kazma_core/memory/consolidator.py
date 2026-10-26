@@ -608,6 +608,21 @@ def _v2_extract_sync(
         primary_conn.row_factory = sqlite3.Row
         apply_sqlite_pragmas(primary_conn)
         ensure_primary_schema(primary_conn)
+        # The user's decision first (§15 I): a turn the forget ledger keeps
+        # out leaves no facts either. Only the episode writer asked it, so
+        # "Please forget that I live in Paris" -- forgotten, and its own turn
+        # kept out -- was read by this pass as a statement and stored
+        # "lives_in Paris" at user trust (audit 2026-10-26 AUD-010).
+        if session_id:
+            from kazma_core.memory.forget import refuses_write
+
+            if refuses_write(
+                primary_conn, tenant_id=tenant_id, session_id=session_id,
+                turn_number=int(turn or 0), user_text=user_text,
+            ):
+                logger.info("[post_turn] no facts from %s turn %s: kept out of memory",
+                            session_id, turn)
+                return
         ops_conn = sqlite3.connect(
             memory_ops_db(), check_same_thread=False, isolation_level=None
         )

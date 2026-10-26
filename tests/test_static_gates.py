@@ -1070,6 +1070,17 @@ _LOOP_STALL_HELPERS = frozenset({
     # whole session (Postgres) before releasing it. During an outage every
     # call waited for the pool on the loop.
     "persist_reply", "upsert_reply", "close_reply_turn",
+    # The full audit of 2026-10-26 (AUD-006/007/111): the web chat's own
+    # wrappers around those writes and the settings reads the tenant
+    # middleware, the rate limiter and the capacity bar made on every call.
+    "record_instant_turn", "_persist_instant_turn", "_persist_reply",
+    "client_tenant_spoof_allowed", "_per_minute", "snapshot_capacity",
+    "stamp_last_platform",
+    # The document actions' own prelude and postlude (AUD-110): the rollout
+    # read, the ACL'd version lookup, the manifest read, the copy of the
+    # original, the artifact's catalog write and the whole intake.
+    "_require_writes_enabled", "_resolve_current_version", "_ocr_text_payload",
+    "_materialize_original", "_audited_artifact", "ingest_stream",
     # The MCP server list through its wrappers (2026-10-01): kazma.yaml, the
     # agent's config and the settings store merged (list_mcp_servers above),
     # which the /mcp page and /api/mcp/servers ran on the loop.
@@ -1175,23 +1186,64 @@ def _loop_stall_helper_calls(tree: ast.AST, extra: frozenset[str] = frozenset())
         for a in node.names
         if a.asname and a.name in _LOOP_STALL_HELPERS
     }
-    helpers = _LOOP_STALL_HELPERS | _module_stall_wrappers(tree, aliases) | extra
+    module_helpers = _LOOP_STALL_HELPERS | _module_stall_wrappers(tree, aliases) | extra
 
-    def visit(node: ast.AST, in_async: bool) -> None:
+    def nested_wrappers(fn: ast.AsyncFunctionDef, known: frozenset[str]) -> frozenset[str]:
+        """Sync functions defined inside *fn* that reach a helper.
+
+        A nested sync def is what ``to_thread`` runs only when it is handed to
+        it; called directly from the async body it runs on the loop. The SSE
+        stream's ``_persist_now`` (a whole-session upsert) was called that way
+        every 50 streamed characters and this gate counted it as threaded
+        (audit 2026-10-26 AUD-006).
+        """
+        nested = [n for n in ast.walk(fn) if isinstance(n, ast.FunctionDef)]
+        local: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for n in nested:
+                if n.name in local:
+                    continue
+                reach = known | local
+                if any(
+                    isinstance(c, ast.Call) and _called_name(c, aliases) in reach
+                    for c in ast.walk(n)
+                ):
+                    local.add(n.name)
+                    changed = True
+        return frozenset(local)
+
+    def visit(node: ast.AST, in_async: bool, helpers: frozenset[str]) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.AsyncFunctionDef):
-                visit(child, True)
+                visit(child, True, helpers | nested_wrappers(child, helpers))
             elif isinstance(child, (ast.FunctionDef, ast.Lambda)):
-                visit(child, False)  # what to_thread runs
+                visit(child, False, helpers)  # what to_thread runs
             else:
                 if in_async and isinstance(child, ast.Call):
                     name = _called_name(child, aliases)
                     if name in helpers:
                         found.append((child.lineno, name))
-                visit(child, in_async)
+                visit(child, in_async, helpers)
 
-    visit(tree, False)
+    visit(tree, False, frozenset(module_helpers))
     return found
+
+
+def test_a_nested_sync_def_called_from_async_code_is_on_the_loop():
+    """The gate's AUD-006 blind spot, planted: calling the nested def is on
+    the loop; handing it to to_thread is not."""
+    src = (
+        "import asyncio\n"
+        "async def stream():\n"
+        "    def _persist_now():\n"
+        "        persist_reply('s', 1, 'x')\n"
+        "    _persist_now()\n"
+        "    await asyncio.to_thread(_persist_now)\n"
+    )
+    found = _loop_stall_helper_calls(ast.parse(src))
+    assert found == [(5, "_persist_now")]
 
 
 def test_loop_stall_helpers_are_not_called_on_the_loop():

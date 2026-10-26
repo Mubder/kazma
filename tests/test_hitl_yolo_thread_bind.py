@@ -48,22 +48,43 @@ def _clean_yolo_grants():
         pass
 
 
-def test_card_yolo_enables_session_even_when_slash_blocked(monkeypatch) -> None:
+def test_card_yolo_enables_session_yolo_where_yolo_is_allowed(monkeypatch) -> None:
     """HITL card YOLO is real session YOLO (native + MCP), not approve-once."""
-    from kazma_core.safety.yolo import (
-        YoloDisabledError,
-        enable_yolo,
-        is_yolo_active,
-        try_enable_yolo,
-    )
+    from kazma_core.safety.yolo import is_yolo_active, try_enable_yolo
 
     monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
-    monkeypatch.setenv("KAZMA_ALLOW_YOLO", "0")
+    monkeypatch.delenv("KAZMA_ALLOW_YOLO", raising=False)
     tid = "thr-yolo-bind"
-    with pytest.raises(YoloDisabledError):
-        enable_yolo(tid, actor="slash")
     st = try_enable_yolo(tid, actor="card")
     assert st.get("downgraded") is False
+    assert is_yolo_active(tid) is True
+
+
+@pytest.mark.parametrize(("production", "allow"), [("1", None), (None, "0"), ("1", "0")])
+def test_card_yolo_is_downgraded_where_yolo_is_off(monkeypatch, production, allow) -> None:
+    """Audit 2026-10-26 AUD-090: the card offers no YOLO there, and the
+    server no longer grants it to a request that asks anyway."""
+    from kazma_core.safety.yolo import is_yolo_active, try_enable_yolo
+
+    for name, value in (("KAZMA_PRODUCTION", production), ("KAZMA_ALLOW_YOLO", allow)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    tid = "thr-yolo-bind"
+    st = try_enable_yolo(tid, actor="card")
+    assert st.get("downgraded") is True
+    assert is_yolo_active(tid) is False
+
+
+def test_negative_control_forcing_ignores_the_switch(monkeypatch) -> None:
+    """What try_enable_yolo did: force=True on, whatever the switch says."""
+    from kazma_core.safety.yolo import enable_yolo, is_yolo_active
+
+    monkeypatch.setenv("KAZMA_PRODUCTION", "1")
+    monkeypatch.delenv("KAZMA_ALLOW_YOLO", raising=False)
+    tid = "thr-yolo-bind"
+    enable_yolo(tid, actor="card", force=True)
     assert is_yolo_active(tid) is True
 
 

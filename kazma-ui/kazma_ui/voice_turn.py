@@ -144,7 +144,7 @@ async def run_voice_user_turn(
     try:
         from kazma_core.sessions.directory import stamp_last_platform
 
-        stamp_last_platform(thread_id, "web")
+        await asyncio.to_thread(stamp_last_platform, thread_id, "web")
     except Exception:
         pass
 

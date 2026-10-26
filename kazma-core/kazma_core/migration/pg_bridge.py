@@ -27,7 +27,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -209,10 +209,14 @@ def dump_database(
     if progress:
         progress(f"pg_dump {conn_parts.dbname}@{conn_parts.host}:{conn_parts.port} -> {out_path.name}")
     logger.info("[pg_bridge] dump: %s", " ".join(_redact_cmd(cmd)))
-    with open(out_path, "wb") as f:
-        proc = subprocess.run(
-            cmd, env=env, stdout=f, stderr=subprocess.PIPE, timeout=1800
-        )
+    try:
+        with open(out_path, "wb") as f:
+            proc = _run_bounded(
+                cmd, what="pg_dump", env=env, stdout=f, stderr=subprocess.PIPE, timeout=1800
+            )
+    except PgBridgeError:
+        out_path.unlink(missing_ok=True)  # a cut-off dump is not a dump
+        raise
     if proc.returncode != 0:
         out_path.unlink(missing_ok=True)
         raise PgBridgeError(
@@ -302,9 +306,9 @@ def restore_database(
         progress(f"pg_restore {dump_path.name} -> {conn_parts.dbname}@{conn_parts.host}:{conn_parts.port}")
     logger.info("[pg_bridge] restore: %s", " ".join(_redact_cmd(cmd)))
     with open(dump_path, "rb") as f:
-        proc = subprocess.run(
-            cmd, env=env, stdin=f, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=3600,
+        proc = _run_bounded(
+            cmd, what="pg_restore", env=env, stdin=f, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=3600,
         )
     stderr = proc.stderr.decode(errors="replace")
     # pg_restore returns 0 (clean), 1 (non-fatal warnings, e.g. "relation
@@ -365,10 +369,14 @@ def _docker_adjusted_parts(tool_cmd: Sequence[str], parts: _DsnParts) -> _DsnPar
 
 
 def _with_docker_pgpassword(cmd: Sequence[str], parts: _DsnParts) -> list[str]:
-    """Insert ``-e PGPASSWORD=…`` into a ``docker exec`` argv (audit M-9).
+    """Insert ``-e PGPASSWORD`` into a ``docker exec`` argv (audit M-9).
 
     ``docker exec`` does not inherit the host process environment, so
-    ``_libpq_env`` alone never reaches libpq inside the container.
+    ``_libpq_env`` alone never reaches libpq inside the container. The NAME
+    alone: docker forwards its value from the CLI's own environment, which
+    ``_libpq_env`` sets. ``PGPASSWORD=<pw>`` in the argv was readable in any
+    process listing for the whole dump, and a timeout's message (the full
+    argv) put it in kazma.log (audit 2026-10-26 AUD-091).
     """
     out = list(cmd)
     if not parts.password:
@@ -381,8 +389,17 @@ def _with_docker_pgpassword(cmd: Sequence[str], parts: _DsnParts) -> list[str]:
     i = 2
     while i < len(out) and out[i].startswith("-") and out[i] not in ("-e", "--env"):
         i += 1
-    out[i:i] = ["-e", f"PGPASSWORD={parts.password}"]
+    out[i:i] = ["-e", "PGPASSWORD"]
     return out
+
+
+def _run_bounded(cmd: Sequence[str], *, what: str, timeout: float, **kwargs: Any) -> Any:
+    """``subprocess.run`` whose timeout never carries the argv: a
+    ``TimeoutExpired`` prints the whole command, connection details included."""
+    try:
+        return subprocess.run(list(cmd), timeout=timeout, **kwargs)
+    except subprocess.TimeoutExpired:
+        raise PgBridgeError(f"{what} did not finish within {int(timeout)} s") from None
 
 
 def _redact_cmd(cmd: Sequence[str]) -> list[str]:

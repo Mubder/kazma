@@ -61,17 +61,25 @@ class UnresolvedHostError(SSRFError):
     tells the two apart by this class."""
 
 
+#: The shared address space (RFC 6598): carrier-grade NAT, Tailscale peers,
+#: cloud-internal services -- Alibaba Cloud's metadata endpoint is
+#: 100.100.100.200. Python counts it neither private nor reserved, so the
+#: checks below let it through (audit 2026-10-26 AUD-088).
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+
+
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     """Return *True* if *ip* is private, loopback, link-local, reserved, or unspecified.
 
     This covers all the ranges called out in the feature spec plus a few
-    closely related ones (unspecified, multicast) that no outbound fetch
-    should ever target.
+    closely related ones (unspecified, multicast, the shared address space)
+    that no outbound fetch should ever target.
     """
     if isinstance(ip, ipaddress.IPv4Address):
         # Map IPv4-in-IPv6 forms (rare from ip_address, but be safe).
         return (
-            ip.is_private
+            ip in _SHARED_ADDRESS_SPACE
+            or ip.is_private
             or ip.is_loopback
             or ip.is_link_local
             or ip.is_reserved

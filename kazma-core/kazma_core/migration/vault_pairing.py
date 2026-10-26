@@ -131,18 +131,21 @@ def sync_vault_key(
     bundle_vault_key: str,
     env_path: Path,
     target_data_dir: Path,
+    move_existing_vault: bool = True,
 ) -> Path | None:
     """Write the bundle's ``KAZMA_VAULT_KEY`` into the target ``.env``.
 
     Backs up any pre-existing target ``vault.db`` to
     ``<data_dir>/.migrate-vault-backup-<ts>.db`` first (so the target's own
-    secrets aren't lost), then writes the key line.
+    secrets aren't lost), then writes the key line. ``move_existing_vault``
+    is False when the vault.db in place is already the bundle's (the
+    importer calls this after its swap).
 
     Returns the backup path if one was made, else None.
     """
     backup_path: Path | None = None
     target_vault = target_data_dir / "vault.db"
-    if target_vault.exists():
+    if move_existing_vault and target_vault.exists():
         import time
 
         ts = int(time.time())

@@ -1491,7 +1491,12 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        allow_spoof = client_tenant_spoof_allowed()
+        # A settings read (platform.users) behind two wrappers: off the loop,
+        # as the auth middleware does for the same question (AUD-007). On the
+        # loop it ran for every request, static files and the guard's
+        # readiness probe included, and stalled them all while Postgres was
+        # away.
+        allow_spoof = await asyncio.to_thread(client_tenant_spoof_allowed)
         tenant_id: str | None = None
         # Whether the tenant was EXPLICITLY chosen (JWT/principal/header/cookie)
         # vs the 'default' fallback. The X-Tenant-ID cookie is only persisted

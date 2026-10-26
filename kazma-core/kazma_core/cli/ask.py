@@ -349,7 +349,9 @@ def _boot_env(*, workspace: str = "", model: str = "") -> None:
     try:
         from kazma_core.env_files import load_env_files
 
-        load_env_files()
+        # It runs inside a workspace: that folder's .env is not the
+        # operator's (audit 2026-10-26 AUD-084).
+        load_env_files(include_cwd=False)
     except Exception:
         pass
     from pathlib import Path as _Path

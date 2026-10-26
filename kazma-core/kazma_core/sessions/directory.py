@@ -593,9 +593,11 @@ async def bind_sender_to_thread(
         except Exception:
             logger.warning("[sessions] SessionStore take-over merge failed", exc_info=True)
 
-    stamp_last_platform(thread_id, platform)
+    # A settings write and the whole chat list: off the loop (audit
+    # 2026-10-26 INF-08).
+    await asyncio.to_thread(stamp_last_platform, thread_id, platform)
 
-    entry = resolve_session(thread_id, include_archived=True)
+    entry = await asyncio.to_thread(resolve_session, thread_id, include_archived=True)
     if entry is not None:
         return entry
     title = (delivery_ctx or {}).get("username") or thread_id[:8]

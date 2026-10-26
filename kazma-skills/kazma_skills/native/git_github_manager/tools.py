@@ -31,32 +31,22 @@ _GIT_PUSH_PULL_WARNED = False
 
 async def git_status() -> str:
     """Get the current git repository status, branch, and staged/unstaged changes."""
-    cwd = await asyncio.to_thread(_get_workspace)
+    # Through _git_read: the repository's core.fsmonitor is a command the
+    # repository chose, and `git status` runs it. This read-tier tool (no
+    # card) ran it until 2026-10-26 (audit AUD-089); its siblings did not.
     try:
-        res = await run_off_loop(
-            ["git", "status", "--porcelain"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if res.returncode != 0:
+        code, out, _err = await _git_read(["status", "--porcelain"], timeout=5)
+        if code != 0:
             return "Not a git repository or git command failed."
-        
+
         # Get active branch name
-        branch_res = await run_off_loop(
-            ["git", "branch", "--show-current"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        branch = branch_res.stdout.strip() or "Detached HEAD"
-        
-        status_lines = res.stdout.strip()
+        _bcode, bout, _berr = await _git_read(["branch", "--show-current"], timeout=5)
+        branch = bout.strip() or "Detached HEAD"
+
+        status_lines = out.strip()
         if not status_lines:
             return f"On branch {branch}\nWorking tree clean."
-        
+
         return f"On branch {branch}\nChanges:\n{status_lines}"
     except Exception as e:
         return f"Error executing git status: {e}"

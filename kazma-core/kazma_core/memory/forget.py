@@ -1369,6 +1369,20 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     for eid, tenant in list(targets.items())[:limit]:
         if forget_episode(eid, tenant_id=tenant, conn=conn, journal=False, by="ledger").get("ok"):
             forgotten += 1
+    # A fact a forgotten turn produced and that is still held: written by a
+    # fact pass that read the turn before its forget landed (audit
+    # 2026-10-26 AUD-010). The episode sweep above never looked at facts.
+    facts = 0
+    for tenant, key, turn in conn.execute(
+        "SELECT DISTINCT f.tenant_id, f.session_key, f.turn_number FROM memory_forgotten f "
+        "JOIN beliefs b ON b.tenant_id = f.tenant_id AND b.source_session = f.session_key "
+        "AND b.source_turn = f.turn_number WHERE f.turn_number > 0 AND b.object != '' LIMIT ?",
+        (limit,),
+    ).fetchall():
+        keys = list(dict.fromkeys([str(key), *chat_keys(str(key))]))
+        facts += len(_forget_turn_facts(
+            conn, tenant_id=str(tenant or "default"), keys=keys, turn=int(turn), now=time.time(),
+        ))
     stale = [str(r[0]) for r in conn.execute(
         "SELECT DISTINCT src.episode_id FROM memory_summaries s JOIN memory_summary_sources src "
         "ON src.summary_id = s.id JOIN episodes e ON e.id = src.episode_id "
@@ -1377,10 +1391,10 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     )]
     summaries = on_turns_forgotten(conn, stale, only_active=True) if stale else []
     conn.commit()
-    if forgotten or summaries:
-        logger.warning("[forget] the ledger refused %d stored memorie(s) and %d active summarie(s): applied",
-                       forgotten, len(summaries))
-    return {"memories": forgotten, "summaries": len(summaries)}
+    if forgotten or summaries or facts:
+        logger.warning("[forget] the ledger refused %d stored memorie(s), %d fact(s) and %d active "
+                       "summarie(s): applied", forgotten, facts, len(summaries))
+    return {"memories": forgotten, "facts": facts, "summaries": len(summaries)}
 
 
 def converge(conn: sqlite3.Connection | None = None) -> dict[str, Any]:

@@ -1390,6 +1390,14 @@ def _load_research_body(path: str) -> tuple[str, Path] | str:
         p.relative_to(root.resolve())
     except ValueError:
         return "Error: path must be inside the active workspace."
+    # Kazma's own databases are refused here as at every other door
+    # (store_registry, AGENTS.md section 37): on an install whose workspace
+    # holds kazma-data/, these read-tier readers returned raw store bytes
+    # that file_read refuses (audit 2026-10-26 AUD-086).
+    from kazma_core.store_registry import is_kazma_store, store_refusal
+
+    if is_kazma_store(p):
+        return "Error: " + store_refusal(p, door="research readers")
     if not p.is_file():
         return f"Error: file not found: {path}"
 

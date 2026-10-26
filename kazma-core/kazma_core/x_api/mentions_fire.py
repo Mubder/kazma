@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -56,7 +55,6 @@ _DEFAULT_POLL = 600.0
 #: token should not mean one doomed request every ten minutes forever.
 _MAX_CONSECUTIVE_ERRORS = 5
 _BACKOFF_S = 3600.0
-_TCO_RE = re.compile(r"https?://t\.co/[A-Za-z0-9]+", re.IGNORECASE)
 
 
 def get_mentions_task() -> asyncio.Task | None:
@@ -211,30 +209,35 @@ def _index_tweets(includes: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
-async def _tweet_id_from_text(text: str) -> str:
-    """Numeric status id from an x.com URL or a resolved t.co link."""
+def _tweet_id_from_post(tweet: dict[str, Any], text: str) -> str:
+    """Numeric status id of an x.com link pasted in a mention, without a fetch.
+
+    X wraps every link in a t.co redirect and reports where it points in the
+    post's own ``entities`` (``expanded_url``, also under ``note_tweet`` for a
+    long post). This used to follow the redirect with a raw ``httpx.get``
+    before any other check (audit 2026-10-26 AUD-002): anyone mentioning the
+    account chose a URL the server fetched -- no public-address check, no
+    body cap, no total deadline -- and a slow one stalled the poller.
+    """
     from kazma_core.x_api.reply import parse_tweet_url
 
     tid, _handle = parse_tweet_url(text)
     if tid:
         return tid
-    m = _TCO_RE.search(text or "")
-    if not m:
-        return ""
-    url = m.group(0)
-
-    def _resolve() -> str:
-        import httpx
-
-        try:
-            r = httpx.get(url, follow_redirects=True, timeout=8.0)
-            return str(r.url)
-        except Exception:
-            return ""
-
-    final = await asyncio.to_thread(_resolve)
-    tid, _handle = parse_tweet_url(final)
-    return tid
+    sources: list[Any] = [tweet.get("entities")]
+    note = tweet.get("note_tweet")
+    if isinstance(note, dict):
+        sources.append(note.get("entities"))
+    for ents in sources:
+        urls = ents.get("urls") if isinstance(ents, dict) else None
+        for entry in urls if isinstance(urls, list) else ():
+            if not isinstance(entry, dict):
+                continue
+            for key in ("expanded_url", "unwound_url"):
+                tid, _handle = parse_tweet_url(str(entry.get(key) or ""))
+                if tid:
+                    return tid
+    return ""
 
 
 async def _walk_off_ours(
@@ -429,7 +432,7 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
 
         replied_id = _parent_id(tweet)
         quoted_id = _ref_id(tweet, "quoted")
-        url_id = "" if quoted_id else await _tweet_id_from_text(text)
+        url_id = "" if quoted_id else _tweet_id_from_post(tweet, text)
         # React to a quote or a pasted status URL, not to our own tweet
         # the mention happens to sit under. Live 2026-09-19: quoting Ali's
         # JSON post in a reply to Kazma was skipped as "own post" and the

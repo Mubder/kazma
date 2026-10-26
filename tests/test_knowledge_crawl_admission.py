@@ -23,6 +23,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+from tests._tool_answer import answer_now
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -153,7 +154,7 @@ def test_the_chat_refresh_refuses_a_private_seed(kb):
 @pytest.mark.parametrize("seed", PRIVATE_SEEDS[:2])
 def test_the_agent_tool_refuses_a_private_seed(kb, seed):
     tool = _tools().get_tool("knowledge_ingest_site")
-    out = asyncio.run(tool.func(library_id="docs", seed_url=seed, max_pages=2))
+    out = answer_now(tool.func, library_id="docs", seed_url=seed, max_pages=2)
     assert out.startswith("Error:") and "crawl seed refused" in out, out
     _nothing_left(kb, "docs")
 
@@ -167,7 +168,7 @@ def test_a_page_on_a_private_address_is_refused_on_every_surface(kb):
     assert answer.status_code == 422 and answer.json()["library_created"] is False
     _say(f"/kb add chat {seed}")
     assert kb.replies[-1].startswith("⚠️"), kb.replies
-    out = asyncio.run(_tools().get_tool("knowledge_ingest_url").func(library_id="tool", url=seed))
+    out = answer_now(_tools().get_tool("knowledge_ingest_url").func, library_id="tool", url=seed)
     assert out.startswith("Error:"), out
     for library in ("web", "chat", "tool"):
         _nothing_left(kb, library)

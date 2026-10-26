@@ -273,58 +273,41 @@ class MockLocalToolRegistry:
 
 
 @pytest.mark.asyncio
-async def test_unified_tool_executor_rbac_gating(tmp_path):
-    """Verify fail-closed RBAC gating and parameter popping in UnifiedToolExecutor."""
+async def test_unified_tool_executor_passes_arguments_whole(tmp_path):
+    """The tool gets every argument the model sent (audit 2026-10-26 AUD-001).
+
+    This test used to assert the opposite: the executor popped ``user_id``,
+    ``division``, ``resource`` and ``action`` as RBAC context and denied a
+    call when the model's own ``_action`` asked for something the role
+    lacked. The principal came from model-written text, so it authorized
+    nothing, and ``email_send(action="draft")`` lost its action and sent the
+    mail. An RBAC engine is still accepted and asked nothing.
+    """
     db_path = str(tmp_path / "rbac_test.db")
     rbac_engine = RBACEngine(db_path=db_path)
-    
+
     try:
-        # Setup roles and permissions
-        # Assign alice a 'trader' role in 'gas_oil'
         await rbac_engine.assign_role("alice", "gas_oil", "trader")
-        
-        # Initialize mock local tools and executor
         mock_local = MockLocalToolRegistry()
         executor = UnifiedToolExecutor(local=mock_local, rbac=rbac_engine)
 
-        # Case A: Access allowed (alice is gas_oil trader, has read permission on pricing)
-        args_allowed = {
+        args = {
             "user_id": "alice",
             "division": "gas_oil",
             "resource": "pricing",
             "action": "read",
-            "param1": "value1"
+            "param1": "value1",
         }
-        res = await executor.execute("test_tool", args_allowed)
+        res = await executor.execute("test_tool", dict(args))
         assert res["is_error"] is False
-        assert "Tool Executed Successfully" in res["content"]
-        
-        # Crucial Verification: context keys popped, parameter signature preserved!
-        assert mock_local.executed_with_args == {"param1": "value1"}
-        assert "user_id" not in mock_local.executed_with_args
-        assert "division" not in mock_local.executed_with_args
-        assert "resource" not in mock_local.executed_with_args
-        assert "action" not in mock_local.executed_with_args
+        assert mock_local.executed_with_args == args
 
-        # Case B: Access denied (alice is gas_oil trader, but delete on sensitive pricing is not allowed)
+        # Keys the model writes decide nothing: "_action": "delete" is an
+        # argument like any other, not a request the executor judges.
         mock_local.executed_with_args = None
-        args_denied = {
-            "_user_id": "alice",
-            "_division": "gas_oil",
-            "_resource": "pricing",
-            "_action": "delete",
-            "param1": "value1"
-        }
-        res_denied = await executor.execute("test_tool", args_denied)
-        assert res_denied["is_error"] is True
-        assert "Access Denied" in res_denied["content"]
-        assert mock_local.executed_with_args is None  # Never routed to local tool!
-
-        # Case C: No user_id context supplied -> normal execution with no RBAC checks
-        mock_local.executed_with_args = None
-        args_no_rbac = {"param1": "no_rbac"}
-        res_no_rbac = await executor.execute("test_tool", args_no_rbac)
-        assert res_no_rbac["is_error"] is False
-        assert mock_local.executed_with_args == {"param1": "no_rbac"}
+        claimed = {"_user_id": "alice", "_action": "delete", "param1": "value1"}
+        res = await executor.execute("test_tool", dict(claimed))
+        assert res["is_error"] is False
+        assert mock_local.executed_with_args == claimed
     finally:
         await rbac_engine.close()

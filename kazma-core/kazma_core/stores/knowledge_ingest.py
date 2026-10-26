@@ -231,6 +231,10 @@ class IngestResult:
     library_created: bool = False
     failed_urls: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    #: Refused before anything was fetched or stored (a URL that is not
+    #: public http(s), a store at its quota): the caller may answer it as
+    #: a correctable refusal, not a failure of unknown effect.
+    refused: bool = False
 
 
 # ── URL helpers ─────────────────────────────────────────────────────────────
@@ -1324,6 +1328,7 @@ async def ingest_url(
         result.errors.append(f"refused URL: {exc}")
         result.failed_urls.append(str(url)[:200])
         result.pages_failed = 1
+        result.refused = True
         return result
     store = await asyncio.to_thread(get_knowledge_store)
     try:
@@ -1332,6 +1337,7 @@ async def ingest_url(
         result.errors.append(str(exc))
         result.failed_urls.append(url)
         result.pages_failed = 1
+        result.refused = True
         return result
     index = await asyncio.to_thread(get_knowledge_index)
     try:
@@ -1344,6 +1350,7 @@ async def ingest_url(
         result.errors.append(f"SSRF/invalid URL {url}: {exc}")
         result.failed_urls.append(url)
         result.pages_failed = 1
+        result.refused = True
         return result
 
     text, status, reason = await _extract_page(url)

@@ -2211,9 +2211,8 @@ class UnifiedToolExecutor:
         # Original configs (pre-rebind templates) for workspace rebind
         self._server_configs: dict[str, dict[str, Any]] = {}
 
-        if rbac is None:
-            from kazma_core.rbac import RBACEngine
-            rbac = RBACEngine()
+        # Accepted for callers that still pass one; execute() asks it nothing
+        # (see execute: the principal never came from a trusted source).
         self._rbac = rbac
 
     @property
@@ -2300,12 +2299,12 @@ class UnifiedToolExecutor:
         """
         if arguments is None:
             arguments = {}
-
-        # Extract and pop RBAC context keys to prevent signature mismatch downstream
-        user_id = arguments.pop("user_id", arguments.pop("_user_id", None))
-        division = arguments.pop("division", arguments.pop("_division", None))
-        resource = arguments.pop("resource", arguments.pop("_resource", None))
-        action = arguments.pop("action", arguments.pop("_action", None))
+        # The arguments are the tool's, whole (audit 2026-10-26 AUD-001). This
+        # method popped "user_id", "division", "resource" and "action" as RBAC
+        # context, so email_send(action="draft") reached the tool without its
+        # action and sent the mail the human had approved as a draft. The RBAC
+        # check those keys fed ran only when the MODEL named a user_id: an
+        # authorization decided by model-written text, which protected nothing.
 
         try:
             from kazma_core.division_runtime import check_division_tool
@@ -2315,22 +2314,6 @@ class UnifiedToolExecutor:
                 return {"content": _div_err, "is_error": True}
         except Exception:
             logger.debug("[Unified] division check skipped", exc_info=True)
-
-        if user_id:
-            resolved_div = division or "general_trading"
-            resolved_res = resource or tool_name
-            resolved_act = action or "execute"
-            perm = await self._rbac.check_permission(
-                user_id=user_id,
-                division=resolved_div,
-                resource=resolved_res,
-                action=resolved_act,
-            )
-            if not perm.allowed:
-                return {
-                    "content": f"Access Denied: {perm.reason}",
-                    "is_error": True,
-                }
 
         # ── Try local first ────────────────────────────────────────
         if self._local is not None:

@@ -305,9 +305,27 @@
     return isSpeaking() ? _currentOwner : null;
   }
 
-  // Leaving the page must not leave audio running. Each Kazma tab is a real
-  // navigation, so this fires on every move between Chat and Workspace.
+  // Leaving the page must not leave audio running. pagehide covers a full
+  // load or a closed tab; a sidebar move is NOT one (modules/nav.js swaps the
+  // page and runs this file again in a new closure), and is teardown()'s.
   window.addEventListener('pagehide', function() { stopTTS(); });
+
+  // Leaving Chat by the sidebar (chat.js destroyChatMouth calls this). The
+  // next visit runs this file again, so the old closure's microphone,
+  // /ws/voice socket and audio were out of reach: Live voice kept streaming,
+  // and its transcripts kept starting turns, on every other page (audit
+  // 2026-10-26 AUD-011). A recording in progress is discarded, never sent.
+  function teardown() {
+    try { if (isStreaming || ws) stopStreaming(); } catch (e) { /* page gone */ }
+    try {
+      if (isRecording && mediaRecorder) {
+        mediaRecorder.onstop = function() { cleanup(); };
+      }
+      stopRecording();
+      cleanup();
+    } catch (e) { /* page gone */ }
+    try { stopTTS(); } catch (e) { /* page gone */ }
+  }
 
   /**
    * Speak `text`. `owner` is an opaque id (a message id) so a caller can ask
@@ -863,7 +881,8 @@
     stopStreaming: stopStreaming,
     toggleLiveVoice: toggleLiveVoice,
     isStreaming: function() { return isStreaming; },
-    uploadExtFor: uploadExtFor
+    uploadExtFor: uploadExtFor,
+    teardown: teardown
   };
 
 })();

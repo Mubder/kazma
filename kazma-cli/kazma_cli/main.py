@@ -48,7 +48,11 @@ def main() -> None:
     # effect of importing kazma_core, from a package-relative path.
     from kazma_core.env_files import load_env_files
 
-    load_env_files()
+    # `kazma mcp` is started by editors and MCP clients in whatever folder
+    # they have open, and `kazma ask` runs inside a workspace: a .env there is
+    # the folder's, not the operator's (audit 2026-10-26 AUD-084).
+    _sub = next((a for a in sys.argv[1:] if not a.startswith("-")), "")
+    load_env_files(include_cwd=_sub not in ("mcp", "ask"))
 
     from kazma_core.tenant_context import set_current_tenant_id
 

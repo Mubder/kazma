@@ -8596,6 +8596,12 @@
   function destroyChatMouth() {
     try { if (activeStream) activeStream.abort(); } catch (e) {}
     activeStream = null;
+    // Live voice's microphone and socket go with the page (AUD-011).
+    try {
+      if (window.KazmaVoice && typeof window.KazmaVoice.teardown === 'function') {
+        window.KazmaVoice.teardown();
+      }
+    } catch (e) {}
     try {
       if (window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent').disconnect) {
         Alpine.store('agent').disconnect();
