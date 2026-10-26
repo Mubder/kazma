@@ -334,7 +334,10 @@ def register_external_tools(registry: Any) -> None:
                 "a later message: a draft is never published in the turn that "
                 "wrote it. For X drafts it returns each draft's length as X "
                 "counts it (and TOO LONG past the limit): save first, never "
-                "run code to count characters. "
+                "run code to count characters. To WRITE X posts use "
+                "x_draft_posts instead (the X model, the operator's reference "
+                "documents and the fact checks); save_proposal is for text the "
+                "user gave word for word. "
                 "Args: kind (e.g. 'tweets'), items (list of draft texts)."
             ),
             category="memory",

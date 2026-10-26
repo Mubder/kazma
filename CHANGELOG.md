@@ -1,7 +1,27 @@
 # CHANGELOG
 
-## X Studio drafts from your reference documents (2026-10-26)
+## X posts drafted from your reference documents (2026-10-26)
 
+- **Chat drafts X posts the way X Studio does** (`x_draft_posts`). Asked
+  in chat for X posts, the model wrote them itself and saved them with
+  `save_proposal`: no reference documents, no checks. The new tool (write
+  tier, never sent to X) runs `draft_posts` -- the X model, the reference
+  documents, the four checks -- and saves the drafts to X Studio's Drafts
+  under the running turn (`saved_turn`), so they are never published in the
+  turn that wrote them. Kazma's product knowledge and `save_proposal`'s
+  description send the model to it for any X post it is asked to write;
+  `save_proposal` stays for text the user gave word for word. A bad brief or
+  an unreadable reference is refused before any model call
+  (`RefusedBeforeEffect`); a rejected draft is a `KnownEffectError`, nothing
+  saved. Gate: `tests/test_x_draft_posts_tool.py`.
+- **Posts have their own length** (Settings → X → Post length,
+  `connectors.x.drafting.post_length`: short, standard or full, full by
+  default). Posts took the reply length (two sentences), and the safety check
+  rejected a three-sentence Studio post for it. The length is set in the
+  language contract the drafter and every check read
+  (`reply_style.with_post_length`; contract v2 adds `full`); replies keep
+  Reply length. Gate: `tests/test_x_post_length.py` (the reply length on
+  posts as the negative control).
 - **Settings → X → Reference documents for post drafting** names up to three
   text files (`connectors.x.drafting.reference_files`). X Studio's Generate
   reads them whole every time: the drafter gets them as the facts its posts

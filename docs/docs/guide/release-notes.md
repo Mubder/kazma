@@ -8,6 +8,9 @@ description: Dated changes and links to the Kazma upgrade guides.
 
 | Area | Change |
 |---|---|
+| **X posts written from your own documents** | Name up to three text files in **Settings → X → Reference documents for post drafting** (for posts about Kazma, the page [What Kazma is](what-is-kazma)) and every X post Kazma drafts is written from them and fact-checked against them -- from X Studio's **Generate**, or by asking in chat ("write two posts about Kazma"), which now drafts the same way and saves to X Studio's Drafts. Nothing is sent to X until you approve a post. |
+| **Posts have their own length** | **Settings → X → Post length**: short, standard or full (the default: as many sentences as the post needs, within X's limit). Posts used the reply length before, and a three-sentence post was rejected for it. |
+| **X checks that judge** | With DeepSeek, an X draft's evidence check spent its whole reply on hidden reasoning and came back empty ("invalid JSON"), and quotes from a wrapped page were refused. X's model calls now turn the reasoning off, a quote counts by its words, and the evidence check marks each fact supported with its source. |
 | **Diagnose keeps the card** | Pressing **Ask Kazma to diagnose** on an incident card no longer removes its other buttons on Telegram and Discord: the diagnosis arrives below the card, and you retry or dismiss from the same card. Run and incident ids now read correctly on Telegram, and a failure you already retried or dismissed no longer counts in `/runs` as needing attention. |
 | **Swarm time limits you ask for** | "Use the swarm … with a 5-second timeout" now reaches the task: `dispatch_swarm` takes a limit from 5 seconds to 30 minutes (5 minutes by default). It is also the quickest way to see an incident card ([Running work](running-work#try-it)). |
 

@@ -203,6 +203,7 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     # the commitment layer's view: it only WRITES an artifact row. Its whole
     # purpose is to make the outbound act VERIFIABLE, not to act.
     "save_proposal": (EffectKind.NONE, SemanticTier.NONE, None, ()),
+    "x_draft_posts": (EffectKind.NONE, SemanticTier.NONE, None, ()),  # a saved draft, as save_proposal
     "list_proposals": (EffectKind.READ, SemanticTier.NONE, None, ()),
     # Retire/restore unused drafts: internal and reversible, never touches a
     # posted or scheduled one (effect-free from the commitment layer's view).

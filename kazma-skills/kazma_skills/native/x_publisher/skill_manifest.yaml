@@ -89,6 +89,23 @@ tools:
     category: social
     prompt_chain:
       - "نزّل الفيديو من هالتغريدة وأرسله لي"
+  x_draft_posts:
+    arabic_name: "صياغة منشورات إكس"
+    description: >
+      Write X posts the way X Studio's Generate does, and save them to X
+      Studio's drafts for the user to review: the X model writes 1-3
+      alternatives from the brief and the operator's reference documents
+      (Settings -> X; for posts about Kazma, the page describing Kazma), and
+      each is fact-checked against them. Use this whenever the user asks for
+      X posts or tweets to be written; use save_proposal only for text the
+      user gave word for word. Args: brief (what the post is about, 1-4000
+      characters; put any facts the user gave in it) and count (1-3,
+      default 1). Answers with each draft's id, text, X length and check
+      verdicts. Show the drafts and stop: a draft is never published in the
+      turn that wrote it.
+    category: social
+    prompt_chain:
+      - "اكتب لي تغريدتين عن كاظمه"
   x_list_scheduled:
     arabic_name: "عرض التغريدات المجدولة"
     description: >

@@ -531,6 +531,7 @@
             summoner_policy: 'allowlist', allow_emoji_mood: true,
             stance_check: true, unmatched: 'skip', use_knowledge: false,
             knowledge_library: '', open_thread_marker: '', close_thread_marker: '', mood_emoji: {},
+            post_length: 'full',
             moods: ['professional', 'friendly', 'humorous', 'roast', 'angry', 'dry', 'deadpan', 'supportive'],
             connector_ready: false, can_draft: false, handle: '',
             poller_running: false, live_reason: '',
