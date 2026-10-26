@@ -245,6 +245,39 @@ def test_generate_route_reports_the_references_it_read(drafting, monkeypatch, tm
         assert response.status_code == 400 and "missing.md" in response.json()["error"]
 
 
+WRAPPED = (
+    "- **In one sentence:** Kazma is a self-hosted, open-source (MIT) AI agent\n"
+    "  that asks before it acts: one assistant across the web, the terminal,\n"
+    "  editors, Telegram, Discord and Slack, in English and Arabic.\n")
+QUOTE = ("In one sentence: Kazma is a self-hosted, open-source (MIT) AI agent that asks "
+         "before it acts: one assistant across the web, the terminal")
+
+
+def _checked(evidence: str):
+    from kazma_core.x_api.verification import parse_checks
+
+    raw = json.dumps({"checks": [{"check": "target", "verdict": "pass", "reason": "Matches the reference.",
+                                  "evidence": evidence, "source_ids": [], "claims": []}]})
+    return parse_checks(raw, ("target",), draft="A draft.", observed="A draft.\n" + WRAPPED, sources=())
+
+
+def test_a_quote_across_a_wrapped_line_of_a_reference_is_an_observed_passage():
+    # Live 2026-10-26: three checks of one draft refused as "not an observed
+    # passage" -- the page is wrapped Markdown, and the quote is not.
+    (result,) = _checked(QUOTE)
+    assert result.verdict == "pass"
+    # The rule before: an exact substring, which this quote is not.
+    assert QUOTE not in "A draft.\n" + WRAPPED
+
+
+@pytest.mark.parametrize("evidence", ["Kazma is a hosted service", "**", "   ", "``"])
+def test_other_words_or_no_words_are_still_not_an_observed_passage(evidence):
+    from kazma_core.x_api.verification import _CheckSchemaError
+
+    with pytest.raises(_CheckSchemaError, match="observed passage"):
+        _checked(evidence)
+
+
 def _write(path, data: bytes):
     path.write_bytes(data)
     return path
