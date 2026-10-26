@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Engineering deep dives (2026-10-26)
+
+- Three new guide pages explain how Kazma works inside, each piece with the
+  problem behind it, the file it lives in and the test that holds it:
+  [Engineering inside Kazma](docs/docs/guide/engineering.md) (the approval
+  registry, the commitment layer, honest failure, action receipts, memory
+  recall by evidence, the measured prompt fence, turn delivery, run
+  supervision, network and document isolation, secrets, the guard),
+  [How a turn works](docs/docs/guide/how-a-turn-works.md) (one message
+  followed from the chat app to the memory it leaves, with a sequence
+  diagram) and [How Kazma handles Arabic](docs/docs/guide/arabic-engineering.md)
+  (direction, shaping, search folding, Arabic memory, PDF and OCR reading, the
+  interface). Both READMEs link them, and link the guard,
+  `scripts/service/kazma_guard.py`, by path.
+
 ## X posts drafted from your reference documents (2026-10-26)
 
 - **Chat drafts X posts the way X Studio does** (`x_draft_posts`). Asked

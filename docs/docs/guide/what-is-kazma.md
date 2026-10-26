@@ -252,6 +252,8 @@ quiet, then stops Kazma, installs the update and starts it again.
 
 - [Quickstart](quickstart.md): install Kazma and send a first message.
 - [Architecture](architecture.md): how it is built.
+- [Engineering inside Kazma](engineering.md): what Kazma builds itself, with
+  the code and the test for each piece.
 - [Security and HITL](security-and-safety.md): what protects an install, and
   its limits.
 - [Running work](running-work.md): how Kazma watches the tasks it runs.

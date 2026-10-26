@@ -26,7 +26,7 @@ Dated updates are in [Release notes](guide/release-notes). For an upgrade, follo
 | Know what Kazma is and what it can do, on one page | [What Kazma is](guide/what-is-kazma) |
 | Install and send a first message | [Quickstart](guide/quickstart) |
 | Run the agent from the terminal (no web server) | `kazma ask "…"` · `kazma acp` (ACP stdio) — [Quickstart](guide/quickstart) |
-| Understand the engine | [Architecture](guide/architecture) |
+| Understand the engine | [Architecture](guide/architecture) · [Engineering inside Kazma](guide/engineering) · [How a turn works](guide/how-a-turn-works) |
 | Configure providers / YAML / env | [Configuration](guide/configuration) · [LLM providers](reference/llm-providers) · [Environment variables](reference/environment-variables) |
 | Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) · [Full-system battery](ops/full-battery) · [Kazma Update](ops/kazma-update) · [Smoke matrix](ops/smoke-matrix) |
 | Pick up code on a watched host | `python scripts/service/kazma_guard.py --reload` (wait for `Kazma is up. build …`; do not kill uvicorn by hand). `--reload` skips the crash backoff ladder. If it still waits minutes, restart **KazmaAgent** once so the guard is on the new code. |
@@ -49,12 +49,12 @@ Dated updates are in [Release notes](guide/release-notes). For an upgrade, follo
 
 ### Guide (concepts & how-to)
 
-- [What Kazma is](guide/what-is-kazma) · [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Configuration](guide/configuration)
+- [What Kazma is](guide/what-is-kazma) · [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Engineering inside Kazma](guide/engineering) · [How a turn works](guide/how-a-turn-works) · [Configuration](guide/configuration)
 - [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
 - [Native skills](guide/native-skills) · [Voice & media](guide/voice-and-media)
 - [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Memory best path](guide/memory-best-path) · [Security](guide/security-and-safety) · [Commitment Layer](guide/commitment-layer)
 - [Web research](guide/web-research) · [Knowledge Library](guide/knowledge-library) · [**Document Intelligence**](guide/document-intelligence) · [Document phases](guide/document-phases) · [**Recent features**](guide/recent-features) · [Email](guide/email-integration) · [X publisher](guide/x-publisher) · [X auto-reply](guide/x-auto-reply)
-- [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
+- [Arabic & cultural](guide/arabic-cultural-features) · [How Kazma handles Arabic](guide/arabic-engineering) · [Deployment](guide/deployment) · [Development](guide/development)
 - [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future) · [What Kazma does — a plain list](https://github.com/Mubder/kazma/blob/main/docs/FEATURES.md)
 
 ### Products (UI surfaces)

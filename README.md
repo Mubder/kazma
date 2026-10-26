@@ -36,7 +36,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~717K LOC** (572K Python code + 45K JS) | **17,622 tests** (1,271 test files) | **4,403+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~717K LOC** (572K Python code + 45K JS) | **17,622 tests** (1,271 test files) | **4,404+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
@@ -168,6 +168,7 @@ git pull
 .venv/bin/python scripts/service/kazma_guard.py --reload --when-idle
 ```
 
+The guard is [`scripts/service/kazma_guard.py`](scripts/service/kazma_guard.py).
 `--reload` waits for `Kazma is up. build …`; `--status` reports
 `supervision : active` and `server : healthy (ready)`. To install the guard:
 `python scripts/service/kazma_guard.py --install`. On Windows, start Kazma
@@ -303,9 +304,20 @@ swarm bus and pipeline checkpoints. Untrusted text (web pages, search results,
 documents, recalled memory, MCP output) reaches the model inside a fence that
 marks it as data, not instructions.
 
-Deep dives: [Architecture](https://kazma.ai/docs/architecture/) ·
+Deep dives:
+[Engineering inside Kazma](https://kazma.ai/docs/engineering/) (the
+mechanisms Kazma builds itself, each with its code and the test that holds it:
+the approval registry, the commitment layer, action receipts, memory recall by
+evidence, the measured prompt fence, run supervision, network and document
+isolation, the guard) ·
+[How a turn works](https://kazma.ai/docs/how-a-turn-works/) (one message
+followed through the code) ·
+[How Kazma handles Arabic](https://kazma.ai/docs/arabic-engineering/) (direction,
+shaping, search folding, Arabic memory, PDF and OCR reading) ·
+[Architecture](https://kazma.ai/docs/architecture/) ·
 [System map](https://kazma.ai/docs/reference/architecture-system-map/) ·
 [Diagnosis map](https://kazma.ai/docs/diagnosis-map/).
+The same pages are in this repository under [`docs/docs/guide/`](docs/docs/guide/).
 
 **Scaling out.** Document jobs can run on several replicas (Postgres
 `SKIP LOCKED` claims); document metadata and the SQLite stores are
@@ -356,6 +368,8 @@ English and [Arabic](https://kazma.ai/ar/docs/).
 | [Environment variables](https://kazma.ai/docs/environment-variables/) | [Disaster recovery](https://kazma.ai/docs/ops/disaster-recovery/) | [Swarm orchestration](https://kazma.ai/docs/swarm-orchestration/) |
 | [Gateways and platforms](https://kazma.ai/docs/gateways-and-platforms/) | [Kazma update](https://kazma.ai/docs/ops/kazma-update/) | [Security and safety](https://kazma.ai/docs/security-and-safety/) |
 | [Slash commands](https://kazma.ai/docs/slash-commands/) | [Diagnosis map](https://kazma.ai/docs/diagnosis-map/) | [What's new](https://kazma.ai/docs/recent-features/) |
+| [What Kazma is](https://kazma.ai/docs/what-is-kazma/) | [Running work](https://kazma.ai/docs/running-work/) | [Engineering inside Kazma](https://kazma.ai/docs/engineering/) |
+| [How a turn works](https://kazma.ai/docs/how-a-turn-works/) | [The guard](scripts/service/kazma_guard.py) | [How Kazma handles Arabic](https://kazma.ai/docs/arabic-engineering/) |
 
 ---
 

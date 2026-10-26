@@ -24,6 +24,8 @@
     {"source": "docs/docs/products/multi-user-saas.md", "site": "multi-user-saas"},
 
     {"source": "docs/docs/guide/architecture.md", "site": "architecture"},
+    {"source": "docs/docs/guide/engineering.md", "site": "engineering"},
+    {"source": "docs/docs/guide/how-a-turn-works.md", "site": "how-a-turn-works"},
     {"source": "docs/docs/guide/configuration.md", "site": "configuration"},
     {"source": "docs/docs/guide/cli-reference.md", "site": "cli-reference"},
     {"source": "docs/docs/guide/gateways-and-platforms.md", "site": "gateways-and-platforms"},
@@ -52,6 +54,7 @@
     {"source": "docs/docs/guide/task-ledger.md", "site": "task-ledger"},
     {"source": "docs/docs/ops/chaos-testing.md", "site": "chaos-testing"},
     {"source": "docs/docs/guide/arabic-cultural-features.md", "site": "arabic-cultural-features"},
+    {"source": "docs/docs/guide/arabic-engineering.md", "site": "arabic-engineering"},
     {"source": "docs/docs/guide/deployment.md", "site": "deployment"},
     {"source": "docs/docs/ops/migration.md", "site": "migration"},
     {"source": "docs/docs/guide/api-and-extension-points.md", "site": "api-and-extension-points"},

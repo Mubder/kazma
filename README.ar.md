@@ -156,6 +156,7 @@ systemd، أو launchd)، طبّق `git pull` بأمر واحد بدل إيقا�
 .venv/bin/python scripts/service/kazma_guard.py --status
 ```
 
+الحارس هو [`scripts/service/kazma_guard.py`](scripts/service/kazma_guard.py).
 ينتظر `--reload` ظهور `Kazma is up. build …`، ويبلّغ `--status` عن
 `supervision : active` و`server : healthy (ready)`. لتثبيت الحارس:
 `python scripts/service/kazma_guard.py --install`. وعلى Windows شغّل كاظمه عبر
@@ -290,9 +291,19 @@ flowchart RL
 والذاكرة المسترجعة، ومخرجات MCP) يصل إلى النموذج داخل سياج يصفه بأنه بيانات لا
 تعليمات.
 
-للتعمق: [البنية المعمارية](https://kazma.ai/ar/docs/architecture/) ·
+للتعمق:
+[الهندسة داخل كاظمه](https://kazma.ai/ar/docs/engineering/) (الآليات التي
+تبنيها كاظمه بنفسها، كل منها مع شيفرته والاختبار الذي يثبته: سجل الموافقات،
+وطبقة الالتزام، وإيصالات الأفعال، واسترجاع الذاكرة بالدليل، وسياج حقن التعليمات
+المقيس، ومراقبة الأعمال، وعزل الشبكة والمستندات، والحارس) ·
+[كيف يجري الدور](https://kazma.ai/ar/docs/how-a-turn-works/) (رسالة واحدة
+متتبَّعة عبر الشيفرة) ·
+[كيف تتعامل كاظمه مع العربية](https://kazma.ai/ar/docs/arabic-engineering/)
+(الاتجاه، وتشكيل الحروف، وطيّ البحث، والذاكرة العربية، وقراءة PDF والتعرف الضوئي) ·
+[البنية المعمارية](https://kazma.ai/ar/docs/architecture/) ·
 [خريطة النظام](https://kazma.ai/ar/docs/reference/architecture-system-map/) ·
 [خريطة التشخيص](https://kazma.ai/ar/docs/diagnosis-map/).
+والصفحات نفسها في هذا المستودع تحت [`docs/docs/guide/`](docs/docs/guide/).
 
 **التوسّع.** يمكن تشغيل مهام المستندات على عدة نسخ (عبر مطالبات `SKIP LOCKED`
 في Postgres)، أما بيانات المستندات الوصفية ومخازن SQLite فتعمل على نسخة واحدة.
@@ -351,6 +362,8 @@ flowchart RL
 | [متغيرات البيئة](https://kazma.ai/ar/docs/environment-variables/) | [التعافي من الكوارث](https://kazma.ai/ar/docs/ops/disaster-recovery/) | [تنسيق السرب](https://kazma.ai/ar/docs/swarm-orchestration/) |
 | [البوابات والمنصات](https://kazma.ai/ar/docs/gateways-and-platforms/) | [تحديث كاظمه](https://kazma.ai/ar/docs/ops/kazma-update/) | [الأمان والسلامة](https://kazma.ai/ar/docs/security-and-safety/) |
 | [أوامر الشرطة المائلة](https://kazma.ai/ar/docs/slash-commands/) | [خريطة التشخيص](https://kazma.ai/ar/docs/diagnosis-map/) | [الجديد في كاظمه](https://kazma.ai/ar/docs/recent-features/) |
+| [ما هي كاظمه](https://kazma.ai/ar/docs/what-is-kazma/) | [الأعمال الجارية](https://kazma.ai/ar/docs/running-work/) | [الهندسة داخل كاظمه](https://kazma.ai/ar/docs/engineering/) |
+| [كيف يجري الدور](https://kazma.ai/ar/docs/how-a-turn-works/) | [الحارس](scripts/service/kazma_guard.py) | [كيف تتعامل كاظمه مع العربية](https://kazma.ai/ar/docs/arabic-engineering/) |
 
 </div>
 
