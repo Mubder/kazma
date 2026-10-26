@@ -3358,6 +3358,15 @@
                     </p>
                 </div>
 
+                <div class="form-group">
+                    <label for="xr-refs">{{ t('settings.xt.references') }}</label>
+                    <textarea id="xr-refs" class="form-input" rows="3" translate="no" dir="ltr"
+                              x-model="xReplyReferencesText"></textarea>
+                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 0;">
+                        {{ t('settings.xt.references_hint') }}
+                    </p>
+                </div>
+
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-top:8px;">
                     <div class="form-group">
                         <label for="xr-day">{{ t('settings.xt.max_day') }}</label>

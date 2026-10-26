@@ -349,7 +349,8 @@ async def x_generate(body: _XGenerateBody) -> JSONResponse:
         reviews = [{**review, "models": list(result.models)} for review in result.reviews]
         saved = await asyncio.to_thread(store.save_proposal, tenant, "", "x_posts", list(result.drafts), reviews=reviews)
         return JSONResponse({"ok": True, "proposal": saved, "models": list(result.models),
-                             "review_required": True, "subject_id": result.subject_id, "usage": result.usage})
+                             "review_required": True, "subject_id": result.subject_id, "usage": result.usage,
+                             "references": list(result.references)})
     except (DraftFailed, ValueError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     except Exception as exc:

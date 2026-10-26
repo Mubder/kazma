@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## X Studio drafts from your reference documents (2026-10-26)
+
+- **Settings → X → Reference documents for post drafting** names up to three
+  text files (`connectors.x.drafting.reference_files`). X Studio's Generate
+  reads them whole every time: the drafter gets them as the facts its posts
+  may state, keeping their limits and status words, and the fact check gets
+  them as evidence a claim can cite (`evidence.source_hold` accepts a
+  reference file's provenance). Until now the drafter saw only the brief, and
+  every fact in a draft had to be typed into it. A file that cannot be read
+  stops the draft before any model call; Settings warns when one is saved,
+  and the Composer names the files a draft was written from
+  (`x_api/references.py`). For posts about Kazma itself, name
+  [What Kazma is](docs/docs/guide/what-is-kazma.md), the new one-page
+  description of the product. Gate: `tests/test_x_drafting_references.py`
+  (the brief-only drafting as the negative control).
+
 ## Run supervision, after the first live test (2026-10-26)
 
 - **Diagnose keeps the card's buttons.** Telegram and Discord removed every

@@ -29,6 +29,7 @@ function xStudioPage() {
     generateBusy: false,
     generateError: '',
     generatedModels: [],
+    generatedReferences: [],
     qualification: null,
     qualificationBusy: false,
     qualificationError: '',
@@ -485,6 +486,7 @@ function xStudioPage() {
         const data = await response.json();
         if (!response.ok || !data || data.ok !== true) throw new Error((data && data.error) || this.t('common.request_failed'));
         this.generatedModels = data.models || [];
+        this.generatedReferences = data.references || [];
         await this.loadDrafts();
         window.showToast(this.t('x_studio.generated_review'), 'success');
       } catch (error) {

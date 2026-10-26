@@ -388,6 +388,17 @@ take `approve_label` and drop "Approve for task" (`task=False`), and whose
 `tests/test_proposal_seen_before_publish.py`, `tests/test_public_action_cards.py`,
 the e2e above (two turns, real graph, browser EN/AR; all fail on the old code).
 
+**X Studio drafts from the operator's reference documents** (2026-10-26,
+`x_api/references.py`). `connectors.x.drafting.reference_files` (Settings → X,
+up to three text files, 40,000 characters together) are read whole at every
+Generate: the drafter gets them fenced as the facts its posts may state, the
+fact check as evidence a claim can cite (`evidence.source_hold` accepts
+`kind: reference_file`, bound to the file and the hash of the text read, dated
+by the file's last change). A file that cannot be read stops the draft before
+any model call. For posts about Kazma itself the reference is
+`docs/docs/guide/what-is-kazma.md`. Gate: `tests/test_x_drafting_references.py`
+(brief-only drafting as the negative control).
+
 **Danger tool list SoT (must stay one list):**
 - **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
 - **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested by

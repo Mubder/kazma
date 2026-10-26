@@ -226,6 +226,10 @@
       <template x-for="model in generatedModels" :key="model.provider + ':' + model.model">
         <div class="xs-meta" translate="no" x-text="model.provider + ' / ' + model.model"></div>
       </template>
+      <div class="xs-meta" x-show="generatedReferences.length" x-cloak>
+        <span>{{ t('x_studio.read_references') }}</span>
+        <span translate="no" dir="ltr" x-text="generatedReferences.map(ref => ref.name).join(', ')"></span>
+      </div>
       <label for="xs-text">{{ t('x_studio.public_text') }}</label>
       <textarea id="xs-text" class="form-input" x-model="text" @input="onInput()" maxlength="2000"
                 :dir="textDir(text)"

@@ -114,6 +114,9 @@ class ReplyConfigBody(BaseModel):
     knowledge_library: str = Field(default="")
     open_thread_marker: str = Field(default="")
     close_thread_marker: str = Field(default="")
+    #: Files X Studio's post drafting reads (x_api/references.py). None keeps
+    #: what is saved, so a client that does not know the field never clears it.
+    drafting_references: list[str] | None = Field(default=None)
     subjects: list[SubjectBody] = Field(default_factory=list)
     ai: _XAISelectionBody | None = Field(default=None)
     reply_style: dict[str, Any] | None = Field(default=None)
@@ -222,6 +225,7 @@ def _payload() -> dict[str, Any]:
         "knowledge_library": cfg.knowledge_library,
         "open_thread_marker": cfg.open_thread_marker,
         "close_thread_marker": cfg.close_thread_marker,
+        "drafting_references": list(cfg.drafting_references),
         "subjects": [asdict(subject) for subject in cfg.subjects],
         "reply_style": cfg.reply_style,
         "moods": sorted(MOODS),
@@ -489,6 +493,20 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             except ValueError as exc:
                 return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
+        from kazma_core.x_api.references import ReferenceUnreadable, load_references, validate_paths
+
+        references = None
+        if body.drafting_references is not None:
+            try:
+                references = list(validate_paths(body.drafting_references))
+            except ValueError as exc:
+                return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+            # Saved either way (the file may be created next); said now, not
+            # at the first Generate.
+            try:
+                await asyncio.to_thread(load_references, tuple(references))
+            except ReferenceUnreadable as exc:
+                warnings.append(f"{exc} X Studio cannot draft until it can be read.")
 
         items: list[tuple[str, Any, str]] = [
             ("connectors.x.reply.enabled", bool(body.enabled), _CATEGORY),
@@ -564,6 +582,8 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         ]
         if ai is not None:
             items.append(("connectors.x.ai", ai, _CATEGORY))
+        if references is not None:
+            items.append(("connectors.x.drafting.reference_files", references, _CATEGORY))
         if style is not None:
             items.append(("connectors.x.reply.style", style, _CATEGORY))
         items.append(("connectors.x.reply.settings_revision", revision + 1, _CATEGORY))

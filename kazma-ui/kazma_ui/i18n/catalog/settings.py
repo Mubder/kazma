@@ -4004,6 +4004,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا مكتبات بعد. أضف واحدة في صفحة المكتبة المعرفية ثم أعد تحميل هذا التبويب.",
         "en": "No libraries yet. Add one on the Knowledge page, then reload this tab.",
     },
+    "settings.xt.references": {
+        "ar": "مستندات مرجعية لصياغة المنشورات",
+        "en": "Reference documents for post drafting",
+    },
+    "settings.xt.references_hint": {
+        "ar": "مسار ملف نصي في كل سطر، حتى ثلاثة ملفات (نسبةً إلى مساحة العمل النشطة، أو مسار كامل). يقرأها زر الإنشاء في استوديو إكس كاملةً في كل مرة، فلا تذكر المسودات إلا ما تدعمه هذه الملفات وفكرتك، ويستشهد بها فحص الحقائق. اتركه فارغًا لتصوغ من فكرتك وحدها.",
+        "en": "One text file path per line, up to three (relative to the active workspace, or a full path). X Studio's Generate reads them whole every time, so drafts state only what they and your brief support, and the fact check cites them. Leave it empty to draft from your brief alone.",
+    },
     "settings.xt.max_day": {
         "ar": "أقصى ردود في اليوم",
         "en": "Max replies / day",

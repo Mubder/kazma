@@ -45,6 +45,11 @@ def source_hold(source: dict[str, Any], *, max_age_days: int = 30, now: float | 
     if (source.get("truncated") is not False or not isinstance(content, str) or not content
             or source.get("content_hash") != hashlib.sha256(content.encode("utf-8")).hexdigest()):
         return "Source passage is incomplete or its content hash cannot be verified."
+    if source.get("kind") == "reference_file":
+        # The operator's reference document (x_api/references.py): bound to
+        # its file and the exact text read, in place of a library's
+        # document and version.
+        return "" if isinstance(source.get("path"), str) and source["path"] else "Reference document lacks its file."
     if not all(isinstance(source.get(key), str) and source[key] for key in ("library_id", "document_id", "version_id")):
         return "Source lacks bound library, document or version provenance."
     return ""
