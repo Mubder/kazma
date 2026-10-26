@@ -343,6 +343,12 @@ async def x_chat(role: str, messages: list[dict[str, Any]], *, max_tokens: int, 
         remaining = limits["deadline_seconds"] - (time.monotonic() - session.started)
         if remaining <= 0:
             raise XBudgetUnavailable("X decision deadline reached. Work is held.")
+        # Every X call is a budgeted structured judgment sized for its answer;
+        # a thinking model's hidden reasoning spent the whole ceiling (live
+        # 2026-10-26: 1,800 reasoning tokens, no answer, "invalid JSON").
+        can_switch = getattr(client, "can_turn_off_reasoning", None)
+        if callable(can_switch) and can_switch() is True:
+            kwargs.setdefault("reasoning", "off")
         response = await asyncio.wait_for(client.chat(messages, max_tokens=max_tokens, **kwargs),
                                          timeout=min(remaining, limits["chat_timeout_seconds"]))
         completed = True

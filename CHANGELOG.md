@@ -15,6 +15,22 @@
   [What Kazma is](docs/docs/guide/what-is-kazma.md), the new one-page
   description of the product. Gate: `tests/test_x_drafting_references.py`
   (the brief-only drafting as the negative control).
+- **X's checks no longer spend their answer on hidden reasoning.** Every X
+  Studio draft's evidence check failed as "Verifier did not return valid
+  JSON". With the truncation warning's new detail the live log read
+  `completion_tokens=1800, reasoning_tokens=1800, content_chars=0`:
+  `deepseek-flash` thinks by default at high effort, its reasoning counts
+  against the reply limit, and the 1,800 tokens a check is given went to
+  reasoning with no answer (even on the X model test's one-line sample;
+  the reference documents made it worse). Every X model call now asks for
+  `reasoning="off"` where the endpoint has a switch: `LLMProvider` sends
+  DeepSeek's `thinking: {"type": "disabled"}` to DeepSeek's own API only
+  (`can_turn_off_reasoning`), and retries once without it if refused. A
+  check whose reply is still cut off says so instead of "invalid JSON".
+  Truncation warnings now name what the tokens went to
+  (`LLMResponse.output_detail`). Gate: `tests/test_x_reasoning_off.py`
+  (a fake DeepSeek that thinks unless told not to; the switch removed as
+  the negative control).
 
 ## Run supervision, after the first live test (2026-10-26)
 

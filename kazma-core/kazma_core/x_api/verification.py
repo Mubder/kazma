@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 CHECK_NAMES = ("context", "target", "stance", "evidence", "safety")
 
 
+class _VerifierCutOff(ValueError):
+    """The verifier's reply stopped at its token limit; nothing was judged."""
+
+
 class _CheckSchemaError(ValueError):
     """Controlled validation text, containing no provider or observed content."""
 
@@ -153,6 +157,8 @@ async def verify_candidate(draft: str, subject: Subject, *, context: ContextSnap
                                            {"role": "user", "content": user}],
                                     max_tokens=1800, temperature=0.0,
                                     response_format={"type": "json_object"})
+            if getattr(response, "finish_reason", "") == "length":
+                raise _VerifierCutOff()
             results.extend(parse_checks(str(getattr(response, "content", "") or ""), names,
                                         draft=draft, observed=observed, sources=sources,
                                         max_source_age_days=subject.evidence_max_age_days))
@@ -169,6 +175,10 @@ async def verify_candidate(draft: str, subject: Subject, *, context: ContextSnap
                 reason = str(exc)
             elif isinstance(exc, XModelUnavailableError):
                 reason = "Selected verifier is unavailable; check its X model binding and connection."
+            elif isinstance(exc, _VerifierCutOff):
+                reason = ("Verifier's reply was cut off at its token limit before it judged anything; "
+                          "a thinking model can spend the limit on hidden reasoning. Human review required.")
+                logger.warning("[x-checks] %s: reply cut off at its token limit", role)
             elif isinstance(exc, json.JSONDecodeError):
                 reason = "Verifier did not return valid JSON; check structured-output compatibility and token limits."
             elif isinstance(exc, _CheckSchemaError):
