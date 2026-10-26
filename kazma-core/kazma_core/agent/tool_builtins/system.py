@@ -212,12 +212,20 @@ def register_system_tools(registry: Any) -> None:
                     val = alt_val
                     break
 
+        # One masker for every surface that echoes configuration (AGENTS
+        # §26D): the key's own name, every nested key (providers.list holds an
+        # api_key per provider; ConfigStore.get decrypts vault:// pointers
+        # inside it) and every URL password (memory.backends.state.url).
+        # Judged by the key's name alone, this tool -- read tier, no card --
+        # returned all of those (audit 2026-10-26 AUD-005).
+        from kazma_core.security.config_mask import key_is_secret, mask_deep
+
         key_l = (key or "").lower()
         secret_markers = (
             "api_key", "apikey", "token", "secret", "password",
             "passwd", "private_key", "credentials", "auth",
         )
-        is_secret_key = any(m in key_l for m in secret_markers)
+        is_secret_key = any(m in key_l for m in secret_markers) or key_is_secret(key)
 
         if val is _MISSING:
             payload = {
@@ -247,13 +255,15 @@ def register_system_tools(registry: Any) -> None:
                 ),
             }
         else:
+            masked = mask_deep(val)
             # Coerce non-string values for display
-            display = val if isinstance(val, (str, int, float, bool)) else str(val)
+            display = masked if isinstance(masked, (str, int, float, bool)) else str(masked)
             payload = {
                 "key": key,
                 "status": "set",
                 "value": display,
-                "message": f"{key} is set.",
+                "message": f"{key} is set."
+                + (" Secrets inside it are hidden." if masked != val else ""),
             }
             if key == "agent.personality":
                 try:
@@ -574,6 +584,29 @@ def register_system_tools(registry: Any) -> None:
                     )
             if binary == "tar" and args[1:] and not args[1].startswith("-"):
                 raise RefusedBeforeEffect("tar requires explicit dash options; old-style option clusters are refused.")
+
+            # uv and git run other programs by subcommand, not by flag (audit
+            # 2026-10-26 AUD-085): `uv run python -c ...` and `uv tool run`
+            # start an interpreter, and `git config alias.x "!cmd"` then
+            # `git x` runs a shell command -- each after one approved card,
+            # the class F-03 closed for `find -exec`.
+            _sub = next((a for a in args[1:] if not a.startswith("-")), "")
+            if binary == "uv" and (
+                _sub in ("run", "tool")
+                or any(a.split("=", 1)[0] == "--with" for a in args[1:])
+            ):
+                raise RefusedBeforeEffect(
+                    f"'uv {_sub or 'run'}' runs another program and would bypass the "
+                    "binary allowlist. Use python_exec, or `uv pip`/`uv sync`."
+                )
+            if binary == "git" and _sub == "config" and not any(
+                a in ("--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin")
+                for a in args[1:]
+            ):
+                raise RefusedBeforeEffect(
+                    "git config may only be read here (--get/--list): a written "
+                    "alias or core.* value runs a program on the next git call."
+                )
 
             # git subcommand denylist (destructive / credential / rewrite)
             if binary == "git" and len(args) > 1:

@@ -1050,6 +1050,20 @@ enforces the reverse direction.
 
 ### 1. Immediate fixes (blockers and security risks), in order
 
+**Status (2026-10-26):** fixed, each with a regression test that fails on the
+old code. The rules are recorded in AGENTS.md §53.
+- Item 1: AUD-001 and AUD-064.
+- Items 2 to 4: AUD-002, AUD-003, AUD-004, AUD-005.
+- Item 5: AUD-084, applied to `kazma mcp` and `kazma ask`.
+- Item 6: AUD-006, AUD-007, AUD-110. The loop-stall gate now catches a
+  nested sync function that async code calls directly.
+- Items 7 to 9: AUD-008, AUD-039, AUD-010, AUD-013.
+- Items 10 and 11: AUD-085 to AUD-091, AUD-009, AUD-011, AUD-012.
+
+Not done: the short-term and long-term items below. AUD-111 remains, except
+the call sites the improved gate flagged (`sessions/directory.py`,
+`voice_turn.py`, the startup graph recompile), which are fixed.
+
 1. **AUD-001:** stop popping tool arguments in `UnifiedToolExecutor`, then
    remove the dead RBAC block (AUD-064).
 2. **AUD-002:** remove the t.co network call from `mentions_fire`, and gate

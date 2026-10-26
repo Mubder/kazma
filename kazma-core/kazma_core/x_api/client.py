@@ -351,7 +351,9 @@ class XClient:
         """
         params = [
             f"max_results={max(5, min(100, int(max_results)))}",
-            "tweet.fields=author_id,conversation_id,referenced_tweets,created_at,text,attachments,note_tweet",
+            # entities: a pasted link's expanded URL, read instead of fetching
+            # the t.co redirect (mentions_fire._tweet_id_from_post).
+            "tweet.fields=author_id,conversation_id,referenced_tweets,created_at,text,attachments,note_tweet,entities",
             "expansions=author_id,referenced_tweets.id,referenced_tweets.id.author_id",
             "user.fields=username,public_metrics",
         ]

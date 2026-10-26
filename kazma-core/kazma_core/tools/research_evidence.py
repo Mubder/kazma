@@ -52,7 +52,13 @@ def _load(path: str | Path) -> str | None:
                 p = p2
         except Exception:
             pass
-    if not p.is_file():
+    from kazma_core.store_registry import is_kazma_store
+
+    # Kazma's own databases are refused here as at every other door
+    # (store_registry, AGENTS.md section 37): on an install whose workspace
+    # holds kazma-data/, these read-tier readers returned raw store bytes
+    # that file_read refuses (audit 2026-10-26 AUD-086).
+    if not p.is_file() or is_kazma_store(p):
         return None
     try:
         return p.read_text(encoding="utf-8", errors="replace")

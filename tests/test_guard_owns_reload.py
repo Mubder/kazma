@@ -654,11 +654,52 @@ def test_a_failed_stop_is_reported_as_failed(monkeypatch):
         raise PermissionError("Operation not permitted")
 
     monkeypatch.setattr(guard.os, "killpg", refuse, raising=False)
+    monkeypatch.setattr(guard, "_recorded_child_is_ours", lambda pid, data, log: True)
     log = _Log()
     assert guard._stop_recorded_child(log) == 0
     assert "reload.child_stopped" not in log.names()
     assert "reload.child_stop_failed" in log.names()
     assert log.first("reload.child_stop_failed")["error"]
+
+
+def _kills(monkeypatch) -> list:
+    ran: list = []
+
+    def run(cmd, *a, **k):
+        ran.append(cmd)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(guard.subprocess, "run", run)
+    monkeypatch.setattr(guard.os, "getpgid", lambda pid: pid, raising=False)
+    monkeypatch.setattr(guard.os, "killpg", lambda pgid, sig: ran.append(["killpg", pgid]),
+                        raising=False)
+    return ran
+
+
+def test_a_reused_pid_is_never_killed(monkeypatch):
+    """Audit 2026-10-26 AUD-013: the state file outlives the guard; after a
+    reboot its child_pid can be any process. Recorded creation time differs
+    from the live process's: nothing is killed."""
+    _use_clock(monkeypatch, _Clock(early=0.0))
+    guard._update_state(child_pid=FOREIGN_PID, child_created=1000.0)
+    monkeypatch.setattr(guard, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(guard, "_process_started_at", lambda pid: 5000.0)
+    ran = _kills(monkeypatch)
+    log = _Log()
+    assert guard._stop_recorded_child(log) == 0
+    assert ran == []
+    assert "orphan.pid_reused" in log.names()
+
+
+def test_negative_control_the_recorded_child_itself_is_killed(monkeypatch):
+    _use_clock(monkeypatch, _Clock(early=0.0))
+    guard._update_state(child_pid=FOREIGN_PID, child_created=1000.0)
+    alive = iter([True, True, False])
+    monkeypatch.setattr(guard, "_pid_alive", lambda pid: next(alive, False))
+    monkeypatch.setattr(guard, "_process_started_at", lambda pid: 1000.5)
+    ran = _kills(monkeypatch)
+    assert guard._stop_recorded_child(_Log()) == FOREIGN_PID
+    assert ran, "the recorded child was not stopped"
 
 
 def test_the_request_file_is_never_read_half_written(tmp_path):

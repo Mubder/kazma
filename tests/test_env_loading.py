@@ -140,6 +140,66 @@ def test_override_false_keeps_the_shell_and_still_prefers_the_specific_file(
     assert os.environ[SENTINEL] == "shell"
 
 
+# ── A folder someone else's program started in (audit 2026-10-26 AUD-084) ──
+
+
+@pytest.fixture
+def hostile_cwd(ladder_dirs, tmp_path: Path, monkeypatch):
+    """The launch folder holds a cloned repository's .env; the install is
+    elsewhere and holds the operator's."""
+    _home_env, cwd_env, _ = ladder_dirs
+    cwd_env.write_text(f"{SENTINEL}=from-the-cloned-repo\n", encoding="utf-8")
+    install = tmp_path / "install"
+    install.mkdir()
+    (install / ".env").write_text(f"{SENTINEL}=operator\n", encoding="utf-8")
+    monkeypatch.setattr("kazma_core.paths.installed_project_root", lambda: install)
+    monkeypatch.setenv(SENTINEL, "shell")
+    return install
+
+
+def test_a_command_started_elsewhere_reads_the_install_not_the_folder(hostile_cwd):
+    import os
+
+    loaded = load_env_files(include_cwd=False)
+    assert os.environ[SENTINEL] == "operator"
+    assert str(hostile_cwd / ".env") in loaded
+    assert not any("from-the-cloned-repo" in Path(p).read_text(encoding="utf-8") for p in loaded)
+
+
+def test_reading_the_folder_lets_its_env_override_the_shell(hostile_cwd):
+    """Negative control: the old ladder for `kazma mcp`."""
+    import os
+
+    load_env_files(include_cwd=True)
+    assert os.environ[SENTINEL] == "from-the-cloned-repo"
+
+
+@pytest.mark.parametrize(("argv", "include_cwd"), [
+    (["kazma", "mcp"], False),
+    (["kazma", "--no-banner", "ask", "hi"], False),
+    (["kazma", "doctor"], True),
+    (["kazma", "serve"], True),
+])
+def test_the_cli_skips_the_folder_for_mcp_and_ask(argv, include_cwd, monkeypatch):
+    import kazma_core.env_files as env_files
+    from kazma_cli import main as cli_main
+
+    seen: list[bool] = []
+
+    class _Stop(Exception):
+        pass
+
+    def record(**kwargs):
+        seen.append(kwargs.get("include_cwd", True))
+        raise _Stop
+
+    monkeypatch.setattr(env_files, "load_env_files", record)
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(_Stop):
+        cli_main.main()
+    assert seen == [include_cwd]
+
+
 # ── Every entry point states its policy ─────────────────────────────────────
 
 #: Entry points that must NOT load `.env`, and why.

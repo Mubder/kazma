@@ -72,9 +72,16 @@ def try_enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]
     """Enable session YOLO from a HITL card click.
 
     The operator is already on an approval card — that is consent for
-    this thread. ``KAZMA_ALLOW_YOLO=0`` still blocks the ``/yolo`` slash
-    command (``enable_yolo`` without ``force``).
+    this thread, but only where YOLO exists at all: when
+    :func:`yolo_allowed` is False (production without ``KAZMA_ALLOW_YOLO=1``,
+    or ``KAZMA_ALLOW_YOLO=0``) the card offers no YOLO button, so a request
+    for it is a stale or crafted client and is downgraded to "approve once"
+    (audit 2026-10-26 AUD-090). Forced on regardless, it turned off every
+    approval of the thread on an install whose operator had switched YOLO
+    off, and the route's downgrade branch could never run.
     """
+    if not yolo_allowed():
+        return {"active": False, "downgraded": True, "reason": yolo_block_reason()}
     st = enable_yolo(thread_id, actor=actor, force=True)
     st["downgraded"] = False
     return st

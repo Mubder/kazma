@@ -241,9 +241,20 @@ def _tool_search_code(root: Path, args: dict[str, Any]) -> str:
         return f"Error: invalid regex: {e}"
     matches: list[str] = []
 
+    # The glob is the client's: `../**/.env` walked out of the project, and
+    # the result's relative_to(root) is lexical, so it passed (audit
+    # 2026-10-26 AUD-087). Refuse a glob that leaves the root, and keep only
+    # files that resolve inside it (a link inside the project can point out).
+    if glob and (os.path.isabs(glob) or ".." in Path(glob).parts or glob.startswith(("/", "\\"))):
+        return "Error: glob must stay inside the project root (no '..' or absolute paths)"
+    root_resolved = root.resolve()
     search_files = root.rglob(glob) if glob else root.rglob("*")
     for fpath in search_files:
         if not fpath.is_file():
+            continue
+        try:
+            fpath.resolve().relative_to(root_resolved)
+        except (OSError, ValueError):
             continue
         # Skip binary / large files
         if fpath.stat().st_size > 1_000_000:

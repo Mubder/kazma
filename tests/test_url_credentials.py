@@ -386,7 +386,7 @@ def _product_sources() -> dict[str, str]:
 
 
 def _probe_mask_deep():
-    from kazma_ui.settings import mask_deep
+    from kazma_core.security.config_mask import mask_deep
 
     return mask_deep({"cfg": {"endpoint": DSN, "cmd": [TOKEN_URL]}})
 
@@ -455,7 +455,7 @@ def _probe_profile():
 
 
 PROBES = {
-    "kazma-ui/kazma_ui/settings.py::mask_deep": _probe_mask_deep,
+    "kazma-core/kazma_core/security/config_mask.py::mask_deep": _probe_mask_deep,
     "kazma-core/kazma_core/memory/backends.py::mask_backends_cfg": _probe_mask_backends_cfg,
     "kazma-core/kazma_core/config_store.py::_redact_for_log": _probe_redact_for_log,
     "kazma-core/kazma_core/settings_restore.py::_mask_backup_secrets": _probe_settings_export,

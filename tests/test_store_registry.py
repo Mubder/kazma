@@ -367,6 +367,9 @@ def data(tmp_path, monkeypatch):
     # Pin the workspace so the verdicts depend on rule 0 alone, not on this
     # machine's active WorkspaceStore row.
     monkeypatch.setattr(path_policy, "resolve_active_root", lambda: tmp_path)
+    # The research readers ask file_write's binding (read_url._workspace_root
+    # is imported by name elsewhere: patched there, the patch would miss it).
+    monkeypatch.setattr("kazma_core.tools.file_write.resolve_active_root", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     return d
 
@@ -379,6 +382,9 @@ def _doors(path: Path) -> dict[str, object]:
         control_plane_store_targeted,
         denied_message,
     )
+    from kazma_core.tools.read_url import _load_research_body
+    from kazma_core.tools.research_eval import score_report_file
+    from kazma_core.tools.research_synthesize import _resolve_under_workspace
     from kazma_skills.native.database_client.tools import _checked_sqlite_file
 
     read = check_path_access(path, "read")
@@ -393,7 +399,20 @@ def _doors(path: Path) -> dict[str, object]:
         "shell_exec": control_plane_store_targeted(str(path)),
         "before_the_card_code": _exec_names_kazma_store({"code": f"open({str(path)!r})"}, ""),
         "before_the_card_shell": _exec_names_kazma_store({}, f'sqlite3 "{path}" .dump'),
+        # The research readers (read_research_chunk, digest/summarize, the
+        # synthesizer, the report scorer): read tier, and on an install whose
+        # workspace holds kazma-data/ they returned raw store bytes (audit
+        # 2026-10-26 AUD-086).
+        "research_reader": _refused_text(_load_research_body(str(path))),
+        "research_synthesize": _refused_text(_resolve_under_workspace(str(path))),
+        "research_score": None if score_report_file(path).checks.get("file_readable", True)
+        else "refused",
     }
+
+
+def _refused_text(verdict: object) -> str | None:
+    """A reader's refusal (its error text), or None when it opened the file."""
+    return verdict if isinstance(verdict, str) else None
 
 
 def test_every_door_refuses_every_store_and_names_its_reader(data):

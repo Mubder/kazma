@@ -18,6 +18,7 @@ Behaviour:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import threading
@@ -140,7 +141,9 @@ def rate_limit(bucket: str, default_per_minute: int) -> Any:
         checked = getattr(request.state, "_kazma_rate_limit_checks", None)
         if checked is not None and marker in checked:
             return
-        limit = _per_minute(bucket, default_per_minute)
+        # A settings read: off the loop (AUD-007; the docstring of _principal
+        # says why a store lookup here must not block).
+        limit = await asyncio.to_thread(_per_minute, bucket, default_per_minute)
         allowed, retry_after = _allow((bucket, _principal(request)), limit)
         if not allowed:
             raise HTTPException(

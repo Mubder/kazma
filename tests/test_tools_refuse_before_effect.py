@@ -37,6 +37,13 @@ from kazma_core.safety.side_effects import is_read_only
 #: closure holds (the memory tools' ``_mem_*``), resolved at test time.
 DELEGATES: dict[str, list[str]] = {
     "computer_use": ["kazma_core.tools.computer_use:computer_use"],
+    # Two hops down: the tool awaits file_apply_patch, which runs the sync
+    # body in a thread. Missing from this map, its refusals were returned as
+    # strings and failed the turn (audit 2026-10-26 AUD-008).
+    "file_apply_patch": [
+        "kazma_core.tools.file_apply_patch:file_apply_patch",
+        "kazma_core.tools.file_apply_patch:_file_apply_patch_sync",
+    ],
     "file_apply_patch_set": ["kazma_core.tools.file_apply_patch:file_apply_patch_set"],
     "file_write": ["kazma_core.tools.file_write:file_write"],
     "git_pull": ["kazma_skills.native.git_github_manager.tools:_git_sync"],

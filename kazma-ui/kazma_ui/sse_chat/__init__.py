@@ -454,7 +454,7 @@ def create_sse_chat_router(
         try:
             from kazma_core.sessions.directory import stamp_last_platform
 
-            stamp_last_platform(thread_id, "web")
+            await asyncio.to_thread(stamp_last_platform, thread_id, "web")
         except Exception:
             pass
 
@@ -465,7 +465,7 @@ def create_sse_chat_router(
 
         _discovery = discovery_reply(raw_msg, current_language())
         if _discovery is not None:
-            _persist_instant_turn(session, thread_id, raw_msg, _discovery)
+            await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, _discovery)
 
             async def _discovery_gen() -> AsyncGenerator[str, None]:
                 yield await _journal_fast_path(thread_id, "token", {"content": _discovery, "capacity": True})
@@ -488,7 +488,7 @@ def create_sse_chat_router(
                 "Usage: `/research deep <topic>` — runs through "
                 "the same agent as chat (tools + HITL)."
             )
-            _persist_instant_turn(session, thread_id, raw_msg, _usage)
+            await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, _usage)
 
             async def _research_gen() -> AsyncGenerator[str, None]:
                 # Persisted as an instant turn: never replayed on reconnect
@@ -523,7 +523,7 @@ def create_sse_chat_router(
             except (SnapshotStoreError, sqlite3.Error, OSError, ValueError) as exc:
                 logger.warning("[SSE] time-travel command could not read snapshots: %s", exc)
                 _tt = _t_tt("replay.chat_store_unreadable", _tt_lang)
-            _persist_instant_turn(session, thread_id, raw_msg, _tt)
+            await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, _tt)
 
             async def _time_travel_gen() -> AsyncGenerator[str, None]:
                 # As /research above: not replayed, and done carries the text.
@@ -549,7 +549,7 @@ def create_sse_chat_router(
                 from kazma_ui.i18n import t as _t_runs
 
                 _rr = _t_runs("runs.chat_unreadable", current_language())
-            _persist_instant_turn(session, thread_id, raw_msg, _rr)
+            await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, _rr)
 
             async def _runs_gen() -> AsyncGenerator[str, None]:
                 yield await _journal_fast_path(thread_id, "token", {"content": _rr, "capacity": True})
@@ -592,7 +592,7 @@ def create_sse_chat_router(
             session.messages = []
             session.title = ""
             try:
-                _get_store().put(session)
+                await asyncio.to_thread(_get_store().put, session)
             except Exception:
                 logger.exception("[SSE] failed to persist /reset")
 
@@ -637,7 +637,7 @@ def create_sse_chat_router(
                         )
                         
                         session.messages = _convert_messages_to_dicts(result_state.get("messages", []))
-                        _get_store().put(session)
+                        await asyncio.to_thread(_get_store().put, session)
                         
                         confirmation = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
                     else:
@@ -651,7 +651,7 @@ def create_sse_chat_router(
             # /compact rewrites the transcript from the compacted checkpoint
             # and used to stream its confirmation without storing it — the
             # user reloaded into a compacted history with no sign of why.
-            _persist_instant_turn(session, thread_id, raw_msg, confirmation)
+            await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, confirmation)
 
             async def _compact_generator() -> AsyncGenerator[str, None]:
                 yield _sse_frame("token", {"content": confirmation})
@@ -676,7 +676,7 @@ def create_sse_chat_router(
                 "(tools + HITL). Example: `/swarm analyze competitor pricing`\n"
                 "`/swarm status` and `/swarm list` still answer instantly."
             )
-            _persist_instant_turn(session, thread_id, raw_msg, _swarm_usage)
+            await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, _swarm_usage)
 
             async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
                 yield _sse_frame("token", {"content": _swarm_usage})
@@ -842,7 +842,7 @@ def create_sse_chat_router(
         session.messages.append({"role": "user", "content": user_message, "ts": _ts})
         # CRITICAL: persist immediately so restarts keep the sidebar transcript.
         try:
-            _get_store().put(session)
+            await asyncio.to_thread(_get_store().put, session)
         except Exception:
             logger.exception("[SSE] failed to persist user message for session=%s", session_id)
 
@@ -1279,7 +1279,7 @@ def create_sse_chat_router(
                         # (125 chars → 125 % 50 == 25) never flushed at all.
                         if len(content_acc) - _flushed_at[0] >= 50:
                             _flushed_at[0] = len(content_acc)
-                            _persist_now()
+                            await asyncio.to_thread(_persist_now)
                     elif ev_type in ("tool_call", "tool_result", "status_update"):
                         _record_frame_activity(activity_log, ev_type, data)
                     elif ev_type in ("approval_required", "hitl"):
@@ -1372,12 +1372,12 @@ def create_sse_chat_router(
                 # A late disconnect flush must not replace the final reply
                 # with narration or two copies emitted by a model recheck.
                 if not _terminal_received:
-                    _persist_now(open_turn=True)
+                    await asyncio.to_thread(_persist_now, open_turn=True)
                 raise
 
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
-                _persist_now(open_turn=False)
+                await asyncio.to_thread(_persist_now, open_turn=False)
                 yield _sse_frame("error", {"content": sanitize_error(exc)})
 
         async def _guarded_events() -> AsyncGenerator[str, None]:
@@ -2094,7 +2094,8 @@ def create_sse_chat_router(
             return {"ok": False, "reason": "missing_session"}
         from kazma_core.agent.capacity_commands import snapshot_capacity
 
-        snap = snapshot_capacity(tid)
+        # Long-task and YOLO settings reads: off the loop (AUD-111).
+        snap = await asyncio.to_thread(snapshot_capacity, tid)
         snap["ok"] = True
         snap["session_id"] = sid
         return snap
@@ -2173,7 +2174,7 @@ def create_sse_chat_router(
                         "role": "user",
                         "content": _label + text,
                     })
-                    _get_store().put(_sess)
+                    await asyncio.to_thread(_get_store().put, _sess)
         except Exception:
             logger.debug("[SSE] persist steer transcript failed", exc_info=True)
 

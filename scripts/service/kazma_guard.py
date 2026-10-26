@@ -3399,6 +3399,11 @@ def _stop_recorded_child(log: GuardLog, *, spawned_before: float | None = None) 
         return 0
     if not pid or not _pid_alive(pid):
         return 0
+    # The state file outlives the guard (a reboot, a hard stop), so the PID
+    # may belong to anything now; the other two reapers asked first, this
+    # one force-killed the tree (audit 2026-10-26 AUD-013, §39).
+    if not _recorded_child_is_ours(pid, state, log):
+        return 0
     note = ""
     try:
         if os.name == "nt":

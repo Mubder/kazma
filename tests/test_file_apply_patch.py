@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests._tool_answer import answer
 import pytest
 
 from kazma_core.tools.file_apply_patch import (
@@ -96,7 +97,7 @@ async def test_file_apply_patch_outside_workspace(
     _pin_workspace(tmp_path, monkeypatch)
     outside = tmp_path.parent / "escape.py"
     outside.write_text("secret = 1\n", encoding="utf-8")
-    msg = await file_apply_patch(str(outside), old_string="secret = 1", new_string="secret = 2")
+    msg = await answer(file_apply_patch(str(outside), old_string="secret = 1", new_string="secret = 2"))
     assert "not allowed" in msg.lower() or msg.startswith("Error") or msg.startswith("Safety")
     assert outside.read_text(encoding="utf-8") == "secret = 1\n"
 

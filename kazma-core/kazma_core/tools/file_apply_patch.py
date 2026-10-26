@@ -189,30 +189,39 @@ def _file_apply_patch_sync(
     patch: str,
     replace_all: bool,
 ) -> str:
+    # Every refusal below until the write is made before anything changed:
+    # RefusedBeforeEffect, an ordinary failed call the model can correct.
+    # Returned as strings, the registry marked them "effects unknown" and
+    # the turn failed on the commonest patch mistake, an old_string that
+    # does not match (audit 2026-10-26 AUD-008).
     if not path or not path.strip():
-        return "Error: No path provided."
+        raise RefusedBeforeEffect("Error: No path provided.")
 
     p = resolve_tool_path(path)
     access = check_path_access(p, "write")
     if not access.allowed:
-        return denied_message(path, "write", result=access)
+        raise RefusedBeforeEffect(denied_message(path, "write", result=access))
 
     patch_text = (patch or "").strip()
     old = old_string or ""
     new = new_string or ""
     if not patch_text and not old and not new:
-        return "Error: Provide old_string+new_string or a unified diff in patch."
+        raise RefusedBeforeEffect(
+            "Error: Provide old_string+new_string or a unified diff in patch."
+        )
 
     existed = p.is_file()
     if not existed:
         if patch_text or old:
-            return f"Error: File not found: {path}. Use file_write to create it, then patch."
+            raise RefusedBeforeEffect(
+                f"Error: File not found: {path}. Use file_write to create it, then patch."
+            )
         # empty old_string + new_string on a missing file → create
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(new, encoding="utf-8")
         except OSError as exc:
-            return f"Error: Could not create {path} — {exc}"
+            return effect_unknown(f"Error: Could not create {path} — {exc}")
         _touch_index(p)
         return f"Created {path} ({len(new.encode('utf-8'))} bytes) via file_apply_patch"
 
@@ -221,9 +230,11 @@ def _file_apply_patch_sync(
         # handling in apply_search_replace from ever seeing a CRLF file.
         original = read_exact(p)
     except OSError as exc:
-        return f"Error: Could not read {path} — {exc}"
+        raise RefusedBeforeEffect(f"Error: Could not read {path} — {exc}") from exc
     except UnicodeDecodeError:
-        return f"Error: {path} is not UTF-8 text; file_apply_patch edits text files only."
+        raise RefusedBeforeEffect(
+            f"Error: {path} is not UTF-8 text; file_apply_patch edits text files only."
+        ) from None
 
     try:
         if patch_text:
@@ -233,7 +244,7 @@ def _file_apply_patch_sync(
                 original, old, new, replace_all=bool(replace_all)
             )
     except PatchError as exc:
-        return f"Error: {exc}"
+        raise RefusedBeforeEffect(f"Error: {exc}") from exc
 
     if updated == original:
         return f"No changes applied to {path}"
@@ -241,7 +252,7 @@ def _file_apply_patch_sync(
     try:
         p.write_text(updated, encoding="utf-8", newline="")
     except OSError as exc:
-        return f"Error: Could not write {path} — {exc}"
+        return effect_unknown(f"Error: Could not write {path} — {exc}")
 
     old_lines = original.count("\n") + (1 if original and not original.endswith("\n") else 0)
     new_lines = updated.count("\n") + (1 if updated and not updated.endswith("\n") else 0)

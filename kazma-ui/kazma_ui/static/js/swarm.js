@@ -8,6 +8,11 @@
   'use strict';
   var KS = window.KazmaStream || {};
   var pollInterval = null;
+  // This file runs again on every visit (modules/nav.js), in a new closure:
+  // its document listeners are bound to this controller and removed on
+  // leaving. Bound bare, they stacked, and a Retry after one round trip
+  // through another page dispatched two tasks (audit 2026-10-26 AUD-012).
+  var _docListeners = null;
   var workers = [];
   var activeTasks = {};        // task_id -> {sse, events, data}
   var currentPlaygroundTaskId = null;
@@ -103,6 +108,9 @@
   // ══════════════════════════════════════════════════════
 
   function init() {
+    if (_docListeners) { try { _docListeners.abort(); } catch (e) {} }
+    _docListeners = new AbortController();
+    var once = { signal: _docListeners.signal };
     fetchModels();
     refreshStatus();
     pollInterval = setInterval(refreshStatus, 5000);
@@ -144,7 +152,7 @@
       else if (btn.dataset.action === 'view-task') viewTaskDetail(btn.dataset.taskId);
       else if (btn.dataset.action === 'approval-approve') decideApproval('approve');
       else if (btn.dataset.action === 'approval-deny') decideApproval('deny');
-    });
+    }, once);
 
     // Event delegation for clickable task cards and rows with data-task-id
     document.addEventListener('click', function(e) {
@@ -152,7 +160,7 @@
       if (!el) return;
       var tid = el.dataset.taskId;
       if (tid) viewTaskDetail(tid);
-    });
+    }, once);
 
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') {
@@ -161,7 +169,7 @@
           closeTaskDetail();
         }
       }
-    });
+    }, once);
   }
 
   // ══════════════════════════════════════════════════════
@@ -3097,8 +3105,14 @@
   // ══════════════════════════════════════════════════════
 
   function destroySwarmMouth() {
+    try { if (_docListeners) _docListeners.abort(); } catch (e) {}
+    _docListeners = null;
     try { if (pollInterval) clearInterval(pollInterval); } catch (e) {}
     pollInterval = null;
+    try { if (window._activeTasksPoll) clearInterval(window._activeTasksPoll); } catch (e) {}
+    window._activeTasksPoll = null;
+    try { if (pipelineInterval) clearInterval(pipelineInterval); } catch (e) {}
+    pipelineInterval = null;
     try { if (approvalPoll) clearInterval(approvalPoll); } catch (e) {}
     approvalPoll = null;
     try { if (playgroundSSE && playgroundSSE.close) playgroundSSE.close(); } catch (e) {}
@@ -3108,6 +3122,7 @@
     Object.keys(activeTasks).forEach(function (id) {
       var entry = activeTasks[id];
       try { if (entry && entry.sse && entry.sse.close) entry.sse.close(); } catch (e) {}
+      try { if (entry && entry.timer) clearInterval(entry.timer); } catch (e) {}
     });
     activeTasks = {};
   }

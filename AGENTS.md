@@ -7610,6 +7610,68 @@ press. Plan and evidence: `docs/plans/RUN_SUPERVISION_PLAN.md`; guide:
   (`scripts/run_supervision_soak.py`, planted bugs as controls),
   `tests/e2e/test_runs_panel.py` (EN/AR, by the sidebar).
 
+### 53. The full audit of 2026-10-26: side doors and failure paths (`docs/audits/AUDIT_FULL_2026-10-26.md`)
+
+Each finding was a sibling of a hardened rule, not the rule. Each fix has a
+test that fails on the old code.
+
+- **A tool gets its arguments whole** (AUD-001). `UnifiedToolExecutor.execute`
+  (every chat surface's executor) popped `user_id`, `division`, `resource`
+  and `action` as RBAC context: `email_send(action="draft")` was approved as
+  a draft and sent. The RBAC check those keys fed ran only when the model
+  named a user, so it is gone; an engine passed in is asked nothing. Gate:
+  `tests/test_tool_arguments_reach_the_tool.py`.
+- **Text from outside never chooses a URL the server fetches** (AUD-002). A
+  mention's pasted link is read from X's own `entities` (`expanded_url`, the
+  mentions request asks for `entities`); `mentions_fire` followed the t.co
+  redirect with a raw `httpx.get` before any check. In `x_api/` only the X
+  client talks to the network. Gate: `tests/test_x_mentions_no_fetch.py`.
+- **A migration import that stops leaves the target as it was** (AUD-003,
+  AUD-004). Every pre-swap copy must succeed (`_back_up_live_dbs`) or nothing
+  changes; a rollback deletes only a file that did not exist before; the
+  vault key is written after the swap (`_sync_vault_after_swap`, which does
+  not move the bundle's own vault.db aside) and put back by every later
+  rollback. Gate: `tests/test_importer_failure_paths.py`.
+- **One configuration masker** (AUD-005): `security/config_mask.py`, used by
+  the Settings API and the agent's `config_read` (read tier), which returned
+  nested provider keys and URL passwords. Gate:
+  `tests/test_config_read_masks_secrets.py`.
+- **`kazma mcp` and `kazma ask` never read the launch folder's `.env`**
+  (AUD-084, `env_files.env_file_ladder(include_cwd=False)`): other programs
+  start them in folders that are not the operator's, and a cloned repository's
+  `.env` overrode the real environment. The installed checkout's `.env` is
+  read instead. Other commands keep the launch folder (their data directory
+  is found from there too). Gate: `tests/test_env_loading.py`.
+- **The loop-stall gate sees a nested sync function called directly**
+  (AUD-006/007/110). A nested `def` is threaded only when handed to
+  `to_thread`; the SSE stream's `_persist_now` ran a whole-session write on
+  the loop every 50 characters. Also off the loop now: instant-turn rows,
+  `stamp_last_platform`, the tenant middleware's and rate limiter's settings
+  reads, the capacity bar, and the document actions' preludes. Gates:
+  `tests/test_static_gates.py` (`test_a_nested_sync_def_called_from_async_code_is_on_the_loop`).
+- **More refusals before effect** (AUD-008, AUD-039): `file_apply_patch`'s
+  refusals (a non-matching `old_string` above all) and a crawl refused at
+  admission (`IngestResult.refused` for a page) raise `RefusedBeforeEffect`.
+  Gates: `tests/test_refusals_keep_the_turn.py`, `DELEGATES` in
+  `tests/test_tools_refuse_before_effect.py`.
+- **A turn kept out of memory leaves no facts** (AUD-010): the heuristic
+  pass asks `forget.refuses_write` first, and `enforce_ledger` takes back the
+  facts of ledgered turns (`facts` in its result). Gate:
+  `tests/test_memory_forgotten_turn_leaves_no_facts.py`.
+- **Every guard reaper verifies the PID** (AUD-013): `_stop_recorded_child`
+  too. Gate: `tests/test_guard_owns_reload.py`.
+- **Smaller doors closed**: `shell_exec` refuses `uv run`/`uv tool`/`--with`
+  and every `git config` that is not a read (AUD-085); the research readers
+  refuse Kazma's stores (AUD-086, in the store-door gate); the IDE MCP
+  server's `search_code` glob stays in the root (AUD-087); SSRF blocks the
+  shared address space 100.64.0.0/10 (AUD-088); `git_status` runs with
+  `core.fsmonitor` off (AUD-089); a card's YOLO is downgraded where
+  `yolo_allowed()` is False (AUD-090); `docker exec` gets `-e PGPASSWORD` by
+  name and a dump timeout carries no command (AUD-091); a scan converted to
+  Word or Markdown keeps its artifact (AUD-009); Swarm's document listeners
+  and Live voice are torn down on a soft navigation (AUD-011/012,
+  `tests/js/test_soft_nav_listeners.js`).
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

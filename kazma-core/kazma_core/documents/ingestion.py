@@ -1856,22 +1856,29 @@ class DocumentIngestionService:
         path is ever accepted; the produced artifact is tenant-owned.
         """
 
-        self._require_writes_enabled()
+        await asyncio.to_thread(self._require_writes_enabled)
         tenant = _clean(tenant_id, "tenant_id")
         actor = _clean(actor_id, "actor_id")
         workspace = _clean(workspace_id, "workspace_id")
         fmt = _clean(target_format, "target_format").lower().lstrip(".")
         doc_id = DocumentId(document_id)
-        _record, version = self._resolve_current_version(
+        _record, version = await asyncio.to_thread(
+            self._resolve_current_version,
             tenant=tenant, actor=actor, doc_id=doc_id
         )
-        ocr_export = self._ocr_text_payload(
+        ocr_export = await asyncio.to_thread(
+            self._ocr_text_payload,
             doc_id, version, fmt, title=output_name or _record.title or "Document")
         if ocr_export is not None:
             # A scanned document's Word or Markdown file is its OCR text: the
             # scan itself converted is page images with no text, and slow
             # enough to time out (2026-10-22, a 54-page scan).
             generated_format, payload = ocr_export
+            # Under the document's durable scope, as the non-OCR convert: the
+            # service stores an artifact only for a scope that names the
+            # document and version. Without them the returned artifact_id was
+            # never recorded, the download answered 404 and the agent's
+            # saved copy failed (audit 2026-10-26 AUD-009).
             result = await self.service.generate(
                 generated_format,
                 self._bounded_payload(payload),
@@ -1880,14 +1887,17 @@ class DocumentIngestionService:
                 actor_id=actor,
                 output_name=output_name or _record.title or "Document",
                 export_dir=None,
+                document_id=doc_id,
+                version_id=version.id,
             )
-            return self._audited_artifact(
+            return await asyncio.to_thread(
+            self._audited_artifact,
                 result, tenant=tenant, actor=actor, doc_id=doc_id,
                 event_type="convert", action="convert",
                 detail={"target_format": fmt, "source": "ocr_text"},
                 failure_metric="generation",
             )
-        with self._materialize_original(version) as staged:
+        with await asyncio.to_thread(self._materialize_original, version) as staged:
             result = await self.service.convert(
                 staged,
                 fmt,
@@ -1900,7 +1910,8 @@ class DocumentIngestionService:
                 document_id=doc_id,
                 version_id=version.id,
             )
-        return self._audited_artifact(
+        return await asyncio.to_thread(
+            self._audited_artifact,
             result, tenant=tenant, actor=actor, doc_id=doc_id,
             event_type="convert", action="convert",
             detail={"target_format": fmt}, failure_metric="generation",
@@ -1956,10 +1967,11 @@ class DocumentIngestionService:
         actor = _clean(actor_id, "actor_id")
         workspace = _clean(workspace_id, "workspace_id")
         doc_id = DocumentId(document_id)
-        _record, version = self._resolve_current_version(
+        _record, version = await asyncio.to_thread(
+            self._resolve_current_version,
             tenant=tenant, actor=actor, doc_id=doc_id
         )
-        with self._materialize_original(version) as staged:
+        with await asyncio.to_thread(self._materialize_original, version) as staged:
             result = await self.service.pdf_info(
                 staged,
                 approved_path=staged,
@@ -1983,7 +1995,7 @@ class DocumentIngestionService:
     ) -> dict[str, Any]:
         """Split a page range from a document's current PDF version."""
 
-        self._require_writes_enabled()
+        await asyncio.to_thread(self._require_writes_enabled)
         tenant = _clean(tenant_id, "tenant_id")
         actor = _clean(actor_id, "actor_id")
         workspace = _clean(workspace_id, "workspace_id")
@@ -1994,10 +2006,11 @@ class DocumentIngestionService:
             raise DocumentIngestionError(
                 "invalid_request", "end_page must be greater than or equal to start_page"
             )
-        _record, version = self._resolve_current_version(
+        _record, version = await asyncio.to_thread(
+            self._resolve_current_version,
             tenant=tenant, actor=actor, doc_id=doc_id
         )
-        with self._materialize_original(version) as staged:
+        with await asyncio.to_thread(self._materialize_original, version) as staged:
             result = await self.service.pdf_split(
                 staged,
                 approved_path=staged,
@@ -2011,7 +2024,8 @@ class DocumentIngestionService:
                 document_id=doc_id,
                 version_id=version.id,
             )
-        return self._audited_artifact(
+        return await asyncio.to_thread(
+            self._audited_artifact,
             result, tenant=tenant, actor=actor, doc_id=doc_id,
             event_type="mutate", action="split",
             detail={"page_start": start, "page_end": end}, failure_metric="generation",
@@ -2030,16 +2044,17 @@ class DocumentIngestionService:
     ) -> dict[str, Any]:
         """Fill AcroForm fields on a document's current PDF version."""
 
-        self._require_writes_enabled()
+        await asyncio.to_thread(self._require_writes_enabled)
         tenant = _clean(tenant_id, "tenant_id")
         actor = _clean(actor_id, "actor_id")
         workspace = _clean(workspace_id, "workspace_id")
         doc_id = DocumentId(document_id)
         clean_fields = self._require_form_fields(fields)
-        _record, version = self._resolve_current_version(
+        _record, version = await asyncio.to_thread(
+            self._resolve_current_version,
             tenant=tenant, actor=actor, doc_id=doc_id
         )
-        with self._materialize_original(version) as staged:
+        with await asyncio.to_thread(self._materialize_original, version) as staged:
             result = await self.service.pdf_fill_form(
                 staged,
                 clean_fields,
@@ -2052,7 +2067,8 @@ class DocumentIngestionService:
                 document_id=doc_id,
                 version_id=version.id,
             )
-        return self._audited_artifact(
+        return await asyncio.to_thread(
+            self._audited_artifact,
             result, tenant=tenant, actor=actor, doc_id=doc_id,
             event_type="mutate", action="fill_form",
             detail={"field_count": len(clean_fields)}, failure_metric="generation",
@@ -2075,16 +2091,17 @@ class DocumentIngestionService:
         isolated worker protocol/manifest deliberately excludes them.
         """
 
-        self._require_writes_enabled()
+        await asyncio.to_thread(self._require_writes_enabled)
         tenant = _clean(tenant_id, "tenant_id")
         actor = _clean(actor_id, "actor_id")
         workspace = _clean(workspace_id, "workspace_id")
         doc_id = DocumentId(document_id)
         clean_terms = self._require_terms(terms)
-        _record, version = self._resolve_current_version(
+        _record, version = await asyncio.to_thread(
+            self._resolve_current_version,
             tenant=tenant, actor=actor, doc_id=doc_id
         )
-        with self._materialize_original(version) as staged:
+        with await asyncio.to_thread(self._materialize_original, version) as staged:
             result = await self.service.redact(
                 staged,
                 clean_terms,
@@ -2097,7 +2114,8 @@ class DocumentIngestionService:
                 document_id=doc_id,
                 version_id=version.id,
             )
-        return self._audited_artifact(
+        return await asyncio.to_thread(
+            self._audited_artifact,
             result, tenant=tenant, actor=actor, doc_id=doc_id,
             event_type="redact", action="redact",
             detail={"term_count": len(clean_terms)}, failure_metric="redaction",
@@ -2120,7 +2138,7 @@ class DocumentIngestionService:
         and downloadable by its opaque artifact ID.
         """
 
-        self._require_writes_enabled()
+        await asyncio.to_thread(self._require_writes_enabled)
         tenant = _clean(tenant_id, "tenant_id")
         actor = _clean(actor_id, "actor_id")
         workspace = _clean(workspace_id, "workspace_id")
@@ -2137,13 +2155,14 @@ class DocumentIngestionService:
         paths: list[Path] = []
         try:
             for doc_id in doc_ids:
-                _record, version = self._resolve_current_version(
+                _record, version = await asyncio.to_thread(
+            self._resolve_current_version,
                     tenant=tenant, actor=actor, doc_id=doc_id
                 )
                 if owner_doc is None:
                     owner_doc = doc_id
                     owner_version_id = version.id
-                handle = self._materialize_original(version)
+                handle = await asyncio.to_thread(self._materialize_original, version)
                 staged = handle.__enter__()
                 materialized.append(handle)
                 paths.append(staged)
@@ -2161,7 +2180,8 @@ class DocumentIngestionService:
         finally:
             for handle in reversed(materialized):
                 handle.__exit__(None, None, None)
-        return self._audited_artifact(
+        return await asyncio.to_thread(
+            self._audited_artifact,
             result, tenant=tenant, actor=actor, doc_id=owner_doc,
             event_type="generate", action="merge",
             detail={"count": len(doc_ids)}, failure_metric="generation",
@@ -2187,7 +2207,7 @@ class DocumentIngestionService:
         ``document_id``/``version_id``/``job_id`` and a downloadable result.
         """
 
-        self._require_writes_enabled()
+        await asyncio.to_thread(self._require_writes_enabled)
         tenant = _clean(tenant_id, "tenant_id")
         actor = _clean(actor_id, "actor_id")
         workspace = _clean(workspace_id, "workspace_id")
@@ -2204,7 +2224,8 @@ class DocumentIngestionService:
         )
         if not result.ok:
             telemetry.record_generation_failure("generate")
-            self.audit.record(
+            await asyncio.to_thread(
+                self.audit.record,
                 tenant_id=tenant, event_type="generate", action="generate",
                 outcome="failure", actor_id=actor,
                 detail={"target_format": fmt, "code": result.code or "generation_failed"},
@@ -2224,22 +2245,31 @@ class DocumentIngestionService:
         stem = Path(stem).stem or "document"
         filename = f"{stem}.{extension}"
         storage_path = artifact.storage_path
-        try:
-            with storage_path.open("rb") as source:
-                ingest = self.ingest_stream(
-                    source,
-                    filename=filename,
-                    tenant_id=tenant,
-                    workspace_id=workspace,
-                    actor_id=actor,
-                    title=title or stem,
-                )
-        finally:
-            self._cleanup_transient_artifact(tenant, artifact)
+
+        def _ingest_generated() -> Any:
+            # Intake launches the parser worker twice, scans, fsyncs and
+            # writes the catalog: seconds normally, minutes under load. It ran
+            # on the event loop and froze every chat stream meanwhile (audit
+            # 2026-10-26 AUD-110).
+            try:
+                with storage_path.open("rb") as source:
+                    return self.ingest_stream(
+                        source,
+                        filename=filename,
+                        tenant_id=tenant,
+                        workspace_id=workspace,
+                        actor_id=actor,
+                        title=title or stem,
+                    )
+            finally:
+                self._cleanup_transient_artifact(tenant, artifact)
+
+        ingest = await asyncio.to_thread(_ingest_generated)
         payload_out = ingest.to_dict()
         payload_out["target_format"] = fmt
         payload_out["warnings"] = list(result.warnings)
-        self.audit.record(
+        await asyncio.to_thread(
+            self.audit.record,
             tenant_id=tenant, event_type="generate", action="generate",
             outcome="success", actor_id=actor,
             document_id=ingest.document_id, version_id=ingest.version_id,

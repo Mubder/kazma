@@ -235,6 +235,12 @@ def test_mask_deep_handles_json_encoded_values():
         ("git clone --upload-pack=echo file:///tmp/x", "--upload-pack"),
         ("git -c core.gitProxy=whoami status", "-c"),
         ("tar --use-compress-program=whoami -cf x.tar .", "--use-compress-program"),
+        # Audit 2026-10-26 AUD-085: by subcommand, not by flag.
+        ("uv run python -V", "uv run"),
+        ("uv tool run cowsay hi", "uv tool"),
+        ("uv pip install --with=evil x", "uv pip"),
+        ("git config alias.x !whoami", "git config"),
+        ("git config core.fsmonitor whoami", "git config"),
     ],
 )
 async def test_shell_exec_blocks_exec_capable_arguments(command, blocked_flag):
@@ -266,7 +272,10 @@ async def test_shell_exec_still_allows_ordinary_commands(tmp_path):
     subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
     async with workspace_path_scope(tmp_path):
         result = await registry._tools["shell_exec"].func("git status --short", timeout=15)
+        # Reading git's configuration stays allowed (AUD-085 refuses writes).
+        read = await registry._tools["shell_exec"].func("git config --list", timeout=15)
     assert not result.startswith("Error:")
+    assert not read.startswith("Error:"), read
 
 
 # ── F-04: HITL default-deny ──────────────────────────────────────────────

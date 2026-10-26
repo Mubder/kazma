@@ -1973,7 +1973,8 @@ class KazmaAppBuilder:
                 _m = getattr(getattr(self.agent.llm, "config", None), "model", None) or "unknown"
                 logger.info("[App] Graph recompiled on model switch (model=%s)", _m)
 
-            _recompile_holder_graph()
+            # The live HITL config is a settings read: off the loop.
+            await asyncio.to_thread(_recompile_holder_graph)
             if hasattr(self.agent, "set_on_model_change_callback"):
                 self.agent.set_on_model_change_callback(_recompile_holder_graph)
 

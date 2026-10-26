@@ -333,22 +333,18 @@ def import_bundle(
     # ── 4. Path translation (invariant B) ──────────────────────────────
     _apply_path_rewrite(staging, bundle, report.target_workspace_root, report, _log)
 
-    # ── 5. Vault-key sync (if needed) ──────────────────────────────────
+    # ── 5. Vault-key sync: checked now, written after the swap ─────────
+    # The key is written only once the bundle's databases are in place
+    # (_sync_vault_after_swap), and put back on every later rollback (audit
+    # 2026-10-26 AUD-004). Written here, before the preflight below, an
+    # import that then stopped ("the target backend is SQLite", "Live SQLite
+    # files were not modified") left the target with the bundle's key and
+    # its own vault.db moved aside: every secret unreadable at the next boot.
+    env_path: Path | None = None
     if pairing.status in (VaultKeyStatus.MISMATCH, VaultKeyStatus.EMPTY) and bundle_key:
         # find the .env (project root, one level up from data_dir).
         env_path = _find_env_file(data_dir)
-        if env_path:
-            _log(f"Syncing KAZMA_VAULT_KEY into {env_path.name}…")
-            backup = sync_vault_key(
-                bundle_vault_key=bundle_key,
-                env_path=env_path,
-                target_data_dir=data_dir,
-            )
-            if backup:
-                report.warnings.append(
-                    f"Existing target vault.db backed up to {backup.name} before overwrite."
-                )
-        else:
+        if env_path is None:
             # No .env to persist KAZMA_VAULT_KEY into. If we continued, the
             # bundle's vault.db would be swapped in (step 6) but its matching
             # key would be written NOWHERE → every encrypted secret becomes
@@ -396,14 +392,14 @@ def import_bundle(
     report.backup_path = str(backup_dir)
     _log(f"Backing up live DBs to {backup_dir.name}/…")
 
-    for arc_name, resolver_name in _dest_map_for(staged_data).items():
-        src_staged = staged_data / arc_name
-        if not src_staged.exists():
-            continue
-        dest = _dest_for_bundle_db(arc_name, resolver_name, paths, data_dir)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists():
-            _backup_one(dest, backup_dir / arc_name)
+    existed_before, failed_backup = _back_up_live_dbs(staged_data, paths, data_dir, backup_dir)
+    if failed_backup:
+        report.error(
+            f"could not back up the live {failed_backup} before replacing it; "
+            "nothing was changed. Free disk space or stop the server, "
+            "and re-run."
+        )
+        return report
 
     if staged_pg_dump.exists():
         from kazma_core.db.backend import get_database_url
@@ -461,10 +457,31 @@ def import_bundle(
             f"  {len(install_failures)} DB(s) failed to install — rolling back "
             + ", ".join(install_failures)
         )
-        _rollback_sqlite_swap(backup_dir, swapped, paths, data_dir)
+        _rollback_sqlite_swap(backup_dir, swapped, paths, data_dir, existed_before)
         report.files_restored = []
         return report
     _log(f"  restored {len(swapped)} data files")
+
+    # The bundle's key now, with its vault.db in place, before anything below
+    # reads the vault (step 5's comment).
+    vault_undo: _VaultUndo | None = None
+    if env_path is not None:
+        _log(f"Syncing KAZMA_VAULT_KEY into {env_path.name}...")
+        try:
+            vault_undo = _sync_vault_after_swap(
+                bundle_key, env_path, data_dir,
+                bundle_has_vault_db=bundle.has_file("data/vault.db"),
+            )
+        except OSError as exc:
+            report.error(f"could not write KAZMA_VAULT_KEY into {env_path}: {exc}")
+            _rollback_sqlite_swap(backup_dir, swapped, paths, data_dir, existed_before)
+            report.files_restored = []
+            return report
+        if vault_undo.moved_vault is not None:
+            report.warnings.append(
+                f"Existing target vault.db backed up to {vault_undo.moved_vault.name} "
+                "before overwrite."
+            )
 
     # 7. Restore config (config.yaml → ConfigStore.import_yaml).
     config_path = staging / "config.yaml"
@@ -480,7 +497,9 @@ def import_bundle(
 
     if not _guard_restored_x(swapped, report):
         _log("  X restore guard failed — rolling back installed SQLite files")
-        _rollback_sqlite_swap(backup_dir, swapped, paths, data_dir)
+        _rollback_sqlite_swap(backup_dir, swapped, paths, data_dir, existed_before)
+        if vault_undo is not None:
+            vault_undo.restore()
         report.files_restored = []
         return report
 
@@ -636,13 +655,99 @@ def _dest_for_bundle_db(
     return data_dir / arc_name
 
 
+def _back_up_live_dbs(
+    staged_data: Path, paths: Any, data_dir: Path, backup_dir: Path,
+) -> tuple[set[str], str]:
+    """Copy every live database the swap will replace into *backup_dir*.
+
+    Returns the names that existed before the swap, and the first whose copy
+    failed ("" when all were copied). The copy must exist before anything
+    changes (audit 2026-10-26 AUD-003): its result was ignored, so a failed
+    copy (a full disk, a locked file under --force) went on to the swap, and
+    the rollback -- seeing no backup -- took the file for one that had not
+    existed and deleted it.
+    """
+    from kazma_core.memory.backup import _backup_one
+
+    existed: set[str] = set()
+    for arc_name, resolver_name in _dest_map_for(staged_data).items():
+        if not (staged_data / arc_name).exists():
+            continue
+        dest = _dest_for_bundle_db(arc_name, resolver_name, paths, data_dir)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            existed.add(arc_name)
+            if not _backup_one(dest, backup_dir / arc_name):
+                return existed, arc_name
+    return existed, ""
+
+
+class _VaultUndo:
+    """What the vault-key sync changed, and how to put it back."""
+
+    def __init__(self, env_path: Path, env_before: str | None,
+                 environ_before: str | None, moved_vault: Path | None,
+                 vault_path: Path) -> None:
+        self.env_path = env_path
+        self.env_before = env_before
+        self.environ_before = environ_before
+        self.moved_vault = moved_vault
+        self.vault_path = vault_path
+
+    def restore(self) -> None:
+        try:
+            if self.env_before is None:
+                self.env_path.unlink(missing_ok=True)
+            else:
+                tmp = self.env_path.with_suffix(self.env_path.suffix + ".tmp")
+                tmp.write_text(self.env_before, encoding="utf-8")
+                os.replace(tmp, self.env_path)
+        except OSError:
+            logger.error("[migrate:import] could not restore %s", self.env_path, exc_info=True)
+        if self.environ_before is None:
+            os.environ.pop("KAZMA_VAULT_KEY", None)
+        else:
+            os.environ["KAZMA_VAULT_KEY"] = self.environ_before
+        if self.moved_vault is not None and self.moved_vault.exists():
+            try:
+                os.replace(self.moved_vault, self.vault_path)
+            except OSError:
+                logger.error("[migrate:import] could not put back %s", self.vault_path,
+                             exc_info=True)
+
+
+def _sync_vault_after_swap(bundle_key: str, env_path: Path, data_dir: Path, *,
+                           bundle_has_vault_db: bool) -> _VaultUndo:
+    """Write the bundle's key; return what to undo if a later step rolls back.
+
+    When the bundle carried a vault.db, the swap already put it in place (the
+    target's own copy is in the pre-swap backup), so it must not be moved
+    aside here. Without one, the target's vault.db -- encrypted with a key
+    that is about to be replaced -- is moved aside as before.
+    """
+    env_before = env_path.read_text(encoding="utf-8") if env_path.exists() else None
+    environ_before = os.environ.get("KAZMA_VAULT_KEY")
+    moved = sync_vault_key(
+        bundle_vault_key=bundle_key,
+        env_path=env_path,
+        target_data_dir=data_dir,
+        move_existing_vault=not bundle_has_vault_db,
+    )
+    return _VaultUndo(env_path, env_before, environ_before, moved, data_dir / "vault.db")
+
+
 def _rollback_sqlite_swap(
     backup_dir: Path,
     swapped: list[str],
     paths: Any,
     data_dir: Path,
+    existed_before: set[str],
 ) -> None:
-    """Restore live SQLite files from the pre-swap backup (audit C-2)."""
+    """Restore live SQLite files from the pre-swap backup (audit C-2).
+
+    A file is deleted only when it did not exist before the swap
+    (``existed_before``), never because its backup is missing (AUD-003).
+    """
     from kazma_core.memory.backup import _backup_one
 
     for arc_name in swapped:
@@ -650,12 +755,17 @@ def _rollback_sqlite_swap(
         dest = _dest_for_bundle_db(arc_name, resolver_name, paths, data_dir)
         bak = backup_dir / arc_name
         if bak.exists():
-            try:
-                _backup_one(bak, dest)
-            except Exception:
-                logger.warning(
-                    "[migrate:import] rollback of %s failed", arc_name, exc_info=True
+            if not _backup_one(bak, dest):
+                logger.error(
+                    "[migrate:import] rollback of %s failed; its pre-import copy "
+                    "is %s", arc_name, bak,
                 )
+            continue
+        if arc_name in existed_before:
+            logger.error(
+                "[migrate:import] no pre-import copy of %s to roll back to; the "
+                "imported file is left in place", arc_name,
+            )
             continue
         # File did not exist live before the swap — drop the new one.
         try:

@@ -148,7 +148,7 @@ def test_cli_cached_status_uses_shared_real_evidence(settings, observed, languag
 
 def test_cli_dispatches_cached_status_and_reports_unknown_jobs(settings, observed, monkeypatch, capsys):
     from kazma_cli import main
-    monkeypatch.setattr('kazma_core.env_files.load_env_files', lambda: None)
+    monkeypatch.setattr('kazma_core.env_files.load_env_files', lambda **_kw: None)
     monkeypatch.setattr(main.sys, 'argv', ['kazma', 'acquisition', 'status', '--json', '--no-banner'])
     with pytest.raises(SystemExit) as result:
         main.main()

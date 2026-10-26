@@ -68,11 +68,27 @@ class TestLiteralPrivateIPv4:
             "169.254.1.1",  # link-local
             "0.0.0.0",
             "224.0.0.1",  # multicast
+            # The shared address space, RFC 6598 (audit 2026-10-26 AUD-088):
+            # CGNAT, Tailscale, Alibaba Cloud's metadata endpoint.
+            "100.64.0.1",
+            "100.100.100.200",
+            "100.127.255.254",
         ],
     )
     def test_blocked(self, ip):
         with pytest.raises(SSRFError):
             validate_url(f"http://{ip}/")
+
+    def test_negative_control_python_does_not_call_it_private(self):
+        """What the explicit range covers: none of Python's flags."""
+        import ipaddress
+
+        ip = ipaddress.ip_address("100.100.100.200")
+        assert not (ip.is_private or ip.is_reserved or ip.is_link_local or ip.is_loopback)
+
+    @pytest.mark.parametrize("ip", ["100.63.255.255", "100.128.0.1"])
+    def test_the_neighbours_of_the_shared_space_stay_public(self, ip):
+        validate_url(f"http://{ip}/")  # must not raise
 
 
 # ═══════════════════════════════════════════════════════════════════

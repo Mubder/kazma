@@ -31,8 +31,21 @@ logger = logging.getLogger(__name__)
 __all__ = ["env_file_ladder", "load_env_files"]
 
 
-def env_file_ladder() -> list[Path]:
+def env_file_ladder(*, include_cwd: bool = True) -> list[Path]:
     """``.env`` files to load, **lowest precedence first**.
+
+    ``include_cwd=False`` is for commands that other programs start in their
+    own folders (``kazma mcp`` from an editor, ``kazma ask`` inside a
+    workspace): their launch folder's ``.env`` is that folder's, and is not
+    read; the checkout this package runs from (``paths.installed_project_root``,
+    which ``kazma mcp`` also pins as its project root) stands in for it (audit
+    2026-10-26 AUD-084). Loaded with override, a ``.env`` in a cloned
+    repository replaced the operator's real environment --
+    ``KAZMA_MCP_ALLOW_UNGATED=1``, ``KAZMA_HITL_CANONICAL_FLOOR=0``,
+    ``KAZMA_DATA_DIR`` -- and the danger tools were served with no approval
+    path. Every other command keeps the launch folder (rule 3 below): its
+    data directory is found from there too, and a key from elsewhere would
+    not open that vault.
 
     Replaces a ladder that hardcoded one developer's absolute path
     (``C:/Users/balfa/kazma``) as the default "user workspace", and loaded
@@ -51,7 +64,7 @@ def env_file_ladder() -> list[Path]:
     3. Most specific wins last. The CWD you launched from beats the
        per-install default; an explicitly named file beats both.
     """
-    from kazma_core.paths import user_home
+    from kazma_core.paths import installed_project_root, user_home
 
     ladder: list[Path] = []
 
@@ -61,8 +74,14 @@ def env_file_ladder() -> list[Path]:
     except Exception:
         pass
 
-    # The directory you launched from — the repo actually being run.
-    ladder.append(Path.cwd() / ".env")
+    if include_cwd:
+        # The directory you launched from -- the repo actually being run.
+        ladder.append(Path.cwd() / ".env")
+    else:
+        # Started in someone else's folder: this installation's checkout.
+        install = installed_project_root()
+        if install is not None:
+            ladder.append(install / ".env")
 
     # Explicit override, highest precedence. Use this to point a dev clone
     # at a shared env file on purpose, instead of it happening by accident.
@@ -73,7 +92,7 @@ def env_file_ladder() -> list[Path]:
     return ladder
 
 
-def load_env_files(*, override: bool = True) -> list[str]:
+def load_env_files(*, override: bool = True, include_cwd: bool = True) -> list[str]:
     """Load the ladder into ``os.environ``; return the files loaded.
 
     ``override=True`` (the server and CLI) lets a file replace a variable that
@@ -86,7 +105,7 @@ def load_env_files(*, override: bool = True) -> list[str]:
     """
     from dotenv import load_dotenv
 
-    ladder = env_file_ladder()
+    ladder = env_file_ladder(include_cwd=include_cwd)
     if not override:
         ladder.reverse()
     loaded: list[str] = []
