@@ -1254,6 +1254,7 @@
                         this.xReplyRoleBindings[role] = Object.assign({ selection: 'inherit', provider: '', model: '' }, ((data.ai || {}).roles || {})[role] || {});
                     });
                     this.xReplySummonersText = (data.summoners || []).join(', ');
+                    this.xReplyReferencesText = (data.drafting_references || []).join('\n');
                     this.xReplyProblems = [];
                     this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
                     this.xReplyPolicyStaged = false;
@@ -1302,7 +1303,8 @@
                 'poll_interval_s', 'summoner_policy', 'allow_emoji_mood', 'stance_check', 'unmatched',
                 'use_knowledge', 'knowledge_library', 'open_thread_marker', 'close_thread_marker', 'reply_style'];
             return JSON.stringify({ values: Object.fromEntries(keys.map(key => [key, this.xReply[key]])),
-                summoners: this.xReplySummonersText, subjects: this.xReplySubjectPayload(), ai: this.xReplyAIConfigPayload() });
+                summoners: this.xReplySummonersText, references: this.xReplyReferencesText,
+                subjects: this.xReplySubjectPayload(), ai: this.xReplyAIConfigPayload() });
         },
 
         xReplyHasChanges() {
@@ -1467,6 +1469,7 @@
                         knowledge_library: this.xReply.knowledge_library || '',
                         open_thread_marker: this.xReply.open_thread_marker || '',
                         close_thread_marker: this.xReply.close_thread_marker || '',
+                        drafting_references: this._xSplit(this.xReplyReferencesText, true),
                         subjects: subjects,
                     }),
                 });
@@ -1482,6 +1485,7 @@
                 } else {
                     Object.assign(this.xReply, data);
                     this.xReplySummonersText = (data.summoners || []).join(', ');
+                    this.xReplyReferencesText = (data.drafting_references || []).join('\n');
                 }
                 this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
                 this.xReplyPolicyStaged = false;

@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kazma_core.x_api.model_selection import x_chat, x_model_call
+from kazma_core.x_api.references import SETTING_KEY as REFERENCES_KEY
+from kazma_core.x_api.references import normalize_paths
 from kazma_core.x_api.reply_style import TONES
 
 logger = logging.getLogger(__name__)
@@ -386,6 +388,8 @@ class ReplyConfig:
     #: may summon on that thread. Empty = never: only trusted handles.
     open_thread_marker: str = ""
     close_thread_marker: str = ""
+    #: Files X Studio's post drafting reads as its facts (x_api/references.py).
+    drafting_references: tuple[str, ...] = ()
     config_errors: tuple[str, ...] = ()
     reply_style: dict[str, Any] = field(default_factory=dict)
 
@@ -611,6 +615,7 @@ def get_reply_config() -> ReplyConfig:
         close_thread_marker=str(
             _cs_get("connectors.x.reply.close_thread_marker", "") or ""
         ).strip(),
+        drafting_references=normalize_paths(_cs_get(REFERENCES_KEY, ())),
     )
 
 

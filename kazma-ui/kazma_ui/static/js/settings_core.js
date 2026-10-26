@@ -539,6 +539,7 @@
         xReplyModelTesting: false,
         xReplyModelResult: null,
         xReplySummonersText: '',
+        xReplyReferencesText: '',
         xReplyLibraries: [],
         xReplyLibrariesLoaded: false,
         xReplyLoading: false,

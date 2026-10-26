@@ -82,6 +82,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "x_studio.alternatives": {"en": "Number of alternatives", "ar": "عدد البدائل"},
     "x_studio.generating": {"en": "Drafting…", "ar": "جارٍ إعداد المسودات…"},
     "x_studio.generated_review": {"en": "Drafts saved below. Review facts and wording before posting.", "ar": "تم حفظ المسودات أدناه. راجع الحقائق والصياغة قبل النشر."},
+    "x_studio.read_references": {"en": "Written from your brief and:", "ar": "كُتبت من فكرتك ومن:"},
     "x_studio.public_text": {"en": "Text to publish", "ar": "النص المراد نشره"},
     "x_studio.status_outcome_unknown": {"en": "Outcome unknown — verify on X", "ar": "نتيجة النشر غير معروفة — تحقق في إكس"},
     "x_studio.status_sending": {"en": "Sending — do not resend", "ar": "جارٍ الإرسال — لا تعد الإرسال"},

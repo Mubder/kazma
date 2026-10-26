@@ -1012,6 +1012,9 @@ _LOOP_STALL_HELPERS = frozenset({
     "resolve_active_root", "get_active_cwd", "resolve_repo", "resolve_tool_path",
     "check_path_access", "_workspace_scope_error", "_get_workspace",
     "notify_file_changed",
+    # X drafting's reference documents (2026-10-26): the workspace lookup,
+    # then each file read whole.
+    "load_references",
     "get_github_token", "is_oauth_connected", "store_oauth_token", "clear_oauth_token",
     # Chat apps' /cost and /context (2026-10-01): the per-call ledger's
     # totals for a chat (SQLite), and the context report -- the active
