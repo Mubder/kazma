@@ -3367,6 +3367,18 @@
                     </p>
                 </div>
 
+                <div class="form-group">
+                    <label for="xr-post-length">{{ t('settings.xt.post_length') }}</label>
+                    <select id="xr-post-length" class="form-input" x-model="xReply.post_length">
+                        <option value="full">{{ t('settings.xt.style_full') }}</option>
+                        <option value="standard">{{ t('settings.xt.style_standard') }}</option>
+                        <option value="short">{{ t('settings.xt.style_short') }}</option>
+                    </select>
+                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 0;">
+                        {{ t('settings.xt.post_length_hint') }}
+                    </p>
+                </div>
+
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-top:8px;">
                     <div class="form-group">
                         <label for="xr-day">{{ t('settings.xt.max_day') }}</label>

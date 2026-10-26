@@ -1301,7 +1301,8 @@
             const keys = ['enabled', 'mode', 'summoners', 'trigger', 'max_replies_per_day',
                 'max_replies_per_target_per_day', 'cooldown_per_thread_s', 'min_target_followers',
                 'poll_interval_s', 'summoner_policy', 'allow_emoji_mood', 'stance_check', 'unmatched',
-                'use_knowledge', 'knowledge_library', 'open_thread_marker', 'close_thread_marker', 'reply_style'];
+                'use_knowledge', 'knowledge_library', 'open_thread_marker', 'close_thread_marker', 'reply_style',
+                'post_length'];
             return JSON.stringify({ values: Object.fromEntries(keys.map(key => [key, this.xReply[key]])),
                 summoners: this.xReplySummonersText, references: this.xReplyReferencesText,
                 subjects: this.xReplySubjectPayload(), ai: this.xReplyAIConfigPayload() });
@@ -1470,6 +1471,7 @@
                         open_thread_marker: this.xReply.open_thread_marker || '',
                         close_thread_marker: this.xReply.close_thread_marker || '',
                         drafting_references: this._xSplit(this.xReplyReferencesText, true),
+                        post_length: this.xReply.post_length || 'full',
                         subjects: subjects,
                     }),
                 });

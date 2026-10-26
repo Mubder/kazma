@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from kazma_core.x_api.reply import _build_prompt, screen_draft
-from kazma_core.x_api.reply_style import bind_style, effective_mood, normalize_style
+from kazma_core.x_api.reply_style import CONTRACT_VERSION, bind_style, effective_mood, normalize_style
 from kazma_core.x_api.stance import Subject, _parse_subjects
 from kazma_core.x_api.subject_policy import normalize_cards, revise_cards
 
@@ -47,7 +47,7 @@ def test_every_tone_retains_the_declared_stance_and_boundaries(side, mood):
     subject = Subject(id="coffee", target="Coffee suppliers", match=("coffee",), side=side,
                       scope="Sourcing only", exceptions=("Private family life",), mood=mood)
     prompt = _build_prompt(subject, "Coffee suppliers admitted a mistake.", "author", mood=mood)[0]["content"]
-    assert "Stance contract v1" in prompt and "Coffee suppliers" in prompt
+    assert f"Stance contract v{CONTRACT_VERSION}" in prompt and "Coffee suppliers" in prompt
     assert "Sourcing only" in prompt and "Private family life" in prompt
     assert "cannot reverse the declared side" in prompt
     assert "no profanity" in prompt

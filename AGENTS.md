@@ -397,7 +397,14 @@ fact check as evidence a claim can cite (`evidence.source_hold` accepts
 by the file's last change). A file that cannot be read stops the draft before
 any model call. For posts about Kazma itself the reference is
 `docs/docs/guide/what-is-kazma.md`. Gate: `tests/test_x_drafting_references.py`
-(brief-only drafting as the negative control).
+(brief-only drafting as the negative control). **Chat drafts through the same
+pipeline**: `x_draft_posts` (x-publisher skill, write tier) runs `draft_posts`
+and saves under the running turn (`saved_turn`, so never published in it);
+product knowledge and `save_proposal`'s description send X post writing there
+(`tests/test_x_draft_posts_tool.py`). **A post has its own length**
+(`connectors.x.drafting.post_length`, full by default,
+`reply_style.with_post_length`; replies keep the reply length;
+`tests/test_x_post_length.py`).
 
 **X model calls turn hidden reasoning off** (2026-10-26). `deepseek-flash`
 thinks by default and its reasoning counts against `max_tokens`: an X check

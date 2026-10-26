@@ -486,3 +486,56 @@ async def x_download_media(post: str) -> str:
     if problems:
         answer["not_saved"] = problems
     return _json(answer)
+
+
+async def x_draft_posts(brief: str, count: int = 1) -> str:
+    """Draft X posts as X Studio's Generate does, and save them for review.
+
+    The same pipeline: the X model, the operator's reference documents
+    (Settings -> X), the four content checks. A post the chat model writes
+    itself and saves with save_proposal has none of them, so a post about the
+    product said whatever the model remembered. The drafts are saved under
+    this turn: they are never published in it.
+    """
+    from kazma_core.agent.artifacts import get_artifact_store
+    from kazma_core.agent.tool_refusal import KnownEffectError
+    from kazma_core.safety.commitment.proposals import current_turn
+    from kazma_core.safety.hitl import get_current_tenant_id, get_current_thread_id
+    from kazma_core.x_api.post_drafting import draft_posts
+    from kazma_core.x_api.reply import DraftFailed
+    from kazma_core.x_api.text_length import validate_text
+
+    try:
+        count = int(count)
+    except (TypeError, ValueError):
+        raise RefusedBeforeEffect("count must be 1, 2 or 3.") from None
+    try:
+        result = await draft_posts(str(brief or ""), count=count)
+    except DraftFailed as exc:
+        # The model calls ran and nothing was saved; another call is safe.
+        raise KnownEffectError(f"{exc} Nothing was saved; adjust the brief and call again.") from exc
+    except ValueError as exc:
+        # A bad brief, the X settings, or a reference document that cannot be
+        # read: refused before any model call.
+        raise RefusedBeforeEffect(str(exc)) from exc
+    tenant, thread, turn = get_current_tenant_id() or "default", get_current_thread_id() or "", current_turn()
+    reviews = [{**review, "models": list(result.models)} for review in result.reviews]
+    store = await asyncio.to_thread(get_artifact_store)
+    payload = await asyncio.to_thread(store.save_proposal, tenant, thread, "x_posts", list(result.drafts),
+                                      reviews=reviews, saved_turn=turn)
+    limit = int((await asyncio.to_thread(get_x_config)).max_chars or 280)
+    sources = ", ".join(ref["name"] for ref in result.references)
+    lines = [f"Saved to X Studio's drafts as {payload['proposal_id']}: {len(payload['items'])} written by the X "
+             f"model from the brief{' and ' + sources if sources else ' alone (no reference documents are set)'}."]
+    for item, review in zip(payload["items"], result.reviews):
+        counted = validate_text(str(item["text"]), maximum=limit)
+        verdicts = ", ".join(f"{check['check']} {check['verdict']}" for check in review["checks"])
+        lines.append(f"- {item['id']} [X length {counted.weighted}/{limit}"
+                     f"{'' if counted.valid else ', TOO LONG'}; checks: {verdicts}]")
+        lines.append(f"  {item['text']}")
+        lines.extend(f"  {check['check']}: {check['reason']}" for check in review["checks"]
+                     if check["verdict"] != "pass" and check["check"] != "context")
+    lines.append("The user has not seen these drafts yet: show them the full text and the checks, and ask "
+                 "before posting. A draft is never published in the turn that wrote it; post one with "
+                 "x_post(proposal_id=<item id>) after the user answers.")
+    return "\n".join(lines)

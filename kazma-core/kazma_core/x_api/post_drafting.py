@@ -50,9 +50,10 @@ async def draft_posts(brief: str, *, count: int = 1, subject_id: str = "") -> Po
         if selected is None or not selected.allow_draft:
             raise ValueError("Choose an existing subject that permits drafting.")
         subject = selected
-    from kazma_core.x_api.reply_style import CONTRACT_VERSION, bind_style, stance_contract, style_contract
+    from kazma_core.x_api.reply_style import (CONTRACT_VERSION, bind_style, stance_contract, style_contract,
+                                              with_post_length)
 
-    subject = bind_style(subject, cfg)
+    subject = with_post_length(bind_style(subject, cfg), cfg.post_length)
     policy = {"target": subject.target or subject.id, "side": subject.side, "view": subject.view,
               "scope": subject.scope, "exceptions": subject.exceptions,
               "evidence_policy": subject.evidence_policy,

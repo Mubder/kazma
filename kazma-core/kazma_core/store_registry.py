@@ -418,6 +418,7 @@ _OUTPUT_ONLY = "the result is the tool output; nothing is saved"
 TOOL_WRITES: dict[str, Write] = {
     # ── the agent's own state ──────────────────────────────────────────
     "save_proposal": Write(("agent_artifacts.db",), ("list_proposals",)),
+    "x_draft_posts": Write(("agent_artifacts.db",), ("list_proposals",)),
     "discard_proposal": Write(("agent_artifacts.db",), ("list_proposals",)),
     "update_scratchpad": Write(("agent_artifacts.db",), ("context:scratchpad",)),
     "task_ledger_update": Write(("task_ledgers.db",), ("context:task_ledger",)),

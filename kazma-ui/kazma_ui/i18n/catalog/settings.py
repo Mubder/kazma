@@ -53,6 +53,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.xt.style_length": {"en": "Reply length", "ar": "طول الرد"},
     "settings.xt.style_short": {"en": "Short — one sentence", "ar": "قصير — جملة واحدة"},
     "settings.xt.style_standard": {"en": "Standard — up to two sentences", "ar": "عادي — حتى جملتين"},
+    "settings.xt.style_full": {"en": "Full — as many sentences as the post needs", "ar": "كامل — بقدر ما يحتاج المنشور من جمل"},
     "settings.xt.allow_uncensored_language": {"en": "Allow uncensored language", "ar": "السماح باللغة غير المنقّحة"},
     "settings.xt.uncensored_hint": {"en": "Allows profanity at the selected level, not unlimited behavior. Slurs, threats, factual checks and publication approvals remain governed by the same rules. Your model may still refuse.", "ar": "يسمح بالألفاظ القوية بالمستوى المحدد، وليس بسلوك بلا حدود. تبقى قواعد الإهانات التمييزية والتهديدات والتحقق من الحقائق وموافقات النشر سارية. قد يرفض النموذج الطلب."},
     "settings.xt.style_profanity": {"en": "Profanity level", "ar": "مستوى الألفاظ القوية"},
@@ -4003,6 +4004,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.xt.no_libraries": {
         "ar": "لا مكتبات بعد. أضف واحدة في صفحة المكتبة المعرفية ثم أعد تحميل هذا التبويب.",
         "en": "No libraries yet. Add one on the Knowledge page, then reload this tab.",
+    },
+    "settings.xt.post_length": {
+        "ar": "طول المنشورات",
+        "en": "Post length",
+    },
+    "settings.xt.post_length_hint": {
+        "ar": "طول المنشورات التي يصوغها استوديو إكس والمحادثة. للردود طولها الخاص (طول الرد أدناه). دائمًا ضمن حد إكس.",
+        "en": "How long the posts X Studio and chat draft may be. Replies keep their own length (Reply length below). Always within X's limit.",
     },
     "settings.xt.references": {
         "ar": "مستندات مرجعية لصياغة المنشورات",

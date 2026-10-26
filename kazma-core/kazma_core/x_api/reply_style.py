@@ -6,7 +6,7 @@ import re
 from dataclasses import replace
 from typing import Any
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2  # v2 (2026-10-26): length=full, a post's own length
 TONES = {
     "professional": "Professional, precise and composed. Avoid personal jabs.",
     "friendly": "Warm, conversational and approachable without false agreement.",
@@ -20,6 +20,11 @@ TONES = {
 DEFAULT_STYLE = {"language": "source", "dialect": "", "slang": "none",
                  "length": "standard", "allow_uncensored_language": False,
                  "profanity": "none"}
+#: ``full`` is for posts (``connectors.x.drafting.post_length``): as many
+#: sentences as fit in X's limit. Replies offer short and standard.
+POST_LENGTHS = frozenset({"short", "standard", "full"})
+POST_LENGTH_KEY = "connectors.x.drafting.post_length"
+DEFAULT_POST_LENGTH = "full"
 _MILD = re.compile(r"(?<!\w)(?:damn|hell|crap)(?!\w)", re.I)
 _STRONG = re.compile(r"(?<!\w)(?:fuck\w*|shit\w*|bullshit|asshole\w*|bitch\w*|كس\s*أم\w*|كسم\w*|شرموط\w*|زب)(?!\w)", re.I)
 
@@ -31,7 +36,7 @@ def normalize_style(raw: Any, *, partial: bool = False) -> dict[str, Any]:
     result = dict(raw) if partial else {**DEFAULT_STYLE, **raw}
     for key, options in (("language", {"source", "en", "ar"}),
                          ("slang", {"none", "natural", "strong"}),
-                         ("length", {"short", "standard"}),
+                         ("length", POST_LENGTHS),
                          ("profanity", {"none", "mild", "strong"})):
         if key in result and (not isinstance(result[key], str) or result[key] not in options):
             raise ValueError(f"Invalid reply style {key}.")
@@ -64,6 +69,17 @@ def bind_style(subject: Any, cfg: Any) -> Any:
     return replace(subject, reply_style=normalize_style(merged))
 
 
+def with_post_length(subject: Any, length: str) -> Any:
+    """A post's own length on the bound subject: replies keep the reply length.
+
+    Posts followed the reply length (two sentences by default), and the
+    safety check rejected a three-sentence Studio post for it (live
+    2026-10-26).
+    """
+    length = length if length in POST_LENGTHS else DEFAULT_POST_LENGTH
+    return replace(subject, reply_style=normalize_style({**subject.reply_style, "length": length}))
+
+
 def stance_contract(side: str, target: str) -> str:
     """Position survives tone, pressure, facts concessions and optional additions."""
     common = (f"Stance contract v{CONTRACT_VERSION}. Address the actual primary target {target}, "
@@ -91,7 +107,8 @@ def style_contract(subject: Any) -> str:
     return (f"Language contract v{CONTRACT_VERSION}: language={style['language']} "
             f"(source means the original post's language); dialect={style['dialect'] or 'standard'}; "
             f"slang={style['slang']}; profanity={style['profanity']}; length={style['length']} "
-            "(short: one concise sentence; standard: up to two concise sentences, always within X's cap). "
+            "(short: one concise sentence; standard: up to two concise sentences; full: as many "
+            "sentences as the post needs; always within X's cap). "
             + freedom + " These settings cannot change the declared stance or factual boundaries.")
 
 
