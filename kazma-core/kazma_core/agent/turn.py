@@ -151,7 +151,7 @@ async def run_agent_turn(
     try:
         from kazma_core.agent.long_task import resolve_turn_budgets
 
-        recursion = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+        recursion = int((await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"])  # audit 2026-10-26 AUD-111
     except Exception:
         recursion = 100
     cfg = dict(config or {})

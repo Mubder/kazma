@@ -353,3 +353,61 @@ def test_delivery_observer_exception_does_not_break_delivery(sender):
             await asyncio.sleep(.01)
         assert sender.sent
     asyncio.run(main())
+
+
+def _sink_probe(monkeypatch, answer: bool) -> list[Any]:
+    """Patch the sink check to record the thread it ran on."""
+    import threading
+
+    seen: list[Any] = []
+
+    def probe() -> bool:
+        seen.append(threading.current_thread())
+        return answer
+
+    monkeypatch.setattr(ops_alerts, "_has_any_sink", probe)
+    return seen
+
+
+@pytest.mark.parametrize("has_sink", [True, False])
+def test_an_alert_raised_on_the_loop_reads_no_setting_there(sender, monkeypatch, has_sink):
+    """The sink check is a settings read (audit 2026-10-26 AUD-111): an alert
+    raised on a loop asks it from a thread, and the receipt is unchanged."""
+    import threading
+
+    seen = _sink_probe(monkeypatch, has_sink)
+    receipts: list[Any] = []
+
+    async def main() -> None:
+        loop_thread = threading.current_thread()
+        assert ops_alerts.alert("on-loop", "Finished", on_delivery=receipts.append) is True
+        assert seen == []  # alert() returned before anything read the settings
+        for _ in range(300):
+            if receipts:
+                break
+            await asyncio.sleep(.01)
+        assert seen and all(t is not loop_thread for t in seen)
+
+    asyncio.run(main())
+    assert receipts == [has_sink]
+    assert bool(sender.sent) is has_sink
+
+
+def test_the_old_dispatch_read_the_settings_on_the_loop(sender, monkeypatch):
+    """Negative control: the sink check as the old dispatcher made it, first
+    thing, on the caller's thread -- the loop."""
+    import threading
+
+    seen = _sink_probe(monkeypatch, False)
+
+    def old_dispatch(text: str, on_delivery: Any = None) -> None:
+        if not ops_alerts._has_any_sink():
+            ops_alerts._delivery_receipt(on_delivery, False)
+
+    monkeypatch.setattr(ops_alerts, "_dispatch", old_dispatch)
+
+    async def main() -> None:
+        ops_alerts.alert("on-loop-old", "Finished")
+        assert seen == [threading.current_thread()]
+
+    asyncio.run(main())

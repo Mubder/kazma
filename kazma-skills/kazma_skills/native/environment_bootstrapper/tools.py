@@ -17,6 +17,26 @@ from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 logger = logging.getLogger(__name__)
 
 
+def _refuse_bad_package_args(packages: list[str]) -> None:
+    """Refuse, before anything runs, an argument that is not a package.
+
+    Shell metacharacters, and any argument starting with ``-`` (audit
+    2026-10-26 AUD-108): the list goes straight onto the installer's
+    command line, so ``--index-url <host>``, ``-e <vcs url>``, ``-r file``
+    or npm's ``--registry`` were options the approval card showed as
+    "packages", installing from wherever they named.
+    """
+    for pkg in packages:
+        text = str(pkg or "")
+        if not text.strip() or any(char in text for char in ";|&<>`$()"):
+            raise RefusedBeforeEffect(f"Error: Invalid package name: {pkg}")
+        if text.lstrip().startswith("-"):
+            raise RefusedBeforeEffect(
+                f"Error: {pkg!r} is an installer option, not a package; "
+                "options are not accepted (name each package)."
+            )
+
+
 async def install_python_packages(packages: list[str]) -> str:
     """Install Python packages safely inside the runtime virtual environment using uv or pip.
 
@@ -29,24 +49,24 @@ async def install_python_packages(packages: list[str]) -> str:
     if not packages:
         raise RefusedBeforeEffect("Error: No packages specified.")
 
-    # Validate package names to avoid shell injection
-    for pkg in packages:
-        if not pkg or any(char in pkg for char in ";|&<>`$()"):
-            raise RefusedBeforeEffect(f"Error: Invalid package name: {pkg}")
+    _refuse_bad_package_args(packages)
 
     cwd = await asyncio.to_thread(_get_workspace)
+
+    # The interpreter Kazma runs on, named explicitly (audit 2026-10-26
+    # AUD-108): without ``--python`` uv picks the environment from the
+    # working directory -- the workspace's own ``.venv`` or an activated
+    # one -- so the install could land somewhere other than the runtime the
+    # tool says it installs into.
+    venv_python = Path(sys.prefix) / "Scripts" / "python.exe" if os.name == "nt" else Path(sys.prefix) / "bin" / "python"
+    interpreter = str(venv_python) if venv_python.exists() else sys.executable
 
     # Try uv first
     uv_path = shutil.which("uv")
     if uv_path:
-        cmd = [uv_path, "pip", "install"] + packages
+        cmd = [uv_path, "pip", "install", "--python", interpreter] + packages
     else:
-        # Fallback to current virtualenv interpreter if available, or sys.executable
-        venv_python = Path(sys.prefix) / "Scripts" / "python.exe" if os.name == "nt" else Path(sys.prefix) / "bin" / "python"
-        if venv_python.exists():
-            cmd = [str(venv_python), "-m", "pip", "install"] + packages
-        else:
-            cmd = [sys.executable, "-m", "pip", "install"] + packages
+        cmd = [interpreter, "-m", "pip", "install"] + packages
 
     try:
         logger.info("Executing Python package install: %s", " ".join(cmd))
@@ -72,9 +92,7 @@ async def install_npm_packages(packages: list[str]) -> str:
     if not packages:
         raise RefusedBeforeEffect("Error: No packages specified.")
 
-    for pkg in packages:
-        if not pkg or any(char in pkg for char in ";|&<>`$()"):
-            raise RefusedBeforeEffect(f"Error: Invalid package name: {pkg}")
+    _refuse_bad_package_args(packages)
 
     cwd = await asyncio.to_thread(_get_workspace)
     npm_path = shutil.which("npm")

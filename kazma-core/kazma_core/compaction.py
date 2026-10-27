@@ -9,6 +9,7 @@ Compacts the agent's conversation context by:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -314,8 +315,12 @@ class CompactionEngine:
             # resolve_tenant_id requires a platform arg; compaction has no
             # request platform, so use the "system" convention. Without it the
             # call raised TypeError and V2 memory retrieval was silently skipped.
-            _tenant = resolve_tenant_id("system", prefer_context=True)
-            hits = v2_search(query, limit=limit, tenant_id=_tenant)
+            # The tenant rule and the recall are settings and SQLite (audit 2026-10-26 AUD-111).
+            def _search() -> list[dict[str, Any]]:
+                _tenant = resolve_tenant_id("system", prefer_context=True)
+                return v2_search(query, limit=limit, tenant_id=_tenant)
+
+            hits = await asyncio.to_thread(_search)
             logger.info("Retrieved %d V2 memories for compaction", len(hits))
             return hits
         except Exception:

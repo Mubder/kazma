@@ -1330,7 +1330,10 @@ async def _stream_langgraph_events(
                                         approval_deadline_from,
                                     )
 
-                                    _deadline = approval_deadline_from()
+                                    # The HITL settings read (AUD-111).
+                                    _deadline = await asyncio.to_thread(
+                                        approval_deadline_from
+                                    )
                                     if _deadline:
                                         _hitl_payload_saved[
                                             "approval_deadline"

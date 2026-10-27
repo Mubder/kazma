@@ -86,6 +86,11 @@ async def probe_proxy(proxy_url: str | None) -> dict[str, Any]:
     if proxy_url is None:
         return {'success': True, 'message': 'Direct mode (no proxy).'}
     try:
+        # Built on the loop on purpose: with proxy= given, the client reads no
+        # setting (the active-route lookup runs only without it), and building
+        # it inside the deadline and after the capacity admission is what the
+        # probe's deadline and refusal tests hold (audit 2026-10-26 AUD-111,
+        # declared in tests/test_static_gates.py::_CALLS_THAT_READ_NOTHING_HERE).
         async with asyncio.timeout(15.0), await acquisition_capacity().acquire(), get_scraping_client(
             proxy=proxy_url, timeout=15.0, follow_redirects=False,
         ) as client:

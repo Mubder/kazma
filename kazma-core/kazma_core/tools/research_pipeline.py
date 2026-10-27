@@ -774,8 +774,8 @@ async def _run_research_pipeline(
             url_by_path[f"digest-{stem}.md"] = u
     for p in digests:
         src_url = url_by_path.get(p) or url_by_path.get(Path(p).name) or ""
-        all_claims.extend(
-            extract_claims_from_file(p, source_url=src_url, max_claims=6)
+        all_claims.extend(  # a file read (audit 2026-10-26 AUD-111)
+            await asyncio.to_thread(extract_claims_from_file, p, source_url=src_url, max_claims=6)
         )
     claims_path = out_dir / "claims-0.json"
     claims_md = claims_to_markdown(all_claims)
@@ -875,7 +875,7 @@ async def _run_research_pipeline(
             for p in extra:
                 src_url = url_by_path.get(p) or url_by_path.get(Path(p).name) or ""
                 all_claims.extend(
-                    extract_claims_from_file(p, source_url=src_url, max_claims=6)
+                    await asyncio.to_thread(extract_claims_from_file, p, source_url=src_url, max_claims=6)
                 )
             claims_md = claims_to_markdown(all_claims)
             await _publish_stage(_job, 'claims-json:1', out_dir / 'claims-1.json',

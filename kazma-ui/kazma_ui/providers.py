@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from kazma_core.config_store import ConfigStore, is_vault_ref
+from kazma_core.errors import safe_error
 from kazma_core.model_registry import get_model_registry
 from kazma_core.security.url_credentials import (
     mask_url_credentials,
@@ -427,7 +428,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         return {"success": False, "error": f"Cannot connect to Vertex AI at {client.config.base_url}"}
             except Exception as e:
                 await asyncio.to_thread(registry.set_provider_health, name, "down")
-                return {"success": False, "error": f"Google Provider test failed: {e}"}
+                # AUD-102: the client gets a code and reference, the log the
+                # exception (it can carry the endpoint and key parameters).
+                return {"success": False, "error": f"Google Provider test failed: {safe_error(e)}"}
 
         base_url = str(provider.get("base_url", "")).rstrip("/")
         api_key = _sanitize_api_key(str(provider.get("api_key", "") or ""))
@@ -718,13 +721,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         if not profile_name:
             raise HTTPException(status_code=400, detail="Profile name is required")
 
-        existing = registry.get_model_profile(profile_name)
-        if _is_masked_placeholder(data.get("api_key", "")) and existing:
-            data["api_key"] = existing.get("api_key", "")
-        data["base_url"] = _restore_url(
-            "base_url", data.get("base_url"), (existing or {}).get("base_url")
-        )
-
+        # A masked key or URL password posted back is restored (or refused)
+        # by ``registry.save_model_profile`` itself: one rule for this route
+        # and POST /api/models/saved (AUD-105).
         profile: dict[str, Any] = {
             "provider": data.get("provider", "custom"),
             "base_url": data.get("base_url", ""),

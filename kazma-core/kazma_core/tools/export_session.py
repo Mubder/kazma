@@ -114,22 +114,28 @@ def _export_json(messages: list[dict[str, Any]]) -> str:
 def _export_markdown(messages: list[dict[str, Any]]) -> str:
     """Export session as a readable Markdown document."""
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    # System messages (the prompt, turn notes) stay out of the readable
+    # export, and the export says so (audit 2026-10-26 AUD-072): it dropped
+    # them silently while its count included them. The JSON export keeps
+    # every message.
+    shown = [m for m in messages if str(m.get("role", "")).lower() != "system"]
+    left_out = len(messages) - len(shown)
     lines: list[str] = [
         "# Session Export",
         f"**Exported:** {now}",
-        f"**Messages:** {len(messages)}",
-        "",
-        "---",
-        "",
+        f"**Messages:** {len(shown)}",
     ]
+    if left_out:
+        lines.append(
+            f"**System messages left out:** {left_out} "
+            "(the prompt and Kazma's notes; the JSON export includes them)"
+        )
+    lines += ["", "---", ""]
 
-    for i, msg in enumerate(messages, 1):
-        role = msg.get("role", "unknown").capitalize()
+    for i, msg in enumerate(shown, 1):
+        role = str(msg.get("role", "unknown")).capitalize()
         content = msg.get("content", "")
         name = msg.get("name", "")
-
-        if role == "System":
-            continue  # skip system messages in export
 
         header = f"## {i}. {role}"
         if name:

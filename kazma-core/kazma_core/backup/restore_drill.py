@@ -1009,19 +1009,20 @@ async def drill_scheduler() -> None:
                 await asyncio.sleep(await asyncio.to_thread(_seconds_until_a_drill_is_due))
             # The weekly deep tier first: if it is due, the daily checks it
             # supersedes run anyway below.
-            if deep_drill_is_due():
+            # The drill stamps are settings reads and writes (audit 2026-10-26 AUD-111).
+            if await asyncio.to_thread(deep_drill_is_due):
                 deep = await asyncio.to_thread(run_deep_drill)
-                _record_deep_run(time.time())
+                await asyncio.to_thread(_record_deep_run, time.time())
                 if deep.ok:
                     logger.info("[restore-drill] deep: %s", deep.summary())
                 else:
                     logger.error("[restore-drill] deep: %s", deep.summary())
                     _alert_failure(deep)
 
-            if not drill_is_due():
+            if not await asyncio.to_thread(drill_is_due):
                 continue
             res = await asyncio.to_thread(run_drill)
-            _record_drill_run(time.time())
+            await asyncio.to_thread(_record_drill_run, time.time())
             if res.ok:
                 # Logged on success on purpose: a mechanism that speaks only
                 # when it breaks cannot be told from one that never runs.

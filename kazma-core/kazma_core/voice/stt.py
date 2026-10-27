@@ -85,6 +85,8 @@ def _get_provider_base_url_from_db(provider_name: str) -> str | None:
 
 
 def _get_configured_stt_model(provider_name: str) -> str | None:
+    # A settings read: the async transcribers call it, and the NIM URL
+    # helpers, through asyncio.to_thread (audit 2026-10-26 AUD-111).
     """Get the custom STT model configured in the database, if any."""
     try:
         from kazma_core.config_store import get_config_store
@@ -249,7 +251,7 @@ async def transcribe_preferring(
     for name in chain:
         if name == "nvidia":
             try:
-                if not _nvidia_asr_base_url():
+                if not await asyncio.to_thread(_nvidia_asr_base_url):
                     logger.info(
                         "[STT] skipping nvidia — no Speech NIM URL "
                         "(set voice.stt_base_url or pick openai/groq)"
@@ -341,7 +343,7 @@ def _openai_stt() -> STTProvider:
                     headers={"Authorization": f"Bearer {key}"},
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
-                        "model": _get_configured_stt_model("openai") or "whisper-1",
+                        "model": await asyncio.to_thread(_get_configured_stt_model, "openai") or "whisper-1",
                         "temperature": "0",
                         **({} if language == "auto" else {"language": language}),
                     },
@@ -390,7 +392,7 @@ def _groq_stt() -> STTProvider:
                     headers={"Authorization": f"Bearer {key}"},
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
-                        "model": _get_configured_stt_model("groq") or "whisper-large-v3",
+                        "model": await asyncio.to_thread(_get_configured_stt_model, "groq") or "whisper-large-v3",
                         **({} if language == "auto" else {"language": language}),
                     },
                 )
@@ -565,10 +567,10 @@ def _nvidia_stt() -> STTProvider:
             "webm": "audio/webm",
         }.get(ext, f"audio/{ext}")
 
-        base_url = _nvidia_asr_base_url()
+        base_url = await asyncio.to_thread(_nvidia_asr_base_url)
         # Legacy mistake: using LLM provider base_url (integrate.api…) → 404
         if not base_url:
-            llm_url = _get_provider_base_url_from_db("nvidia")
+            llm_url = await asyncio.to_thread(_get_provider_base_url_from_db, "nvidia")
             if llm_url and not _is_llm_only_nvidia_url(llm_url):
                 base_url = llm_url.rstrip("/")
             elif llm_url and _is_llm_only_nvidia_url(llm_url):
@@ -605,7 +607,7 @@ def _nvidia_stt() -> STTProvider:
             target_url = f"{target_url.rstrip('/')}/v1/audio/transcriptions"
 
         model = (
-            _get_configured_stt_model("nvidia")
+            await asyncio.to_thread(_get_configured_stt_model, "nvidia")
             or "openai/whisper-large-v3"
         )
         headers: dict[str, str] = {"Accept": "application/json"}

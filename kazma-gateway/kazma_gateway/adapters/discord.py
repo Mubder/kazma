@@ -677,6 +677,17 @@ class DiscordAdapter(BaseAdapter):
             )
             await _ack({"type": 6})
             return
+        # The server allowlist too, as messages and slash commands apply it
+        # (audit 2026-10-26 AUD-066): a button pressed in a server Kazma is
+        # limited away from was answered like one in an allowed server.
+        _ia_guild = str(data.get("guild_id") or "")
+        if _ia_guild and self._allowed_guilds and _ia_guild not in self._allowed_guilds:
+            logger.info(
+                "[discord] Ignoring interaction from a server not allowed guild=%s action=%s",
+                _ia_guild, action.kind,
+            )
+            await _ack({"type": 6})
+            return
 
         # Admin gate for approval buttons (audit 2026-09-16 F-8). Audit H-8
         # made installs admin-grade and stopped there, leaving the privilege
@@ -687,7 +698,7 @@ class DiscordAdapter(BaseAdapter):
         if action.kind in ("hitl", "swarm", "run"):
             from kazma_gateway.allowlists import is_gateway_admin
 
-            if not is_gateway_admin(f"discord:{_ia_user_id}", "discord"):
+            if not await asyncio.to_thread(is_gateway_admin, f"discord:{_ia_user_id}", "discord"):
                 logger.info(
                     "[discord] Ignoring %s approval (admin required) user=%s",
                     action.kind, _ia_user_id,
@@ -713,7 +724,7 @@ class DiscordAdapter(BaseAdapter):
             # allowlist check above only bounds who may chat/click at all.
             from kazma_gateway.allowlists import is_gateway_admin
 
-            if not is_gateway_admin(f"discord:{_ia_user_id}", "discord"):
+            if not await asyncio.to_thread(is_gateway_admin, f"discord:{_ia_user_id}", "discord"):
                 logger.info(
                     "[discord] Ignoring install interaction (admin required) user=%s",
                     _ia_user_id,

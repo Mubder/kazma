@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
@@ -507,7 +508,9 @@ class ChatPanel(Vertical):
         cmd = parts[0].lower()
         if cmd in ("/sessions", "/seasons") or not rest or rest.lower() in {"list", "ls"}:
             here = f"this TUI mouth: {self._session_id[-8:]}" if self._session_id else "no season yet"
-            self.write("system", format_session_list(list_directory()) + f"\n({here})")
+            # The sessions directory reads the chat list: off the TUI's loop (audit 2026-10-26 AUD-111).
+            entries = await asyncio.to_thread(list_directory)
+            self.write("system", format_session_list(entries) + f"\n({here})")
             return
         bits = rest.split(None, 1)
         if bits[0].lower() in {"new", "start"}:
@@ -517,8 +520,8 @@ class ChatPanel(Vertical):
             sid = ""
             if title:
                 try:
-                    entry = create_named_session(
-                        platform="web", sender_id="tui", title=title
+                    entry = await asyncio.to_thread(
+                        create_named_session, platform="web", sender_id="tui", title=title
                     )
                     sid = entry.session_id
                 except Exception:
@@ -530,7 +533,9 @@ class ChatPanel(Vertical):
             label = title or f"#{self._session_id[-8:]}"
             self.write("system", f"New TUI season {label} — same brain as Web.")
             return
-        hit = resolve_session(rest, current_thread_id=self._session_id or None)
+        hit = await asyncio.to_thread(
+            resolve_session, rest, current_thread_id=self._session_id or None
+        )
         if hit is None:
             self.write("system", f"No season matches {rest!r}. Try /sessions.")
             return

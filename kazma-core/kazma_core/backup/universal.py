@@ -369,11 +369,12 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
             try:
                 from kazma_core.backup.cloud_sync import get_sync_provider
 
-                provider = get_sync_provider()
+                # Settings and vault reads, then a zip of the backup (audit 2026-10-26 AUD-111).
+                provider = await asyncio.to_thread(get_sync_provider)
                 if provider is None:
                     return {"skipped": f"unknown provider: {cfg['provider']}"}
                 try:
-                    zip_path = _zip_backup_dir(dest)
+                    zip_path = await asyncio.to_thread(_zip_backup_dir, dest)
                 except Exception as exc:
                     logger.warning("[universal-backup] zipping backup failed: %s", exc)
                     return {"ok": False, "error": f"zip failed: {exc}"}

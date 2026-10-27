@@ -172,7 +172,7 @@ async def run_voice_user_turn(
     }
     try:
         graph_config["recursion_limit"] = int(
-            resolve_turn_budgets(thread_id)["recursion_limit"]
+            (await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"]  # audit 2026-10-26 AUD-111
         )
     except Exception:
         pass
@@ -227,15 +227,18 @@ async def run_voice_user_turn(
     from kazma_core.agent.state import initial_supervisor_state
     from kazma_core.memory.config import resolve_tenant_id
 
-    input_state = initial_supervisor_state(
-        thread_id=thread_id,
-        tenant_id=resolve_tenant_id("web", "", session_id),
+    # The initial state and the tenant rule read settings (audit 2026-10-26 AUD-111).
+    input_state = await asyncio.to_thread(
+        lambda: initial_supervisor_state(
+            thread_id=thread_id,
+            tenant_id=resolve_tenant_id("web", "", session_id),
+        )
     )
     input_state["messages"] = messages
     try:
         from kazma_core.tools.send_message import web_gateway_block
 
-        input_state["_gateway"] = web_gateway_block(thread_id)
+        input_state["_gateway"] = await asyncio.to_thread(web_gateway_block, thread_id)
     except Exception:
         logger.debug("[voice] web gateway stamp skipped", exc_info=True)
     try:
@@ -321,7 +324,7 @@ async def _async_system_messages(
         from kazma_core.safety.prompt_fence import format_untrusted_block
         from kazma_core.skills.self_improvement import get_agent_evolution_block
 
-        evo = get_agent_evolution_block("supervisor")
+        evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")
         if evo:
             system_msgs.append({
                 "role": "system",
@@ -354,7 +357,7 @@ async def _async_system_messages(
     try:
         from kazma_core.agent.long_task import consume_long_task_turn
 
-        notice = consume_long_task_turn(thread_id)
+        notice = await asyncio.to_thread(consume_long_task_turn, thread_id)  # audit 2026-10-26 AUD-111
         if notice:
             system_msgs.append({
                 "role": "system",

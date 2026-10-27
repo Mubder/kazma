@@ -83,6 +83,7 @@ from kazma_ui.sse_chat._helpers import (  # noqa: F401
 )
 from kazma_ui.sse_chat._persistence import (  # noqa: F401
     _checkpoint_backfill_unanswered,
+    _mutate_session,
     _persist_detached_reply,
     _persist_instant_turn,
     _snapshot_paused,
@@ -564,7 +565,10 @@ def create_sse_chat_router(
 
         from kazma_ui.sse_chat._capacity import intercept_capacity_fast_path
 
-        _cap_resp, _cap_rewrite = intercept_capacity_fast_path(
+        # /long, /plan and /yolo write the chat's settings and its instant
+        # row: off the loop (audit 2026-10-26 AUD-111).
+        _cap_resp, _cap_rewrite = await asyncio.to_thread(
+            intercept_capacity_fast_path,
             session=session,
             thread_id=thread_id,
             session_id=session_id,
@@ -589,10 +593,16 @@ def create_sse_chat_router(
                 except Exception as exc:
                     logger.debug("[SSE] failed to delete thread checkpoints on /reset: %s", exc)
             
-            session.messages = []
-            session.title = ""
+            def _clear(sess: Any) -> None:
+                sess.messages = []
+                sess.title = ""
+
+            # AUD-052: under the session's transaction, never a put of the
+            # copy read before the checkpoint delete's await.
             try:
-                await asyncio.to_thread(_get_store().put, session)
+                session = await asyncio.to_thread(
+                    _mutate_session, session.session_id, _clear, session
+                )
             except Exception:
                 logger.exception("[SSE] failed to persist /reset")
 
@@ -636,8 +646,16 @@ def create_sse_chat_router(
                             budget=False,
                         )
                         
-                        session.messages = _convert_messages_to_dicts(result_state.get("messages", []))
-                        await asyncio.to_thread(_get_store().put, session)
+                        _compacted = _convert_messages_to_dicts(result_state.get("messages", []))
+
+                        def _replace(sess: Any) -> None:
+                            sess.messages = _compacted
+
+                        # AUD-052: the compaction awaited the graph; write
+                        # through the transaction, not the copy read before.
+                        session = await asyncio.to_thread(
+                            _mutate_session, session.session_id, _replace, session
+                        )
                         
                         confirmation = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
                     else:
@@ -839,10 +857,18 @@ def create_sse_chat_router(
         from datetime import datetime as _dt
 
         _ts = _dt.now(UTC).isoformat()
-        session.messages.append({"role": "user", "content": user_message, "ts": _ts})
+        _user_row = {"role": "user", "content": user_message, "ts": _ts}
         # CRITICAL: persist immediately so restarts keep the sidebar transcript.
+        # AUD-052: appended under the session's transaction, so a reply the
+        # previous turn persisted meanwhile is not overwritten by this
+        # request's copy (read before the supersede awaits above).
         try:
-            await asyncio.to_thread(_get_store().put, session)
+            session = await asyncio.to_thread(
+                _mutate_session,
+                session.session_id,
+                lambda sess: sess.messages.append(_user_row),
+                session,
+            )
         except Exception:
             logger.exception("[SSE] failed to persist user message for session=%s", session_id)
 
@@ -850,7 +876,9 @@ def create_sse_chat_router(
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
 
-            _sse_recursion = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+            _sse_recursion = int(
+                (await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"]
+            )
         except Exception:
             _sse_recursion = 100
         graph_config = {
@@ -877,7 +905,8 @@ def create_sse_chat_router(
             from kazma_core.safety.prompt_fence import format_untrusted_block
             from kazma_core.skills.self_improvement import get_agent_evolution_block
 
-            evo = get_agent_evolution_block("supervisor")
+            # The Soul is a settings read (and a one-off migration) (audit 2026-10-26 AUD-111).
+            evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")
             if evo:
                 system_msgs.append(
                     {
@@ -929,7 +958,8 @@ def create_sse_chat_router(
         # the reply tells the user instead of silently degrading. (This
         # function is NOT a generator here — it returns StreamingResponse —
         # so the notice rides the model's reply, not an SSE frame.)
-        _unrestricted_notice = consume_long_task_turn(thread_id)
+        # A settings read-modify-write of the chat's long-task record (audit 2026-10-26 AUD-111).
+        _unrestricted_notice = await asyncio.to_thread(consume_long_task_turn, thread_id)
         if _unrestricted_notice:
             system_msgs.append({
                 "role": "system",
@@ -1036,11 +1066,14 @@ def create_sse_chat_router(
         except Exception:
             pass
 
-        input_state = initial_supervisor_state(
-            thread_id=thread_id,
-            tenant_id=resolve_tenant_id(
-                "web", "", session_id, auth_user_id=_auth_uid
-            ),
+        # The initial state and the tenant rule read settings (audit 2026-10-26 AUD-111).
+        input_state = await asyncio.to_thread(
+            lambda: initial_supervisor_state(
+                thread_id=thread_id,
+                tenant_id=resolve_tenant_id(
+                    "web", "", session_id, auth_user_id=_auth_uid
+                ),
+            )
         )
         input_state["messages"] = messages
         # Web has no inbound telegram chat_id. Stamp operator Telegram on
@@ -1049,7 +1082,7 @@ def create_sse_chat_router(
         try:
             from kazma_core.tools.send_message import web_gateway_block
 
-            input_state["_gateway"] = web_gateway_block(thread_id)
+            input_state["_gateway"] = await asyncio.to_thread(web_gateway_block, thread_id)
         except Exception:
             logger.debug("[SSE] web gateway stamp skipped", exc_info=True)
         # Transport-level working-memory pin (before supervisor loop)
@@ -1715,68 +1748,86 @@ def create_sse_chat_router(
                             return False
                         return True
 
-                    _extras: dict[str, dict[str, Any]] = {}
-                    for m in messages:
-                        if not isinstance(m, dict) or (m.get("role") or "").lower() != "assistant":
-                            continue
-                        key = str(m.get("content") or "").strip()
-                        extra = {
-                            k: m[k]
-                            for k in (
-                                "parts", "activity", "open", "pending",
-                                *_reply_sink.CLIENT_ROW_FIELDS,
-                            )
-                            if m.get(k) is not None
-                        }
-                        if key and extra:
-                            _extras[key] = extra
-                    ui = []
-                    for m in prior:
-                        if not _ui_ok(m):
-                            continue
-                        item: dict[str, Any] = {
-                            "role": m.get("role"),
-                            "content": str(m.get("content") or "").strip(),
-                        }
-                        extra = _extras.get(item["content"])
-                        if extra:
-                            item.update(extra)
-                        ui.append(item)
-                    if ui:
-                        # An in-flight turn's row lives only here — the
-                        # checkpoint has no reply for it yet — and carries the
-                        # turn_id its resume needs. Hydrating over it would
-                        # drop the narration and split the answer in two.
-                        _in_flight = [
-                            m
-                            for m in messages
-                            if isinstance(m, dict)
-                            and m.get("role") == "assistant"
-                            and (m.get("open") or m.get("pending"))
-                        ]
-                        # The checkpointer is the source of truth for gw-*
-                        # sessions. Replace if the checkpoint has more content
-                        # (e.g. it has assistant replies the cached row lacks),
-                        # or if the cache was empty.
-                        if len(ui) >= len(messages):
-                            session.messages = ui + _in_flight
-                        else:
-                            # Merge: add any checkpoint messages missing from
-                            # cache. Keyed on FULL text — an 80-char prefix
-                            # collapsed distinct replies sharing an opening.
-                            existing_keys = {
-                                (m.get("role"), str(m.get("content") or ""))
-                                for m in messages if isinstance(m, dict)
+                    def _hydrate(sess: Any) -> bool:
+                        # AUD-052: merged against the session as it is NOW,
+                        # under its transaction: a reply persisted since this
+                        # route read it is kept, never overwritten.
+                        messages = list(sess.messages or [])
+                        _extras: dict[str, dict[str, Any]] = {}
+                        for m in messages:
+                            if not isinstance(m, dict) or (m.get("role") or "").lower() != "assistant":
+                                continue
+                            key = str(m.get("content") or "").strip()
+                            extra = {
+                                k: m[k]
+                                for k in (
+                                    "parts", "activity", "open", "pending",
+                                    *_reply_sink.CLIENT_ROW_FIELDS,
+                                )
+                                if m.get(k) is not None
                             }
-                            for m in ui:
-                                key = (m.get("role"), str(m.get("content") or ""))
-                                if key not in existing_keys:
-                                    messages.append(m)
-                            session.messages = messages
-                        if session_id.startswith("gw-"):
-                            session.thread_id = session_id
-                        await asyncio.to_thread(store.put, session)
-                        messages = session.messages
+                            if key and extra:
+                                _extras[key] = extra
+                        ui = []
+                        for m in prior:
+                            if not _ui_ok(m):
+                                continue
+                            item: dict[str, Any] = {
+                                "role": m.get("role"),
+                                "content": str(m.get("content") or "").strip(),
+                            }
+                            extra = _extras.get(item["content"])
+                            if extra:
+                                item.update(extra)
+                            ui.append(item)
+                        if ui:
+                            # An in-flight turn's row lives only here — the
+                            # checkpoint has no reply for it yet — and carries the
+                            # turn_id its resume needs. Hydrating over it would
+                            # drop the narration and split the answer in two.
+                            _in_flight = [
+                                m
+                                for m in messages
+                                if isinstance(m, dict)
+                                and m.get("role") == "assistant"
+                                and (m.get("open") or m.get("pending"))
+                            ]
+                            # The checkpointer is the source of truth for gw-*
+                            # sessions. Replace if the checkpoint has more content
+                            # (e.g. it has assistant replies the cached row lacks),
+                            # or if the cache was empty.
+                            if len(ui) >= len(messages):
+                                sess.messages = ui + _in_flight
+                            else:
+                                # Merge: add any checkpoint messages missing from
+                                # cache. Keyed on FULL text — an 80-char prefix
+                                # collapsed distinct replies sharing an opening.
+                                existing_keys = {
+                                    (m.get("role"), str(m.get("content") or ""))
+                                    for m in messages if isinstance(m, dict)
+                                }
+                                for m in ui:
+                                    key = (m.get("role"), str(m.get("content") or ""))
+                                    if key not in existing_keys:
+                                        messages.append(m)
+                                sess.messages = messages
+                            if session_id.startswith("gw-"):
+                                sess.thread_id = session_id
+                            return True
+                        return False
+
+                    # Only a checkpoint with something to show writes (the
+                    # transaction always stores what it yields).
+                    _healed = (
+                        await asyncio.to_thread(
+                            _mutate_session, session.session_id, _hydrate, session
+                        )
+                        if any(_ui_ok(m) for m in prior)
+                        else None
+                    )
+                    if _healed is not None:
+                        session = _healed
+                        messages = list(session.messages or [])
             except Exception:
                 logger.debug(
                     "[SSE] checkpointer hydrate failed for %s",
@@ -2019,7 +2070,11 @@ def create_sse_chat_router(
 
                 await asyncio.to_thread(validate_url, normalize_provider_url(_raw_url), allow_private=True)
             except Exception as exc:
-                return {"error": f"URL validation failed: {exc}"}
+                # AUD-102: the caller's own URL was refused (validation):
+                # its message, redacted, never the raw exception text.
+                from kazma_core.errors import validation_error
+
+                return {"error": f"URL validation failed: {validation_error(exc)}"}
 
         # Single switch pipeline: registry + agent.sync + graph recompile.
         # Never feed a masked "***" api_key into reconfigure (SwitchResult /
@@ -2054,8 +2109,11 @@ def create_sse_chat_router(
                     pass
             return out
         except Exception as exc:
-            logger.warning("Provider switch failed: %s", exc)
-            return {"error": str(exc), "status": "error", "ok": False}
+            # AUD-102: a server fault answers with a code and reference;
+            # the exception (endpoint, key fragments) is logged under it.
+            from kazma_core.errors import safe_error
+
+            return {"error": safe_error(exc), "status": "error", "ok": False}
 
     # ── Stop: cancel the running turn (Stop button) ──────────────────
     @r.post("/api/chat/stop")
@@ -2145,7 +2203,7 @@ def create_sse_chat_router(
             try:
                 from kazma_core.agent.long_task import resolve_turn_budgets
 
-                _rec = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+                _rec = int((await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"])
                 _cfg = {
                     "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
                     "recursion_limit": _rec,
@@ -2167,14 +2225,15 @@ def create_sse_chat_router(
         # Durable transcript so the user can see / edit the steer after refresh.
         try:
             if session_id:
-                _sess = _get_store().get(session_id)
-                if _sess is not None:
-                    _label = "/steer! " if mode == "hard" else "/steer "
-                    _sess.messages.append({
-                        "role": "user",
-                        "content": _label + text,
-                    })
-                    await asyncio.to_thread(_get_store().put, _sess)
+                _label = "/steer! " if mode == "hard" else "/steer "
+                _steer_row = {"role": "user", "content": _label + text}
+                # AUD-052: read, append and write under the session's
+                # transaction (and off the loop: the read was on it).
+                await asyncio.to_thread(
+                    _mutate_session,
+                    session_id,
+                    lambda sess: sess.messages.append(_steer_row),
+                )
         except Exception:
             logger.debug("[SSE] persist steer transcript failed", exc_info=True)
 
@@ -2196,7 +2255,7 @@ def create_sse_chat_router(
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
 
-            _rec = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+            _rec = int((await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"])
         except Exception:
             _rec = 100
         config = {

@@ -460,8 +460,26 @@ class _MemoryWorker:
                         (now, task["id"], token),
                     )
                 else:
-                    attempts = int(task.get("attempts", 0)) + 1
-                    max_attempts = int(task.get("max_attempts", 3))
+                    # The count is the row's, incremented in SQL: the claimed
+                    # dict holds what the claim READ, so a reclaim's own
+                    # ``attempts + 1`` was overwritten by ``task["attempts"] + 1``
+                    # here, and a crash-looping task ran up to about twice
+                    # ``max_attempts`` times (audit 2026-10-26 AUD-048). The
+                    # increment opens this ack's transaction, so the status
+                    # write below decides on the count it made.
+                    rows = conn.execute(
+                        """UPDATE memory_task_queue SET attempts = attempts + 1
+                           WHERE id=? AND lease_token=?
+                           RETURNING attempts, max_attempts""",
+                        (task["id"], token),
+                    ).fetchall()  # all: a RETURNING statement left unstepped blocks the commit
+                    counted = rows[0] if rows else None
+                    if counted is None:
+                        # Reclaimed meanwhile (the token rotated): the newer
+                        # lease owns the row and its count.
+                        conn.rollback()
+                        return
+                    attempts, max_attempts = int(counted[0]), int(counted[1] or 3)
                     if attempts >= max_attempts:
                         cur = conn.execute(
                             """UPDATE memory_task_queue

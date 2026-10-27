@@ -51,6 +51,19 @@ MCP_CHILD_ENV_ALLOWLIST: tuple[str, ...] = (
 )
 
 
+def _carries_credentials(key: str, value: str) -> bool:
+    """Whether an inherited variable holds a credential in its value: a URL
+    password anywhere, or userinfo in a proxy given without a scheme
+    (``user:pass@proxy:3128``, which curl and httpx accept)."""
+    from kazma_core.security.url_credentials import url_has_credentials
+
+    if url_has_credentials(value):
+        return True
+    if key.upper().endswith("_PROXY") and "://" not in value:
+        return url_has_credentials("http://" + value.strip())
+    return False
+
+
 def mcp_child_env(name: str, cfg: dict[str, Any]) -> dict[str, str]:
     """The environment for MCP server *name* with config *cfg*.
 
@@ -65,6 +78,18 @@ def mcp_child_env(name: str, cfg: dict[str, Any]) -> dict[str, str]:
         env = dict(os.environ)
     else:
         env = {k: v for k, v in os.environ.items() if k.upper() in MCP_CHILD_ENV_ALLOWLIST}
+        # A proxy URL can carry the proxy account's password
+        # (``http://user:pass@proxy:3128``), and the allowlist handed it to
+        # every MCP server, a package the operator may only be trying out
+        # (audit 2026-10-26 AUD-097). Such a value stays behind; a server that
+        # needs the proxy gets it in its own ``env``, which is applied below.
+        for key in [k for k, v in env.items() if _carries_credentials(k, v)]:
+            del env[key]
+            logger.info(
+                "[MCP] stdio server '%s': not passing %s (it carries credentials); "
+                "set it in the server's own env if the server needs it",
+                name, key,
+            )
     for key, value in (cfg.get("env") or {}).items():
         if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
             env[key] = str(value)

@@ -189,7 +189,10 @@ async def handle_voice_websocket(
                 # or an unknown session is refused outright (IDOR guard).
                 from kazma_ui.voice_turn import resolve_voice_session
 
-                pair = resolve_voice_session(str(msg.get("session_id") or ""))
+                # A chat-store read and maybe a write (audit 2026-10-26 AUD-111).
+                pair = await asyncio.to_thread(
+                    resolve_voice_session, str(msg.get("session_id") or "")
+                )
                 if pair is None:
                     await _send_error(
                         "Unknown or unauthorized chat session — reload the page "
@@ -364,7 +367,7 @@ async def _process_utterance(
     )
 
     segment_at = time.monotonic()
-    cfg = _voice_settings()
+    cfg = await asyncio.to_thread(_voice_settings)  # settings reads (audit 2026-10-26 AUD-111)
     if cfg["stt_provider"]:
         stt_provider = cfg["stt_provider"]
     language = cfg["stt_language"] or "auto"
@@ -536,7 +539,7 @@ async def _speak_reply(
     if not clean or len(clean) < 5:
         return
 
-    cfg = _voice_settings()
+    cfg = await asyncio.to_thread(_voice_settings)  # settings reads (audit 2026-10-26 AUD-111)
     if cfg["tts_provider"]:
         tts_provider = cfg["tts_provider"]
     voice = cfg["tts_voice"] or "default"

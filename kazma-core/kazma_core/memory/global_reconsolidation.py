@@ -125,6 +125,13 @@ def run_global_reconsolidation(
     except Exception:
         stats["errors"] += 1
         logger.warning("[reconsolidation] duplicate merge failed", exc_info=True)
+        # A failed batch is undone here: the next step commits this
+        # connection, and would commit the half it left open (audit
+        # 2026-10-26 AUD-112; the macro_sleep twin is AUD-046).
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            logger.warning("[reconsolidation] rollback of the failed merge batch failed", exc_info=True)
     # W6: one fact stored under two names with the same words ("timezone" /
     # "timezone_is", "daily_tweet_cap" / "tweet_daily_cap"). It reads every
     # subject itself, so it runs once per sweep, with the first partition.
@@ -221,7 +228,16 @@ def _merge_duplicate_beliefs(
 
     now = time.time()
     merged = 0
+    #: (loser, keep) of every row this sweep invalidated. The graph delete,
+    #: the mirror tombstone and the audit row run after the batch committed,
+    #: never inside it: they ran per merge inside the uncommitted batch of up
+    #: to ``max_merges``, so memory_state.db's write lock was held across
+    #: Neo4j, Postgres and ops-DB round trips, and the mirror was handed rows
+    #: a later rollback could undo (audit 2026-10-26 AUD-112, AGENTS.md §15 D2).
+    invalidated: list[tuple[Any, Any]] = []
     for _key, members in groups.items():
+        if merged >= max_merges:
+            break
         if len(members) < 2:
             continue
         members_sorted = sorted(
@@ -233,79 +249,72 @@ def _merge_duplicate_beliefs(
         keep = members_sorted[0]
         for loser in members_sorted[1:]:
             if merged >= max_merges:
-                if merged:
-                    conn.commit()
-                return merged, scanned
-            try:
-                from kazma_core.memory.hygiene import beliefs_write
+                break
+            from kazma_core.memory.hygiene import beliefs_write
 
-                beliefs_write(
-                    conn,
-                    """
-                    UPDATE beliefs
-                    SET valid_until = ?, invalidated_at = ?, supersedes_id = ?
-                    WHERE id = ? AND valid_until IS NULL
-                    """,
-                    (now, now, keep["id"], loser["id"]),
-                )
-            except Exception:
-                conn.execute(
-                    """
-                    UPDATE beliefs
-                    SET valid_until = ?, invalidated_at = ?, supersedes_id = ?
-                    WHERE id = ? AND valid_until IS NULL
-                    """,
-                    (now, now, keep["id"], loser["id"]),
-                )
-            # Best-effort Neo4j edge cleanup for invalidated duplicate
-            try:
-                from kazma_core.memory.graph_backend import delete_belief_edge
-
-                delete_belief_edge(
-                    belief_id=str(loser["id"]),
-                    subject=str(loser["subject"] or ""),
-                    predicate=str(loser["predicate"] or ""),
-                    obj=str(loser["object"] or ""),
-                    tenant_id=tenant_id,
-                )
-            except Exception:
-                pass
-            # M-09: mirror tombstone + audit row — dedupe invalidations must
-            # behave like every other invalidation path.
-            try:
-                from kazma_core.memory.state_backend import remirror_belief_by_id
-
-                remirror_belief_by_id(conn, str(loser["id"]))
-            except Exception:
-                logger.debug("[reconsolidation] mirror tombstone skipped", exc_info=True)
-            try:
-                import sqlite3 as _sq
-
-                from kazma_core.memory.belief_mutation import _write_audit
-                from kazma_core.memory.schema_v2 import ensure_ops_schema
-                from kazma_core.paths import memory_ops_db
-
-                ops = _sq.connect(memory_ops_db(), timeout=10)
-                try:
-                    ensure_ops_schema(ops)
-                    _write_audit(
-                        ops,
-                        tenant_id=tenant_id,
-                        event_type="dedupe_invalidate",
-                        target_id=str(loser["id"]),
-                        actor="global_reconsolidation",
-                        reason="duplicate of higher-ranked belief",
-                        state_before={"id": loser["id"], "subject": loser["subject"]},
-                        state_after={"supersedes_id": keep["id"]},
-                    )
-                finally:
-                    ops.close()
-            except Exception:
-                logger.debug("[reconsolidation] audit row skipped", exc_info=True)
+            cur = beliefs_write(
+                conn,
+                """
+                UPDATE beliefs
+                SET valid_until = ?, invalidated_at = ?, supersedes_id = ?
+                WHERE id = ? AND valid_until IS NULL
+                """,
+                (now, now, keep["id"], loser["id"]),
+            )
+            if cur.rowcount:
+                invalidated.append((loser, keep))
             merged += 1
     if merged:
         conn.commit()
+    _after_merges(conn, invalidated, tenant_id=tenant_id)
     return merged, scanned
+
+
+def _after_merges(conn: sqlite3.Connection, invalidated: list[tuple[Any, Any]], *, tenant_id: str) -> None:
+    """The slow halves of the committed merges: Neo4j edge cleanup, the mirror
+    tombstone and one audit row each (M-09: dedupe invalidations behave like
+    every other invalidation path). Called with no transaction open."""
+    if not invalidated:
+        return
+    from kazma_core.memory.graph_backend import delete_belief_edge
+    from kazma_core.memory.state_backend import remirror_belief_by_id
+
+    for loser, _keep in invalidated:
+        # Best-effort Neo4j edge cleanup for the invalidated duplicate
+        # (delete_belief_edge never raises; False is "no edge removed").
+        delete_belief_edge(
+            belief_id=str(loser["id"]),
+            subject=str(loser["subject"] or ""),
+            predicate=str(loser["predicate"] or ""),
+            obj=str(loser["object"] or ""),
+            tenant_id=tenant_id,
+        )
+        # The row as it is now, committed (never raises).
+        remirror_belief_by_id(conn, str(loser["id"]))
+    try:
+        from kazma_core.memory.belief_mutation import _write_audit
+        from kazma_core.memory.schema_v2 import ensure_ops_schema
+        from kazma_core.paths import memory_ops_db
+
+        ops = sqlite3.connect(memory_ops_db(), timeout=10)
+        try:
+            ensure_ops_schema(ops)
+            for loser, keep in invalidated:
+                _write_audit(
+                    ops,
+                    tenant_id=tenant_id,
+                    event_type="dedupe_invalidate",
+                    target_id=str(loser["id"]),
+                    actor="global_reconsolidation",
+                    reason="duplicate of higher-ranked belief",
+                    state_before={"id": loser["id"], "subject": loser["subject"]},
+                    state_after={"supersedes_id": keep["id"]},
+                )
+        finally:
+            ops.close()
+    except Exception:
+        logger.warning("[reconsolidation] audit rows for %d merge(s) not written", len(invalidated),
+                       exc_info=True)
 
 
 def _reembed_missing(

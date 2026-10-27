@@ -293,7 +293,7 @@ class InProcessWorker(SwarmWorker):
         """
         import json as _json
 
-        MAX_ITERATIONS = worker_iteration_budget()
+        MAX_ITERATIONS = await asyncio.to_thread(worker_iteration_budget)  # a settings read (audit 2026-10-26 AUD-111)
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex}"
         from kazma_core.agent.effect_journal import EffectUncertain, execute_effect
         from kazma_core.tenant_context import get_current_tenant_id
@@ -350,7 +350,8 @@ class InProcessWorker(SwarmWorker):
                 try:
                     from kazma_core.models.selection import select_provider_for_task
 
-                    chosen = select_provider_for_task(registry, prompt=task)
+                    # The model defaults are settings reads (audit 2026-10-26 AUD-111).
+                    chosen = await asyncio.to_thread(select_provider_for_task, registry, prompt=task)
                     if chosen is not None:
                         provider = chosen
                         logger.info(
@@ -625,7 +626,7 @@ class InProcessWorker(SwarmWorker):
 
                                     from kazma_core.agent.graph_helpers import _resolve_tool_timeout
 
-                                    _t = _resolve_tool_timeout()
+                                    _t = await _aio.to_thread(_resolve_tool_timeout)  # audit 2026-10-26 AUD-111
                                     if _t and _t > 0:
                                         result = await _aio.wait_for(
                                             execute_effect(tool_registry, effect_state,
@@ -709,13 +710,38 @@ class InProcessWorker(SwarmWorker):
                 # Iteration limit exhausted — make one final LLM call WITHOUT
                 # tools to force a text answer from whatever was collected.
                 logger.info("[InProcessWorker:%s] Max iterations hit — forcing final synthesis", self.name)
+                from kazma_core.agent.resilient_chat import resilient_chat
+
                 try:
                     _final_msgs = list(messages) + [{"role": "user", "content": "Provide your complete final answer now based on all the research above. Do not call any tools. Write the full report."}]
-                    _final_resp = await provider.chat(_final_msgs, tools=None, model=self.model or None)
+                    # Through resilient_chat like every turn of the loop:
+                    # the per-call ledger row (the task's id as thread),
+                    # transient retries and the failover chain. A bare
+                    # ``provider.chat`` here wrote no ledger row, so this
+                    # call's cost was missing from the ledger, and one
+                    # transient error lost the answer (audit 2026-10-26
+                    # AUD-119).
+                    _final_resp = await resilient_chat(
+                        provider,
+                        messages=_final_msgs,
+                        tools=None,
+                        model=self.model or None,
+                        max_attempts=3,
+                        backoff_base=2.0,
+                        thread_id=task_id,
+                        iteration=MAX_ITERATIONS + 1,
+                        label=f"InProcessWorker:{self.name}:final",
+                    )
                     final_output = _final_resp.content or last_content or "Max tool-use iterations reached without a final answer."
-                    total_tokens += int(getattr(_final_resp, "usage", {}).get("prompt_tokens", 0)) + int(getattr(_final_resp, "usage", {}).get("completion_tokens", 0))
+                    _final_usage = getattr(_final_resp, "usage", {}) or {}
+                    total_tokens += int(_final_usage.get("prompt_tokens", 0)) + int(_final_usage.get("completion_tokens", 0))
                     total_cost += getattr(_final_resp, "cost_usd", 0.0) or 0.0
-                except Exception:
+                except Exception as exc:
+                    logger.warning(
+                        "[InProcessWorker:%s] final answer at the iteration limit failed (%s); "
+                        "returning the last partial answer",
+                        self.name, type(exc).__name__,
+                    )
                     final_output = last_content or "Max tool-use iterations reached without a final answer."
 
             return {

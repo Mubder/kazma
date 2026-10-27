@@ -29,6 +29,34 @@ _cached_backend: Any | None = None
 _cached_key: str = ""
 
 
+def _rel_type(predicate: str) -> str:
+    """The Cypher relationship type of *predicate*, backtick-quoted.
+
+    Letters, digits and ``_`` are kept, everything else becomes ``_``. The
+    type is quoted because an unquoted Cypher name must not start with a
+    digit: ``2fa_enabled`` made ``-[r:2FA_ENABLED]->``, a syntax error the
+    driver raised, logged at DEBUG, and the fact's edge was never written
+    (audit 2026-10-26 AUD-049). No backtick survives the sanitizing, so the
+    quoting cannot be broken out of.
+    """
+    pred = (predicate or "related_to").replace(" ", "_")
+    rel = "".join(c if c.isalnum() or c == "_" else "_" for c in pred).upper() or "RELATED"
+    return f"`{rel}`"
+
+
+#: Appended after ``DELETE r`` where ``a``/``b`` are the edge's ends: an end
+#: left with no relationship goes too. A forgotten fact's value is a node
+#: (``Entity.name`` = the value), and deleting the edge alone kept a codeword
+#: in Neo4j after Forget (audit 2026-10-26 AUD-063). An end another fact
+#: still uses keeps its edges and stays; ``upsert_triple`` MERGEs it back.
+_DELETE_ORPHANED_ENDS = """
+                        WITH a, b
+                        UNWIND [a, b] AS n
+                        WITH DISTINCT n
+                        WHERE NOT (n)--()
+                        DELETE n"""
+
+
 @runtime_checkable
 class GraphBackend(Protocol):
     name: str
@@ -197,9 +225,7 @@ class Neo4jGraphBackend:
         drv = self._get_driver()
         if drv is None or not subject or not obj:
             return False
-        pred = (predicate or "related_to").replace(" ", "_")
-        # Sanitize relationship type for Cypher
-        rel = "".join(c if c.isalnum() or c == "_" else "_" for c in pred).upper() or "RELATED"
+        rel = _rel_type(predicate)
         try:
             with drv.session(database=self._database) as session:
                 session.run(
@@ -238,26 +264,24 @@ class Neo4jGraphBackend:
             with drv.session(database=self._database) as session:
                 if belief_id:
                     session.run(
-                        """
-                        MATCH ()-[r]->()
+                        f"""
+                        MATCH (a)-[r]->(b)
                         WHERE r.belief_id = $bid
                         DELETE r
+                        {_DELETE_ORPHANED_ENDS}
                         """,
                         bid=belief_id,
                     )
                     return True
                 if subject and obj:
-                    pred = (predicate or "related_to").replace(" ", "_")
-                    rel = (
-                        "".join(c if c.isalnum() or c == "_" else "_" for c in pred).upper()
-                        or "RELATED"
-                    )
+                    rel = _rel_type(predicate)
                     session.run(
                         f"""
                         MATCH (a:Entity {{name: $sub, tenant_id: $tid}})
                               -[r:{rel}]->
                               (b:Entity {{name: $obj, tenant_id: $tid}})
                         DELETE r
+                        {_DELETE_ORPHANED_ENDS}
                         """,
                         sub=subject,
                         obj=obj,
@@ -285,7 +309,18 @@ class Neo4jGraphBackend:
                 )
                 summary = result.consume()
                 counters = getattr(summary, "counters", None)
-                return int(getattr(counters, "relationships_deleted", 0) or 0)
+                deleted = int(getattr(counters, "relationships_deleted", 0) or 0)
+                # The nodes go too: each holds a subject or value as its name
+                # (audit 2026-10-26 AUD-063).
+                session.run(
+                    """
+                    MATCH (n:Entity {tenant_id: $tid})
+                    WHERE NOT (n)--()
+                    DELETE n
+                    """,
+                    tid=tenant_id,
+                )
+                return deleted
         except Exception:
             logger.debug("[graph_backend] neo4j tenant-clear failed", exc_info=True)
             return 0

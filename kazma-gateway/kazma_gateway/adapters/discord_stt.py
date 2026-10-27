@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -38,7 +39,7 @@ async def send_voice_reply(
         synthesize_speech,
     )
 
-    cfg = live_voice_settings()
+    cfg = await asyncio.to_thread(live_voice_settings)
     if not cfg.get("enabled") or not cfg.get("tts_reply", True) or not text:
         return False
     try:
@@ -51,7 +52,7 @@ async def send_voice_reply(
 
         from kazma_core.voice.audio_format import audio_label
 
-        ext, mime = audio_label(audio, str(live_voice_settings().get("tts_output_format") or ""))
+        ext, mime = audio_label(audio, str((await asyncio.to_thread(live_voice_settings)).get("tts_output_format") or ""))
         resp = await http.post(
             f"/channels/{channel_id}/messages",
             data={"payload_json": json.dumps({"content": ""})},

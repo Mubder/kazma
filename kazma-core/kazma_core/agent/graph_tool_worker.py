@@ -799,7 +799,7 @@ async def tool_worker_node(
         _delivery = _gw.get("delivery_target") if isinstance(_gw, dict) else None
         if not is_valid_delivery_target(_delivery):
             try:
-                _delivery = resolve_delivery_target()
+                _delivery = await asyncio.to_thread(resolve_delivery_target)  # settings (audit 2026-10-26 AUD-111)
             except Exception:
                 _delivery = None
         if is_valid_delivery_target(_delivery):
@@ -817,7 +817,15 @@ async def tool_worker_node(
 
     try:
         pending, preflight_refused = await _refuse_unrunnable_calls(pending)
-        pending, semantic_blocked = _commitment_resolve_gate(state, pending, allow_interrupt=allow_interrupt)
+        # The gate loads constraint beliefs (SQLite) and authorizes each
+        # semantic call against the settings and the stores: off the loop
+        # (audit 2026-10-26 AUD-111). Its clarify card is LangGraph's
+        # interrupt(), which reads the node's config from the context
+        # to_thread copies -- the way a sync node's interrupt runs in a
+        # worker thread -- and its GraphInterrupt propagates through the await.
+        pending, semantic_blocked = await asyncio.to_thread(
+            _commitment_resolve_gate, state, pending, allow_interrupt=allow_interrupt
+        )
         semantic_blocked = [*preflight_refused, *semantic_blocked]
 
         # ── HITL: separate safe and danger tools ──────────────────────
@@ -871,8 +879,12 @@ async def tool_worker_node(
         # no ContextVar, ALWAYS_HITL_TOOLS-only danger split.
         _hitl_active = bool(hitl_config) and bool(hitl_config.get("enabled", True))
         if _hitl_active:
-            for tc in pending:
-                if requires_approval(tc["name"], hitl_config) or _tc_is_git_write(tc):
+            # The approval floor and the tool grants are settings reads (audit 2026-10-26 AUD-111).
+            _needs_card = await asyncio.to_thread(
+                lambda: [requires_approval(tc["name"], hitl_config) for tc in pending]
+            )
+            for tc, _card in zip(pending, _needs_card):
+                if _card or _tc_is_git_write(tc):
                     danger_tools.append(tc)
                 else:
                     safe_tools.append(tc)
@@ -971,7 +983,7 @@ async def tool_worker_node(
             # a HARD tool error so the loop breaker can trip after repeated
             # hangs. Config: ConfigStore agent.tool_timeout_seconds or
             # KAZMA_TOOL_TIMEOUT_SECONDS (default 120s; <=0 disables).
-            _tool_timeout = _resolve_tool_timeout()
+            _tool_timeout = await asyncio.to_thread(_resolve_tool_timeout)  # a settings read (audit 2026-10-26 AUD-111)
             # Phase 0 instrumentation (Commitment Layer): log every tool
             # execution with its side-effect tier + an args digest so mutator
             # traffic is observable before authorize_effect lands (Phase 1/2).
@@ -1230,7 +1242,9 @@ async def tool_worker_node(
             ]
             if len(danger_tools) == 1:
                 tc0 = danger_tools[0]
-                message = _format_hitl_message(tc0["name"], tc0.get("arguments") or {})
+                message = await asyncio.to_thread(  # the card's notes read settings (audit 2026-10-26 AUD-111)
+                    _format_hitl_message, tc0["name"], tc0.get("arguments") or {}
+                )
                 primary_tool = tc0["name"]
                 primary_args = tc0.get("arguments") or {}
             else:
@@ -1293,7 +1307,7 @@ async def tool_worker_node(
                 # 2026-09-21, on a card that contained shell_exec.
                 _notes: list[str] = []
                 for _tc in danger_tools:
-                    _n = _jail_note(str(_tc.get("name") or ""))
+                    _n = await asyncio.to_thread(_jail_note, str(_tc.get("name") or ""))
                     if _n and _n not in _notes:
                         _notes.append(_n)
 
@@ -1401,7 +1415,7 @@ async def tool_worker_node(
                 for tc in danger_tools
                 if tc["name"] in ALWAYS_HITL_TOOLS or _tc_is_git_write(tc)
             ]
-            if current_thread and is_yolo_active(str(current_thread)) and not _always:
+            if current_thread and not _always and await asyncio.to_thread(is_yolo_active, str(current_thread)):
                 logger.warning(
                     "[ToolWorker] YOLO active for thread=%s — auto-approving %d danger tool(s)",
                     current_thread,

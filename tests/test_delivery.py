@@ -318,6 +318,83 @@ class TestFanOut:
             broker.unregister_socket("t1", conn_id)
 
 
+class TestGateViewStampOffTheLoop:
+    """The gate view of a HITL or done frame reads the gate registry and the
+    chat store: it is stamped in a thread, inside the thread's emit lock, so
+    frames still journal in the order emit() was called (audit 2026-10-26
+    AUD-111)."""
+
+    @staticmethod
+    def _slow_stamp(monkeypatch, seen: list, delay: float = 0.2) -> None:
+        import threading
+        import time
+
+        from kazma_ui import gate_view
+
+        def stamp(frame: dict, thread_id: str) -> dict:
+            seen.append(threading.current_thread())
+            time.sleep(delay)
+            return {**frame, "view": {"state": "pending"}}
+
+        monkeypatch.setattr(gate_view, "attach_view_to_hitl_frame", stamp)
+        monkeypatch.setattr(gate_view, "attach_gate_views_to_done_frame", stamp)
+
+    @pytest.mark.asyncio
+    async def test_frames_keep_call_order_while_a_view_is_read(self, monkeypatch) -> None:
+        import threading
+
+        seen: list = []
+        self._slow_stamp(monkeypatch, seen)
+        broker = TurnBroker()
+        loop_thread = threading.current_thread()
+        hitl = asyncio.create_task(broker.emit("t1", {"type": "hitl", "data": {"interrupt_id": "g"}}))
+        await asyncio.sleep(0)  # the HITL emit is reading its view now
+        token = asyncio.create_task(broker.emit("t1", {"type": "token", "data": {"i": 1}}))
+        done = asyncio.create_task(broker.emit("t1", {"type": "done", "data": {}}))
+        stamped = await asyncio.gather(hitl, token, done)
+
+        assert [f["type"] for f in stamped] == ["hitl", "token", "done"]
+        assert [f["seq"] for f in stamped] == [1, 2, 3]
+        assert stamped[0]["view"] == {"state": "pending"}
+        assert len(seen) == 2 and all(t is not loop_thread for t in seen)
+        frames, _gap = broker._journal.replay("t1", 0)
+        assert [f["type"] for f in frames] == ["hitl", "token", "done"]
+
+    @pytest.mark.asyncio
+    async def test_the_loop_runs_while_a_view_is_read(self, monkeypatch) -> None:
+        seen: list = []
+        self._slow_stamp(monkeypatch, seen, delay=0.3)
+        broker = TurnBroker()
+        ticks = 0
+
+        async def tick() -> None:
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        ticker = asyncio.create_task(tick())
+        try:
+            await broker.emit("t2", {"type": "hitl", "data": {}})
+        finally:
+            ticker.cancel()
+        assert ticks >= 5  # it would be 1 with the read on the loop
+
+    @pytest.mark.asyncio
+    async def test_a_cancel_during_the_read_journals_the_frame_unstamped(self, monkeypatch) -> None:
+        seen: list = []
+        self._slow_stamp(monkeypatch, seen, delay=0.3)
+        broker = TurnBroker()
+        task = asyncio.create_task(broker.emit("t3", {"type": "done", "data": {"content": ""}}))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        frames, _gap = broker._journal.replay("t3", 0)
+        assert [f["type"] for f in frames] == ["done"]
+        assert "view" not in frames[0]
+
+
 # ── TurnBroker: resume handshake data ────────────────────────────────────
 
 

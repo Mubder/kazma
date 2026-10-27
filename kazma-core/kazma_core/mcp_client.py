@@ -230,7 +230,7 @@ class MCPClient:
             cfg = server_config
         else:
             cfg = MCPServerConfig(**server_config)
-        cfg = _with_secrets(cfg)
+        cfg = await asyncio.to_thread(_with_secrets, cfg)  # vault reads (audit 2026-10-26 AUD-111)
 
         self._config = cfg
 

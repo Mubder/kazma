@@ -41,7 +41,11 @@ def _attach_hitl_view(
     tool: str = "",
     state_hint: str = "",
 ) -> dict[str, Any]:
-    """Stamp ``view`` + ``gate_id`` on an approve 200/409 body. Never raises."""
+    """Stamp ``view`` + ``gate_id`` on an approve 200/409 body. Never raises.
+
+    It reads the gate registry (SQLite): the route calls it through
+    ``asyncio.to_thread`` (audit 2026-10-26 AUD-111).
+    """
     out = dict(payload)
     iid = str(
         interrupt_id
@@ -93,7 +97,34 @@ def _is_own_bridge_gate(item: dict) -> bool:
     return str(item.get("tenant_id") or "default") == _current_tenant()
 
 
-async def _decide_bridge_gate(thread_id: str, body: dict, approved: bool):
+async def _request_actor(request: Any) -> str:
+    """Who decided, from the SERVER-side session -- never the request body.
+
+    Body text is attacker-chosen and made the gate-registry decision log
+    spoofable (audit M-W3). Falls back to a short hash of the presented
+    credential so the trail is still attributable when no cookie session
+    exists. Shared by the graph path and the bus-bridge branch (AUD-100: the
+    bridge recorded ``body["actor"]`` as the human who decided).
+    """
+    try:
+        from kazma_core.security.web_sessions import (
+            SESSION_COOKIE as _SC,
+            get_session_payload,
+        )
+
+        actor_sid = request.cookies.get(_SC) or ""
+        payload = await asyncio.to_thread(get_session_payload, actor_sid) or {}
+        role = str(payload.get("role") or "user")
+        sid_short = str(payload.get("session_id") or actor_sid or "")[:8]
+        return f"web:{role}:{sid_short}" if sid_short else "web:token"
+    except Exception:
+        logger.debug("[HITL] approval actor lookup failed", exc_info=True)
+        return "web:anon"
+
+
+async def _decide_bridge_gate(
+    thread_id: str, body: dict, approved: bool, actor: str = "web:anon"
+):
     """Claim a pending bus-bridge gate for *thread_id*, or return ``None``.
 
     ``None`` means "not a bridge gate" and the caller carries on down the
@@ -136,7 +167,9 @@ async def _decide_bridge_gate(thread_id: str, body: dict, approved: bool):
         return None
 
     decision = "approve" if approved else "deny"
-    actor = str(body.get("actor") or "operator")
+    # AUD-100: the actor is the caller's server-side session (``actor``,
+    # from ``_request_actor``); ``body["actor"]`` was recorded verbatim, so
+    # any client could name who approved.
     try:
         await claim_gate_async(match.gate_id, decision, actor)
         await settle_gate_async(match.gate_id, decision)
@@ -320,7 +353,8 @@ def register_misc_routes(self: Any) -> None:
         # close instead of 4003 and the session-expired redirect never fired
         # (the /ws/chat endpoint already does it in this order).
         await websocket.accept()
-        if not websocket_is_authenticated(websocket):
+        # The session lookup is a store read (audit 2026-10-26 AUD-111).
+        if not await asyncio.to_thread(websocket_is_authenticated, websocket):
             await websocket.close(code=4003, reason="Unauthorized")
             return
         from kazma_core.shutdown import is_shutting_down
@@ -461,11 +495,16 @@ def register_misc_routes(self: Any) -> None:
     async def health_check(request: Request) -> dict[str, Any]:
         from kazma_core.diagnostic_scope import read_only_diagnostic
 
-        with read_only_diagnostic("/health"):
-            return _health_body(request)
+        def _caller_is_admin() -> bool:
+            with read_only_diagnostic("/health"):
+                return _is_caller_admin(request)
 
-    def _health_body(request: Request) -> dict[str, Any]:
-        if not _is_caller_admin(request):
+        # The admin decision reads the session store; the counters below are
+        # in memory and stay on the loop (audit 2026-10-26 AUD-111).
+        return _health_body(await asyncio.to_thread(_caller_is_admin))
+
+    def _health_body(is_admin: bool) -> dict[str, Any]:
+        if not is_admin:
             return {"status": "ok"}
         if self.gateway is None:
             return {
@@ -515,9 +554,9 @@ def register_misc_routes(self: Any) -> None:
     )
     async def approve_tool(thread_id: str, request: Request) -> _JSONResponse:
         # Use shared auth: KAZMA_SECRET *or* Account API token.
-        from kazma_ui.auth import get_kazma_secret, is_authenticated
+        from kazma_ui.auth import aget_kazma_secret, is_authenticated
 
-        _secret = get_kazma_secret()
+        _secret = await aget_kazma_secret()
         if _secret and not await asyncio.to_thread(is_authenticated, request, _secret):
             return _JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -543,7 +582,10 @@ def register_misc_routes(self: Any) -> None:
         # `kazma mcp`, polling the registry row for its answer. Handled before
         # the graph lookup so an approval does not need a graph that this
         # request has nothing to do with.
-        decided = await _decide_bridge_gate(thread_id, body, approved)
+        # Who decides, from the server-side session (AUD-100: the bridge
+        # branch recorded the body's ``actor``).
+        actor = await _request_actor(request)
+        decided = await _decide_bridge_gate(thread_id, body, approved, actor=actor)
         if decided is not None:
             return decided
 
@@ -666,7 +708,7 @@ def register_misc_routes(self: Any) -> None:
                     thread_id, list(getattr(pre, "next", None) or ()), _interrupts,
                 )
                 return _JSONResponse(
-                    _attach_hitl_view(
+                    await asyncio.to_thread(_attach_hitl_view,
                         {
                             "ok": False,
                             "status": "expired",
@@ -704,7 +746,7 @@ def register_misc_routes(self: Any) -> None:
                         scope, ",".join(_always), thread_id,
                     )
                     return _JSONResponse(
-                        _attach_hitl_view(
+                        await asyncio.to_thread(_attach_hitl_view,
                             {
                                 "ok": False,
                                 "status": "refused",
@@ -725,25 +767,8 @@ def register_misc_routes(self: Any) -> None:
                         status_code=409,
                     )
 
-            # Audit identity from the SERVER-side session, not the client
-            # body: body session_id is attacker-chosen text and made the
-            # gate-registry decision log spoofable (audit M-W3). Fall back
-            # to a short hash of the presented credential so the trail is
-            # still attributable when no cookie session exists.
-            _actor_sid = ""
-            try:
-                from kazma_core.security.web_sessions import (
-                    SESSION_COOKIE as _SC,
-                    get_session_payload,
-                )
-
-                _actor_sid = request.cookies.get(_SC) or ""
-                _payload = await asyncio.to_thread(get_session_payload, _actor_sid) or {}
-                _role = str(_payload.get("role") or "user")
-                _sid_short = str(_payload.get("session_id") or _actor_sid or "")[:8]
-                actor = f"web:{_role}:{_sid_short}" if _sid_short else "web:token"
-            except Exception:
-                actor = "web:anon"
+            # ``actor`` came from the SERVER-side session above
+            # (``_request_actor``), never the client body (audit M-W3).
             # Never trust a client-supplied actor label.
             body.pop("actor", None)
 
@@ -784,7 +809,7 @@ def register_misc_routes(self: Any) -> None:
                     else "foreign"
                 )
                 return _JSONResponse(
-                    _attach_hitl_view(
+                    await asyncio.to_thread(_attach_hitl_view,
                         {
                             "ok": False,
                             "status": "expired" if _already != "foreign" else "not_found",
@@ -819,7 +844,7 @@ def register_misc_routes(self: Any) -> None:
                 logger.info("[HITL] gate=%s is not the live interrupt of thread=%s — refused",
                             _req_gate, thread_id)
                 return _JSONResponse(
-                    _attach_hitl_view(
+                    await asyncio.to_thread(_attach_hitl_view,
                         {
                             "ok": False,
                             "status": "expired",
@@ -917,7 +942,7 @@ def register_misc_routes(self: Any) -> None:
                     except Exception:
                         pass
                     return _JSONResponse(
-                        _attach_hitl_view(
+                        await asyncio.to_thread(_attach_hitl_view,
                             {
                                 "ok": False,
                                 "error": "This approval is no longer pending.",
@@ -994,7 +1019,7 @@ def register_misc_routes(self: Any) -> None:
                     in ("approved", "denied", "inflight", "settled", "done")
                 ):
                     return _JSONResponse(
-                        _attach_hitl_view(
+                        await asyncio.to_thread(_attach_hitl_view,
                             {
                                 "ok": False,
                                 "error": "This approval is no longer pending.",
@@ -1055,7 +1080,7 @@ def register_misc_routes(self: Any) -> None:
 
                 _ok_iid = str(_stamp_payload.get("interrupt_id") or "")
                 return _JSONResponse(
-                    _attach_hitl_view(
+                    await asyncio.to_thread(_attach_hitl_view,
                         {
                             "ok": True,
                             "approved": approved,
@@ -1078,7 +1103,7 @@ def register_misc_routes(self: Any) -> None:
             )
         except TransitionConflict as conflict:
             return _JSONResponse(
-                _attach_hitl_view(
+                await asyncio.to_thread(_attach_hitl_view,
                     {"error": "Approval no longer pending", "reason": "not_pending", "thread_id": thread_id,
                      "hitl_state": "inflight" if conflict.actual in ("claimed", "resuming") else conflict.actual},
                     thread_id, _body_interrupt_id(body),
@@ -1147,12 +1172,12 @@ def register_misc_routes(self: Any) -> None:
     # by nothing (removed 2026-10-01).
     @self.app.post("/api/pending-approvals/clear")
     async def clear_pending_approvals_route(request: Request) -> _JSONResponse:
-        from kazma_ui.auth import get_kazma_secret, is_authenticated
+        from kazma_ui.auth import aget_kazma_secret, is_authenticated
 
-        _secret = get_kazma_secret()
+        _secret = await aget_kazma_secret()
         if _secret and not await asyncio.to_thread(is_authenticated, request, _secret):
             return _JSONResponse({"error": "Unauthorized"}, status_code=401)
-        if not _is_caller_admin(request):
+        if not await asyncio.to_thread(_is_caller_admin, request):
             return _JSONResponse({"error": "Admin role required"}, status_code=403)
 
         from kazma_ui.hitl_approval import _get_pending_approvals

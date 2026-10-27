@@ -364,7 +364,23 @@ def unbounded_cancel_waits(source: str, rel: str) -> list[str]:
             arg = ast.unparse(node.args[0])
             if (rel, arg) not in DECLARED_WAIT_FOR:
                 found.append(f"{rel}:{node.lineno} asyncio.wait_for({arg})")
+        # A gather of sends is a set of tasks doing work, built in the call:
+        # its timeout cancels them and waits without a bound, the shape the
+        # alert and lifecycle senders had (audit 2026-10-26 AUD-071; the gate
+        # read only Name/Attribute arguments, so a Call slipped past).
+        if (isinstance(node, ast.Call) and ast.unparse(node.func) in ("asyncio.wait_for", "wait_for")
+                and node.args and isinstance(node.args[0], ast.Call)
+                and ast.unparse(node.args[0].func) in _TASK_BUILDING_CALLS):
+            found.append(f"{rel}:{node.lineno} asyncio.wait_for({ast.unparse(node.args[0].func)}(...))")
     return found
+
+
+#: Calls whose result is a future over tasks already running: a
+#: ``wait_for`` on one is the unbounded cancel-and-wait (AUD-071).
+_TASK_BUILDING_CALLS = frozenset({
+    "asyncio.gather", "gather", "asyncio.ensure_future", "ensure_future",
+    "asyncio.create_task", "create_task", "loop.create_task",
+})
 
 
 def test_no_unbounded_cancel_and_wait_in_product_code():
@@ -407,6 +423,69 @@ async def d(t, other):
     assert any("task.cancel() then await task" in f for f in found)
     assert any("self._t.cancel() then await self._t" in f for f in found)
     assert any("wait_for(self._task)" in f for f in found)
+
+
+def test_the_gate_finds_a_wait_for_over_a_gather_of_sends():
+    """Negative control for AUD-071: the alert and lifecycle senders' old
+    shape (a ``gather`` built inside the ``wait_for`` call) is found; a
+    fresh coroutine call is still not (it is the awaitable itself)."""
+    planted = '''
+async def deliver(targets, msg):
+    results = await asyncio.wait_for(
+        asyncio.gather(*(a.send(msg) for a in targets), return_exceptions=True),
+        timeout=10.0,
+    )
+    other = await asyncio.wait_for(asyncio.create_task(work()), timeout=1)
+    fine = await asyncio.wait_for(fetch(), timeout=1)
+'''
+    found = unbounded_cancel_waits(planted, "planted.py")
+    assert len(found) == 2, found
+    assert any("wait_for(asyncio.gather(...))" in f for f in found)
+    assert any("wait_for(asyncio.create_task(...))" in f for f in found)
+
+
+@pytest.mark.asyncio
+async def test_ops_alert_bus_send_ends_within_its_bound_when_a_send_absorbs_its_cancel(monkeypatch):
+    """AUD-071 behaviour: a bus send stuck in a read that absorbs its cancel no
+    longer holds the alert past its bound. The old ``asyncio.wait_for`` waits
+    for the stuck send after its timeout (the control: patched back in)."""
+    from kazma_core.observability import ops_alerts
+    from kazma_core.swarm import bus as bus_mod
+
+    release = asyncio.Event()
+
+    class _StuckAdapter:
+        name = "stuck"
+
+        async def send(self, msg):
+            return await _swallow_cancels(release)
+
+    class _Bus:
+        adapter = _StuckAdapter()
+
+    import kazma_core.bounded_cancel as bc
+
+    monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
+    monkeypatch.setattr(ops_alerts, "_ops_channels", lambda: [])
+    monkeypatch.setattr(ops_alerts, "bus_send_targets", lambda adapter, channels: [adapter])
+    monkeypatch.setattr(ops_alerts, "_telegram_direct", lambda *a, **k: False)
+    real = bc.wait_for_bounded
+
+    async def quick(aw, timeout, *, what, cancel_timeout=5.0):
+        # The send's 10 s, shortened; the cancel's bound, shortened.
+        return await real(aw, 0.2, what=what, cancel_timeout=0.3)
+
+    monkeypatch.setattr(bc, "wait_for_bounded", quick)
+    outcome: dict[str, list[str]] = {}
+    task = asyncio.create_task(ops_alerts._deliver("[ops] stuck test", outcome))
+    done, _ = await asyncio.wait({task}, timeout=3.0)
+    try:
+        assert done, "the alert's bus send waited past its bound for a stuck send"
+        assert task.result() is False
+        assert "stuck" in outcome["failed"]
+    finally:
+        release.set()
+        await asyncio.wait({task}, timeout=_ABSORB_AT_MOST_S + 2)
 
 
 def test_every_declared_wait_for_is_still_there():

@@ -134,11 +134,13 @@ async def run_performance_smoke(
     work_root.mkdir(parents=True, exist_ok=True)
     source = work_root / "performance-smoke.txt"
     source.write_text(("Kazma bounded document smoke.\n" * 2048), encoding="utf-8")
+    # A settings snapshot: read once, off the loop (audit 2026-10-26 AUD-111).
+    base_config = await asyncio.to_thread(get_document_config)
     config = replace(
-        get_document_config(),
+        base_config,
         storage_root=work_root / "store",
-        worker_timeout_seconds=min(get_document_config().worker_timeout_seconds, 20),
-        worker_memory_mb=min(get_document_config().worker_memory_mb, 512),
+        worker_timeout_seconds=min(base_config.worker_timeout_seconds, 20),
+        worker_memory_mb=min(base_config.worker_memory_mb, 512),
         ocr_enabled=False,
     )
     # Pre-clean any residual parser-runs from prior runs

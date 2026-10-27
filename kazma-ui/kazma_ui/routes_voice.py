@@ -420,7 +420,8 @@ async def list_stt_models(provider: str = "openai") -> list[dict[str, str]]:
         try:
             from kazma_core.voice.stt import list_nvidia_stt_models
 
-            rich = list_nvidia_stt_models()
+            # The provider list and its key are settings reads (AUD-111).
+            rich = await asyncio.to_thread(list_nvidia_stt_models)
             return [
                 {
                     "id": str(m.get("id", "")),

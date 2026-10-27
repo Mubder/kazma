@@ -138,7 +138,8 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     _last = messages[-1] if messages else {}
     _last_role = _last.get("role") if isinstance(_last, dict) else None
     _max_hit = iteration >= state.get("max_iterations", 15)
-    _final_text = _final_assistant_text_after_tools(messages)
+    # A plan-only answer asks the chat's plan mode: a settings read (audit 2026-10-26 AUD-111).
+    _final_text = await asyncio.to_thread(_final_assistant_text_after_tools, messages)
     _force_synth = bool(state.get("force_synthesis"))
     _junk_final = bool(_final_text and is_unusable_assistant_content(_final_text))
     _usable_final = bool(_final_text) and not _junk_final
@@ -180,7 +181,7 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             try:
                 from kazma_core.runtime.live_llm import resolve_live_client
 
-                _llm, _ = resolve_live_client(_llm, state=state)
+                _llm, _ = await asyncio.to_thread(resolve_live_client, _llm, state=state)  # the registry (audit 2026-10-26 AUD-111)
             except Exception:
                 pass
             try:
@@ -303,7 +304,7 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     # After synthesis (or if synthesis was skipped), ensure the user never
     # sees a blank turn. Prefer tool-aware partial notice over a vague
     # "no written answer" line.
-    _final_for_user = _final_assistant_text_after_tools(messages)
+    _final_for_user = await asyncio.to_thread(_final_assistant_text_after_tools, messages)
     if not _final_for_user or is_unusable_assistant_content(_final_for_user):
         tools_used = [
             tc.get("function", {}).get("name") or tc.get("name", "tool")

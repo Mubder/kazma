@@ -196,7 +196,7 @@ def register_general_routes(
     @router.post("/api/swarm/templates")
     async def add_template(payload: dict[str, Any], request: Request) -> JSONResponse:
         """Register a new worker template (admin-only, audit H-5)."""
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
         svc = get_swarm_service()
@@ -220,7 +220,7 @@ def register_general_routes(
     @router.delete("/api/swarm/templates/{name}")
     async def delete_template(name: str, request: Request) -> JSONResponse:
         """Remove a template and reap its instances (admin-only, audit H-5)."""
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
         svc = get_swarm_service()
@@ -238,7 +238,7 @@ def register_general_routes(
     @router.post("/api/swarm/autoscaler/reap")
     async def reap_idle_workers(request: Request) -> JSONResponse:
         """Trigger idle worker reaping (admin-only, audit H-5)."""
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
         svc = get_swarm_service()

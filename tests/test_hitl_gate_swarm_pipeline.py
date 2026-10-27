@@ -146,3 +146,49 @@ def test_pipeline_reject_records_deny():
     finally:
         conn.close()
     assert r["state"] == "settled" and r["decision"] == "deny"
+
+
+def _settle_probe(monkeypatch) -> list:
+    import threading
+
+    from kazma_core.swarm import checkpoint_manager
+
+    seen: list = []
+    monkeypatch.setattr(
+        checkpoint_manager, "_gate_settle_pipeline",
+        lambda task_id, decision: seen.append((threading.current_thread(), task_id, decision)),
+    )
+    return seen
+
+
+class _Handler:
+    def close(self, task_id: str) -> object:
+        return object()  # a checkpoint was open
+
+
+def test_closing_a_checkpoint_on_the_loop_settles_its_gates_in_a_thread(monkeypatch):
+    """The gate registry is SQLite: a task finalized on the loop settles its
+    pipeline gates in a thread (audit 2026-10-26 AUD-111, declared in
+    tests/test_static_gates.py::_OFF_THE_LOOP_WHEN_ON_IT); with no loop, inline."""
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    from kazma_core.background import background_tasks
+    from kazma_core.swarm.engine import SwarmEngine
+
+    seen = _settle_probe(monkeypatch)
+    engine = SimpleNamespace(_checkpoint_handler=_Handler())
+
+    async def main() -> None:
+        SwarmEngine._close_open_checkpoint(engine, "task-loop")
+        assert seen == []  # nothing settled on the loop itself
+        await asyncio.gather(*(t for t in background_tasks()
+                               if t.get_name() == "swarm-gate-settle:task-loop"))
+
+    asyncio.run(main())
+    assert len(seen) == 1 and seen[0][0] is not threading.main_thread()
+    assert seen[0][1:] == ("task-loop", "deny")
+
+    SwarmEngine._close_open_checkpoint(engine, "task-sync")  # no loop: inline
+    assert seen[-1] == (threading.current_thread(), "task-sync", "deny")

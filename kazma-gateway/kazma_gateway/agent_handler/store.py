@@ -202,13 +202,14 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     """
     ctx = msg.context_metadata
 
-    # Resolve thread_id using standardized resolver
-    thread_id = _resolve_thread(msg)
+    import asyncio
+
+    # Resolve thread_id using standardized resolver: a settings read (audit 2026-10-26 AUD-111)
+    thread_id = await asyncio.to_thread(_resolve_thread, msg)
 
     # Persist authorization independently of the five-minute delivery cache.
     # Approval commands are intercepted before this builder: they must never
     # acquire ownership of an unknown thread just by asking to approve it.
-    import asyncio
     from kazma_core.sessions.directory import record_thread_owner
 
     await asyncio.to_thread(record_thread_owner, thread_id, msg.sender_id)
@@ -242,9 +243,12 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
 
         from kazma_core.memory.config import resolve_tenant_id
 
-        state = initial_supervisor_state(
-            thread_id=thread_id,
-            tenant_id=resolve_tenant_id(msg.platform, msg.sender_id or ""),
+        # The initial state and the tenant rule read settings (audit 2026-10-26 AUD-111).
+        state = await asyncio.to_thread(
+            lambda: initial_supervisor_state(
+                thread_id=thread_id,
+                tenant_id=resolve_tenant_id(msg.platform, msg.sender_id or ""),
+            )
         )
     except ImportError:
         state = {"thread_id": thread_id, "messages": []}
@@ -287,7 +291,7 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     try:
         from kazma_core.agent.long_task import consume_continue_context
 
-        cont = consume_continue_context(thread_id, user_text=msg.text)
+        cont = await asyncio.to_thread(consume_continue_context, thread_id, user_text=msg.text)  # audit 2026-10-26 AUD-111
         if cont:
             state["messages"] = [
                 {"role": "system", "content": cont},

@@ -88,9 +88,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3407,
+    "blind_except": 3394,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 405,
+    "silent_except": 402,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
@@ -98,13 +98,13 @@ STRUCTURAL_BASELINE = {
     # Turn workspace entry consumes the binding resolver through its module;
     # the Scheduled soak names health.check_cron, and the Time Travel soak
     # SnapshotStore and close_shared_checkpoints.
-    "module_local_public_symbols": 532,
+    "module_local_public_symbols": 528,
     "patched_value_imports": 72,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,
     "shared_temp_names": 0,
     "async_inline_db_calls": 8,
-    "async_tools_never_await": 2,
+    "async_tools_never_await": 1,
     "functions_over_complexity_50": 35,
 }
 

@@ -109,17 +109,17 @@ def kept_connections(src: str) -> list[tuple[str, int, bool, str]]:
                 opened_into[id(n)] = locals_
     out = []
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
             continue
-        found = _connect_call(node.value)
-        via = None
-        if found is None and isinstance(node.value, ast.Name):
-            found = opened_into.get(id(node), {}).get(node.value.id)
-            via = node.value.id
-        if found is None:
-            continue
-        call, driver = found
-        for target in node.targets if isinstance(node, ast.Assign) else [node.target]:
+        for target, value in _assigned_pairs(node):
+            found = _connect_call(value)
+            via = None
+            if found is None and isinstance(value, ast.Name):
+                found = opened_into.get(id(node), {}).get(value.id)
+                via = value.id
+            if found is None:
+                continue
+            call, driver = found
             holder = ast.unparse(target)
             kept = isinstance(target, ast.Attribute) or (
                 isinstance(target, ast.Name)
@@ -136,6 +136,22 @@ def kept_connections(src: str) -> list[tuple[str, int, bool, str]]:
             )
             out.append((holder, node.lineno, autocommit, driver))
     return out
+
+
+def _assigned_pairs(node: ast.Assign | ast.AnnAssign) -> list[tuple[ast.expr, ast.expr]]:
+    """``(target, value)`` for each name an assignment binds, a tuple
+    unpacked element by element (``self._a, self._b = a, b``: the memory
+    mirror publishes both its connections that way, audit 2026-10-26
+    AUD-117, and the gate went blind to them)."""
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    pairs: list[tuple[ast.expr, ast.expr]] = []
+    for target in targets:
+        if (isinstance(target, (ast.Tuple, ast.List)) and isinstance(node.value, (ast.Tuple, ast.List))
+                and len(target.elts) == len(node.value.elts)):
+            pairs.extend(zip(target.elts, node.value.elts))
+        else:
+            pairs.append((target, node.value))
+    return pairs
 
 
 def _sql(node: ast.expr, names: dict[str, str] | None = None) -> str | None:

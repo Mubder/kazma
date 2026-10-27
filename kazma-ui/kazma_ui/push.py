@@ -122,19 +122,39 @@ def _load_subs() -> list[dict[str, Any]]:
         from kazma_core.config_store import get_config_store
 
         raw = get_config_store().get(_SUBS_KEY)
-        subs = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        return subs if isinstance(subs, list) else []
     except Exception:
         return []
+    return _as_list(raw)
 
 
-def _save_subs(subs: list[dict[str, Any]]) -> None:
+def _endpoint_refusal(endpoint: str) -> str | None:
+    """Why the server will not POST to *endpoint*, or None when it may.
+
+    AUD-103: any URL a browser sent was stored as a subscription and every
+    finished turn POSTed to it -- a client could point the server at an
+    internal host (a metadata service, the database's admin port). A push
+    service is a public https host (FCM, Mozilla, Apple, Microsoft), so the
+    endpoint must be https and pass the SSRF check every server-side fetch
+    uses, with its name resolving. Resolves DNS: call off the event loop.
+    """
+    from urllib.parse import urlsplit
+
+    text = str(endpoint or "").strip()
     try:
-        from kazma_core.config_store import get_config_store
+        parts = urlsplit(text)
+    except ValueError:
+        return "invalid push endpoint"
+    if parts.scheme != "https" or not parts.hostname:
+        return "push endpoint must be an https URL"
+    try:
+        from kazma_core.security.ssrf import validate_url
 
-        get_config_store().set(_SUBS_KEY, json.dumps(subs[-_MAX_SUBSCRIPTIONS:]))
-    except Exception:
-        logger.debug("[Push] subscription save failed", exc_info=True)
+        validate_url(text, block_unresolved=True)
+    except (ValueError, OSError) as exc:  # SSRFError is a ValueError
+        from kazma_core.errors import validation_error
+
+        return f"push endpoint refused: {validation_error(exc)}"
+    return None
 
 
 def _endpoint_hash(sub: dict[str, Any]) -> str:
@@ -142,25 +162,59 @@ def _endpoint_hash(sub: dict[str, Any]) -> str:
     return hashlib.sha256(ep.encode("utf-8")).hexdigest()[:24]
 
 
+def _as_list(raw: Any) -> list[dict[str, Any]]:
+    try:
+        subs = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except ValueError:  # not JSON: no readable subscriptions
+        return []
+    return subs if isinstance(subs, list) else []
+
+
+def _update_subs(change: Any) -> int:
+    """Apply ``change(list) -> list`` to the stored subscriptions; return the count.
+
+    AUD-103: subscribe, unsubscribe and the 410 prune each loaded the list,
+    changed it and saved it, so two at once (a browser subscribing while a
+    finished turn pruned a dead device) dropped one of the changes. One
+    ``atomic_update`` (BEGIN IMMEDIATE / FOR UPDATE) holds the row across the
+    read and the write. Blocking: call off the event loop.
+    """
+    from kazma_core.config_store import get_config_store
+
+    count = 0
+
+    def _apply(raw: Any) -> str:
+        nonlocal count
+        subs = change(_as_list(raw))[-_MAX_SUBSCRIPTIONS:]
+        count = len(subs)
+        return json.dumps(subs)
+
+    get_config_store().atomic_update(_SUBS_KEY, _apply)
+    return count
+
+
 def subscribe(subscription: dict[str, Any]) -> dict[str, Any]:
-    """Persist a browser PushSubscription JSON. Idempotent per endpoint."""
+    """Persist a browser PushSubscription JSON. Idempotent per endpoint.
+
+    Blocking (DNS and a settings write): call off the event loop.
+    """
     if not isinstance(subscription, dict) or not subscription.get("endpoint"):
         return {"status": "error", "error": "invalid subscription"}
-    subs = _load_subs()
+    refusal = _endpoint_refusal(str(subscription.get("endpoint")))
+    if refusal:
+        return {"status": "error", "error": refusal}
     hid = _endpoint_hash(subscription)
-    subs = [s for s in subs if s.get("_id") != hid]
     record = dict(subscription)
     record["_id"] = hid
-    subs.append(record)
-    _save_subs(subs)
-    return {"status": "ok", "count": len(subs)}
+    count = _update_subs(lambda subs: [s for s in subs if s.get("_id") != hid] + [record])
+    return {"status": "ok", "count": count}
 
 
 def unsubscribe(endpoint: str) -> dict[str, Any]:
+    """Remove a subscription by endpoint. Blocking: call off the event loop."""
     hid = hashlib.sha256(str(endpoint or "").encode("utf-8")).hexdigest()[:24]
-    subs = [s for s in _load_subs() if s.get("_id") != hid]
-    _save_subs(subs)
-    return {"status": "ok", "count": len(subs)}
+    count = _update_subs(lambda subs: [s for s in subs if s.get("_id") != hid])
+    return {"status": "ok", "count": count}
 
 
 def list_subscriptions() -> list[dict[str, Any]]:
@@ -197,6 +251,12 @@ async def notify_push_turn_complete(summary: str) -> int:
     (pub, priv), subs = plan
 
     def _send_one(sub: dict[str, Any]) -> bool:
+        # AUD-103: checked again at send time -- a stored endpoint from an
+        # older build, or a name that now resolves to an internal address.
+        refusal = _endpoint_refusal(str(sub.get("endpoint") or ""))
+        if refusal:
+            logger.warning("[Push] subscription not sent: %s", refusal)
+            return False
         try:
             webpush(
                 subscription_info={
@@ -213,7 +273,11 @@ async def notify_push_turn_complete(summary: str) -> int:
         except WebPushException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 410:
-                unsubscribe(str(sub.get("endpoint") or ""))
+                try:
+                    unsubscribe(str(sub.get("endpoint") or ""))
+                except Exception:
+                    # The dead device is tried (and pruned) again next turn.
+                    logger.warning("[Push] could not prune a dead subscription", exc_info=True)
             logger.debug("[Push] send failed (%s)", status or "unknown")
             return False
         except Exception:

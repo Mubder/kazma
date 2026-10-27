@@ -40,6 +40,17 @@ __all__ = ["find_closed_entries", "reopen_entries"]
 #: Two timestamps of one write: ``recorded`` is written to both columns.
 _SAME_INSTANT_S = 0.001
 
+#: An entry the user forgot is never reopened: Forget empties the value
+#: (``object = ''``) and stamps ``metadata.forgotten``
+#: (``forget._forget_fact_rows``). A forgotten entry is still a closed
+#: ``set`` row, so the superseded-id match found it and the reopen made a
+#: blank fact current again (audit 2026-10-26 AUD-047). Both reads and the
+#: reopen's own ``UPDATE`` hold this condition.
+_NOT_FORGOTTEN_SQL = (
+    "COALESCE(object, '') != '' AND NOT (json_valid(COALESCE(metadata_json, '{}')) "
+    "AND json_extract(COALESCE(metadata_json, '{}'), '$.forgotten') IS NOT NULL)"
+)
+
 
 def find_closed_entries(conn: sqlite3.Connection, *, written_after: float = 0.0) -> list[dict[str, Any]]:
     """Every list entry a single-valued write closed, grouped by that write
@@ -57,6 +68,7 @@ def find_closed_entries(conn: sqlite3.Connection, *, written_after: float = 0.0)
         closed = [str(r[0]) for r in conn.execute(
             "SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? "
             "AND predicate_type = 'set' AND invalidated_at IS NOT NULL "
+            f"AND {_NOT_FORGOTTEN_SQL} "
             "AND (id = ? OR ABS(invalidated_at - ?) < ?) ORDER BY ingested_at",
             (tenant, subject, predicate, supersedes or "", float(at or 0.0), _SAME_INSTANT_S),
         ).fetchall()]
@@ -83,7 +95,8 @@ def reopen_entries(
             for bid in group["closed"]:
                 cur = conn.execute(
                     "UPDATE beliefs SET valid_until = NULL, invalidated_at = NULL "
-                    "WHERE id = ? AND predicate_type = 'set' AND invalidated_at IS NOT NULL",
+                    "WHERE id = ? AND predicate_type = 'set' AND invalidated_at IS NOT NULL "
+                    f"AND {_NOT_FORGOTTEN_SQL}",
                     (bid,),
                 )
                 if cur.rowcount:

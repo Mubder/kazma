@@ -470,7 +470,15 @@ PROBES = {
 }
 
 #: Found by the census and deliberately not probed — each with its reason.
-NOT_PROBED: dict[str, str] = {}
+NOT_PROBED: dict[str, str] = {
+    "kazma-core/kazma_core/model_registry.py::ModelRegistry._restore_masked_profile_secrets": (
+        "the reverse of a masker: it puts the STORED key and URL back over the "
+        "stars a form posted, before a write, and returns nothing to a caller; "
+        "a URL password it cannot restore is refused (restore_masked_url), and "
+        "every profile it stores is shown through _mask_profile, which is probed "
+        "(audit 2026-10-26 AUD-105, tests/test_saved_model_profile_masks.py)"
+    ),
+}
 
 
 def test_every_key_name_masker_also_masks_url_passwords():

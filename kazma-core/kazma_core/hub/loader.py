@@ -241,7 +241,10 @@ class SkillLoader:
 
                     # ── HMAC signature: verify if present ───────────
                     if stored_sig:
-                        secret = get_kazma_secret()  # unified via config_store
+                        import asyncio
+
+                        # unified via config_store: a settings read (audit 2026-10-26 AUD-111)
+                        secret = await asyncio.to_thread(get_kazma_secret)
                         if not secret:
                             raise SkillLoadError(
                                 f"Skill {skill_name} has a signature but KAZMA_SECRET "

@@ -26,6 +26,7 @@ from typing import Any
 __all__ = [
     "PlatformRole",
     "PlatformUser",
+    "PlatformUsersUnavailable",
     "ROLE_RANK",
     "authenticate_local_user",
     "create_local_user",
@@ -67,6 +68,10 @@ _ADMIN_PREFIXES = (
     "/api/memory/v2/queue",
     "/api/memory/v2/reconsolidate",
     "/api/memory/v2/eval",
+    # AUD-104: the Soul confirm queue. A confirmed delta is guidance in every
+    # future system prompt, for every user of the install -- an operator
+    # could confirm what the admin had held back.
+    "/api/commitment",
 )
 
 # Paths viewer may access (read-ish); everything else needs operator+
@@ -199,14 +204,45 @@ def _verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def _load_users_from_store() -> list[dict[str, Any]]:
-    try:
-        from kazma_core.config_store import get_config_store
+class PlatformUsersUnavailable(RuntimeError):
+    """The platform user list could not be read (audit 2026-10-26 AUD-123)."""
 
+
+def _load_users_from_store() -> list[dict[str, Any]]:
+    """The platform users, or :class:`PlatformUsersUnavailable` when the store
+    cannot answer -- never an empty list standing for "unknown".
+
+    It swallowed the error and answered ``[]``, which is single-operator
+    mode: the multi-user check said "no" during a store outage, so
+    ``tenant_isolation.multi_user_or_production`` -- written to fail closed on
+    an RBAC store error -- never saw one, and a read-modify-write of the list
+    saved an empty read back over the real one (audit 2026-10-26 AUD-123).
+    Only a sign-in or a listing, where an empty list fails closed, takes
+    :func:`_users_for_sign_in` instead.
+    """
+    from kazma_core.config_store import get_config_store
+
+    try:
         raw = get_config_store().get("platform.users", [])
-        if isinstance(raw, list):
-            return [u for u in raw if isinstance(u, dict)]
-    except Exception:
+    except Exception as exc:
+        raise PlatformUsersUnavailable(f"platform.users unreadable: {type(exc).__name__}") from exc
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise PlatformUsersUnavailable(
+            f"platform.users holds {type(raw).__name__}, not a list"
+        )
+    return [u for u in raw if isinstance(u, dict)]
+
+
+def _users_for_sign_in() -> list[dict[str, Any]]:
+    """The platform users for a sign-in or a listing; empty when the store
+    cannot answer (no local user authenticates: fail-closed there). A
+    decision that "no users" would open reads :func:`_load_users_from_store`.
+    """
+    try:
+        return _load_users_from_store()
+    except PlatformUsersUnavailable:
         # Safe to swallow the value (audit O3): an empty user list means no
         # local user authenticates, which is fail-closed. Logged because a
         # store error here silently locks every local user out.
@@ -226,7 +262,7 @@ def _save_users_to_store(users: list[dict[str, Any]]) -> None:
 
 def list_users() -> list[PlatformUser]:
     out: list[PlatformUser] = []
-    for u in _load_users_from_store():
+    for u in _users_for_sign_in():
         out.append(
             PlatformUser(
                 user_id=str(u.get("user_id") or u.get("username") or ""),
@@ -264,6 +300,8 @@ def create_local_user(
         raise ValueError(f"Invalid role {role!r}; use viewer|operator|admin")
     if tenant_id is not None and not valid_tenant_id(tenant_id):
         raise ValueError(f"Invalid tenant_id {tenant_id!r}")
+    # Strict: read as empty, an unreadable list was saved back as just this
+    # user, every other user gone (audit 2026-10-26 AUD-123).
     users = _load_users_from_store()
     uid = user_id or secrets.token_hex(8)
     ph = _hash_password(password)
@@ -304,7 +342,7 @@ def create_local_user(
 
 def authenticate_local_user(username: str, password: str) -> PlatformUser | None:
     """Validate local credentials; return PlatformUser or None."""
-    for u in _load_users_from_store():
+    for u in _users_for_sign_in():
         if str(u.get("username", "")).lower() != username.lower():
             continue
         if not u.get("enabled", True):
@@ -354,4 +392,7 @@ def multi_user_enabled() -> bool:
         "1", "true", "on", "yes",
     ):
         return True
+    # Raises PlatformUsersUnavailable when the store cannot answer: "no users"
+    # is single-operator mode, so an unreadable list must not read as empty
+    # (audit 2026-10-26 AUD-123). Every caller fails closed on the error.
     return bool(_load_users_from_store())

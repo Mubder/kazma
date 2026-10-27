@@ -15,6 +15,7 @@ Env / ConfigStore keys (shared with Settings UI)::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -191,7 +192,7 @@ async def transcribe_audio(
         return None
     from kazma_core.voice.stt import sanitize_transcript, transcribe, transcribe_with_fallback
 
-    cfg = live_voice_settings()
+    cfg = await asyncio.to_thread(live_voice_settings)
     provider = str(cfg["stt_provider"])
     language = str(cfg["stt_language"])
     key = api_key or str(cfg.get("stt_api_key") or "") or None
@@ -279,7 +280,7 @@ async def transcribe_inbound_message(
     - Tags ``voice_transcribed``, ``stt_provider``, ``stt_language``, byte size
     - Never drops the turn on STT failure
     """
-    cfg = live_voice_settings()
+    cfg = await asyncio.to_thread(live_voice_settings)
     if not cfg.get("enabled"):
         return msg
 
@@ -356,7 +357,7 @@ async def synthesize_speech(text: str, *, require_tts_reply: bool = False) -> by
     """
     from kazma_core.voice.tts import synthesize
 
-    cfg = live_voice_settings()
+    cfg = await asyncio.to_thread(live_voice_settings)
     if not cfg.get("enabled"):
         return None
     if require_tts_reply and not cfg.get("tts_reply", True):

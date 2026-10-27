@@ -95,7 +95,8 @@ async def file_write(path: str, content: str) -> str:
     # Store reads: resolved and checked in a worker thread.
     p, access = await resolve_and_check(path, "write")
     if not access.allowed:
-        raise RefusedBeforeEffect(denied_message(path, "write", result=access))
+        # The refusal names the grants: settings reads (audit 2026-10-26 AUD-111).
+        raise RefusedBeforeEffect(await asyncio.to_thread(denied_message, path, "write", result=access))
 
     MAX_FILE_WRITE_BYTES = 8 * 1024 * 1024  # 8 MB cap
     encoded_bytes = content.encode("utf-8")

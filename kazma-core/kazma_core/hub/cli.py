@@ -11,7 +11,7 @@ import click
 import yaml
 
 from kazma_core.hub.manifest_schema import SkillManifest
-from kazma_core.hub.registry import KazmaHub
+from kazma_core.hub.registry import HubInstallNotImplemented, KazmaHub
 from kazma_core.hub.validator import SkillValidator
 
 __all__ = ["badge", "certified", "check_certification", "hub", "info", "install", "list_installed", "main", "register", "search", "sign", "stats", "status", "submit", "uninstall", "validate"]
@@ -214,7 +214,11 @@ def search(ctx, query: str | None, capabilities: str | None, tags: str | None, a
 @click.argument("skill_id")
 @click.pass_context
 def install(ctx, skill_id: str) -> None:
-    """Install a skill (marks as installed in registry)."""
+    """Install a hub skill: not implemented, says so and exits non-zero.
+
+    It printed "Installed X to <folder>" over an empty folder (audit
+    2026-10-26 AUD-074; AGENTS.md §22G: hub skills register no tools).
+    """
     try:
         hub_instance = KazmaHub(registry_path=ctx.obj["registry_path"])
     except ValueError as exc:
@@ -224,16 +228,17 @@ def install(ctx, skill_id: str) -> None:
     try:
         manifest = _run(hub_instance.get(skill_id))
         if manifest is None:
-            click.echo(f"Skill not found: {skill_id}")
-            _run(hub_instance.close())
-            return
-
-        install_path = _run(hub_instance.install(skill_id))
-        _run(hub_instance.close())
-        click.echo(f"Installed {skill_id} to {install_path}")
+            click.echo(f"Skill not found: {skill_id}", err=True)
+            sys.exit(1)
+        _run(hub_instance.install(skill_id))
     except ValueError as exc:
         click.echo(f"Invalid skill ID: {exc}", err=True)
         sys.exit(1)
+    except HubInstallNotImplemented as exc:
+        click.echo(f"Not installed: {exc}", err=True)
+        sys.exit(2)
+    finally:
+        _run(hub_instance.close())
 
 
 # ─── list ─────────────────────────────────────────────────────────────────

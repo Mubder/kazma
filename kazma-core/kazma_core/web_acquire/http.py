@@ -210,9 +210,10 @@ async def fetch_public(
     seen: set[str] = set()
     async with asyncio.timeout(timeout), await (capacity_pool or resources.acquisition_capacity()).acquire():
         if proxy_url is _PROXY_UNSET:
-            proxy_url = get_active_proxy_url()
+            proxy_url = await asyncio.to_thread(get_active_proxy_url)  # settings (audit 2026-10-26 AUD-111)
         via_proxy = bool(proxy_url)
-        async with get_scraping_client(
+        async with await asyncio.to_thread(
+            get_scraping_client,
             follow_redirects=False, timeout=timeout,
             headers={"Accept-Encoding": "gzip, deflate", **(headers or {})},
             rotate_ua=True, pin_hosts=pins if not via_proxy else None,

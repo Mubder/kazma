@@ -271,9 +271,9 @@ class SkillInstallationWizard:
             return False
         return None
 
-    async def _step_install(self) -> None:
-        """Install the skill."""
-        from kazma_core.hub.registry import KazmaHub
+    async def _step_install(self) -> bool | None:
+        """Install the skill; False (the wizard stops) when nothing was installed."""
+        from kazma_core.hub.registry import HubInstallNotImplemented, KazmaHub
 
         skill = self.context.selected_skill
         if not skill:
@@ -291,9 +291,14 @@ class SkillInstallationWizard:
             manifest = await hub.get(skill_id)
             if manifest is None:
                 print(f"  Error: Skill {skill_id} not found in registry.")
-                return
-            install_path = await hub.install(skill_id)
-            print(f"  Installed to: {install_path}")
+                return False
+            await hub.install(skill_id)
+        except HubInstallNotImplemented as exc:
+            # The hub installs nothing; this printed "Installed to:" over an
+            # empty folder, then "Installation Complete!" (audit 2026-10-26
+            # AUD-074). Stop here: no later step may claim an install.
+            print(f"  Not installed: {exc}")
+            return False
         finally:
             await hub.close()
 

@@ -43,7 +43,12 @@
         return '<pre>' + escapeHtml(String(args)) + '</pre>';
       }
     }
-    var out = [patches.length + ' file(s):'];
+    // AUD-120: the count is said in its plural form, in the page's language
+    // ("3 file(s):" was English on every page); the header is its own row.
+    var header = window.kazmaCount
+      ? window.kazmaCount('dashboard.hitl_patch_files', patches.length)
+      : String(patches.length);
+    var out = [];
     patches.slice(0, 20).forEach(function (item, i) {
       if (!item || typeof item !== 'object') return;
       out.push('\n' + (i + 1) + '. ' + (item.path || args.path || '?'));
@@ -59,10 +64,12 @@
         out.push('+ ' + ln);
       });
     });
-    return '<div class="hitl-diff" role="region" aria-label="Patch preview">' +
+    return '<div class="hitl-diff" role="region" aria-label="' +
+      escapeHtml(t('dashboard.hitl_patch_preview', 'Patch preview')) + '">' +
+      '<div class="hitl-diff-file">' + escapeHtml(header) + '</div>' +
       out.join('\n').split('\n').map(function (ln) {
         var cls = 'hitl-diff-ctx';
-        if (/^\d+\.\s/.test(ln) || ln.indexOf(' file(s):') !== -1) cls = 'hitl-diff-file';
+        if (/^\d+\.\s/.test(ln)) cls = 'hitl-diff-file';
         else if (/^(\+\+\+|---|@@|diff )/.test(ln)) cls = 'hitl-diff-meta';
         else if (ln.charAt(0) === '-') cls = 'hitl-diff-del';
         else if (ln.charAt(0) === '+') cls = 'hitl-diff-add';

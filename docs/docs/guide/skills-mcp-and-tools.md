@@ -165,17 +165,10 @@ kazma hub list
 kazma hub info author/skill-name
 ```
 
-**Install** a specific version or the latest (`cli.py:234-266`):
-```bash
-kazma hub install author/skill-name@1.0.0
-kazma hub install author/skill-name
-```
-Or use the interactive **skill-installation wizard** (`kazma_core/cli/wizard.py`, `main.py:117-123`):
-```bash
-kazma wizard
-```
-
-> **⚠ `hub install`/`hub update` are currently stubbed** — `registry.py:269` only updates a DB row and performs no real fetch. Verify the skill source out-of-band until the installer is fully wired.
+**Install** is not implemented. `kazma hub install`, the
+**skill-installation wizard** (`kazma wizard`) and the Skills page for a
+`kazma-hub://` id say so and install nothing: the hub registry cannot fetch a
+skill or give the agent its tools. Install an Agent Skill instead.
 
 ---
 

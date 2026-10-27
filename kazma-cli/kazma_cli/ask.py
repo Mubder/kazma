@@ -17,7 +17,14 @@ from kazma_core.cli.ask import (
 
 
 def _hitl_decide_tty(payload: dict[str, Any], *, stdin_consumed: bool) -> dict[str, Any]:
-    """TTY y/N (or a=always). Not a TTY / stdin already consumed → deny."""
+    """TTY y/N (or a = allow this tool for this chat). Not a TTY / stdin
+    already consumed → deny.
+
+    "a" grants only the tool asked about, for this chat
+    (``kazma_core.cli.ask._grant_asked_tools``); it used to be "a=always" and
+    turned on YOLO for the whole thread (audit 2026-10-26 AUD-107). An
+    always-ask tool (``always_ask``: X writes) is offered y/N only.
+    """
     tool = payload.get("tool") or "danger tool"
     msg = str(payload.get("message") or f"Approve {tool}?").strip()
     print(f"\n[HITL] {msg}", file=sys.stderr)
@@ -27,15 +34,17 @@ def _hitl_decide_tty(payload: dict[str, Any], *, stdin_consumed: bool) -> dict[s
             file=sys.stderr,
         )
         return {"approved": False}
+    one_time = bool(payload.get("always_ask"))
+    choices = "[y/N]" if one_time else f"[y/N/a=allow {tool} for this chat]"
     try:
-        print("Allow this once? [y/N/a=always] ", end="", file=sys.stderr, flush=True)
+        print(f"Allow this once? {choices} ", end="", file=sys.stderr, flush=True)
         ans = sys.stdin.readline().strip().lower()
     except (EOFError, KeyboardInterrupt):
         print("", file=sys.stderr)
         return {"approved": False}
     if ans in ("y", "yes"):
         return {"approved": True}
-    if ans in ("a", "always"):
+    if ans in ("a", "always") and not one_time:
         return {"approved": True, "always": True}
     return {"approved": False}
 

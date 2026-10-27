@@ -21,6 +21,7 @@ rather than reporting a breakage the operator has already tripped over.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -129,14 +130,15 @@ async def check_google(*, alert_on_findings: bool = True) -> ConnectorStatus:
 
 
 async def _check_google(*, alert_on_findings: bool = True) -> ConnectorStatus:
+    # Every token read is a vault read: off the loop (audit 2026-10-26 AUD-111).
     st = ConnectorStatus(name="google")
 
-    if not _vault_get("email.gmail.refresh_token"):
+    if not await asyncio.to_thread(_vault_get, "email.gmail.refresh_token"):
         st.ok = True
         st.skipped = "no Google account connected"
         return st
 
-    age = google_grant_age_days()
+    age = await asyncio.to_thread(google_grant_age_days)
     st.age_days = age
     if age is not None:
         st.expires_in_days = max(0.0, TESTING_MODE_TTL_DAYS - age)
@@ -188,8 +190,8 @@ async def _probe_google() -> tuple[bool, str]:
             refresh_gmail_access_token,
         )
 
-        refresh = _vault_get("email.gmail.refresh_token")
-        access = _vault_get("email.gmail.access_token")
+        refresh = await asyncio.to_thread(_vault_get, "email.gmail.refresh_token")
+        access = await asyncio.to_thread(_vault_get, "email.gmail.access_token")
         if refresh:
             try:
                 access, _ = await refresh_gmail_access_token(refresh)
@@ -235,12 +237,12 @@ async def check_google_calendar(*, alert_on_findings: bool = True) -> ConnectorS
 
 async def _check_google_calendar(*, alert_on_findings: bool = True) -> ConnectorStatus:
     st = ConnectorStatus(name="google_calendar")
-    if not _vault_get("calendar.google.refresh_token"):
+    if not await asyncio.to_thread(_vault_get, "calendar.google.refresh_token"):
         st.ok = True
         st.skipped = "no Google Calendar connected"
         return st
 
-    age = google_calendar_grant_age_days()
+    age = await asyncio.to_thread(google_calendar_grant_age_days)
     st.age_days = age
     if age is not None:
         st.expires_in_days = max(0.0, TESTING_MODE_TTL_DAYS - age)
@@ -281,8 +283,8 @@ async def _probe_google_calendar() -> tuple[bool, str]:
             refresh_google_calendar_access_token,
         )
 
-        refresh = _vault_get("calendar.google.refresh_token")
-        access = _vault_get("calendar.google.access_token")
+        refresh = await asyncio.to_thread(_vault_get, "calendar.google.refresh_token")
+        access = await asyncio.to_thread(_vault_get, "calendar.google.access_token")
         if refresh:
             try:
                 access, _ = await refresh_google_calendar_access_token(refresh)

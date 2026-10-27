@@ -43,6 +43,13 @@ __all__ = [
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _BLOB_KINDS = frozenset({"quarantine", "originals", "artifacts"})
 _ACL_PERMISSIONS = frozenset({"read", "write", "owner"})
+#: The ACL grants that satisfy each permission (the document's owner always
+#: does). One table for the per-document check and the joined listing.
+_ACL_COVERS: dict[str, frozenset[str]] = {
+    "read": frozenset({"read", "write", "owner"}),
+    "write": frozenset({"write", "owner"}),
+    "owner": frozenset({"owner"}),
+}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -498,6 +505,46 @@ class DocumentRepository:
             rows = self._conn.execute(
                 f"SELECT * FROM documents WHERE {' AND '.join(clauses)} ORDER BY created_at, id",
                 params,
+            ).fetchall()
+        return [_document(row) for row in rows]
+
+    def list_documents_by_access(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        permission: str = "read",
+        granted: bool = True,
+    ) -> list[DocumentRecord]:
+        """The tenant's live documents *actor_id* holds *permission* on (or,
+        with ``granted=False``, does not), in one joined query.
+
+        The listing asked :meth:`has_access` once per document (audit
+        2026-10-26 AUD-115): a page of documents was a query per document,
+        and the operator grant re-checked every document every minute. Same
+        rule as :meth:`has_access` (owner, or an ACL row that covers it).
+        """
+        tenant = _required(tenant_id, "tenant_id")
+        actor = _required(actor_id, "actor_id")
+        if permission not in _ACL_PERMISSIONS:
+            raise ValueError(f"invalid permission: {permission!r}")
+        allowed = sorted(_ACL_COVERS[permission])
+        marks = ", ".join("?" for _ in allowed)
+        held = f"(d.owner_id = ? OR COALESCE(a.permission, '') IN ({marks}))"
+        condition = held if granted else "NOT " + held
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT d.* FROM documents d
+                LEFT JOIN document_acl a
+                  ON a.tenant_id = d.tenant_id
+                 AND a.document_id = d.id
+                 AND a.principal_id = ?
+                WHERE d.tenant_id = ? AND d.deleted_at IS NULL
+                  AND {condition}
+                ORDER BY d.created_at, d.id
+                """,
+                (actor, tenant, actor, *allowed),
             ).fetchall()
         return [_document(row) for row in rows]
 
@@ -1330,11 +1377,7 @@ class DocumentRepository:
         if row["owner_id"] == actor:
             return
         granted = row["permission"]
-        allowed = {
-            "read": {"read", "write", "owner"},
-            "write": {"write", "owner"},
-            "owner": {"owner"},
-        }[permission]
+        allowed = _ACL_COVERS[permission]
         if granted not in allowed:
             raise DocumentAccessError("actor does not have the required document permission")
 

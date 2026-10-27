@@ -1133,6 +1133,10 @@
     if (data && data.code === 'task_store_unavailable') {
       return t('swarm.task_store_unavailable');
     }
+    // AUD-070: the engine did not load; the task was not recorded or run.
+    if (data && data.code === 'swarm_engine_unavailable') {
+      return t('swarm.engine_unavailable');
+    }
     return (data && data.message) || fallback;
   }
 

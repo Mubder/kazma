@@ -410,4 +410,7 @@ class TestTheOffsiteCopyIsReadBack:
         from kazma_core.backup.cloud_sync import S3Sync
 
         src = inspect.getsource(S3Sync.upload_file)
-        assert '"size": len(payload)' in src
+        # The size is the file's own (multipart uploads never hold the whole
+        # payload, audit 2026-10-26 AUD-113), recorded on success.
+        assert "local.stat().st_size" in src
+        assert '"size": size}' in src

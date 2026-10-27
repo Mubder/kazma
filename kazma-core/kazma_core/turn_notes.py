@@ -93,6 +93,11 @@ TURN_NOTE_KINDS: dict[str, tuple[str, ...]] = {
     # graph_tool_worker.approval_scope_note: current batch's decision only.
     # Retain on approval resume; remove at the next fresh user turn.
     "approval_scope": ("APPROVAL SCOPE (runtime decision facts):",),
+    # agent.supervisor_watchdog._reflection_text: a recovery attempt's note
+    # describes THAT attempt. Unregistered, the watchdog wrote it into the
+    # checkpoint and every later turn sent it again (audit 2026-10-26
+    # AUD-122); within a turn the watchdog keeps only the newest one.
+    "recovery": ("[KAZMA RECOVERY]",),
 }
 
 

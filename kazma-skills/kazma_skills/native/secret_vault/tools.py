@@ -17,6 +17,7 @@ a graceful error string in that case.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 # The module, not the function: a name bound at import keeps whatever
@@ -51,7 +52,8 @@ async def vault_store(
     except (json.JSONDecodeError, TypeError):
         meta = {}
     try:
-        sid = vault.store(name, value, category=category, metadata=meta)
+        # The vault is SQLite: every call off the loop (audit 2026-10-26 AUD-111).
+        sid = await asyncio.to_thread(vault.store, name, value, category=category, metadata=meta)
         return f"Secret '{name}' stored securely (id={sid}, category={category})."
     except Exception as exc:
         return f"Error storing secret: {exc}"
@@ -89,7 +91,7 @@ async def vault_retrieve(name: str) -> str:
     # resolver existed; this was the last tool still not using it.
     from kazma_core.security.vault import retrieve_scoped
 
-    value = retrieve_scoped(name, vault)
+    value = await asyncio.to_thread(retrieve_scoped, name, vault)  # a vault read (audit 2026-10-26 AUD-111)
     if value is None:
         return f"No secret found with name '{name}'."
     # Return the value with a warning that it's sensitive. The HITL gate
@@ -107,7 +109,7 @@ async def vault_list() -> str:
     vault = _vault.get_vault()
     if vault is None:
         return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
-    items = vault.list_secrets()
+    items = await asyncio.to_thread(vault.list_secrets)
     if not items:
         return "The vault is empty."
     return json.dumps(items, ensure_ascii=False, indent=2)
@@ -127,7 +129,7 @@ async def vault_delete(name: str) -> str:
     vault = _vault.get_vault()
     if vault is None:
         raise RefusedBeforeEffect("Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable.")
-    deleted = vault.delete(name)
+    deleted = await asyncio.to_thread(vault.delete, name)
     if deleted:
         return f"Secret '{name}' deleted."
     return f"No secret found with name '{name}'."

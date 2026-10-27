@@ -38,7 +38,11 @@ MIME_MAP: dict[str, str] = {
     "gif": "image/gif",
 }
 MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB — images above this are resized
-MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB — hard cap for URL downloads
+# The one hard cap on a source image, a local file or a URL download alike
+# (audit 2026-10-26 AUD-109): a download was capped at 50 MB, a local file at
+# 2x MAX_IMAGE_BYTES (40 MB) and read whole after a stat, so a file that grew
+# between the two was read past its cap.
+MAX_DOWNLOAD_BYTES = 2 * MAX_IMAGE_BYTES
 DEFAULT_QUESTION = "Describe this image in detail."
 RESIZE_MAX_DIMENSION = 2048  # px — longest side after downscale
 REQUEST_TIMEOUT = 60.0
@@ -134,14 +138,23 @@ def _load_local_image(path: Path) -> tuple[bytes, str]:
             f"Supported: {supported}"
         )
 
+    cap = MAX_DOWNLOAD_BYTES
     stat = path.stat()
-    if stat.st_size > MAX_IMAGE_BYTES * 2:
+    if stat.st_size > cap:
         raise ValueError(
             f"Image file too large ({stat.st_size / 1_048_576:.1f} MB). "
-            f"Max {MAX_IMAGE_BYTES * 2 / 1_048_576:.0f} MB."
+            f"Max {cap / 1_048_576:.0f} MB."
         )
 
-    raw = path.read_bytes()
+    # Read at most one byte past the cap: the size above is from a stat, and
+    # a file written meanwhile would otherwise be read whole (AUD-109).
+    with path.open("rb") as fh:
+        raw = fh.read(cap + 1)
+    if len(raw) > cap:
+        raise ValueError(
+            f"Image file too large (over {cap / 1_048_576:.0f} MB). "
+            f"Max {cap / 1_048_576:.0f} MB."
+        )
     mime = _ext_to_mime(fmt)
     return raw, mime
 

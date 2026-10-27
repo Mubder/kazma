@@ -404,11 +404,12 @@ async def _maybe_send_to_output_target(
             return False
         return await send_swarm_output(manager, text, override, is_html=is_html)
 
-    routes = _swarm_routes()
+    # The routes and their targets are settings reads (audit 2026-10-26 AUD-111).
+    routes = await asyncio.to_thread(_swarm_routes)
     if routes:
         sent_any = False
         for route in routes:
-            cfg = _swarm_route_config(route)
+            cfg = await asyncio.to_thread(_swarm_route_config, route)
             if cfg is None:
                 logger.info(
                     "[agent-handler] swarm route %r selected but not configured "
@@ -424,7 +425,7 @@ async def _maybe_send_to_output_target(
             )
         return sent_any
 
-    cfg = _get_output_target_config()
+    cfg = await asyncio.to_thread(_get_output_target_config)
     if origin is not None and _target_is_origin_chat(cfg, origin):
         return False
     return await send_swarm_output(manager, text, cfg, is_html=is_html)
@@ -481,7 +482,7 @@ async def _dispatch_swarm_from_chat(
         # user (Swarm audit SW-S16).
         from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
 
-        if not _sender_is_gateway_admin(msg):
+        if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (audit 2026-10-26 AUD-111)
             await _send_swarm_reply(
                 msg, store, manager, thread_id,
                 "⛔ Sending a swarm result to another chat is admin-only, like "

@@ -29,6 +29,16 @@ def force_output_routing():
         os.environ["KAZMA_TEST_FORCE_OUTPUT_ROUTING"] = original
 
 
+@pytest.fixture(autouse=True)
+def single_operator_install(monkeypatch):
+    """The swarm routes refuse an install whose user list cannot be read
+    (audit 2026-10-26 AUD-123), and these tests hand the routes a MagicMock
+    settings store: say "no platform users" outright, as an install has."""
+    from kazma_core.security import platform_rbac
+
+    monkeypatch.setattr(platform_rbac, "multi_user_enabled", lambda: False)
+
+
 # ---------------------------------------------------------------------------
 # _parse_output_target_suffix
 # ---------------------------------------------------------------------------

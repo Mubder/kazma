@@ -726,7 +726,10 @@ def test_a_confirmed_local_decision_outranks_a_stale_registry_row() -> None:
         / "kazma-ui" / "kazma_ui" / "routes_direct" / "misc.py"
     ).read_text(encoding="utf-8")
     assert "def _attach_hitl_view(" in misc
-    assert "_attach_hitl_view(" in misc.split("return _JSONResponse(", 1)[1]
+    # The approve route answers with the gate view attached. It reads the
+    # registry, so it runs in a thread (AUD-111): to_thread(_attach_hitl_view, ...).
+    after = misc.split("return _JSONResponse(", 1)[1]
+    assert "to_thread(_attach_hitl_view," in after or "_attach_hitl_view(" in after
 
 
 def test_the_answer_is_painted_the_same_way_everywhere() -> None:

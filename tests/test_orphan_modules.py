@@ -102,6 +102,89 @@ def unreached_modules(
     return out
 
 
+def _imports_of(rel: str, text: str) -> set[str]:
+    """Every dotted name *rel* imports (``import a.b``; ``from a import b``
+    gives ``a`` and ``a.b``), relative imports resolved."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    me = _module_name(rel) or ""
+    is_pkg = rel.endswith("__init__.py")
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            out.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = me.split(".") if is_pkg else me.split(".")[:-1]
+                base = base[: len(base) - (node.level - 1)] if node.level > 1 else base
+                mod = ".".join(base + ([node.module] if node.module else []))
+            else:
+                mod = node.module or ""
+            out.add(mod)
+            out.update(f"{mod}.{a.name}" for a in node.names)
+    return out
+
+
+def reached_only_by_the_unreached(
+    sources: dict[str, str], extra_text: str = "", launchers: dict[str, str] | None = None
+) -> list[str]:
+    """Modules every import of which comes from modules nothing live reaches.
+
+    :func:`unreached_modules` counts any import as reaching, so modules that
+    import EACH OTHER keep each other alive: ``agent/pipeline_registry.py``
+    and ``agent/pipelines/document.py`` did, and the compat
+    ``agent/intent_router.py`` hung off them -- three modules no product
+    path reached (audit 2026-10-26 AUD-075). This follows imports from the
+    roots instead (entry points, names in strings or config, launchers,
+    package ``__init__``/``__main__`` files, native skill tools) and returns
+    what that walk never reaches.
+    """
+    modules = {m: rel for rel in sources if (m := _module_name(rel))}
+
+    def targets(names: set[str]) -> set[str]:
+        hit: set[str] = set()
+        for name in names:
+            parts = name.split(".")
+            for k in range(len(parts), 0, -1):
+                if ".".join(parts[:k]) in modules:
+                    hit.add(".".join(parts[:k]))
+                    break
+        return hit
+
+    edges = {m: targets(_imports_of(rel, sources[rel])) for m, rel in modules.items()}
+    roots: set[str] = set()
+    strings: set[str] = set()
+    for rel, text in {**sources, **(launchers or {})}.items():
+        if rel.endswith("__main__.py") or '__name__ == "__main__"' in text:
+            roots.add(_module_name(rel) or "")
+        if launchers and rel in launchers:
+            roots |= targets(_imports_of(rel, text))
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                strings.add(node.value.split(":", 1)[0])
+    roots |= targets(strings)
+    for mod, rel in modules.items():
+        if rel.endswith(("__init__.py", "__main__.py")) or mod in extra_text:
+            roots.add(mod)
+        if rel.endswith("/tools.py") and "/native/" in rel:
+            roots.add(mod)
+
+    alive: set[str] = set()
+    stack = [m for m in roots if m in modules]
+    while stack:
+        mod = stack.pop()
+        if mod not in alive:
+            alive.add(mod)
+            stack.extend(edges.get(mod, ()))
+    return sorted(set(modules) - alive)
+
+
 def _product_sources() -> tuple[dict[str, str], str, dict[str, str]]:
     files = subprocess.run(
         ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
@@ -165,3 +248,50 @@ def test_orphan_gate_catches_an_unreached_module():
         ),
     }
     assert unreached_modules(sources) == ["kazma_core.forgotten"]
+
+
+def test_no_module_is_kept_alive_only_by_modules_nothing_reaches():
+    """Audit 2026-10-26 AUD-075: an import cycle nothing live imports."""
+    sources, config, launchers = _product_sources()
+    dead = [
+        m for m in reached_only_by_the_unreached(sources, config, launchers)
+        if m not in ALLOWED_UNREACHED
+    ]
+    assert not dead, (
+        "These modules are imported only by modules that no entry point, "
+        "registry string or launcher reaches -- a cycle keeps them looking "
+        "alive to test_every_product_module_is_reached. Wire them, delete "
+        "them with their tests, or add them to ALLOWED_UNREACHED with the "
+        "reason:\n  " + "\n  ".join(dead)
+    )
+
+
+def test_the_cycle_gate_catches_the_old_document_pipeline():
+    """Negative control: the removed cluster's shape. The plain orphan gate
+    passes it (each module is imported by another); the walk does not."""
+    sources = {
+        "kazma-core/kazma_core/__init__.py": "",
+        "kazma-core/kazma_core/runner.py": (
+            "from kazma_core.used import X\n"
+            'if __name__ == "__main__":\n    print(X)\n'
+        ),
+        "kazma-core/kazma_core/used.py": "X = 1\n",
+        "kazma-core/kazma_core/agent/__init__.py": "",
+        "kazma-core/kazma_core/agent/intent_router.py": "class TaskIntent: ...\n",
+        "kazma-core/kazma_core/agent/pipeline_registry.py": (
+            "def _auto_register():\n"
+            "    from kazma_core.agent.pipelines.document import register\n"
+            "    register()\n"
+        ),
+        "kazma-core/kazma_core/agent/pipelines/__init__.py": "",
+        "kazma-core/kazma_core/agent/pipelines/document.py": (
+            "from kazma_core.agent.intent_router import TaskIntent\n"
+            "from kazma_core.agent.pipeline_registry import get_registry\n"
+        ),
+    }
+    assert unreached_modules(sources) == []
+    assert reached_only_by_the_unreached(sources) == [
+        "kazma_core.agent.intent_router",
+        "kazma_core.agent.pipeline_registry",
+        "kazma_core.agent.pipelines.document",
+    ]

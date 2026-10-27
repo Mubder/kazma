@@ -445,7 +445,7 @@ async def list_sessions(request: Request, limit: int = 50) -> JSONResponse:
     # it is an admin view. It used to be open to any role — a viewer could list
     # every thread and an operator could delete one or clear them all (audit
     # 2026-09-22). platform_rbac lists /api/sessions as admin-only as well.
-    if (denied := require_admin(request)) is not None:
+    if (denied := await asyncio.to_thread(require_admin, request)) is not None:
         return denied
     if not _checkpoint_manager:
         return JSONResponse({"sessions": [], "error": "CheckpointManager not initialized"})
@@ -496,7 +496,7 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
     # it is an admin view. It used to be open to any role — a viewer could list
     # every thread and an operator could delete one or clear them all (audit
     # 2026-09-22). platform_rbac lists /api/sessions as admin-only as well.
-    if (denied := require_admin(request)) is not None:
+    if (denied := await asyncio.to_thread(require_admin, request)) is not None:
         return denied
     if not _checkpoint_manager:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
@@ -575,7 +575,7 @@ async def clear_all_sessions(request: Request) -> JSONResponse:
     # it is an admin view. It used to be open to any role — a viewer could list
     # every thread and an operator could delete one or clear them all (audit
     # 2026-09-22). platform_rbac lists /api/sessions as admin-only as well.
-    if (denied := require_admin(request)) is not None:
+    if (denied := await asyncio.to_thread(require_admin, request)) is not None:
         return denied
     if not _checkpoint_manager:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)

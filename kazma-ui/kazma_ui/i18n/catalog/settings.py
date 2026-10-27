@@ -184,6 +184,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "رُفضت دلتا الروح.",
         "en": "Soul delta rejected.",
     },
+    "settings.soul_not_found": {
+        "ar": "لم تعد دلتا الروح هذه بانتظار التأكيد.",
+        "en": "This Soul delta is no longer waiting for confirmation.",
+    },
+    "settings.soul_not_confirmed": {
+        "ar": "تعذّر تأكيد دلتا الروح، ولم يتغير شيء.",
+        "en": "The Soul delta could not be confirmed; nothing changed.",
+    },
+    "settings.soul_not_applied": {
+        "ar": "أُكِّدت دلتا الروح لكنها لم تُطبَّق (رُفضت عند التطبيق).",
+        "en": "The Soul delta was confirmed but not applied (it was refused at apply).",
+    },
+    "settings.soul_apply_failed": {
+        "ar": "أُكِّدت دلتا الروح لكن تطبيقها فشل. سجل الخادم يذكر السبب.",
+        "en": "The Soul delta was confirmed but applying it failed. The server log names the cause.",
+    },
     "settings.safety_saved": {
         "ar": "حُفظت إعدادات السلامة",
         "en": "Safety settings saved",

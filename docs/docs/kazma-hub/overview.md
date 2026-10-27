@@ -12,7 +12,8 @@ A remote marketplace API may be configured (`hub_url`); many flows work fully of
 | Capability | Status | CLI |
 |------------|--------|-----|
 | Search registry | **Live** | `kazma hub search` |
-| Install / uninstall | **Live** (registry) | `kazma hub install` / `uninstall` |
+| Install | **Not implemented**: refuses, installs nothing | `kazma hub install` |
+| Uninstall (remove from the registry) | **Live** (registry) | `kazma hub uninstall` |
 | List / info | **Live** | `kazma hub list` / `info` |
 | Register local path | **Live** | `kazma hub register` |
 | Validate manifest | **Live** | `kazma hub validate` |
@@ -20,7 +21,7 @@ A remote marketplace API may be configured (`hub_url`); many flows work fully of
 | Certification check (local) | **Live** | `kazma hub check-certification` |
 | Submit to remote hub API | **Live only if hub API is up** | `kazma hub submit` / `status` |
 | `kazma hub publish` | **Does not exist** | Use `register` + optional `submit` |
-| Interactive wizard | **Live** | `kazma wizard` |
+| Interactive wizard | **Live** up to its install step, which refuses | `kazma wizard` |
 | Built-in native skills | **Live** | Auto-loaded from `kazma-skills/…/native/` |
 
 Full command list (from `kazma_core/hub/cli.py`):
@@ -34,7 +35,6 @@ submit, status, stats, badge, certified, check-certification
 
 ```bash
 kazma hub search "vault"
-kazma hub install author/skill-name
 kazma hub list
 kazma hub info author/skill-name
 kazma hub validate ./my-skill

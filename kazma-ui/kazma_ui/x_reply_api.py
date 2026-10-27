@@ -166,6 +166,11 @@ def _actor(request: Request) -> str:
     return str(principal.get("user_id") or principal.get("username") or "local-operator")
 
 
+def _tenant_keyed(items: list[tuple[str, Any, str]]) -> list[tuple[str, Any, str]]:
+    """The batch's keys under the X account's tenant (reads settings: call in a thread)."""
+    return [(x_config_key(key), value, category) for key, value, category in items]
+
+
 def _validate_subjects(subjects: list[SubjectBody]) -> list[str]:
     """Use the same versioned validator as runtime loading."""
     from kazma_core.x_api.subject_policy import normalize_cards
@@ -399,7 +404,9 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         from kazma_core.config_store import ConfigRevisionConflict, get_config_store
         from kazma_core.x_api.stance import MODE_AUTO, MODE_DRAFT, MODE_OFF
 
-        revision_key = x_config_key("connectors.x.reply.settings_revision")
+        # With no tenant bound, the tenant rule is a settings read: every X
+        # key is resolved off the loop (audit 2026-10-26 AUD-111).
+        revision_key = await asyncio.to_thread(x_config_key, "connectors.x.reply.settings_revision")
         revision = await asyncio.to_thread(get_config_store().get, revision_key, 0)
         if body.expected_revision is not None and body.expected_revision != revision:
             return JSONResponse({"ok": False, "error": "X settings changed. Reload and review before saving."}, status_code=409)
@@ -485,7 +492,9 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         from kazma_core.x_api.subject_policy import normalize_cards, revise_cards
 
         subjects, _ = normalize_cards([subject.model_dump(by_alias=True) for subject in body.subjects])
-        previous = await asyncio.to_thread(get_config_store().get, x_config_key("connectors.x.reply.subjects"), [])
+        previous = await asyncio.to_thread(
+            lambda: get_config_store().get(x_config_key("connectors.x.reply.subjects"), [])
+        )
         subjects = revise_cards(previous, subjects)
         from kazma_core.x_api.reply_style import normalize_style
 
@@ -598,9 +607,11 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             items.append(("connectors.x.reply.style", style, _CATEGORY))
         items.append(("connectors.x.reply.settings_revision", revision + 1, _CATEGORY))
         try:
-            await asyncio.to_thread(get_config_store().batch_set,
-                                   [(x_config_key(key), value, category) for key, value, category in items],
-                                   expected=(revision_key, revision))
+            # The tenant rule behind x_config_key is a settings read, so the
+            # keys are resolved in the thread too (AUD-111).
+            keyed = await asyncio.to_thread(_tenant_keyed, items)
+            await asyncio.to_thread(get_config_store().batch_set, keyed,
+                                    expected=(revision_key, revision))
         except ConfigRevisionConflict as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
 
@@ -654,7 +665,7 @@ async def x_reply_poll() -> JSONResponse:
         from kazma_core.x_api.mentions_fire import poll_once
         from kazma_core.x_api.stance import get_reply_config
 
-        with tenant_scope(x_tenant_id()):
+        with tenant_scope(await asyncio.to_thread(x_tenant_id)):
             cfg = await asyncio.to_thread(get_reply_config)
             if not cfg.can_draft():
                 return JSONResponse(
@@ -693,7 +704,7 @@ async def x_reply_approve(body: SummonIdBody, request: Request) -> JSONResponse:
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.reply import approve_summon
 
-        with tenant_scope(x_tenant_id()):
+        with tenant_scope(await asyncio.to_thread(x_tenant_id)):
             result = await approve_summon(sid, approval_token=body.approval_token, actor=await asyncio.to_thread(_actor, request))
         status = 200 if result.ok or result.action == "skipped" else 400
         return JSONResponse(_summon_payload(result), status_code=status)
@@ -711,7 +722,7 @@ async def x_reply_delete(body: SummonIdBody) -> JSONResponse:
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.reply import forget_summon
 
-        with tenant_scope(x_tenant_id()):
+        with tenant_scope(await asyncio.to_thread(x_tenant_id)):
             result = await forget_summon(sid, approval_token=body.approval_token)
         status = 200 if result.ok else 400
         return JSONResponse(_summon_payload(result), status_code=status)
@@ -728,7 +739,7 @@ async def x_reply_deny(body: SummonIdBody, request: Request) -> JSONResponse:
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.reply import deny_summon
 
-        with tenant_scope(x_tenant_id()):
+        with tenant_scope(await asyncio.to_thread(x_tenant_id)):
             result = await deny_summon(sid, approval_token=body.approval_token, actor=await asyncio.to_thread(_actor, request))
         status = 200 if result.ok or result.action == "skipped" else 400
         return JSONResponse(_summon_payload(result), status_code=status)
@@ -746,7 +757,7 @@ async def x_reply_retry(body: SummonIdBody, request: Request) -> JSONResponse:
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.reply import retry_summon
 
-        with tenant_scope(x_tenant_id()):
+        with tenant_scope(await asyncio.to_thread(x_tenant_id)):
             result = await retry_summon(sid, actor=await asyncio.to_thread(_actor, request))
         status = 200 if result.ok or result.action in ("skipped", "awaiting_approval", "posted") else 400
         # failed drafts still 200 — the operator needs the reason, not a 400
@@ -772,7 +783,7 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
 
         # Settings requests carry a tenant, but provider keys are tenant-scoped
         # vault rows and this is the one endpoint that spends a model call.
-        with tenant_scope(x_tenant_id()):
+        with tenant_scope(await asyncio.to_thread(x_tenant_id)):
             override = None
             if body.subject is not None:
                 from kazma_core.x_api.stance import _parse_subjects

@@ -721,7 +721,8 @@ class AsyncMCPManager:
                         root = await asyncio.to_thread(binding.resolve_active_root)
                     from kazma_core.workspace.mcp_rebind import apply_workspace_to_server_config
 
-                    cfg = apply_workspace_to_server_config(cfg, root)
+                    # The root's path is resolved on disk (audit 2026-10-26 AUD-111).
+                    cfg = await asyncio.to_thread(apply_workspace_to_server_config, cfg, root)
                 # A repeated startup/start request must not orphan the prior
                 # child process or HTTP client.  A healthy handle is already
                 # serving the configured tools, so report it idempotently.
@@ -1259,7 +1260,9 @@ class AsyncMCPManager:
 
         digest = hashlib.sha256(root_key.encode("utf-8", errors="replace")).hexdigest()[:8]
         alias = f"{server_name}__scoped_{digest}"
-        cfg = apply_workspace_to_server_config(dict(template), root=Path(scoped_root))
+        cfg = await asyncio.to_thread(  # the root's path is resolved on disk (audit 2026-10-26 AUD-111)
+            apply_workspace_to_server_config, dict(template), root=Path(scoped_root)
+        )
         cfg["name"] = alias
         transport = cfg.get("transport", "stdio")
         try:
@@ -1578,7 +1581,7 @@ class AsyncMCPManager:
 
     async def _connect_stdio(self, name: str, cfg: dict[str, Any]) -> int:
         """Spawn an MCP server as a subprocess and perform the handshake."""
-        cfg = self._with_secrets(name, cfg)
+        cfg = await asyncio.to_thread(self._with_secrets, name, cfg)  # vault reads (audit 2026-10-26 AUD-111)
         command = cfg.get("command", [])
         if not command:
             raise MCPBridgeError(f"stdio server '{name}' requires a 'command' list")
@@ -1766,7 +1769,7 @@ class AsyncMCPManager:
 
     async def _connect_sse(self, name: str, cfg: dict[str, Any]) -> int:
         """Connect to an MCP server over HTTP SSE."""
-        cfg = self._with_secrets(name, cfg)
+        cfg = await asyncio.to_thread(self._with_secrets, name, cfg)  # vault reads (audit 2026-10-26 AUD-111)
         url = cfg.get("url", "")
         if not url:
             raise MCPBridgeError(f"SSE server '{name}' requires a 'url'")
@@ -2097,7 +2100,7 @@ class AsyncMCPManager:
 
     async def _connect_streamable_http(self, name: str, cfg: dict[str, Any]) -> int:
         """Connect to an MCP server over the Streamable HTTP transport."""
-        cfg = self._with_secrets(name, cfg)
+        cfg = await asyncio.to_thread(self._with_secrets, name, cfg)  # vault reads (audit 2026-10-26 AUD-111)
         url = cfg.get("url", "")
         if not url:
             raise MCPBridgeError(f"Streamable HTTP server '{name}' requires a 'url'")
@@ -2436,8 +2439,9 @@ class UnifiedToolExecutor:
                         # recorded approvals of this call. The graph-authority
                         # flag is not: it is set for the whole tool-worker
                         # turn, including tools the graph never asked about.
-                        if _tid and (
-                            is_yolo_active(_tid)
+                        # The grants are settings reads (audit 2026-10-26 AUD-111).
+                        if _tid and await asyncio.to_thread(
+                            lambda: is_yolo_active(_tid)
                             or has_task_grant(_tid)
                             or has_tool_grant(_tid, tool_name)
                         ):

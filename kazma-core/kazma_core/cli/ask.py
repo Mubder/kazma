@@ -323,6 +323,39 @@ def extract_hitl_interrupt(snapshot: Any) -> dict[str, Any] | None:
     return _hitl_from_value(getattr(snapshot, "interrupts", None))
 
 
+def _grant_asked_tools(thread_id: str, payload: dict[str, Any], *, actor: str) -> list[str]:
+    """Grant, for this chat, the tools an approval asked about; return them.
+
+    "Always" on a ``kazma ask`` / ACP approval means THIS tool for this
+    chat, the web card's "Allow tool" (:mod:`kazma_core.safety.hitl_grants`,
+    30 minutes). It turned on YOLO for the whole thread, so one "a" on a
+    ``file_write`` card let every later danger tool run unasked (audit
+    2026-10-26 AUD-107). An always-ask tool (X writes) is never granted:
+    its approval is for this call only. A grant that cannot be stored is
+    said, and the call is still approved once.
+    """
+    from kazma_core.safety.hitl_grants import grant_tool, one_time_only, tools_to_grant
+
+    tools = payload.get("tools") if isinstance(payload.get("tools"), list) else []
+    tool = str(payload.get("tool") or "")
+    one_time = set(one_time_only(tools, tool))
+    granted: list[str] = []
+    for name in tools_to_grant(tools, tool):
+        if name in one_time:
+            continue
+        try:
+            result = grant_tool(thread_id, name, actor=actor)
+        except Exception:
+            logger.warning(
+                "[ask] Could not store the grant for %s; approved once only", name,
+                exc_info=True,
+            )
+            continue
+        if result.get("active"):
+            granted.append(name)
+    return granted
+
+
 def map_permission_outcome(result: dict[str, Any] | None) -> dict[str, Any]:
     """Map ACP ``session/request_permission`` result → graph resume value."""
     raw = result or {}
@@ -452,14 +485,14 @@ async def run_ask(
         try:
             from kazma_core.agent.plan_mode import enable_plan_mode
 
-            enable_plan_mode(thread_id, actor="cli")
+            await asyncio.to_thread(enable_plan_mode, thread_id, actor="cli")  # settings (audit 2026-10-26 AUD-111)
         except Exception:
             logger.debug("[ask] plan mode enable failed", exc_info=True)
     if opts.yolo:
         try:
             from kazma_core.safety.yolo import enable_yolo
 
-            enable_yolo(thread_id, actor="cli")
+            await asyncio.to_thread(enable_yolo, thread_id, actor="cli")
         except Exception:
             logger.debug("[ask] yolo enable failed", exc_info=True)
         try:
@@ -521,7 +554,7 @@ async def _invoke_supervisor(
         set_current_thread_id,
     )
 
-    agent = KazmaAgent(load_config())
+    agent = KazmaAgent(await asyncio.to_thread(load_config))  # kazma.yaml and settings (audit 2026-10-26 AUD-111)
     executor: Any = agent.tools
     if on_event is not None:
         executor = _EmittingExecutor(agent.tools, on_event)
@@ -552,12 +585,12 @@ async def _invoke_supervisor(
         snapshot_recorder=getattr(agent, "_snapshot_recorder", None),
     )
 
-    state = initial_supervisor_state(thread_id=thread_id)
+    state = await asyncio.to_thread(initial_supervisor_state, thread_id=thread_id)
     state["messages"] = [{"role": "user", "content": prompt}]
     try:
         from kazma_core.agent.long_task import resolve_turn_budgets
 
-        recursion = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+        recursion = int((await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"])
     except Exception:
         recursion = 100
     config = {
@@ -646,12 +679,9 @@ async def _invoke_supervisor(
                     logger.warning("[ask] HITL decide failed — denying", exc_info=True)
                     decision = {"approved": False}
             if decision.get("always") and decision.get("approved"):
-                try:
-                    from kazma_core.safety.yolo import enable_yolo
-
-                    enable_yolo(thread_id, actor="cli-allow-always")
-                except Exception:
-                    pass
+                await asyncio.to_thread(
+                    _grant_asked_tools, thread_id, hitl_payload, actor="cli-allow-always"
+                )
             from kazma_core.safety.commitment.resume import build_resume_command
 
             payload = build_resume_command(
@@ -1033,7 +1063,7 @@ async def _acp_run_prompt(
         try:
             from kazma_core.tools.code_exec import jail_note_for_tool
 
-            jail = jail_note_for_tool(tool_name)
+            jail = await asyncio.to_thread(jail_note_for_tool, tool_name)  # settings (audit 2026-10-26 AUD-111)
         except Exception:
             jail = ""
         title = str(payload.get("message") or tool_name or "danger tool")
@@ -1058,18 +1088,23 @@ async def _acp_run_prompt(
             "sessionId": sid,
             "update": {"sessionUpdate": "tool_call", **tool_call},
         })
+        # "Always" grants this tool for the session, never YOLO, and an
+        # always-ask tool is offered once/reject only (audit 2026-10-26
+        # AUD-107, _grant_asked_tools).
+        options: list[dict[str, str]] = [
+            {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+        ]
+        if not payload.get("always_ask"):
+            options.append({
+                "optionId": "allow-always",
+                "name": f"Allow {tool_name} for this session",
+                "kind": "allow_always",
+            })
+        options.append({"optionId": "reject-once", "name": "Reject", "kind": "reject_once"})
         result = await rpc.call("session/request_permission", {
             "sessionId": sid,
             "toolCall": tool_call,
-            "options": [
-                {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
-                {
-                    "optionId": "allow-always",
-                    "name": "Allow for this session",
-                    "kind": "allow_always",
-                },
-                {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
-            ],
+            "options": options,
         })
         return map_permission_outcome(result)
 

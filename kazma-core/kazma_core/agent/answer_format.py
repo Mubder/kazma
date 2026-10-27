@@ -153,7 +153,7 @@ async def format_terminal_answer(
             return messages
         from kazma_core.runtime.live_llm import resolve_live_client
 
-        client, _ = resolve_live_client(llm, state=state)
+        client, _ = await asyncio.to_thread(resolve_live_client, llm, state=state)  # the registry (audit 2026-10-26 AUD-111)
         started = time.monotonic()
         try:
             async with asyncio.timeout(_RETRY_TIMEOUT_SECONDS):

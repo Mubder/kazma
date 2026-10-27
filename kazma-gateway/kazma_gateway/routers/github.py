@@ -736,7 +736,9 @@ def _oauth_result_page(success: bool, message: str) -> HTMLResponseType:
 </div>
 <script>
   // Try to signal the opener (the Kazma tab) so it refreshes immediately.
-  if (window.opener) {{ try {{ window.opener.postMessage({{ type: 'github-oauth-done', success: {str(success).lower()} }}, '*'); }} catch(e) {{}} }}
+  // Only to Kazma's own origin (AUD-106): with '*' any page that opened
+  // this tab -- another site's window -- received the outcome.
+  if (window.opener) {{ try {{ window.opener.postMessage({{ type: 'github-oauth-done', success: {str(success).lower()} }}, window.location.origin); }} catch(e) {{}} }}
   // Reliable fallback: redirect THIS tab back to the workspace page after
   // a short delay. On success the user lands on Kazma (which re-checks
   // OAuth status on load); we can't always window.close() a non-script

@@ -376,7 +376,7 @@ def register_system_tools(registry: Any) -> None:
             # Note: `kazma` / `ps` removed from prod allowlist (audit H4)
         }
         # File ops: off in multi-user/prod unless KAZMA_SHELL_ALLOW_MUTATE=1
-        if shell_mutate_allowed():
+        if await asyncio.to_thread(shell_mutate_allowed):  # the multi-user rule: settings (AUD-111)
             _SAFE_BINARIES |= {"mkdir", "cp", "mv", "touch"}
         # Archives: disabled by default in production strict mode
         # (tar/zip can write outside cwd via absolute entries).

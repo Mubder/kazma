@@ -366,7 +366,7 @@ async def handle_mcp_server_request(
     if name == "ping":
         return {}, None
     if name == "roots/list":
-        return {"roots": workspace_roots()}, None
+        return {"roots": await asyncio.to_thread(workspace_roots)}, None  # the workspace store (audit 2026-10-26 AUD-111)
     if name == "sampling/createMessage":
         ok, reason = await request_sampling_hitl(params, server_name=server_name)
         if not ok:

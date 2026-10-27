@@ -310,6 +310,8 @@ def _record_procedural_outcome(tool_name: str, arguments: dict[str, Any], *, suc
     Best-effort and non-blocking — never delays the tool result or raises into
     the tool path. Enqueues for the single worker above; drops the record when
     the queue is full rather than growing memory or blocking a tool call.
+    It reads the memory settings, so async code calls it through
+    ``asyncio.to_thread`` (audit 2026-10-26 AUD-111).
     """
     if _PROCEDURAL_STOPPING.is_set():
         return
@@ -563,7 +565,7 @@ class LocalToolRegistry:
             from kazma_core.safety.commitment import authorize_effect as _authorize
             from kazma_core.safety.commitment.config import get_commitment_config
 
-            _enforce = bool(get_commitment_config().get("enforce_unknown_mutators"))
+            _enforce = bool((await asyncio.to_thread(get_commitment_config)).get("enforce_unknown_mutators"))
             _dec = _authorize(
                 tool_name, arguments, enforce_unknown_mutators=_enforce,
                 context={"source": "registry"},
@@ -595,7 +597,7 @@ class LocalToolRegistry:
             try:
                 from kazma_core.safety.commitment.config import get_commitment_config
 
-                if bool(get_commitment_config().get("enforce_unknown_mutators")):
+                if bool((await asyncio.to_thread(get_commitment_config)).get("enforce_unknown_mutators")):
                     return {
                         "content": "[commitment] blocked: authorization failed closed",
                         "is_error": True,
@@ -620,7 +622,7 @@ class LocalToolRegistry:
         try:
             from kazma_core.retry import load_retry_config
 
-            cfg = load_retry_config()
+            cfg = await asyncio.to_thread(load_retry_config)
             # Clamp to >= 1: range(1, max_attempts + 1) is empty for 0/neg,
             # so the tool function is never invoked and the method returns a
             # nonsensical "Error: None" for every call (audit finding).
@@ -825,7 +827,7 @@ class LocalToolRegistry:
                             "Tool '%s' called without required args %s — raw arguments: %s",
                             tool_name, missing, json.dumps(arguments, ensure_ascii=False)[:500],
                         )
-                        _record_procedural_outcome(tool_name, arguments, success=False)
+                        await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=False)
                         return {
                             "content": (
                                 f"Error: Tool '{tool_name}' was called with missing required "
@@ -893,7 +895,7 @@ class LocalToolRegistry:
                     or content.startswith("Safety:")
                     or _json_reports_failure(content)
                 )
-                _record_procedural_outcome(tool_name, arguments, success=not _is_err)
+                await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=not _is_err)
                 return await _with_post({"content": content, "is_error": _is_err})
 
             except retryable_exc as exc:
@@ -919,7 +921,7 @@ class LocalToolRegistry:
                     logger.info("Tool '%s' failed with a known, repeatable effect: %s", tool_name, exc)
                 else:
                     logger.info("Tool '%s' refused before running: %s", tool_name, exc)
-                _record_procedural_outcome(tool_name, arguments, success=False)
+                await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=False)
                 return await _with_post({"content": exc.content(), "is_error": True})
 
             except TypeError as exc:
@@ -928,7 +930,7 @@ class LocalToolRegistry:
                 # instead of retrying blind against "check server logs".
                 duration_ms = (time.monotonic() - start) * 1000
                 logger.error("Tool '%s' argument error after %.0fms: %s", tool_name, duration_ms, exc, exc_info=True)
-                _record_procedural_outcome(tool_name, arguments, success=False)
+                await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=False)
                 schema_hint = tool.input_schema or {}
                 return await _with_post({
                     "content": (
@@ -943,7 +945,7 @@ class LocalToolRegistry:
                 # Non-retryable error — return immediately
                 duration_ms = (time.monotonic() - start) * 1000
                 logger.error("Tool '%s' failed after %.0fms: %s", tool_name, duration_ms, exc, exc_info=True)
-                _record_procedural_outcome(tool_name, arguments, success=False)
+                await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=False)
                 return await _with_post({"content": f"Error: Tool '{tool_name}' failed: {exc}", "is_error": True})
 
         # All retry attempts exhausted
@@ -951,7 +953,7 @@ class LocalToolRegistry:
         # exc_info=last_exc (not True) — we are outside an except block here,
         # so exc_info=True logged no traceback on the retryable-failure path.
         logger.error("Tool '%s' failed after %d attempts (%.0fms): %s", tool_name, max_attempts, duration_ms, last_exc, exc_info=last_exc)
-        _record_procedural_outcome(tool_name, arguments, success=False)
+        await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=False)
         return await _with_post({"content": f"Error: {last_exc}", "is_error": True})
 
     # ── Introspection ───────────────────────────────────────────────

@@ -263,9 +263,12 @@ def test_the_skill_route_reports_an_osv_failure(monkeypatch: pytest.MonkeyPatch,
     client = TestClient(app)
 
     monkeypatch.setattr(ds, "scan_skill_manifests", down)
-    assert client.get("/api/security/deps").json() == {
-        "status": "error", "error": "OSV could not be asked: no route", "results": [],
-    }
+    # An error, never an empty "ok" list; the transport's text stays in the
+    # log behind the reference (audit 2026-10-26 AUD-102).
+    failed = client.get("/api/security/deps").json()
+    assert failed["status"] == "error" and failed["results"] == []
+    assert failed["error"].startswith("internal_error (ref: ")
+    assert "no route" not in failed["error"]
     monkeypatch.setattr(ds, "scan_skill_manifests", clean)
     assert client.get("/api/security/deps").json() == {
         "status": "ok",

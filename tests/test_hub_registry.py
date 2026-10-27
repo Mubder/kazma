@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 from kazma_core.hub.manifest_schema import SkillManifest
@@ -285,9 +284,15 @@ class TestListInstalled:
         try:
             m1 = SkillManifest.from_dict(_make_manifest(name="installed-one"))
             m2 = SkillManifest.from_dict(_make_manifest(name="not-installed"))
-            sid1 = await hub.register(m1)
+            await hub.register(m1)
             await hub.register(m2)
-            await hub.install(sid1)
+            # The registry's install is a refusal now (audit 2026-10-26
+            # AUD-074); a row an older build marked installed is still listed.
+            conn = await hub._get_conn()
+            await conn.execute(
+                "UPDATE skills SET installed_path=? WHERE name=?",
+                (str(tmp_path / "installed-one"), "installed-one"),
+            )
             installed = await hub.list_installed()
             assert len(installed) == 1
             assert installed[0].data["name"] == "installed-one"
@@ -302,17 +307,18 @@ class TestListInstalled:
 
 @pytest.mark.asyncio
 class TestInstall:
-    async def test_install_returns_path(self, tmp_path):
-        from kazma_core.hub.registry import KazmaHub
+    async def test_install_refuses(self, tmp_path):
+        """It returned a path over an empty folder (audit 2026-10-26 AUD-074);
+        tests/test_hub_install_refuses.py holds the refusal on every surface."""
+        from kazma_core.hub.registry import HubInstallNotImplemented, KazmaHub
 
         hub = KazmaHub(registry_path=str(tmp_path / "db.sqlite"))
         try:
             manifest = SkillManifest.from_dict(_make_manifest())
             sid = await hub.register(manifest)
-            install_path = await hub.install(sid)
-            assert isinstance(install_path, Path)
-            # Default install path should contain the skill name
-            assert "test-skill" in str(install_path)
+            with pytest.raises(HubInstallNotImplemented):
+                await hub.install(sid)
+            assert await hub.list_installed() == []
         finally:
             await hub.close()
 

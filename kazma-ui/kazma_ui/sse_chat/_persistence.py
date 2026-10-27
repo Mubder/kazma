@@ -128,6 +128,38 @@ async def _persist_detached_reply(
         except Exception:
             pass
 
+def _mutate_session(session_id: str, mutate: Any, fallback: Any = None) -> Any:
+    """Change a stored chat session under its transaction; return the result.
+
+    AUD-052: the stream route appended the user's message, cleared the
+    transcript on ``/reset``, replaced it on ``/compact`` and appended a
+    steer on the ``session`` object it had read at the start of the request,
+    then ``put`` that object back. A reply persisted meanwhile (the detached
+    pump, the approval route, another tab) went through
+    ``SessionManager.transact`` and was overwritten by the stale copy. Every
+    change now reads the session again under its per-session lock
+    (``transact``), applies ``mutate`` and writes it before the lock is
+    released. Blocking (a whole-session write): call it with
+    ``asyncio.to_thread``.
+
+    ``fallback`` is the request's own copy: a session bound with
+    ``durable=False`` exists only in the cache, and if the cache evicted it
+    before its first message there is nothing to re-read, so that copy is
+    stored first (what the old ``put`` did). With no stored session and no
+    fallback nothing is written and None is returned.
+    """
+    from kazma_ui.session_manager import get_session_manager
+
+    store = get_session_manager()
+    if store.get(session_id) is None:
+        if fallback is None:
+            return None
+        store.put(fallback)
+    with store.transact(session_id) as sess:
+        mutate(sess)
+        return sess
+
+
 def _persist_instant_turn(
     session: Any,
     thread_id: str,

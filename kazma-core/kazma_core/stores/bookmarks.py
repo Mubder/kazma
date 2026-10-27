@@ -182,10 +182,18 @@ class BookmarkStore:
         return deleted
 
     def close(self) -> None:
-        """Close the underlying database connection."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        """Close the underlying database connection.
+
+        Holds ``self._lock``, as every statement does: closing without it
+        freed sqlite's native handle under a thread still inside
+        ``sqlite3_step`` -- the use-after-free AGENTS.md §8 records for
+        ConfigStore, a bare access violation on Windows (audit 2026-10-26
+        AUD-118). A call after a close reopens lazily (``_get_conn``).
+        """
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -193,6 +201,10 @@ class BookmarkStore:
 # ══════════════════════════════════════════════════════════════════════════
 
 _bookmark_store: BookmarkStore | None = None
+#: One builder of the singleton: two first callers each built a store (two
+#: connections, two locks), and the one that lost the assignment kept using
+#: its own (audit 2026-10-26 AUD-118).
+_singleton_lock = threading.Lock()
 
 
 def get_bookmark_store() -> BookmarkStore:
@@ -203,14 +215,19 @@ def get_bookmark_store() -> BookmarkStore:
     share one SQLite connection and one ``threading.Lock``.
     """
     global _bookmark_store
-    if _bookmark_store is None:
-        _bookmark_store = BookmarkStore()
-    return _bookmark_store
+    store = _bookmark_store
+    if store is not None:
+        return store
+    with _singleton_lock:
+        if _bookmark_store is None:
+            _bookmark_store = BookmarkStore()
+        return _bookmark_store
 
 
 def reset_bookmark_store() -> None:
     """Drop the singleton reference (used by test teardown)."""
     global _bookmark_store
-    if _bookmark_store is not None:
-        _bookmark_store.close()
-    _bookmark_store = None
+    with _singleton_lock:
+        if _bookmark_store is not None:
+            _bookmark_store.close()
+        _bookmark_store = None

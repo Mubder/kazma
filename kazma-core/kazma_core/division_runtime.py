@@ -8,6 +8,7 @@ are blocked and an :class:`AuthorizationFlow` request is minted.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -233,7 +234,7 @@ async def check_division_tool(tool_name: str) -> str | None:
 
     No division configured → None (fail-open).
     """
-    ctx = current_division_context()
+    ctx = await asyncio.to_thread(current_division_context)  # a settings read (audit 2026-10-26 AUD-111)
     if ctx is None:
         return None
     user, division = ctx

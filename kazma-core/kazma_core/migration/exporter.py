@@ -362,9 +362,15 @@ def _count_tables(db_path: Path) -> dict[str, int]:
             rows = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
+            # A table name holding ``"`` closed the quoting early: the count
+            # failed (-1, which ``verify`` then reports) or ran other SQL. One
+            # quoting rule with the importer (audit 2026-10-26 AUD-095, the
+            # AUD-028 sibling).
+            from kazma_core.migration.path_rewrite import _quote_ident
+
             for (name,) in rows:
                 try:
-                    counts[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+                    counts[name] = conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(name)}").fetchone()[0]
                 except sqlite3.OperationalError:
                     counts[name] = -1
         finally:
@@ -484,8 +490,11 @@ def _export_document_store(
         # (read after the snapshot: a superset). The queue itself travels in
         # data/postgres.dump.
         promoted = promoted_versions_from_postgres(dsn) if jobs == "postgres" else None
+        # The bundle's copy is a snapshot (opened immutable, AUD-116); the
+        # live database, read when the copy failed, is not.
         refs, versions = _read_references(
-            db_dest if db_dest.exists() else db_src, promoted_versions=promoted
+            db_dest if db_dest.exists() else db_src, promoted_versions=promoted,
+            snapshot=db_dest.exists(),
         )
         blob_count = 0
         missing_blobs: list[str] = []

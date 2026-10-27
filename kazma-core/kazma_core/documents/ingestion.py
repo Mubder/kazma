@@ -84,6 +84,7 @@ from .policy import DocumentPolicy, policy_operation
 from .repository import DocumentAccessError, DocumentRepository
 from .retention import DocumentGarbageCollector
 from .service import DocumentService
+from .sniff import SniffResult
 from .storage import (
     BlobChecksumError,
     BlobLengthError,
@@ -153,6 +154,23 @@ class IngestionResult:
             "state": self.state.value,
             "reused": self.reused,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _IntakeSniff:
+    """One inspection of an intake's quarantined bytes (audit 2026-10-26 AUD-114).
+
+    Intake inspected the bytes for their type, then validation inspected the
+    same bytes again moments later -- two parser launches, two containers in
+    the container profile, for one check. The record names what it inspected
+    (digest, file name) and under which policy, so validation reuses it only
+    for exactly that.
+    """
+
+    sha256: str
+    filename: str
+    policy_revision: str
+    result: SniffResult
 
 
 class DocumentIngestionService:
@@ -859,7 +877,8 @@ class DocumentIngestionService:
                 document_id=doc_id,
             )
 
-        mime = self._probe_mime(stored, safe_name)
+        sniffed = self._probe(stored, safe_name)
+        mime = sniffed.result.mime_type if sniffed is not None else "application/octet-stream"
         version = self.repository.create_version(
             tenant_id=tenant,
             document_id=doc_id,
@@ -893,7 +912,9 @@ class DocumentIngestionService:
         )
 
         # 4) Synchronous quarantine + validation, then hand to the worker.
-        job = self._advance_intake(job, tenant=tenant, actor=actor, force_ocr=force_ocr)
+        job = self._advance_intake(
+            job, tenant=tenant, actor=actor, force_ocr=force_ocr, sniffed=sniffed,
+        )
         telemetry.record_intake(accepted=True, byte_size=stored.byte_size)
         self.audit.record(
             tenant_id=tenant,
@@ -1064,8 +1085,14 @@ class DocumentIngestionService:
         tenant: str,
         actor: str | None,
         force_ocr: bool,
+        sniffed: _IntakeSniff | None = None,
     ) -> DocumentJobRecord:
-        """RECEIVED -> QUARANTINED -> VALIDATING -> READY_TO_PARSE/OCR_REQUIRED."""
+        """RECEIVED -> QUARANTINED -> VALIDATING -> READY_TO_PARSE/OCR_REQUIRED.
+
+        *sniffed*: the inspection this intake already made of the same bytes
+        under the same policy (AUD-114); validation reuses it instead of
+        launching the parser worker a second time.
+        """
 
         if job.state is DocumentJobState.RECEIVED:
             job = self._transition(job, DocumentJobState.QUARANTINED)
@@ -1074,7 +1101,7 @@ class DocumentIngestionService:
         if job.state is not DocumentJobState.VALIDATING:
             return job
         try:
-            self._validate_and_promote(tenant=tenant, actor=actor, job=job)
+            self._validate_and_promote(tenant=tenant, actor=actor, job=job, sniffed=sniffed)
         except DocumentParseError as exc:
             if exc.retryable:
                 return self.jobs.record_failure(
@@ -1138,9 +1165,15 @@ class DocumentIngestionService:
         return self._transition(job, target, event_type="validated")
 
     def _validate_and_promote(
-        self, *, tenant: str, actor: str | None, job: DocumentJobRecord
+        self, *, tenant: str, actor: str | None, job: DocumentJobRecord,
+        sniffed: _IntakeSniff | None = None,
     ) -> None:
-        """Sniff the quarantined blob and physically promote it to originals."""
+        """Sniff the quarantined blob and physically promote it to originals.
+
+        A *sniffed* inspection is reused only for the same source digest under
+        the same policy revision (§19 C); a worker retry, a recovery or a
+        policy change sniffs again.
+        """
 
         version = self.repository.get_version(
             tenant_id=tenant, version_id=job.version_id, actor_id=actor
@@ -1159,11 +1192,23 @@ class DocumentIngestionService:
                 raise DocumentParseError(
                     "Document source bytes are missing", code="document_missing"
                 )
-        with self._materialize(quarantine_path, version.original_filename) as staged:
-            sniffed = self.service.inspect_path(staged)
-            self.service.registry.resolve(
-                mime_type=sniffed.mime_type, extension=sniffed.extension
-            )
+        if (
+            sniffed is not None
+            and sniffed.sha256 == version.source_sha256
+            and sniffed.filename == version.original_filename
+            and sniffed.policy_revision == self._policy.revision
+        ):
+            # The intake's own inspection of these bytes, moments ago, under
+            # this policy (audit 2026-10-26 AUD-114): a second parser launch
+            # -- a second container in the container profile -- would check
+            # exactly the same thing.
+            result = sniffed.result
+        else:
+            with self._materialize(quarantine_path, version.original_filename) as staged:
+                result = self.service.inspect_path(staged)
+        self.service.registry.resolve(
+            mime_type=result.mime_type, extension=result.extension
+        )
         # Physically promote to the immutable originals store (same sha).
         with quarantine_path.open("rb") as handle:
             self.storage.put_stream(
@@ -1312,7 +1357,12 @@ class DocumentIngestionService:
                 "originals_missing", "Original document bytes are unavailable"
             )
         force = force_ocr or (job.force_ocr if job.request_digest else bool(version.metadata.get("force_ocr")))
-        if self.capacity.below_floor(extra_bytes=2 * int(getattr(version, "byte_size", 0) or 0)):
+        # The headroom is the original's own size (audit 2026-10-26 AUD-040):
+        # a VersionRecord has no byte_size, so ``getattr(version, "byte_size",
+        # 0)`` asked for 0 bytes and a stage started into a disk the copy and
+        # the manifest would fill.
+        source_bytes = originals_path.stat().st_size
+        if self.capacity.below_floor(extra_bytes=2 * source_bytes):
             # Parsing stages a copy and writes a run directory and a manifest:
             # held and retried, never started into a full disk (F08).
             raise TransientDocumentError(
@@ -1436,11 +1486,12 @@ class DocumentIngestionService:
             if not force and last is not None and now - last < self.OPERATOR_GRANT_INTERVAL_SECONDS:
                 return 0
         granted = 0
-        for record in self.repository.list_documents(tenant_id=tenant):
-            if record.owner_id == OPERATOR or self.repository.has_access(
-                tenant_id=tenant, document_id=record.id, actor_id=OPERATOR, permission="owner"
-            ):
-                continue
+        # Only the documents the operator lacks, in one joined query (audit
+        # 2026-10-26 AUD-115): every document was checked with a query of its
+        # own, every minute.
+        for record in self.repository.list_documents_by_access(
+            tenant_id=tenant, actor_id=OPERATOR, permission="owner", granted=False,
+        ):
             self.repository.grant_access(
                 tenant_id=tenant, document_id=record.id, actor_id=record.owner_id,
                 principal_id=OPERATOR, permission="owner",
@@ -1462,14 +1513,20 @@ class DocumentIngestionService:
         tenant = _clean(tenant_id, "tenant_id")
         actor = _clean(actor_id, "actor_id")
         rows: list[dict[str, Any]] = []
-        for record in self.repository.list_documents(tenant_id=tenant):
-            if not self.repository.has_access(
-                tenant_id=tenant, document_id=record.id, actor_id=actor
-            ):
-                continue
-            latest = self.jobs_for_document(
-                tenant_id=tenant, document_id=record.id, actor_id=SYSTEM_ACTOR
-            )
+        # Two queries for the whole list (audit 2026-10-26 AUD-115): the
+        # documents the actor may read, joined with their ACL, and each
+        # document's newest job. It was a has_access query and a query per
+        # job, for every document. The jobs may live in another database
+        # than the documents (a SQLite catalog beside a Postgres queue), so
+        # the two are not one join. Documents first: a job is created after
+        # its document, so every listed document's job is already there.
+        readable = self.repository.list_documents_by_access(
+            tenant_id=tenant, actor_id=actor, permission="read",
+        )
+        newest = self.jobs.latest_jobs_by_document(tenant_id=tenant) if readable else {}
+        for record in readable:
+            job = newest.get(str(record.id))
+            latest = [self._job_dict(job)] if job is not None else []
             state = latest[0]["state"] if latest else None
             rows.append(
                 {
@@ -2290,18 +2347,22 @@ class DocumentIngestionService:
             # writes the catalog: seconds normally, minutes under load. It ran
             # on the event loop and froze every chat stream meanwhile (audit
             # 2026-10-26 AUD-110).
-            try:
-                with storage_path.open("rb") as source:
-                    return self.ingest_stream(
-                        source,
-                        filename=filename,
-                        tenant_id=tenant,
-                        workspace_id=workspace,
-                        actor_id=actor,
-                        title=title or stem,
-                    )
-            finally:
-                self._cleanup_transient_artifact(tenant, artifact)
+            #
+            # The transient artifact is left to garbage collection (audit
+            # 2026-10-26 AUD-041): its CAS path is shared by every tenant, and
+            # a cleanup that asked only this tenant's references unlinked a
+            # blob another tenant's artifact row still named. GC asks every
+            # tenant, waits out its grace period and re-checks before it
+            # deletes (retention._sweep_kind / _is_live_reference).
+            with storage_path.open("rb") as source:
+                return self.ingest_stream(
+                    source,
+                    filename=filename,
+                    tenant_id=tenant,
+                    workspace_id=workspace,
+                    actor_id=actor,
+                    title=title or stem,
+                )
 
         ingest = await asyncio.to_thread(_ingest_generated)
         payload_out = ingest.to_dict()
@@ -2923,35 +2984,25 @@ class DocumentIngestionService:
             )
         return _depth
 
-    def _cleanup_transient_artifact(self, tenant: str, artifact: Any) -> None:
-        """Best-effort removal of an unreferenced transient CAS artifact blob."""
-
-        try:
-            sha = artifact.manifest.output_sha256
-            if self.repository.tenant_references_sha256(
-                tenant_id=tenant, sha256=sha, storage_kind="artifacts"
-            ):
-                return
-            path = self.storage.blob_path(kind="artifacts", sha256=sha)
-            if path.is_file():
-                path.unlink(missing_ok=True)
-        except Exception:  # noqa: BLE001 - cleanup must never raise
-            logger.debug(
-                "[documents.ingestion] transient artifact cleanup skipped",
-                exc_info=True,
-            )
-
     # ── Internal helpers ────────────────────────────────────────────────
 
-    def _probe_mime(self, stored: Any, filename: str) -> str:
+    def _probe(self, stored: Any, filename: str) -> _IntakeSniff | None:
+        """Inspect the quarantined bytes once for the intake (type + validation).
+
+        None when the inspection refused them: the real rejection is left to
+        the VALIDATING stage, which inspects again and records it, and the
+        version is stored with a generic type meanwhile.
+        """
         path = self.storage.blob_path(kind="quarantine", sha256=stored.sha256)
         try:
             with self._materialize(path, filename) as staged:
-                return self.service.inspect_path(staged).mime_type
+                result = self.service.inspect_path(staged)
         except DocumentParseError:
-            # Defer the real rejection to the VALIDATING stage; store a
-            # generic type so the immutable version can still be created.
-            return "application/octet-stream"
+            return None
+        return _IntakeSniff(
+            sha256=stored.sha256, filename=filename,
+            policy_revision=self._policy.revision, result=result,
+        )
 
     class _Materialized:
         __slots__ = ("_dir", "path")

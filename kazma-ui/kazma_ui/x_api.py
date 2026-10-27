@@ -343,7 +343,7 @@ async def x_generate(body: _XGenerateBody) -> JSONResponse:
     from kazma_core.x_api.reply import DraftFailed
 
     try:
-        tenant = _tenant_id()
+        tenant = await asyncio.to_thread(_tenant_id)  # a settings read (audit 2026-10-26 AUD-111)
         result = await draft_posts(body.brief, count=body.count, subject_id=body.subject_id)
         store = await asyncio.to_thread(get_artifact_store)
         reviews = [{**review, "models": list(result.models)} for review in result.reviews]
@@ -588,7 +588,9 @@ async def _x_thread_stage(body: _XThreadBody, request: Request) -> JSONResponse:
     from kazma_ui.x_reply_api import _actor
 
     try:
-        detail = await asyncio.to_thread(prepare_thread, body.segments, intent_key=body.intent_key, actor=_actor(request))
+        # The principal is a session-store read (audit 2026-10-26 AUD-111).
+        actor = await asyncio.to_thread(_actor, request)
+        detail = await asyncio.to_thread(prepare_thread, body.segments, intent_key=body.intent_key, actor=actor)
         return JSONResponse({"ok": True, "thread": detail})
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
@@ -602,12 +604,14 @@ async def _x_thread_action(ident: str, action: str, body: _XThreadActionBody, re
     from kazma_ui.x_reply_api import _actor
 
     try:
+        # The principal is a session-store read (audit 2026-10-26 AUD-111).
+        actor = await asyncio.to_thread(_actor, request)
         if action == "publish":
-            detail = await publish_thread(ident, revision=body.expected_revision, token=body.approval_token, actor=_actor(request))
+            detail = await publish_thread(ident, revision=body.expected_revision, token=body.approval_token, actor=actor)
         elif action == "cancel":
-            detail = await asyncio.to_thread(thread_store.cancel_thread, ident, revision=body.expected_revision, token=body.approval_token, actor=_actor(request))
+            detail = await asyncio.to_thread(thread_store.cancel_thread, ident, revision=body.expected_revision, token=body.approval_token, actor=actor)
         elif action == "review":
-            detail = await asyncio.to_thread(thread_store.review_thread, ident, revision=body.expected_revision, actor=_actor(request))
+            detail = await asyncio.to_thread(thread_store.review_thread, ident, revision=body.expected_revision, actor=actor)
         else:
             raise ValueError("Unsupported thread action.")
         return JSONResponse({"ok": True, "thread": detail})

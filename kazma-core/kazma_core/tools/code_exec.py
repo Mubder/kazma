@@ -741,7 +741,8 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     from kazma_core.store_registry import store_refusal
     from kazma_core.workspace.path_policy import code_mentions_control_plane
 
-    mentioned = code_mentions_control_plane(code)
+    # The store list and the policy switches are settings reads (audit 2026-10-26 AUD-111).
+    mentioned = await asyncio.to_thread(code_mentions_control_plane, code)
     if mentioned:
         # Normally refused before the approval card (commitment exec
         # resolver); this is the backstop when that layer is off.
@@ -760,11 +761,11 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     try:
         from kazma_core.sandbox.e2b import e2b_enabled, run_python as _e2b_run
 
-        if not strict_container and e2b_enabled():
+        if not strict_container and await asyncio.to_thread(e2b_enabled):
             try:
                 return await _e2b_run(code, timeout)
             except Exception as exc:
-                if local_exec_forbidden() and not docker_available():
+                if await asyncio.to_thread(local_exec_forbidden) and not docker_available():
                     logger.error("[code_exec] E2B required but failed: %s", exc)
                     return f"[Exit code: 1]\nE2B sandbox failed: {exc}"
                 logger.warning(
@@ -779,10 +780,10 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     try:
         # The runner with the snippet embedded (its blocklist applies inside
         # Docker too, where it is belt-and-braces).
-        code_file.write_text(_build_sandbox_script(code), encoding="utf-8")
-        no_local = local_exec_forbidden()
+        await asyncio.to_thread(code_file.write_text, _build_sandbox_script(code), encoding="utf-8")
+        no_local = await asyncio.to_thread(local_exec_forbidden)
 
-        if use_docker_jail():
+        if await asyncio.to_thread(use_docker_jail):
             try:
                 return await _run_docker_jail(code_file, tmp_dir, timeout)
             except Exception as exc:

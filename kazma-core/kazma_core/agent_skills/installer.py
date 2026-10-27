@@ -450,7 +450,7 @@ async def install_from_github(
         errors: list[str] = []
         for skill_dir in skill_dirs:
             try:
-                info = _copy_skill(skill_dir, dest, source=label)
+                info = await asyncio.to_thread(_copy_skill, skill_dir, dest, source=label)  # a copy and a signature (audit 2026-10-26 AUD-111)
                 installed.append(info)
             except Exception as exc:
                 errors.append(f"{skill_dir.name}: {exc}")
@@ -556,13 +556,13 @@ async def install_from_any(
     # Local path?
     p = Path(raw).expanduser()
     if p.exists():
-        result = install_from_source(p, target_dir=target_dir)
+        result = await asyncio.to_thread(install_from_source, p, target_dir=target_dir)  # audit 2026-10-26 AUD-111
         return await _attach_basic_certification(result)
 
     # file:// URL
     if raw.startswith("file:"):
         parsed = urlparse(raw)
-        result = install_from_source(parsed.path, target_dir=target_dir)
+        result = await asyncio.to_thread(install_from_source, parsed.path, target_dir=target_dir)
         return await _attach_basic_certification(result)
 
     result = await install_from_github(raw, target_dir=target_dir, scope=scope)

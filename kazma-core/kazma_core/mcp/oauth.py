@@ -371,7 +371,8 @@ async def start_oauth_flow(
         try:
             code = await _wait_for_code(server_name)
             tokens = await _exchange_code(pending, code)
-            _save_tokens(server_name, resource_url, pending.client_id, tokens)
+            # The token is a settings write, vault-encrypted (audit 2026-10-26 AUD-111).
+            await asyncio.to_thread(_save_tokens, server_name, resource_url, pending.client_id, tokens)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[MCP-OAuth] login for '%s' failed: %s", server_name, exc)
         finally:
@@ -494,7 +495,7 @@ async def _refresh(pending_record: dict[str, Any]) -> dict[str, Any] | None:
 
 async def get_valid_token(server_name: str) -> str | None:
     """Return a usable access token for *server_name*, refreshing if needed."""
-    record = _load_tokens(server_name)
+    record = await asyncio.to_thread(_load_tokens, server_name)  # a settings read (audit 2026-10-26 AUD-111)
     if not record or not record.get("access_token"):
         return None
     if time.time() < float(record.get("expires_at", 0)):
@@ -510,7 +511,8 @@ async def get_valid_token(server_name: str) -> str | None:
         return None
     if not refreshed:
         return None
-    _save_tokens(
+    await asyncio.to_thread(
+        _save_tokens,
         server_name,
         record["resource_url"],
         record["client_id"],

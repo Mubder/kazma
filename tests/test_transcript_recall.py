@@ -176,7 +176,8 @@ def test_supervisor_wires_the_fallback() -> None:
         / "kazma-core" / "kazma_core" / "agent" / "graph_supervisor.py"
     ).read_text(encoding="utf-8")
     assert "from kazma_core.memory.transcript_recall import" in src
-    assert "transcript_fallback_enabled()" in src
+    # The switch is a settings read, asked off the loop (AUD-111).
+    assert "asyncio.to_thread(transcript_fallback_enabled)" in src
     assert "format_transcript_block(_tx_hits)" in src
     # Only in the recall-empty branch, and suppressed turns skip it too.
     assert "elif not _suppress_recall:" in src

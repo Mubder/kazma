@@ -462,9 +462,15 @@ async def _deliver(text: str, level: str) -> list[str]:
             sends.append(asyncio.to_thread(ops_alerts._telegram_direct, text, group_route=True))
         if not sends:
             return []
-        results = await asyncio.wait_for(
+        # Bounded on the cancel too (audit 2026-10-26 AUD-071, §26E):
+        # asyncio.wait_for waits without a bound for sends whose cancel an
+        # httpx read absorbed, and this runs in boot and shutdown.
+        from kazma_core.bounded_cancel import wait_for_bounded
+
+        results = await wait_for_bounded(
             asyncio.gather(*sends, return_exceptions=True),
-            timeout=_SEND_TIMEOUT_SECONDS,
+            _SEND_TIMEOUT_SECONDS,
+            what="lifecycle notice sends",
         )
     except Exception as exc:  # noqa: BLE001 — never break boot/shutdown
         logger.warning("[LifecycleNotifier] could not send %r: %s", _title(text), exc)

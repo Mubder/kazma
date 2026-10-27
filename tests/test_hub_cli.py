@@ -180,7 +180,9 @@ class TestCliInstall:
     """install command tests."""
 
     def test_install_skill(self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path) -> None:
-        """Install a registered skill."""
+        """Installing a registered skill is refused as not implemented: it
+        used to exit 0 with "Installed" over an empty folder (audit
+        2026-10-26 AUD-074; tests/test_hub_install_refuses.py)."""
         db_path = tmp_path / "test_registry.db"
         runner.invoke(
             hub,
@@ -190,7 +192,8 @@ class TestCliInstall:
             hub,
             ["--registry-path", str(db_path), "install", "kazma-hub://almuhalab/drone-inspection@0.1.0"],
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 2
+        assert "not implemented" in result.output
 
     def test_install_unregistered_skill(self, runner: CliRunner, tmp_path: Path) -> None:
         """Install a skill that isn't registered fails gracefully."""

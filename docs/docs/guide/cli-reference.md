@@ -156,7 +156,13 @@ Zed — `~/.config/zed/settings.json` (Windows: `%APPDATA%\Zed\settings.json`):
 ```
 
 Open the Agent Panel, pick **Kazma**, start a thread. Danger tools prompt
-in the editor (Allow once / Allow for this session / Reject).
+in the editor (Allow once / Allow *tool* for this session / Reject).
+"For this session" allows that one tool for the thread (30 minutes by
+default, `KAZMA_HITL_GRANT_TTL_SECONDS`), as
+the web card's "Allow tool" does; it never switches off approvals for the
+other tools. A tool that always asks (posting to X) offers Allow once and
+Reject only. In a terminal, `kazma ask` asks `y/N/a`, where `a` is the
+same per-tool allowance.
 
 ### 2.8 `kazma mcp`
 
@@ -417,7 +423,7 @@ The only Click-based subtree (`kazma_core/hub/cli.py:104`). Group options: `--re
 |---|---|
 | `kazma hub register &lt;path>` | Register a local skill. |
 | `kazma hub search [query] [--capabilities --tags --author]` | Search the registry. |
-| `kazma hub install &lt;skill_id>` | Install a skill. |
+| `kazma hub install &lt;skill_id>` | Not implemented: says so and exits 2, installing nothing. |
 | `kazma hub list` | List installed skills. |
 | `kazma hub info &lt;skill_id>` | Show skill details. |
 | `kazma hub validate &lt;path> [--json]` | Validate a skill manifest. |
@@ -434,9 +440,8 @@ The only Click-based subtree (`kazma_core/hub/cli.py:104`). Group options: `--re
 # Sign a skill (writes checksum + signature into skill_manifest.yaml)
 KAZMA_SECRET=... kazma hub sign ./my-skill
 
-# Search and install
+# Search the registry
 kazma hub search "oil pricing" --capabilities mcp
-kazma hub install oil-pricing-pro@1.2.0
 ```
 
 ---

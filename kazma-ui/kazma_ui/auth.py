@@ -784,6 +784,22 @@ def get_kazma_secret() -> str:
         return _generated_secret
 
 
+async def aget_kazma_secret() -> str:
+    """:func:`get_kazma_secret` for async code.
+
+    The cached secret and the environment's are answered on the loop; only a
+    settings-store read goes to a thread. With no secret configured (open
+    mode) every call is that read, on every request the middleware sees
+    (audit 2026-10-26 AUD-111).
+    """
+    if _generated_secret is not None:
+        return _generated_secret
+    env_secret = os.environ.get(SECRET_ENV_VAR, "").strip()
+    if env_secret:
+        return env_secret
+    return await asyncio.to_thread(get_kazma_secret)
+
+
 def is_sensitive_path(path: str) -> bool:
     """Return *True* if *path* requires auth when a secret is configured.
 
@@ -1304,7 +1320,7 @@ def create_auth_middleware(
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         path = request.url.path
-        expected = static_secret if static_secret is not None else get_kazma_secret()
+        expected = static_secret if static_secret is not None else await aget_kazma_secret()
 
         # 0. Public demo mode: KAZMA_DEMO_MODE bypasses the secret gate so a
         #    public demo instance is open to all visitors

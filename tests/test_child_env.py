@@ -264,6 +264,13 @@ _ENV_BY_OTHER_ROUTE = {
 
 
 def _is_builder_call(node: ast.AST) -> bool:
+    # A builder that reads settings is run off the loop by async code
+    # (audit 2026-10-26 AUD-111): ``await asyncio.to_thread(get_commit_env)``.
+    if isinstance(node, ast.Await) and isinstance(node.value, ast.Call):
+        call = node.value
+        if ast.unparse(call.func).split(".")[-1] == "to_thread" and call.args:
+            return ast.unparse(call.args[0]).split(".")[-1] in _BUILDERS
+        return False
     return (
         isinstance(node, ast.Call)
         and ast.unparse(node.func).split(".")[-1] in _BUILDERS
@@ -389,8 +396,17 @@ def test_the_gate_sees_an_inherited_environment():
         "    clone_env = tool_child_env(clone_auth_env(token))\n"
         "    await asyncio.to_thread(subprocess.run, cmd, env=clone_env)\n"
     )
-    for src in (bare, copied, raw, runner, threaded, threaded_bare):
+    # A builder run in a thread is still the builder; any other function so
+    # run is not (AUD-111: git_commit reads get_commit_env off the loop).
+    built_off_loop = (
+        "async def f(cmd):\n"
+        "    env = await asyncio.to_thread(get_commit_env)\n"
+        "    await run_off_loop(cmd, env=env)\n"
+    )
+    copied_off_loop = built_off_loop.replace("get_commit_env", "os.environ.copy")
+    for src in (bare, copied, raw, runner, threaded, threaded_bare, copied_off_loop):
         assert _unsafe_spawns(src), src
     assert _unsafe_spawns(good) == []
     assert _unsafe_spawns(defaulted) == []
     assert _unsafe_spawns(threaded_good) == []
+    assert _unsafe_spawns(built_off_loop) == []

@@ -117,6 +117,28 @@ def _with_turn_id(thread_id: str, frame: dict[str, Any]) -> dict[str, Any]:
     return {**frame, "data": {**data, "turn_id": turn_id}}
 
 
+def _stamp_gate_view(frame: dict[str, Any], ftype: str, thread_id: str) -> dict[str, Any]:
+    """The frame with its gate views (a copy; the input is never changed).
+
+    Runs in a thread: the gate registry and the chat store are read.
+    Never raises -- an unstamped frame is the stamp's failure path.
+    """
+    try:
+        from kazma_ui.gate_view import (
+            attach_gate_views_to_done_frame,
+            attach_view_to_hitl_frame,
+            is_hitl_frame_type,
+        )
+
+        if is_hitl_frame_type(ftype):
+            return attach_view_to_hitl_frame(frame, thread_id)
+        if ftype in ("done", "turn_complete"):
+            return attach_gate_views_to_done_frame(frame, thread_id)
+    except Exception:
+        logger.debug("[Delivery] gate view stamp skipped", exc_info=True)
+    return frame
+
+
 def is_replayable(frame: dict[str, Any]) -> bool:
     """False for frames that must never be served on cursor replay."""
     if frame.get("type") in REPLAY_SKIP_TYPES:
@@ -312,21 +334,25 @@ class TurnBroker:
             thread_id, event.to_dict() if hasattr(event, "to_dict") else dict(event)
         )
         ftype = str(frame.get("type") or "")
-        try:
-            from kazma_ui.gate_view import (
-                attach_gate_views_to_done_frame,
-                attach_view_to_hitl_frame,
-                is_hitl_frame_type,
-            )
+        from kazma_ui.gate_view import is_hitl_frame_type
 
-            if is_hitl_frame_type(ftype):
-                frame = attach_view_to_hitl_frame(frame, thread_id)
-            elif ftype in ("done", "turn_complete"):
-                frame = attach_gate_views_to_done_frame(frame, thread_id)
-        except Exception:
-            logger.debug("[Delivery] gate view stamp skipped", exc_info=True)
+        needs_view = is_hitl_frame_type(ftype) or ftype in ("done", "turn_complete")
+        cancelled = False
         lock = self._emit_lock_for(thread_id)
         async with lock:
+            if needs_view:
+                # The gate view reads the gate registry (SQLite) and the chat
+                # store (Postgres when not cached): off the loop, but INSIDE
+                # the thread's emit lock, so frames still journal in the
+                # order emit() was called -- nothing before the lock awaits
+                # (audit 2026-10-26 AUD-111). A cancel landing in the read
+                # journals the frame unstamped (the stamp's own failure
+                # path; readers take the views from the registry), then
+                # honours the cancel.
+                try:
+                    frame = await asyncio.to_thread(_stamp_gate_view, frame, ftype, thread_id)
+                except asyncio.CancelledError:
+                    cancelled = True
             stamped = self._journal.append(thread_id, frame)
             with self._lock:
                 sockets = list(self._sockets.get(thread_id, {}).values())
@@ -363,6 +389,8 @@ class TurnBroker:
             if summary and not (isinstance(data, dict) and data.get("capacity")):
                 spawn_background(self._push_terminal(summary), name="delivery-push-terminal")
 
+        if cancelled:
+            raise asyncio.CancelledError
         return stamped
 
     async def _push_terminal(self, summary: str) -> None:

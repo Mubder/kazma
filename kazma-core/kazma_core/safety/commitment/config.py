@@ -67,23 +67,14 @@ def get_commitment_config() -> dict[str, Any]:
     cfg = {k: (v.copy() if isinstance(v, (dict, list)) else v)
            for k, v in _DEFAULTS.items()}
 
-    # ── env overrides (kill-switch + mode are the live operator knobs) ──────
-    env_enabled = _env_bool("KAZMA_COMMITMENT_ENABLED")
-    if env_enabled is not None:
-        cfg["enabled"] = env_enabled
-    env_mode = (os.environ.get("KAZMA_COMMITMENT_MODE") or "").strip().lower()
-    if env_mode in MODES:
-        cfg["mode"] = env_mode
-    env_sse = _env_bool("KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE")
-    if env_sse is not None:
-        cfg["swarm_scope_enforce"] = env_sse
     soul_explicit = False
-    env_src = _env_bool("KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM")
-    if env_src is not None:
-        cfg["soul_requires_confirm"] = env_src
-        soul_explicit = True
 
     # ── ConfigStore (Settings UI / programmatic) ───────────────────────────
+    # Read FIRST, so the environment below overrides it. The env block used
+    # to run before this one, and a stored ``agent.commitment.enabled: true``
+    # silently undid ``KAZMA_COMMITMENT_ENABLED=0`` -- the kill-switch §20E
+    # documents -- and the same for the mode and the two scope switches
+    # (audit 2026-10-26 AUD-096).
     try:
         from kazma_core.config_store import get_config_store
 
@@ -143,6 +134,22 @@ def get_commitment_config() -> dict[str, Any]:
                 pass
     except Exception:
         logger.debug("[commitment] get_commitment_config: ConfigStore read failed — defaults", exc_info=True)
+
+    # ── env overrides, applied last: the environment wins (env → ConfigStore
+    # → defaults). Kill-switch + mode are the live operator knobs. ─────────
+    env_enabled = _env_bool("KAZMA_COMMITMENT_ENABLED")
+    if env_enabled is not None:
+        cfg["enabled"] = env_enabled
+    env_mode = (os.environ.get("KAZMA_COMMITMENT_MODE") or "").strip().lower()
+    if env_mode in MODES:
+        cfg["mode"] = env_mode
+    env_sse = _env_bool("KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE")
+    if env_sse is not None:
+        cfg["swarm_scope_enforce"] = env_sse
+    env_src = _env_bool("KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM")
+    if env_src is not None:
+        cfg["soul_requires_confirm"] = env_src
+        soul_explicit = True
 
     # Soul confirm: operator-set value wins. Otherwise ON in production /
     # multi-user so a Soul delta cannot silently rewrite the supervisor.

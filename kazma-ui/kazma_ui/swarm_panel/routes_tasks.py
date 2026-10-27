@@ -429,17 +429,23 @@ def register_tasks_routes(
                 worker_names = all_names
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
+            # AUD-070: this said "The task was recorded" -- nothing is
+            # recorded here, no task store row and no history entry -- and it
+            # was a 200 "warning", which the page counts as dispatched (it
+            # toasted "dispatched to 0 workers" and cleared the prompt). It is
+            # a refusal: nothing was recorded or run.
             return JSONResponse(
                 {
-                    "status": "warning",
+                    "status": "error",
+                    "code": "swarm_engine_unavailable",
                     "message": (
-                        f"{SWARM_CORE_MISSING} The task was recorded, but no "
-                        "worker will run it."
+                        f"{SWARM_CORE_MISSING} Nothing was recorded or run."
                     ),
                     "dispatched": [],
                     "missing": list(worker_names),
                     "results": [],
-                }
+                },
+                status_code=503,
             )
 
         dispatched = [name for name in worker_names if engine.get_worker(name) is not None]
@@ -769,7 +775,7 @@ def register_tasks_routes(
     @router.post("/api/swarm/tasks/{task_id}/approve")
     async def swarm_approve_checkpoint(task_id: str, request: Request) -> JSONResponse:
         """Approve an HITL checkpoint and resume the pipeline."""
-        _denied = _require_admin(request)
+        _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
         engine = _current_engine()
@@ -863,7 +869,7 @@ def register_tasks_routes(
     @router.post("/api/swarm/tasks/{task_id}/reject")
     async def swarm_reject_checkpoint(task_id: str, request: Request) -> JSONResponse:
         """Reject an HITL checkpoint and abort the pipeline."""
-        _denied = _require_admin(request)
+        _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
         engine = _current_engine()
@@ -917,7 +923,7 @@ def register_tasks_routes(
     @router.post("/api/swarm/tasks/{task_id}/cancel")
     async def swarm_cancel_task(task_id: str, request: Request) -> JSONResponse:
         """Cancel a running or paused task."""
-        _denied = _require_admin(request)
+        _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
         from kazma_ui.swarm_panel.task_actions import cancel_task
@@ -930,7 +936,7 @@ def register_tasks_routes(
 
     @router.post("/api/swarm/tasks/{task_id}/retry")
     async def swarm_retry_task(task_id: str, request: Request) -> JSONResponse:
-        _denied = _require_admin(request)
+        _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
         """Retry a failed/timeout/cancelled task by re-dispatching."""

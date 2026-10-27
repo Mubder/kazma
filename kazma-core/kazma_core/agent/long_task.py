@@ -17,6 +17,7 @@ ConfigStore keys:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -647,9 +648,10 @@ async def maybe_heartbeat(
     """Send a short progress note every 5 rounds when long-task is active."""
     if not thread_id or iteration <= 0 or iteration % 5 != 0:
         return
-    if not is_long_task_active(thread_id):
+    # The chat's long-task record is settings state (audit 2026-10-26 AUD-111).
+    if not await asyncio.to_thread(is_long_task_active, thread_id):
         # Still heartbeat when default long-task or deep budgets
-        budgets = resolve_turn_budgets(thread_id)
+        budgets = await asyncio.to_thread(resolve_turn_budgets, thread_id)
         if budgets["max_iterations"] < 25:
             return
     sender = get_progress_sender()

@@ -7,6 +7,7 @@ within this group is preserved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -243,7 +244,8 @@ def register_external_tools(registry: Any) -> None:
 
         async def update_scratchpad(key: str, finding: str) -> str:
             """Save a durable finding for this turn (survives history trim)."""
-            return apply_scratchpad_write(key, finding)
+            # A durable artifact-store write (audit 2026-10-26 AUD-111).
+            return await asyncio.to_thread(apply_scratchpad_write, key, finding)
 
         registry.register_function(
             "update_scratchpad",

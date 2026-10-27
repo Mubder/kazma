@@ -166,6 +166,13 @@ class DocumentKnowledgeAdapter:
             )
             if record is None or version is None or version.document_id != document.document_id:
                 raise DocumentAccessError("document version is unavailable")
+            # Publishing changes what every user of the library can find:
+            # write access, not read (audit 2026-10-26 AUD-061).
+            if not self.repository.has_access(
+                tenant_id=tenant_id, document_id=document.document_id,
+                actor_id=actor_id, permission="write",
+            ):
+                raise DocumentAccessError("indexing a document needs write access")
             if record.current_version_id != document.version_id:
                 raise ValueError("only the document's current immutable version may be activated")
             if self.store.get_library_for_tenant(library_id, tenant_id) is None:
@@ -302,6 +309,18 @@ class DocumentKnowledgeAdapter:
                 ok=False,
                 code="document_access_denied",
                 message="Document or knowledge library is unavailable",
+                document_id=document_id,
+            )
+        # Taking a document out of a library is a change to it: write access,
+        # not read (audit 2026-10-26 AUD-061).
+        if not self.repository.has_access(
+            tenant_id=tenant_id, document_id=record.id, actor_id=actor_id,
+            permission="write",
+        ):
+            return DocumentResult(
+                ok=False,
+                code="document_access_denied",
+                message="Removing a document from a library needs write access",
                 document_id=document_id,
             )
         count = self.index.unindex_document(

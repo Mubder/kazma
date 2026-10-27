@@ -307,4 +307,12 @@ def run_macro_sleep(
         # amnesia" pattern). Surface it at WARNING + flag the stat.
         logger.warning("[macro_sleep] sweep failed", exc_info=True)
         stats["sweep_error"] = True
+        # The sweep's uncommitted moves are rolled back here, not left open
+        # on the caller's connection: the handler's next step (the ego anchor
+        # sweep) commits that connection, and committed the half of a failed
+        # sweep it found there (audit 2026-10-26 AUD-046).
+        try:
+            primary_conn.rollback()
+        except sqlite3.Error:
+            logger.warning("[macro_sleep] rollback of the failed sweep failed", exc_info=True)
     return stats

@@ -862,7 +862,11 @@ function workspaceApp() {
       // GitHub calls every minute (audit 2026-10-26 AUD-030).
       this._timers = [];
       // Listen for the OAuth callback tab signaling completion.
+      // AUD-106: only Kazma's own callback tab (same origin) is heard; any
+      // window (another site that framed or opened this page) could post
+      // 'github-oauth-done' and drive the page's GitHub refresh and toast.
       const onMessage = (e) => {
+        if (e.origin !== window.location.origin) return;
         if (e.data && e.data.type === 'github-oauth-done') {
           this.loadOAuthStatus().then(() => {
             if (this.ghOAuthConnected) {

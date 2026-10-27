@@ -104,7 +104,8 @@ def _resolve_workspace_file(path: str) -> tuple[Path | None, str | None]:
 async def _ensure_service():
     from kazma_core.documents.ingestion import get_ingestion_service
 
-    svc = get_ingestion_service()
+    # The first call builds the service: stores opened (audit 2026-10-26 AUD-111).
+    svc = await asyncio.to_thread(get_ingestion_service)
     if not svc.worker_running:
         try:
             await svc.start_workers()

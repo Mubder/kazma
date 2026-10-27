@@ -785,6 +785,30 @@ class DocumentJobRepository:
             ).fetchall()
         return [JobId(row["id"]) for row in rows]
 
+    def latest_jobs_by_document(self, *, tenant_id: str) -> dict[str, DocumentJobRecord]:
+        """Each of the tenant's documents' newest job, in one query.
+
+        The newest is :meth:`document_job_ids`' first (``created_at``, then
+        ``id``, descending). The Documents listing asked for every job of
+        every document, a query each (audit 2026-10-26 AUD-115).
+        """
+        tenant = _required(tenant_id, "tenant_id")
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT j.* FROM document_jobs j
+                WHERE j.tenant_id = ?
+                  AND j.id = (
+                    SELECT k.id FROM document_jobs k
+                    WHERE k.tenant_id = j.tenant_id AND k.document_id = j.document_id
+                    ORDER BY k.created_at DESC, k.id DESC
+                    LIMIT 1
+                  )
+                """,
+                (tenant,),
+            ).fetchall()
+        return {row["document_id"]: _job(row) for row in rows}
+
     def transition(
         self,
         *,

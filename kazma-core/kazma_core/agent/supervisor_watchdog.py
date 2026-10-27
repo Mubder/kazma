@@ -237,6 +237,7 @@ async def supervised_invoke(
         try:
             from kazma_core.agent.graph_builder import sanitize_tool_chains
             from kazma_core.summarizer import _normalize_msg
+            from kazma_core.turn_notes import note_kind
 
             msgs: list[dict[str, Any]] = []
             try:
@@ -249,6 +250,11 @@ async def supervised_invoke(
                 msgs = []
             if msgs:
                 msgs = sanitize_tool_chains(msgs)
+                # One recovery note at a time: the previous attempt's note
+                # describes an attempt that is over (audit 2026-10-26
+                # AUD-122). The next fresh turn strips this one too (it is
+                # a registered turn note, ``turn_notes.TURN_NOTE_KINDS``).
+                msgs = [m for m in msgs if note_kind(m) != "recovery"]
                 msgs = msgs + [
                     {
                         "role": "system",

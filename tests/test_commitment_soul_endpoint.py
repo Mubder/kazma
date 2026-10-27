@@ -61,6 +61,7 @@ def test_reject_aborts(client):
 
 
 def test_confirm_not_found(client):
+    # AUD-104: a refusal answers its own status (it was a 200).
     r = client.post("/api/commitment/soul/cmt_nonexistent/confirm")
-    assert r.status_code == 200
-    assert "error" in r.json()
+    assert r.status_code == 404
+    assert r.json()["code"] == "not_found"

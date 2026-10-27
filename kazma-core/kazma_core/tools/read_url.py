@@ -951,10 +951,11 @@ async def _fetch_full_text_impl(url: str) -> FetchResult:
         _host = (_urlparse(url).hostname or "").lower()
         if _host and validated_ips:
             _pins[_host] = validated_ips[0]
-        _proxy_url = get_active_proxy_url()
+        _proxy_url = await asyncio.to_thread(get_active_proxy_url)  # settings (audit 2026-10-26 AUD-111)
         _via_proxy = bool(_proxy_url)
 
-        async with get_scraping_client(
+        async with await asyncio.to_thread(
+            get_scraping_client,
             follow_redirects=False,
             timeout=30.0,
             headers=dict(_HTTP_HEADERS),

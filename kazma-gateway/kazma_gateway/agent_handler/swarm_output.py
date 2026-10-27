@@ -246,7 +246,7 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
             if await try_mode2_gateway_send():
                 return True
             # If manager is None or failed, resolve the primary token and fallback to direct send
-            primary_token = resolve_primary_token()
+            primary_token = await asyncio.to_thread(resolve_primary_token)  # settings and vault (audit 2026-10-26 AUD-111)
             if primary_token:
                 if await try_mode1_direct_send(primary_token):
                     return True

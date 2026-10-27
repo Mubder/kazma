@@ -379,3 +379,64 @@ def test_without_lanes_the_turn_waited_for_the_backups(mem):
     mem.mp.setattr(tq, "MEMORY_LANE", frozenset())
     took = _maintenance_then_turn(mem)
     assert took.get("turn", 99) > 1.5, took
+
+
+# ── audit 2026-10-26 AUD-048: a reclaim's count survives the failed ack ────
+
+
+def _crash_loop_runs(mem) -> int:
+    """How many times a handler that hangs, then fails, is handed a
+    3-attempt task before it is a dead letter: each run is claimed, its
+    lease lapses, the row is reclaimed, and the reclaimed run's ack fails."""
+    mem.mp.setattr("kazma_core.observability.ops_alerts.alert", lambda *a, **k: True)
+    worker = tq._MemoryWorker()
+    assert tq.enqueue_task("probe_hang", {}, max_attempts=3)
+    runs = 0
+    for _ in range(10):
+        claimed = worker._claim_batch(lane="maintenance")
+        if not claimed:
+            break
+        runs += 1
+        mem.ops.execute("UPDATE memory_task_queue SET updated_at = ?",
+                        (time.time() - 2 * tq._STUCK_THRESHOLD_SEC,))
+        mem.ops.commit()
+        reclaimed = worker._claim_batch(lane="maintenance")
+        if not reclaimed:
+            break  # dead-lettered at the reclaim
+        runs += 1
+        worker._ack(reclaimed[0], success=False, error="handler failed")
+        mem.ops.execute("UPDATE memory_task_queue SET next_attempt_at = 0")  # backoff waited out
+        mem.ops.commit()
+    assert _rows(mem)[0]["status"] == "failed"
+    return runs
+
+
+def test_a_reclaimed_task_counts_both_attempts(mem):
+    worker = tq._MemoryWorker()
+    assert tq.enqueue_task("probe_hang", {}, max_attempts=5)
+    worker._claim_batch(lane="maintenance")
+    mem.ops.execute("UPDATE memory_task_queue SET updated_at = ?", (time.time() - 2 * tq._STUCK_THRESHOLD_SEC,))
+    mem.ops.commit()
+    reclaimed = worker._claim_batch(lane="maintenance")
+    assert reclaimed and reclaimed[0]["attempts"] == 0  # what the claim READ
+    assert _rows(mem)[0]["attempts"] == 1  # the reclaim's own count
+    worker._ack(reclaimed[0], success=False, error="handler failed")
+    assert _rows(mem)[0]["attempts"] == 2 and _rows(mem)[0]["status"] == "pending"
+
+
+def test_a_crash_looping_task_runs_at_most_max_attempts_times(mem):
+    assert _crash_loop_runs(mem) == 3
+
+
+def test_negative_control_the_acks_count_overwrote_the_reclaims(mem):
+    """The old ack wrote ``task["attempts"] + 1`` over the row's count."""
+
+    def old_ack(self, task, *, success, error):
+        attempts = int(task.get("attempts", 0)) + 1
+        status = "failed" if attempts >= int(task.get("max_attempts", 3)) else "pending"
+        mem.ops.execute("UPDATE memory_task_queue SET status = ?, attempts = ?, lease_token = NULL "
+                        "WHERE id = ? AND lease_token = ?", (status, attempts, task["id"], task["lease_token"]))
+        mem.ops.commit()
+
+    mem.mp.setattr(tq._MemoryWorker, "_ack", old_ack)
+    assert _crash_loop_runs(mem) == 5

@@ -157,6 +157,43 @@ def _every_writer(mem) -> None:
                    "user_text = 'an old note', assistant_text = 'kept' WHERE id != ?", (eid,))
     stats = run_macro_sleep(mem.db, cfg={}, tenant_id="t", now=time.time() + 400 * 86400)
     assert stats["archived_beliefs"] >= 1, stats
+    _swarm_result_and_reconsolidation(mem)
+
+
+SWARM_RESULT = "Task: pick a supplier for the pump housings\nResult: Nordvalve, for lead time."
+
+
+def _swarm_result_and_reconsolidation(mem, probe: _Probe | None = None) -> None:
+    """The two writers audit 2026-10-26 AUD-112 found outside this gate: the
+    swarm bridge's episode write and reconsolidation's duplicate merges, each
+    on a connection in Python's default mode, as their callers open it.
+    *probe* also probes the merges' ops-DB audit rows."""
+    from kazma_core.memory import belief_mutation
+    from kazma_core.memory.global_reconsolidation import run_global_reconsolidation
+    from kazma_core.memory.swarm_bridge import store_swarm_result
+
+    assert store_swarm_result("coder", "task-1", SWARM_RESULT, tenant_id="t")
+    conn = sqlite3.connect(str(mem.state), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    try:
+        for n, (obj, conf) in enumerate((("Fado", 0.9), ("fado", 0.4), ("FADO", 0.3))):
+            conn.execute(
+                "INSERT INTO beliefs (id, tenant_id, subject, predicate, predicate_type, object, confidence, "
+                "structural_importance, source_trust_weight, valid_from, ingested_at) "
+                "VALUES (?, 't', 'user', 'enjoys', 'set', ?, ?, 2, 0.5, 1.0, 1.0)", (f"b_dup_{n}", obj, conf))
+        conn.commit()
+        if probe is not None:
+            real = belief_mutation._write_audit
+
+            def audit(*a, **k):
+                probe.check("audit")
+                return real(*a, **k)
+
+            mem.mp.setattr(belief_mutation, "_write_audit", audit)
+        stats = run_global_reconsolidation(conn, tenant_id="t", reembed_limit=1, auto_partition=False)
+    finally:
+        conn.close()
+    assert stats["duplicate_beliefs_merged"] == 2 and not stats["errors"], stats
 
 
 def test_no_slow_hook_runs_under_a_memory_write_lock(mem):
@@ -165,6 +202,61 @@ def test_no_slow_hook_runs_under_a_memory_write_lock(mem):
     _every_writer(mem)
     assert {hook for hook, _f, _h in probe.seen} >= {"embed", "mirror", "graph", "vector"}, probe.seen
     assert probe.blocked() == [], probe.blocked()
+
+
+def test_swarm_results_and_merges_run_no_slow_hook_under_the_write_lock(mem):
+    """(audit 2026-10-26 AUD-112) The episode is committed before it is
+    embedded; the merges commit before their graph, mirror and audit calls."""
+    probe = _Probe(mem.state)
+    _hooks(mem, probe)
+    _swarm_result_and_reconsolidation(mem, probe)
+    assert {hook for hook, _f, _h in probe.seen} >= {"embed", "mirror", "graph", "audit"}, probe.seen
+    assert probe.blocked() == [], probe.blocked()
+    row = mem.db.execute("SELECT embedding IS NOT NULL FROM episodes WHERE metadata_json LIKE '%swarm_result%'")
+    assert row.fetchone()[0]  # embedded once, after the commit
+    current = mem.db.execute("SELECT id FROM beliefs WHERE predicate = 'enjoys' AND invalidated_at IS NULL")
+    assert [r[0] for r in current] == ["b_dup_0"]
+
+
+def test_the_probe_sees_the_old_swarm_embedding_inside_the_transaction(mem):
+    """Negative control: the old order -- insert, embed, then commit."""
+    from kazma_core.memory.vector_write import encode_vector
+
+    probe = _Probe(mem.state)
+    _hooks(mem, probe)
+    conn = sqlite3.connect(str(mem.state), check_same_thread=False)
+    try:
+        conn.execute("INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, tier, created_at, "
+                     "metadata_json) VALUES ('e_old', 't', 'swarm:coder', 1, ?, 'episodic', 1, '{}')",
+                     (SWARM_RESULT,))
+        encode_vector(SWARM_RESULT)
+        conn.commit()
+    finally:
+        conn.close()
+    assert ("embed", False, False) in probe.seen
+
+
+def test_the_probe_sees_the_old_merge_mirror_inside_the_batch(mem):
+    """Negative control: the old placement -- the graph delete and the mirror
+    tombstone per merge, inside the uncommitted batch."""
+    from kazma_core.memory import hygiene
+
+    probe = _Probe(mem.state)
+    _hooks(mem, probe)
+    real = hygiene.beliefs_write
+
+    def old(conn, sql, params=()):
+        cur = real(conn, sql, params)
+        from kazma_core.memory.graph_backend import delete_belief_edge
+        from kazma_core.memory.state_backend import remirror_belief_by_id
+
+        delete_belief_edge(belief_id=str(params[3]))
+        remirror_belief_by_id(conn, str(params[3]))
+        return cur
+
+    mem.mp.setattr(hygiene, "beliefs_write", old)
+    _swarm_result_and_reconsolidation(mem)
+    assert ("graph", False, False) in probe.seen and ("mirror", False, False) in probe.seen
 
 
 def test_the_probe_sees_the_old_embedding_inside_the_transaction(mem):
