@@ -748,7 +748,7 @@ async def summarize_period(
 
     from kazma_core.llm_provider import LLMError
 
-    cfg = _config()
+    cfg = await asyncio.to_thread(_config)  # memory settings (audit 2026-10-26 AUD-111)
     tenant_id = tenant_id or "default"
 
     def prepare() -> tuple[sqlite3.Connection | None, list[_Turn], _Grouping]:
@@ -816,7 +816,7 @@ async def rebuild_summary(summary_id: str, *, chat: ChatFn | None = None, model:
 
     from kazma_core.llm_provider import LLMError
 
-    cfg = _config()
+    cfg = await asyncio.to_thread(_config)  # memory settings (audit 2026-10-26 AUD-111)
 
     def prepare() -> tuple[sqlite3.Connection | None, sqlite3.Row | None, list[_Turn]]:
         conn = _open()

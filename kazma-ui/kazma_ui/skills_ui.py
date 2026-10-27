@@ -324,7 +324,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
         * ``kazma-hub://author/name@version`` → hub registry install
         * ``owner/repo``, GitHub URL, or local path → Agent Skills installer
         """
-        auth_err = _require_admin(request)
+        auth_err = await asyncio.to_thread(_require_admin, request)
         if auth_err:
             return auth_err
 
@@ -382,7 +382,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
     @router.post("/api/skills/uninstall")
     async def api_uninstall_skill(req: SkillInstallRequest, request: Request) -> JSONResponse:
         """Uninstall a hub skill or Agent Skill."""
-        auth_err = _require_admin(request)
+        auth_err = await asyncio.to_thread(_require_admin, request)
         if auth_err:
             return auth_err
 

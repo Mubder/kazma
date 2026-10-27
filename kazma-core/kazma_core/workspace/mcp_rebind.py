@@ -218,7 +218,7 @@ async def rebind_workspace_mcp_servers(
             try:
                 if hasattr(ex, "disconnect_server"):
                     await ex.disconnect_server(name)
-                new_cfg = apply_workspace_to_server_config(cfg, root)
+                new_cfg = await asyncio.to_thread(apply_workspace_to_server_config, cfg, root)  # audit 2026-10-26 AUD-111
                 if hasattr(ex, "connect_server"):
                     await ex.connect_server(new_cfg)
                 elif hasattr(ex, "_mcp") and hasattr(ex._mcp, "connect_from_config"):

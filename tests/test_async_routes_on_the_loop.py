@@ -28,9 +28,6 @@ ON_THE_LOOP: dict[str, str] = {
     "kazma-ui/kazma_ui/health.py:liveness": (
         "the liveness probe: an answer from the loop proves the loop is alive"
     ),
-    "kazma-ui/kazma_ui/routes_direct/misc.py:health_check": (
-        "the /health probe: gateway counters in memory, answered from the loop like liveness"
-    ),
     "kazma-ui/kazma_ui/routes_direct/settings.py:_settings_memory_rebuild": (
         "starts the rebuild with spawn_background, which needs the running loop; "
         "the rebuild itself runs in a thread"
@@ -46,9 +43,6 @@ ON_THE_LOOP: dict[str, str] = {
     ),
     "kazma-ui/kazma_ui/models_route.py:ollama_pulls": (
         "reads the pull tasks' progress, which the pull coroutines update on the loop"
-    ),
-    "kazma-ui/kazma_ui/swarm_panel/routes_general.py:reap_idle_workers": (
-        "removes idle workers from the swarm engine, whose state the loop owns"
     ),
     "kazma-ui/kazma_ui/swarm_panel/routes_tasks.py:swarm_active_tasks": _LOOP_STATE,
     "kazma-ui/kazma_ui/swarm_panel/routes_workers.py:swarm_worker_logs": _LOOP_STATE,

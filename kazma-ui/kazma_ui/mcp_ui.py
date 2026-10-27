@@ -336,7 +336,8 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         try:
             from kazma_core.workspace.mcp_rebind import apply_workspace_to_server_config
 
-            server_cfg = apply_workspace_to_server_config(server_cfg)
+            # The active workspace is a store read (audit 2026-10-26 AUD-111).
+            server_cfg = await asyncio.to_thread(apply_workspace_to_server_config, server_cfg)
         except Exception as exc:
             logger.debug("[mcp_api] workspace interpolation skipped for test-config: %s", exc)
 

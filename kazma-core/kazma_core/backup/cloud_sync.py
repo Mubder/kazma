@@ -76,6 +76,8 @@ def _read_config(key: str, default: str = "") -> str:
 
 
 def _read_vault(key: str) -> str:
+    # A vault (SQLite) read: the async providers call it through
+    # asyncio.to_thread, like _get_config (audit 2026-10-26 AUD-111).
     try:
         from kazma_core.security.vault import retrieve_with_tenant_ladder
 
@@ -296,7 +298,7 @@ class GoogleDriveSync:
     async def _get_access_token(self) -> str:
         """Get a valid access token, refreshing if needed."""
         # Try the current access token first
-        token = _read_vault("email.gmail.access_token") or os.environ.get(
+        token = await asyncio.to_thread(_read_vault, "email.gmail.access_token") or os.environ.get(
             "EMAIL_GMAIL_ACCESS_TOKEN", ""
         )
         if token:
@@ -311,15 +313,15 @@ class GoogleDriveSync:
                     return token
 
         # Refresh
-        refresh_token = _read_vault("email.gmail.refresh_token") or os.environ.get(
+        refresh_token = await asyncio.to_thread(_read_vault, "email.gmail.refresh_token") or os.environ.get(
             "EMAIL_GMAIL_REFRESH_TOKEN", ""
         )
         if not refresh_token:
             raise RuntimeError("Google Drive not connected — no Gmail refresh token in vault")
-        client_id = _read_vault("email.gmail.client_id") or os.environ.get(
+        client_id = await asyncio.to_thread(_read_vault, "email.gmail.client_id") or os.environ.get(
             "EMAIL_GMAIL_CLIENT_ID", ""
         )
-        client_secret = _read_vault("email.gmail.client_secret") or os.environ.get(
+        client_secret = await asyncio.to_thread(_read_vault, "email.gmail.client_secret") or os.environ.get(
             "EMAIL_GMAIL_CLIENT_SECRET", ""
         )
         if not client_id or not client_secret:
@@ -540,7 +542,7 @@ class OneDriveSync:
     """
 
     async def _get_access_token(self) -> str:
-        token = _read_vault("email.microsoft.access_token") or os.environ.get(
+        token = await asyncio.to_thread(_read_vault, "email.microsoft.access_token") or os.environ.get(
             "EMAIL_MS_ACCESS_TOKEN", ""
         )
         if token:
@@ -552,12 +554,12 @@ class OneDriveSync:
                 if resp.status_code == 200:
                     return token
 
-        refresh_token = _read_vault("email.microsoft.refresh_token") or os.environ.get(
+        refresh_token = await asyncio.to_thread(_read_vault, "email.microsoft.refresh_token") or os.environ.get(
             "EMAIL_MS_REFRESH_TOKEN", ""
         )
         if not refresh_token:
             raise RuntimeError("OneDrive not connected — no Microsoft refresh token in vault")
-        client_id = _read_vault("email.microsoft.client_id") or os.environ.get(
+        client_id = await asyncio.to_thread(_read_vault, "email.microsoft.client_id") or os.environ.get(
             "EMAIL_MS_CLIENT_ID", ""
         )
         if not client_id:
@@ -566,7 +568,7 @@ class OneDriveSync:
         # secret on the refresh grant — without it AAD rejects with
         # AADSTS70002 "must include a 'client_secret' input parameter"
         # (incident 2026-08-16). Public-client apps have no secret → omit it.
-        client_secret = _read_vault("email.microsoft.client_secret") or os.environ.get(
+        client_secret = await asyncio.to_thread(_read_vault, "email.microsoft.client_secret") or os.environ.get(
             "EMAIL_MS_CLIENT_SECRET", ""
         )
         tenant = os.environ.get("EMAIL_MS_TENANT_ID") or "common"
@@ -667,14 +669,14 @@ class WebDAVSync:
         return url, username, password
 
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
-        url, username, password = self._get_config()
+        url, username, password = await asyncio.to_thread(self._get_config)
         if not url:
             return {"ok": False, "remote": "webdav", "error": "WebDAV URL not configured"}
         auth = (username, password) if username else None
         host = url.split("//")[1] if "//" in url else url
         display = f"webdav:{host}/{self._ROOT_FOLDER}/{remote_name}"
         size = await asyncio.to_thread(lambda: local.stat().st_size)
-        async with httpx.AsyncClient(timeout=300, verify=_webdav_tls_verify()) as client:
+        async with httpx.AsyncClient(timeout=300, verify=await asyncio.to_thread(_webdav_tls_verify)) as client:
             # MKCOL the root folder — idempotent (405/409 = already exists)
             await client.request("MKCOL", f"{url}/{self._ROOT_FOLDER}", auth=auth)
             # Streamed, a chunk at a time read off the loop (audit 2026-10-26
@@ -692,12 +694,12 @@ class WebDAVSync:
         return {"ok": False, "remote": display, "error": f"WebDAV error: HTTP {resp.status_code}"}
 
     async def test_connection(self) -> dict[str, Any]:
-        url, username, password = self._get_config()
+        url, username, password = await asyncio.to_thread(self._get_config)
         if not url:
             return {"ok": False, "error": "WebDAV URL not configured"}
         auth = (username, password) if username else None
         try:
-            async with httpx.AsyncClient(timeout=10, verify=_webdav_tls_verify()) as client:
+            async with httpx.AsyncClient(timeout=10, verify=await asyncio.to_thread(_webdav_tls_verify)) as client:
                 resp = await client.request(
                     "PROPFIND", url, auth=auth, headers={"Depth": "0"}
                 )
@@ -819,7 +821,7 @@ class FTPSync:
                 ftp.cwd(part)
 
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
-        cfg = self._get_config()
+        cfg = await asyncio.to_thread(self._get_config)
         if not cfg["host"]:
             return {"ok": False, "remote": "ftp", "error": "FTP host not configured"}
         display = f"ftp:{cfg['host']}/{self._ROOT_FOLDER}/{remote_name}"
@@ -844,7 +846,7 @@ class FTPSync:
             return {"ok": False, "remote": display, "error": f"FTP error: {exc}"}
 
     async def test_connection(self) -> dict[str, Any]:
-        cfg = self._get_config()
+        cfg = await asyncio.to_thread(self._get_config)
         if not cfg["host"]:
             return {"ok": False, "error": "FTP host not configured"}
 
@@ -1019,7 +1021,7 @@ class S3Sync:
         return f"https://{config['bucket']}.s3.{config['region']}.amazonaws.com/{key}"
 
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
-        config = self._get_config()
+        config = await asyncio.to_thread(self._get_config)
         if not config["access_key"] or not config["bucket"]:
             return {"ok": False, "remote": "s3", "error": "S3 not configured"}
         key = f"{self._ROOT_FOLDER}/{remote_name}"
@@ -1131,7 +1133,7 @@ class S3Sync:
         ``offsite.ok: true`` records that a PUT returned 200, which a remote
         that accepts writes and stores nothing also does.
         """
-        config = self._get_config()
+        config = await asyncio.to_thread(self._get_config)
         if not config["access_key"] or not config["bucket"]:
             return {"ok": False, "error": "S3 not configured"}
         key = f"{self._ROOT_FOLDER}/{remote_name}"
@@ -1153,7 +1155,7 @@ class S3Sync:
         return {"ok": True, "size": size}
 
     async def test_connection(self) -> dict[str, Any]:
-        config = self._get_config()
+        config = await asyncio.to_thread(self._get_config)
         if not config["access_key"] or not config["bucket"]:
             return {"ok": False, "error": "S3 access key and bucket are required"}
         url = self._build_url(config, "")

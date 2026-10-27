@@ -332,7 +332,8 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
 
     from kazma_core.x_api.ownership import x_tenant_id
 
-    identity_key = x_tenant_id() + ":" + hashlib.sha256(repr(xcfg.credentials).encode("utf-8")).hexdigest()
+    # With no tenant bound the tenant rule is a settings read (audit 2026-10-26 AUD-111).
+    identity_key = await asyncio.to_thread(x_tenant_id) + ":" + hashlib.sha256(repr(xcfg.credentials).encode("utf-8")).hexdigest()
     if _identity is None or _identity_key != identity_key:
         _identity = None
         try:

@@ -137,7 +137,9 @@ def test_the_save_tool_stamps_the_running_turn_and_says_so():
     worker = inspect.getsource(graph_tool_worker.tool_worker_node)
     assert "bind_turn(state)" in worker and "reset_turn(_proposal_turn_token)" in worker
     # Bound before the commitment gate runs.
-    assert worker.index("bind_turn(state)") < worker.index("_commitment_resolve_gate(state")
+    # (The gate runs in a thread since AUD-111; to_thread copies the context
+    # that holds the bound turn.)
+    assert worker.index("bind_turn(state)") < worker.index("_commitment_resolve_gate, state")
 
 
 def test_every_publish_tool_goes_through_the_check():

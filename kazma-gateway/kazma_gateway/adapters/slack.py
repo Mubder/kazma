@@ -912,7 +912,7 @@ class SlackAdapter(BaseAdapter):
                                         # allowed_users is configured.
                                         from kazma_gateway.allowlists import is_gateway_admin
 
-                                        if not is_gateway_admin(f"slack:{_ia_user_id}", "slack"):
+                                        if not await asyncio.to_thread(is_gateway_admin, f"slack:{_ia_user_id}", "slack"):
                                             logger.info(
                                                 "[Slack] Ignoring %s approval (admin required) user=%s",
                                                 action.kind, _ia_user_id,
@@ -924,7 +924,7 @@ class SlackAdapter(BaseAdapter):
                                         # all; installs additionally need admin.
                                         from kazma_gateway.allowlists import is_gateway_admin
 
-                                        if not is_gateway_admin(f"slack:{_ia_user_id}", "slack"):
+                                        if not await asyncio.to_thread(is_gateway_admin, f"slack:{_ia_user_id}", "slack"):
                                             logger.info(
                                                 "[Slack] Ignoring install interaction (admin required) user=%s",
                                                 _ia_user_id,

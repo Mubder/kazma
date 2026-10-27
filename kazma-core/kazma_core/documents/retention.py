@@ -663,10 +663,12 @@ def start_document_maintenance_loop(
                 if is_shutting_down():
                     logger.info("[documents.retention] maintenance loop exiting (shutdown)")
                     return
-                cfg = get_document_config()
                 from .config import get_document_rollout
 
-                rollout = get_document_rollout()
+                # Both are settings reads (a snapshot of documents.*): off the
+                # loop (audit 2026-10-26 AUD-111).
+                cfg = await asyncio.to_thread(get_document_config)
+                rollout = await asyncio.to_thread(get_document_rollout)
                 if rollout.enabled and cfg.gc_enabled and cfg.gc_auto_maintain:
                     run = asyncio.create_task(asyncio.to_thread(_run_once))
                     try:

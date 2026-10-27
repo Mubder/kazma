@@ -293,7 +293,7 @@ class InProcessWorker(SwarmWorker):
         """
         import json as _json
 
-        MAX_ITERATIONS = worker_iteration_budget()
+        MAX_ITERATIONS = await asyncio.to_thread(worker_iteration_budget)  # a settings read (audit 2026-10-26 AUD-111)
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex}"
         from kazma_core.agent.effect_journal import EffectUncertain, execute_effect
         from kazma_core.tenant_context import get_current_tenant_id
@@ -350,7 +350,8 @@ class InProcessWorker(SwarmWorker):
                 try:
                     from kazma_core.models.selection import select_provider_for_task
 
-                    chosen = select_provider_for_task(registry, prompt=task)
+                    # The model defaults are settings reads (audit 2026-10-26 AUD-111).
+                    chosen = await asyncio.to_thread(select_provider_for_task, registry, prompt=task)
                     if chosen is not None:
                         provider = chosen
                         logger.info(
@@ -625,7 +626,7 @@ class InProcessWorker(SwarmWorker):
 
                                     from kazma_core.agent.graph_helpers import _resolve_tool_timeout
 
-                                    _t = _resolve_tool_timeout()
+                                    _t = await _aio.to_thread(_resolve_tool_timeout)  # audit 2026-10-26 AUD-111
                                     if _t and _t > 0:
                                         result = await _aio.wait_for(
                                             execute_effect(tool_registry, effect_state,

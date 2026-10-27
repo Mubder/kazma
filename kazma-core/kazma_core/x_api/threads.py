@@ -74,7 +74,9 @@ async def publish_thread(ident: str, *, revision: int, token: str, actor: str) -
             ok, _ = await publications._dispatch_operation(operation, cfg=cfg)
             # A returned remote success whose DB confirmation failed still has
             # no durable predecessor: stop rather than threading from inference.
-            stored = await asyncio.to_thread(get_publication_store().get, operation, tenant_id=x_tenant_id())
+            stored = await asyncio.to_thread(
+                lambda: get_publication_store().get(operation, tenant_id=x_tenant_id())  # audit 2026-10-26 AUD-111
+            )
             if not ok or stored["state"] != "published":
                 break
     finally:

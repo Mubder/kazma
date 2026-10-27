@@ -197,7 +197,11 @@ async def _loop() -> None:
     while True:
         try:
             await asyncio.sleep(_SCAN_INTERVAL_SECONDS)
-            check_once()
+            # Each open turn's approval state is a chat-store read and a heal
+            # is a chat-store write: off the loop, one sweep at a time (this
+            # loop is the only caller, so the module's clocks are not shared)
+            # (audit 2026-10-26 AUD-111).
+            await asyncio.to_thread(check_once)
         except asyncio.CancelledError:
             raise
         except Exception:

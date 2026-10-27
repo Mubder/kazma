@@ -381,7 +381,7 @@ async def apply_pre_tool_hooks(
     args = dict(arguments or {})
     if not tool_hooks_enabled():
         return None, args
-    cfg = load_hook_config()
+    cfg = await asyncio.to_thread(load_hook_config)  # settings (audit 2026-10-26 AUD-111)
     if not cfg.get("enabled", True):
         python_hooks = []
         command_entries = []
@@ -440,7 +440,7 @@ async def apply_post_tool_hooks(
     if not tool_hooks_enabled():
         return result
     try:
-        cfg = load_hook_config()
+        cfg = await asyncio.to_thread(load_hook_config)
     except Exception:
         return result
     if not cfg.get("enabled", True):

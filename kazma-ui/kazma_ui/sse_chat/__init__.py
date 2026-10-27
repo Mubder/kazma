@@ -565,7 +565,10 @@ def create_sse_chat_router(
 
         from kazma_ui.sse_chat._capacity import intercept_capacity_fast_path
 
-        _cap_resp, _cap_rewrite = intercept_capacity_fast_path(
+        # /long, /plan and /yolo write the chat's settings and its instant
+        # row: off the loop (audit 2026-10-26 AUD-111).
+        _cap_resp, _cap_rewrite = await asyncio.to_thread(
+            intercept_capacity_fast_path,
             session=session,
             thread_id=thread_id,
             session_id=session_id,
@@ -873,7 +876,9 @@ def create_sse_chat_router(
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
 
-            _sse_recursion = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+            _sse_recursion = int(
+                (await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"]
+            )
         except Exception:
             _sse_recursion = 100
         graph_config = {
@@ -900,7 +905,8 @@ def create_sse_chat_router(
             from kazma_core.safety.prompt_fence import format_untrusted_block
             from kazma_core.skills.self_improvement import get_agent_evolution_block
 
-            evo = get_agent_evolution_block("supervisor")
+            # The Soul is a settings read (and a one-off migration) (audit 2026-10-26 AUD-111).
+            evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")
             if evo:
                 system_msgs.append(
                     {
@@ -952,7 +958,8 @@ def create_sse_chat_router(
         # the reply tells the user instead of silently degrading. (This
         # function is NOT a generator here — it returns StreamingResponse —
         # so the notice rides the model's reply, not an SSE frame.)
-        _unrestricted_notice = consume_long_task_turn(thread_id)
+        # A settings read-modify-write of the chat's long-task record (audit 2026-10-26 AUD-111).
+        _unrestricted_notice = await asyncio.to_thread(consume_long_task_turn, thread_id)
         if _unrestricted_notice:
             system_msgs.append({
                 "role": "system",
@@ -1059,11 +1066,14 @@ def create_sse_chat_router(
         except Exception:
             pass
 
-        input_state = initial_supervisor_state(
-            thread_id=thread_id,
-            tenant_id=resolve_tenant_id(
-                "web", "", session_id, auth_user_id=_auth_uid
-            ),
+        # The initial state and the tenant rule read settings (audit 2026-10-26 AUD-111).
+        input_state = await asyncio.to_thread(
+            lambda: initial_supervisor_state(
+                thread_id=thread_id,
+                tenant_id=resolve_tenant_id(
+                    "web", "", session_id, auth_user_id=_auth_uid
+                ),
+            )
         )
         input_state["messages"] = messages
         # Web has no inbound telegram chat_id. Stamp operator Telegram on
@@ -1072,7 +1082,7 @@ def create_sse_chat_router(
         try:
             from kazma_core.tools.send_message import web_gateway_block
 
-            input_state["_gateway"] = web_gateway_block(thread_id)
+            input_state["_gateway"] = await asyncio.to_thread(web_gateway_block, thread_id)
         except Exception:
             logger.debug("[SSE] web gateway stamp skipped", exc_info=True)
         # Transport-level working-memory pin (before supervisor loop)
@@ -2193,7 +2203,7 @@ def create_sse_chat_router(
             try:
                 from kazma_core.agent.long_task import resolve_turn_budgets
 
-                _rec = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+                _rec = int((await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"])
                 _cfg = {
                     "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
                     "recursion_limit": _rec,
@@ -2245,7 +2255,7 @@ def create_sse_chat_router(
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
 
-            _rec = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+            _rec = int((await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"])
         except Exception:
             _rec = 100
         config = {

@@ -59,9 +59,11 @@ class BrowserNetwork:
     async def __aenter__(self):
         from kazma_core.proxy.client import get_active_proxy_url, get_scraping_client
 
-        proxy = get_active_proxy_url()
+        # The proxy route and the acquisition policy are settings reads (audit 2026-10-26 AUD-111).
+        proxy = await asyncio.to_thread(get_active_proxy_url)
         self.via_proxy = bool(proxy)
-        self.client = get_scraping_client(
+        self.client = await asyncio.to_thread(
+            get_scraping_client,
             proxy=proxy, pin_hosts=self.pins if not proxy else None,
             follow_redirects=False, timeout=20.0, trust_env=False,
             headers={"Accept-Encoding": "gzip, deflate"})

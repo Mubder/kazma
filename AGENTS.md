@@ -6267,8 +6267,17 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   and holds the memory modules to it. Undo resolved its tenant on the loop
   through three hops in two modules (`_consume_undo` -> `_memory_tenant_id`
   -> `multi_user_or_production` -> a settings read); the memory worker raised
-  ops alerts and queued retries on the loop. Product-wide the same inference
-  names ~130 sites in other areas: each area's own change. The memory GET
+  ops alerts and queued retries on the loop. **Since 2026-10-27 it covers the
+  whole product** (audit 2026-10-26 AUD-111): every product module is in an
+  area (`test_every_product_module_is_in_an_area`), calls resolve through a
+  module's own bindings, `self`/`cls`, a class's methods and modules imported
+  whole (`_StallModule`), and a direct settings-store use seeds a stall like
+  a listed helper. A nested def handed to a thread is not its parent's call.
+  A function that keeps its read off the loop when it runs on one is declared
+  in `_OFF_THE_LOOP_WHEN_ON_IT` with the test that proves it; a call that
+  reads nothing at that site in `_CALLS_THAT_READ_NOTHING_HERE`. About 230
+  sites were converted. Not held: chat-store methods on a receiver the gate
+  cannot resolve (`get_session_manager().get`). The memory GET
   routes write nothing (`test_a_memory_get_route_writes_nothing`, every GET
   traced): `memory_api._conn()` makes the schema ready once per process
   (it ran the entity-count backfill on every request), and the operator's
@@ -7770,6 +7779,25 @@ test that fails on the old code.
     - Every saved model profile keeps or refuses masked secrets
       (`ModelRegistry.save_model_profile`, AUD-105).
     - The OAuth message is origin-checked (AUD-106).
+- **A result that says whether it worked is read where it is returned**
+  (2026-10-27, the audit's recurring pattern 2,
+  `tests/test_failure_results_are_used.py`). A backup, migration, send or
+  delivery function returning `bool` or an `ok` field may not have its
+  answer dropped by a product caller (a bare call, or `_ = ...`). Calls are
+  resolved through imports, aliases, `self`/`cls` and bases. A receiver the
+  gate cannot type must be classified (`RECEIVERS` / `NOT_OURS`), or it is a
+  finding. A site that may drop the answer is declared in `DECLARED` or
+  `REPORTS_ITS_OWN_FAILURE` with its reason, and a declaration that matches
+  nothing fails. Fixed when it was built: the importer's document restore
+  (a failed safety copy went on to overwrite, and a failed install deleted
+  the live `documents.db`; it now copies beside the file and swaps it in),
+  and the gateway logging "HITL interrupt surfaced" over an approval card
+  the platform refused (a WARNING now names the Web panel and `/hitl`).
+- **No helper call stalls the loop in any area** (AUD-111, 2026-10-27): see
+  §35. `TurnBroker.emit` stamps the gate view in a thread inside the
+  thread's emit lock, so frames keep their call order. `ops_alerts._dispatch`
+  asks its sinks from a thread when a loop runs. The LLM provider reads its
+  egress target in a thread and changes the client on the loop.
 
 ## UI Conventions (Web)
 

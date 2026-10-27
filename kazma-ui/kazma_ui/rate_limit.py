@@ -135,7 +135,9 @@ def rate_limit(bucket: str, default_per_minute: int) -> Any:
     """FastAPI dependency factory — 429 with Retry-After when exhausted."""
 
     async def _check(request: Request) -> None:
-        if not _enabled():
+        # The secret's lookup is a settings read when none is cached (open
+        # mode): off the loop too (audit 2026-10-26 AUD-111).
+        if not await asyncio.to_thread(_enabled):
             return
         marker = (bucket, default_per_minute)
         checked = getattr(request.state, "_kazma_rate_limit_checks", None)

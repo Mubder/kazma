@@ -1161,13 +1161,14 @@ class KazmaAgent:
 
         from kazma_core.agent.state import initial_supervisor_state
 
-        graph_state = initial_supervisor_state(thread_id=self._thread_id)
+        # The initial state and the turn budget are settings reads (audit 2026-10-26 AUD-111).
+        graph_state = await asyncio.to_thread(initial_supervisor_state, thread_id=self._thread_id)
         graph_state["messages"] = messages
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
 
             _run_recursion = int(
-                resolve_turn_budgets(self._thread_id)["recursion_limit"]
+                (await asyncio.to_thread(resolve_turn_budgets, self._thread_id))["recursion_limit"]
             )
         except Exception:
             _run_recursion = 100
@@ -1362,11 +1363,11 @@ async def main() -> None:
     try:
         from kazma_core.logging_config import setup_logging
 
-        setup_logging()
+        await asyncio.to_thread(setup_logging)  # files and settings (audit 2026-10-26 AUD-111)
     except Exception:
         pass  # Logging must never block boot.
 
-    config = load_config()
+    config = await asyncio.to_thread(load_config)
     agent = KazmaAgent(config)
 
     # Connect MCP servers

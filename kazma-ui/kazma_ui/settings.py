@@ -273,6 +273,8 @@ class SettingsRouterBuilder:
             """Persist a browser PushSubscription JSON (P5)."""
             from kazma_ui.push import push_available, subscribe
 
+            # The VAPID key and the subscription store are settings reads and
+            # writes (audit 2026-10-26 AUD-111).
             if not await asyncio.to_thread(push_available):
                 return {"status": "error", "error": "push support not installed"}
             try:
@@ -638,8 +640,14 @@ class SettingsRouterBuilder:
             # credentials are what gets tested, then call test_connection().
             try:
                 from kazma_core.backup.cloud_sync import get_sync_provider
-                _apply_offsite_payload(req)
-                provider = get_sync_provider()
+
+                def _saved_provider() -> Any:
+                    _apply_offsite_payload(req)
+                    return get_sync_provider()
+
+                # Settings writes, then the provider built from them, with
+                # vault reads (audit 2026-10-26 AUD-111).
+                provider = await asyncio.to_thread(_saved_provider)
                 if provider is None:
                     return {"ok": False, "error": f"Unknown provider: {provider_name}"}
                 return await provider.test_connection()
@@ -1525,7 +1533,7 @@ class SettingsRouterBuilder:
         async def api_division_approve(request_id: str) -> dict[str, Any]:
             from kazma_core.division_runtime import current_division_context, get_authorization_flow
 
-            ctx = current_division_context()
+            ctx = await asyncio.to_thread(current_division_context)  # a settings read (AUD-111)
             approver = ctx[0] if ctx else "default"
             result = await get_authorization_flow().approve_request(request_id, approver)
             return {
@@ -1539,7 +1547,7 @@ class SettingsRouterBuilder:
         async def api_division_deny(request_id: str, req: dict[str, Any] | None = None) -> dict[str, Any]:
             from kazma_core.division_runtime import current_division_context, get_authorization_flow
 
-            ctx = current_division_context()
+            ctx = await asyncio.to_thread(current_division_context)  # a settings read (AUD-111)
             approver = ctx[0] if ctx else "default"
             reason = str((req or {}).get("reason") or "denied")
             result = await get_authorization_flow().deny_request(request_id, approver, reason)

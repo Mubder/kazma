@@ -485,14 +485,14 @@ async def run_ask(
         try:
             from kazma_core.agent.plan_mode import enable_plan_mode
 
-            enable_plan_mode(thread_id, actor="cli")
+            await asyncio.to_thread(enable_plan_mode, thread_id, actor="cli")  # settings (audit 2026-10-26 AUD-111)
         except Exception:
             logger.debug("[ask] plan mode enable failed", exc_info=True)
     if opts.yolo:
         try:
             from kazma_core.safety.yolo import enable_yolo
 
-            enable_yolo(thread_id, actor="cli")
+            await asyncio.to_thread(enable_yolo, thread_id, actor="cli")
         except Exception:
             logger.debug("[ask] yolo enable failed", exc_info=True)
         try:
@@ -554,7 +554,7 @@ async def _invoke_supervisor(
         set_current_thread_id,
     )
 
-    agent = KazmaAgent(load_config())
+    agent = KazmaAgent(await asyncio.to_thread(load_config))  # kazma.yaml and settings (audit 2026-10-26 AUD-111)
     executor: Any = agent.tools
     if on_event is not None:
         executor = _EmittingExecutor(agent.tools, on_event)
@@ -585,12 +585,12 @@ async def _invoke_supervisor(
         snapshot_recorder=getattr(agent, "_snapshot_recorder", None),
     )
 
-    state = initial_supervisor_state(thread_id=thread_id)
+    state = await asyncio.to_thread(initial_supervisor_state, thread_id=thread_id)
     state["messages"] = [{"role": "user", "content": prompt}]
     try:
         from kazma_core.agent.long_task import resolve_turn_budgets
 
-        recursion = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+        recursion = int((await asyncio.to_thread(resolve_turn_budgets, thread_id))["recursion_limit"])
     except Exception:
         recursion = 100
     config = {
@@ -1063,7 +1063,7 @@ async def _acp_run_prompt(
         try:
             from kazma_core.tools.code_exec import jail_note_for_tool
 
-            jail = jail_note_for_tool(tool_name)
+            jail = await asyncio.to_thread(jail_note_for_tool, tool_name)  # settings (audit 2026-10-26 AUD-111)
         except Exception:
             jail = ""
         title = str(payload.get("message") or tool_name or "danger tool")

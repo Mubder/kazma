@@ -293,7 +293,7 @@ async def _dispatch_operation(ident: str, *, cfg: XConfig | None = None) -> tupl
     from kazma_core.x_api.policy import evaluate_delete, evaluate_post
     from kazma_core.x_api.schedule import x_schedule_enabled
 
-    tenant = x_tenant_id()
+    tenant = await asyncio.to_thread(x_tenant_id)  # a settings read (audit 2026-10-26 AUD-111)
     store = await asyncio.to_thread(get_publication_store)
     row = await asyncio.to_thread(store.get, ident, tenant_id=tenant)
     if row is None:
@@ -439,7 +439,7 @@ async def delete(*, tweet_id: str, idempotency_key: str = "") -> tuple[bool, dic
     if not tid.isascii() or not tid.isdigit():
         return False, {"deleted": False, "outcome": "not_sent", "error": "tweet_id must be a numeric X identifier."}
     cfg = await asyncio.to_thread(_config)
-    decision = evaluate_delete(cfg=cfg)
+    decision = await asyncio.to_thread(evaluate_delete, cfg=cfg)  # settings (audit 2026-10-26 AUD-111)
     if not decision.allow:
         return False, {"deleted": False, "outcome": "not_sent", "error": decision.reason}
     try:

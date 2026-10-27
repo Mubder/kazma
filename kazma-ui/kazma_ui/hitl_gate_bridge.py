@@ -532,7 +532,8 @@ async def pending_items_from_registry() -> list[dict[str, Any]] | None:
         # A native-id row carries the hash as alias_id. The hash-id ghost
         # of the same pause must not become a second dashboard card.
         collapsed = [r for r in rows if str(getattr(r, "gate_id", "") or "") not in aliases]
-        return [gate_row_to_pending_item(r) for r in collapsed]
+        # Each item's deadline reads the HITL settings (audit 2026-10-26 AUD-111).
+        return await asyncio.to_thread(lambda: [gate_row_to_pending_item(r) for r in collapsed])
     except Exception:
         logger.warning("[GateBridge] pending_gates read failed", exc_info=True)
         _mismatch("pending_read")

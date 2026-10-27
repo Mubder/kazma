@@ -173,7 +173,7 @@ class SelfImprovementSkill:
             from kazma_core.memory.config import resolve_tenant_id
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
-            _tenant = resolve_tenant_id("system", prefer_context=True)
+            _tenant = await asyncio.to_thread(resolve_tenant_id, "system", prefer_context=True)  # audit 2026-10-26 AUD-111
             # Recall = SQLite + embedding: off the loop (loop-stall dumps
             # caught its access bump on it, 2026-09-15).
             results = await asyncio.to_thread(search, f"{worker_name} pipeline {task[:100]}", limit=3, tenant_id=_tenant)
@@ -206,7 +206,7 @@ Focus on what patterns to preserve and strengthen.
 Output ONLY the delta text, no preamble."""
 
         try:
-            provider = _llm_for_delta()
+            provider = await asyncio.to_thread(_llm_for_delta)  # the registry's settings
             if provider is not None:
                 response = await provider.chat([
                     {"role": "system", "content": "You are a concise meta-learning expert."},
@@ -269,7 +269,7 @@ Output ONLY the delta text, no preamble."""
             from kazma_core.memory.config import resolve_tenant_id
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
-            _tenant = resolve_tenant_id("system", prefer_context=True)
+            _tenant = await asyncio.to_thread(resolve_tenant_id, "system", prefer_context=True)  # audit 2026-10-26 AUD-111
             # Recall = SQLite + embedding: off the loop (loop-stall dumps
             # caught its access bump on it, 2026-09-15).
             results = await asyncio.to_thread(search, f"{worker_name} failure {task[:100]}", limit=3, tenant_id=_tenant)
@@ -298,7 +298,7 @@ Focus on what to AVOID and how to improve next time.
 Output ONLY the delta text, no preamble."""
 
         try:
-            provider = _llm_for_delta()
+            provider = await asyncio.to_thread(_llm_for_delta)  # the registry's settings
             if provider is not None:
                 response = await provider.chat([
                     {"role": "system", "content": "You are a concise meta-learning expert."},
@@ -366,7 +366,7 @@ Output ONLY the delta text, no preamble."""
             )
             return False
         # Same soul-confirm gate as apply_agent_mutation (mint + hold if needed).
-        if _soul_requires_confirm():
+        if await asyncio.to_thread(_soul_requires_confirm):
             if not commitment_id:
                 commitment_id = await asyncio.to_thread(
                     mint_soul_commitment, delta, worker_name=worker_name,

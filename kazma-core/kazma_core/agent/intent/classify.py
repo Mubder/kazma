@@ -1,6 +1,7 @@
 """classify_turn — the single entry point for intent classification."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -164,8 +165,11 @@ async def classify_turn(
     from kazma_core.agent.intent.config import intent_tier2_enabled
     from kazma_core.agent.turn_input import classify_turn_intent
 
+    # The drift check embeds the text and every rule reads settings; the
+    # entity resolution reads the workspace: off the loop (audit 2026-10-26 AUD-111).
     if focus is None:
-        focus = classify_turn_intent(
+        focus = await asyncio.to_thread(
+            classify_turn_intent,
             text,
             messages=messages,
             task_status=task_status,
@@ -176,12 +180,12 @@ async def classify_turn(
     acts = detect_acts(text, attachments)
     acts = _merge_command_acts(acts, command)
 
-    entities = resolve_entities(text=text, attachments=attachments, acts=acts)
+    entities = await asyncio.to_thread(resolve_entities, text=text, attachments=attachments, acts=acts)
 
     # Tier 2: LLM refinement for gray zone only
     if (
-        intent_tier2_enabled()
-        and llm is not None
+        llm is not None
+        and await asyncio.to_thread(intent_tier2_enabled)
         and len((text or "").strip()) > 20
     ):
         max_conf = max((a.confidence for a in acts), default=0)
@@ -200,9 +204,12 @@ async def classify_turn(
             acts = await _refine_acts_llm(text, llm, acts)
             # F12: re-resolve entities — a Tier-2-introduced document_generate
             # must hit the unresolved/ambiguous gate, not fail later in the handler.
-            entities = resolve_entities(text=text, attachments=attachments, acts=acts)
+            entities = await asyncio.to_thread(
+                resolve_entities, text=text, attachments=attachments, acts=acts
+            )
 
-    route, handler, reason, plan_note = decide(
+    route, handler, reason, plan_note = await asyncio.to_thread(
+        decide,
         focus=focus,
         acts=acts,
         entities=entities,

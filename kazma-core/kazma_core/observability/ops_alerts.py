@@ -474,34 +474,45 @@ def _has_any_sink() -> bool:
         return True
 
 
+#: What the loop's delivery task returns when nothing could receive the alert.
+_NO_SINK = object()
+
+
+def _say_no_sink() -> None:
+    # The WARNING in alert() is already the durable record; this only says
+    # the interrupt had nowhere to go.
+    logger.debug(
+        "[ops_alerts] no bus adapter and no Telegram credentials — "
+        "alert exists only in the log; not delivering it"
+    )
+
+
+async def _deliver_from_the_loop(text: str) -> Any:
+    """``_deliver`` for an alert raised on a loop: the sink check first, in a thread."""
+    if not await asyncio.to_thread(_has_any_sink):
+        _say_no_sink()
+        return _NO_SINK
+    return await _deliver(text)
+
+
 def _dispatch(text: str, on_delivery: Any = None) -> None:
     """Deliver without blocking or raising, from sync OR async callers."""
-    if not _has_any_sink():
-        # The WARNING in alert() is already the durable record; this only says
-        # the interrupt had nowhere to go.
-        logger.debug(
-            "[ops_alerts] no bus adapter and no Telegram credentials — "
-            "alert exists only in the log; not starting a delivery thread"
-        )
-        _delivery_receipt(on_delivery, False)
-        return
-
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
-
-    if loop is None and _on_server_loop(text, on_delivery):
-        return
 
     if loop is not None:
         # Already on an event loop: fire and forget. Never await here — the
         # caller is usually inside an exception handler on a hot path.
         # spawn_background keeps a strong ref (audit 2026-09-17: a local
         # Task + add_done_callback is not enough; the loop's ref is weak).
+        # Whether anything can receive it is a settings read (with a vault
+        # pointer): the task asks it from a thread, so alert() never blocks
+        # the loop it is called on (audit 2026-10-26 AUD-111).
         from kazma_core.background import spawn_background
 
-        task = spawn_background(_deliver(text), name="ops-alert")
+        task = spawn_background(_deliver_from_the_loop(text), name="ops-alert")
 
         def _report(t: asyncio.Task) -> None:
             if t.cancelled():
@@ -510,11 +521,22 @@ def _dispatch(text: str, on_delivery: Any = None) -> None:
             if t.exception() is not None:
                 _delivery_receipt(on_delivery, None)
                 return  # spawn_background already logs the exception
+            if t.result() is _NO_SINK:
+                _delivery_receipt(on_delivery, False)
+                return
             if t.result() is False:
                 logger.warning("[ops_alerts] alert was NOT delivered anywhere")
             _delivery_receipt(on_delivery, t.result() is True)
 
         task.add_done_callback(_report)
+        return
+
+    if not _has_any_sink():
+        _say_no_sink()
+        _delivery_receipt(on_delivery, False)
+        return
+
+    if _on_server_loop(text, on_delivery):
         return
 
     def _run() -> None:

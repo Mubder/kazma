@@ -193,8 +193,8 @@ async def supervisor_node(
         _rounds_used = int(state.get("mission_rounds_used") or 0)
         if (
             _tid
-            and is_mission_mode(_tid)
             and iteration >= _max_iter
+            and await asyncio.to_thread(is_mission_mode, _tid)  # settings (audit 2026-10-26 AUD-111)
         ):
             _hard = int(state.get("mission_hard_rounds") or mission_hard_rounds())
             _next_used = _rounds_used + max(iteration, _max_iter)
@@ -417,7 +417,9 @@ async def supervisor_node(
 
         _prev_status = str(state.get("task_status") or TaskStatus.IDLE)
         _prev_goal = str(state.get("task_goal_summary") or "")
-        _intent_mode = classify_turn_intent(
+        # The drift check embeds the text; the rules read settings (audit 2026-10-26 AUD-111).
+        _intent_mode = await asyncio.to_thread(
+            classify_turn_intent,
             last_user_content,
             messages=messages,
             task_status=_prev_status,
@@ -449,7 +451,7 @@ async def supervisor_node(
                 from kazma_core.agent.intent.classify import classify_turn
                 from kazma_core.agent.intent.config import intent_engine_enabled
 
-                if intent_engine_enabled():
+                if await asyncio.to_thread(intent_engine_enabled):
                     _atts = list(state.get("active_attachments") or [])
                     if not _atts:
                         try:
@@ -883,7 +885,9 @@ async def supervisor_node(
     try:
         from kazma_core.agent.plan_mode import apply_plan_mode_to_turn
 
-        _hc, messages, _plan_kind = apply_plan_mode_to_turn(
+        # The chat's plan mode is settings state (audit 2026-10-26 AUD-111).
+        _hc, messages, _plan_kind = await asyncio.to_thread(
+            apply_plan_mode_to_turn,
             str(state.get("thread_id") or ""),
             hard_constraints=list(working_memory_patch.get("hard_constraints") or []),
             messages=messages,
@@ -962,7 +966,9 @@ async def supervisor_node(
         try:
             from kazma_core.models.selection import resolve_supervisor_route
 
-            routed_model, routed_client, _profile = resolve_supervisor_route(
+            # The model defaults and the registry: settings reads (audit 2026-10-26 AUD-111).
+            routed_model, routed_client, _profile = await asyncio.to_thread(
+                resolve_supervisor_route,
                 _recall_query or last_user_content,
                 model_router=model_router,
             )
@@ -989,8 +995,8 @@ async def supervisor_node(
     try:
         from kazma_core.runtime.live_llm import resolve_live_client
 
-        turn_llm, _chosen = resolve_live_client(
-            llm, state=state, model=routed_model,
+        turn_llm, _chosen = await asyncio.to_thread(
+            resolve_live_client, llm, state=state, model=routed_model,
         )
         if _chosen:
             routed_model = _chosen
@@ -1014,7 +1020,7 @@ async def supervisor_node(
     try:
         from kazma_core.memory.config import memory_per_turn_enabled
 
-        _per_turn_on = memory_per_turn_enabled()
+        _per_turn_on = await asyncio.to_thread(memory_per_turn_enabled)  # settings (audit 2026-10-26 AUD-111)
     except Exception:
         pass
 
@@ -1051,13 +1057,13 @@ async def supervisor_node(
         try:
             from kazma_core.memory.config import memory_v2_enabled
 
-            _use_v2 = memory_v2_enabled()
+            _use_v2 = await asyncio.to_thread(memory_v2_enabled)
         except Exception:
             pass
 
         if _use_v2:
             try:
-                _top_k = _rag_top_k()
+                _top_k = await asyncio.to_thread(_rag_top_k)
                 from kazma_core.memory.recall import format_recall_block, recall
 
                 _explain = None
@@ -1065,7 +1071,7 @@ async def supervisor_node(
                     from kazma_core.memory.config import read_memory_cfg
 
                     _explain = bool(
-                        ((read_memory_cfg() or {}).get("v2") or {}).get(
+                        ((await asyncio.to_thread(read_memory_cfg) or {}).get("v2") or {}).get(
                             "explain_recall", False
                         )
                     )
@@ -1082,7 +1088,7 @@ async def supervisor_node(
                     explain=_explain,
                 )
                 if not result.empty:
-                    mem_block = format_recall_block(result, explain=_explain)
+                    mem_block = await asyncio.to_thread(format_recall_block, result, explain=_explain)
                     if mem_block:
                         messages.insert(1, {"role": "system", "content": mem_block})
                         logger.info(
@@ -1104,7 +1110,7 @@ async def supervisor_node(
                             transcript_fallback_enabled,
                         )
 
-                        if transcript_fallback_enabled():
+                        if await asyncio.to_thread(transcript_fallback_enabled):
                             _tx_hits = await asyncio.to_thread(
                                 search_transcripts,
                                 _recall_query or last_user_content,
@@ -1271,8 +1277,9 @@ async def supervisor_node(
     from kazma_core.summarizer import prune_tool_outputs
 
     _lm_for_trim = state.get("last_model") or routed_model
-    _trim_budget = resolve_trim_token_budget(
-        last_model=_lm_for_trim if isinstance(_lm_for_trim, str) else None
+    _trim_budget = await asyncio.to_thread(  # the window settings (audit 2026-10-26 AUD-111)
+        resolve_trim_token_budget,
+        last_model=_lm_for_trim if isinstance(_lm_for_trim, str) else None,
     )
     messages = prune_tool_outputs(messages, max_tokens=_trim_budget)
 
@@ -1497,7 +1504,7 @@ async def supervisor_node(
         from kazma_core.llm_provider import LLMError
         from kazma_core.retry import friendly_llm_error, load_retry_config
 
-        cfg = load_retry_config()
+        cfg = await asyncio.to_thread(load_retry_config)  # settings
         # Guard: max_attempts <= 0 would make range(1, 1) empty and raise
         # last_exc=None — the LLM would never be called. Clamp to >= 1.
         cfg["max_attempts"] = max(1, int(cfg.get("max_attempts", 1) or 1))
@@ -2233,7 +2240,7 @@ async def supervisor_node(
             from kazma_core.agent.long_task import is_mission_mode, mission_hard_rounds
 
             _tid = str(state.get("thread_id") or "") or None
-            if _tid and is_mission_mode(_tid):
+            if _tid and await asyncio.to_thread(is_mission_mode, _tid):
                 _used = int(state.get("mission_rounds_used") or 0) + int(iteration or 0)
                 _hard = int(state.get("mission_hard_rounds") or mission_hard_rounds())
                 if _used < _hard:

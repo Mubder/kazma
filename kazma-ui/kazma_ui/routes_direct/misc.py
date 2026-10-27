@@ -41,7 +41,11 @@ def _attach_hitl_view(
     tool: str = "",
     state_hint: str = "",
 ) -> dict[str, Any]:
-    """Stamp ``view`` + ``gate_id`` on an approve 200/409 body. Never raises."""
+    """Stamp ``view`` + ``gate_id`` on an approve 200/409 body. Never raises.
+
+    It reads the gate registry (SQLite): the route calls it through
+    ``asyncio.to_thread`` (audit 2026-10-26 AUD-111).
+    """
     out = dict(payload)
     iid = str(
         interrupt_id
@@ -349,7 +353,8 @@ def register_misc_routes(self: Any) -> None:
         # close instead of 4003 and the session-expired redirect never fired
         # (the /ws/chat endpoint already does it in this order).
         await websocket.accept()
-        if not websocket_is_authenticated(websocket):
+        # The session lookup is a store read (audit 2026-10-26 AUD-111).
+        if not await asyncio.to_thread(websocket_is_authenticated, websocket):
             await websocket.close(code=4003, reason="Unauthorized")
             return
         from kazma_core.shutdown import is_shutting_down
@@ -490,11 +495,16 @@ def register_misc_routes(self: Any) -> None:
     async def health_check(request: Request) -> dict[str, Any]:
         from kazma_core.diagnostic_scope import read_only_diagnostic
 
-        with read_only_diagnostic("/health"):
-            return _health_body(request)
+        def _caller_is_admin() -> bool:
+            with read_only_diagnostic("/health"):
+                return _is_caller_admin(request)
 
-    def _health_body(request: Request) -> dict[str, Any]:
-        if not _is_caller_admin(request):
+        # The admin decision reads the session store; the counters below are
+        # in memory and stay on the loop (audit 2026-10-26 AUD-111).
+        return _health_body(await asyncio.to_thread(_caller_is_admin))
+
+    def _health_body(is_admin: bool) -> dict[str, Any]:
+        if not is_admin:
             return {"status": "ok"}
         if self.gateway is None:
             return {
@@ -544,9 +554,9 @@ def register_misc_routes(self: Any) -> None:
     )
     async def approve_tool(thread_id: str, request: Request) -> _JSONResponse:
         # Use shared auth: KAZMA_SECRET *or* Account API token.
-        from kazma_ui.auth import get_kazma_secret, is_authenticated
+        from kazma_ui.auth import aget_kazma_secret, is_authenticated
 
-        _secret = get_kazma_secret()
+        _secret = await aget_kazma_secret()
         if _secret and not await asyncio.to_thread(is_authenticated, request, _secret):
             return _JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -698,7 +708,7 @@ def register_misc_routes(self: Any) -> None:
                     thread_id, list(getattr(pre, "next", None) or ()), _interrupts,
                 )
                 return _JSONResponse(
-                    _attach_hitl_view(
+                    await asyncio.to_thread(_attach_hitl_view,
                         {
                             "ok": False,
                             "status": "expired",
@@ -736,7 +746,7 @@ def register_misc_routes(self: Any) -> None:
                         scope, ",".join(_always), thread_id,
                     )
                     return _JSONResponse(
-                        _attach_hitl_view(
+                        await asyncio.to_thread(_attach_hitl_view,
                             {
                                 "ok": False,
                                 "status": "refused",
@@ -799,7 +809,7 @@ def register_misc_routes(self: Any) -> None:
                     else "foreign"
                 )
                 return _JSONResponse(
-                    _attach_hitl_view(
+                    await asyncio.to_thread(_attach_hitl_view,
                         {
                             "ok": False,
                             "status": "expired" if _already != "foreign" else "not_found",
@@ -834,7 +844,7 @@ def register_misc_routes(self: Any) -> None:
                 logger.info("[HITL] gate=%s is not the live interrupt of thread=%s — refused",
                             _req_gate, thread_id)
                 return _JSONResponse(
-                    _attach_hitl_view(
+                    await asyncio.to_thread(_attach_hitl_view,
                         {
                             "ok": False,
                             "status": "expired",
@@ -932,7 +942,7 @@ def register_misc_routes(self: Any) -> None:
                     except Exception:
                         pass
                     return _JSONResponse(
-                        _attach_hitl_view(
+                        await asyncio.to_thread(_attach_hitl_view,
                             {
                                 "ok": False,
                                 "error": "This approval is no longer pending.",
@@ -1009,7 +1019,7 @@ def register_misc_routes(self: Any) -> None:
                     in ("approved", "denied", "inflight", "settled", "done")
                 ):
                     return _JSONResponse(
-                        _attach_hitl_view(
+                        await asyncio.to_thread(_attach_hitl_view,
                             {
                                 "ok": False,
                                 "error": "This approval is no longer pending.",
@@ -1070,7 +1080,7 @@ def register_misc_routes(self: Any) -> None:
 
                 _ok_iid = str(_stamp_payload.get("interrupt_id") or "")
                 return _JSONResponse(
-                    _attach_hitl_view(
+                    await asyncio.to_thread(_attach_hitl_view,
                         {
                             "ok": True,
                             "approved": approved,
@@ -1093,7 +1103,7 @@ def register_misc_routes(self: Any) -> None:
             )
         except TransitionConflict as conflict:
             return _JSONResponse(
-                _attach_hitl_view(
+                await asyncio.to_thread(_attach_hitl_view,
                     {"error": "Approval no longer pending", "reason": "not_pending", "thread_id": thread_id,
                      "hitl_state": "inflight" if conflict.actual in ("claimed", "resuming") else conflict.actual},
                     thread_id, _body_interrupt_id(body),
@@ -1162,12 +1172,12 @@ def register_misc_routes(self: Any) -> None:
     # by nothing (removed 2026-10-01).
     @self.app.post("/api/pending-approvals/clear")
     async def clear_pending_approvals_route(request: Request) -> _JSONResponse:
-        from kazma_ui.auth import get_kazma_secret, is_authenticated
+        from kazma_ui.auth import aget_kazma_secret, is_authenticated
 
-        _secret = get_kazma_secret()
+        _secret = await aget_kazma_secret()
         if _secret and not await asyncio.to_thread(is_authenticated, request, _secret):
             return _JSONResponse({"error": "Unauthorized"}, status_code=401)
-        if not _is_caller_admin(request):
+        if not await asyncio.to_thread(_is_caller_admin, request):
             return _JSONResponse({"error": "Admin role required"}, status_code=403)
 
         from kazma_ui.hitl_approval import _get_pending_approvals

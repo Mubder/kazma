@@ -1094,7 +1094,7 @@ class TelegramAdapter(BaseAdapter):
         """Transcribe audio bytes using the configured STT provider."""
         from kazma_core.voice.stt import transcribe
 
-        cfg = self._live_voice_settings()
+        cfg = await asyncio.to_thread(self._live_voice_settings)
         return await transcribe(
             audio_bytes,
             provider=str(cfg["stt_provider"]),
@@ -1106,7 +1106,7 @@ class TelegramAdapter(BaseAdapter):
         """Synthesize text to audio using the configured TTS provider."""
         from kazma_core.voice.tts import synthesize
 
-        cfg = self._live_voice_settings()
+        cfg = await asyncio.to_thread(self._live_voice_settings)
         return await synthesize(
             text,
             provider=str(cfg["tts_provider"]),
@@ -1121,7 +1121,7 @@ class TelegramAdapter(BaseAdapter):
         try:
             from kazma_core.voice.audio_format import audio_label
 
-            ext, mime = audio_label(audio_bytes, str(self._live_voice_settings().get("tts_output_format") or ""))
+            ext, mime = audio_label(audio_bytes, str((await asyncio.to_thread(self._live_voice_settings)).get("tts_output_format") or ""))
             files = {"voice": (f"reply.{ext}", audio_bytes, mime)}
             data: dict[str, Any] = {"chat_id": chat_id}
             if reply_to:
@@ -1147,7 +1147,7 @@ class TelegramAdapter(BaseAdapter):
         engine gets clean spoken text. Gated by ``voice.enabled`` and
         ``voice.tts_reply`` (Settings → Voice).
         """
-        cfg = self._live_voice_settings()
+        cfg = await asyncio.to_thread(self._live_voice_settings)
         if not text or not cfg.get("enabled") or not cfg.get("tts_reply", True):
             return
         try:
@@ -1175,7 +1175,7 @@ class TelegramAdapter(BaseAdapter):
         voice_obj = message.get("voice") or message.get("audio")
         if not voice_obj:
             return None
-        if not self._live_voice_settings().get("enabled"):
+        if not (await asyncio.to_thread(self._live_voice_settings)).get("enabled"):
             return None
         file_id = voice_obj.get("file_id")
         if not file_id:
@@ -1402,7 +1402,7 @@ class TelegramAdapter(BaseAdapter):
             from kazma_gateway.allowlists import is_gateway_admin
 
             _approver = f"telegram:{from_user.get('id', '')}"
-            if not is_gateway_admin(_approver, "telegram"):
+            if not await asyncio.to_thread(is_gateway_admin, _approver, "telegram"):
                 logger.warning(
                     "[telegram] Non-admin user %s tried to answer a %s approval.",
                     from_user.get("id"),
@@ -1482,7 +1482,7 @@ class TelegramAdapter(BaseAdapter):
             from kazma_gateway.allowlists import is_gateway_admin
 
             _tg_sender = f"telegram:{from_user.get('id', '')}"
-            if not is_gateway_admin(_tg_sender, "telegram"):
+            if not await asyncio.to_thread(is_gateway_admin, _tg_sender, "telegram"):
                 logger.warning(
                     "[telegram] Non-admin user %s tried to trigger installation.",
                     from_user.get("id"),
@@ -1521,7 +1521,7 @@ class TelegramAdapter(BaseAdapter):
             from kazma_gateway.allowlists import is_gateway_admin
 
             _dep_sender = f"telegram:{from_user.get('id', '')}"
-            if not is_gateway_admin(_dep_sender, "telegram"):
+            if not await asyncio.to_thread(is_gateway_admin, _dep_sender, "telegram"):
                 logger.warning(
                     "[telegram] Non-admin user %s tried to install a dependency.",
                     from_user.get("id"),
@@ -1699,7 +1699,7 @@ class TelegramAdapter(BaseAdapter):
             try:
                 from kazma_gateway.adapters.voice_helpers import should_send_tts_reply
 
-                if should_send_tts_reply(outbound.context_metadata):
+                if await asyncio.to_thread(should_send_tts_reply, outbound.context_metadata):
                     self._spawn(
                         self._send_tts_reply(chat_id, outbound.text, original_msg_id)
                     )

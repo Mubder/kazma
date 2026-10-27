@@ -56,8 +56,12 @@ def test_the_recursion_path_goes_through_it_and_never_swallows_silently():
     source = (REPO / "kazma-gateway" / "kazma_gateway" / "agent_handler" / "graph.py").read_text(
         encoding="utf-8")
     tree = ast.parse(source)
+    # Called directly, or handed to a thread: it writes settings, so the
+    # handler runs it off the loop (audit 2026-10-26 AUD-111).
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
-             and getattr(n.func, "id", "") == "_settle_recursion_partial"]
+             and (getattr(n.func, "id", "") == "_settle_recursion_partial"
+                  or (getattr(n.func, "attr", "") == "to_thread" and n.args
+                      and getattr(n.args[0], "id", "") == "_settle_recursion_partial"))]
     assert len(calls) == 1
     handler = next(t for t in ast.walk(tree) if isinstance(t, ast.Try)
                    and any(c in list(ast.walk(t)) for c in calls))

@@ -122,8 +122,8 @@ def register_auth_routes(self: Any) -> None:
         from kazma_ui.auth import (
             SECRET_COOKIE,
             _is_https,
+            aget_kazma_secret,
             client_address,
-            get_kazma_secret,
             verify_secret,
         )
 
@@ -142,7 +142,7 @@ def register_auth_routes(self: Any) -> None:
         # another request's call; appending to a stale list lost the entry).
         recent.append(now)
 
-        expected = get_kazma_secret()
+        expected = await aget_kazma_secret()
         if not expected:
             _release(_login_failures, client_ip, now)
             return _JSONResponse(

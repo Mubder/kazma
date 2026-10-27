@@ -1218,7 +1218,9 @@ async def _try_documents_command(
     try:
         from kazma_core.memory.config import resolve_tenant_id
 
-        tenant = resolve_tenant_id(
+        # The tenant rule reads settings (audit 2026-10-26 AUD-111).
+        tenant = await asyncio.to_thread(
+            resolve_tenant_id,
             msg.platform or "unknown",
             sender_id=str(msg.sender_id or ""),
             prefer_context=True,
@@ -1234,7 +1236,8 @@ async def _try_documents_command(
     try:
         from kazma_core.documents.ingestion import get_ingestion_service
 
-        svc = get_ingestion_service()
+        # The first call builds the service: stores opened (audit 2026-10-26 AUD-111).
+        svc = await asyncio.to_thread(get_ingestion_service)
     except Exception as exc:  # noqa: BLE001
         logger.debug("[AgentHandler] Document platform unavailable: %s", exc)
         await _send_model_reply(
@@ -1683,7 +1686,7 @@ async def _try_model_command(
         # active model for EVERY user and platform.
         from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
 
-        if not _sender_is_gateway_admin(msg):
+        if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
             await _send_model_reply(
                 msg, store, manager, thread_id,
                 "⛔ Switching the active model is admin-only. Set "
@@ -1811,7 +1814,7 @@ async def _try_skill_command(
             # injected into every later system prompt — admin-only (audit H-8).
             from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
 
-            if not _sender_is_gateway_admin(msg):
+            if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
                 await _send_model_reply(
                     msg, store, manager, thread_id,
                     "⛔ Installing skills is admin-only. Set "
@@ -1906,7 +1909,7 @@ async def _try_skill_command(
             # 2026-10-01.
             from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
 
-            if not _sender_is_gateway_admin(msg):
+            if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
                 await _send_model_reply(
                     msg, store, manager, thread_id,
                     "⛔ Uninstalling skills is admin-only. Set "
@@ -1928,7 +1931,7 @@ async def _try_skill_command(
                 return True
             from kazma_core.agent_skills.discovery import get_skill
 
-            skill = get_skill(rest.split()[0])
+            skill = await asyncio.to_thread(get_skill, rest.split()[0])  # a folder walk (audit 2026-10-26 AUD-111)
             if skill is None:
                 await _send_model_reply(
                     msg, store, manager, thread_id,

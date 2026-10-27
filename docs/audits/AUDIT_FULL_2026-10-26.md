@@ -1138,8 +1138,16 @@ regression test, except where noted:
 - Not done here:
   - AUD-062: the variable was never read, so it was removed from the docs
     rather than wired in.
-- In progress: AUD-111 (the product-wide loop-stall inference) and the
-  result-must-be-used gate.
+- Also fixed (2026-10-27, second wave):
+  - AUD-111: the loop-stall inference follows imports across every product
+    area. About 230 call sites moved off the loop. Two functions are
+    declared as keeping their read off the loop, each with a behaviour
+    test. The gate still cannot see chat-store calls on receivers it
+    cannot resolve.
+  - The result-must-be-used gate (pattern 2): it found 132 sites. Two were
+    bugs and are fixed: the importer's document restore, and the
+    "interrupt surfaced" log over a refused approval card. The rest are
+    declared with reasons.
 
 - Extend the import-following loop-stall inference (§35 M34) to every area
   (AUD-111), retiring name-matching gates.

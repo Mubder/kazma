@@ -1076,6 +1076,18 @@ _LOOP_STALL_HELPERS = frozenset({
     "record_instant_turn", "_persist_instant_turn", "_persist_reply",
     "client_tenant_spoof_allowed", "_per_minute", "snapshot_capacity",
     "stamp_last_platform",
+    # ... and the gate registry's sync API (kazma_core.safety.hitl_gates,
+    # SQLite, several BEGIN IMMEDIATE): async code awaits its *_async twins.
+    # The journal stamped every HITL and done frame through it on the loop
+    # (gate_view), and the approve route's 200/409 body too (AUD-111). The
+    # live-voice socket's session lookup is a chat-store read.
+    "register_gate", "claim_gate", "mark_resuming", "settle_gate", "fail_gate",
+    "supersede_gate", "gate_for", "live_gates", "display_gates", "pending_gates",
+    "timeout_gate", "boot_sweep", "ensure_gate_schema", "resolve_voice_session",
+    # The chat upload's write (up to 20 MB) and the documents settings
+    # snapshot the maintenance loop read every pass (AUD-111): a file write
+    # and ConfigStore.snapshot, which the names above cannot infer.
+    "store_uploaded_attachment", "get_document_config", "get_document_rollout",
     # The document actions' own prelude and postlude (AUD-110): the rollout
     # read, the ACL'd version lookup, the manifest read, the copy of the
     # original, the artifact's catalog write and the whole intake.
@@ -1359,7 +1371,28 @@ _CROSS_MODULE_AREAS: dict[str, tuple[str, ...]] = {
                   "kazma-core/kazma_core/agent/tool_builtins/knowledge.py",
                   "kazma-core/kazma_core/web_acquire/crawl_jobs.py",
                   "kazma-ui/kazma_ui/kb_api.py"),
+    # The full audit of 2026-10-26 (AUD-111) closed the rest, package by
+    # package, with the inference that follows methods, sibling closures,
+    # modules imported whole and settings-store use (below): the web app
+    # (routes, SSE chat, voice, X, settings, the journal's gate views), the
+    # chat apps (adapters, the turn handler, slash commands), the core (the
+    # supervisor, tool worker and registry, the LLM provider and model
+    # registry, MCP, runs, documents, backup, observability, voice, web
+    # acquisition, X, the CLI), the skills, the TUI and the CLI.
+    "web_app": ("kazma-ui/kazma_ui/",),
+    "chat_apps": ("kazma-gateway/kazma_gateway/",),
+    "core": ("kazma-core/kazma_core/",),
+    "skills": ("kazma-skills/kazma_skills/",),
+    "tui": ("kazma-tui/kazma_tui/",),
+    "cli": ("kazma-cli/kazma_cli/",),
 }
+
+#: The areas also held to the first, name-following inference (the memory
+#: path's M34 rule: a call matched by a bound name, ``x._consume()`` too).
+#: The rest are held to the resolving inference alone: matched by name, a
+#: method named like a stalling function (``Path(...).resolve()`` beside an
+#: imported ``resolve``) would be taken for it.
+_NAME_FOLLOWING_AREAS = frozenset({"memory", "swarm", "scheduled", "time_travel", "knowledge"})
 
 
 @functools.lru_cache(maxsize=1)
@@ -1376,19 +1409,460 @@ def _product_trees() -> tuple[dict[str, ast.AST], dict[str, Path], frozenset[str
     return trees, paths, frozenset(_qualified_stall_helpers(trees))
 
 
+# ── The import-following inference, product-wide (audit 2026-10-26 AUD-111) ──
+#
+# The memory-path inference above follows only bare-name calls into
+# module-level functions, from helper names alone. The audit found the same
+# class everywhere else through shapes it cannot see:
+#   * a method: ``self._live_voice_settings()``, ``LLMProvider._known_models_for(...)``
+#     (settings, vault and discovered models on every model id with a "/");
+#   * a sibling closure of the route: ``misc.py``'s ``_health_body`` ->
+#     ``_is_caller_admin`` -> ``admin_decision`` -- nested defs of the SYNC
+#     method that registers the routes, called from the async route beside them;
+#   * a module imported whole: ``ops_alerts.alert(...)``;
+#   * a settings-store read that is in no list: ``is_gateway_admin`` reads
+#     ``get_config_store().get(...)`` on every chat-app button press.
+# So a function is a stall when it calls a listed helper (by name, or by an
+# import under another name) OR uses the settings store itself (the same
+# receiver rule as the settings gate below), or calls such a function --
+# resolved through its own module's bindings: a module function, an import,
+# ``self``/``cls``/a class's method, a module imported whole -- to a fixed
+# point. In async code a call is on the loop unless it is inside a nested def
+# or lambda (what to_thread runs); a decorator or a default argument is
+# evaluated where the function is defined, not in its body.
+
+
+class _StallModule:
+    """One module's bindings, enough to resolve a call to ``module:qualname``."""
+
+    def __init__(self, name: str, tree: ast.AST, is_pkg: bool, module_names: set[str]) -> None:
+        self.name, self.tree = name, tree
+        self.imports: dict[str, str] = {}
+        self.modules: dict[str, str] = {}
+        pkg = name if is_pkg else name.rpartition(".")[0]
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:
+                    parts = pkg.split(".")
+                    if node.level > 1:
+                        parts = parts[: -(node.level - 1)]
+                    base = ".".join(parts + ([base] if base else []))
+                if not base.startswith("kazma_"):
+                    continue
+                for a in node.names:
+                    local, full = a.asname or a.name, f"{base}.{a.name}"
+                    if full in module_names:
+                        self.modules[local] = full
+                    else:
+                        self.imports[local] = f"{base}:{a.name}"
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.name.startswith("kazma_") and a.asname:
+                        self.modules[a.asname] = a.name
+        body = getattr(tree, "body", [])
+        self.funcs = {n.name for n in body if isinstance(n, ast.FunctionDef)}
+        self.classes = {n.name for n in body if isinstance(n, ast.ClassDef)}
+
+    def resolve(self, call: ast.Call, cls: str | None) -> str | None:
+        fn = call.func
+        if isinstance(fn, ast.Name):
+            if fn.id in self.funcs:
+                return f"{self.name}:{fn.id}"
+            return self.imports.get(fn.id)
+        if isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name):
+            x, attr = fn.value.id, fn.attr
+            if x in ("self", "cls") and cls:
+                return f"{self.name}:{cls}.{attr}"
+            if x in self.classes:
+                return f"{self.name}:{x}.{attr}"
+            if x in self.modules:
+                return f"{self.modules[x]}:{attr}"
+            if x in self.imports:
+                return f"{self.imports[x]}.{attr}"
+        return None
+
+
+def _store_bound_names(fn: ast.AST, mod: _StallModule | None = None) -> set[str]:
+    """Names a function binds from ``get_config_store()`` (or an alias of it)."""
+    names: set[str] = set()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            f = node.value.func
+            called = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+            if mod is not None and isinstance(f, ast.Name) and f.id in mod.imports:
+                called = mod.imports[f.id].rpartition(":")[2]
+            if called == "get_config_store":
+                names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
+def _body_calls(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
+    """The calls made when *fn* runs: its own body, the lambdas in it, and the
+    nested defs it calls by name -- never a nested def it only hands on
+    (``Thread(target=...)``, ``to_thread(...)``): that runs elsewhere."""
+    def own(nodes: list[ast.AST]) -> tuple[list[ast.Call], dict[str, ast.FunctionDef]]:
+        calls: list[ast.Call] = []
+        defs: dict[str, ast.FunctionDef] = {}
+        stack = list(nodes)
+        while stack:
+            n = stack.pop()
+            if isinstance(n, ast.FunctionDef):
+                defs[n.name] = n
+                continue
+            if isinstance(n, (ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(n, ast.Call):
+                calls.append(n)
+            stack.extend(ast.iter_child_nodes(n))
+        return calls, defs
+
+    calls, defs = own(list(fn.body))
+    done: set[str] = set()
+    i = 0
+    while i < len(calls):
+        c = calls[i]
+        i += 1
+        if isinstance(c.func, ast.Name) and c.func.id in defs and c.func.id not in done:
+            done.add(c.func.id)
+            more, inner = own(list(defs[c.func.id].body))
+            calls += more
+            defs.update({k: v for k, v in inner.items() if k not in defs})
+    return calls
+
+
+def _is_stall_seed(call: ast.Call, bound: set[str], resolved: str | None) -> bool:
+    """A listed helper by name (or reached under another name), or the settings store."""
+    fn = call.func
+    if _called_name(call, {}) in _LOOP_STALL_HELPERS:
+        return True
+    if resolved and resolved.rpartition(":")[2].rpartition(".")[2] in _LOOP_STALL_HELPERS:
+        return True
+    return (isinstance(fn, ast.Attribute) and fn.attr in _SYNC_STORE_METHODS
+            and _is_store_receiver(fn.value, bound))
+
+
+#: Sync functions that reach a helper only when NOT on a loop: called on one,
+#: they hand every read to a task or a thread. Each names the behavioural test
+#: that runs it on a real loop and proves it. The graph treats them as clean;
+#: anything else they reach on the loop is still found through their callers.
+_OFF_THE_LOOP_WHEN_ON_IT: dict[str, str] = {
+    "kazma_core.observability.ops_alerts:_dispatch": (
+        "on a running loop it spawns the delivery task, which asks _has_any_sink "
+        "(a settings read) in a thread; only the off-loop branch asks it inline -- "
+        "tests/test_ops_alert_delivery.py::test_an_alert_raised_on_the_loop_reads_no_setting_there"
+    ),
+    "kazma_core.swarm.engine:SwarmEngine._close_open_checkpoint": (
+        "on a running loop it settles the pipeline's gate rows in a background "
+        "to_thread task; only with no loop in the thread does it settle inline -- "
+        "tests/test_hitl_gate_swarm_pipeline.py::"
+        "test_closing_a_checkpoint_on_the_loop_settles_its_gates_in_a_thread"
+    ),
+}
+
+
+#: Calls, by (file, called name), that reach a helper only on a branch these
+#: call sites never take, each with why. The function stays a stall for
+#: every other caller.
+_CALLS_THAT_READ_NOTHING_HERE: dict[tuple[str, str], str] = {
+    ("kazma-core/kazma_core/proxy/base.py", "get_scraping_client"): (
+        "probe_proxy passes proxy=; the active-route lookup (a settings read) runs "
+        "only without it. Building the client inside the 15 s deadline and after "
+        "the capacity admission is what tests/test_proxy_routing_safety.py's "
+        "deadline and refusal tests hold"
+    ),
+}
+
+
+def _extended_stalls(mods: dict[str, _StallModule]) -> frozenset[str]:
+    """Every ``module:function`` / ``module:Class.method`` (sync) reaching a seed."""
+    graph: dict[str, set[str]] = {}
+    for m, mod in mods.items():
+        def add(q: str, fn: ast.FunctionDef, cls: str | None, mod: _StallModule = mod) -> None:
+            if q in _OFF_THE_LOOP_WHEN_ON_IT:
+                graph[q] = set()
+                return
+            bound = _store_bound_names(fn, mod)
+            callees: set[str] = set()
+            for node in _body_calls(fn):
+                r = mod.resolve(node, cls)
+                if _is_stall_seed(node, bound, r):
+                    callees.add("<seed>")
+                elif r:
+                    callees.add(r)
+            graph[q] = callees
+
+        for n in getattr(mod.tree, "body", []):
+            if isinstance(n, ast.FunctionDef):
+                add(f"{m}:{n.name}", n, None)
+            elif isinstance(n, ast.ClassDef):
+                for k in n.body:
+                    if isinstance(k, ast.FunctionDef):
+                        add(f"{m}:{n.name}.{k.name}", k, n.name)
+    stalls = {q for q, callees in graph.items() if "<seed>" in callees}
+    changed = True
+    while changed:
+        changed = False
+        for q, callees in graph.items():
+            if q not in stalls and callees & stalls:
+                stalls.add(q)
+                changed = True
+    return frozenset(stalls)
+
+
+def _scope_defs(fn: ast.AST) -> list[ast.FunctionDef]:
+    """The sync defs a function's own body defines (not those of nested defs)."""
+    out: list[ast.FunctionDef] = []
+    stack = list(getattr(fn, "body", []))
+    while stack:
+        n = stack.pop()
+        if isinstance(n, ast.FunctionDef):
+            out.append(n)
+        elif not isinstance(n, (ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            stack.extend(ast.iter_child_nodes(n))
+    return out
+
+
+def _extended_loop_calls(mod: _StallModule, stalls: frozenset[str]) -> list[tuple[int, str]]:
+    """Calls made on the event loop that reach a seed: (line, what was called)."""
+    found: list[tuple[int, str]] = []
+
+    def reaches(call: ast.Call, cls: str | None, bound: set[str], local: frozenset[str]) -> str | None:
+        r = mod.resolve(call, cls)
+        fn = call.func
+        if isinstance(fn, ast.Name) and fn.id in local:
+            return fn.id
+        if _is_stall_seed(call, bound, r) or (r is not None and r in stalls):
+            if isinstance(fn, ast.Name):
+                return fn.id
+            return (r.split(":", 1)[1] if r else getattr(fn, "attr", "?"))
+        return None
+
+    def scope_stalls(fn: ast.AST, cls: str | None, outer: frozenset[str]) -> frozenset[str]:
+        """Nested sync defs of *fn* reaching a seed, through each other too."""
+        defs = _scope_defs(fn)
+        outer_bound = _store_bound_names(fn, mod)
+        local: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for d in defs:
+                if d.name in local:
+                    continue
+                bound = outer_bound | _store_bound_names(d, mod)
+                known = outer | frozenset(local)
+                if any(reaches(c, cls, bound, known) for c in _body_calls(d)):
+                    local.add(d.name)
+                    changed = True
+        return outer | frozenset(local)
+
+    def walk(node: ast.AST, in_async: bool, cls: str | None, local: frozenset[str]) -> None:
+        if isinstance(node, ast.ClassDef):
+            for d in node.decorator_list:
+                walk(d, in_async, cls, local)
+            for s in node.body:
+                walk(s, False, node.name, local)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Decorators and defaults run where the function is defined.
+            for d in [*node.decorator_list, node.args]:
+                walk(d, in_async, cls, local)
+            inner = scope_stalls(node, cls, local)
+            for s in node.body:
+                walk(s, isinstance(node, ast.AsyncFunctionDef), cls, inner)
+            return
+        if isinstance(node, ast.Lambda):
+            walk(node.args, in_async, cls, local)
+            walk(node.body, False, cls, local)  # what to_thread runs
+            return
+        if in_async and isinstance(node, ast.Call):
+            # A direct settings-store call in async code is the settings
+            # gate's to report; this one names the wrappers it cannot see.
+            fn = node.func
+            direct_store = (isinstance(fn, ast.Attribute) and fn.attr in _SYNC_STORE_METHODS)
+            what = None if direct_store else reaches(node, cls, set(), local)
+            if what:
+                found.append((node.lineno, what))
+        for child in ast.iter_child_nodes(node):
+            walk(child, in_async, cls, local)
+
+    walk(mod.tree, False, None, frozenset())
+    return sorted(found)
+
+
+@functools.lru_cache(maxsize=1)
+def _extended_index() -> tuple[dict[str, _StallModule], dict[str, Path], frozenset[str]]:
+    trees, paths, _ = _product_trees()
+    names = set(trees)
+    mods = {m: _StallModule(m, t, paths[m].name == "__init__.py", names) for m, t in trees.items()}
+    return mods, paths, _extended_stalls(mods)
+
+
+def _in_area(rel: str, prefixes: tuple[str, ...]) -> bool:
+    return any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in prefixes)
+
+
 @pytest.mark.parametrize("area", sorted(_CROSS_MODULE_AREAS))
 def test_an_area_reaches_no_helper_through_another_module(area: str):
     trees, paths, stalls = _product_trees()
+    mods, _, ext_stalls = _extended_index()
     offenders: list[str] = []
     for mod, tree in trees.items():
         rel = _rel(paths[mod])
-        if not any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in _CROSS_MODULE_AREAS[area]):
+        if not _in_area(rel, _CROSS_MODULE_AREAS[area]):
             continue
-        extra = _bound_stall_names(mod, tree, set(stalls))
-        offenders += [f"{rel}:{line} {name}()" for line, name in _loop_stall_helper_calls(tree, extra)]
+        found = {
+            (line, name) for line, name in _extended_loop_calls(mods[mod], ext_stalls)
+            if (rel, name.rpartition(".")[2]) not in _CALLS_THAT_READ_NOTHING_HERE
+        }
+        if area in _NAME_FOLLOWING_AREAS:
+            extra = _bound_stall_names(mod, tree, set(stalls))
+            found |= set(_loop_stall_helper_calls(tree, extra))
+        offenders += [f"{rel}:{line} {name}()" for line, name in sorted(found)]
     assert not offenders, (
         f"Async {area} code reaches a loop-stall helper through another module's function.\n"
-        "Fix: `await asyncio.to_thread(...)`.\n  " + "\n  ".join(offenders))
+        "Fix: `await asyncio.to_thread(...)`, or make a route that never awaits a plain `def`.\n  "
+        + "\n  ".join(offenders))
+
+
+def test_every_product_module_is_in_an_area():
+    """A new package or folder is held to the rule the day it is added."""
+    _, paths, _ = _product_trees()
+    prefixes = tuple(p for ps in _CROSS_MODULE_AREAS.values() for p in ps)
+    outside = sorted(_rel(p) for p in paths.values() if not _in_area(_rel(p), prefixes))
+    assert not outside, outside
+
+
+def test_each_off_the_loop_declaration_names_a_function_and_its_proof():
+    """A declaration that outlives its function, or names a test that does
+    not exist, excuses nothing."""
+    mods, _, _ = _extended_index()
+    for qualname, reason in _OFF_THE_LOOP_WHEN_ON_IT.items():
+        mod, _, name = qualname.partition(":")
+        assert mod in mods, qualname
+        cls, _, meth = name.rpartition(".")
+        body = getattr(mods[mod].tree, "body", [])
+        scope = next((n.body for n in body if isinstance(n, ast.ClassDef) and n.name == cls), body) if cls else body
+        assert any(isinstance(n, ast.FunctionDef) and n.name == meth for n in scope), qualname
+        test_file, _, test_name = reason.rpartition("tests/")[2].partition("::")
+        source = (REPO_ROOT / "tests" / test_file).read_text(encoding="utf-8")
+        assert f"def {test_name}(" in source, (qualname, test_file, test_name)
+    # A call-site excuse is stale once that file no longer makes the call.
+    mods, paths, stalls = _extended_index()
+    by_rel = {_rel(p): m for m, p in paths.items()}
+    for (rel, name), _why in _CALLS_THAT_READ_NOTHING_HERE.items():
+        found = _extended_loop_calls(mods[by_rel[rel]], stalls)
+        assert any(n.rpartition(".")[2] == name for _, n in found), (rel, name)
+
+
+#: The shapes AUD-111 found, each in two modules: the first inference saw none.
+_AUD111_SHAPES = {
+    "kazma_x.store": (
+        "from kazma_core.config_store import get_config_store\n"
+        "def admin_decision(request):\n"
+        "    return validate_session(request)\n"
+        "def is_gateway_admin(sender):\n"
+        "    return sender in get_config_store().get('connectors.x.allowed', '')\n"
+        "class Provider:\n"
+        "    def _known_models_for(self, url):\n"
+        "        cs = get_config_store()\n"
+        "        return cs.get('registry.discovered_models')\n"
+    ),
+    "kazma_x.routes": (
+        "import asyncio\n"
+        "from kazma_x import store\n"
+        "from kazma_x.store import Provider, admin_decision, is_gateway_admin\n"
+        "class Routes:\n"
+        "    def register(self):\n"
+        "        def _is_caller_admin(request):\n"
+        "            return admin_decision(request) == 'ok'\n"
+        "        def _health_body(request):\n"
+        "            return {'admin': _is_caller_admin(request)}\n"
+        "        async def health(request):\n"
+        "            return _health_body(request)\n"                              # 11: sibling closure
+        "        async def health_fixed(request):\n"
+        "            return await asyncio.to_thread(_health_body, request)\n"
+        "    def _voice(self):\n"
+        "        return store.is_gateway_admin('x')\n"
+        "    async def on_press(self, sender):\n"
+        "        if not is_gateway_admin(sender):\n"                           # 17: settings-store seed
+        "            return\n"
+        "        return self._voice()\n"                                       # 19: a method
+        "    async def chat(self, url):\n"
+        "        return Provider._known_models_for(None, url)\n"               # 21: a class's method
+        "    async def ops(self):\n"
+        "        store.is_gateway_admin('x')\n"                                # 23: a module imported whole
+        "        await asyncio.to_thread(store.is_gateway_admin, 'x')\n"
+        "    @staticmethod\n"
+        "    async def route(dep=store.is_gateway_admin('default')):\n"       # defined, not run, here
+        "        return dep\n"
+    ),
+}
+
+
+def _shape_modules() -> dict[str, _StallModule]:
+    trees = {m: ast.parse(src) for m, src in _AUD111_SHAPES.items()}
+    return {m: _StallModule(m, t, False, set(trees) | {"kazma_x"}) for m, t in trees.items()}
+
+
+def test_the_resolving_inference_finds_each_aud111_shape():
+    """Negative control: each planted wrapper is found, the threaded twin is
+    not, and the first inference -- bare names into module functions -- sees
+    none of them."""
+    mods = _shape_modules()
+    stalls = _extended_stalls(mods)
+    assert {"kazma_x.store:admin_decision", "kazma_x.store:is_gateway_admin",
+            "kazma_x.store:Provider._known_models_for", "kazma_x.routes:Routes._voice"} <= stalls
+    found = _extended_loop_calls(mods["kazma_x.routes"], stalls)
+    assert [line for line, _ in found] == [11, 17, 19, 21, 23], found
+
+    trees = {m: ast.parse(src) for m, src in _AUD111_SHAPES.items()}
+    old = _qualified_stall_helpers(trees)
+    extra = _bound_stall_names("kazma_x.routes", trees["kazma_x.routes"], old)
+    assert [line for line, _ in _loop_stall_helper_calls(trees["kazma_x.routes"], extra)] == []
+
+
+def test_a_nested_def_handed_to_a_thread_is_not_its_parents_call():
+    """consolidator's shape: a sync function starts a thread whose target does
+    the I/O; calling the function is not the I/O. A nested def it CALLS is."""
+    src = (
+        "import asyncio, threading\n"
+        "def schedule(msgs):\n"
+        "    def _run():\n"
+        "        recall(msgs)\n"
+        "    threading.Thread(target=_run).start()\n"
+        "def inline(msgs):\n"
+        "    def _run():\n"
+        "        recall(msgs)\n"
+        "    return _run()\n"
+        "async def turn(msgs):\n"
+        "    schedule(msgs)\n"
+        "    inline(msgs)\n"
+    )
+    mods = {"kazma_x.c": _StallModule("kazma_x.c", ast.parse(src), False, {"kazma_x.c"})}
+    stalls = _extended_stalls(mods)
+    assert "kazma_x.c:inline" in stalls and "kazma_x.c:schedule" not in stalls
+    assert _extended_loop_calls(mods["kazma_x.c"], stalls) == [(12, "inline")]
+
+
+def test_a_function_declared_off_the_loop_is_clean_and_its_callers_too(monkeypatch):
+    """The declaration excuses the declared function alone."""
+    src = (
+        "def _dispatch(text):\n"
+        "    return _has_any_sink()\n"
+        "def alert(text):\n"
+        "    _dispatch(text)\n"
+        "    return _ops_channels()\n"
+        "async def report():\n"
+        "    alert('x')\n"
+        "    _dispatch('x')\n"
+    )
+    mods = {"kazma_x.a": _StallModule("kazma_x.a", ast.parse(src), False, {"kazma_x.a"})}
+    monkeypatch.setitem(_OFF_THE_LOOP_WHEN_ON_IT, "kazma_x.a:_dispatch", "planted")
+    stalls = _extended_stalls(mods)
+    assert "kazma_x.a:_dispatch" not in stalls
+    # alert still reaches _ops_channels inline: found.
+    assert _extended_loop_calls(mods["kazma_x.a"], stalls) == [(7, "alert")]
 
 
 def test_the_cross_module_inference_follows_the_undo_chain():

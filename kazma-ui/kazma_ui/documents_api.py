@@ -1019,7 +1019,7 @@ def create_documents_router() -> APIRouter:
 
         # The trail names every document, job and actor of the tenant,
         # including documents the caller cannot read: an operator view.
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied is not None:
             return denied
         svc = _svc(request)
@@ -1056,7 +1056,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
         _tenant, actor, _ = await _resolve_scope(request)
@@ -1080,7 +1080,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
         _tenant, actor, _ = await _resolve_scope(request)

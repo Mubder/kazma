@@ -904,18 +904,34 @@ def _restore_document_store(
     if staged_db.exists() and metadata == "postgres":
         _log("  documents.db not installed: the target's document catalog is on Postgres")
     elif staged_db.exists():
-        # Back up any existing live documents.db before overwriting.
+        # Both copies answer whether they worked (audit 2026-10-26,
+        # result-must-be-used gate). Both answers were dropped: a failed
+        # safety copy went on to overwrite the live catalog with no backup of
+        # it, and a failed install -- ``_backup_one`` removes its destination
+        # when a copy fails, and the destination WAS the live file -- left
+        # the target with no documents.db while the log said "restored".
         live_db = target_root / "documents.db"
         if live_db.exists():
-            backup_dir = Path(report.backup_path) if report.backup_path else target_root
-            try:
-                _backup_one(live_db, backup_dir / "documents.db")
-            except Exception:  # noqa: BLE001
-                pass
+            backup_to = (
+                Path(report.backup_path) / "documents.db" if report.backup_path
+                else target_root / "documents.db.pre-import"
+            )
+            if not _backup_one(live_db, backup_to):
+                raise RuntimeError(
+                    f"could not back up the live documents.db to {backup_to}; "
+                    "it was left as it was"
+                )
+        # Copied beside the live file, then swapped in: a copy that fails
+        # never touches it.
+        incoming = live_db.with_name(live_db.name + ".importing")
+        if not _backup_one(staged_db, incoming):
+            raise RuntimeError(
+                "could not copy the bundle's documents.db; the live one was left as it was"
+            )
         for suffix in ("-wal", "-shm", "-journal"):
             stale = live_db.with_name(live_db.name + suffix)
             stale.unlink(missing_ok=True)
-        _backup_one(staged_db, live_db)
+        os.replace(incoming, live_db)
         _log("  restored documents.db")
 
     if staged_tree.exists():

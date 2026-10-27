@@ -96,7 +96,9 @@ async def upload_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
     mime = _sniff_mime(data, declared)
     kind = _classify(mime)
     original = file.filename or "upload"
-    attach_id = store_uploaded_attachment(data, original)
+    # Up to 20 MB written to disk (and the data folder resolved): off the
+    # loop (audit 2026-10-26 AUD-111).
+    attach_id = await asyncio.to_thread(store_uploaded_attachment, data, original)
     logger.info(
         "[chat-upload] stored %s (%s, %d bytes) as %s",
         original, mime, len(data), attach_id,

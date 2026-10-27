@@ -85,12 +85,15 @@ async def try_session_command(
         return True
 
     if verb in {"list", "list_all"}:
-        entries = list_directory(include_archived=(verb == "list_all"), limit=40)
+        # The sessions directory reads the whole chat list (audit 2026-10-26 AUD-111).
+        entries = await asyncio.to_thread(
+            list_directory, include_archived=(verb == "list_all"), limit=40
+        )
         await _reply(format_session_list(entries, current_thread_id=thread_id))
         return True
 
     if verb == "here":
-        hit = resolve_session(thread_id, include_archived=True)
+        hit = await asyncio.to_thread(resolve_session, thread_id, include_archived=True)
         title = hit.title if hit else thread_id
         short = hit.short_id if hit else thread_id[-8:]
         await _reply(
@@ -101,7 +104,8 @@ async def try_session_command(
         return True
 
     if verb == "new":
-        entry = create_named_session(
+        entry = await asyncio.to_thread(
+            create_named_session,
             platform=msg.platform,
             sender_id=sender,
             title=rest,
@@ -135,9 +139,13 @@ async def try_session_command(
         return True
 
     # switch
-    hit = resolve_session(rest, current_thread_id=thread_id, include_archived=False)
+    hit = await asyncio.to_thread(
+        resolve_session, rest, current_thread_id=thread_id, include_archived=False
+    )
     if hit is None:
-        hit = resolve_session(rest, current_thread_id=thread_id, include_archived=True)
+        hit = await asyncio.to_thread(
+            resolve_session, rest, current_thread_id=thread_id, include_archived=True
+        )
     if hit is None:
         await _reply(
             f"No season matches `{rest}`.\n"
@@ -150,7 +158,7 @@ async def try_session_command(
     # gates (the in-thread approve path checks no sender identity).
     from kazma_core.sessions.directory import sender_may_take_over
 
-    allowed, owner = sender_may_take_over(sender, hit.thread_id)
+    allowed, owner = await asyncio.to_thread(sender_may_take_over, sender, hit.thread_id)
     if not allowed:
         await _reply(
             f"🔒 That season belongs to another user (`{owner[:6]}…`).\n"

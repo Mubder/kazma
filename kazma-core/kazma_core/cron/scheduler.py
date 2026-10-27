@@ -205,7 +205,18 @@ def annotate_fire_times(next_run: datetime | str | None, *, zone: tzinfo | None 
     Compact ``5m``/ISO results were still returned as UTC ISO only, so the
     agent said "fires at 01:15:19 UTC" even when the operator zone was Kuwait.
     Pass *zone*/*zone_name* resolved once; without them this reads settings.
+    Async code resolves the zone off the loop and calls
+    :func:`_fire_times_in_zone` (audit 2026-10-26 AUD-111).
     """
+    if zone is None or zone_name is None:
+        if next_run is None or next_run == "":
+            return {}
+        zone, zone_name = resolve_cron_zone()
+    return _fire_times_in_zone(next_run, zone, zone_name)
+
+
+def _fire_times_in_zone(next_run: datetime | str | None, zone: tzinfo, zone_name: str) -> dict[str, str]:
+    """:func:`annotate_fire_times` in a zone already resolved: no settings read."""
     if next_run is None or next_run == "":
         return {}
     try:
@@ -214,8 +225,6 @@ def annotate_fire_times(next_run: datetime | str | None, *, zone: tzinfo | None 
         return {}
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
-    if zone is None or zone_name is None:
-        zone, zone_name = resolve_cron_zone()
     utc = dt.astimezone(UTC)
     local = dt.astimezone(zone)
     return {
@@ -633,7 +642,7 @@ class CronScheduler:
             "destination": destination_label(delivery_target, platform),
             "version": job.version,
         }
-        out.update(annotate_fire_times(resolved.first, zone=zone, zone_name=zone_name))
+        out.update(_fire_times_in_zone(resolved.first, zone, zone_name))
         return out
 
     async def list_jobs(self, *, tenant_id: str | None = None, scoped: bool | None = None,
@@ -650,7 +659,7 @@ class CronScheduler:
         out = []
         for job in jobs:
             d = job.to_dict()
-            d.update(annotate_fire_times(job.next_run, zone=zone, zone_name=zone_name))
+            d.update(_fire_times_in_zone(job.next_run, zone, zone_name))
             out.append(d)
         return out
 

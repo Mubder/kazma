@@ -134,7 +134,7 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
         # Resolve bot identity env (no-op when disabled).
         from kazma_core.git_identity import get_commit_env
 
-        commit_env = get_commit_env()
+        commit_env = await asyncio.to_thread(get_commit_env)  # settings and a token lookup (audit 2026-10-26 AUD-111)
 
         # Stage files
         add_args = ["git", "add", "."] if not files else ["git", "add"] + files

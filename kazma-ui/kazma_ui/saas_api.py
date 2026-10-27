@@ -85,7 +85,7 @@ def create_saas_router() -> APIRouter:
 
     @router.post("/users")
     async def create_platform_user(request: Request) -> JSONResponse:
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
         try:
@@ -111,7 +111,10 @@ def create_saas_router() -> APIRouter:
                     {"error": "tenant_id: letters, digits, '.', '_' or '-', up to 64"},
                     status_code=400,
                 )
-            user = create_local_user(username, password, role=role, tenant_id=tenant_id)
+            # A user-store write and a PBKDF2 hash (audit 2026-10-26 AUD-111).
+            user = await asyncio.to_thread(
+                create_local_user, username, password, role=role, tenant_id=tenant_id
+            )
             return JSONResponse({
                 "status": "ok",
                 "user": {
@@ -154,7 +157,7 @@ def create_saas_router() -> APIRouter:
 
     @router.patch("/users/{username}")
     async def patch_platform_user(username: str, request: Request) -> JSONResponse:
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
         try:
@@ -231,7 +234,7 @@ def create_saas_router() -> APIRouter:
 
     @router.post("/tenants")
     async def create_tenant(request: Request) -> JSONResponse:
-        denied = _require_admin(request)
+        denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
         try:

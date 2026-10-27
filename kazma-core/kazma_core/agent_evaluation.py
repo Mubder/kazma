@@ -6,6 +6,7 @@ completion and grounding. Mechanical checks alone never certify accuracy.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
@@ -145,7 +146,9 @@ async def evaluate_case(case: dict[str, Any], client: Any, *, model: str, system
         tool_executor=FixtureExecutor(), cost_breaker=controls, authority=controls, tracer=controls,
         hitl_config={"enabled": True, "auto_deny": True, "require_approval_for": list(CANONICAL_DANGER_TOOLS)},
     )
-    state = initial_supervisor_state(thread_id=f"live-eval-{case['id']}", max_iterations=5)
+    state = await asyncio.to_thread(  # settings reads (audit 2026-10-26 AUD-111)
+        initial_supervisor_state, thread_id=f"live-eval-{case['id']}", max_iterations=5
+    )
     state["messages"] = [{"role": "user", "content": case["prompt"]}]
     started = time.monotonic()
     turn = await run_agent_turn(

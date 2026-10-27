@@ -853,7 +853,8 @@ async def _deliver_resume(
         )
 
     if chained is not None:
-        prompt = _build_approval_prompt(chained, thread_id, platform=platform)
+        # The card reads the HITL settings and the gate registry (AUD-111).
+        prompt = await asyncio.to_thread(_build_approval_prompt, chained, thread_id, platform=platform)
         prompt_text, send_ctx = _prepare_outbound(platform, prompt["text"], ctx)
         if prompt.get("markup"):
             if platform == "telegram":

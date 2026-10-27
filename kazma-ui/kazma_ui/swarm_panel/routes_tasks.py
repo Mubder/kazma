@@ -775,7 +775,7 @@ def register_tasks_routes(
     @router.post("/api/swarm/tasks/{task_id}/approve")
     async def swarm_approve_checkpoint(task_id: str, request: Request) -> JSONResponse:
         """Approve an HITL checkpoint and resume the pipeline."""
-        _denied = _require_admin(request)
+        _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
         engine = _current_engine()
@@ -869,7 +869,7 @@ def register_tasks_routes(
     @router.post("/api/swarm/tasks/{task_id}/reject")
     async def swarm_reject_checkpoint(task_id: str, request: Request) -> JSONResponse:
         """Reject an HITL checkpoint and abort the pipeline."""
-        _denied = _require_admin(request)
+        _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
         engine = _current_engine()
@@ -923,7 +923,7 @@ def register_tasks_routes(
     @router.post("/api/swarm/tasks/{task_id}/cancel")
     async def swarm_cancel_task(task_id: str, request: Request) -> JSONResponse:
         """Cancel a running or paused task."""
-        _denied = _require_admin(request)
+        _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
         from kazma_ui.swarm_panel.task_actions import cancel_task
@@ -936,7 +936,7 @@ def register_tasks_routes(
 
     @router.post("/api/swarm/tasks/{task_id}/retry")
     async def swarm_retry_task(task_id: str, request: Request) -> JSONResponse:
-        _denied = _require_admin(request)
+        _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
         """Retry a failed/timeout/cancelled task by re-dispatching."""

@@ -1389,7 +1389,8 @@ class KazmaAppBuilder:
             async def _ws_voice(websocket: WebSocket) -> None:
                 from kazma_ui.auth import websocket_is_authenticated
 
-                if not websocket_is_authenticated(websocket):
+                # The session lookup is a store read (audit 2026-10-26 AUD-111).
+                if not await asyncio.to_thread(websocket_is_authenticated, websocket):
                     await websocket.close(code=4003, reason="Unauthorized")
                     return
 
@@ -1801,7 +1802,8 @@ class KazmaAppBuilder:
                     verify_required_pg_tables,
                 )
 
-                if pg_backup_enabled():
+                # A settings read (audit 2026-10-26 AUD-111).
+                if await asyncio.to_thread(pg_backup_enabled):
                     from kazma_core.db.postgres_pool import get_postgres_pool
 
                     _pool = get_postgres_pool()
@@ -2100,7 +2102,9 @@ class KazmaAppBuilder:
                 set_ingestion_service,
             )
 
-            documents = create_default_ingestion_service()
+            # The catalog, the Knowledge store and the policy are opened and
+            # read here: off the loop (audit 2026-10-26 AUD-111).
+            documents = await asyncio.to_thread(create_default_ingestion_service)
             await documents.start_workers()
             self.app.state.documents = documents
             self._documents = documents

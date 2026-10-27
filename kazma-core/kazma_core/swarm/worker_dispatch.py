@@ -221,7 +221,7 @@ async def dispatch_worker(
     if _scope_token is None:
         from kazma_core.safety.commitment.scope import default_worker_scope
 
-        _scope_token = default_worker_scope(_ws_id)
+        _scope_token = await asyncio.to_thread(default_worker_scope, _ws_id)  # settings (audit 2026-10-26 AUD-111)
 
     # Who this dispatch may hand off to, with the engine's cycle guard for
     # this point of the chain (Swarm audit SW-E13): the worker's handoff tool.

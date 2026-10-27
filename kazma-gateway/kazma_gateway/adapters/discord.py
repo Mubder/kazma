@@ -698,7 +698,7 @@ class DiscordAdapter(BaseAdapter):
         if action.kind in ("hitl", "swarm", "run"):
             from kazma_gateway.allowlists import is_gateway_admin
 
-            if not is_gateway_admin(f"discord:{_ia_user_id}", "discord"):
+            if not await asyncio.to_thread(is_gateway_admin, f"discord:{_ia_user_id}", "discord"):
                 logger.info(
                     "[discord] Ignoring %s approval (admin required) user=%s",
                     action.kind, _ia_user_id,
@@ -724,7 +724,7 @@ class DiscordAdapter(BaseAdapter):
             # allowlist check above only bounds who may chat/click at all.
             from kazma_gateway.allowlists import is_gateway_admin
 
-            if not is_gateway_admin(f"discord:{_ia_user_id}", "discord"):
+            if not await asyncio.to_thread(is_gateway_admin, f"discord:{_ia_user_id}", "discord"):
                 logger.info(
                     "[discord] Ignoring install interaction (admin required) user=%s",
                     _ia_user_id,

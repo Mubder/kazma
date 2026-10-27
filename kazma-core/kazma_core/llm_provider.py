@@ -450,16 +450,33 @@ class LLMProvider:
         (AGENTS.md §1). Live-read so ``KAZMA_LITELLM_URL`` / ConfigStore
         changes take effect on the next ``chat()``.
         """
+        self._apply_egress(self._egress_target())
+
+    async def _sync_gateway_async(self) -> None:
+        """:meth:`_sync_gateway` for ``chat``: the read in a thread, the change
+        of client on the loop (so no request in flight sees a half-changed one)."""
+        self._apply_egress(await asyncio.to_thread(self._egress_target))
+
+    def _egress_target(self) -> tuple[str, str, bool] | None:
+        """Where the generic client's calls go now: the settings are read
+        here, so async callers run this in a thread and apply the answer on
+        the loop (audit 2026-10-26 AUD-111). None: nothing to apply."""
+        if getattr(self, '_egress_frozen', False) or type(self) is not LLMProvider:
+            return None
+        from kazma_core.llm_gateway import resolve_generic_egress
+
+        return resolve_generic_egress(self._direct_base_url, self._direct_api_key or "")
+
+    def _apply_egress(self, target: tuple[str, str, bool] | None) -> None:
+        """Apply :meth:`_egress_target`'s answer (reads nothing)."""
         if getattr(self, '_egress_frozen', False):
             return
         if type(self) is not LLMProvider:
             self._via_gateway = False
             return
-        from kazma_core.llm_gateway import resolve_generic_egress
-
-        url, key, via = resolve_generic_egress(
-            self._direct_base_url, self._direct_api_key or ""
-        )
+        if target is None:
+            return
+        url, key, via = target
         self._via_gateway = via
         if url == self.config.base_url and key == (self.config.api_key or ""):
             return
@@ -838,10 +855,13 @@ class LLMProvider:
         Returns:
             LLMResponse with content, tool_calls, usage, and cost.
         """
-        self._sync_gateway()
+        # The egress and the provider's known models are settings reads: off
+        # the loop on every model call (audit 2026-10-26 AUD-111).
+        await self._sync_gateway_async()
         client = await self._get_client()
 
-        payload = self._chat_payload(
+        payload = await asyncio.to_thread(
+            self._chat_payload,
             messages, tools, max_tokens, temperature, model, response_format, reasoning
         )
 
@@ -1510,7 +1530,7 @@ class LLMProvider:
         """
         from kazma_core.llm_stream import stream_enabled
 
-        self._sync_gateway()
+        await self._sync_gateway_async()
         if not stream_enabled():
             resp = await self.chat(
                 messages, tools, max_tokens, temperature, model, response_format
@@ -1520,7 +1540,8 @@ class LLMProvider:
             yield StreamDelta(response=resp)
             return
 
-        payload = self._chat_payload(
+        payload = await asyncio.to_thread(
+            self._chat_payload,
             messages, tools, max_tokens, temperature, model, response_format
         )
         payload["stream"] = True
@@ -1678,7 +1699,7 @@ class LLMProvider:
                 try:
                     from kazma_core.llm_gateway import get_litellm_gateway
 
-                    if get_litellm_gateway().fallback_direct:
+                    if (await asyncio.to_thread(get_litellm_gateway)).fallback_direct:
                         logger.warning(
                             "LiteLLM stream failed (%s) — falling back to blocking chat()",
                             type(e).__name__,
@@ -1786,7 +1807,7 @@ class LLMProvider:
         try:
             from kazma_core.llm_gateway import get_litellm_gateway
 
-            if not get_litellm_gateway().fallback_direct:
+            if not (await asyncio.to_thread(get_litellm_gateway)).fallback_direct:
                 return None
         except Exception:
             return None

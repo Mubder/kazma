@@ -423,7 +423,8 @@ def create_kb_router() -> APIRouter:
         from kazma_core.stores.knowledge_ingest import ingest_url
 
         try:
-            await asyncio.to_thread(_store().ensure_capacity, lib_id)
+            # Building the store opens SQLite: inside the thread too (AUD-111).
+            await asyncio.to_thread(lambda: _store().ensure_capacity(lib_id))
         except KnowledgeStorageFull as exc:
             return _capacity_refusal(lib_id, exc)
         try:

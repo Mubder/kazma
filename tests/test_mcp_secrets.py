@@ -388,7 +388,10 @@ def _transports_resolving(source: str) -> dict[str, bool]:
         if isinstance(fn, ast.AsyncFunctionDef) and fn.name in _TRANSPORTS:
             body = fn.body[1:] if isinstance(fn.body[0], ast.Expr) and isinstance(fn.body[0].value, ast.Constant) else fn.body
             first = ast.unparse(body[0]) if body else ""
-            out[fn.name] = first.startswith("cfg = self._with_secrets(")
+            # Directly, or in a thread: the vault read runs off the loop
+            # (audit 2026-10-26 AUD-111).
+            out[fn.name] = first.startswith(
+                ("cfg = self._with_secrets(", "cfg = await asyncio.to_thread(self._with_secrets,"))
     return out
 
 
@@ -397,7 +400,7 @@ def test_every_transport_resolves_secrets_before_anything_else():
     assert _transports_resolving(manager) == dict.fromkeys(_TRANSPORTS, True)
     client = ast.parse((REPO / "kazma-core" / "kazma_core" / "mcp_client.py").read_text(encoding="utf-8"))
     connect = next(n for n in ast.walk(client) if isinstance(n, ast.AsyncFunctionDef) and n.name == "connect")
-    assert "cfg = _with_secrets(cfg)" in ast.unparse(connect)
+    assert "cfg = await asyncio.to_thread(_with_secrets, cfg)" in ast.unparse(connect)
 
 
 def test_the_transport_gate_sees_a_transport_that_does_not_resolve():

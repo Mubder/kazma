@@ -7,6 +7,7 @@ within this group is preserved.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -69,7 +70,7 @@ def register_research_tools(registry: Any) -> None:
         try:
             from kazma_core.tools.research_pipeline import list_research_papers as _list
 
-            papers = _list(limit=max(1, min(200, int(limit))))
+            papers = await asyncio.to_thread(_list, limit=max(1, min(200, int(limit))))  # a folder walk (audit 2026-10-26 AUD-111)
             return json.dumps(papers, ensure_ascii=False, indent=2)
         except Exception as exc:
             return f"Error: listing research papers failed — {exc}"

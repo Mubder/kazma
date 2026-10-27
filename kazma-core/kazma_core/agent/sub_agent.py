@@ -111,7 +111,7 @@ class SubAgentManager:
 
             try:
                 # Build child graph with HITL config
-                hitl_config = self._build_hitl_config(safety_mode)
+                hitl_config = await asyncio.to_thread(self._build_hitl_config, safety_mode)  # settings (audit 2026-10-26 AUD-111)
                 child_graph = self._graph_builder(
                     tools=tools,
                     hitl_config=hitl_config,

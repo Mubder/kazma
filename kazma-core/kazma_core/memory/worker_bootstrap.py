@@ -792,7 +792,7 @@ def _start_backup_export_scheduler() -> None:
                 await asyncio.to_thread(_enqueue_checked, "universal_backup", {})
                 # Postgres shared-state dump (self-disables on SQLite installs
                 # or the backups.pg.enabled kill-switch — checked live here).
-                if pg_backup_enabled():
+                if await asyncio.to_thread(pg_backup_enabled):  # a settings read (audit 2026-10-26 AUD-111)
                     await asyncio.to_thread(_enqueue_checked, "native_pg_backup", {})
                 # Retention + verification for the restic repositories. Kept
                 # separate from the snapshot itself (which rides along with
@@ -1710,7 +1710,7 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
 
         from kazma_core.db.pg_backup import perform_pg_backup, pg_backup_enabled
 
-        if not pg_backup_enabled():
+        if not await asyncio.to_thread(pg_backup_enabled):  # a settings read (audit 2026-10-26 AUD-111)
             return True  # not on Postgres / kill-switched — nothing to do
         path = await asyncio.to_thread(perform_pg_backup)
         if path is not None:

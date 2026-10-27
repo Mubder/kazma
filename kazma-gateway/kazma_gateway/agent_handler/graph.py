@@ -728,7 +728,9 @@ def create_graph_handler(
             try:
                 from kazma_core.sessions.directory import find_mouth_thread
 
-                found = find_mouth_thread(
+                # The sessions directory is a settings read (audit 2026-10-26 AUD-111).
+                found = await asyncio.to_thread(
+                    find_mouth_thread,
                     sender,
                     platform=msg.platform,
                     username=str(
@@ -747,14 +749,14 @@ def create_graph_handler(
                 _sessions.move_to_end(sender)
                 thread_id = _sessions[sender]
             else:
-                _sessions[sender] = _resolve_thread(msg)
+                _sessions[sender] = await asyncio.to_thread(_resolve_thread, msg)
                 while len(_sessions) > _MAX_DICT_ENTRIES:
                     _sessions.popitem(last=False)
                 thread_id = _sessions[sender]
             try:
                 from kazma_core.sessions.directory import remember_sender_thread
 
-                remember_sender_thread(sender, thread_id)
+                await asyncio.to_thread(remember_sender_thread, sender, thread_id)
             except Exception:
                 logger.debug("[agent-handler] remember_sender_thread failed", exc_info=True)
 
@@ -921,7 +923,7 @@ def create_graph_handler(
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
 
-            _budgets = resolve_turn_budgets(thread_id)
+            _budgets = await asyncio.to_thread(resolve_turn_budgets, thread_id)  # audit 2026-10-26 AUD-111
             _recursion_limit = int(_budgets["recursion_limit"])
         except Exception:
             _recursion_limit = 100
@@ -1068,7 +1070,8 @@ def create_graph_handler(
             cmd = msg.text.strip().lower()
             actor = msg.sender_id or "gateway"
             if cmd == "/yolo status":
-                st = yolo_status(thread_id)
+                # The YOLO window is settings state (audit 2026-10-26 AUD-111).
+                st = await asyncio.to_thread(yolo_status, thread_id)
                 if st.get("active"):
                     rem = st.get("remaining_seconds")
                     ttl_note = f"Expires in ~{rem // 60}m." if rem is not None else "No auto-expiry."
@@ -1076,13 +1079,13 @@ def create_graph_handler(
                 else:
                     reply_msg = "🛡️ YOLO is **OFF**. HITL is required for danger tools."
             elif cmd == "/yolo off":
-                disable_yolo(thread_id, actor=actor)
+                await asyncio.to_thread(disable_yolo, thread_id, actor=actor)
                 reply_msg = "🛡️ YOLO deactivated. Safety gates are active again."
             else:
                 from kazma_core.safety.yolo import YoloDisabledError
 
                 try:
-                    st = enable_yolo(thread_id, actor=actor)
+                    st = await asyncio.to_thread(enable_yolo, thread_id, actor=actor)
                 except YoloDisabledError as exc:
                     # Policy-blocked (KAZMA_ALLOW_YOLO=0 / production) —
                     # tell the operator instead of letting the exception
@@ -1133,7 +1136,9 @@ def create_graph_handler(
 
             if is_capacity_command(msg.text, require_slash=False):
                 actor = msg.sender_id or "gateway"
-                _cap = apply_capacity_command(
+                # The chat's /long and /yolo records are settings (audit 2026-10-26 AUD-111).
+                _cap = await asyncio.to_thread(
+                    apply_capacity_command,
                     thread_id, msg.text, actor=actor, require_slash=False,
                 )
                 if _cap.rewrite_user_text:
@@ -1162,7 +1167,8 @@ def create_graph_handler(
 
             if is_plan_command(msg.text, require_slash=False):
                 actor = msg.sender_id or "gateway"
-                _pl = apply_plan_command(
+                _pl = await asyncio.to_thread(
+                    apply_plan_command,
                     thread_id, msg.text, actor=actor, require_slash=False,
                 )
                 if _pl.rewrite_user_text:
@@ -1445,7 +1451,10 @@ def create_graph_handler(
             # and platform gets -- the model, memory, MCP servers, the
             # personality -- must not be reachable by anyone in the default
             # allow_all posture.
-            if changes_global_config(msg.text) and not _sender_is_gateway_admin(msg):
+            # The admin allowlist is a settings read (audit 2026-10-26 AUD-111).
+            if changes_global_config(msg.text) and not await asyncio.to_thread(
+                _sender_is_gateway_admin, msg
+            ):
                 ctx = await _store.get(thread_id) or msg.context_metadata
                 await manager.send(
                     OutboundMessage(
@@ -1621,7 +1630,7 @@ def create_graph_handler(
                 # message. A unified /unrestricted record that JUST expired
                 # (idle TTL) returns a loud-once notice — surface it to the
                 # user instead of silently degrading to a normal turn.
-                _unrestricted_notice = consume_long_task_turn(thread_id)
+                _unrestricted_notice = await asyncio.to_thread(consume_long_task_turn, thread_id)  # audit 2026-10-26 AUD-111
                 if _unrestricted_notice:
                     try:
                         _n_ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1711,7 +1720,7 @@ def create_graph_handler(
                 from kazma_core.safety.prompt_fence import format_untrusted_block
                 from kazma_core.skills.self_improvement import get_agent_evolution_block
 
-                evo = get_agent_evolution_block("supervisor")
+                evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")  # audit 2026-10-26 AUD-111
                 if evo:
                     msgs = list(state.get("messages") or [])
                     evo_sys = {
@@ -1869,8 +1878,9 @@ def create_graph_handler(
                             streamed_text=_turn.text or "",
                         )
                         return
-                    prompt = _build_approval_prompt(
-                        hitl_payload, thread_id, platform=msg.platform
+                    # The card reads the HITL settings and the gate registry (audit 2026-10-26 AUD-111).
+                    prompt = await asyncio.to_thread(
+                        _build_approval_prompt, hitl_payload, thread_id, platform=msg.platform
                     )
                     # Interactive controls travel in context_metadata:
                     # Telegram → reply_markup, Discord → components, Slack → blocks.
@@ -1882,17 +1892,29 @@ def create_graph_handler(
                             send_ctx["components"] = prompt["markup"]
                         elif msg.platform == "slack":
                             send_ctx["blocks"] = prompt["markup"]
-                    await manager.send(
+                    card_sent = await manager.send(
                         OutboundMessage(
                             target_id=_build_target_id(msg.platform, ctx),
                             text=prompt_text,
                             context_metadata=send_ctx,
                         )
                     )
-                    logger.info(
-                        "[agent-handler] HITL interrupt surfaced: thread=%s tool=%s",
-                        thread_id, hitl_payload.get("tool"),
-                    )
+                    if card_sent:
+                        logger.info(
+                            "[agent-handler] HITL interrupt surfaced: thread=%s tool=%s",
+                            thread_id, hitl_payload.get("tool"),
+                        )
+                    else:
+                        # "Surfaced" was logged over a card the platform
+                        # refused (audit 2026-10-26, result-must-be-used
+                        # gate). The gate stays registered and the turn
+                        # paused either way; the card is just not in the chat.
+                        logger.warning(
+                            "[agent-handler] approval card NOT delivered on %s: thread=%s tool=%s; "
+                            "the turn stays paused -- decide it on the Web approvals panel or "
+                            "with /hitl, or it expires unanswered",
+                            msg.platform, thread_id, hitl_payload.get("tool"),
+                        )
                     await _persist_hitl_pause(
                         graph,
                         config,
@@ -2065,14 +2087,15 @@ def create_graph_handler(
                             is_mission_mode,
                         )
 
-                        if not is_long_task_active(thread_id):
+                        # Settings reads (audit 2026-10-26 AUD-111).
+                        if not await asyncio.to_thread(is_long_task_active, thread_id):
                             long_hint = (
                                 "\n\n💡 Tip: `/long mission` for a real long run "
                                 "(~500 tool rounds hard wall), or `/long on` for a "
                                 "soft Research budget — then continue with "
                                 "*only remaining steps*."
                             )
-                        elif not is_mission_mode(thread_id):
+                        elif not await asyncio.to_thread(is_mission_mode, thread_id):
                             long_hint = (
                                 "\n\n💡 Budget mode hit a soft wall. "
                                 "Reply **Proceed**, or enable `/long mission` "
@@ -2083,7 +2106,7 @@ def create_graph_handler(
                     if partial:
                         _was_long = False
                         try:
-                            _was_long = _settle_recursion_partial(thread_id, partial)
+                            _was_long = await asyncio.to_thread(_settle_recursion_partial, thread_id, partial)
                         except Exception:
                             # Never silent: this swallow hid a dead import for
                             # three weeks (see _settle_recursion_partial).

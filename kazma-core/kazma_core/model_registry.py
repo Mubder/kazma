@@ -737,7 +737,8 @@ class ModelRegistry:
         if not clean_name:
             return []
 
-        provider_entry = self.get_provider(clean_name)
+        # The provider list is settings and vault reads (audit 2026-10-26 AUD-111).
+        provider_entry = await asyncio.to_thread(self.get_provider, clean_name)
         if not provider_entry:
             logger.warning("discover_models: provider %r not found", clean_name)
             return []
@@ -770,7 +771,9 @@ class ModelRegistry:
                                         model_ids.append(full_name)
                                 if model_ids:
                                     self._discovered_models[clean_name] = sorted(set(model_ids))
-                                    self._prune_stale_selected_models(clean_name, self._discovered_models[clean_name])
+                                    await asyncio.to_thread(
+                                        self._prune_stale_selected_models, clean_name, self._discovered_models[clean_name]
+                                    )
                                     return self._discovered_models[clean_name]
                     except Exception as exc:
                         logger.warning("discover_models: Google AI Studio dynamic discovery failed: %s", exc)
@@ -848,7 +851,7 @@ class ModelRegistry:
 
             model_ids = sorted(set(model_ids))
             self._discovered_models[clean_name] = model_ids
-            self._prune_stale_selected_models(clean_name, model_ids)
+            await asyncio.to_thread(self._prune_stale_selected_models, clean_name, model_ids)  # audit 2026-10-26 AUD-111
             return model_ids
 
         except Exception as exc:
@@ -900,7 +903,7 @@ class ModelRegistry:
     async def discover_all(self) -> dict[str, list[str]]:
         """Discover models for all enabled providers."""
         results: dict[str, list[str]] = {}
-        for provider in self.list_providers():
+        for provider in await asyncio.to_thread(self.list_providers):
             name = str(provider.get("name", "")).strip()
             if not name or not provider.get("enabled", True):
                 continue

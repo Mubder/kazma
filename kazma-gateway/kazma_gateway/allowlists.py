@@ -69,6 +69,9 @@ def is_gateway_admin(sender_id: str, platform: str = "") -> bool:
     3. Otherwise: NOT admin. In the default allow_all posture (empty
        allowlist) every workspace member may chat, and none of them may
        install packages, flip global config, or switch the global model.
+
+    Source 2 is a settings read: async callers (every button press on the
+    chat apps) use ``asyncio.to_thread`` (audit 2026-10-26 AUD-111).
     """
     sender_id = (sender_id or "").strip()
     if not sender_id:

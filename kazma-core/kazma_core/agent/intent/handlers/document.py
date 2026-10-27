@@ -240,7 +240,7 @@ async def run_document(decision: TurnDecision, state: dict[str, Any], **ctx: Any
     # F8: route delivery through the send_file tool (execute path) so the
     # HITL/commitment wiring applies — never call send_file_message directly.
     if deliver_to:
-        target = _resolve_delivery_target(deliver_to)
+        target = await asyncio.to_thread(_resolve_delivery_target, deliver_to)  # settings (audit 2026-10-26 AUD-111)
         if target:
             try:
                 send_out = await tool_executor.execute(
