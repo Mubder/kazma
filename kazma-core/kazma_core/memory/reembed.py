@@ -24,7 +24,6 @@ import contextlib
 import logging
 import os
 import sqlite3
-import struct
 import time
 from datetime import UTC, datetime
 from typing import Any, Callable
@@ -131,47 +130,63 @@ def embedding_version_counts() -> dict[str, dict[str, int]]:
     return out
 
 
-def _encode_text(emb: Any, text: str) -> bytes | None:
-    """Encode *text* → float32 BLOB, or None on failure/empty input."""
-    text = (text or "").strip()
-    if not text:
-        return None
-    try:
-        vec = emb.encode(text)
-        if not vec:
-            return None
-        return struct.pack(f"<{len(vec)}f", *vec)
-    except Exception:
-        logger.debug("[reembed] encode failed for %r", text[:80], exc_info=True)
-        return None
+#: The row still holds what was embedded, and is no tombstone: an episode
+#: with its three texts unchanged and not forgotten, a fact with its triple
+#: unchanged and a value (a forget empties ``object``). Parameters: the texts
+#: read with the row (audit 2026-10-26 AUD-028).
+_EPISODE_STILL = (
+    "tier != 'forgotten' AND user_text IS ? AND assistant_text IS ? AND summary_text IS ?"
+)
+_BELIEF_STILL = "subject IS ? AND predicate IS ? AND object IS ? AND object != ''"
 
 
-def _upsert_remote_vector(
+def _reencode_row(
     conn: sqlite3.Connection,
     emb: Any,
-    item_id: str,
+    kind: str,
+    rid: str,
     text: str,
     *,
+    still_params: tuple[Any, ...],
+    replacing: bytes | None,
+    model: str,
     tenant_id: str,
     meta: dict[str, Any],
-) -> None:
-    """Best-effort pgvector/Qdrant upsert so rebuild fills the scale index
-    (the remote index only: the local row is the rebuild's own write)."""
-    del conn
-    try:
-        from kazma_core.memory.backends import get_remote_vector_backend
+    dim: int | None = None,
+) -> str:
+    """Re-encode one row in place, the §15 D2 way. Returns ``"written"``,
+    ``"skipped"`` (no text, no vector, or a vector of another size) or
+    ``"changed"`` (the row changed while it was embedded: left as it is).
 
-        remote = get_remote_vector_backend()
-        if remote is None or not getattr(remote, "available", False):
-            return
-        vec = emb.encode(text)
-        if not vec:
-            return
-        remote.upsert(item_id, list(vec), tenant_id=tenant_id, meta=meta)
-    except Exception:
-        logger.debug(
-            "[reembed] remote vector upsert failed for %s", item_id, exc_info=True
-        )
+    The vector is computed once (:func:`encode_vector`) with no transaction
+    open, written by ONE guarded ``UPDATE`` (:func:`write_local_vector`: the
+    row must still hold the text that was embedded and the vector it had when
+    read, and a tombstone never takes one), then sent to the remote index,
+    which takes it back out if a forget landed meanwhile. The rebuild and the
+    repair used to embed rows and write them inside an open batch
+    transaction, unguarded: a forget between the read and the write got the
+    forgotten text's vector back on its tombstone (and in the remote index),
+    and the batch held the memory write lock while the model ran (AUD-028).
+    """
+    from kazma_core.memory.vector_write import encode_vector, index_remotely, write_local_vector
+
+    still_sql = _EPISODE_STILL if kind == "episodes" else _BELIEF_STILL
+    if conn.in_transaction:
+        conn.commit()  # nothing of ours is held while the model runs
+    vec = encode_vector(text, embedder=emb)
+    if not vec or (dim is not None and len(vec) != dim):
+        return "skipped"
+    if not write_local_vector(conn, kind, rid, vec, still_sql=still_sql, still_params=still_params,
+                              replace=True, replacing=replacing, model=model):
+        return "changed"
+
+    def _still_held() -> bool:
+        return conn.execute(
+            f"SELECT 1 FROM {kind} WHERE id = ? AND {still_sql}", (rid, *still_params),
+        ).fetchone() is not None
+
+    index_remotely(rid, vec, tenant_id=tenant_id, meta=meta, still_held=_still_held)
+    return "written"
 
 
 def _backup(db_path: str) -> None:
@@ -239,66 +254,49 @@ def rebuild_embeddings(
 
         # ── Episodes ────────────────────────────────────────────────────
         rows = conn.execute(
-            "SELECT id, tenant_id, summary_text, user_text, assistant_text, tier "
+            "SELECT id, tenant_id, summary_text, user_text, assistant_text, tier, embedding "
             f"FROM episodes WHERE {stale}", (target_model,),
         ).fetchall()
         total = len(rows)
         for i, row in enumerate(rows, 1):
             text = embed_text(row["user_text"], row["assistant_text"], row["summary_text"])
-            if text:
-                blob = _encode_text(emb, text)
-                if blob:
-                    conn.execute(
-                        "UPDATE episodes SET embedding = ?, embedding_model_version = ? WHERE id = ?",
-                        (blob, target_model, row["id"]),
-                    )
-                else:
-                    summary["skipped_rows"] += 1
-                _upsert_remote_vector(
-                    conn,
-                    emb,
-                    str(row["id"]),
-                    text,
+            if text and row["tier"] != "forgotten":
+                outcome = _reencode_row(
+                    conn, emb, "episodes", str(row["id"]), text,
+                    still_params=(row["user_text"], row["assistant_text"], row["summary_text"]),
+                    replacing=row["embedding"], model=target_model,
                     tenant_id=str(row["tenant_id"] or "default"),
                     meta={"kind": "episode", "tier": row["tier"] or "episodic"},
                 )
-            if i % _BATCH_SIZE == 0:
-                conn.commit()
-                if progress:
-                    progress(i, total)
-        conn.commit()
+                if outcome != "written":
+                    summary["skipped_rows"] += 1
+            if i % _BATCH_SIZE == 0 and progress:
+                progress(i, total)
         summary["episodes"] = total
         if progress:
             progress(total, total)
 
         # ── Beliefs ─────────────────────────────────────────────────────
         rows = conn.execute(
-            f"SELECT id, tenant_id, subject, predicate, object FROM beliefs WHERE {stale}", (target_model,),
+            f"SELECT id, tenant_id, subject, predicate, object, embedding FROM beliefs WHERE {stale}",
+            (target_model,),
         ).fetchall()
         total = len(rows)
         for i, row in enumerate(rows, 1):
-            text = f"{row['subject']} {row['predicate']} {row['object']}"
-            blob = _encode_text(emb, text)
-            if blob:
-                conn.execute(
-                    "UPDATE beliefs SET embedding = ?, embedding_model_version = ? WHERE id = ?",
-                    (blob, target_model, row["id"]),
+            # A forgotten fact has no value left to embed (object = '').
+            if row["object"]:
+                text = f"{row['subject']} {row['predicate']} {row['object']}"
+                outcome = _reencode_row(
+                    conn, emb, "beliefs", str(row["id"]), text,
+                    still_params=(row["subject"], row["predicate"], row["object"]),
+                    replacing=row["embedding"], model=target_model,
+                    tenant_id=str(row["tenant_id"] or "default"),
+                    meta={"kind": "belief", "tier": "semantic"},
                 )
-            else:
-                summary["skipped_rows"] += 1
-            _upsert_remote_vector(
-                conn,
-                emb,
-                str(row["id"]),
-                text,
-                tenant_id=str(row["tenant_id"] or "default"),
-                meta={"kind": "belief", "tier": "semantic"},
-            )
-            if i % _BATCH_SIZE == 0:
-                conn.commit()
-                if progress:
-                    progress(i, total)
-        conn.commit()
+                if outcome != "written":
+                    summary["skipped_rows"] += 1
+            if i % _BATCH_SIZE == 0 and progress:
+                progress(i, total)
         summary["beliefs"] = total
         if progress:
             progress(total, total)
@@ -437,14 +435,15 @@ def repair_unsearchable_vectors(
         if embedder is None:
             _MODEL_DIMS[model] = dim
     tenants = [tenant_id] if tenant_id else _tenants(conn)
-    remote = _remote_index(conn)
     deadline = time.monotonic() + max(0.0, float(time_budget_s))
     done = {"episodes": 0, "beliefs": 0}
-    skipped: set[str] = set()  # text that would not encode, this pass only
+    # Rows that would not encode, or changed while they were embedded: this
+    # pass only (the next one reads them again).
+    skipped: set[str] = set()
     for kind in ("episodes", "beliefs"):
         source = _unsearchable_sql(kind, model)
-        columns = ("id, user_text, assistant_text, summary_text, tier, session_id"
-                   if kind == "episodes" else f"id, {_BELIEF_TEXT_SQL}, '', '', '', ''")
+        columns = ("id, user_text, assistant_text, summary_text, tier, session_id, embedding"
+                   if kind == "episodes" else "id, subject, predicate, object, '', '', embedding")
         order = "created_at" if kind == "episodes" else "ingested_at"
         for tenant in tenants:
             while time.monotonic() < deadline:
@@ -459,20 +458,21 @@ def repair_unsearchable_vectors(
                 ).fetchall()
                 if not rows:
                     break
-                for rid, first, answer, summary, tier, session_id in rows:
-                    text = embed_text(first, answer, summary) if kind == "episodes" else first
-                    vec = _embed(emb, text)
-                    if not vec or len(vec) != dim:
+                for rid, a, b, c, tier, session_id, old in rows:
+                    if kind == "episodes":
+                        text = embed_text(a, b, c)
+                        meta = {"kind": "episode", "tier": tier or "episodic", "session_id": session_id}
+                    else:
+                        text = f"{a} {b} {c}".strip()
+                        meta = {"kind": "belief", "tier": "semantic"}
+                    outcome = _reencode_row(
+                        conn, emb, kind, str(rid), text, still_params=(a, b, c),
+                        replacing=old, model=model or "", tenant_id=tenant, meta=meta, dim=dim,
+                    )
+                    if outcome != "written":
                         skipped.add(str(rid))
                         continue
-                    conn.execute(
-                        f"UPDATE {kind} SET embedding = ?, embedding_model_version = ? WHERE id = ?",
-                        (struct.pack(f"<{dim}f", *vec), model, rid),
-                    )
                     done[kind] += 1
-                    if remote is not None:
-                        _upsert_remote(remote, kind, str(rid), vec, tenant, tier, session_id)
-                conn.commit()
     remaining = sum(_unsearchable_counts(conn, dim=dim, model=model).values())
     if done["episodes"] or done["beliefs"]:
         logger.info(
@@ -538,26 +538,3 @@ def run_vector_repair_pass(*, time_budget_s: float = 20.0) -> dict[str, int]:
         return zero
     finally:
         conn.close()
-
-
-def _remote_index(conn: sqlite3.Connection) -> Any:
-    """The configured remote vector index, or None for the local-only setup
-    (never a hybrid backend's local half: the repair writes the row itself)."""
-    from kazma_core.memory.backends import get_remote_vector_backend
-
-    del conn
-    remote = get_remote_vector_backend()
-    return remote if remote is not None and getattr(remote, "available", False) else None
-
-
-def _upsert_remote(
-    backend: Any, kind: str, rid: str, vec: list[float], tenant: str, tier: str, session_id: str
-) -> None:
-    meta = (
-        {"kind": "episode", "tier": tier or "episodic", "session_id": session_id}
-        if kind == "episodes"
-        else {"kind": "belief", "tier": "semantic"}
-    )
-    # A backend reports a failed write by returning False; the local row is the truth.
-    if not backend.upsert(rid, vec, tenant_id=tenant, meta=meta):
-        logger.debug("[reembed] remote index did not take %s", rid)

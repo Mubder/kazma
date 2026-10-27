@@ -14,14 +14,19 @@
 
   const POLL_INTERVAL_MS = 5000;
   const containerId = 'hitl-approvals-panel';
-  // Hoisted poll timer so re-init (soft-nav re-inject of this script, or a
-  // second initHitlApproval call) doesn't stack a second setInterval on top
-  // of the first — each extra poller doubled the /api/pending-approvals rate
-  // forever (no clearInterval anywhere) (audit finding).
-  let _pollTimer = null;
+  // The poll timer lives on window, not in this closure: soft navigation
+  // runs this file again on every visit, each run in a new closure, so a
+  // closure-local guard never saw the earlier run's timer and every visit
+  // added a poller of /api/pending-approvals, forever (audit 2026-10-26
+  // AUD-030). A new run replaces the old timer, and leaving the page stops
+  // it (the leave hook below).
+  function _stopPolling() {
+    if (window.__kazmaHitlPollTimer) clearInterval(window.__kazmaHitlPollTimer);
+    window.__kazmaHitlPollTimer = null;
+  }
   function _startPolling() {
-    if (_pollTimer) return;
-    _pollTimer = setInterval(refreshPending, POLL_INTERVAL_MS);
+    _stopPolling();
+    window.__kazmaHitlPollTimer = setInterval(refreshPending, POLL_INTERVAL_MS);
   }
 
   function _hitlPatchArgsHtml(tool, args) {
@@ -276,7 +281,25 @@
         fetch('/api/approve/' + encodeURIComponent(tid), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-        }).then(function() { refreshPending(); })
+        }).then(function (r) {
+          // A refused decision (a 4xx/5xx, `ok: false`) went straight to a
+          // refresh, as if it had been taken (audit 2026-10-26 AUD-068).
+          // Same reading as submitApproval: a gate no longer pending is
+          // refreshed away; any other refusal says so, and the next poll
+          // brings the card's options back.
+          return r.json().catch(function () { return {}; }).then(function (body) {
+            body = body || {};
+            if (r.status === 409 || body.reason === 'not_pending') { refreshPending(); return; }
+            if (!r.ok || body.ok === false) {
+              var why = String(body.error || body.reason || ('HTTP ' + r.status));
+              if (act) act.innerHTML = '<span class="text-danger">' +
+                escapeHtml(t('chat.gate_failed_retry', 'Failed — retry')) +
+                '</span> <span translate="no">' + escapeHtml(why) + '</span>';
+              return;
+            }
+            refreshPending();
+          });
+        })
           .catch(function() { if (act) act.innerHTML = '<span class="text-danger">' + escapeHtml(t('chat.gate_failed_retry', 'Failed — retry')) + '</span>'; });
       });
     });
@@ -309,15 +332,9 @@
     if (gateId) payload.gate_id = gateId;
 
     var url = '/api/approve/' + encodeURIComponent(threadId);
-
-    if (window.KazmaApp && window.KazmaApp.setIsThinking) {
-      window.KazmaApp.setIsThinking(
-        true,
-        approve
-          ? t('dashboard.hitl_running', 'Running approved tool…')
-          : t('dashboard.hitl_denying', 'Denying…')
-      );
-    }
+    // The window.KazmaApp.setIsThinking calls here and below were removed:
+    // nothing defines KazmaApp.setIsThinking, so they never ran (audit
+    // 2026-10-26 AUD-081). The card's status line is what says it.
 
     try {
       var resp = await fetch(url, {
@@ -328,9 +345,6 @@
       });
       var body = {};
       try { body = await resp.json(); } catch (eParse) { body = {}; }
-      if (window.KazmaApp && window.KazmaApp.setIsThinking) {
-        window.KazmaApp.setIsThinking(false);
-      }
       if (resp.status === 409 || body.reason === 'not_pending') {
         if (body.running) {
           if (statusEl) {
@@ -381,9 +395,6 @@
         refreshPending();
       }, 1500);
     } catch (err) {
-      if (window.KazmaApp && window.KazmaApp.setIsThinking) {
-        window.KazmaApp.setIsThinking(false);
-      }
       if (statusEl) {
         statusEl.innerHTML =
           (window.KazmaIcons ? KazmaIcons.span('alert') : '') + ' ' +
@@ -405,21 +416,26 @@
     }
   }
 
+  // This run's window listeners, removed on leaving the page. A window flag
+  // bound them once per tab instead, for good: after leaving the dashboard
+  // every resolved gate still fetched /api/pending-approvals from whatever
+  // page was open (audit 2026-10-26 AUD-030).
+  var _pageListeners = new AbortController();
   function _bindHitlResolvedRefresh() {
-    if (window.__kazmaHitlResolvedBound) return;
-    window.__kazmaHitlResolvedBound = true;
-    try {
-      window.addEventListener('kazma:hitl-resolved', function () {
-        refreshPending();
-      });
-    } catch (eEv) { /* ignore */ }
-    try {
-      window.addEventListener('storage', function (ev) {
-        if (ev && ev.key === 'kazma:hitl-resolved') refreshPending();
-      });
-    } catch (eSt) { /* ignore */ }
+    var opts = { signal: _pageListeners.signal };
+    window.addEventListener('kazma:hitl-resolved', function () {
+      refreshPending();
+    }, opts);
+    window.addEventListener('storage', function (ev) {
+      if (ev && ev.key === 'kazma:hitl-resolved') refreshPending();
+    }, opts);
   }
   _bindHitlResolvedRefresh();
+
+  function teardown() {
+    _stopPolling();
+    try { _pageListeners.abort(); } catch (e) { /* already aborted */ }
+  }
 
   async function refreshPending() {
     try {
@@ -452,26 +468,19 @@
       });
     }
 
-    if (document.getElementById(containerId)) {
-      refreshPending();
-      _startPolling();
-      window.KazmaHITL = { refresh: refreshPending };
-      return;
-    }
-
     refreshPending();
     _startPolling();
-    window.KazmaHITL = { refresh: refreshPending };
   }
+
+  // Leaving the page stops the poller and the listeners. Added to the leave
+  // hooks: dashboard.js on the same page used to overwrite them.
+  window.kazmaAddLeaveHook(teardown);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initHitlApproval);
   } else {
     initHitlApproval();
   }
-
-  window.__hitl_approval__ = {
-    renderApprovals: renderApprovals,
-    refreshPending: refreshPending,
-  };
+  // window.KazmaHITL and window.__hitl_approval__ had no reader anywhere;
+  // removed (audit 2026-10-26 AUD-081).
 })();

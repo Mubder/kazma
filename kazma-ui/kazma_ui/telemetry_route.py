@@ -76,6 +76,10 @@ def create_telemetry_router(monitor: Any = None) -> APIRouter:
                     yield f"data: {payload}\n\n"
             except asyncio.CancelledError:
                 logger.info("Telemetry SSE stream closed (client disconnect)")
+                # The cancel belongs to whoever cancelled (the server's
+                # disconnect or shutdown): swallowed, the generator ended as
+                # if it had finished (audit 2026-10-26 AUD-082).
+                raise
             except Exception as exc:
                 logger.error("Telemetry SSE stream error: %s", exc)
                 error_payload = json.dumps({"error": "Telemetry stream error", "timestamp": 0})

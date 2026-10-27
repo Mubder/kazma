@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -541,10 +541,6 @@ class SQLiteCronStore:
             f"SELECT COUNT(*) AS n FROM cron_jobs WHERE {' AND '.join(where)}", tuple(args))
         return int(rows[0]["n"]) if rows else 0
 
-    async def job_exists(self, job_id: str, *, tenant_id: str | None = None) -> bool:
-        """True when a job row exists (any status)."""
-        return await self.get(job_id, tenant_id=tenant_id) is not None
-
     async def sibling_delivery_target(self, thread_id: str) -> str:
         """A VALID delivery_target from any other job on the same thread.
 
@@ -593,11 +589,6 @@ class SQLiteCronStore:
             )
             await self._event(db, job.job_id, "created", actor=job.created_by, source=job.source,
                               detail={"timing": job.timing, "kind": job.kind, "capabilities": job.capabilities})
-
-    async def update_result(self, job_id: str, result: str) -> None:
-        """Record a job's last result text."""
-        async with self._tx() as db:
-            await db.execute("UPDATE cron_jobs SET last_result = ? WHERE job_id = ?", (result[:5000], job_id))
 
     async def update_delivery_target(self, job_id: str, delivery_target: str) -> None:
         """Repair a job's delivery_target (self-heal from a sibling job)."""
@@ -978,14 +969,26 @@ class SQLiteCronStore:
                                       "purpose": purpose, "error": error[:200]})
             return {**dict(row), "state": state}
 
-    async def recover_deliveries(self, *, owner: str, now: float | None = None) -> list[dict[str, Any]]:
-        """Sends a dead sender claimed: ``unknown`` (it may have arrived; never resent)."""
+    async def recover_deliveries(self, *, owner: str, now: float | None = None,
+                                 live: Collection[int] = ()) -> list[dict[str, Any]]:
+        """Sends a dead sender claimed: ``unknown`` (it may have arrived; never resent).
+
+        *live* are the ids *owner* is sending right now: never recovered,
+        whatever their lease says. The lease is not renewed while a send
+        runs, and a Telegram send that retries (three 30 s reads, 429 waits)
+        outlives :data:`DELIVERY_LEASE_S`: the scheduler's own next poll
+        marked its live send ``unknown`` and alerted "may not have arrived"
+        over a message that did, or lost a failed one's retries (audit
+        2026-10-26 AUD-017).
+        """
         ts = self.clock.time() if now is None else now
+        keep = {int(i) for i in live}
         async with self._tx() as db:
             cur = await db.execute(
                 "SELECT * FROM cron_deliveries WHERE state = 'sending' AND (lease_owner != ? OR lease_until < ?)",
                 (owner, ts))
-            rows = [dict(r) for r in await cur.fetchall()]
+            rows = [dict(r) for r in await cur.fetchall()
+                    if not (r["lease_owner"] == owner and int(r["id"]) in keep)]
             for row in rows:
                 await db.execute(
                     "UPDATE cron_deliveries SET state = 'unknown', finished_at = ?, lease_owner = '', "
@@ -1104,12 +1107,6 @@ class SQLiteCronStore:
             (job_id, self.clock.time(), event, actor or "", source or "",
              json.dumps(detail or {}, ensure_ascii=False, default=str)))
         return int(cur.lastrowid or 0)
-
-    async def record_event(self, job_id: str, event: str, *, actor: str = "", source: str = "",
-                           detail: dict[str, Any] | None = None) -> None:
-        """Append one row to the job's history."""
-        async with self._tx() as db:
-            await self._event(db, job_id, event, actor=actor, source=source, detail=detail)
 
     async def list_events(self, job_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
         rows = await self._conn().execute_fetchall(

@@ -397,7 +397,7 @@ async def _maybe_send_to_output_target(
     :func:`format_swarm_task_result`) and must NOT be re-converted by the
     adapter — passing it through ``md_to_tg_html`` would double-escape it.
 
-    Returns True if a message was sent (or attempted), False if no target.
+    Returns True only when a route's platform took the message (§51).
     """
     if override is not None:
         if origin is not None and _target_is_origin_chat(override, origin):
@@ -561,7 +561,7 @@ async def _dispatch_swarm_from_chat(
                 tokens=int(getattr(result, "total_tokens", 0) or 0),
                 worker_results=worker_rows,
             )
-            await _send_swarm_reply(
+            delivered = await _send_swarm_reply(
                 msg,
                 store,
                 manager,
@@ -571,15 +571,18 @@ async def _dispatch_swarm_from_chat(
             )
             # Mirror the SAME rich HTML report to the output routes so the
             # Telegram group sees the formatted report, not raw markdown.
-            # Origin-chat dedupe happens inside (the direct reply above
-            # already delivered the report to the originating chat).
+            # Origin-chat dedupe happens inside, and only when the direct
+            # reply above did deliver the report to the originating chat
+            # (audit 2026-10-26 AUD-032).
             await _maybe_send_to_output_target(
-                manager, telegram_reply, target_override, is_html=True, origin=msg
+                manager, telegram_reply, target_override, is_html=True,
+                origin=msg if delivered else None,
             )
         else:
-            await _send_swarm_reply(msg, store, manager, thread_id, reply)
+            delivered = await _send_swarm_reply(msg, store, manager, thread_id, reply)
             await _maybe_send_to_output_target(
-                manager, reply, target_override, origin=msg
+                manager, reply, target_override,
+                origin=msg if delivered else None,
             )
 
     except asyncio.TimeoutError:
@@ -594,18 +597,20 @@ async def _dispatch_swarm_from_chat(
             "(gateway wait budget). Anything its workers had already done stays done: "
             "check the task in the Swarm page's Task History before running it again."
         )
-        await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
+        delivered = await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
         await _maybe_send_to_output_target(
-            manager, error_reply, target_override, origin=msg
+            manager, error_reply, target_override,
+            origin=msg if delivered else None,
         )
     except Exception as exc:
         logger.exception("[agent-handler] Swarm dispatch failed for thread %s", thread_id)
         error_reply = sanitize_error(exc)
-        await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
+        delivered = await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
         # Mirror the failure to the output routes too, consistent with the
         # success path.
         await _maybe_send_to_output_target(
-            manager, error_reply, target_override, origin=msg
+            manager, error_reply, target_override,
+            origin=msg if delivered else None,
         )
 
     return True
@@ -618,11 +623,13 @@ async def _send_swarm_reply(
     thread_id: str,
     text: str,
     text_is_html: bool = False,
-) -> None:
+) -> bool:
     """Send a reply through the gateway manager (platform-agnostic).
-    
+
     For Telegram, applies markdown-to-HTML conversion so **bold** renders
     inside blockquotes instead of showing literal asterisks.
+
+    Returns whether the platform took the reply.
     """
     ctx = await store.get(thread_id)
     if not ctx:
@@ -637,10 +644,19 @@ async def _send_swarm_reply(
         final_text = text if text_is_html else md_to_tg_html(text)
         ctx.setdefault("parse_mode", "HTML")
     
-    await manager.send(
+    # The answer is the adapter's: False when no platform took the reply
+    # (audit 2026-10-26 AUD-032, §51). The result path reads it, so a
+    # report the origin chat never got is not deduped off its output routes.
+    delivered = await manager.send(
         OutboundMessage(
             target_id=_build_target_id(msg.platform, ctx),
             text=final_text,
             context_metadata=ctx,
         )
     )
+    if not delivered:
+        logger.warning(
+            "[agent-handler] Swarm reply for thread %s was not delivered on %s",
+            thread_id, msg.platform,
+        )
+    return bool(delivered)

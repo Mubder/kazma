@@ -248,8 +248,13 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
                 continue
             target = dest / name
             if src.is_dir():
-                count = _robust_copytree(src, target)
-                result["artifacts"].append({"path": name, "files": count})
+                failures: list[dict[str, str]] = []
+                count = _robust_copytree(src, target, failures)
+                row: dict[str, Any] = {"path": name, "files": count}
+                if failures:
+                    row["failed"] = len(failures)
+                    row["failures"] = failures[:_FAILURES_LISTED]
+                result["artifacts"].append(row)
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, target)
@@ -330,13 +335,22 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "via": "rclone"}
         remote = f"{base_remote.rstrip('/')}/{dest.name}"
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            ["rclone", "copy", "--transfers", "4", "--", str(dest), remote],
-            capture_output=True,
-            text=True, encoding="utf-8", errors="replace",
-            timeout=1800,
-        )
+        try:
+            proc = await asyncio.to_thread(
+                subprocess.run,
+                ["rclone", "copy", "--transfers", "4", "--", str(dest), remote],
+                capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+                timeout=1800,
+            )
+        except subprocess.TimeoutExpired:
+            # A timed-out copy is a failed copy, answered once (audit
+            # 2026-10-26 AUD-045): it used to escape into the native path's
+            # handler, which ran rclone a second time -- another 30 minutes.
+            err = "rclone copy timed out after 1800s"
+            logger.warning("[universal-backup] %s", err)
+            return {"ok": False, "remote": remote, "via": "rclone",
+                    "error": f"{reason} | rclone: {err}" if reason else err}
         if proc.returncode == 0:
             logger.info("[universal-backup] offsite sync complete via rclone: %s", remote)
             out: dict[str, Any] = {"ok": True, "remote": remote, "via": "rclone"}
@@ -383,12 +397,16 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
                     "[universal-backup] offsite sync failed: %s — trying rclone",
                     result.get("error"),
                 )
-                return await _rclone(str(result.get("error") or "native provider failed"))
+                primary_error = str(result.get("error") or "native provider failed")
             except Exception as exc:
                 logger.warning(
                     "[universal-backup] native offsite sync error: %s — trying rclone", exc
                 )
-                return await _rclone(str(exc))
+                primary_error = str(exc)
+            # The fallback runs once, outside the native path's handler
+            # (audit 2026-10-26 AUD-045): inside it, a fallback that raised
+            # was caught there and rclone ran again.
+            return await _rclone(primary_error)
 
         return await _rclone()
 
@@ -516,7 +534,11 @@ def _backup_one_db(src: Path, dest: Path) -> bool:
         return False
 
 
-def _robust_copytree(src: Path, dest: Path) -> int:
+#: How many failed files a manifest row names; the count is always whole.
+_FAILURES_LISTED = 20
+
+
+def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | None = None) -> int:
     """Copy a directory tree file-by-file, skipping files that vanish mid-copy.
 
     LibreOffice conversion runs leave ephemeral cache files (.bin under
@@ -524,7 +546,16 @@ def _robust_copytree(src: Path, dest: Path) -> int:
     copy. shutil.copytree aborts the ENTIRE directory on one missing file;
     this walker skips individual failures so the real data (content-addressed
     blobs) always lands. Returns the number of files successfully copied.
+
+    Only a file that VANISHED (``FileNotFoundError``) is skipped quietly.
+    Any other failure -- a locked blob (``PermissionError``), a read error --
+    is a file the backup does not hold, and goes into *failures* (relative
+    path and error) for the manifest and the gap alert (audit 2026-10-26
+    AUD-021: they were logged at DEBUG and the backup said ``ok``, so a
+    locked document blob was missing from every backup without a word).
     """
+    if failures is None:
+        failures = []
     dest.mkdir(parents=True, exist_ok=True)
     count = 0
     for item in sorted(src.iterdir()):
@@ -535,14 +566,19 @@ def _robust_copytree(src: Path, dest: Path) -> int:
             if item.is_symlink():
                 continue  # don't follow symlinks
             if item.is_dir():
-                count += _robust_copytree(item, target)
+                nested: list[dict[str, str]] = []
+                count += _robust_copytree(item, target, nested)
+                failures.extend(
+                    {"path": f"{item.name}/{row['path']}", "error": row["error"]} for row in nested
+                )
             elif item.is_file():
                 shutil.copy2(item, target)
                 count += 1
-        except (FileNotFoundError, OSError) as exc:
+        except FileNotFoundError as exc:
             logger.debug("[universal-backup] skipped ephemeral file %s: %s", item.name, exc)
-        except Exception as exc:
-            logger.debug("[universal-backup] copy error %s: %s", item.name, exc)
+        except Exception as exc:  # noqa: BLE001 -- recorded, never swallowed
+            logger.warning("[universal-backup] could not copy %s: %s", item, exc)
+            failures.append({"path": item.name, "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
     return count
 
 
@@ -584,8 +620,13 @@ def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
         target = dest / rel
         try:
             if item.is_dir():
-                count = _robust_copytree(item, target)
-                copied.append({"path": rel, "type": "dir", "files": count})
+                failures: list[dict[str, str]] = []
+                count = _robust_copytree(item, target, failures)
+                row: dict[str, Any] = {"path": rel, "type": "dir", "files": count}
+                if failures:
+                    row["failed"] = len(failures)
+                    row["failures"] = failures[:_FAILURES_LISTED]
+                copied.append(row)
             else:
                 shutil.copy2(item, target)
                 copied.append({"path": rel, "type": "file", "size": item.stat().st_size})
@@ -647,12 +688,80 @@ def _sweep_orphaned_tmp(root: Path) -> int:
     return removed
 
 
+def _file_failures(
+    assets: list[dict[str, Any]], root_artifacts: dict[str, Any]
+) -> tuple[int, list[str]]:
+    """Files the backup does not hold, and the first few of their paths.
+
+    Read from the asset rows and the root artifacts: a whole entry that
+    failed counts once, a folder counts every file it could not copy.
+    """
+    count = 0
+    examples: list[str] = []
+    rows = [*assets, *root_artifacts.get("artifacts", [])]
+    env = root_artifacts.get("env") or {}
+    if env.get("error"):
+        rows.append({"path": ".env", "type": "error"})
+    for row in rows:
+        if row.get("type") == "error" or row.get("error"):
+            count += 1
+            examples.append(str(row.get("path")))
+        failed = int(row.get("failed") or 0)
+        if failed:
+            count += failed
+            examples += [f"{row.get('path')}/{f.get('path')}" for f in row.get("failures", [])]
+    return count, examples[:_FAILURES_LISTED]
+
+
+def _manifest_complete(manifest: dict[str, Any]) -> bool:
+    """Did this backup hold everything it set out to copy?
+
+    Read from ``complete`` (written since audit 2026-10-26 AUD-021); an older
+    manifest is judged by what it recorded: no failed database, no asset
+    entry that failed.
+    """
+    if "complete" in manifest:
+        return bool(manifest["complete"])
+    dbs = manifest.get("databases") or {}
+    if int(dbs.get("failed") or 0):
+        return False
+    return not any(row.get("type") == "error" for row in manifest.get("assets") or [])
+
+
+def _newest_complete(backups: list[Path]) -> Path | None:
+    """The newest backup folder whose manifest says it is complete."""
+    for candidate in backups:
+        manifest_path = candidate / "manifest.json"
+        if not candidate.is_dir() or not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning("[universal-backup] unreadable manifest %s: %s", manifest_path, exc)
+            continue
+        if isinstance(manifest, dict) and _manifest_complete(manifest):
+            return candidate
+    return None
+
+
 def _prune(retention: int) -> int:
-    """Delete oldest universal backups beyond retention. Returns count deleted."""
+    """Delete oldest universal backups beyond retention. Returns count deleted.
+
+    The newest COMPLETE backup is never pruned, whatever its age (audit
+    2026-10-26 AUD-021): retention counted partial backups, so seven partial
+    runs in a row rotated out the last backup that held everything.
+    """
     base = _universal_dir()
     backups = sorted(base.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    keep_complete = _newest_complete(backups)
     deleted = 0
     for stale in backups[retention:]:
+        if stale == keep_complete:
+            logger.info(
+                "[universal-backup] keeping %s past retention: the newest complete backup",
+                stale.name,
+            )
+            continue
         try:
             if stale.is_dir():
                 # _rmtree_force handles Windows read-only/locked files; plain
@@ -797,7 +906,11 @@ def _failed_db_headline(db_fail: int, failed_dbs: list[dict[str, Any]]) -> str:
 
 
 def _alert_on_backup_gaps(
-    offsite: dict[str, Any], db_fail: int, failed_dbs: list[dict[str, Any]] | None = None
+    offsite: dict[str, Any],
+    db_fail: int,
+    failed_dbs: list[dict[str, Any]] | None = None,
+    files_failed: int = 0,
+    file_examples: list[str] | None = None,
 ) -> None:
     """Tell the operator when a backup silently stopped protecting them.
 
@@ -828,6 +941,22 @@ def _alert_on_backup_gaps(
                     "write lock on the named store, then disk space."
                 ),
                 severity="critical",
+            )
+        if files_failed:
+            # Audit 2026-10-26 AUD-021: a file the copy could not read (a
+            # locked document blob) was logged at DEBUG and the backup said
+            # complete. It is a hole in every backup until it is fixed.
+            listed = ", ".join((file_examples or [])[:3]) or "unknown"
+            alert(
+                "backup.files_failed",
+                f"{files_failed} file(s) are missing from the backup: {listed}.",
+                (
+                    "The copy could not read them (a lock held by another "
+                    "program, or permissions). The backup is incomplete until "
+                    "they copy; the newest complete backup is kept meanwhile."
+                ),
+                severity="warn",
+                cooldown_s=_OFFSITE_ALERT_COOLDOWN_S,
             )
         if offsite.get("skipped"):
             return  # deliberately disabled -- not a failure
@@ -889,24 +1018,18 @@ def perform_universal_backup(
     with _backup_lock:
         _phase = _backup_progress.get("phase")
         _started_ts = _backup_progress.get("started_ts")
-        
-        # Clean up incomplete backups from interrupted runs (server restart while
-        # a backup was in progress). Any dir without a manifest.json is incomplete.
-        # Must be INSIDE the lock to prevent race with concurrent backup runs.
-        try:
-            base = _universal_dir()
-            if base.is_dir():
-                for old in base.iterdir():
-                    if old.is_dir() and old != dest and not (old / "manifest.json").is_file():
-                        logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
-                        _rmtree_force(old)
-        except Exception:
-            logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
+
         # A run that died mid-backup (process kill) leaves a mid phase
         # forever; anything older than 30 min is treated as crashed so the
         # cadence can never brick.
         _crashed = backup_progress_is_stale(_backup_progress)
         if _phase not in ("idle", "done", "error") and not _crashed:
+            # Decided BEFORE any cleanup (audit 2026-10-26 AUD-020): the
+            # cleanup below deletes every folder without a manifest, and the
+            # live run's folder has none until it finishes. A queued run
+            # arriving mid-copy deleted the running backup's folder, then
+            # answered "already running"; the first run then recorded as
+            # saved databases whose files were gone.
             logger.info(
                 "[universal-backup] already running (phase=%s) — skipping",
                 _phase,
@@ -923,6 +1046,20 @@ def perform_universal_backup(
                 _phase,
                 time.time() - _started_ts,
             )
+
+        # No live run: clean up incomplete backups from interrupted runs
+        # (server restart while a backup was in progress). Any dir without a
+        # manifest.json is incomplete. Inside the lock, so a run starting
+        # concurrently cannot begin its folder in between.
+        try:
+            base = _universal_dir()
+            if base.is_dir():
+                for old in base.iterdir():
+                    if old.is_dir() and old != dest and not (old / "manifest.json").is_file():
+                        logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
+                        _rmtree_force(old)
+        except Exception:
+            logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
         _set_progress("databases", detail="Preparing backup…", started_ts=time.time())
 
     (dest / "dbs").mkdir(parents=True, exist_ok=True)
@@ -1010,12 +1147,18 @@ def perform_universal_backup(
     # reads to badge backups as ☁ Cloud.
     _set_progress("offsite", detail="Zipping + uploading to cloud…" if _offsite_config()["enabled"] else "Skipping offsite…")
     elapsed = round(time.time() - started, 1)
+    # Complete means every database AND every file landed (audit 2026-10-26
+    # AUD-021): retention keeps the newest complete backup whatever its age.
+    files_failed, file_examples = _file_failures(asset_results, root_artifacts)
+    complete = db_fail == 0 and files_failed == 0
     manifest: dict[str, Any] = {
         "timestamp": ts,
         "version": 1,
         "trigger": trigger,
         "elapsed_seconds": elapsed,
+        "complete": complete,
         "databases": {"ok": db_ok, "failed": db_fail, "items": db_results},
+        "files": {"failed": files_failed, "examples": file_examples},
         "assets": asset_results,
         "root_artifacts": root_artifacts,
         "postgres": pg_result,
@@ -1036,7 +1179,8 @@ def perform_universal_backup(
         manifest["restic"] = restic_result
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     _alert_on_backup_gaps(
-        offsite, db_fail, [r for r in db_results if r.get("error")]
+        offsite, db_fail, [r for r in db_results if r.get("error")],
+        files_failed=files_failed, file_examples=file_examples,
     )
 
     # 6. Prune old backups (live-configured retention, env override, >= 1).
@@ -1045,13 +1189,17 @@ def perform_universal_backup(
 
     total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
     size_mb = round(total_size / (1024 * 1024), 1)
-    summary = {
-        "ok": True,
+    summary: dict[str, Any] = {
+        # Never ``True`` over a failed database or file (audit 2026-10-26
+        # AUD-021, AGENTS.md §27): an incomplete backup says so.
+        "ok": complete,
+        "complete": complete,
         "backup_dir": str(dest),
         "timestamp": ts,
         "trigger": trigger,
         "databases_ok": db_ok,
         "databases_failed": db_fail,
+        "files_failed": files_failed,
         "assets_copied": len(asset_results),
         "postgres": pg_result.get("ok") if pg_result else None,
         "total_size_mb": size_mb,
@@ -1065,7 +1213,12 @@ def perform_universal_backup(
         "[universal-backup] complete: %d DBs, %d asset groups, %.1f MB, %.1fs, pruned %d",
         db_ok, len(asset_results), size_mb, elapsed, pruned,
     )
-    _set_progress("done", detail=f"Complete: {db_ok} DBs, {size_mb} MB, {elapsed}s",
+    if not complete:
+        summary["error"] = (
+            f"Incomplete backup: {db_fail} database(s) and {files_failed} file(s) not saved"
+        )
+        logger.warning("[universal-backup] %s", summary["error"])
+    _set_progress("done",detail=f"Complete: {db_ok} DBs, {size_mb} MB, {elapsed}s",
                    result=summary)
     return summary
 

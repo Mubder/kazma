@@ -8,7 +8,9 @@ shows it).
 
 Source of truth: ``cron.db`` through the live scheduler's own store (an
 aiosqlite connection on the server loop, so this adapter reads it there). A
-fire's owner is alive while its lease runs (SCH-E04). Failures are already
+fire's owner is alive while the scheduler's fire task runs
+(``CronScheduler.fire_owner_alive``); a fire another owner holds, while its
+lease runs (SCH-E04). Failures are already
 announced by the scheduled jobs' alert outbox (§16 E2), so the supervisor
 sends no second message about them. Cancel is the Scheduled page's
 (``CronScheduler.cancel``, compare-and-set on the job's version).
@@ -57,15 +59,25 @@ class _CronAdapter:
             ended = epoch(job.finished_at)
             if native not in ("running", "delivering") and (ended or 0.0) < now - window_s:
                 continue
-            runs.append(self._run(job, native, now))
+            runs.append(self._run(job, native, now, scheduler))
         return runs
 
-    def _run(self, job: Any, native: str, now: float) -> Run:
+    def _run(self, job: Any, native: str, now: float, scheduler: Any) -> Run:
         state = RunState(self.STATE_MAP.get(native, RunState.UNKNOWN))
-        fired = epoch(job.last_fire_at) or epoch(job.fire_due)
         owner = None
         if native == "running":
-            owner = bool(job.lease_until and job.lease_until > now)
+            # A running fire is judged from its claim: the occurrence it
+            # serves, never ``last_fire_at`` (a recurring job's PREVIOUS
+            # fire). Its owner is alive while the scheduler's fire task runs;
+            # the lease decides only for a fire this scheduler does not own
+            # (audit 2026-10-26 AUD-019: a lease that lapsed under a healthy
+            # 15-minute fire made it "stuck: nothing is running it").
+            fired = epoch(job.fire_due) or epoch(job.last_fire_at)
+            owner = scheduler.fire_owner_alive(job)
+            if owner is None:
+                owner = bool(job.lease_until and job.lease_until > now)
+        else:
+            fired = epoch(job.last_fire_at) or epoch(job.fire_due)
         actions: tuple[str, ...] = ("cancel",) if native in ("running", "delivering") else ()
         detail = ""
         if state in (RunState.FAILED, RunState.UNKNOWN):

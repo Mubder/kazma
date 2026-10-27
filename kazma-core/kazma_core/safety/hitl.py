@@ -272,7 +272,9 @@ TOOL_TIERS: dict[str, str] = {
     "summarize_research_file": "write",
     "synthesize_from_digests": "write",
     "plan_research_queries": "write",
-    "send_approval_request": "write",  # this IS the approval channel
+    # A question to the operator in a chat app: no approval buttons and no
+    # `hitl approve` line, so it decides no gate (audit 2026-10-26 AUD-060).
+    "send_approval_request": "write",
     "mcp_test_server": "write",
     #
     # Read — no side effects beyond caches and outbound GETs.

@@ -771,6 +771,16 @@ async def _check_memory_recall() -> dict[str, Any]:
         )
         beliefs = getattr(result, "beliefs", None)
         episodes = getattr(result, "episodes", None)
+        if getattr(result, "failed", False) is True:
+            # Recall catches its own failures and reports them in
+            # `degraded`: an empty result there is not a passing canary
+            # (audit 2026-10-26 AUD-026).
+            return {
+                "status": "failed",
+                "component": "memory_recall",
+                "error": str(result.degraded)[:300],
+                "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            }
         return {
             "status": "ok",
             "component": "memory_recall",

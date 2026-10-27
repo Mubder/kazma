@@ -877,6 +877,7 @@ class GatewayManager:
         """Dequeue messages and dispatch to the registered handler."""
         logger.info("Message consumer started")
         while not self._shutdown.is_set():
+            msg: IncomingMessage | None = None
             try:
                 msg = await asyncio.wait_for(
                     self.queue.get(),
@@ -969,6 +970,22 @@ class GatewayManager:
                 continue
             except asyncio.CancelledError:
                 break
+            except Exception:
+                # One message must not end the consumer: a raise here (a rate
+                # limit of 0 divided by zero) killed gateway-consumer and
+                # every chat app stopped answering, said only by asyncio's
+                # "Task exception was never retrieved" (audit 2026-10-26
+                # AUD-033). The message is recorded as left, then the loop
+                # goes on.
+                logger.exception("[Gateway] Consumer failed on a message; continuing")
+                if msg is not None:
+                    try:
+                        source = self.adapter_named(msg.platform)
+                        if source is not None:
+                            source.note_left_unanswered(msg, "dispatch_failed")
+                    except Exception:
+                        logger.warning("[Gateway] Could not record the failed message", exc_info=True)
+                continue
         logger.info("Message consumer stopped")
 
     @asynccontextmanager

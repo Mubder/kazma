@@ -8,7 +8,7 @@ Usage:
 
     rfm = RateFeedbackManager(limit=30, window_seconds=60, cooldown_seconds=30)
     if rfm.is_limited("telegram:12345"):
-        feedback = rfm.get_feedback("telegram:12345")
+        feedback = rfm.get_feedback_message("telegram:12345")
         # send feedback to user
 """
 
@@ -62,10 +62,23 @@ class RateFeedbackManager:
             return self._limit.get(platform, self._limit.get("default", 30))
         return self._limit
 
+    def _unlimited(self, user_id: str) -> bool:
+        """A limit (or window) of 0 or less means no limit for that platform.
+
+        An operator who set ``gateway.rate_limits.<platform>: 0`` meant "off";
+        the bucket then refilled at 0 a second and ``get_reset_seconds``
+        divided by it, killing the gateway's consumer at the next message, so
+        every chat app stopped answering (audit 2026-10-26 AUD-033).
+        """
+        return self._window <= 0 or self._get_limit_for_user(user_id) <= 0
+
     def _refill(self, user_id: str, bucket: _UserBucket) -> None:
         """Refill tokens based on elapsed time."""
         now = time.monotonic()
         elapsed = now - bucket.last_refill
+        if self._unlimited(user_id):
+            bucket.last_refill = now
+            return
         limit = self._get_limit_for_user(user_id)
         refill_rate = limit / self._window
         bucket.tokens = min(float(limit), bucket.tokens + elapsed * refill_rate)
@@ -96,7 +109,7 @@ class RateFeedbackManager:
         If not limited, consumes one token. If limited, returns True
         without consuming.
         """
-        if not self._enabled:
+        if not self._enabled or self._unlimited(user_id):
             return False
 
         bucket = self._get_bucket(user_id)
@@ -117,7 +130,7 @@ class RateFeedbackManager:
         """Get seconds until the user has at least 1 token available."""
         bucket = self._get_bucket(user_id)
         self._refill(user_id, bucket)
-        if bucket.tokens >= 1:
+        if bucket.tokens >= 1 or self._unlimited(user_id):
             return 0
         deficit = 1 - bucket.tokens
         limit = self._get_limit_for_user(user_id)
@@ -139,8 +152,3 @@ class RateFeedbackManager:
         reset = self.get_reset_seconds(user_id)
         limit = self._get_limit_for_user(user_id)
         return f"⏳ Slow down — {remaining}/{count_noun(limit, 'request')} available. Resets in {reset}s."
-
-    def record_feedback(self, user_id: str) -> None:
-        """Record that feedback was sent (update cooldown timer)."""
-        bucket = self._get_bucket(user_id)
-        bucket.last_feedback = time.monotonic()

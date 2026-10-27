@@ -516,7 +516,8 @@ def test_the_webhook_takes_the_adapter_running_now() -> None:
     app = FastAPI()
     app.include_router(telegram_webhook_router(lambda: current["adapter"]), prefix="/hook")
     bound = FastAPI()
-    bound.include_router(first.create_webhook_router(), prefix="/hook")
+    # The old shape: a router bound to one adapter instance.
+    bound.include_router(telegram_webhook_router(lambda: first), prefix="/hook")
     update = {"update_id": 1}
 
     def post(client: TestClient, secret: str) -> int:

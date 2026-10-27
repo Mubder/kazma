@@ -14,6 +14,14 @@
 (function() {
   'use strict';
   var KS = window.KazmaStream;
+  // Every document/window listener this run binds is bound to this
+  // controller, and leaving the page aborts it (destroyChatMouth). Soft
+  // navigation runs this file again on every visit, and each run's
+  // listeners stacked: a stale run's Escape could POST /api/chat/stop for a
+  // turn from another page, and every focus resynced once per earlier visit
+  // (audit 2026-10-26 AUD-030).
+  var _pageListeners = new AbortController();
+  var _onPage = { signal: _pageListeners.signal };
   var chatSessionId = null;
   var currentMsgEl = null;
   /**
@@ -275,7 +283,7 @@
         if (modelSelectorEl) modelSelectorEl.value = model;
         try { localStorage.setItem(MODEL_LS_KEY, model); } catch(err) {}
       }
-    });
+    }, _onPage);
 
     // New session button
     var newBtn = $('new-session-btn');
@@ -324,7 +332,7 @@
         _openMenuId = null;
         renderSessionList();
       }
-    });
+    }, _onPage);
 
     function _modalOrOverlayOpen() {
       try {
@@ -351,7 +359,7 @@
         e.preventDefault();
         abortGeneration();
       }
-    });
+    }, _onPage);
 
     // Load the current session's messages if we have a session ID
     // (e.g., after page refresh or via the global search overlay ?s=)
@@ -396,14 +404,14 @@
         if (showArchived) loadArchivedSessions(); else loadSessions();
         if (chatSessionId) _resyncDelivery('visibility');
       }
-    });
+    }, _onPage);
     // Some browsers (esp. mobile) fire pageshow/focus without visibilitychange.
     window.addEventListener('pageshow', function() {
       if (chatSessionId && !document.hidden) _resyncDelivery('pageshow');
-    });
+    }, _onPage);
     window.addEventListener('focus', function() {
       if (chatSessionId && !document.hidden) _resyncDelivery('focus');
-    });
+    }, _onPage);
   }
 
   /**
@@ -7447,7 +7455,7 @@
       renderSessionList();
       if (inputEl) inputEl.focus();
     }
-  });
+  }, _onPage);
 
   // ── Boot ──────────────────────────────────────────────
   if (document.readyState === 'loading') {
@@ -8596,6 +8604,13 @@
   function destroyChatMouth() {
     try { if (activeStream) activeStream.abort(); } catch (e) {}
     activeStream = null;
+    // This run's document/window listeners and timers go with the page: the
+    // next visit runs the file again and binds its own (audit 2026-10-26
+    // AUD-030). The desync healer ran every 1.5 s on every later page.
+    try { _pageListeners.abort(); } catch (e) {}
+    if (_turnSyncTimer) { clearInterval(_turnSyncTimer); _turnSyncTimer = null; }
+    if (_turnWatchdogTimer) { clearTimeout(_turnWatchdogTimer); _turnWatchdogTimer = null; }
+    try { _stopHeaderTicker(); } catch (e) {}
     // Live voice's microphone and socket go with the page (AUD-011).
     try {
       if (window.KazmaVoice && typeof window.KazmaVoice.teardown === 'function') {
@@ -8608,7 +8623,8 @@
       }
     } catch (e) {}
   }
-  window.kazmaOnSoftNavLeave = destroyChatMouth;
+  // Added to the page's leave hooks, never over another script's hook.
+  window.kazmaAddLeaveHook(destroyChatMouth);
 
   /** Live-voice user-row contract. The voice socket is the originating
    *  mouth for the USER line — exactly like the composer is for typed text

@@ -69,7 +69,7 @@ def test_the_session_table_names_the_chat(harness: Harness) -> None:
             row = dash.evaluate(_ROW)
             chat, platform, messages, steps, when, _actions = row["cells"]
             assert QUESTION in chat, row
-            assert row["href"].startswith("/chat?session="), row
+            assert row["href"].startswith("/chat?s="), row  # chat.js reads ?s= (AUD-031)
             assert row["titleTranslate"] == "no", "the chat's title is the user's words"
             assert platform == "Web", row
             assert messages == "2", row

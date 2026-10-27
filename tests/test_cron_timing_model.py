@@ -62,7 +62,7 @@ def test_one_string_is_one_instant_on_every_path(zone_name, monkeypatch, ops_db)
     scheduler's validator) and X booking agree, in every zone."""
     zone = _zone(zone_name)
     _set_zone(monkeypatch, zone_name)
-    from kazma_core.cron.scheduler import parse_timing
+    from kazma_core.cron.scheduler import resolve_cron_zone
     from kazma_core.safety.commitment import authorize_effect
     from kazma_core.x_api.booking import _parse_when
 
@@ -74,7 +74,11 @@ def test_one_string_is_one_instant_on_every_path(zone_name, monkeypatch, ops_db)
         request_at=datetime.now(UTC), memory_beliefs=[], thread_id="t-e03", turn_id="turn1",
     )
     assert d.decision == "allow"
-    via_chat = parse_timing(d.rewritten_args["timing"] if d.rewritten_args else naive)
+    # The booking the gate's (rewritten) arguments reach: the scheduler's
+    # zone and the one timing model.
+    booked_zone, booked_name = resolve_cron_zone()
+    via_chat = resolve_timing(d.rewritten_args["timing"] if d.rewritten_args else naive,
+                              zone=booked_zone, zone_name=booked_name).first
     via_web = resolve_timing(naive, zone=zone, zone_name=zone_name).first
     via_x = datetime.fromtimestamp(_parse_when(naive), tz=UTC)
     assert via_chat == want and via_web == want and via_x == want
@@ -113,7 +117,7 @@ _RECURRING_CORPUS = [
 def test_recurring_requests_keep_their_recurrence(user_text, timing, ops_db, monkeypatch):
     _set_zone(monkeypatch, "Asia/Kuwait")
     zone = _zone("Asia/Kuwait")
-    from kazma_core.cron.scheduler import parse_timing
+    from kazma_core.cron.scheduler import resolve_cron_zone
     from kazma_core.safety.commitment import authorize_effect
 
     request_at = datetime(2026, 10, 13, 15, 17, tzinfo=UTC)
@@ -124,7 +128,9 @@ def test_recurring_requests_keep_their_recurrence(user_text, timing, ops_db, mon
     # Its first occurrence is the scheduler's.
     rec = parse_recurrence(timing)
     first = next_occurrence(rec, zone=zone, after=request_at)
-    assert first == parse_timing(timing, from_time=request_at)
+    booked_zone, booked_name = resolve_cron_zone()
+    assert first == resolve_timing(timing, zone=booked_zone, zone_name=booked_name, now=request_at,
+                                   allow_past=True).first
     assert first.astimezone(zone).hour == rec.hour
 
 

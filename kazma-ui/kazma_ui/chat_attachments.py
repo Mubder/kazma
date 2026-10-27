@@ -48,7 +48,18 @@ def _load_uploaded_attachment(attachment_id: Any) -> bytes | None:
         return None
 
     root = ATTACHMENT_DIR.resolve()
-    matches = list(root.glob(f"{attachment_id}.*")) if root.exists() else []
+    # A file is stored as ``<id><suffix>``, and the suffix is empty for a name
+    # with no extension (``Dockerfile``, ``README``): ``<id>.*`` never found
+    # those, so the turn carried no bytes (audit 2026-10-26 AUD-029). Match
+    # the bare id or the id followed by its suffix, nothing else.
+    matches = (
+        [
+            p for p in root.glob(f"{attachment_id}*")
+            if p.name == attachment_id or p.name.startswith(f"{attachment_id}.")
+        ]
+        if root.exists()
+        else []
+    )
     if len(matches) != 1:
         return None
 

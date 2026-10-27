@@ -76,7 +76,8 @@ function ideApp() {
       this.loadSkills();
       this.initChat();
       var self = this;
-      window.kazmaOnSoftNavLeave = function () { self.destroy(); };
+      // Added to the leave hooks, never over another script's (AUD-030).
+      window.kazmaAddLeaveHook(function () { self.destroy(); });
       this._leaveGuard = function () { return self.confirmLeave(); };
       window.kazmaBeforeNavigate = this._leaveGuard;
       this._beforeUnload = function (event) {

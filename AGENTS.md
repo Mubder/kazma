@@ -437,7 +437,9 @@ JSON". Gate: `tests/test_x_reasoning_off.py`.
 ### 8. ConfigStore Singleton + Atomicity (`kazma-core/kazma_core/config_store.py`)
 - Uses WAL + `busy_timeout=5000` (like all other SQLite stores)
 - Process-wide singleton: `get_config_store()` — all components MUST use this, not `ConfigStore()` directly
-- Multi-key writes MUST use `batch_set()` or `transaction()` for atomicity
+- Multi-key writes MUST use `batch_set()` for atomicity. `transaction()` is
+  SQLite-only (on Postgres its `_get_conn()` refuses) and no product code
+  calls it: do not add a caller (audit 2026-10-26 AUD-079)
 - Never construct `ConfigStore()` in gateway/core code — use `get_config_store()`
 - **`self._lock` covers the live statement, and `close()` must take it too.**
   Every read/write holds the lock across `_get_conn()` *and* the statement
@@ -7671,6 +7673,40 @@ test that fails on the old code.
   Word or Markdown keeps its artifact (AUD-009); Swarm's document listeners
   and Live voice are torn down on a soft navigation (AUD-011/012,
   `tests/js/test_soft_nav_listeners.js`).
+- **The short-term batch (AUD-014..082)**, each with its regression test:
+  - A provider 5xx is transient on the non-streaming path too (AUD-014).
+    A pinned provider is never sent another vendor's active model (AUD-015).
+  - A failed recall answers `degraded="recall_failed:<code>"`, never an empty
+    result, through `memory_search`, federated search and `/health/deep`
+    (AUD-026, 057). `mutate_belief` re-raises a refused write (AUD-027). The
+    re-embed passes write each vector once, guarded against a forget landing
+    meanwhile (AUD-028).
+  - The MCP path gate reads every path-like argument (AUD-059).
+  - A swarm retry names the chain's first task (AUD-016).
+  - Cron recovery skips its own live sends (AUD-017). A fire's lease covers
+    its task budget (AUD-019).
+  - Claimed incident work always ends recorded (`runs/claims.py`, AUD-018).
+  - A universal backup never deletes a running backup's folder (AUD-020).
+    It counts the files it could not copy (`complete`, `backup.files_failed`),
+    and retention keeps the newest complete one (AUD-021).
+  - Document intake recovery leaves live uploads alone (AUD-022). GC skips a
+    stage in use (`documents/live_scratch.py`, AUD-023). The heartbeat rides
+    out a locked store (AUD-024). A block that fails to render fails the
+    document (AUD-025).
+  - The MCP Test client reads its own reply by id and drains stderr
+    (AUD-038). `ollama pull` cannot block on its pipes (AUD-037).
+  - Chat-app sends report each attachment and the swarm routes report a
+    refusal (AUD-032). A rate limit of 0 means none, and one failing message
+    never stops `gateway-consumer` (`dispatch_failed`, AUD-033).
+  - Discord's fatal close codes stop the reconnect loop (AUD-034). The TUI
+    writes locally only when nothing listens (`LocalApiUnreachable`,
+    AUD-035). `send_approval_request` is a question with no HITL buttons
+    (AUD-060).
+  - Page scripts register leave hooks only through `window.kazmaAddLeaveHook`
+    (`base.html`); no script assigns `window.kazmaOnSoftNavLeave` (AUD-030,
+    `tests/js/test_soft_nav_lifecycle.js`). Dashboard chat links use `?s=`
+    (AUD-031). The Dashboard's chat delete forgets the Time Travel steps
+    (AUD-055).
 
 ## UI Conventions (Web)
 

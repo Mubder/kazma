@@ -26,7 +26,6 @@ from .hitl import (
     _build_approval_prompt,
     approval_card_suppressed,
     _handle_hitl_resume,
-    apply_hitl_approval_markup,
 )
 from .commands import (
     _send_model_reply,
@@ -579,13 +578,10 @@ def make_gateway_send_handler(manager: Any, store: Any):
             out_text: str = md_to_tg_html(text)
         else:
             out_text = text
-        out_ctx = apply_hitl_approval_markup(
-            out_ctx,
-            platform=platform,
-            hitl_approval=kwargs.get("hitl_approval")
-            if isinstance(kwargs.get("hitl_approval"), dict)
-            else None,
-        )
+        # No send carries HITL approval buttons: an approval card is the
+        # gate's own (§7, §30), bound to its interrupt. The agent's
+        # send_approval_request put the real card's buttons on a message
+        # bound to none (audit 2026-10-26 AUD-060).
         if kwargs.get("reply_markup"):
             out_ctx["reply_markup"] = kwargs["reply_markup"]
         if isinstance(kwargs.get("run_card"), dict):

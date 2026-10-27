@@ -209,3 +209,31 @@ def test_document_excerpt_is_fenced_as_untrusted(tmp_path, monkeypatch) -> None:
     assert isinstance(content, str)
     assert '<kazma:data source="document_attachment" untrusted="true">' in content
     assert "NOT instructions" in content
+
+
+@pytest.mark.parametrize("filename", ["Dockerfile", "Makefile", "README", "LICENSE"])
+def test_an_upload_with_no_extension_resolves(tmp_path, monkeypatch, filename) -> None:
+    """(audit 2026-10-26 AUD-029) a file stored with no suffix is found again.
+
+    The loader globbed ``<id>.*``, so an upload named ``Dockerfile`` got a 200
+    and an id and then reached the turn with no bytes.
+    """
+    monkeypatch.setattr(chat_attachments, "ATTACHMENT_DIR", tmp_path)
+    attachment_id = chat_attachments.store_uploaded_attachment(b"FROM python", filename)
+
+    attachments = chat_attachments.attachments_from_client_payload(
+        [{"id": attachment_id, "kind": "file", "filename": filename}]
+    )
+
+    assert attachments[0].data == b"FROM python"
+
+
+def test_an_id_never_matches_a_longer_name(tmp_path, monkeypatch) -> None:
+    """The match is the id itself or the id and a suffix, never a longer stem."""
+    monkeypatch.setattr(chat_attachments, "ATTACHMENT_DIR", tmp_path)
+    attachment_id = f"att_{'a' * 32}"
+    (tmp_path / f"{attachment_id}extra").write_bytes(b"not this one")
+
+    assert chat_attachments._load_uploaded_attachment(attachment_id) is None
+    (tmp_path / f"{attachment_id}.txt").write_bytes(b"this one")
+    assert chat_attachments._load_uploaded_attachment(attachment_id) == b"this one"

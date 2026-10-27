@@ -92,6 +92,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا توجد مستندات بعد.",
         "en": "No documents yet.",
     },
+    "documents.audit_load_failed": {
+        "ar": "تعذّر تحميل سجل التدقيق.",
+        "en": "The audit history could not be loaded.",
+    },
     "documents.delete_title": {
         "ar": "حذف هذا المستند / أرشفته",
         "en": "Delete / archive this document",

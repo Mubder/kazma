@@ -215,8 +215,90 @@ def mcp_safe_allowlisted(tool_name: str) -> bool:
     return bool(leaf) and leaf in allow
 
 
-_FS_PATH_KEYS = ("path", "paths", "directory", "filePath", "filepath",
-                  "source", "destination", "src", "dst", "target", "folder")
+# Argument names that hold a path, compared lower-case with "_" and "-"
+# removed, at any depth: the old fixed list (path, paths, directory,
+# filePath, source, destination, src, dst, target, folder), its spellings
+# across MCP servers (``file_path``, ``repo_path``, ``uri``, ``cwd``,
+# ``root``...), and any name ending in one of the suffixes. The fixed list let
+# ``file_path``/``repo_path``/``uri``/``file``/``filename``/``dir``/``root``
+# and ``cwd`` pass unchecked, and this gate is the only filesystem
+# containment for MCP tools (audit 2026-10-26 AUD-059).
+_PATH_KEY_NAMES = frozenset({
+    "path", "paths", "directory", "directories", "dir", "dirs", "folder", "folders",
+    "file", "files", "filename", "filenames", "filepath", "filepaths",
+    "source", "sources", "destination", "dest", "src", "dst", "target",
+    "root", "roots", "cwd", "workdir", "workingdirectory", "uri", "uris",
+    "location", "repo", "repository",
+})
+_PATH_KEY_SUFFIXES = ("path", "paths", "dir", "directory", "folder", "file", "filename",
+                      "uri", "root")
+# Any other string argument is checked when its WHOLE value is shaped like a
+# path that can leave the workspace: absolute (a drive, a UNC share, "/a/..."
+# with at least one inner slash, so "/help" in a message is not a path), the
+# home folder, a parent-folder climb, or a file: URI.
+_PATH_SHAPED = re.compile(
+    r"^(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|/[^/\s]+/|~[\\/]|\.\.(?:[\\/]|$)|file:)",
+    re.IGNORECASE,
+)
+_URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_MAX_ARG_DEPTH = 6
+_MAX_ARG_STRINGS = 512
+
+
+def _is_path_key(key: Any) -> bool:
+    norm = re.sub(r"[_\-\s]", "", str(key or "")).lower()
+    return bool(norm) and (norm in _PATH_KEY_NAMES or norm.endswith(_PATH_KEY_SUFFIXES))
+
+
+def _path_value(value: str) -> str | None:
+    """The filesystem path *value* names, or None (a web URL is not one)."""
+    text = value.strip()
+    if not text:
+        return None
+    if text.lower().startswith("file:"):
+        return _resource_path_from_uri(text)
+    if _URL_SCHEME.match(text):
+        return None
+    return text
+
+
+def _path_arguments(arguments: Any) -> list[str]:
+    """Every path an MCP call's arguments name, at any depth.
+
+    A value under a path-named key is a path (a relative one resolves inside
+    the workspace); any other single-line string is one only when it is
+    path-shaped (:data:`_PATH_SHAPED`), so prose and queries are not judged.
+    """
+    found: list[str] = []
+    seen = 0
+
+    def visit(value: Any, path_key: bool, depth: int) -> None:
+        nonlocal seen
+        if depth > _MAX_ARG_DEPTH or seen >= _MAX_ARG_STRINGS:
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                visit(item, path_key or _is_path_key(key), depth + 1)
+            return
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                visit(item, path_key, depth + 1)
+            return
+        if isinstance(value, bool):
+            return
+        if isinstance(value, int) and path_key:
+            value = str(value)
+        if not isinstance(value, str):
+            return
+        seen += 1
+        if not path_key and ("\n" in value or not _PATH_SHAPED.match(value.strip())):
+            return
+        named = _path_value(value)
+        if named:
+            found.append(named)
+
+    visit(arguments if isinstance(arguments, dict) else {}, False, 0)
+    return found
 # Filesystem verbs that are writes but not always in `_MUTATOR_TOKENS`
 # (append/patch/edit/unix short names). Unioned with the side_effects SoT.
 _FS_WRITE_EXTRA = frozenset({
@@ -275,14 +357,8 @@ def _gate_mcp_path_access(
     the hole where MCP ``filesystem`` tools bypassed the path-grant system
     entirely (their own allowlist was the only gate).
     """
-    # Collect path-like arguments.
-    paths: list[str] = []
-    for key in _FS_PATH_KEYS:
-        val = arguments.get(key)
-        if val is None:
-            continue
-        items = val if isinstance(val, list) else [val]
-        paths.extend(str(v) for v in items if isinstance(v, (str, int)) and str(v).strip())
+    # Every path the arguments name, by key or by shape, at any depth (AUD-059).
+    paths = _path_arguments(arguments)
     if not paths:
         return None  # no path args → not a filesystem op
 

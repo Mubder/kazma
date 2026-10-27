@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -456,6 +457,30 @@ async def check_ollama_health(base_url: str | None = None) -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+#: Waiter threads of pulls still running, by pid (removed as each ends).
+_pull_waiters: dict[int, threading.Thread] = {}
+_pull_waiters_lock = threading.Lock()
+
+
+def _record_pull_end(proc: Any, result: dict[str, Any]) -> None:
+    """Wait for an ``ollama pull`` and record its ending in *result*."""
+    try:
+        code = proc.wait()
+    except Exception as exc:  # noqa: BLE001 -- the ending is recorded either way
+        logger.warning("Ollama pull wait failed: model=%s: %s", result.get("model"), exc)
+        result.update(status="error", error=f"could not wait for the pull: {str(exc)[:120]}")
+        return
+    finally:
+        with _pull_waiters_lock:
+            _pull_waiters.pop(getattr(proc, "pid", None), None)
+    if code == 0:
+        result["status"] = "pulled"
+        logger.info("Ollama pull finished: model=%s", result.get("model"))
+    else:
+        result.update(status="error", error=f"ollama pull exited with code {code}")
+        logger.warning("Ollama pull failed: model=%s code=%s", result.get("model"), code)
+
+
 async def pull_ollama_model(model: str) -> dict[str, Any]:
     """Pull a model via `ollama pull` as an async subprocess.
 
@@ -478,18 +503,31 @@ async def pull_ollama_model(model: str) -> dict[str, Any]:
         # (Popen is non-blocking; the pull continues in the background).
         import subprocess
 
+        # No pipes (audit 2026-10-26 AUD-037): stdout/stderr were PIPEs that
+        # nothing read, so once Ollama's progress output filled the buffer
+        # the pull blocked for good and the UI said "pulling" forever.
         proc = await asyncio.to_thread(
             subprocess.Popen,
             ["ollama", "pull", model],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         logger.info("Ollama pull started: model=%s pid=%d", model, proc.pid)
-        return {
+        result: dict[str, Any] = {
             "status": "pulling",
             "model": model,
             "pid": proc.pid,
         }
+        # The returned dict is the one the pulls list shows: a waiter thread
+        # records how the pull ended in it (kept in _pull_waiters until then).
+        waiter = threading.Thread(
+            target=_record_pull_end, args=(proc, result), name=f"ollama-pull-{proc.pid}", daemon=True,
+        )
+        with _pull_waiters_lock:
+            _pull_waiters[proc.pid] = waiter
+        waiter.start()
+        return result
 
     except FileNotFoundError:
         return {

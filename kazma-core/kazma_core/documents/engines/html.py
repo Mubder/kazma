@@ -32,6 +32,7 @@ from kazma_core.documents.content_model import (
     TitleBlock,
     TOCBlock,
 )
+from kazma_core.documents.errors import DocumentRenderError
 from kazma_core.documents.profile import DocProfile
 
 logger = logging.getLogger(__name__)
@@ -76,8 +77,18 @@ class HtmlEngine:
                 chunk = self._render_block(block)
                 if chunk:
                     body_parts.append(chunk)
-            except Exception:
-                logger.debug("[html] block render failed: %r", block, exc_info=True)
+            except DocumentRenderError:
+                raise
+            except Exception as exc:
+                # Fails the render, never drops the block (audit 2026-10-26
+                # AUD-025, §19's DocumentRenderError rule).
+                logger.warning(
+                    "[html] %s could not be rendered: %s", type(block).__name__, exc, exc_info=True
+                )
+                raise DocumentRenderError(
+                    f"A {type(block).__name__} could not be rendered ({type(exc).__name__})",
+                    code="document_render_failed",
+                ) from exc
         body_html = "\n".join(body_parts)
         return self._document(title, body_html, header_card=bool(title))
 

@@ -191,9 +191,10 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "current_datetime": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "send_message": (EffectKind.NONE, SemanticTier.NONE, None, ()),
     # Operator-directed messaging: outbound, but ungated on purpose.
-    # send_approval_request IS the HITL card -- putting it behind the
-    # send_outbound gate would require an approval in order to ask for one.
-    # Both deliver to the operator, never to a third party, so the gate that
+    # send_approval_request asks the operator a question in a chat app; it
+    # is NOT a HITL card (no buttons, no `hitl approve` line, bound to no
+    # interrupt: audit 2026-10-26 AUD-060), and decides nothing. Both
+    # deliver to the operator, never to a third party, so the gate that
     # every other OUTBOUND tool carries would protect nobody here.
     "send_approval_request": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),
     "dispatch_notification": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),

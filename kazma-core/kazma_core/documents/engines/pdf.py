@@ -35,6 +35,7 @@ from kazma_core.documents.content_model import (
     TitleBlock,
     TOCBlock,
 )
+from kazma_core.documents.errors import DocumentRenderError
 from kazma_core.documents.profile import DocProfile
 from kazma_core.documents.rich_render import (
     inline_markdown_to_reportlab,
@@ -237,8 +238,18 @@ class PdfEngine:
                 self._render_block(block, story, _bar, Paragraph, Spacer, PageBreak,
                                    Table, TableStyle, colors, th, rich_styles,
                                    font, bold_font, col_width, body_size_actual, accent)
-            except Exception:
-                logger.debug("[pdf] block render failed: %r", block, exc_info=True)
+            except DocumentRenderError:
+                raise
+            except Exception as exc:
+                # Fails the render, never drops the block (audit 2026-10-26
+                # AUD-025, §19's DocumentRenderError rule).
+                logger.warning(
+                    "[pdf] %s could not be rendered: %s", type(block).__name__, exc, exc_info=True
+                )
+                raise DocumentRenderError(
+                    f"A {type(block).__name__} could not be rendered ({type(exc).__name__})",
+                    code="document_render_failed",
+                ) from exc
         story = self._keep_headings_with_body(story)
 
         # Reshaping library availability warning (only matters when shaping).
@@ -289,7 +300,6 @@ class PdfEngine:
         Arabic PDF that looked like a successful render. A typed refusal is
         strictly more useful than a silently empty document.
         """
-        from kazma_core.documents.errors import DocumentRenderError
         from kazma_core.documents.fonts import resolve_fonts
 
         needs_arabic = bool(self.profile.shape_arabic)
@@ -579,10 +589,17 @@ class PdfEngine:
         it to pick the line-breaking mode.
         """
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+        from reportlab.lib.styles import ParagraphStyle
 
         out: dict[str, Any] = {}
         for name, style in styles.items():
-            if not hasattr(style, "clone"):
+            # Paragraph styles only: the set also holds the accent colour, and
+            # a reportlab ``Color`` has a ``clone()`` that takes no name. The
+            # old ``hasattr(style, "clone")`` test sent it here, the TypeError
+            # was swallowed per block, and every block of a mixed document's
+            # other direction was missing from the PDF (found by audit
+            # 2026-10-26 AUD-025 once a failed block stopped being dropped).
+            if not isinstance(style, ParagraphStyle):
                 out[name] = style
                 continue
             copy = style.clone(name + "Mirrored")

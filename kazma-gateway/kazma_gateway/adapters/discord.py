@@ -58,6 +58,50 @@ _RESUME_CLOSE_CODE = 4000
 #: Portal, or Discord closes the connection with 4014).
 _INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15)
 
+#: Close codes after which reconnecting can never succeed (Discord's
+#: Gateway close codes, "Reconnect: false"), with what to fix. Only 4013 and
+#: 4014 stopped the loop; a revoked token (4004) re-identified every 1-3 s
+#: forever, against Discord's identify limit, while the Test said only
+#: "connecting" (audit 2026-10-26 AUD-034).
+_FATAL_CLOSE_CODES: dict[int, str] = {
+    4004: (
+        "Discord refused the bot token (close code 4004, authentication "
+        "failed). Put the bot's current token in Settings -> Adapters & "
+        "Routes -> Discord."
+    ),
+    4010: "Discord refused the shard Kazma sent (close code 4010, invalid shard).",
+    4011: (
+        "Discord requires this bot to shard (close code 4011, sharding "
+        "required): it is in too many servers for one connection."
+    ),
+    4012: "Discord refused the gateway API version (close code 4012).",
+    4013: (
+        "Discord refused the intents Kazma asked for (close code 4013, "
+        "invalid intents)."
+    ),
+    4014: (
+        "Discord refused a privileged intent (close code 4014). Enable "
+        "'MESSAGE CONTENT INTENT' under Discord Developer Portal -> "
+        "Application -> Bot -> Privileged Gateway Intents, then restart Kazma."
+    ),
+}
+#: Reconnects after a connection that never reached READY / RESUMED back off
+#: exponentially, 2 s doubling to this cap (with +-25 % jitter).
+_RECONNECT_BACKOFF_MAX_S = 60.0
+#: The least wait after the server closed the socket cleanly (no op 7/op 9):
+#: such a close used to reconnect with no delay at all.
+_CLEAN_CLOSE_MIN_S = 1.0
+
+
+
+def _reconnect_backoff(failures: int) -> float:
+    """Seconds to wait after *failures* connections in a row that never got
+    to READY / RESUMED: 2, 4, 8 ... capped at ``_RECONNECT_BACKOFF_MAX_S``,
+    each +-25 % so a fleet of restarts does not identify in step."""
+    base = min(_RECONNECT_BACKOFF_MAX_S, 2.0 ** max(1, failures))
+    return base * random.uniform(0.75, 1.25)
+
+
 # Rate-limit constants
 _SEND_MAX_RETRIES = 3
 _SEND_BASE_DELAY = 1.0
@@ -108,6 +152,9 @@ class DiscordAdapter(BaseAdapter):
         # READY's resume_gateway_url. Discord answers a Resume sent anywhere
         # else with op 9, and the session is lost (see _gateway_url).
         self._resume_url: str | None = None
+        # Whether the current connection reached READY / RESUMED: one that
+        # did not counts toward the reconnect backoff (AUD-034).
+        self._reached_ready = False
         # Per-channel serial chains for message processing (voice fetch +
         # STT): keeps arrival order within a channel so a slow transcription
         # can no longer enqueue AFTER a later text message and swap turn
@@ -186,9 +233,18 @@ class DiscordAdapter(BaseAdapter):
         try:
             logger.info("[discord] Starting Discord gateway connection")
 
+            # Connections in a row that never reached READY / RESUMED.
+            failures = 0
             while not shutdown_event.is_set():
+                self._reached_ready = False
                 try:
                     wait = await self._connect_gateway(queue, shutdown_event)
+                    failures = 0 if self._reached_ready else failures + 1
+                    if failures and not shutdown_event.is_set():
+                        # Discord closed a connection before it was up: back
+                        # off, never reconnect at once (audit 2026-10-26
+                        # AUD-034).
+                        wait = max(wait or 0.0, _reconnect_backoff(failures))
                     if wait:
                         # Discord's rule after a non-resumable op 9: wait
                         # 1-5 s before a fresh Identify. The socket is
@@ -200,24 +256,28 @@ class DiscordAdapter(BaseAdapter):
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    # Fatal gateway close codes: 4013 invalid intents / 4014
-                    # disallowed intents. 4014 means MESSAGE_CONTENT (or
-                    # another privileged intent we request) is NOT enabled in
-                    # the Discord Developer Portal — reconnecting can never
-                    # succeed, so stop with an actionable message instead of
-                    # looping forever.
+                    # Close codes after which reconnecting can never succeed
+                    # (a refused token, intents, shards): stop, and say what
+                    # to fix -- in the log AND in the connection's record,
+                    # which the connector Test shows.
                     _close_code = getattr(getattr(exc, "rcvd", None), "code", None)
-                    if _close_code in (4013, 4014):
-                        logger.critical(
-                            "[discord] Gateway rejected our intents (close code "
-                            "%s). Enable 'MESSAGE CONTENT INTENT' under Discord "
-                            "Developer Portal → Application → Bot → Privileged "
-                            "Gateway Intents, then restart Kazma.",
-                            _close_code,
-                        )
+                    fatal = _FATAL_CLOSE_CODES.get(_close_code) if isinstance(_close_code, int) else None
+                    if fatal is not None:
+                        logger.critical("[discord] %s Not reconnecting.", fatal)
+                        self._receive.disconnected(fatal)
                         break
+                    failures = 0 if self._reached_ready else failures + 1
                     err_msg = str(exc) or exc.__class__.__name__
                     logger.warning("[discord] Gateway connection dropped (%s) — reconnecting...", err_msg)
+                    if failures:
+                        self._receive.problem(f"The connection dropped before Discord answered: {err_msg}")
+                        try:
+                            await asyncio.wait_for(
+                                shutdown_event.wait(), timeout=_reconnect_backoff(failures),
+                            )
+                            break
+                        except TimeoutError:
+                            continue
                     if await self.jitter_sleep(shutdown_event):
                         break
                     continue
@@ -355,6 +415,7 @@ class DiscordAdapter(BaseAdapter):
                             else None
                         )
                         self._receive.ready(d)
+                        self._reached_ready = True
                         from kazma_gateway.adapters.discord_commands import register
 
                         application = str((d.get("application") or {}).get("id") or (d.get("user") or {}).get("id") or "")
@@ -364,6 +425,7 @@ class DiscordAdapter(BaseAdapter):
 
                     elif op == 0 and t == "RESUMED":
                         self._receive.resumed()
+                        self._reached_ready = True
                         logger.info("[discord] Gateway session resumed successfully")
 
                     elif op == 0 and t == "MESSAGE_CREATE":
@@ -407,6 +469,12 @@ class DiscordAdapter(BaseAdapter):
 
                     elif op == 11:  # Heartbeat ACK
                         pass
+
+                if not shutdown_event.is_set():
+                    # Discord closed the socket cleanly without asking for a
+                    # reconnect: never connect again at once (AUD-034).
+                    logger.info("[discord] Gateway closed the connection; reconnecting")
+                    return _CLEAN_CLOSE_MIN_S
 
         except ImportError:
             logger.error("[discord] websockets package not installed — run: pip install websockets")
@@ -842,9 +910,12 @@ class DiscordAdapter(BaseAdapter):
 
         if all_sent:
             logger.debug("[discord] Sent to channel %s: %.80s", channel_id, outbound.text)
-            # Deliver any media attachments after the text.
+            # Deliver any media attachments after the text. A refused upload
+            # is a failed send (audit 2026-10-26 AUD-032, §51); every
+            # attachment is still tried.
             for att in outbound.attachments:
-                await self._send_attachment(channel_id, att)
+                if not await self._send_attachment(channel_id, att):
+                    all_sent = False
             # Voice reply: if the inbound turn was transcribed audio and TTS
             # is enabled, synthesize the text and send it back as audio.
             if outbound.context_metadata.get("voice_transcribed") and outbound.text:

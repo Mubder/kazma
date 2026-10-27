@@ -1088,6 +1088,25 @@ the call sites the improved gate flagged (`sessions/directory.py`,
 
 ### 2. Short-term refactoring (wiring and cleanup)
 
+**Status (2026-10-27):** fixed, each with a regression test that fails on the
+old code, except where noted.
+- Fixed in full: AUD-014 to AUD-035, AUD-037, AUD-038, AUD-055 to AUD-060,
+  AUD-076 to AUD-078, AUD-080 to AUD-082, and the Low rows AUD-042 to
+  AUD-045 and AUD-067 to AUD-069.
+- AUD-036 is partial. The model work is off the loop and the Coqui import is
+  fixed, but the Kokoro and faster-whisper calls are unverified, because those
+  packages are not installed.
+- AUD-076 kept `list_active`: the scheduled soak harness calls it.
+- AUD-079 is not a bug as written. On Postgres `transaction()` refuses to run
+  rather than writing to the SQLite shadow. AGENTS.md section 8 no longer
+  recommends it.
+- AUD-083 was resolved by AUD-090.
+
+Found while fixing AUD-025: the ReportLab PDF route dropped every block whose
+direction differed from the document's, so bilingual PDFs lost their
+minority-language blocks (`_mirror_styles` cloned a `Color`). Fixed and
+tested.
+
 - **AUD-014 to 038:** retry classification, provider/model pairing, lineage,
   cron leases, incident exception handling, backup ordering and counting,
   document intake recovery, stage GC, heartbeat, render drops, recall and

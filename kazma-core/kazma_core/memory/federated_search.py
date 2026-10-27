@@ -119,6 +119,12 @@ def federated_search(
     hits: list[dict[str, Any]] = []
     mem_n = 0
     kb_n = 0
+    # Why a store's answer is incomplete, or None. "No hits in either
+    # store." over a search that failed is a false statement: the memory
+    # side said nothing (an exception at DEBUG, `result.degraded` dropped)
+    # and the response was still ok (audit 2026-10-26 AUD-057).
+    memory_degraded: str | None = None
+    knowledge_error: str | None = None
 
     if include_memory:
         try:
@@ -131,6 +137,7 @@ def federated_search(
                 tenant_id=tenant_id,
                 explain=True,
             )
+            memory_degraded = result.degraded
             for h in result.beliefs:
                 hits.append(
                     {
@@ -181,7 +188,10 @@ def federated_search(
                 )
                 mem_n += 1
         except Exception as exc:
-            logger.debug("[federated] memory search failed: %s", exc, exc_info=True)
+            logger.warning("[federated] memory search failed: %s", exc, exc_info=True)
+            from kazma_core.memory.recall import RECALL_FAILED
+
+            memory_degraded = f"{RECALL_FAILED}federated_error"
 
     # Each store keeps its own ranking and its own budget (Knowledge audit
     # KB-S02): memory scores are evidence on 0..1, Knowledge scores are RRF
@@ -205,6 +215,7 @@ def federated_search(
             kb_n = len(kb_hits)
         except Exception as exc:
             logger.warning("[federated] knowledge search failed: %s", exc)
+            knowledge_error = "knowledge_search_failed"
 
     return {
         "ok": True,
@@ -215,6 +226,9 @@ def federated_search(
             "knowledge": kb_n,
             "total": len(hits),
         },
+        # The page shows each as a banner instead of "no hits" (AUD-057).
+        "degraded": memory_degraded,
+        "knowledge_error": knowledge_error,
     }
 
 

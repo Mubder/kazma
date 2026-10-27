@@ -4,8 +4,11 @@
 // Failures always fall back to a full page load.
 //
 // Soft-nav is on for every page. Failures fall back to a full load.
-// Chat / IDE / Swarm register window.kazmaOnSoftNavLeave to abort SSE
-// and destroy the editor before the next page binds.
+// Page scripts add a leave hook with window.kazmaAddLeaveHook (base.html)
+// to abort SSE, stop pollers, unbind document/window listeners and destroy
+// the editor before the next page binds; teardownLiveSockets runs them all.
+// Never assign window.kazmaOnSoftNavLeave: that dropped the hooks of every
+// script before it on the page (audit 2026-10-26 AUD-030).
 //
 // First-click empty pages: a whitelist used to skip companions
 // (memory_console.js, dash_lists.js, voice.js, mermaid, CodeMirror).
@@ -583,10 +586,16 @@ export function initSoftNav() {
                 credentials: 'same-origin',
                 redirect: 'follow',
             });
-            // NOTE: the global fetch wrapper (auth-guard.js) now owns the
-            // session-expired → /login redirect for 401/403. Just bail here;
-            // the wrapper already fired the redirect.
-            if (res.status === 401 || res.status === 403) {
+            // The global fetch wrapper (auth-guard.js) owns the
+            // session-expired → /login redirect, for 401 ONLY. A 403 is not
+            // redirected there, so bailing left the click doing nothing,
+            // silently (audit 2026-10-26 AUD-069): load the page whole and
+            // let the server's own answer show.
+            if (res.status === 401) {
+                return;
+            }
+            if (res.status === 403) {
+                window.location.href = url;
                 return;
             }
             if (res.redirected && /\/login(?:\?|$)/.test(res.url)) {

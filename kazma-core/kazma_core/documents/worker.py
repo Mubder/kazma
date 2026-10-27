@@ -405,6 +405,14 @@ class DocumentWorker:
         owner: str,
         cancellation: threading.Event,
     ) -> None:
+        # When the lease was last known renewed (the claim set it). A store
+        # error is retried at the next beat while the lease still holds; the
+        # stage is stopped only by a conflict (another owner, the job gone)
+        # or once the lease has actually run out (audit 2026-10-26 AUD-024:
+        # one "database is locked" stopped renewal and cancelled the stage,
+        # losing every OCR page read so far, or let the lease lapse under a
+        # stage still running beside the next owner's).
+        renewed_at = time.monotonic()
         while not cancellation.is_set():
             try:
                 await asyncio.sleep(self._heartbeat_interval)
@@ -417,6 +425,7 @@ class DocumentWorker:
                     owner=owner,
                     lease_seconds=self._lease_seconds,
                 )
+                renewed_at = time.monotonic()
                 if refreshed.cancel_requested:
                     cancellation.set()
                     return
@@ -425,6 +434,21 @@ class DocumentWorker:
             except JobConflictError:
                 cancellation.set()
                 return
+            except store_errors() as exc:
+                if time.monotonic() - renewed_at >= self._lease_seconds:
+                    logger.error(
+                        "Document heartbeat could not renew the lease before it ran out "
+                        "job=%s error_type=%s",
+                        job.id,
+                        type(exc).__name__,
+                    )
+                    cancellation.set()
+                    return
+                logger.warning(
+                    "Document heartbeat failed job=%s error_type=%s; retrying while the lease holds",
+                    job.id,
+                    type(exc).__name__,
+                )
             except Exception as exc:
                 logger.error(
                     "Document heartbeat failed job=%s error_type=%s",

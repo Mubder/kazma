@@ -42,6 +42,12 @@ def _read_client_stderr(client: Any) -> str:
     fails. Never raises — diagnostics must not break the test path.
     """
     try:
+        # The client drains stderr itself into a bounded tail (audit
+        # 2026-10-26 AUD-038), kept after the process exits -- a second
+        # reader here would race its drain thread for the bytes.
+        tail = getattr(client, "stderr_tail", None)
+        if callable(tail):
+            return str(tail())[-2048:]
         proc = getattr(client, "_process", None)
         if proc is None or not hasattr(proc, "stderr") or proc.stderr is None:
             return ""

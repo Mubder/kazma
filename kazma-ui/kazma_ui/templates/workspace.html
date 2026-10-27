@@ -709,7 +709,8 @@
             <span style="font-size:0.6rem;color:var(--text-tertiary);flex-shrink:0;" x-text="ghRelativeTime(a.timestamp)"></span>
           </div>
         </template>
-        <div x-show="ghActivity.length === 0 && !loading && ghOAuthChecked && (!ghOAuthConnected || ghActivityLoaded)" style="padding:30px 20px;text-align:center;color:var(--text-muted);" x-cloak>
+        <div x-show="ghActivityFailed" role="alert" style="padding:14px 20px;text-align:center;color:var(--text-muted);font-size:0.8rem;" x-text="t('workspace.activity_load_failed')" x-cloak></div>
+        <div x-show="ghActivity.length === 0 && !loading && ghOAuthChecked && !ghActivityFailed && (!ghOAuthConnected || ghActivityLoaded)" style="padding:30px 20px;text-align:center;color:var(--text-muted);" x-cloak>
           <p style="margin:0;font-size:0.8rem;" x-text="ghOAuthConnected ? t('workspace.no_activity') : t('workspace.connect_for_activity')"></p>
         </div>
       </div>
@@ -817,6 +818,7 @@ function workspaceApp() {
     // Activity card + repo picker + autocomplete
     ghActivity: [],
     ghActivityLoaded: false,
+    ghActivityFailed: false,
     ghActivityFilter: 'all',
     ghRepoList: [],
     ghRepoListLoaded: false,
@@ -833,6 +835,12 @@ function workspaceApp() {
     extraRootsError: '',
     newExtraRoot: { path: '', mode: 'read', label: '' },
 
+    // What init() starts and destroy() ends (audit 2026-10-26 AUD-030).
+    _timers: [],
+    _ghPoll: null,
+    _offMessage: null,
+    _destroyed: false,
+
     async init() {
       // OAuth status is a cheap local ConfigStore read — resolve it FIRST
       // (non-blocking) so the GitHub card shows the correct connected /
@@ -844,9 +852,17 @@ function workspaceApp() {
       await this.refreshAll();
       await this.loadBookmarks();
       this.loadExtraRoots();
+      // Left before the loads above finished: start nothing.
+      if (this._destroyed) return;
 
+      // Every listener and poller below is ended by destroy(), which Alpine
+      // runs when soft navigation leaves the page. There was none: each
+      // visit added three pollers that ran from every later page, hidden
+      // tabs too -- a `git status` per visit every 10 s, and uncached
+      // GitHub calls every minute (audit 2026-10-26 AUD-030).
+      this._timers = [];
       // Listen for the OAuth callback tab signaling completion.
-      window.addEventListener('message', (e) => {
+      const onMessage = (e) => {
         if (e.data && e.data.type === 'github-oauth-done') {
           this.loadOAuthStatus().then(() => {
             if (this.ghOAuthConnected) {
@@ -855,25 +871,39 @@ function workspaceApp() {
             }
           });
         }
-      });
+      };
+      window.addEventListener('message', onMessage);
+      this._offMessage = () => window.removeEventListener('message', onMessage);
 
       // Poll Git & GitHub status every 10 seconds to keep UI live and fresh.
-      // GitHub tab lists refresh on their own lighter cadence below.
-      setInterval(() => {
+      // GitHub tab lists refresh on their own lighter cadence below. A
+      // hidden tab skips its turn.
+      this._timers.push(setInterval(() => {
+        if (document.hidden) return;
         this.loadGitStatus();
         this.loadOAuthStatus();
         // Refresh telemetry when authenticated via OAuth *or* PAT.
         if (this.ghAuthenticated) this.loadGitHubStatus();
-      }, 10000);
+      }, 10000));
       // Lighter poll for the active tab's list (30s).
-      setInterval(() => {
+      this._timers.push(setInterval(() => {
+        if (document.hidden) return;
         if (this.ghAuthenticated && this.ghActiveTab !== 'overview') this.ghLoadTab(this.ghActiveTab);
-      }, 30000);
+      }, 30000));
       // Activity card refreshes every 60s (deliberately slower — protects
       // the rate budget since /activity is a GraphQL + 1 REST call).
-      setInterval(() => {
+      this._timers.push(setInterval(() => {
+        if (document.hidden) return;
         if (this.ghOAuthConnected) this.loadActivity();
-      }, 60000);
+      }, 60000));
+    },
+
+    destroy() {
+      this._destroyed = true;
+      (this._timers || []).forEach((id) => clearInterval(id));
+      this._timers = [];
+      if (this._ghPoll) { clearInterval(this._ghPoll); this._ghPoll = null; }
+      if (this._offMessage) { this._offMessage(); this._offMessage = null; }
     },
 
     async loadExtraRoots() {
@@ -1398,9 +1428,16 @@ function workspaceApp() {
           if (!data.error) {
             this.ghActivity = data.activity || [];
             this.ghActivityLoaded = true;
+            this.ghActivityFailed = false;
+          } else {
+            this.ghActivityFailed = true;
           }
+        } else {
+          // A failed read is said, never a blank feed (audit 2026-10-26
+          // AUD-058's rule; tests/test_empty_states_after_load.py).
+          this.ghActivityFailed = true;
         }
-      } catch (e) { /* non-fatal */ }
+      } catch (e) { this.ghActivityFailed = true; }
     },
 
     ghRelativeTime(iso) {

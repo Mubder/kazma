@@ -65,3 +65,39 @@ async def test_delete_session_requires_admin_when_auth_is_on(monkeypatch) -> Non
         set_dashboard_context(checkpoint_manager=None)
     assert response.status_code == 403
     assert manager.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_delete_session_forgets_its_time_travel_steps(tmp_path, monkeypatch) -> None:
+    """(audit 2026-10-26 AUD-055) the Dashboard's delete reaches the steps.
+
+    The chat page's delete forgot a chat's saved steps under every key it had
+    (§12 G, TT-05); this route deleted the checkpoints and the chat and left
+    every step of it in snapshots.db.
+    """
+    from kazma_core import time_travel
+    from kazma_core.time_travel import SnapshotRecorder
+    from kazma_ui import dashboard
+
+    rec = SnapshotRecorder(db_path=str(tmp_path / "snapshots.db"))
+    time_travel.set_process_recorder(rec)
+    thread_id, session_id = "thread-aud055", "sess-aud055"
+    for key in (thread_id, session_id, "someone-else"):
+        state = {"thread_id": key, "iteration": 1,
+                 "messages": [{"role": "user", "content": "hello"}]}
+        assert rec.capture(state) is not None
+    # The chat store's answer: the thread's chat was ``session_id``.
+    monkeypatch.setattr(dashboard, "_delete_chats_of_thread",
+                        lambda tid: sorted({tid, session_id}))
+
+    manager = _Manager()
+    set_dashboard_context(checkpoint_manager=manager, session_store=None)
+    try:
+        response = await delete_session(_request(), thread_id)
+    finally:
+        set_dashboard_context(checkpoint_manager=None)
+        time_travel.set_process_recorder(None)
+    assert response.status_code == 200
+    assert rec.list_snapshots(thread_id) == []
+    assert rec.list_snapshots(session_id) == []
+    assert len(rec.list_snapshots("someone-else")) == 1

@@ -28,6 +28,45 @@ __all__ = [
 ]
 
 
+async def _send_via_manager(
+    manager: Any,
+    platform: str,
+    chat_id: Any,
+    text: str,
+    context_metadata: dict[str, Any],
+) -> bool:
+    """Send through the gateway manager and answer what the adapter answered.
+
+    ``GatewayManager.send`` returns False when no adapter took the message
+    (none for the platform, a refusal, a timeout). The routes discarded it
+    and logged "routed" over a dead adapter, so the direct Telegram
+    fallback never ran (audit 2026-10-26 AUD-032, §51).
+    """
+    try:
+        ok = await manager.send(OutboundMessage(
+            target_id=f"{platform}:{chat_id}",
+            text=text,
+            context_metadata=context_metadata,
+        ))
+    except Exception:
+        logger.warning(
+            "[swarm-output] Failed routing swarm output to %s:%s via gateway manager",
+            platform, chat_id, exc_info=True,
+        )
+        return False
+    if not ok:
+        logger.warning(
+            "[swarm-output] The %s adapter did not take the swarm output for %s",
+            platform, chat_id,
+        )
+        return False
+    logger.info(
+        "[swarm-output] Swarm output routed to %s:%s via gateway manager",
+        platform, chat_id,
+    )
+    return True
+
+
 class SwarmOutputTarget(abc.ABC):
     """Abstract base class for swarm output target adapters."""
 
@@ -50,7 +89,7 @@ class SwarmOutputTarget(abc.ABC):
                 not be re-converted (avoids double-escaping).
 
         Returns:
-            True if sent (or attempted), False if no target available.
+            True only when a platform took the message (§51).
         """
         pass
 
@@ -168,26 +207,13 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
         async def try_mode2_gateway_send() -> bool:
             if manager is None:
                 return False
-            try:
-                await manager.send(OutboundMessage(
-                    target_id=f"{platform}:{chat_id}",
-                    text=html_text,
-                    context_metadata={
-                        "chat_id": chat_id,
-                        "parse_mode": "HTML",  # match direct Bot API path
-                    },
-                ))
-                logger.info(
-                    "[swarm-output] Swarm output routed to %s:%s via gateway manager",
-                    platform, chat_id,
-                )
-                return True
-            except Exception:
-                logger.warning(
-                    "[swarm-output] Failed routing swarm output to %s:%s via gateway manager",
-                    platform, chat_id, exc_info=True,
-                )
-                return False
+            return await _send_via_manager(
+                manager, platform, chat_id, html_text,
+                {
+                    "chat_id": chat_id,
+                    "parse_mode": "HTML",  # match direct Bot API path
+                },
+            )
 
         # Helper: Resolve primary bot token as fallback
         def resolve_primary_token() -> str:
@@ -258,23 +284,9 @@ class DiscordSwarmOutputTarget(SwarmOutputTarget):
             logger.warning("[swarm-output] No gateway manager for Discord output")
             return False
 
-        try:
-            await manager.send(OutboundMessage(
-                target_id=f"{platform}:{chat_id}",
-                text=text,
-                context_metadata={"chat_id": chat_id},
-            ))
-            logger.info(
-                "[swarm-output] Swarm output routed to %s:%s via gateway manager",
-                platform, chat_id,
-            )
-            return True
-        except Exception:
-            logger.warning(
-                "[swarm-output] Failed routing swarm output to %s:%s via gateway manager",
-                platform, chat_id, exc_info=True,
-            )
-            return False
+        return await _send_via_manager(
+            manager, platform, chat_id, text, {"chat_id": chat_id},
+        )
 
     def validate_config(self, config: dict[str, Any]) -> bool:
         platform = config.get("platform", "discord")
@@ -307,23 +319,9 @@ class SlackSwarmOutputTarget(SwarmOutputTarget):
             logger.warning("[swarm-output] No gateway manager for Slack output")
             return False
 
-        try:
-            await manager.send(OutboundMessage(
-                target_id=f"{platform}:{chat_id}",
-                text=text,
-                context_metadata={"chat_id": chat_id},
-            ))
-            logger.info(
-                "[swarm-output] Swarm output routed to %s:%s via gateway manager",
-                platform, chat_id,
-            )
-            return True
-        except Exception:
-            logger.warning(
-                "[swarm-output] Failed routing swarm output to %s:%s via gateway manager",
-                platform, chat_id, exc_info=True,
-            )
-            return False
+        return await _send_via_manager(
+            manager, platform, chat_id, text, {"chat_id": chat_id},
+        )
 
     def validate_config(self, config: dict[str, Any]) -> bool:
         platform = config.get("platform", "slack")
@@ -353,7 +351,8 @@ async def send_swarm_output(
         is_html: When True, ``text`` is already Telegram HTML (skip conversion).
 
     Returns:
-        True if a message was sent (or attempted), False if no target configured.
+        True only when a platform took the message; False when no target is
+        configured or every route refused it (§51).
     """
     # Never send real swarm output under pytest: tests call create_app() with
     # the real kazma.yaml, so the configured output target (a live Telegram

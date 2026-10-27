@@ -435,13 +435,7 @@
         window.KazmaReplay.destroy();
       }
     };
-    if (Array.isArray(window.kazmaOnSoftNavLeave)) {
-      window.kazmaOnSoftNavLeave.push(teardown);
-    } else if (typeof window.kazmaOnSoftNavLeave === 'function') {
-      window.kazmaOnSoftNavLeave = [window.kazmaOnSoftNavLeave, teardown];
-    } else {
-      window.kazmaOnSoftNavLeave = [teardown];
-    }
+    window.kazmaAddLeaveHook(teardown);
   }
 
   // Auto-init on DOM ready

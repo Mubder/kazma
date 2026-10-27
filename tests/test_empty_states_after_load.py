@@ -423,3 +423,54 @@ def test_a_failure_path_that_says_it_failed_passes() -> None:
         "} catch (e) {\n  // it shouldn't fail\n  this.err = 1;\n}\nvar later = t('mcp.ui.no_detail');",
     ):
         assert failure_paths_that_paint_none(honest) == [], honest
+
+
+# ── an ``ok: false`` answer (audit 2026-10-26 AUD-058) ───────────────────
+
+#: ``if (j.ok) {`` / ``if (aud?.ok) {``: a load that branches on the body.
+_OK_BRANCH = re.compile(r"\bif\s*\(\s*[A-Za-z_$][\w$]*\??\.ok\s*\)\s*\{")
+#: The branch sets the load's success flag: the empty state's condition.
+_SETS_LOADED = re.compile(r"\b[\w$]*[Ll]oaded\b(?:\.[\w$]+|\[[^\]]*\])*\s*=\s*true\b")
+
+
+def ok_branches_with_no_failure(script: str) -> list[int]:
+    """Lines of each ``if (x.ok) {...}`` that sets a loaded flag and has no
+    ``else``: an ``ok: false`` body (the service unavailable, a 500) then
+    leaves the list with no loading, empty or error state."""
+    found = []
+    for m in _OK_BRANCH.finditer(script):
+        block = _block_at(script, m.end() - 1)
+        after = script[m.end() - 1 + len(block):].lstrip()
+        if _SETS_LOADED.search(block) and not after.startswith("else"):
+            found.append(script.count("\n", 0, m.start()) + 1)
+    return found
+
+
+def test_an_ok_false_answer_is_said_not_left_blank() -> None:
+    bad = []
+    for path in _page_scripts():
+        for line in ok_branches_with_no_failure(path.read_text(encoding="utf-8")):
+            bad.append(f"{path.relative_to(REPO).as_posix()}:{line}")
+    assert not bad, (
+        "A load sets its loaded flag on `ok` and does nothing on `ok: false`: "
+        "the list is left blank with no state. Say the read failed in an "
+        "`else`:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_the_documents_load_that_shipped_is_flagged() -> None:
+    """Negative control: documents.js's loader as it shipped (AUD-058)."""
+    shipped = (
+        "        const j = await r.json();\n"
+        "        if (j.ok) {\n"
+        "          this.documents = j.documents || [];\n"
+        "          this.documentsLoaded = true;\n"
+        "        }\n"
+        "      } catch (e) {\n"
+    )
+    assert ok_branches_with_no_failure(shipped) == [2]
+    fixed = shipped.replace(
+        "        }\n      } catch", "        } else {\n          this.documentsError = j.error;\n"
+        "        }\n      } catch",
+    )
+    assert ok_branches_with_no_failure(fixed) == []

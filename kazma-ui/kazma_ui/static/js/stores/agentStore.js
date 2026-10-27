@@ -126,6 +126,8 @@ function registerAgentStore() {
     /** Liveness ticker started once (worker-backed, throttle-immune). */
     _livenessStarted: false,
     _livenessWorker: null,
+    _livenessUrl: null,
+    _livenessTimer: null,
 
     // ── UI bridge helpers ────────────────────────────────────
     _chat() {
@@ -242,13 +244,36 @@ function registerAgentStore() {
         try {
           const src = 'setInterval(function(){postMessage(0)},5000);';
           const blob = new Blob([src], { type: 'text/javascript' });
-          const w = new Worker(URL.createObjectURL(blob));
+          this._livenessUrl = URL.createObjectURL(blob);
+          const w = new Worker(this._livenessUrl);
           w.onmessage = tick;
           this._livenessWorker = w;
           return;
         } catch (e) { /* CSP / no workers — fall through */ }
       }
-      setInterval(tick, 5000);
+      this._livenessTimer = setInterval(tick, 5000);
+    },
+
+    /**
+     * End the liveness ticker (disconnect). Soft navigation runs this file
+     * again on every Chat visit and registers a new store; the old store's
+     * worker was never terminated, so every visit left one Web Worker
+     * ticking for good (audit 2026-10-26 AUD-030). connect() starts it again.
+     */
+    _stopLivenessTicker() {
+      if (this._livenessWorker) {
+        try { this._livenessWorker.terminate(); } catch (e) { /* already gone */ }
+        this._livenessWorker = null;
+      }
+      if (this._livenessUrl) {
+        try { URL.revokeObjectURL(this._livenessUrl); } catch (e) { /* ignore */ }
+        this._livenessUrl = null;
+      }
+      if (this._livenessTimer) {
+        clearInterval(this._livenessTimer);
+        this._livenessTimer = null;
+      }
+      this._livenessStarted = false;
     },
 
     /** Page-context liveness action (invoked from worker ticks). */
@@ -417,6 +442,7 @@ function registerAgentStore() {
       this._connectionAttempt = (this._connectionAttempt || 0) + 1;
       this._intentionalClose = true;
       this._closeSocket();
+      this._stopLivenessTicker();
       this._resetTurnState();
       this.sessionId = null;
       this.connectionStatus = 'disconnected';

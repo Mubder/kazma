@@ -12,11 +12,11 @@ tools:
     prompt_chain:
       - "أرسل إشعاراً أو تنبيهاً فورياً إلى القناة المحددة"
   send_approval_request:
-    arabic_name: "إرسال طلب موافقة تفاعلي"
-    description: "Send a platform-native HITL card (Telegram inline Approve/Deny/Approve-for-task buttons). Not a text mock. Do not use this instead of calling the actual danger tool."
+    arabic_name: "إرسال طلب مراجعة"
+    description: "Ask the operator on Telegram, Discord or Slack to review something. A plain question: no approval buttons, approves nothing; the operator answers in the chat. A tool that needs approval asks with its own card: never use this in its place."
     category: "communication"
     prompt_chain:
-      - "أرسل بطاقة موافقة بأزرار المنصة الحقيقية (Approve/Deny) وليس نصاً"
+      - "اسأل المشغّل في المحادثة أن يراجع أمراً؛ الرسالة سؤال ولا توافق على شيء"
   send_message:
     arabic_name: "إرسال رسالة"
     description: "Send a text message to the current conversation thread. Use this to reply to the user. The platform and delivery channel are handled automatically."

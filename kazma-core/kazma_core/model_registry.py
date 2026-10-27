@@ -657,12 +657,20 @@ class ModelRegistry:
             return None
         effective_model = model or str(entry.get("model", "") or "")
         if not effective_model:
-            # The active model, then THIS provider's own default -- never
-            # another vendor's. `get_client_for` is pinned to provider_name;
-            # answering with gpt-4o-mini for an Anthropic pin was simply wrong.
+            # A model of THIS provider -- never another vendor's. The active
+            # model only when it is this provider's (§1: model and provider
+            # move together), else the provider's own first visible model,
+            # else its default. Provider rows keep `models`, never `model`,
+            # so the old `self._active_model or ...` sent whatever model was
+            # active -- deepseek-chat to Anthropic for an Anthropic-pinned
+            # swarm worker, a 404 classed permanent (audit 2026-10-26 AUD-015).
             from kazma_core.providers import default_model_for
 
-            effective_model = self._active_model or default_model_for(provider_name)
+            effective_model = (
+                self._active_model_if_owned_by(provider_name)
+                or self.probe_model_for(provider_name)
+                or default_model_for(provider_name)
+            )
         base_url, api_key = self.resolve_provider_credentials(provider_name)
         config = LLMConfig.from_dict({
             "base_url": base_url,
@@ -670,6 +678,28 @@ class ModelRegistry:
             "model": effective_model,
         })
         return self._track(build_client(provider_name, config, entry), provider_name)
+
+    def _active_model_if_owned_by(self, provider_name: str) -> str:
+        """The active model when it belongs to *provider_name*, else "".
+
+        Owned means the provider list names the active model under this
+        provider, or -- for a model typed by hand and listed nowhere -- that
+        this provider is the active one (``set_active_model`` moves both).
+        """
+        active = (self._active_model or "").strip()
+        if not active:
+            return ""
+        entry = self.get_provider(provider_name) or {}
+        own_name = str(entry.get("name") or provider_name).strip().lower()
+        owner = self.find_provider_for_model(active)
+        if owner is not None:
+            owner_name = str(owner.get("name") or "").strip().lower()
+            return active if owner_name == own_name else ""
+        active_provider = self.get_provider(self._active_provider or "") or {}
+        active_name = str(
+            active_provider.get("name") or self._active_provider or ""
+        ).strip().lower()
+        return active if active_name and active_name == own_name else ""
 
     def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
         """Return the provider entry that owns *model_id*.

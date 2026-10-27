@@ -20,6 +20,7 @@
 const fs = require("fs");
 const path = require("path");
 const { makeDocument } = require("./_dom.js");
+const { installLeaveHooks } = require("./_leave_hooks.js");
 
 const JS = path.join(
   __dirname, "..", "..",
@@ -34,6 +35,8 @@ doc.readyState = "loading";
 doc.body = env.ROOT;
 
 global.window = global;
+// base.html's leave-hook helper: chat.js adds its teardown through it.
+installLeaveHooks(global);
 global.document = doc;
 global.localStorage = {
   _m: {},

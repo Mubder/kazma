@@ -342,7 +342,11 @@ def mutate_belief(
          "belief_id": str,
          "superseded_id": str | None}
 
-    Never raises — logs on failure and returns ``{"action": "noop", ...}``.
+    Raises ``sqlite3.Error`` when the store refuses the write itself (a
+    locked or busy database is an outage the caller retries, never a "noop":
+    AUD-027). Any other failure is logged at WARNING and returns
+    ``{"action": "noop", ..., "error": <type>}``; a failure after the write
+    committed returns the write's result.
     """
     # One set of limits for every writer (memory/limits.py, Memory audit
     # M36): refused, never cut -- a cut value is a different fact.
@@ -418,6 +422,7 @@ def mutate_belief(
     recorded = time.time()
     now = recorded if now is None else float(now)
 
+    result: dict[str, Any] | None = None
     try:
         with _mutation_lock:
             # W6: the name the subject already uses for the same words and
@@ -564,9 +569,29 @@ def mutate_belief(
                                  tenant_id=tenant_id, mem_class=mem_class, private=private)
 
         return result
-    except Exception:
-        logger.debug("[belief_mutate] mutation failed", exc_info=True)
-        return {"action": "noop", "belief_id": "", "superseded_id": None}
+    except Exception as exc:
+        return _after_failure(exc, result)
+
+
+def _after_failure(exc: Exception, result: dict[str, Any] | None) -> dict[str, Any]:
+    """What :func:`mutate_belief` answers when *exc* ended it (called from its
+    ``except``); *result* is the write's outcome when it had committed.
+
+    A store refusal (locked, busy, read-only, corrupt) before the write is an
+    outage, never a verdict, and is raised. Returned as a "noop" it was a fact
+    lost in silence: turn reconcile moved its cursor past it and the post-turn
+    pass counted the turn ok, so nothing retried (audit 2026-10-26 AUD-027;
+    Memory audits M12, M27). The callers own the retry.
+    """
+    if result is not None:
+        # The fact is written; a follow-up step after the commit failed.
+        logger.warning("[belief_mutate] follow-up after the write failed", exc_info=exc)
+        return result
+    if isinstance(exc, sqlite3.Error):
+        logger.warning("[belief_mutate] the memory store refused the write", exc_info=exc)
+        raise exc
+    logger.warning("[belief_mutate] mutation failed", exc_info=exc)
+    return {"action": "noop", "belief_id": "", "superseded_id": None, "error": type(exc).__name__}
 
 
 def _store_belief_vector(

@@ -1,9 +1,9 @@
 """Tests for cron scheduler (gw-029).
 
 8 tests:
-    1. parse_timing relative ("5m", "1h")
-    2. parse_timing recurring ("daily at 9am")
-    3. parse_timing ISO timestamp
+    1. timing relative ("5m", "1h")
+    2. timing recurring ("daily at 9am")
+    3. timing ISO timestamp
     4. SQLiteCronStore insert + list_active
     5. CronScheduler schedule + list_jobs
     6. CronScheduler cancel
@@ -48,9 +48,20 @@ from kazma_core.cron.scheduler import (
     SQLiteCronStore,
     compose_cron_delivery,
     get_cron_scheduler,
-    parse_timing,
+    resolve_cron_zone,
     set_cron_scheduler,
 )
+from kazma_core.cron.timing import resolve_timing
+
+
+def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
+    """The first fire *timing* names, read in the operator's zone: the zone
+    and the timing model every booking path uses. (The scheduler's own
+    ``parse_timing`` wrapper had no product caller and was removed, audit
+    2026-10-26 AUD-076; these tests read the two functions it wrapped.)"""
+    zone, name = resolve_cron_zone()
+    return resolve_timing(timing, zone=zone, zone_name=name, now=from_time or datetime.now(UTC),
+                          allow_past=True).first
 
 
 class TestParseTiming:
@@ -99,7 +110,7 @@ class TestParseTiming:
 
     def test_invalid_timing(self) -> None:
         """Invalid timing raises ValueError."""
-        with pytest.raises(ValueError, match="Unparseable"):
+        with pytest.raises(ValueError):  # TimingError, a ValueError naming the reason
             parse_timing("next tuesday")
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import closing
 from typing import Any
 
 from fastapi import Request
@@ -104,34 +105,27 @@ def register_system_routes(self: Any) -> None:
         fts5_size = fts5_path.stat().st_size if fts5_path.exists() else 0
         fts5_count = 0
         if fts5_path.exists():
+            # One close, by closing(): the connection was closed three times
+            # (in the body, the handler and the finally), the last two
+            # swallowing what they hit (audit 2026-10-26 AUD-082).
             try:
-                conn = sqlite3.connect(fts5_path)
-                cursor = conn.cursor()
-                # Canonical L3 schema first; legacy memory_fts as fallback.
-                for table in ("memories", "memory_fts", "memory_fts_migrated"):
-                    cursor.execute(
-                        "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=?",
-                        (table,),
-                    )
-                    if cursor.fetchone():
-                        try:
-                            cursor.execute(f"SELECT COUNT(*) FROM [{table}]")
-                            fts5_count = int(cursor.fetchone()[0] or 0)
-                            break
-                        except Exception:
-                            continue
-                conn.close()
-            except Exception as _e:
+                with closing(sqlite3.connect(fts5_path)) as conn:
+                    cursor = conn.cursor()
+                    # Canonical L3 schema first; legacy memory_fts as fallback.
+                    for table in ("memories", "memory_fts", "memory_fts_migrated"):
+                        cursor.execute(
+                            "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=?",
+                            (table,),
+                        )
+                        if cursor.fetchone():
+                            try:
+                                cursor.execute(f"SELECT COUNT(*) FROM [{table}]")
+                                fts5_count = int(cursor.fetchone()[0] or 0)
+                                break
+                            except sqlite3.Error:
+                                continue
+            except (sqlite3.Error, OSError) as _e:
                 logger.debug("fts5 count failed: %s", _e)
-                try:
-                    conn.close()  # type: ignore[name-defined]
-                except Exception:
-                    pass
-            finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass  # already closed / never opened
 
         vector_size = 0
         if vector_path.exists() and vector_path.is_dir():

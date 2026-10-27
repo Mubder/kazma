@@ -128,9 +128,9 @@ def create_setup_router() -> APIRouter:
             logger.warning("[setup] bootstrap failed: %s", exc)
             return {"error": str(safe_error(exc)), "ready": False}
 
-        status = compute_setup_status()
-        if "api_key" in status:
-            status = {k: v for k, v in status.items() if k != "api_key"}
-        return status
+        # compute_setup_status returns booleans and presets, never key
+        # material; the filter for an "api_key" it cannot hold is gone
+        # (audit 2026-10-26 AUD-082). tests/test_setup_api.py holds it.
+        return compute_setup_status()
 
     return router

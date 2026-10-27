@@ -32,6 +32,9 @@ COMMON_REASONS: dict[str, str] = {
         "was left unanswered: its author sent more messages in a minute than "
         "gateway.rate_limits allows (Kazma answered \"Slow down\")"
     ),
+    # Left by the gateway's consumer when handing it on raised (the log
+    # names the error); the consumer goes on with the next message.
+    "dispatch_failed": "was left unanswered: the gateway failed while handing it on (see the log)",
 }
 
 

@@ -31,9 +31,8 @@ class TestRateFeedback:
         assert not rfm.is_limited("user:2")
         assert rfm.is_limited("user:2")
 
-        # First feedback — should be allowed
+        # First feedback — should be allowed (and starts the cooldown)
         assert rfm.should_send_feedback("user:2")
-        rfm.record_feedback("user:2")
 
         # Second feedback within cooldown — should be suppressed
         assert not rfm.should_send_feedback("user:2")

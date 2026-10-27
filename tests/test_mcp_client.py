@@ -82,6 +82,23 @@ class TestMCPServerConfig:
 # ---------------------------------------------------------------------------
 
 
+def _answer_each_request(mock_proc: MagicMock, result: dict) -> None:
+    """The fake server answers the request it was sent, under its id.
+
+    The client takes only the reply to its own request id (audit 2026-10-26
+    AUD-038); a fixed ``"id": 1`` matches only the first request a process
+    ever makes, so the fake echoes what was written.
+    """
+    sent: list[dict] = []
+    mock_proc.stdin.write.side_effect = lambda data: sent.append(json.loads(data))
+
+    def readline(size: int = -1) -> bytes:
+        request = next((m for m in reversed(sent) if "id" in m), {"id": None})
+        return (json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}) + "\n").encode()
+
+    mock_proc.stdout.readline.side_effect = readline
+
+
 class TestMCPClient:
     @pytest.fixture
     def client(self) -> MCPClient:
@@ -116,15 +133,8 @@ class TestMCPClient:
         mock_proc.stderr = MagicMock()
 
         with patch("kazma_core.security.process_budget.start_process_async", new=AsyncMock(return_value=(mock_proc, None))):
-            # We need to mock the _send_stdio to return a valid initialize response
-            init_response = json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "result": {"serverInfo": {"name": "test-server"}},
-                }
-            )
-            mock_proc.stdout.readline.return_value = (init_response + "\n").encode()
+            # A valid initialize response, under the request's own id
+            _answer_each_request(mock_proc, {"serverInfo": {"name": "test-server"}})
 
             result = await client.connect(
                 {
@@ -189,14 +199,7 @@ class TestMCPClient:
         mock_proc.stderr = MagicMock()
 
         with patch("kazma_core.security.process_budget.start_process_async", new=AsyncMock(return_value=(mock_proc, None))):
-            init_response = json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "result": {"serverInfo": {"name": "test"}},
-                }
-            )
-            mock_proc.stdout.readline.return_value = (init_response + "\n").encode()
+            _answer_each_request(mock_proc, {"serverInfo": {"name": "test"}})
 
             await client.connect(
                 {

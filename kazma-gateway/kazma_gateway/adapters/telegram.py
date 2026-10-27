@@ -4,8 +4,8 @@ Headless: pure polling against the Telegram Bot API.
 No webhooks required, no aiogram Dispatcher, no public IP needed.
 Full control over poll timing, jitter, and rate-limit handling.
 
-An optional webhook ingress router is available via create_webhook_router()
-for testing or deployments with a public URL. Both polling and webhook
+An optional webhook ingress router is available via telegram_webhook_router()
+for deployments with a public URL. Both polling and webhook
 feed into the same asyncio.Queue — the Brain sees no difference.
 
 All incoming messages are normalized to IncomingMessage with context_metadata
@@ -90,8 +90,11 @@ class TelegramAdapter(BaseAdapter):
     Every poll cycle includes a 1-3 second randomized jitter delay
     to prevent rate-limiting and API hammering (mandate requirement).
 
-    Optionally exposes a webhook ingress router via create_webhook_router()
-    for testing or when a public URL is available.
+    Webhook ingress, when a public URL is available, goes through the
+    module's ``telegram_webhook_router``, which resolves the running adapter
+    on every request (a router bound to one instance, the removed
+    ``create_webhook_router``, had no product caller: audit 2026-10-26
+    AUD-080).
 
     Args:
         token:          Telegram Bot API token.
@@ -857,16 +860,6 @@ class TelegramAdapter(BaseAdapter):
         from kazma_gateway.adapters.telegram_parse import parse_text_update
 
         return parse_text_update(update)
-
-    def create_webhook_router(self) -> Any:
-        """A FastAPI router for optional webhook ingress into THIS adapter.
-
-        The app mounts ``telegram_webhook_router`` instead, which asks the
-        gateway for its current Telegram adapter on every request: a router
-        bound to one instance kept the boot adapter's allowlist and secret
-        after Settings replaced it (2026-10-01).
-        """
-        return telegram_webhook_router(lambda: self)
 
     # --- Voice message transcription ---------------------------------
 
@@ -1667,8 +1660,13 @@ class TelegramAdapter(BaseAdapter):
                     self._set_reaction(chat_id, original_msg_id, emoji)
                 )
             # Send any media attachments (photos/documents/video) after text.
+            # A file the upload refused (a 413, ok=false) is a failed send:
+            # send_file answered "File sent" over it (audit 2026-10-26
+            # AUD-032, §51). Every attachment is still tried.
+            attachments_sent = True
             for att in outbound.attachments:
-                await self._send_attachment(chat_id, att, message_thread_id=topic_id)
+                if not await self._send_attachment(chat_id, att, message_thread_id=topic_id):
+                    attachments_sent = False
             # Send TTS voice reply only when this turn was voice + Settings allow it
             try:
                 from kazma_gateway.adapters.voice_helpers import should_send_tts_reply
@@ -1679,7 +1677,7 @@ class TelegramAdapter(BaseAdapter):
                     )
             except Exception:
                 logger.debug("[telegram] TTS reply gate failed", exc_info=True)
-            return True
+            return attachments_sent
         else:
             # React with ❌ on failure
             original_msg_id = outbound.context_metadata.get("message_id")

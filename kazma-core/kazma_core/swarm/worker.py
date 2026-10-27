@@ -60,6 +60,24 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _note_progress(context: str | SwarmDispatchContext, what: str) -> None:
+    """Stamp the dispatching task's progress for the run supervisor.
+
+    The engine's events (worker started / completed) are the only other
+    stamps, so a single worker working through many model calls and tool
+    rounds looked idle between them: the run supervisor judged a busy task
+    "stalled" 600 s after its worker started (audit 2026-10-26 AUD-043).
+    Each model reply and each finished tool round is meaningful progress.
+    A dispatch outside the engine (no task id) stamps nothing.
+    """
+    task_id = context.task_id if isinstance(context, SwarmDispatchContext) else ""
+    if not task_id:
+        return
+    from kazma_core.runs import progress
+
+    progress.note(f"swarm_task:{task_id}", what)
+
+
 # ---------------------------------------------------------------------------
 # Base
 # ---------------------------------------------------------------------------
@@ -497,6 +515,7 @@ class InProcessWorker(SwarmWorker):
                     iteration=iteration,
                     label=f"InProcessWorker:{self.name}",
                 )
+                _note_progress(context, "worker_model_reply")
 
                 # Accumulate token/cost across all iterations.
                 # Sum ONLY prompt_tokens + completion_tokens — NOT
@@ -684,6 +703,7 @@ class InProcessWorker(SwarmWorker):
                         "tool_call_id": tc.id,
                         "content": _truncated.output,
                     })
+                _note_progress(context, "worker_tool_round")
 
             else:
                 # Iteration limit exhausted — make one final LLM call WITHOUT

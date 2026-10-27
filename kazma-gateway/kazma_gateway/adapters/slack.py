@@ -419,9 +419,17 @@ class SlackAdapter(BaseAdapter):
             # No text and no blocks: nothing to post. Deliver media directly —
             # the old [""] chunk made Slack 400 (must_not_be_blank) and the
             # attachments after it were never sent (deep-audit 2026-08-19).
+            # The answer is the uploads' own: True over a refused upload
+            # made send_file say "File sent" (audit 2026-10-26 AUD-032, §51).
+            if not self._http:
+                self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), verify=shared_ssl_context())
+            attachments_sent = True
             for att in outbound.attachments:
-                await self._send_attachment(channel_id, att, thread_ts)
-            return True
+                if not await self._send_attachment(channel_id, att, thread_ts):
+                    attachments_sent = False
+            return attachments_sent
+
+        attachments_sent = True
         
         for chunk_idx, chunk in enumerate(chunks):
             payload: dict[str, Any] = {
@@ -468,7 +476,8 @@ class SlackAdapter(BaseAdapter):
                         # Deliver any media attachments after the first chunk.
                         if chunk_idx == 0:
                             for att in outbound.attachments:
-                                await self._send_attachment(channel_id, att, thread_ts)
+                                if not await self._send_attachment(channel_id, att, thread_ts):
+                                    attachments_sent = False
                             # Voice reply: if the inbound was transcribed audio, reply
                             # with synthesized speech.
                             if outbound.context_metadata.get("voice_transcribed") and outbound.text:
@@ -488,7 +497,7 @@ class SlackAdapter(BaseAdapter):
                     logger.exception("[Slack] Send exception: %s", exc)
                     return False
 
-        return True
+        return attachments_sent
 
     def _chain_channel_work(self, channel_id: str, coro) -> None:
         """Run *coro* in a per-channel serial chain (never blocks the reader).

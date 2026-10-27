@@ -56,8 +56,9 @@
     var title = s.title
       ? '<strong class="dash-mobile-card-name" translate="no">' + escapeHtml(s.title) + "</strong>"
       : '<strong class="dash-mobile-card-name">' + escapeHtml(tr("dashboard.no_chat", "No chat")) + "</strong>";
+    // ?s= is what chat.js reads (audit 2026-10-26 AUD-031).
     if (s.title && s.session_id) {
-      title = '<a href="/chat?session=' + encodeURIComponent(s.session_id) + '">' + title + "</a>";
+      title = '<a href="/chat?s=' + encodeURIComponent(s.session_id) + '">' + title + "</a>";
     }
     var messages = s.message_count == null ? "—" : String(s.message_count);
     return (

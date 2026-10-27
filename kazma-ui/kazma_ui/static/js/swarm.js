@@ -3126,7 +3126,8 @@
     });
     activeTasks = {};
   }
-  window.kazmaOnSoftNavLeave = destroySwarmMouth;
+  // Added to the leave hooks, never over another script's (AUD-030).
+  window.kazmaAddLeaveHook(destroySwarmMouth);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

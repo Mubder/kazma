@@ -30,6 +30,7 @@ import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -149,10 +150,24 @@ async def _generate(fmt: str, title: str, sections: list[dict[str, str]]) -> str
 
 
 def _export_reply(fmt: str, msg: Any) -> JSONResponse:
+    """The export's answer: the saved file, or a failure when nothing was saved.
+
+    The generator answers ``Error: ...`` when it saved nothing; that came back
+    as ``ok: True`` and the page showed "Exported" over no file (audit
+    2026-10-26 AUD-056). Only a ``Saved to:`` line is a success.
+    """
     path = ""
     if isinstance(msg, str) and "Saved to:" in msg:
         path = msg.split("Saved to:")[-1].strip()
     filename = Path(path).name if path else ""
+    if not filename:
+        text = str(msg or "").strip()
+        error = text[len("Error:"):].strip() if text.startswith("Error:") else text
+        logger.warning("[research] %s export saved no file: %s", fmt, text[:300])
+        return JSONResponse(
+            {"ok": False, "format": fmt, "error": error or "export_saved_no_file"},
+            status_code=500,
+        )
     return JSONResponse(
         {
             "ok": True,
@@ -160,7 +175,8 @@ def _export_reply(fmt: str, msg: Any) -> JSONResponse:
             "message": msg,
             "path": path,
             "filename": filename,
-            "download_url": (f"/api/research/download?path={filename}" if filename else ""),
+            # A file name may hold '&', '#' or spaces (the topic's words).
+            "download_url": f"/api/research/download?path={quote(filename)}",
         }
     )
 

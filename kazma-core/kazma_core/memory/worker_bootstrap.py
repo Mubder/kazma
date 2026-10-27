@@ -1450,6 +1450,10 @@ async def _handle_universal_backup(payload: dict[str, Any]) -> bool:
                 result.get("databases_ok", 0),
                 result.get("total_size_mb", 0),
             )
+        elif result.get("backup_dir"):
+            # It ran and is incomplete (audit 2026-10-26 AUD-021): said, not
+            # retried -- the copy and its alert already happened.
+            logger.warning("[memory_worker] universal_backup incomplete: %s", result.get("error", ""))
         else:
             logger.debug("[memory_worker] universal_backup skipped: %s", result.get("error", ""))
         return True

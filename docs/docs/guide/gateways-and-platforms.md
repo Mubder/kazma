@@ -48,7 +48,7 @@ flowchart LR
 | Aspect | Detail |
 |---|---|
 | Class | `TelegramAdapter` (`telegram.py:70`), `name = "telegram"`. |
-| Receive | Manual `getUpdates` **long-polling** (HTTP), 1-3 s jitter; optional webhook router `create_webhook_router()` mounted at `/api/webhooks/telegram`. |
+| Receive | Manual `getUpdates` **long-polling** (HTTP), 1-3 s jitter; optional webhook router `telegram_webhook_router()` mounted at `/api/webhooks/telegram`, which resolves the running adapter on every request. |
 | Send | `POST /sendMessage` with HTML `parse_mode`, 429 retry, message chunking. |
 | Context keys | `chat_id` (int), `user_id` (int), `username` (str), `message_id` (int), `chat_type` (str). |
 | Extras | Voice/STT (`telegram_stt.py`), inline keyboards (`telegram_keyboards.py`), reactions (✅/🎯/❌), typing indicator, registered command menu via `setMyCommands`, inbound photo/document/video/animation capture, outbound `sendPhoto`/`sendDocument`/`sendVideo`/`sendAudio`. |
