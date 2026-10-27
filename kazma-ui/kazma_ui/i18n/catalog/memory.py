@@ -60,6 +60,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "البحث بالمعنى غير متاح: مطابقات الكلمات فقط.",
         "en": "Meaning search was unavailable: keyword matches only.",
     },
+    "memory.console.memory_search_failed": {
+        "ar": "تعذّر البحث في الذاكرة: هذه ليست نتيجة فارغة.",
+        "en": "Memory search failed: this is not an empty result.",
+    },
+    "memory.console.knowledge_search_failed": {
+        "ar": "تعذّر البحث في المكتبة المعرفية: هذه ليست نتيجة فارغة.",
+        "en": "Knowledge search failed: this is not an empty result.",
+    },
     "memory.confirm_delete": {
         "ar": "حذف هذا الكيان؟",
         "en": "Delete this entity shell?",

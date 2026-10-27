@@ -168,7 +168,14 @@ def build_retry_task(
         raise RetryNeedsAcknowledgement(task_id, tools)
 
     new_metadata = {k: v for k, v in (original.metadata or {}).items() if k not in _RUN_METADATA}
-    new_metadata["retry_of"] = task_id
+    # ``retry_of`` names the chain's ROOT, never the parent: it is the run's
+    # lineage (``runs.adapters.swarm``), and a runbook takes one automatic
+    # step per lineage a day (§52). Naming the parent gave A -> B -> C a new
+    # lineage at every hop, so each human retry of a retry reset the limit
+    # (audit 2026-10-26 AUD-016). The metadata copy above keeps the
+    # original's ``retry_of``, so a chain stored before this still finds its
+    # root.
+    new_metadata["retry_of"] = (original.metadata or {}).get("retry_of") or task_id
     if unknown:
         new_metadata["retry_acknowledged_unknown"] = True
 

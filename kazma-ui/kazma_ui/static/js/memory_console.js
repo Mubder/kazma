@@ -30,7 +30,13 @@
     });
     _memWin = [];
   };
-  var I18N = window.__DASH_MEM_I18N || window.I18N || {};
+  // Leaving the page runs whatever cleanup is current (the graph below adds
+  // to it). Added to the leave hooks from the start, so a failure further
+  // down cannot leave the timers running; it used to overwrite the hooks.
+  window.kazmaAddLeaveHook(function () {
+    if (typeof window.__kazmaMemConsoleCleanup === 'function') window.__kazmaMemConsoleCleanup();
+  });
+  var I18N =window.__DASH_MEM_I18N || window.I18N || {};
   // Text this console builds: the catalog's text for *key* in the page's
   // language, else *fallback* (English), {name} placeholders from *vars*.
   function _mt(key, fallback, vars) {
@@ -983,7 +989,7 @@
           '<span translate="no">' + _esc((h.content || '').slice(0, 300)) + '</span>' + _hitForget('summary', h.id) + '</div>');
       });
       if (data.degraded) {
-        lines.unshift('<div style="margin-bottom:6px;color:#fbbf24;font-size:0.72rem;">' + _esc(_mt('memory.console.probe_degraded', 'Meaning search was unavailable: keyword matches only.')) + '</div>');
+        lines.unshift(_memoryDegradedBanner(data.degraded));
       }
       if (!lines.length) {
         const hints = (data.hints || []).map(function(hh) {
@@ -1211,6 +1217,21 @@
     } catch (e) { el.textContent = _mt('memory.console.merges_load_failed', 'Merges load failed'); }
   }
 
+  // A search that failed or ran without meaning search says so -- never
+  // "no hits" (audit 2026-10-26 AUD-026/AUD-057). Recall reports a failure
+  // as `degraded: "recall_failed:<code>"`.
+  function _memoryDegradedBanner(degraded) {
+    const failed = String(degraded || '').indexOf('recall_failed:') === 0;
+    const text = failed
+      ? _mt('memory.console.memory_search_failed', 'Memory search failed: this is not an empty result.')
+      : _mt('memory.console.probe_degraded', 'Meaning search was unavailable: keyword matches only.');
+    return '<div style="margin-bottom:6px;color:#fbbf24;font-size:0.72rem;">' + _esc(text) + '</div>';
+  }
+  function _knowledgeFailedBanner() {
+    return '<div style="margin-bottom:6px;color:#fbbf24;font-size:0.72rem;">' +
+      _esc(_mt('memory.console.knowledge_search_failed', 'Knowledge search failed: this is not an empty result.')) + '</div>';
+  }
+
   async function runFederatedSearch() {
     const input = document.getElementById('v2-probe-input');
     const out = document.getElementById('v2-probe-results');
@@ -1259,11 +1280,16 @@
       _v2gCollectSeedsFromHits(data.hits || []);
       const qWords = (document.getElementById('v2-probe-input') || {}).value || '';
       qWords.split(/\s+/).forEach(function(w) { if (w.length > 2) _v2gLastQuerySeeds.push(w); });
+      const banners = [];
+      if (data.degraded) banners.push(_memoryDegradedBanner(data.degraded));
+      if (data.knowledge_error) banners.push(_knowledgeFailedBanner());
       if (lines.length) {
-        out.innerHTML = lines.join('') +
+        out.innerHTML = banners.join('') + lines.join('') +
           '<button type="button" class="btn btn-sm" id="v2-fed-path-btn" style="margin-top:8px;font-size:0.72rem;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>';
         document.getElementById('v2-fed-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
         _wireHitForgets(out);
+      } else if (banners.length) {
+        out.innerHTML = banners.join('');
       } else {
         out.innerHTML = '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.no_hits_either', 'No hits in either store.')) + '</span>';
       }
@@ -1550,7 +1576,9 @@
   loadV2Merges();
   loadV2Procedural();
   loadV2Quality();
-  setInterval(function() { if (document.hidden) return; loadV2Queue(); loadV2Merges(); loadV2Procedural(); loadV2Quality(); }, 15000);
+  // Through _memEvery, which the leave hook clears: a raw setInterval kept
+  // polling from every later page (audit 2026-10-26 AUD-030).
+  _memEvery(15000, function() { if (document.hidden) return; loadV2Queue(); loadV2Merges(); loadV2Procedural(); loadV2Quality(); });
 
   async function loadV2Beliefs(q) {
     try {
@@ -1754,7 +1782,9 @@
     }
     pollV2Health();
     loadV2Beliefs('');
-    setInterval(function() { if (!document.hidden) pollV2Health(); }, 5000);
+    // _memEvery (cleared on leaving): /api/memory/v2/health was polled every
+    // 5 s from every page after a visit (audit 2026-10-26 AUD-030).
+    _memEvery(5000, function() { if (!document.hidden) pollV2Health(); });
   } catch (e) { /* V2 panel optional */ }
 
   // ══ V2 BELIEF TOPOLOGY GRAPH ══════════════════════════════════
@@ -4889,8 +4919,8 @@
     var _prevCleanup = window.__kazmaMemConsoleCleanup;
     window.__kazmaMemConsoleCleanup = function () {
       if (_v2gAnim) { try { cancelAnimationFrame(_v2gAnim); } catch (e2) { /* ignore */ } _v2gAnim = null; }
+      if (_v2gPlayTimer) { clearInterval(_v2gPlayTimer); _v2gPlayTimer = null; }
       if (typeof _prevCleanup === 'function') _prevCleanup();
     };
-    window.kazmaOnSoftNavLeave = window.__kazmaMemConsoleCleanup;
   } catch (e) { /* V2 graph optional */ }
 })();

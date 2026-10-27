@@ -1,4 +1,4 @@
-"""Chat Platform Dispatcher Native Skill — tools for cross-channel notifications and HITL."""
+"""Chat Platform Dispatcher Native Skill — cross-channel notifications and review requests."""
 
 from __future__ import annotations
 
@@ -46,24 +46,28 @@ async def send_approval_request(
     title: str,
     actions: list[str],
 ) -> str:
-    """Dispatch a platform-native HITL approval card (Telegram inline buttons).
+    """Ask the operator, on a chat platform, to review something.
 
-    Telegram/Discord/Slack get the same Approve / Deny / Approve-for-task
-    controls as a real graph interrupt. Do not draw fake ``[ APPROVE ]``
-    text — those are not buttons. This card does not replace calling a
-    danger tool (``file_write``, etc.); those already pause for HITL.
+    The message is a question, not an approval card: it carries no HITL
+    buttons and no ``hitl approve`` instruction, and nothing waits on it.
+    The operator answers in the chat, as a new message. The card used to be
+    bound to no interrupt but carried the real card's buttons and its
+    "Reply: hitl approve <thread>" line: a prompt-injected turn could post
+    "Approve reading the weather?", then pause on ``shell_exec``, and the
+    operator's typed reply approved the real ``shell_exec`` (audit
+    2026-10-26 AUD-060). A danger tool (``file_write``, ``shell_exec``...)
+    asks for its own approval when it is called; this does not replace it.
 
     Args:
         channel: Platform backend ('telegram', 'discord', 'slack').
         recipient_id: Recipient target ID (e.g. 'telegram:12345').
-        title: The heading or prompt description requiring human review.
-        actions: Hint list (Approve/Deny). The platform keyboard is fixed
-            to the HITL action vocabulary the adapters already handle.
+        title: What the operator is asked to review.
+        actions: The answers to offer (default Approve / Deny), listed in
+            the message as words to reply with.
 
     Returns:
         The dispatch status.
     """
-    from kazma_core.safety.hitl import get_current_thread_id
     from kazma_core.tools.send_message import get_current_delivery_target
 
     if not title:
@@ -78,35 +82,30 @@ async def send_approval_request(
     if chan not in allowed_channels:
         raise RefusedBeforeEffect(f"Error: Channel '{channel}' not supported. Supported: {', '.join(sorted(allowed_channels))}")
 
-    if not actions:
-        actions = ["Approve", "Deny"]
+    answers = [str(a).strip() for a in (actions or []) if str(a).strip()] or ["Approve", "Deny"]
 
-    request_id = (get_current_thread_id() or "").strip() or recipient_id
-
-    # Same body shape as graph HITL so Telegram looks like the Web card,
-    # plus typed fallbacks if the keyboard cannot be delivered.
-    formatted_card = (
-        f"⚠️ Approval required\n"
+    # A plain notice: no buttons (no ``hitl_approval`` markup) and no
+    # ``hitl approve|deny`` command, so nothing in it can decide a real gate.
+    notice = (
+        f"❓ Kazma asks for your review\n"
         f"{title}\n\n"
-        f"Reply: hitl approve {request_id}\n"
-        f"   or: hitl deny {request_id}"
+        f"Answer in this chat ({' / '.join(answers)}). This message approves "
+        f"nothing by itself: a tool that needs your approval asks with its own card."
     )
 
     try:
         res = await _core_send_message(
             target_id=recipient_id,
-            text=formatted_card,
+            text=notice,
             backend=chan,
-            hitl_approval={
-                "request_id": request_id,
-                "title": title,
-                "actions": list(actions),
-            },
         )
         if send_failed(res):
             # It said "dispatched" before the status that said it was not.
             return res
-        return f"Approval request dispatched. Status: {res}"
+        return (
+            f"Review request sent (a question, not an approval: the answer, if any, "
+            f"comes as the operator's next message). Status: {res}"
+        )
     except Exception as e:
         logger.error("Error sending approval request card: %s", e)
         return f"Error sending approval card: {e}"

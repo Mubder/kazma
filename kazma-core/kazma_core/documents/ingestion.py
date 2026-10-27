@@ -51,7 +51,7 @@ from typing import Any, BinaryIO
 
 from kazma_core.db.pg_helpers import store_errors
 
-from . import ocr_progress, telemetry
+from . import live_scratch, ocr_progress, telemetry
 from .admission import IntakeAdmissionStore, current_owner, lease_lapsed, owner_state
 from .audit import DocumentAuditStore
 from .capacity import CapacityError, DocumentCapacityGuard
@@ -62,6 +62,7 @@ from .jobs import (
     DocumentJobRepository,
     IntakeFencedError,
     InvalidJobTransitionError,
+    JobConflictError,
     JobNotFoundError,
 )
 from .jobs_pg import (
@@ -502,6 +503,33 @@ class DocumentIngestionService:
         except Exception:  # pragma: no cover - defensive
             logger.debug("[documents.ingestion] repository close failed", exc_info=True)
 
+    def _intake_owner_is_live(self, job: DocumentJobRecord) -> bool:
+        """True when the process that published *job* may still be advancing it.
+
+        The upload validates synchronously after it publishes the job, so a
+        job in an intake state is either an upload in progress or one a crash
+        left behind. Its reservation's owner tells which (audit 2026-10-26
+        AUD-022): this process or another live one is an upload in progress;
+        a provably dead owner, a reservation restored from a backup, or a job
+        with no reservation (an older build) is stranded. An owner that
+        cannot be proven either way counts as live while its reservation is
+        held and its lease is current.
+        """
+
+        reservation = self.admissions.reservation_for_job(
+            tenant_id=job.tenant_id, job_id=str(job.id)
+        )
+        if reservation is None:
+            return False
+        state = owner_state(str(reservation.get("owner") or ""))
+        if state in {"self", "alive"}:
+            return True
+        if state == "dead":
+            return False
+        return bool(int(reservation.get("active") or 0)) and not lease_lapsed(
+            reservation, self.admissions.now_epoch()
+        )
+
     @policy_operation
     def recover_interrupted_intake(self) -> int:
         """Resume pre-worker intake states left behind by a hard process crash."""
@@ -518,6 +546,10 @@ class DocumentIngestionService:
                 DocumentJobState.VALIDATING,
             }:
                 continue
+            if self._intake_owner_is_live(current):
+                # Another process (the server validating an upload, while a
+                # CLI or a second replica starts its workers) still owns it.
+                continue
             version = self.repository.get_version(
                 tenant_id=current.tenant_id,
                 version_id=current.version_id,
@@ -530,8 +562,15 @@ class DocumentIngestionService:
                     actor=None,
                     force_ocr=force_ocr,
                 )
-            except InvalidJobTransitionError:
-                # Another recovery actor won the compare-and-swap.
+            except JobConflictError as exc:
+                # Another actor moved the job first (audit 2026-10-26
+                # AUD-022): losing the compare-and-swap raises
+                # StaleJobUpdateError, a sibling of the transition error this
+                # caught, and it failed the whole start_workers().
+                logger.info(
+                    "[documents.ingestion] intake recovery skipped job=%s: %s",
+                    current.id, type(exc).__name__,
+                )
                 continue
             if result.state not in {
                 DocumentJobState.RECEIVED,
@@ -2926,9 +2965,13 @@ class DocumentIngestionService:
             shutil.copyfile(blob_path, self.path)
 
         def __enter__(self) -> Path:
+            # Held while in use, so garbage collection never takes a stage
+            # a long OCR run is still reading (audit 2026-10-26 AUD-023).
+            live_scratch.hold(self._dir)
             return self.path
 
         def __exit__(self, *exc: object) -> None:
+            live_scratch.release(self._dir)
             shutil.rmtree(self._dir, ignore_errors=True)
 
     def _materialize(self, blob_path: Path, filename: str) -> "DocumentIngestionService._Materialized":

@@ -122,7 +122,7 @@ def test_dash_lists_session_card_is_the_shipped_builder() -> None:
     assert "Telegram" in html
     # The chat's title is the user's own words: linked to the chat, never
     # translated (2026-09-28: every card read "anonymous").
-    assert '<a href="/chat?session=s-1"><strong class="dash-mobile-card-name" translate="no">Ali</strong></a>' in html
+    assert '<a href="/chat?s=s-1"><strong class="dash-mobile-card-name" translate="no">Ali</strong></a>' in html
     assert "Messages: 4" in html and "Saved steps: 12" in html
 
 

@@ -396,6 +396,23 @@ class IntakeAdmissionStore:
             row = cur.fetchone()
         return dict(row) if row is not None else None
 
+    def reservation_for_job(self, *, tenant_id: str, job_id: str) -> dict[str, Any] | None:
+        """The newest reservation that published (or is publishing) *job_id*.
+
+        Kept after it closes (``active = 0``): its ``owner`` still says which
+        process advanced the job's intake, so recovery can tell a live
+        upload from one stranded by a crash (audit 2026-10-26 AUD-022).
+        """
+        with self._transaction() as cur:
+            self._execute(
+                cur,
+                """SELECT * FROM document_intake_reservations
+                WHERE tenant_id = ? AND job_id = ? ORDER BY created_epoch DESC LIMIT 1""",
+                (tenant_id, job_id),
+            )
+            row = cur.fetchone()
+        return dict(row) if row is not None else None
+
     def unpublished(self) -> list[dict[str, Any]]:
         """Active reservations with no published job (candidates for recovery)."""
         with self._transaction() as cur:

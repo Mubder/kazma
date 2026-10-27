@@ -469,7 +469,7 @@ async def test_purge_and_recovery_at_any_size(tmp_path, capture, rows):
             [(f"cron-d{i:05d}", (now - timedelta(seconds=i)).isoformat(), now.isoformat(), now.isoformat())
              for i in range(rows)])
         assert await store.purge_terminal_jobs(keep_last=10_000) == 0
-        assert await store.job_exists("cron-oldfail")
+        assert await store.get("cron-oldfail") is not None
         sched = CronScheduler(store=store, graph_builder=lambda: _ReplyGraph(), poll_interval=0.05)
         await sched.start()
         for _ in range(100):

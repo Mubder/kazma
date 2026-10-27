@@ -88,15 +88,17 @@ def _json_response(status: int, payload: dict[str, Any]) -> httpx.Response:
 
 
 @pytest.fixture
-def tmp_backup_dir(tmp_path: Path) -> Path:
-    """A small backup dir: one root file + one nested file."""
-    dest = tmp_path / "backup_20260815_120000"
-    dest.mkdir()
-    (dest / "manifest.json").write_text('{"ok": true}', encoding="utf-8")
-    nested = dest / "data"
-    nested.mkdir()
-    (nested / "memory.db").write_bytes(b"\x00" * 64)
-    return dest
+def tmp_backup_archive(tmp_path: Path) -> Path:
+    """A small backup archive: what the universal backup uploads, one .zip.
+
+    The folder-tree upload these tests once drove (``upload_directory``) had
+    no caller and was removed (audit 2026-10-26 AUD-077); each provider's
+    token, signing and configuration paths are exercised through
+    ``upload_file``, the one the backup uses.
+    """
+    archive = tmp_path / "backup_20260815_120000.zip"
+    archive.write_bytes(b"PK\x03\x04" + b"\x00" * 60)
+    return archive
 
 
 # ── provider routing ─────────────────────────────────────────────────────
@@ -216,8 +218,8 @@ def test_google_drive_test_connection_403_is_actionable(
     assert expected_hint in result["error"]
 
 
-def test_google_drive_upload_and_folder_creation(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+def test_google_drive_upload_creates_the_root_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path
 ) -> None:
     monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
     monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.gmail.access_token": "tok"}))
@@ -237,14 +239,13 @@ def test_google_drive_upload_and_folder_creation(
 
     _install_mock_transport(monkeypatch, handler, captured)
 
-    result = asyncio.run(cs.GoogleDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    result = asyncio.run(cs.GoogleDriveSync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
     assert result["ok"] is True
-    assert result["files"] == 2
-    # Folder chain created: kazma-backups + <ts> + nested "data" dir
+    # The kazma-backups root folder did not exist: it is created once.
     create_calls = [r for r in captured if r.method == "POST" and r.url.path == "/drive/v3/files"]
-    assert len(create_calls) == 3
+    assert len(create_calls) == 1
     uploads = [r for r in captured if "/upload/drive/v3/files" in r.url.path]
-    assert len(uploads) == 2
+    assert len(uploads) == 1
     assert all(r.headers.get("authorization") == "Bearer tok" for r in captured)
 
 
@@ -302,7 +303,7 @@ def test_google_drive_large_file_uses_resumable_upload(
 
 
 def test_google_drive_refreshes_expired_token(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path
 ) -> None:
     monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
     vault = _FakeVault({
@@ -331,14 +332,14 @@ def test_google_drive_refreshes_expired_token(
 
     _install_mock_transport(monkeypatch, handler, captured)
 
-    result = asyncio.run(cs.GoogleDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    result = asyncio.run(cs.GoogleDriveSync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
     assert result["ok"] is True
     # The refreshed token was persisted back to the (fake) vault
     assert vault.values["email.gmail.access_token"] == "fresh"
 
 
 def test_google_drive_without_tokens_fails_clear(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path
 ) -> None:
     monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
     monkeypatch.setattr(cs, "_read_vault", _FakeVault({}))
@@ -346,7 +347,7 @@ def test_google_drive_without_tokens_fails_clear(
     _install_mock_transport(monkeypatch, lambda req: httpx.Response(500), captured)
 
     with pytest.raises(RuntimeError, match="not connected"):
-        asyncio.run(cs.GoogleDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+        asyncio.run(cs.GoogleDriveSync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
 
 
 def test_google_drive_upload_file_single_archive(
@@ -413,33 +414,8 @@ def test_google_drive_upload_file_reports_actionable_error(
 # ── OneDrive ─────────────────────────────────────────────────────────────
 
 
-def test_onedrive_upload_via_graph_put(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
-) -> None:
-    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "onedrive"}))
-    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.microsoft.access_token": "mstok"}))
-    captured: list[httpx.Request] = []
-
-    def handler(req: httpx.Request) -> httpx.Response:
-        if req.url.path == "/v1.0/me":
-            return _json_response(200, {})
-        if req.method == "PUT":
-            assert req.url.path.startswith("/v1.0/me/drive/root:/kazma-backups/")
-            assert req.headers.get("authorization") == "Bearer mstok"
-            return httpx.Response(201)
-        return httpx.Response(404)
-
-    _install_mock_transport(monkeypatch, handler, captured)
-
-    result = asyncio.run(cs.OneDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
-    assert result["ok"] is True
-    puts = [r for r in captured if r.method == "PUT"]
-    assert len(puts) == 2
-    assert any(r.url.path.endswith("/manifest.json:/content") for r in puts)
-
-
 def test_onedrive_refreshes_and_rotates_token(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path
 ) -> None:
     monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "onedrive"}))
     vault = _FakeVault({
@@ -463,7 +439,7 @@ def test_onedrive_refreshes_and_rotates_token(
 
     _install_mock_transport(monkeypatch, handler, captured)
 
-    result = asyncio.run(cs.OneDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    result = asyncio.run(cs.OneDriveSync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
     assert result["ok"] is True
     assert vault.values["email.microsoft.access_token"] == "ms-fresh"
     assert vault.values["email.microsoft.refresh_token"] == "rt-new"
@@ -521,7 +497,7 @@ def _onedrive_token_capture(monkeypatch: pytest.MonkeyPatch, vault: "_FakeVault"
 
 
 def test_onedrive_refresh_sends_client_secret_when_configured(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path
 ) -> None:
     """Incident 2026-08-16: a confidential Azure app rejects the refresh grant
     with AADSTS70002 unless the client_secret is included."""
@@ -531,14 +507,14 @@ def test_onedrive_refresh_sends_client_secret_when_configured(
         "email.microsoft.client_secret": "shh",
     })
     token_body = _onedrive_token_capture(monkeypatch, vault)
-    result = asyncio.run(cs.OneDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    result = asyncio.run(cs.OneDriveSync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
     assert result["ok"] is True
     assert token_body.get("client_secret") == "shh"
     assert token_body.get("grant_type") == "refresh_token"
 
 
 def test_onedrive_refresh_omits_client_secret_for_public_client(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path
 ) -> None:
     """Public-client Azure apps store no secret → the grant must omit it."""
     vault = _FakeVault({
@@ -546,7 +522,7 @@ def test_onedrive_refresh_omits_client_secret_for_public_client(
         "email.microsoft.client_id": "cid",
     })
     token_body = _onedrive_token_capture(monkeypatch, vault)
-    result = asyncio.run(cs.OneDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    result = asyncio.run(cs.OneDriveSync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
     assert result["ok"] is True
     assert "client_secret" not in token_body
     assert token_body.get("grant_type") == "refresh_token"
@@ -555,69 +531,15 @@ def test_onedrive_refresh_omits_client_secret_for_public_client(
 # ── WebDAV (unit + local-server integration) ────────────────────────────
 
 
-def test_webdav_upload_mkcol_and_put(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
-) -> None:
-    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
-        "backups.offsite.provider": "webdav",
-        "backups.offsite.webdav.url": "https://nas.local/backups",
-        "backups.offsite.webdav.username": "user",
-    }))
-    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.webdav.password": "pw"}))
-    captured: list[httpx.Request] = []
-
-    def handler(req: httpx.Request) -> httpx.Response:
-        if req.method == "MKCOL":
-            return httpx.Response(201)
-        if req.method == "PUT":
-            return httpx.Response(201)
-        return httpx.Response(405)
-
-    _install_mock_transport(monkeypatch, handler, captured)
-
-    result = asyncio.run(cs.WebDAVSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
-    assert result["ok"] is True
-    assert result["files"] == 2
-    mkcols = [r for r in captured if r.method == "MKCOL"]
-    assert len(mkcols) == 1  # nested data/ dir only — root files need no parent
-    puts = [r for r in captured if r.method == "PUT"]
-    assert len(puts) == 2
-    # Basic auth attached to every request
-    assert all(r.headers.get("authorization", "").startswith("Basic ") for r in captured)
-
-
-def test_webdav_unconfigured_fails_clear(monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path) -> None:
+def test_webdav_unconfigured_fails_clear(monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path) -> None:
     monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "webdav",
         "backups.offsite.webdav.url": "",
     }))
 
-    result = asyncio.run(cs.WebDAVSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    result = asyncio.run(cs.WebDAVSync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
     assert result["ok"] is False
     assert "URL not configured" in result["error"]
-
-
-def test_webdav_partial_failure_reports_count(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
-) -> None:
-    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
-        "backups.offsite.provider": "webdav",
-        "backups.offsite.webdav.url": "https://nas.local/backups",
-    }))
-    captured: list[httpx.Request] = []
-
-    def handler(req: httpx.Request) -> httpx.Response:
-        if req.method == "MKCOL":
-            return httpx.Response(201)
-        if req.method == "PUT" and req.url.path.endswith("/manifest.json"):
-            return httpx.Response(500)
-        return httpx.Response(201)
-
-    _install_mock_transport(monkeypatch, handler, captured)
-
-    result = asyncio.run(cs.WebDAVSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
-    assert result["ok"] is True  # one file still made it
-    assert "1/2 files failed" in result["error"]
 
 
 def test_webdav_upload_file_single_archive(
@@ -650,7 +572,7 @@ def test_webdav_upload_file_single_archive(
     assert all(r.headers.get("authorization", "").startswith("Basic ") for r in captured)
 
 
-def test_webdav_integration_real_server(monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path) -> None:
+def test_webdav_integration_real_server(monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path) -> None:
     """End-to-end WebDAV upload against a real threaded local HTTP server."""
     stored: dict[str, bytes] = {}
 
@@ -684,13 +606,11 @@ def test_webdav_integration_real_server(monkeypatch: pytest.MonkeyPatch, tmp_bac
         monkeypatch.setattr(cs, "_read_vault", _FakeVault({}))
 
         provider = cs.WebDAVSync()
-        result = asyncio.run(provider.upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+        result = asyncio.run(provider.upload_file(tmp_backup_archive, tmp_backup_archive.name))
         assert result["ok"] is True
-        assert len(stored) == 2
-        # Paths are relative to the DAV root + remote_path
-        assert any(p.endswith(f"/{tmp_backup_dir.name}/manifest.json") for p in stored)
-        nested_key = next(p for p in stored if p.endswith("/data/memory.db"))
-        assert stored[nested_key] == b"\x00" * 64
+        assert len(stored) == 1
+        # The archive lands under the DAV root's kazma-backups folder, whole.
+        assert stored[f"/dav/kazma-backups/{tmp_backup_archive.name}"] == tmp_backup_archive.read_bytes()
 
         # test_connection against the same server
         test = asyncio.run(provider.test_connection())
@@ -842,7 +762,7 @@ def test_ftp_status_reports_connection(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_s3_upload_signs_with_sigv4(
-    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path
 ) -> None:
     monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "s3",
@@ -859,27 +779,27 @@ def test_s3_upload_signs_with_sigv4(
 
     _install_mock_transport(monkeypatch, handler, captured)
 
-    result = asyncio.run(cs.S3Sync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    result = asyncio.run(cs.S3Sync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
     assert result["ok"] is True
     puts = [r for r in captured if r.method == "PUT"]
-    assert len(puts) == 2
+    assert len(puts) == 1
     for req in puts:
         assert req.headers["x-amz-date"]
         assert req.headers["x-amz-content-sha256"]
         auth = req.headers["authorization"]
         assert auth.startswith("AWS4-HMAC-SHA256 Credential=AKID/")
         assert "SignedHeaders=content-type;host" in auth  # canonical (sorted) order
-        assert f"/{tmp_backup_dir.name}/" in req.url.path
+        assert req.url.path.endswith(f"/kazma-backups/{tmp_backup_archive.name}")
 
 
-def test_s3_unconfigured_fails_clear(monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path) -> None:
+def test_s3_unconfigured_fails_clear(monkeypatch: pytest.MonkeyPatch, tmp_backup_archive: Path) -> None:
     monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "s3",
         "backups.offsite.s3.access_key": "",
         "backups.offsite.s3.bucket": "",
     }))
 
-    result = asyncio.run(cs.S3Sync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    result = asyncio.run(cs.S3Sync().upload_file(tmp_backup_archive, tmp_backup_archive.name))
     assert result["ok"] is False
     assert "not configured" in result["error"]
 

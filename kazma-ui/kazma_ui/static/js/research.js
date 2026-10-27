@@ -116,19 +116,20 @@
         window.KazmaResearch.destroy();
       }
     };
-    if (Array.isArray(window.kazmaOnSoftNavLeave)) {
-      window.kazmaOnSoftNavLeave.push(teardown);
-    } else if (typeof window.kazmaOnSoftNavLeave === 'function') {
-      window.kazmaOnSoftNavLeave = [window.kazmaOnSoftNavLeave, teardown];
-    } else {
-      window.kazmaOnSoftNavLeave = [teardown];
-    }
+    window.kazmaAddLeaveHook(teardown);
   }
 
+  // The delegated click listener is bound to this controller and removed on
+  // leaving the page (destroy). The guard below lives in this run's closure,
+  // and soft navigation runs the file again on every visit: each visit added
+  // a listener, so Archive and Resume POSTed twice and Delete opened two
+  // confirms (audit 2026-10-26 AUD-030).
+  var _delegatedListeners = null;
   var _delegatedBound = false;
   function _bindDelegatedEvents() {
     if (_delegatedBound) return;
     _delegatedBound = true;
+    _delegatedListeners = new AbortController();
     document.addEventListener('click', function (e) {
       var actEl = e.target.closest('[data-act]');
       if (!actEl) return;
@@ -158,7 +159,7 @@
         if (e.target.closest('a, button[data-act]:not([data-act="view-detail"])')) return;
         if (tid) window.KazmaResearch.viewDetail(tid);
       }
-    });
+    }, { signal: _delegatedListeners.signal });
   }
 
   // The session's own depth: "chat" (a chat tool's web search, recorded as
@@ -204,6 +205,8 @@
     destroy: function () {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       closeLiveStream();
+      if (_delegatedListeners) { _delegatedListeners.abort(); _delegatedListeners = null; }
+      _delegatedBound = false;
     },
 
     switchTab: function (name) {

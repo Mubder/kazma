@@ -1388,8 +1388,9 @@ class SwarmEngine:
         """Retry a failed/timeout/cancelled task by creating a fresh dispatch.
 
         Builds a new SwarmTask with a new ID, copying the prompt/type/
-        workers/context from the original. The original task's ID is
-        recorded in metadata['retry_of'] for lineage.
+        workers/context from the original. The ID of the chain's first task
+        is recorded in metadata['retry_of'] for lineage (a retry of a retry
+        names the same root).
 
         Returns the new SwarmTask, or None if the original was not found.
         """

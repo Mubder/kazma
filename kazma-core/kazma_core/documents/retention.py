@@ -40,6 +40,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from . import live_scratch
 from .config import DocumentConfig, get_document_config
 from .policy import DocumentPolicy, policy_operation
 
@@ -322,6 +323,11 @@ class DocumentGarbageCollector:
                     return budget
                 if entry.is_symlink():
                     report.refused_symlinks += 1
+                    continue
+                if live_scratch.is_held(entry):
+                    # A running operation's stage, however old its mtime
+                    # (audit 2026-10-26 AUD-023: a long OCR run lost its
+                    # source to this sweep and restarted from page 1).
                     continue
                 try:
                     newest = entry.stat().st_mtime

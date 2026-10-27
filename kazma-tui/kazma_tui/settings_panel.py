@@ -143,8 +143,14 @@ class SettingsPanel(VerticalScroll):
 
         The payload went in positionally to a keyword-only parameter, so every
         save raised TypeError, was written locally and reported "server
-        unreachable" (2026-10-01)."""
-        from kazma_core.runtime.local_api import LocalApiRefused, request_json
+        unreachable" (2026-10-01).
+
+        Only "nothing listens" (``LocalApiUnreachable``) writes locally. Any
+        other failure -- an answered refusal (``LocalApiRefused``), a
+        401/403 from a mismatched secret, a 5xx, a slow server -- is a server
+        that answered, and is raised for the panel to show: writing locally then skipped the server's admin check, its
+        change listeners and its cache (audit 2026-10-26 AUD-035)."""
+        from kazma_core.runtime.local_api import LocalApiUnreachable, request_json
 
         try:
             request_json(
@@ -153,10 +159,8 @@ class SettingsPanel(VerticalScroll):
                 payload={"key": key, "value": value, "category": category},
                 timeout=2.0,
             )
-        except LocalApiRefused:
-            raise
-        except Exception:
-            logger.debug("TUI settings live PUT failed", exc_info=True)
+        except LocalApiUnreachable:
+            logger.debug("TUI settings live PUT: no server answers", exc_info=True)
             from kazma_core.config_store import get_config_store
             from kazma_core.settings_validation import validate_setting
 
@@ -369,7 +373,14 @@ class SettingsPanel(VerticalScroll):
 
         def on_confirm(confirmed: bool) -> None:
             if confirmed:
-                via = self._persist_setting(_HITL_KEY, False, "safety")
+                try:
+                    via = self._persist_setting(_HITL_KEY, False, "safety")
+                except Exception as e:
+                    # A server that answered and refused (or failed) keeps
+                    # HITL on: say so, and show the box as it still is.
+                    self.notify(f"Failed to disable HITL approval: {e}", severity="error")
+                    sel.select(_HITL_KEY)
+                    return
                 self._last_saved[_HITL_KEY] = False
                 where = "live server" if via == "server" else "this TUI process"
                 self.notify(

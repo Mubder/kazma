@@ -1173,11 +1173,16 @@ class LLMProvider:
                 # with nothing saying WHICH model was sent WHERE — the single
                 # most useful fact, and the one the operator cannot get any
                 # other way (audit 2026-09-16).
+                #
+                # Classified by the status like every other branch: a 5xx
+                # here was raised permanent, so a provider 503 inside
+                # resilient_chat failed fast with no retry and no failover
+                # (audit 2026-10-26 AUD-014, §3).
                 raise LLMError(
                     f"LLM call failed (HTTP {status_code}) for model "
                     f"{payload.get('model') or '<unset>'!r} at "
                     f"{self._describe_endpoint()}: {detail[:300]}",
-                    transient=False,
+                    transient=_http_status_is_transient(status_code),
                 ) from e
         except LLMError:
             # Already a structured LLM error — re-raise without wrapping

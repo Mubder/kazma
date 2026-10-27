@@ -18,6 +18,7 @@ import logging
 import time
 from typing import Any
 
+from kazma_core.runs.claims import WORK_FAILURES, settle_on_error
 from kazma_core.runs.kinds import KINDS
 from kazma_core.runs.text import action_word, ago
 
@@ -120,12 +121,22 @@ async def deliver(row: dict[str, Any]) -> str:
         offered = list(row.get("actions") or []) if row.get("state") == "open" else []
         card = {"incident_id": row["id"], "actions": offered,
                 "labels": {a: action_word(a) for a in offered}}
-        try:
-            result = await _send(target, _card_text(row), backend=platform, run_card=card)
-        except asyncio.CancelledError:
-            raise
-        except (RuntimeError, OSError, ValueError) as exc:
-            result = f"Error: {type(exc).__name__}: {exc}"
+        async def _interrupted(exc: BaseException) -> None:
+            logger.warning("[runs] incident %s: the card send raised %s", row["id"], type(exc).__name__,
+                           exc_info=exc)
+            await asyncio.to_thread(store.finish_notification, row["id"], outcome="uncertain",
+                                    detail=f"the send raised {type(exc).__name__}")
+
+        # The row is "sending" now: it always ends recorded (audit 2026-10-26
+        # AUD-018 -- an httpx or sqlite3 error escaped the three types caught
+        # here and left it "sending" until the next start). A send that
+        # raised a known failure falls through to the ops channels; anything
+        # else may or may not have reached the chat: uncertain, never resent.
+        async with settle_on_error(_interrupted):
+            try:
+                result = await _send(target, _card_text(row), backend=platform, run_card=card)
+            except WORK_FAILURES as exc:
+                result = f"Error: {type(exc).__name__}: {exc}"
         if not send_failed(result):
             await asyncio.to_thread(store.finish_notification, row["id"], outcome="delivered", detail=platform)
             logger.info("[runs] incident %s sent to %s", row["id"], platform)
@@ -172,8 +183,8 @@ async def _send_text(row: dict[str, Any], text: Any, key: str) -> None:
 
         try:
             result = await _send(target, text(code=True), backend=platform)
-        except (RuntimeError, OSError, ValueError) as exc:
-            result = f"Error: {exc}"
+        except WORK_FAILURES as exc:  # a send that raises is a refused send (AUD-018)
+            result = f"Error: {type(exc).__name__}: {exc}"
         if not send_failed(result):
             return
         logger.warning("[runs] %s for %s not taken by %s: %s", key, row["id"], platform, str(result)[:200])

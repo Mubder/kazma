@@ -227,6 +227,17 @@
             for (var k in fill) text = text.split('{' + k + '}').join(String(fill[k]));
             return text;
         };
+        // The one way a page script asks to be told when soft navigation
+        // leaves the page (modules/nav.js runs every hook, then clears the
+        // list): ADD to the list. Scripts that assigned
+        // window.kazmaOnSoftNavLeave overwrote the hook of every script that
+        // ran before them on the same page (audit 2026-10-26 AUD-030).
+        window.kazmaAddLeaveHook = function (fn) {
+            var hooks = window.kazmaOnSoftNavLeave;
+            if (Array.isArray(hooks)) hooks.push(fn);
+            else if (typeof hooks === 'function') window.kazmaOnSoftNavLeave = [hooks, fn];
+            else window.kazmaOnSoftNavLeave = [fn];
+        };
         // Uncaught fetch/rejection surface (UI audit P1-8): ~70 load calls
         // across settings_hub/mcp/kb/models/providers/skills/ide have no
         // .catch — failures cleared `loading` and rendered empty-states as

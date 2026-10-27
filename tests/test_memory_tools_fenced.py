@@ -110,11 +110,14 @@ def test_memory_search_shows_the_memory_not_the_match_text(mem):
 
 
 def test_a_recall_failure_is_not_an_empty_result(mem, monkeypatch):
+    # Break recall INSIDE: the real recall() catches its own failures and
+    # never raises, so patching recall() to raise tested a path that does
+    # not happen (audit 2026-10-26 AUD-026).
     def boom(*a, **k):
-        raise RuntimeError("embedder down")
+        raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr("kazma_core.memory.recall.recall", boom)
-    out = asyncio.run(_tool("memory_search").func(query="anything"))
+    monkeypatch.setattr("kazma_core.memory.recall._recall_episodes", boom)
+    out = asyncio.run(_tool("memory_search").func(query="where do I live"))
     assert "unavailable" in out and "NOT an empty result" in out
     assert out != "No relevant memories found."
 

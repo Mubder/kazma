@@ -7,6 +7,9 @@
   'use strict';
   var KS = window.KazmaStream;
   var ws = null;
+  // This run's pollers and its telemetry stream, ended by teardown().
+  var _timers = [];
+  var _resourceStream = null;
   // The charts' range. They draw the LLM ledger's per-bucket tokens and
   // cost (/api/dashboard/usage); they used to draw the running totals the
   // open page had sampled, kept only in its memory (2026-10-22).
@@ -32,17 +35,20 @@
     });
 
     // Set up auto-refresh fallback (skipped while the tab is hidden —
-    // memory_console.js already gates its polls this way)
-    setInterval(function() {
+    // memory_console.js already gates its polls this way). Kept to be
+    // cleared on leaving: soft navigation runs this file again on every
+    // visit, and each run's pollers kept fetching from every later page
+    // (audit 2026-10-26 AUD-030).
+    _timers.push(setInterval(function() {
       if (!document.hidden) {
         fetchStatusFallback();
         fetchAnswerQuality();
       }
-    }, 10000);
+    }, 10000));
     // The charts' buckets are minutes to hours wide: once a minute is enough.
-    setInterval(function() {
+    _timers.push(setInterval(function() {
       if (!document.hidden) refreshCharts();
-    }, 60000);
+    }, 60000));
 
     // Time range selector
     var rangeBtns = document.querySelectorAll('.range-btn');
@@ -505,9 +511,9 @@
     var eventSource = new EventSource('/api/telemetry/stream');
     window.__kazmaEventSources = window.__kazmaEventSources || [];
     window.__kazmaEventSources.push(eventSource);
-    window.kazmaOnSoftNavLeave = function () {
-      try { eventSource.close(); } catch (e) {}
-    };
+    // Closed by teardown(), the page's one leave hook (it used to overwrite
+    // window.kazmaOnSoftNavLeave, and with it hitl_approval.js's).
+    _resourceStream = eventSource;
     eventSource.onmessage = function(event) {
       try {
         var data = JSON.parse(event.data);
@@ -615,7 +621,8 @@
         var chatTd = document.createElement('td');
         chatTd.style.cssText = 'padding:10px 12px;max-width:320px;';
         var titleEl = document.createElement(s.session_id ? 'a' : 'span');
-        if (s.session_id) titleEl.href = '/chat?session=' + encodeURIComponent(s.session_id);
+        // chat.js opens a chat by ?s= (audit 2026-10-26 AUD-031: ?session= opened the last chat).
+        if (s.session_id) titleEl.href = '/chat?s=' + encodeURIComponent(s.session_id);
         titleEl.textContent = s.title || label('dashboard.no_chat', 'No chat');
         if (s.title) titleEl.setAttribute('translate', 'no');
         titleEl.style.cssText = 'display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
@@ -785,7 +792,22 @@
   }
 
   // ── Boot ──────────────────────────────────────────────
+  /**
+   * Leaving the page ends what this run started: the /ws/dashboard socket
+   * (each earlier run's socket prepended every trace row once more), the
+   * pollers and the telemetry stream (audit 2026-10-26 AUD-030).
+   */
+  function teardown() {
+    _timers.forEach(function (id) { clearInterval(id); });
+    _timers = [];
+    try { if (ws && ws.close) ws.close(); } catch (e) {}
+    ws = null;
+    try { if (_resourceStream) _resourceStream.close(); } catch (e) {}
+    _resourceStream = null;
+  }
+
   function boot() {
+    window.kazmaAddLeaveHook(teardown);
     init();
     startResourceMonitor();
     // The session list ends its own skeleton: with the rows, with "no
@@ -800,12 +822,7 @@
   } else {
     boot();
   }
-
-  window.KazmaDashboard = {
-    refresh: fetchInitialData,
-    getWS: function() { return ws; },
-    loadSessions: function() {
-      try { initSessionManagement(); } catch (e) { /* ignore */ }
-    },
-  };
+  // window.KazmaDashboard (refresh, getWS, loadSessions) had no reader
+  // anywhere and kept this run's socket reachable after leaving; removed
+  // (audit 2026-10-26 AUD-081).
 })();

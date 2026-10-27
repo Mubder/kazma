@@ -91,27 +91,38 @@ def _messages(incident: dict[str, Any]) -> list[dict[str, str]]:
 
 async def _diagnose(incident: dict[str, Any], *, actor: str, platform: str) -> None:
     from kazma_core.agent.turn import run_agent_turn
+    from kazma_core.runs.claims import WORK_FAILURES, settle_on_error
     from kazma_core.runs.incidents import get_incident_store
 
     store = get_incident_store()
     text, ok = "", False
-    try:
-        graph = await asyncio.to_thread(_graph_builder)
-        thread_id = f"diagnose-{incident['id']}"
-        turn = await asyncio.wait_for(
-            run_agent_turn(graph=graph, thread_id=thread_id, state={"messages": _messages(incident)},
-                           config={"configurable": {"thread_id": thread_id}}, persist=False),
-            timeout=DIAGNOSIS_BUDGET_S)
-        failed = bool(getattr(turn, "turn_failed", False) or getattr(turn, "error", None))
-        text = (getattr(turn, "text", "") or "").strip()
-        ok = bool(text) and not failed
-        if not ok:
-            text = text or f"The diagnosis could not finish: {getattr(turn, 'error', '') or 'no answer'}"
-    except TimeoutError:
-        text = f"The diagnosis took longer than {int(DIAGNOSIS_BUDGET_S)} s and was stopped."
-    except (RuntimeError, OSError, ValueError) as exc:
-        logger.warning("[runs] diagnosis failed incident=%s", incident["id"], exc_info=True)
-        text = f"The diagnosis could not run: {type(exc).__name__}"
+
+    async def _could_not_run(exc: BaseException) -> None:
+        logger.warning("[runs] diagnosis failed incident=%s", incident["id"], exc_info=exc)
+        await asyncio.to_thread(store.finish_diagnosis, incident["id"],
+                                text=f"The diagnosis could not run: {type(exc).__name__}", ok=False)
+
+    # The claimed "running" diagnosis always ends recorded (audit 2026-10-26
+    # AUD-018): an error outside the three types caught here left it
+    # "running", and every later "diagnose" answered "already running".
+    async with settle_on_error(_could_not_run):
+        try:
+            graph = await asyncio.to_thread(_graph_builder)
+            thread_id = f"diagnose-{incident['id']}"
+            turn = await asyncio.wait_for(
+                run_agent_turn(graph=graph, thread_id=thread_id, state={"messages": _messages(incident)},
+                               config={"configurable": {"thread_id": thread_id}}, persist=False),
+                timeout=DIAGNOSIS_BUDGET_S)
+            failed = bool(getattr(turn, "turn_failed", False) or getattr(turn, "error", None))
+            text = (getattr(turn, "text", "") or "").strip()
+            ok = bool(text) and not failed
+            if not ok:
+                text = text or f"The diagnosis could not finish: {getattr(turn, 'error', '') or 'no answer'}"
+        except TimeoutError:
+            text = f"The diagnosis took longer than {int(DIAGNOSIS_BUDGET_S)} s and was stopped."
+        except WORK_FAILURES as exc:
+            logger.warning("[runs] diagnosis failed incident=%s", incident["id"], exc_info=True)
+            text = f"The diagnosis could not run: {type(exc).__name__}"
     await asyncio.to_thread(store.finish_diagnosis, incident["id"], text=text, ok=ok)
     logger.info("[runs] diagnosis incident=%s ok=%s by=%s on=%s", incident["id"], ok, actor or "-", platform)
     from kazma_core.runs.notify import send_diagnosis

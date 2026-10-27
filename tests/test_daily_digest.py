@@ -561,26 +561,3 @@ class TestSchedulerHealth:
         )
         out = self._check()()
         assert out["cron"] == "error"
-
-
-def test_cron_fires_overdue_jobs_after_downtime():
-    """Corrects an audit finding rather than implementing one.
-
-    The audit reported "no evidence a schedule missed during downtime is
-    ever recovered", based on grepping the logs for catch-up lines. There
-    are none -- because the recovery is implicit: due means now >= next_run,
-    so an overdue job fires on the next poll. It works and says nothing.
-    """
-    import sys
-    from datetime import UTC, datetime, timedelta
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "kazma-core"))
-    from kazma_core.cron.scheduler import CronScheduler
-
-    now = datetime.now(UTC)
-    missed = (now - timedelta(hours=8)).isoformat()
-    assert CronScheduler._is_due(missed, now) is True, (
-        "a job whose fire time passed while Kazma was down must still fire"
-    )
-    assert CronScheduler._is_due((now + timedelta(hours=1)).isoformat(), now) is False

@@ -37,6 +37,7 @@ from kazma_core.documents.content_model import (
     TitleBlock,
     TOCBlock,
 )
+from kazma_core.documents.errors import DocumentRenderError
 from kazma_core.documents.profile import DocProfile
 from kazma_core.documents.rich_render import parse_rich_blocks, try_parse_pipe_table_blob
 
@@ -149,8 +150,20 @@ class DocxEngine:
         for block in model.blocks:
             try:
                 self._render_block(document, block)
-            except Exception:
-                logger.debug("[docx] block render failed: %r", block, exc_info=True)
+            except DocumentRenderError:
+                raise
+            except Exception as exc:
+                # A body block that cannot be drawn fails the render (audit
+                # 2026-10-26 AUD-025, §19's DocumentRenderError rule): it was
+                # dropped at DEBUG and the document came out "ready" without
+                # the table or paragraph.
+                logger.warning(
+                    "[docx] %s could not be rendered: %s", type(block).__name__, exc, exc_info=True
+                )
+                raise DocumentRenderError(
+                    f"A {type(block).__name__} could not be rendered ({type(exc).__name__})",
+                    code="document_render_failed",
+                ) from exc
 
         self._house_bullets(document)
         self._complex_script_emphasis(document)

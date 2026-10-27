@@ -7,7 +7,6 @@ BUG 2: Cron double-fire — verify in-flight guard prevents duplicate execution.
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -16,27 +15,29 @@ import pytest
 # ═══════════════════════════════════════════════════════════════════════════
 # BUG 1: Memory ranking — regression tests for reverse=True sort order
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # BUG 2: Cron double-fire — regression tests for in-flight guard
 # ═══════════════════════════════════════════════════════════════════════════
-
-
 from kazma_core.cron.scheduler import CronScheduler, ScheduledJob
 
 
 class TestCronInFlightGuard:
-    """Verify that the scheduler does not fire a job that is already running."""
+    """Verify that the scheduler does not fire a job that is already running.
+
+    The poll pass is the scheduler's own (``_poll_once``) over a store that
+    reports nothing to recover, deliver or alert. (These tests ran a copy of
+    the loop around the scheduler's ``_is_due``, which the poll never used:
+    removed with it, audit 2026-10-26 AUD-076.)
+    """
 
     @pytest.fixture
     def mock_store(self):
         store = AsyncMock()
-        store.update_status = AsyncMock()
-        store.update_result = AsyncMock()
-        store.update_next_run = AsyncMock()
+        store.list_running = AsyncMock(return_value=[])
+        store.recover_deliveries = AsyncMock(return_value=[])
+        store.claim_delivery = AsyncMock(return_value=None)
+        store.pending_alerts = AsyncMock(return_value=[])
+        store.pending_alert_count = AsyncMock(return_value=0)
         return store
 
     @pytest.fixture
@@ -45,6 +46,17 @@ class TestCronInFlightGuard:
             store=mock_store,
             graph_builder=None,
             poll_interval=0.1,
+        )
+
+    @staticmethod
+    def _due_job(job_id: str) -> ScheduledJob:
+        return ScheduledJob(
+            job_id=job_id,
+            timing="5m",
+            prompt="test prompt",
+            platform="telegram",
+            thread_id="",
+            next_run=(datetime.now(UTC) - timedelta(seconds=10)).isoformat(),
         )
 
     def test_in_flight_set_initialized(self, scheduler):
@@ -60,41 +72,19 @@ class TestCronInFlightGuard:
         Regression guard for gw-062 BUG 2: if a job takes longer than the
         poll interval, the next poll must skip it.
         """
-        # Create a job that is due NOW
-        job = ScheduledJob(
-            job_id="test-dup-1",
-            timing="5m",
-            prompt="test prompt",
-            platform="telegram",
-            thread_id="",
-            next_run=(datetime.now(UTC) - timedelta(seconds=10)).isoformat(),
-        )
-
-        # Mock store to return the same job on every poll
-        mock_store.list_active = AsyncMock(return_value=[job])
-
-        # Track how many times _execute is called
+        mock_store.due_jobs = AsyncMock(return_value=[self._due_job("test-dup-1")])
         execute_calls = []
 
         async def mock_execute(j):
             execute_calls.append(j.job_id)
 
         scheduler._execute = mock_execute
-
-        # Simulate 3 poll cycles with the job already in-flight
         scheduler._in_flight.add("test-dup-1")
         scheduler._running = True
 
-        # Manually run 3 poll iterations
         for _ in range(3):
-            jobs = await scheduler._store.list_active()
-            now = datetime.now(UTC)
-            for j in jobs:
-                if j.job_id in scheduler._in_flight:
-                    continue
-                if j.next_run and scheduler._is_due(j.next_run, now):
-                    scheduler._in_flight.add(j.job_id)
-                    await scheduler._execute(j)
+            await scheduler._poll_once()
+        await asyncio.gather(*scheduler._exec_tasks)
 
         # _execute should never have been called because the job was in-flight
         assert len(execute_calls) == 0, (
@@ -131,37 +121,24 @@ class TestCronInFlightGuard:
 
     @pytest.mark.asyncio
     async def test_in_flight_allows_new_jobs(self, scheduler, mock_store):
-        """Jobs NOT in _in_flight should still be dispatched normally."""
-        job = ScheduledJob(
-            job_id="new-job-1",
-            timing="5m",
-            prompt="test prompt",
-            platform="telegram",
-            thread_id="",
-            next_run=(datetime.now(UTC) - timedelta(seconds=10)).isoformat(),
-        )
-
-        mock_store.list_active = AsyncMock(return_value=[job])
-
+        """Jobs NOT in _in_flight should still be dispatched normally -- once,
+        however many passes run while the fire is in flight."""
+        mock_store.due_jobs = AsyncMock(return_value=[self._due_job("new-job-1")])
+        release = asyncio.Event()
         execute_calls = []
 
         async def mock_execute(j):
             execute_calls.append(j.job_id)
-            # Simulate the finally cleanup
-            scheduler._in_flight.discard(j.job_id)
+            await release.wait()
 
         scheduler._execute = mock_execute
         scheduler._running = True
 
-        # Run one poll cycle — job is NOT in in_flight, should fire
-        jobs = await scheduler._store.list_active()
-        now = datetime.now(UTC)
-        for j in jobs:
-            if j.job_id in scheduler._in_flight:
-                continue
-            if j.next_run and scheduler._is_due(j.next_run, now):
-                scheduler._in_flight.add(j.job_id)
-                await scheduler._execute(j)
+        await scheduler._poll_once()
+        await asyncio.sleep(0)  # the fire starts
+        await scheduler._poll_once()  # a second pass while it runs
+        release.set()
+        await asyncio.gather(*scheduler._exec_tasks)
 
-        assert len(execute_calls) == 1
-        assert execute_calls[0] == "new-job-1"
+        assert execute_calls == ["new-job-1"]
+        assert "new-job-1" not in scheduler._in_flight

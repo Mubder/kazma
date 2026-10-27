@@ -31,15 +31,18 @@ logger = logging.getLogger(__name__)
 __all__ = ["encode_vector", "index_remotely", "write_local_vector"]
 
 
-def encode_vector(text: str) -> list[float] | None:
+def encode_vector(text: str, *, embedder: Any = None) -> list[float] | None:
     """The shared embedder's vector for *text*, or None (no embedder, an
-    empty text, a failed call). Call it with no transaction open."""
+    empty text, a failed call). Call it with no transaction open. *embedder*
+    is one already loaded (the rebuild and repair passes hold theirs)."""
     body = (text or "").strip()
     if not body:
         return None
-    from kazma_core.memory.embedder import get_embedder
+    emb = embedder
+    if emb is None:
+        from kazma_core.memory.embedder import get_embedder
 
-    emb = get_embedder()
+        emb = get_embedder()
     if emb is None:
         return None
     try:
@@ -47,7 +50,8 @@ def encode_vector(text: str) -> list[float] | None:
     except Exception:  # noqa: BLE001 - a failed embedding leaves the row for vector repair
         logger.debug("[vector_write] embedding failed", exc_info=True)
         return None
-    return [float(x) for x in vec] if vec else None
+    # `len`, not truth: an embedder may answer with an array.
+    return [float(x) for x in vec] if vec is not None and len(vec) else None
 
 
 def write_local_vector(
@@ -58,10 +62,20 @@ def write_local_vector(
     *,
     still_sql: str,
     still_params: Sequence[Any] = (),
+    replacing: bytes | None = None,
+    replace: bool = False,
+    model: str | None = None,
 ) -> bool:
     """Store *vec* on the row, once: only while it has no vector and still
     matches *still_sql* (it holds what was embedded). Commits only a
-    transaction this call began -- never the caller's."""
+    transaction this call began -- never the caller's.
+
+    *replace*: the row's vector is re-encoded in place (the rebuild and the
+    repair pass): written only while the row still holds *replacing*, the
+    vector it had when it was read (None: none), so a write that landed
+    meanwhile is never overwritten. *model* stamps the version (default: the
+    configured embedding model).
+    """
     if table not in ("episodes", "beliefs") or not row_id or not vec:
         return False
     from kazma_core.memory.embedder import get_embedding_model_name, serialize_f32_embedding
@@ -70,10 +84,12 @@ def write_local_vector(
     if not blob:
         return False
     began = not conn.in_transaction
+    vector_sql, vector_params = ("embedding IS ?", (replacing,)) if replace else ("embedding IS NULL", ())
     cur = conn.execute(
         f"UPDATE {table} SET embedding = ?, embedding_model_version = ? "
-        f"WHERE id = ? AND embedding IS NULL AND {still_sql}",
-        (blob, get_embedding_model_name() or "", row_id, *still_params),
+        f"WHERE id = ? AND {vector_sql} AND {still_sql}",
+        (blob, (model if model is not None else get_embedding_model_name()) or "", row_id,
+         *vector_params, *still_params),
     )
     if began and conn.in_transaction:
         conn.commit()

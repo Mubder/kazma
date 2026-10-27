@@ -25,6 +25,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -57,6 +58,52 @@ def _jsonrpc_request(method: str, params: dict[str, Any] | None = None) -> dict:
     if params is not None:
         msg["params"] = params
     return msg
+
+
+def _request_id(raw: str) -> Any:
+    """The JSON-RPC id *raw* asks with, or None (a notification, not JSON)."""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    return data.get("id") if isinstance(data, dict) else None
+
+
+#: Messages read while waiting for one reply before the wait is given up:
+#: notifications, server requests, replies to an earlier timed-out request.
+_MAX_UNRELATED_MESSAGES = 1000
+#: The bytes of a stdio server's stderr kept for the Test's diagnostics.
+_STDERR_TAIL_BYTES = 8192
+
+
+class _StderrTail:
+    """Drains a child's stderr in a thread, keeping the last bytes.
+
+    Read only after EOF, as before (audit 2026-10-26 AUD-038), stderr could
+    fill its pipe: an ``npx`` server writing many warnings then blocked on
+    the write, never answered, and the Test timed out after 90 s.
+    """
+
+    def __init__(self) -> None:
+        self._data = bytearray()
+        self._lock = threading.Lock()
+
+    def drain(self, stream: Any) -> None:
+        read = getattr(stream, "read1", None) or stream.read
+        while True:
+            try:
+                chunk = read(4096)
+            except (OSError, ValueError):
+                return  # closed under us: the process is gone
+            if not isinstance(chunk, (bytes, bytearray)) or not chunk:
+                return
+            with self._lock:
+                self._data += chunk
+                del self._data[:-_STDERR_TAIL_BYTES]
+
+    def text(self) -> str:
+        with self._lock:
+            return bytes(self._data).decode("utf-8", errors="replace")
 
 
 def _jsonrpc_response(text: str) -> dict[str, Any]:
@@ -148,8 +195,14 @@ class MCPClient:
         self._process_tree: Any = None
         self._http: httpx.AsyncClient | None = None
         self._read_lock: asyncio.Lock = asyncio.Lock()
+        self._stderr_tail = _StderrTail()
+        self._stderr_thread: threading.Thread | None = None
 
     # -- public API --------------------------------------------------------
+
+    def stderr_tail(self) -> str:
+        """The last bytes the stdio server wrote to stderr (kept after it exits)."""
+        return self._stderr_tail.text()
 
     @property
     def connected(self) -> bool:
@@ -319,6 +372,18 @@ class MCPClient:
         except OSError as exc:
             raise MCPConnectionError(f"Failed to start process: {exc}") from exc
 
+        # stderr is drained from the start, into a bounded tail (audit
+        # 2026-10-26 AUD-038): read only at EOF, a server writing many
+        # warnings filled the pipe and blocked before it answered.
+        self._stderr_tail = _StderrTail()
+        self._stderr_thread = None
+        if self._process.stderr is not None:
+            self._stderr_thread = threading.Thread(
+                target=self._stderr_tail.drain, args=(self._process.stderr,),
+                name=f"mcp-test-stderr-{cfg.name}", daemon=True,
+            )
+            self._stderr_thread.start()
+
         logger.debug(
             "Spawned stdio process: pid=%s cmd=%s",
             self._process.pid,
@@ -392,6 +457,7 @@ class MCPClient:
             raise MCPConnectionError("stdio process not running")
         if len(raw.encode()) > _STDIO_BYTES:
             raise MCPConnectionError("MCP request exceeds its byte budget")
+        expected = _request_id(raw)
 
         # stdio responses have no background JSON-RPC dispatcher here, so
         # serialize a complete write/read transaction to preserve response
@@ -406,7 +472,7 @@ class MCPClient:
                 async with asyncio.timeout(timeout):
                     await asyncio.to_thread(proc.stdin.flush)
                 async with asyncio.timeout(timeout):
-                    line = await asyncio.to_thread(proc.stdout.readline, _STDIO_BYTES + 1)
+                    line = await asyncio.to_thread(self._read_reply, proc, expected)
             except TimeoutError as exc:
                 self._connected = False
                 timeout = self._config.timeout if self._config else 90.0
@@ -417,21 +483,67 @@ class MCPClient:
         if len(line) > _STDIO_BYTES:
             raise MCPConnectionError("MCP response exceeds its byte budget")
         if not line:
-            # The subprocess exited before answering. Read whatever it wrote
-            # to stderr so operators get the *real* cause (bad arg, missing
-            # dir, npm error) instead of an opaque EOF.
-            stderr_hint = ""
-            proc = self._process
-            if proc is not None and proc.stderr is not None:
-                try:
-                    read = getattr(proc.stderr, "read1", proc.stderr.read)
-                    stderr_hint = (await asyncio.wait_for(asyncio.to_thread(read, 4096), timeout=0.5)).decode(errors="replace").strip()
-                except (TimeoutError, OSError):
-                    stderr_hint = ""
+            # The subprocess exited before answering. Show what it wrote to
+            # stderr so operators get the *real* cause (bad arg, missing
+            # dir, npm error) instead of an opaque EOF; the drain thread has
+            # it, once it has read to the end.
+            if self._stderr_thread is not None:
+                await asyncio.to_thread(self._stderr_thread.join, 0.5)
+            stderr_hint = self._stderr_tail.text().strip()[-4096:]
             detail = f": {stderr_hint}" if stderr_hint else " (no stderr output)"
             raise MCPConnectionError(f"Server closed stdout (EOF){detail}")
 
         return _jsonrpc_response(line.decode().strip())
+
+    def _read_reply(self, proc: Any, expected: Any) -> bytes:
+        """Read stdout until the reply to *expected* (blocking: run in a thread).
+
+        The reply is the response whose id is the request's (audit
+        2026-10-26 AUD-038: the first line was taken, so a server that sent
+        a log notification first reported 0 tools). Notifications are
+        skipped, a server's own request is answered (``ping``, else "method
+        not found"), and a reply to another id is skipped. Returned as read:
+        an empty line (EOF), a line past the byte budget, or one that is not
+        a JSON object are the caller's to judge, as before.
+        """
+        for _ in range(_MAX_UNRELATED_MESSAGES + 1):
+            line = proc.stdout.readline(_STDIO_BYTES + 1)
+            if not line or len(line) > _STDIO_BYTES:
+                return line
+            try:
+                data = json.loads(line)
+            except ValueError:
+                return line
+            if not isinstance(data, dict):
+                return line
+            if "method" in data and "result" not in data and "error" not in data:
+                if "id" in data:
+                    self._answer_server_request(proc, data)
+                continue
+            if expected is not None and data.get("id") != expected:
+                logger.debug(
+                    "MCP '%s': skipped a reply to id %r while waiting for %r",
+                    self.server_name, data.get("id"), expected,
+                )
+                continue
+            return line
+        raise MCPConnectionError(
+            f"'{self.server_name}' sent {_MAX_UNRELATED_MESSAGES} messages without "
+            "answering the request"
+        )
+
+    @staticmethod
+    def _answer_server_request(proc: Any, request: dict[str, Any]) -> None:
+        """Answer a request the server sends while we wait (blocking)."""
+        if request.get("method") == "ping":
+            reply: dict[str, Any] = {"jsonrpc": "2.0", "id": request["id"], "result": {}}
+        else:
+            reply = {
+                "jsonrpc": "2.0", "id": request["id"],
+                "error": {"code": -32601, "message": "Method not found"},
+            }
+        proc.stdin.write((json.dumps(reply) + "\n").encode())
+        proc.stdin.flush()
 
     async def _send_sse(self, raw: str, method: str) -> Any:
         if self._http is None:

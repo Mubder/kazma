@@ -106,14 +106,11 @@ def _cases(store: SQLiteCronStore) -> list[tuple[str, str, object]]:
         ("insert", "a second job", lambda: store.insert(_job("b"))),
         ("mark_missed", "", lambda: store.mark_missed(
             "b", expected_next_run="", notice="missed", target="telegram:1", advance=_never)),
-        ("update_result", "", lambda: store.update_result("a", "ok")),
         ("update_job", "a field changes", lambda: store.update_job("a", prompt="q")),
         ("update_job", "no field given", lambda: store.update_job("a")),
         ("restore_job", "", lambda: store.restore_job("a", timing="5m", next_run=now.isoformat())),
-        ("job_exists", "", lambda: store.job_exists("a")),
         ("update_delivery_target", "", lambda: store.update_delivery_target("a", "telegram:2")),
         ("sibling_delivery_target", "", lambda: store.sibling_delivery_target("t1")),
-        ("record_event", "", lambda: store.record_event("a", "note")),
         ("list_events", "", lambda: store.list_events("a")),
         ("cancel", "", lambda: store.cancel("a")),
         ("insert", "an old finished job", lambda: store.insert(_job("old", status=JobStatus.DONE, days_old=30))),
@@ -138,7 +135,7 @@ async def test_no_method_returns_with_the_write_lock_held(tmp_path: Path) -> Non
             if store._db.in_transaction or not _write_lock_free(path):  # noqa: SLF001
                 held.append(label)
         assert held == [], f"these calls returned with cron.db's write lock held: {held}"
-        assert await store.job_exists("a") and not await store.job_exists("old")
+        assert await store.get("a") is not None and await store.get("old") is None
     finally:
         await store.close()
     assert _write_lock_free(path)

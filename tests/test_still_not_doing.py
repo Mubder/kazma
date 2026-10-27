@@ -43,9 +43,12 @@ def test_chat_ide_swarm_soft_nav_and_teardown():
     swarm = (_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "swarm.js").read_text(
         encoding="utf-8"
     )
-    assert "kazmaOnSoftNavLeave" in chat
-    assert "kazmaOnSoftNavLeave" in ide
-    assert "kazmaOnSoftNavLeave" in swarm
+    # Each adds its teardown to the leave hooks (base.html's helper); an
+    # assignment dropped the hooks before it (audit 2026-10-26 AUD-030,
+    # behaviour in tests/js/test_soft_nav_lifecycle.js).
+    assert "window.kazmaAddLeaveHook(" in chat
+    assert "window.kazmaAddLeaveHook(" in ide
+    assert "window.kazmaAddLeaveHook(" in swarm
 
 
 def test_disclosure_and_division_routes_exist():

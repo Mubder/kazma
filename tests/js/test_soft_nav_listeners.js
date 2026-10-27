@@ -16,6 +16,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
+const { installLeaveHooks, leavePage } = require("./_leave_hooks.js");
 
 const JS = path.join(__dirname, "../../kazma-ui/kazma_ui/static/js");
 const read = (name) => fs.readFileSync(path.join(JS, name), "utf8").replace(/\r\n/g, "\n");
@@ -69,9 +70,10 @@ function swarmRoundTrip(code) {
     kazmaGetJson: async () => null, kazmaConfirm: async () => false,
     KazmaUtils: { escapeHtml: (x) => String(x) }, KazmaFormat: {},
   };
+  installLeaveHooks(window);
   const posts = [];
   bootSwarm(code, document, window, posts);         // first visit
-  if (typeof window.kazmaOnSoftNavLeave === "function") window.kazmaOnSoftNavLeave();
+  leavePage(window);
   bootSwarm(code, document, window, posts);         // back again
   document.dispatch("click", retryClick());
   return posts.filter((u) => u.indexOf("/retry") >= 0);
@@ -91,7 +93,8 @@ test("leaving Chat tears Live voice down; the old closure kept it", () => {
   assert.match(voice, /teardown: teardown/);
   const chat = read("chat.js");
   const destroy = chat.slice(chat.indexOf("function destroyChatMouth()"),
-    chat.indexOf("window.kazmaOnSoftNavLeave = destroyChatMouth;"));
+    chat.indexOf("window.kazmaAddLeaveHook(destroyChatMouth);"));
+  assert.ok(destroy.length > 0 && destroy.length < 4000, "destroyChatMouth not found");
   assert.match(destroy, /KazmaVoice\.teardown\(\)/);
 });
 

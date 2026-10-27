@@ -15,6 +15,8 @@ const ui = path.join(__dirname, '../../kazma-ui/kazma_ui/static/js');
     addEventListener: (type, fn) => events.set(type, fn),
     removeEventListener: (type, fn) => { if (events.get(type) === fn) events.delete(type); },
   };
+  // base.html's leave-hook helper: ide.js adds its teardown through it.
+  require('./_leave_hooks.js').installLeaveHooks(window);
   const ctx = vm.createContext({ window, setTimeout: fn => timers.push(fn), Map, console });
   vm.runInContext(fs.readFileSync(path.join(ui, 'ide.js'), 'utf8'), ctx);
   const editor = vm.runInContext('ideApp()', ctx);

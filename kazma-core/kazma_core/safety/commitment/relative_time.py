@@ -132,7 +132,7 @@ _RE_CALENDAR_EN = re.compile(
     re.IGNORECASE,
 )
 # Scheduler-native compact shorthand: "5m", "24h", "1386m" (mirrors
-# cron.scheduler.parse_timing's ^(\d+)(m|h)$). Without this the commitment
+# the scheduler's relative delays, cron.timing.resolve_timing). Without this the commitment
 # gate rejects the exact format the schedule_task docstring advertises
 # (incident 2026-08-16: "1386m" → "no time expression found").
 _RE_COMPACT_EN = re.compile(r"\b(\d+)\s*(m|h)\b", re.IGNORECASE)
@@ -426,7 +426,7 @@ def _clock_in_text(text: str | None) -> tuple[int, int] | None:
     return hour, minute
 
 
-# Same form cron.scheduler.parse_timing accepts for relative delays.
+# Same form cron.timing.resolve_timing accepts for relative delays.
 _RE_NATIVE_COMPACT = re.compile(r"^(\d+)\s*(m|h)$", re.IGNORECASE)
 
 

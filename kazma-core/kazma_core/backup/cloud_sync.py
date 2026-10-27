@@ -14,8 +14,8 @@ Providers:
 Contract (matches _offsite_sync in backup/universal.py):
     upload_file(local, remote_name) -> {"ok": bool, "remote": str} or {"ok": False, "error": str}
         Single-file upload (the universal backup sends ONE .zip per run).
-    upload_directory(dest, remote_path) -> {"ok": bool, "remote": str} or {"ok": False, "error": str}
-        Legacy folder-tree upload — kept for backward compatibility.
+        The folder-tree upload is gone (audit 2026-10-26 AUD-077): nothing
+        called it, and it reported ``ok`` when one file of a thousand landed.
     test_connection() -> {"ok": bool, "message"|"error": str}
 """
 from __future__ import annotations
@@ -127,10 +127,6 @@ class CloudSyncProvider(Protocol):
         """Upload a single file (the backup .zip). Returns {"ok", "remote"} or error."""
         ...
 
-    async def upload_directory(self, dest: Path, remote_path: str) -> dict[str, Any]:
-        """Upload a directory tree. Returns {"ok": bool, "remote": str} or error."""
-        ...
-
     async def test_connection(self) -> dict[str, Any]:
         """Test connectivity. Returns {"ok": bool, "message" or "error": str}."""
         ...
@@ -146,41 +142,6 @@ class CloudSyncProvider(Protocol):
     def status(self) -> dict[str, Any]:
         """Return connection status for the UI."""
         ...
-
-
-async def _upload_all_files(
-    dest: Path,
-    upload_one: Any,  # Callable[[Path, str], Awaitable[bool]]
-    remote_path: str,
-    remote_display: str,
-) -> dict[str, Any]:
-    """Walk dest/ and upload each file via the provided callable.
-
-    The callable receives (local_path, relative_remote_path) and returns True
-    on success. Used by all providers to share the tree-walking logic.
-    """
-    files = [f for f in dest.rglob("*") if f.is_file()]
-    if not files:
-        return {"ok": False, "remote": remote_display, "error": "no files to upload"}
-    uploaded = 0
-    failed: list[str] = []
-    for f in files:
-        rel = f.relative_to(dest).as_posix()
-        try:
-            if await upload_one(f, rel):
-                uploaded += 1
-            else:
-                failed.append(rel)
-        except Exception as exc:
-            logger.warning("[cloud_sync] upload %s failed: %s", rel, exc)
-            failed.append(rel)
-    if failed:
-        return {
-            "ok": uploaded > 0,
-            "remote": remote_display,
-            "error": f"{len(failed)}/{len(files)} files failed: {failed[:3]}",
-        }
-    return {"ok": True, "remote": remote_display, "files": uploaded}
 
 
 # ─── Google Drive ──────────────────────────────────────────────────────
@@ -416,29 +377,6 @@ class GoogleDriveSync:
                 raise RuntimeError(f"Folder creation failed: {resp.text[:200]}")
             return resp.json()["id"]
 
-    async def upload_directory(self, dest: Path, remote_path: str) -> dict[str, Any]:
-        token = await self._get_access_token()
-
-        # Ensure folder chain: kazma-backups/<remote_path>/
-        root_id = await self._ensure_folder(token, _GDRIVE_ROOT_FOLDER)
-        backup_id = await self._ensure_folder(token, remote_path, parent=root_id)
-
-        async def upload_one(local: Path, rel: str) -> bool:
-            # Create parent folders if the file is nested
-            parts = rel.split("/")
-            parent_id = backup_id
-            for folder in parts[:-1]:
-                parent_id = await self._ensure_folder(token, folder, parent=parent_id)
-
-            async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
-                resp = await _gdrive_upload(
-                    client, token, name=parts[-1], parent_id=parent_id, local=local
-                )
-                return resp.status_code in (200, 201)
-
-        display = f"google_drive:{_GDRIVE_ROOT_FOLDER}/{remote_path}"
-        return await _upload_all_files(dest, upload_one, remote_path, display)
-
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
         token = await self._get_access_token()
         root_id = await self._ensure_folder(token, _GDRIVE_ROOT_FOLDER)
@@ -564,31 +502,6 @@ class OneDriveSync:
                 os.environ["EMAIL_MS_REFRESH_TOKEN"] = new_refresh
             return new_token
 
-    async def upload_directory(self, dest: Path, remote_path: str) -> dict[str, Any]:
-        token = await self._get_access_token()
-
-        async def upload_one(local: Path, rel: str) -> bool:
-            # PUT to /me/drive/root:/kazma-backups/<timestamp>/<rel>:/content
-            path = quote(f"{_MS_ROOT_FOLDER}/{remote_path}/{rel}")
-            url = f"{_MS_GRAPH_DRIVE}:/{path}:/content"
-            async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
-                # bytes read up-front: httpx 0.28 async clients reject sync
-                # file objects as content
-                with open(local, "rb") as f:
-                    data = f.read()
-                resp = await client.put(
-                    url,
-                    content=data,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/octet-stream",
-                    },
-                )
-                return resp.status_code in (200, 201)
-
-        display = f"onedrive:{_MS_ROOT_FOLDER}/{remote_path}"
-        return await _upload_all_files(dest, upload_one, remote_path, display)
-
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
         token = await self._get_access_token()
         path = quote(f"{_MS_ROOT_FOLDER}/{remote_name}")
@@ -656,37 +569,6 @@ class WebDAVSync:
         username = _read_config("backups.offsite.webdav.username", "")
         password = _read_vault("backups.offsite.webdav.password")
         return url, username, password
-
-    async def upload_directory(self, dest: Path, remote_path: str) -> dict[str, Any]:
-        url, username, password = self._get_config()
-        if not url:
-            return {"ok": False, "remote": "webdav", "error": "WebDAV URL not configured"}
-        auth = (username, password) if username else None
-        display = f"webdav:{url.split('//')[1] if '//' in url else url}/{remote_path}"
-
-        async def upload_one(local: Path, rel: str) -> bool:
-            # MKCOL parent directories first
-            parts = rel.split("/")[:-1]
-            current = f"{url}/{remote_path}"
-            async with httpx.AsyncClient(timeout=300, verify=_webdav_tls_verify()) as client:
-                for part in parts:
-                    current = f"{current}/{part}"
-                    # MKCOL is idempotent (409 = already exists is fine)
-                    await client.request(
-                        "MKCOL", current, auth=auth
-                    )
-                # PUT the file — bytes are read up-front because httpx 0.28
-                # async clients reject sync file objects as content
-                with open(local, "rb") as f:
-                    data = f.read()
-                resp = await client.put(
-                    f"{url}/{remote_path}/{rel}",
-                    content=data,
-                    auth=auth,
-                )
-                return resp.status_code in (200, 201, 204)
-
-        return await _upload_all_files(dest, upload_one, remote_path, display)
 
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
         url, username, password = self._get_config()
@@ -862,54 +744,6 @@ class FTPSync:
         except Exception as exc:
             return {"ok": False, "remote": display, "error": f"FTP error: {exc}"}
 
-    async def upload_directory(self, dest: Path, remote_path: str) -> dict[str, Any]:
-        cfg = self._get_config()
-        if not cfg["host"]:
-            return {"ok": False, "remote": "ftp", "error": "FTP host not configured"}
-        display = f"ftp:{cfg['host']}/{self._ROOT_FOLDER}/{remote_path}"
-        base_root = f"{cfg['path']}/{self._ROOT_FOLDER}" if cfg["path"] else self._ROOT_FOLDER
-        root = f"{base_root}/{remote_path}"
-        files = [f for f in dest.rglob("*") if f.is_file()]
-
-        def _run() -> tuple[int, list[str]]:
-            ftp = self._connect(cfg)
-            home = ftp.pwd()
-            uploaded = 0
-            failed: list[str] = []
-            try:
-                self._ensure_dir(ftp, root)
-                for f in files:
-                    rel = f.relative_to(dest).as_posix()
-                    try:
-                        ftp.cwd(home)  # back to the login dir (absolute — always legal)
-                        self._ensure_dir(ftp, root)
-                        parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
-                        if parent:
-                            self._ensure_dir(ftp, parent)
-                        with open(f, "rb") as fh:
-                            ftp.storbinary(f"STOR {rel.rsplit('/', 1)[-1]}", fh)
-                        uploaded += 1
-                    except Exception:
-                        failed.append(rel)
-            finally:
-                try:
-                    ftp.quit()
-                except Exception:
-                    pass
-            return uploaded, failed
-
-        try:
-            uploaded, failed = await asyncio.to_thread(_run)
-        except Exception as exc:
-            return {"ok": False, "remote": display, "error": f"FTP error: {exc}"}
-        if failed:
-            return {
-                "ok": uploaded > 0,
-                "remote": display,
-                "error": f"{len(failed)}/{len(files)} files failed: {failed[:3]}",
-            }
-        return {"ok": True, "remote": display, "files": uploaded}
-
     async def test_connection(self) -> dict[str, Any]:
         cfg = self._get_config()
         if not cfg["host"]:
@@ -1036,26 +870,6 @@ class S3Sync:
         if config["endpoint"]:
             return f"{config['endpoint']}/{config['bucket']}/{key}"
         return f"https://{config['bucket']}.s3.{config['region']}.amazonaws.com/{key}"
-
-    async def upload_directory(self, dest: Path, remote_path: str) -> dict[str, Any]:
-        config = self._get_config()
-        if not config["access_key"] or not config["bucket"]:
-            return {"ok": False, "remote": "s3", "error": "S3 not configured"}
-        display = f"s3:{config['bucket']}/{remote_path}"
-
-        async def upload_one(local: Path, rel: str) -> bool:
-            key = f"{self._ROOT_FOLDER}/{remote_path}/{rel}"
-            url = self._build_url(config, key)
-            content_type = "application/octet-stream"
-            base_headers = {"content-type": content_type}
-            async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
-                with open(local, "rb") as f:
-                    payload = f.read()
-                signed = self._sign_request("PUT", url, base_headers, payload, config)
-                resp = await client.put(url, content=payload, headers=signed)
-                return resp.status_code in (200, 201)
-
-        return await _upload_all_files(dest, upload_one, remote_path, display)
 
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
         config = self._get_config()

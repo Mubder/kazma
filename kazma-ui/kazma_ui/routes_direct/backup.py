@@ -73,7 +73,9 @@ def register_backup_routes(self: Any) -> None:
                 from kazma_core.backup.universal import _set_progress
                 _set_progress("error", detail=safe_error(exc), error=str(exc)[:300])
 
-        spawn_background(_run(), name="memory-maintenance")
+        # Named for what it runs: it was "memory-maintenance", which a stall
+        # dump or a task list then blamed on memory (audit 2026-10-26 AUD-082).
+        spawn_background(_run(), name="manual-universal-backup")
 
         # perform_universal_backup deliberately does NOT dump Postgres -- that
         # belongs to the native_pg_backup task, which only the 24-hourly sweep

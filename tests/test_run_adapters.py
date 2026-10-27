@@ -148,8 +148,9 @@ def test_scheduled_jobs_are_read_from_cron_db(tmp_path, monkeypatch):
     # aiosqlite connections are loop-bound: seed and read on one loop.
     async def scenario():
         cron_store = await seed()
+        # A scheduler that does not own the seeded fire: its lease decides.
         monkeypatch.setattr("kazma_core.cron.scheduler.get_cron_scheduler",
-                            lambda: SimpleNamespace(_store=cron_store))
+                            lambda: SimpleNamespace(_store=cron_store, fire_owner_alive=lambda job: None))
         listing = await registry.list_runs(kinds=("scheduled_job",), now=NOW)
         await cron_store.close()
         return listing

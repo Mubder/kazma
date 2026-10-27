@@ -23,6 +23,7 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const { pathToFileURL } = require("url");
+const { installLeaveHooks } = require("./_leave_hooks.js");
 
 const UI = path.join(__dirname, "..", "..", "kazma-ui", "kazma_ui");
 const JS = path.join(UI, "static", "js");
@@ -120,6 +121,8 @@ function sandbox() {
   ctx.window = ctx;
   ctx.self = ctx;
   ctx.globalThis = ctx;
+  // base.html's leave-hook helper, as every page has it before its scripts.
+  installLeaveHooks(ctx);
   vm.createContext(ctx);
   return ctx;
 }

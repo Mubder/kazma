@@ -199,7 +199,19 @@ class IncidentStore:
             conn.close()
 
     def pending_notifications(self) -> list[dict[str, Any]]:
-        return self._read("SELECT * FROM run_incidents WHERE notify = 'pending' ORDER BY opened_at")
+        """Incidents whose message is still to send, and still worth sending.
+
+        A live incident (open or being acted on), and one a runbook closed:
+        its message says what Kazma already did (``runbooks``). One that
+        settled before it was sent -- resolved (the run moved on), expired,
+        dismissed, closed by a person -- is not sent: a process that stopped
+        between opening an incident and sending it would otherwise page "X
+        is stuck", with buttons, about a run its restart had just seen
+        recover (audit 2026-10-26 AUD-042).
+        """
+        return self._read(
+            "SELECT * FROM run_incidents WHERE notify = 'pending' AND (state IN ('open', 'acting') "
+            "OR (state = 'closed' AND decided_platform = 'runbook')) ORDER BY opened_at")
 
     # ── opening and settling ─────────────────────────────────────────────
     def open_incident(self, run: Run, condition: str, *, origin: dict[str, str],

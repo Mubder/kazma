@@ -406,8 +406,12 @@ def _chats_by_thread() -> dict[str, dict[str, Any]]:
     return chats_by_thread()
 
 
-def _delete_chats_of_thread(thread_id: str) -> None:
-    """Delete every chat whose thread or id is *thread_id*. Blocking."""
+def _delete_chats_of_thread(thread_id: str) -> list[str]:
+    """Delete every chat whose thread or id is *thread_id*. Blocking.
+
+    Returns the ids it deleted under (the thread id among them): the keys the
+    chat's Time Travel steps are stored under.
+    """
     from kazma_ui.session_manager import get_session_manager
 
     sm = get_session_manager()
@@ -418,6 +422,7 @@ def _delete_chats_of_thread(thread_id: str) -> None:
     }
     for session_id in doomed:
         sm.delete(session_id)
+    return sorted(doomed)
 
 
 @router.get("/api/sessions")
@@ -524,10 +529,26 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
 
         # The chat the thread belongs to (web and platform ids alike). Store
         # writes: off the event loop.
+        chat_keys = [thread_id]
         try:
-            await asyncio.to_thread(_delete_chats_of_thread, thread_id)
+            chat_keys = await asyncio.to_thread(_delete_chats_of_thread, thread_id)
         except Exception as exc:
             logger.debug("SessionManager delete skipped: %s", exc)
+
+        # Its Time Travel steps go with it, under every key it had (§12 G,
+        # TT-05), as the chat page's delete does: they are copies of the chat.
+        # This route left them in snapshots.db (audit 2026-10-26 AUD-055). Off
+        # the loop: the process recorder is a loop-stall helper (§12 K).
+        import sqlite3
+
+        from kazma_core.time_travel import SnapshotStoreError, forget_thread_snapshots
+
+        try:
+            await asyncio.to_thread(forget_thread_snapshots, [thread_id, *chat_keys])
+        except (SnapshotStoreError, sqlite3.Error, OSError):
+            logger.warning(
+                "[dashboard] %s deleted, but its saved steps were NOT", thread_id, exc_info=True
+            )
 
         logger.info("Deleted session: %s (checkpoints + stores)", thread_id)
         return JSONResponse({

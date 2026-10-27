@@ -90,6 +90,24 @@ class RecallResult:
     def empty(self) -> bool:
         return not self.beliefs and not self.episodes and not self.summaries
 
+    @property
+    def failed(self) -> bool:
+        """True when recall itself failed: no search ran, nothing was judged."""
+        return bool(self.degraded) and str(self.degraded).startswith(RECALL_FAILED)
+
+
+#: ``RecallResult.degraded`` of a recall that failed outright, followed by a
+#: short code (``recall_failed:search_failed``). A failure used to return a
+#: plain empty result, which ``memory_search`` read as "No relevant memories
+#: found." -- a locked database or a Postgres outage told the user nothing was
+#: remembered (audit 2026-10-26 AUD-026, §26 G, Memory audit M11).
+RECALL_FAILED = "recall_failed:"
+
+
+def _failed_recall(code: str) -> RecallResult:
+    """An empty result that says recall failed, never "nothing found"."""
+    return RecallResult(beliefs=[], episodes=[], degraded=f"{RECALL_FAILED}{code}")
+
 
 # ── Public entry point ────────────────────────────────────────────────────
 
@@ -221,8 +239,9 @@ def _recall(
 
     Returns:
         :class:`RecallResult` with ``beliefs`` and ``episodes`` lists.
-        Empty lists (not exceptions) on any failure — recall is
-        best-effort so a broken path degrades silently.
+        Empty lists (not exceptions) on any failure, with ``degraded``
+        set to ``recall_failed:<code>`` (:data:`RECALL_FAILED`): a failed
+        recall is never read as "nothing remembered" (AUD-026).
     """
     if is_small_talk(query, None):
         # "hello", "thanks", "ok": nothing to look up (plan W5). A greeting
@@ -258,8 +277,10 @@ def _recall(
             apply_sqlite_pragmas(conn)
             conn.row_factory = sqlite3.Row
         except Exception:
-            logger.debug("[recall] could not open primary DB", exc_info=True)
-            return RecallResult([], [])
+            # A database that exists and cannot be opened is a failure, not
+            # an empty memory (AUD-026).
+            logger.warning("[recall] could not open primary DB", exc_info=True)
+            return _failed_recall("open_failed")
 
     do_explain = explain
     if do_explain is None:
@@ -326,7 +347,7 @@ def _recall(
             mark_recall_degraded(str(exc)[:200])
         except Exception:
             pass
-        return RecallResult([], [])
+        return _failed_recall("search_failed")
     finally:
         if own_conn and conn is not None:
             try:
@@ -403,7 +424,7 @@ def _recall_postgres_primary(
             mark_recall_degraded("postgres-primary import failed")
         except Exception:
             pass
-        return RecallResult([], [])
+        return _failed_recall("primary_unavailable")
 
     be = get_state_backend()
     if getattr(be, "name", "") == "null" or not getattr(be, "available", False):
@@ -415,7 +436,7 @@ def _recall_postgres_primary(
             mark_recall_degraded(msg)
         except Exception:
             pass
-        return RecallResult([], [])
+        return _failed_recall("primary_unavailable")
 
     try:
         episodes = _pg_primary_episodes(
@@ -450,7 +471,7 @@ def _recall_postgres_primary(
             mark_recall_degraded(str(exc)[:200])
         except Exception:
             pass
-        return RecallResult([], [])
+        return _failed_recall("primary_search_failed")
 
 
 def _available_vector_backend() -> Any | None:

@@ -26,11 +26,13 @@ is a complete, independently decodable audio file.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
+import threading
 from collections.abc import AsyncIterator
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 from kazma_core.http_tls import shared_ssl_context
@@ -492,11 +494,36 @@ def _nvidia_tts_provider() -> TTSProvider:
     return _synthesize
 
 
+def _missing_package(exc: ModuleNotFoundError, packages: tuple[str, ...]) -> bool:
+    """True when *exc* says one of *packages* is not installed (not some other
+    import failing inside an installed package)."""
+    return (exc.name or "").split(".")[0] in packages
+
+
+#: Loaded Coqui models, kept for the life of the process: a load reads the
+#: model from disk and takes seconds (audit 2026-10-26 AUD-036 -- it ran on
+#: every synthesis, on the event loop).
+_coqui_models: dict[str, Any] = {}
+_coqui_lock = threading.Lock()
+
+
+def _coqui_model(model_class: Any) -> Any:
+    """The cached Coqui model, loaded once (blocking: call in a thread)."""
+    with _coqui_lock:
+        model = _coqui_models.get("default")
+        if model is None:
+            model = model_class()
+            _coqui_models["default"] = model
+        return model
+
+
 def _kokoro_provider() -> TTSProvider:
     """Kokoro neural TTS provider — local, high quality.
 
     Requires ``pip install kokoro>=0.8`` and ``soundfile``.
-    Runs the model in-process (no server needed).
+    Runs the model in-process (no server needed): the import and the
+    synthesis block for seconds, so both run in a worker thread (audit
+    2026-10-26 AUD-036: they ran inside the ``async def``).
     """
 
     async def _synthesize(
@@ -506,32 +533,40 @@ def _kokoro_provider() -> TTSProvider:
         api_key: str | None = None,
         output_format: str = "mp3",
     ) -> bytes | None:
-        try:
+        if voice == "default":
+            voice = "af_sarah"
+
+        def _run() -> bytes:
             import io
 
             import kokoro  # type: ignore[import-untyped]
             import soundfile as sf  # type: ignore[import-untyped]
-        except ImportError:
+
+            # Kokoro returns (audio_numpy, sample_rate). NOTE (audit
+            # 2026-10-26 AUD-036): this module-level ``create`` call is kept
+            # as it was. kokoro is not installed where this was fixed, so its
+            # API could not be checked; the audit says ``kokoro>=0.8``
+            # exposes a pipeline instead (needs runtime verification).
+            audio, sr = kokoro.create(text, voice=voice)
+            buf = io.BytesIO()
+            sf.write(buf, audio, sr, format="WAV")
+            return buf.getvalue()
+
+        try:
+            audio_bytes = await asyncio.to_thread(_run)
+        except ModuleNotFoundError as err:
+            if not _missing_package(err, ("kokoro", "soundfile")):
+                raise TTSError(str(err) or "kokoro synthesis failed") from err
             raise TTSError(
                 "kokoro / soundfile not installed",
                 hint="pip install 'kokoro>=0.8' soundfile",
                 is_config=True,
-            )
-        if voice == "default":
-            voice = "af_sarah"
-        try:
-            # Kokoro returns (audio_numpy, sample_rate)
-            audio, sr = kokoro.create(text, voice=voice)
-            # Write to WAV buffer
-            buf = io.BytesIO()
-            sf.write(buf, audio, sr, format="WAV")
-            buf.seek(0)
-            audio_bytes = buf.read()
-            if audio_bytes:
-                logger.info("[TTS/kokoro] Synthesized %d bytes (voice=%s)", len(audio_bytes), voice)
-            return audio_bytes or None
+            ) from err
         except Exception as err:
             raise TTSError(str(err) or "kokoro synthesis failed") from err
+        if audio_bytes:
+            logger.info("[TTS/kokoro] Synthesized %d bytes (voice=%s)", len(audio_bytes), voice)
+        return audio_bytes or None
 
     return _synthesize
 
@@ -539,7 +574,8 @@ def _kokoro_provider() -> TTSProvider:
 def _coqui_provider() -> TTSProvider:
     """Coqui TTS provider — local neural TTS.
 
-    Requires ``pip install TTS``.
+    Requires ``pip install TTS``. The model is loaded once and every load or
+    synthesis runs in a worker thread (audit 2026-10-26 AUD-036).
     """
 
     async def _synthesize(
@@ -549,29 +585,38 @@ def _coqui_provider() -> TTSProvider:
         api_key: str | None = None,
         output_format: str = "mp3",
     ) -> bytes | None:
-        try:
+        def _run() -> bytes:
             import io
 
-            import TTS.api.TTS as coqui_tts  # type: ignore[import-untyped]
             import soundfile as sf  # type: ignore[import-untyped]
-        except ImportError:
+
+            # ``TTS`` is a class in ``TTS.api``, not a module: the old
+            # ``import TTS.api.TTS as coqui_tts`` always raised ImportError,
+            # so this provider answered "not installed" even when it was
+            # (audit 2026-10-26 AUD-036). The calls on the model are kept as
+            # they were (Coqui is not installed where this was fixed).
+            from TTS.api import TTS as CoquiTTS  # type: ignore[import-untyped]
+
+            wav = _coqui_model(CoquiTTS).tts(text)
+            buf = io.BytesIO()
+            sf.write(buf, wav, 22050, format="WAV")
+            return buf.getvalue()
+
+        try:
+            audio_bytes = await asyncio.to_thread(_run)
+        except ModuleNotFoundError as err:
+            if not _missing_package(err, ("TTS", "soundfile")):
+                raise TTSError(str(err) or "Coqui TTS failed") from err
             raise TTSError(
                 "Coqui TTS / soundfile not installed",
                 hint="pip install TTS soundfile",
                 is_config=True,
-            )
-        try:
-            tts_model = coqui_tts.TTS()
-            wav = tts_model.tts(text)
-            buf = io.BytesIO()
-            sf.write(buf, wav, 22050, format="WAV")
-            buf.seek(0)
-            audio_bytes = buf.read()
-            if audio_bytes:
-                logger.info("[TTS/coqui] Synthesized %d bytes", len(audio_bytes))
-            return audio_bytes or None
+            ) from err
         except Exception as err:
             raise TTSError(str(err) or "Coqui TTS failed") from err
+        if audio_bytes:
+            logger.info("[TTS/coqui] Synthesized %d bytes", len(audio_bytes))
+        return audio_bytes or None
 
     return _synthesize
 

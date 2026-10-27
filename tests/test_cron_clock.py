@@ -36,8 +36,6 @@ _ENGINE = ("kazma-core/kazma_core/cron/scheduler.py", "kazma-core/kazma_core/cro
 
 #: Clock reads the engine keeps on purpose: (file, enclosing scope) -> why.
 _DECLARED = {
-    ("scheduler.py", "parse_timing"): (
-        "a parser kept for callers outside the engine; it reads a caller's own 'now' when given none"),
     ("store.py", "ScheduledJob"): (
         "the default creation time of a row built outside schedule() (an import, a test); schedule() "
         "passes the clock's time"),

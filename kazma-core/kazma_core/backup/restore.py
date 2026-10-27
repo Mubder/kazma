@@ -88,6 +88,15 @@ class RestoreResult:
                 f"generation {self.generation} -> {self.target}")
 
 
+class _SnapshotListError(RuntimeError):
+    """restic could not list the repository's snapshots.
+
+    Distinct from an empty list (audit 2026-10-26 AUD-044): a wrong
+    passphrase, a missing repository or a restic that failed used to read as
+    "no restore points", at the one moment someone needs them.
+    """
+
+
 def _snapshots(repo: str, password: str) -> list[dict[str, Any]]:
     env = dict(os.environ)
     env["RESTIC_REPOSITORY"] = repo
@@ -95,15 +104,23 @@ def _snapshots(repo: str, password: str) -> list[dict[str, Any]]:
     try:
         # --retry-lock: a prune or check holding the repository exclusively
         # is waited for, never read as "no snapshots" (restic_repo._run).
-        out = subprocess.run(
+        proc = subprocess.run(
             ["restic", "--retry-lock", "10m", "snapshots", "--json"], env=env, capture_output=True,
             text=True, encoding="utf-8", errors="replace", timeout=900,
             check=False,
-        ).stdout
-        return json.loads(out or "[]")
-    except Exception:  # noqa: BLE001
-        logger.warning("[restore] could not list snapshots", exc_info=True)
-        return []
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _SnapshotListError(f"restic could not be run: {exc}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip()[:300] or f"exit code {proc.returncode}"
+        raise _SnapshotListError(f"restic could not list snapshots: {detail}")
+    try:
+        snaps = json.loads(proc.stdout or "[]")
+    except ValueError as exc:
+        raise _SnapshotListError(f"restic returned an unreadable snapshot list: {exc}") from exc
+    if not isinstance(snaps, list):
+        raise _SnapshotListError("restic returned an unreadable snapshot list")
+    return snaps
 
 
 def list_restore_points(repo: str, password: str) -> list[RestorePoint]:
@@ -207,7 +224,12 @@ def restore_files(
         )
         return res
 
-    points = list_restore_points(repo, password)
+    try:
+        points = list_restore_points(repo, password)
+    except _SnapshotListError as exc:
+        res.ok = False
+        res.error = str(exc)
+        return res
     if not points:
         res.ok = False
         res.error = "no restorable generations found in the repository"
@@ -434,7 +456,11 @@ def main(argv: list[str] | None = None) -> int:
     repo = args.repo or repo_paths()["local"]
 
     if args.list or not args.target:
-        points = list_restore_points(repo, password)
+        try:
+            points = list_restore_points(repo, password)
+        except _SnapshotListError as exc:
+            print(f"Could not read {repo}: {exc}")
+            return 2
         if not points:
             print("No restore points found in", repo)
             return 1

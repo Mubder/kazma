@@ -18,9 +18,11 @@ Supported providers:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
+import threading
 from contextvars import ContextVar
 from typing import Any, Protocol, runtime_checkable
 
@@ -650,12 +652,62 @@ def _nvidia_stt() -> STTProvider:
     return _transcribe
 
 
+#: Loaded faster-whisper models by size, kept for the life of the process: a
+#: load reads hundreds of MB from disk (audit 2026-10-26 AUD-036 -- it ran on
+#: every transcription, on the event loop).
+_whisper_models: dict[str, Any] = {}
+_whisper_lock = threading.Lock()
+
+
+def _whisper_model(model_class: Any, model_size: str) -> Any:
+    """The cached model for *model_size*, loaded once (blocking: call in a thread)."""
+    with _whisper_lock:
+        model = _whisper_models.get(model_size)
+        if model is None:
+            model = model_class(model_size, device="auto", compute_type="float16")
+            _whisper_models[model_size] = model
+        return model
+
+
 def _faster_whisper_stt() -> STTProvider:
     """Local faster-whisper STT provider.
 
     Requires ``pip install faster-whisper``. Uses the CTranslate2 backend
-    for GPU/CPU accelerated Whisper inference.
+    for GPU/CPU accelerated Whisper inference. The model load and the
+    transcription block for seconds, so both run in a worker thread, and the
+    model is loaded once per size (audit 2026-10-26 AUD-036: both ran inside
+    the ``async def``, freezing the server for the whole load).
     """
+
+    def _run(audio_bytes: bytes, audio_format: str, language: str) -> str:
+        import tempfile
+        from pathlib import Path
+
+        # Importing the package loads CTranslate2: in this thread, as is the
+        # settings read below -- never on the event loop.
+        from faster_whisper import WhisperModel  # type: ignore[import-untyped]
+
+        model_size = _get_configured_stt_model("faster-whisper") or os.environ.get("WHISPER_MODEL", "base")
+        model = _whisper_model(WhisperModel, model_size)
+        # Write audio to temp file (faster-whisper needs a file path)
+        ext = audio_format or "ogg"
+        with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+        try:
+            lang = None if language == "auto" else language
+            segments, info = model.transcribe(tmp_path, language=lang)
+            text = " ".join(seg.text for seg in segments).strip()
+            if text:
+                logger.info(
+                    "[STT/faster-whisper] Transcribed (%s, %.1fs): %.100s",
+                    info.language,
+                    info.duration,
+                    text,
+                )
+            return text
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
 
     async def _transcribe(
         audio_bytes: bytes,
@@ -665,36 +717,15 @@ def _faster_whisper_stt() -> STTProvider:
         audio_format: str = "ogg",
     ) -> str | None:
         try:
-            from faster_whisper import WhisperModel  # type: ignore[import-untyped]
-        except ImportError:
+            return await asyncio.to_thread(_run, audio_bytes, audio_format, language)
+        except ModuleNotFoundError as exc:
+            if (exc.name or "").split(".")[0] != "faster_whisper":
+                _note_error(str(exc) or "faster-whisper STT failed")
+                logger.exception("[STT/faster-whisper] Failed")
+                return None
             _note_error("faster-whisper is not installed")
             logger.error("[STT/faster-whisper] pip install faster-whisper required")
             return None
-        import tempfile
-        from pathlib import Path
-
-        model_size = _get_configured_stt_model("faster-whisper") or os.environ.get("WHISPER_MODEL", "base")
-        try:
-            model = WhisperModel(model_size, device="auto", compute_type="float16")
-            # Write audio to temp file (faster-whisper needs a file path)
-            ext = audio_format or "ogg"
-            with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-            try:
-                lang = None if language == "auto" else language
-                segments, info = model.transcribe(tmp_path, language=lang)
-                text = " ".join(seg.text for seg in segments).strip()
-                if text:
-                    logger.info(
-                        "[STT/faster-whisper] Transcribed (%s, %.1fs): %.100s",
-                        info.language,
-                        info.duration,
-                        text,
-                    )
-                return text
-            finally:
-                Path(tmp_path).unlink(missing_ok=True)
         except Exception as exc:
             _note_error(str(exc) or "faster-whisper STT failed")
             logger.exception("[STT/faster-whisper] Failed")

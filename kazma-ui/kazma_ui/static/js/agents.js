@@ -54,10 +54,11 @@ function agentsPage() {
 
       // Poll for updates every 5 seconds
       this._pollInterval = setInterval(() => this.refresh(), 5000);
-      window.kazmaOnSoftNavLeave = () => this.destroy();
-
-      // Clean up on page unload
-      window.addEventListener('beforeunload', () => this.destroy());
+      // Added to the page's leave hooks, never over another script's hook.
+      // (A beforeunload listener here was added on every visit and never
+      // removed; a page that unloads ends its own timers.) Audit 2026-10-26
+      // AUD-030.
+      window.kazmaAddLeaveHook(() => this.destroy());
     },
 
     destroy() {

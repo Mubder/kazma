@@ -142,7 +142,7 @@ def test_the_tui_never_writes_what_the_server_refused(monkeypatch, panel) -> Non
 
 def test_with_no_server_the_tui_writes_locally_through_the_same_check(monkeypatch, panel) -> None:
     def request_json(method, path, *, payload=None, timeout=8.0):
-        raise RuntimeError("Kazma server is not running on this machine")
+        raise local_api.LocalApiUnreachable("Kazma server is not running on this machine")
 
     writes = []
     monkeypatch.setattr(local_api, "request_json", request_json)

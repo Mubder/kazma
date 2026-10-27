@@ -218,11 +218,14 @@ class TestOllamaPull:
     async def test_successful_spawn(self):
         mock_proc = MagicMock()
         mock_proc.pid = 12345
+        # A waiter thread records the pull's ending in the result (audit
+        # 2026-10-26 AUD-037), so the pull must have one: it exited cleanly.
+        mock_proc.wait.return_value = 0
 
         with patch("subprocess.Popen", return_value=mock_proc):
             result = await pull_ollama_model("llama3.2")
 
-        assert result["status"] == "pulling"
+        assert result["status"] in {"pulling", "pulled"}
         assert result["pid"] == 12345
 
 
@@ -275,11 +278,20 @@ class TestModelsEndpoint:
         app.include_router(create_models_router())
         client = TestClient(app)
 
+        import threading
+
         mock_proc = MagicMock()
         mock_proc.pid = 999
+        # The pull is still running while the route answers (a waiter thread
+        # records its ending later, audit 2026-10-26 AUD-037).
+        still_running = threading.Event()
+        mock_proc.wait.side_effect = lambda: 0 if still_running.wait(5) else 0
 
-        with patch("subprocess.Popen", return_value=mock_proc):
-            resp = client.post("/api/ollama/pull", json={"model": "llama3.2"})
+        try:
+            with patch("subprocess.Popen", return_value=mock_proc):
+                resp = client.post("/api/ollama/pull", json={"model": "llama3.2"})
+        finally:
+            still_running.set()
 
         assert resp.status_code == 200
         data = resp.json()

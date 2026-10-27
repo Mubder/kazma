@@ -535,7 +535,10 @@ TOOL_WRITES: dict[str, Write] = {
     # ── messages to people ─────────────────────────────────────────────
     "send_message": Write(("external:chat",), note="delivered to a chat; nothing to read back"),
     "dispatch_notification": Write(("external:chat",), note="delivered to the operator; nothing to read back"),
-    "send_approval_request": Write(("external:chat",), note="an approval card; its answer returns to the turn"),
+    "send_approval_request": Write(
+        ("external:chat",),
+        note="a question to the operator, not an approval card; the answer comes as their next chat message",
+    ),
     "send_file": Write(("external:chat",), note="sends a copy; the file itself stays readable with file_read"),
     # ── skills ─────────────────────────────────────────────────────────
     "activate_skill": Write(("none",), note="returns the skill's instructions in the tool result"),

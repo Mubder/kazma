@@ -34,7 +34,6 @@ __all__ = [
     "start_worker",
     "stop_worker",
     "purge_completed_tasks",
-    "async_purge_completed_tasks",
     "MEMORY_LANE",
 ]
 
@@ -612,7 +611,8 @@ def purge_completed_tasks(retention_days: int = 7) -> int:
         conn.close()
 
 
-async def async_purge_completed_tasks(retention_days: int = 7) -> int:
-    """Async wrapper for purge_completed_tasks via asyncio.to_thread."""
-    return await asyncio.to_thread(purge_completed_tasks, retention_days=retention_days)
+# ``async_purge_completed_tasks`` (an asyncio.to_thread wrapper) is gone: it
+# had no caller -- the purge runs on the maintenance cadence
+# (worker_bootstrap._purge_task_queue) -- and an unused second entry point is
+# dead code that drifts (audit 2026-10-26 AUD-078).
 

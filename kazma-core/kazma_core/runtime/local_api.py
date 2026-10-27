@@ -13,6 +13,7 @@ from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "LocalApiRefused",
+    "LocalApiUnreachable",
     "auth_headers",
     "candidate_api_bases",
     "request_json",
@@ -32,6 +33,18 @@ class LocalApiRefused(RuntimeError):
         super().__init__(detail)
         self.detail = detail
         self.status = status
+
+
+class LocalApiUnreachable(RuntimeError):
+    """Nothing listens at any candidate address: no server answered at all.
+
+    The only failure after which a mouth may act on its own (the TUI's
+    local settings write, §47). A 401/403, a 5xx, a slow server or another
+    program's answer is a server that answered -- a plain ``RuntimeError``
+    -- and the TUI wrote straight into the shared store behind the
+    server's admin check, listeners and cache on each of them (audit
+    2026-10-26 AUD-035).
+    """
 
 
 def _refusal(resp: Any) -> LocalApiRefused | None:
@@ -119,6 +132,21 @@ def _json_url(base: str, path: str) -> str:
     return f"{base.rstrip('/')}{p}"
 
 
+def _failed(errors: list[str], answered: bool) -> RuntimeError:
+    """The error after every candidate failed: ``LocalApiUnreachable`` only
+    when none of them answered at all (nothing listening, or a connect that
+    timed out); a plain ``RuntimeError`` when one did."""
+    detail = "; ".join(errors) if errors else "no API candidates"
+    tried = ", ".join(candidate_api_bases())
+    if not answered:
+        return LocalApiUnreachable(
+            "Kazma server is not running on this machine "
+            f"(tried {tried}). {detail} "
+            "Start it yourself — the TUI is only a mouth."
+        )
+    return RuntimeError(f"The Kazma server answered but the request failed (tried {tried}). {detail}")
+
+
 def request_json(
     method: str,
     path: str,
@@ -128,17 +156,21 @@ def request_json(
 ) -> Any:
     """GET/POST JSON against the first reachable loopback API.
 
-    Raises ``RuntimeError`` when no candidate accepts a JSON response.
+    Raises ``LocalApiUnreachable`` when nothing listens at any candidate,
+    ``LocalApiRefused`` for an answered refusal, and ``RuntimeError`` when
+    a server answered but no candidate gave a JSON response.
     """
     import httpx
 
     headers = {"Accept": "application/json", **auth_headers()}
     errors: list[str] = []
+    answered = False
     for base in candidate_api_bases():
         url = _json_url(base, path)
         try:
             with httpx.Client(timeout=httpx.Timeout(timeout, connect=2.0)) as client:
                 resp = client.request(method.upper(), url, json=payload, headers=headers)
+            answered = True
             if resp.status_code in (401, 403):
                 raise RuntimeError(
                     f"{url} returned {resp.status_code} — set KAZMA_SECRET "
@@ -155,18 +187,15 @@ def request_json(
                 errors.append(f"{url} returned {resp.status_code} ({ctype or 'no content-type'})")
                 continue
             return resp.json()
-        except httpx.ConnectError:
+        except (httpx.ConnectError, httpx.ConnectTimeout):
             errors.append(f"nothing listening at {base}")
             continue
         except httpx.TimeoutException:
+            # Connected, then slow: a server is there.
+            answered = True
             errors.append(f"timeout talking to {base}")
             continue
-    detail = "; ".join(errors) if errors else "no API candidates"
-    raise RuntimeError(
-        "Kazma server is not running on this machine "
-        f"(tried {', '.join(candidate_api_bases())}). {detail} "
-        "Start it yourself — the TUI is only a mouth."
-    )
+    raise _failed(errors, answered)
 
 
 async def request_json_async(
@@ -181,6 +210,7 @@ async def request_json_async(
 
     headers = {"Accept": "application/json", **auth_headers()}
     errors: list[str] = []
+    answered = False
     for base in candidate_api_bases():
         url = _json_url(base, path)
         try:
@@ -188,6 +218,7 @@ async def request_json_async(
                 resp = await client.request(
                     method.upper(), url, json=payload, headers=headers
                 )
+            answered = True
             if resp.status_code in (401, 403):
                 raise RuntimeError(
                     f"{url} returned {resp.status_code} — set KAZMA_SECRET "
@@ -210,15 +241,11 @@ async def request_json_async(
                 errors.append(f"{url} returned {resp.status_code} ({ctype or 'no content-type'})")
                 continue
             return resp.json()
-        except httpx.ConnectError:
+        except (httpx.ConnectError, httpx.ConnectTimeout):
             errors.append(f"nothing listening at {base}")
             continue
         except httpx.TimeoutException:
+            answered = True
             errors.append(f"timeout talking to {base}")
             continue
-    detail = "; ".join(errors) if errors else "no API candidates"
-    raise RuntimeError(
-        "Kazma server is not running on this machine "
-        f"(tried {', '.join(candidate_api_bases())}). {detail} "
-        "Start it yourself — the TUI is only a mouth."
-    )
+    raise _failed(errors, answered)

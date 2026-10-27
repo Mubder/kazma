@@ -16,7 +16,11 @@ function documentsPage() {
     // (2026-10-15, tests/test_empty_states_after_load.py).
     documentsLoading: false,
     documentsLoaded: false,
+    // The last failed read's reason (the server's words), "" when the last
+    // read succeeded (audit 2026-10-26 AUD-058).
+    documentsError: "",
     auditLoaded: false,
+    auditFailed: false,
     selected: null,
     versions: [],
     jobs: [],
@@ -115,8 +119,16 @@ function documentsPage() {
         if (j.ok) {
           this.documents = j.documents || [];
           this.documentsLoaded = true;
+          this.documentsError = "";
+        } else {
+          // An `ok: false` answer (the platform unavailable, a 500) left the
+          // list blank with no loading, empty or error state (audit
+          // 2026-10-26 AUD-058). Say the read failed, and keep what an
+          // earlier read gave.
+          this.documentsError = String((j && j.error) || r.status || "");
         }
       } catch (e) {
+        this.documentsError = String((e && e.message) || e || "");
         this.toast(kazmaT('documents.js.failed_to_load_documents', "Failed to load documents"), "error");
       } finally {
         this.documentsLoading = false;
@@ -153,9 +165,14 @@ function documentsPage() {
         if (aud?.ok) {
           this.auditEvents = aud.events || [];
           this.auditLoaded = true;
+          this.auditFailed = false;
+        } else {
+          // Same rule as the library (audit 2026-10-26 AUD-058): a failed
+          // read is said, never a blank history.
+          this.auditFailed = true;
         }
       } catch (e) {
-        /* non-fatal */
+        this.auditFailed = true;
       }
     },
 
@@ -380,6 +397,13 @@ function documentsPage() {
         clearInterval(this._poll);
         this._poll = null;
       }
+    },
+
+    // Alpine runs this when soft navigation leaves the page. There was none:
+    // a job's 1.5 s poll kept fetching from every later page until the job
+    // finished (audit 2026-10-26 AUD-030).
+    destroy() {
+      this._stopPoll();
     },
 
     async showEvents(jobId) {

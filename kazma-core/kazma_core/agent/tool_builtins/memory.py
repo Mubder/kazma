@@ -773,6 +773,11 @@ def register_memory_tools(registry: Any) -> None:
             from kazma_core.safety.hitl import get_current_tenant_id
 
             result = v2_recall(query, limit=limit, tenant_id=get_current_tenant_id())
+            if result.failed:
+                # Recall catches its own failures and says so in `degraded`
+                # (AUD-026): no search ran, so neither "nothing found" nor
+                # "keyword matches only" is true.
+                return f"{_RECALL_DEGRADED} ({result.degraded})", True
             out: list[dict[str, Any]] = []
             # A week's topic summary (plan C2) shows its week, title and text;
             # a memory, its question and its answer.

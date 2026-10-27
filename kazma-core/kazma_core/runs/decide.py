@@ -18,6 +18,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from kazma_core.runs.claims import WORK_FAILURES, settle_on_error
 from kazma_core.runs.incidents import DecisionConflictError, get_incident_store
 from kazma_core.runs.text import action_word
 
@@ -74,16 +75,22 @@ async def decide(incident_id: str, action: str, *, actor: str, platform: str) ->
         return DecisionOutcome(True, "dismissed", "Dismissed. The run is left as it is.", row)
     from kazma_core.runs.registry import perform
 
-    try:
-        result = await perform(row["run_id"], action, actor=actor)
-    except asyncio.CancelledError:
-        # The row stays "acting": a restart closes it as interrupted, never replays it.
-        raise
-    except (RuntimeError, OSError, ValueError) as exc:
-        logger.warning("[runs] action failed incident=%s action=%s", incident_id, action, exc_info=True)
-        final = await asyncio.to_thread(store.finish_decision, incident_id, ok=False,
-                                        code=type(exc).__name__, message=str(exc)[:300])
-        return DecisionOutcome(False, "action_failed", f"The action failed: {exc}", final)
+    async def _record_failure(exc: BaseException) -> dict[str, Any] | None:
+        logger.warning("[runs] action failed incident=%s action=%s", incident_id, action, exc_info=exc)
+        return await asyncio.to_thread(store.finish_decision, incident_id, ok=False,
+                                       code=type(exc).__name__, message=str(exc)[:300])
+
+    # The claimed "acting" row always ends recorded (audit 2026-10-26
+    # AUD-018): a "database is locked", an httpx error, a KeyError or a
+    # TypeError escaped the three types caught here and left it "acting" for
+    # good. A cancellation leaves it "acting": a restart closes it as
+    # interrupted, never replays it.
+    async with settle_on_error(_record_failure):
+        try:
+            result = await perform(row["run_id"], action, actor=actor)
+        except WORK_FAILURES as exc:
+            final = await _record_failure(exc)
+            return DecisionOutcome(False, "action_failed", f"The action failed: {exc}", final)
     final = await asyncio.to_thread(store.finish_decision, incident_id, ok=result.ok,
                                     code=result.code, message=result.message)
     return DecisionOutcome(result.ok, result.code, result.message or result.code, final)

@@ -72,7 +72,13 @@
         {# "None" only once the server said so: before the first answer the
            list is not empty, it is not loaded (tests/test_empty_states_after_load.py). #}
         <div x-show="!documentsLoaded && documentsLoading" x-cloak role="status" style="color:var(--text-muted);font-size:.8rem;">{{ t('common.loading') }}</div>
-        <div x-show="documentsLoaded && documents.length === 0" x-cloak style="color:var(--text-muted);font-size:.8rem;">{{ t('documents.no_documents') }}</div>
+        {# A failed read says it failed, with the server's reason, over what an
+           earlier read gave (audit 2026-10-26 AUD-058). #}
+        <div x-show="documentsError" x-cloak role="alert" class="doc-load-error" style="color:var(--danger, #c0392b);font-size:.8rem;margin-bottom:.4rem;">
+          <div>{{ t('documents.js.failed_to_load_documents') }}</div>
+          <div translate="no" x-text="documentsError" style="color:var(--text-muted);"></div>
+        </div>
+        <div x-show="documentsLoaded && !documentsError && documents.length === 0" x-cloak style="color:var(--text-muted);font-size:.8rem;">{{ t('documents.no_documents') }}</div>
         <template x-for="d in documents" :key="d.document_id">
           <div class="doc-row" :class="{ selected: selected && selected.document_id === d.document_id }" @click="openDocument(d.document_id)">
             <div style="min-width:0;flex:1;">
@@ -364,7 +370,8 @@
         {# Operational audit history #}
         <details style="margin-top:.5rem;">
           <summary style="cursor:pointer;font-size:.8rem;">{{ t('documents.audit_history') }} (<span x-text="auditEvents.length"></span>)</summary>
-          <div x-show="auditLoaded && auditEvents.length === 0" x-cloak style="color:var(--text-muted);font-size:.74rem;padding:.3rem 0;">{{ t('documents.no_audit') }}</div>
+          <div x-show="auditFailed" x-cloak role="alert" style="color:var(--text-muted);font-size:.74rem;padding:.3rem 0;">{{ t('documents.audit_load_failed') }}</div>
+          <div x-show="auditLoaded && !auditFailed && auditEvents.length === 0" x-cloak style="color:var(--text-muted);font-size:.74rem;padding:.3rem 0;">{{ t('documents.no_audit') }}</div>
           <template x-for="a in auditEvents" :key="a.id">
             <div class="evt-row" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
               <span translate="no">

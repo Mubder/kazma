@@ -60,7 +60,6 @@ __all__ = [
     "ScheduledJob",
     "compose_cron_delivery",
     "get_cron_scheduler",
-    "parse_timing",
     "resolve_cron_zone",
     "scheduled_tenant_filter",
     "set_cron_scheduler",
@@ -89,6 +88,12 @@ def get_cron_parent() -> dict[str, str] | None:
         return val
     return None
 
+
+#: A fire's lease is its task budget plus this margin (the graph build, the
+#: target, the finishing transaction), never shorter than the minimum: a
+#: reminder needs no budget (audit 2026-10-26 AUD-019).
+_FIRE_LEASE_MARGIN_S = 300.0
+_FIRE_LEASE_MIN_S = 600.0
 
 # Module-level singleton
 _cron_scheduler: CronScheduler | None = None
@@ -220,26 +225,6 @@ def annotate_fire_times(next_run: datetime | str | None, *, zone: tzinfo | None 
     }
 
 
-def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
-    """The next run *timing* names, read in the operator's zone.
-
-    A parser, kept for its callers: it does not refuse a past instant (a
-    booking does, through :func:`kazma_core.cron.timing.resolve_timing`).
-    Supported: ``5m``/``2h``/``3d``, recurring forms (``daily at 9:30am``,
-    ``weekdays at 08:00``, ``every mon,wed at 21:00``, an RRULE subset),
-    and RFC 3339 / ISO timestamps (naive → operator zone; ``Z`` and offsets
-    honored). Raises ``ValueError`` ("Unparseable timing ...").
-    """
-    from kazma_core.cron.timing import TimingError, resolve_timing
-
-    zone, name = resolve_cron_zone()
-    try:
-        return resolve_timing(timing, zone=zone, zone_name=name, now=from_time or datetime.now(UTC),
-                              allow_past=True).first
-    except TimingError as exc:
-        raise ValueError(f"Unparseable timing: {exc}") from None
-
-
 # ══════════════════════════════════════════════════════════════════════════
 # What a fire delivers
 # ══════════════════════════════════════════════════════════════════════════
@@ -348,7 +333,6 @@ class CronScheduler:
         store:          SQLiteCronStore for persistence.
         graph_builder:  Callable that builds a compiled graph for a task's fire
                         (called with ``capabilities=`` when it accepts it).
-        checkpointer:   Unused; kept for callers that pass it.
         poll_interval:  Seconds between polls (default 30).
         max_concurrent: Fires at once (default 4).
         drain_seconds:  How long ``stop()`` waits for fires in flight.
@@ -361,7 +345,6 @@ class CronScheduler:
         self,
         store: SQLiteCronStore,
         graph_builder: Any = None,
-        checkpointer: Any = None,
         poll_interval: float = 30.0,
         max_concurrent: int = 4,
         *,
@@ -371,13 +354,16 @@ class CronScheduler:
         self._store = store
         self._clock: CronClock = clock or (store.clock if isinstance(store, SQLiteCronStore) else SYSTEM_CLOCK)
         self._graph_builder = graph_builder
-        self._checkpointer = checkpointer
         self._poll_interval = poll_interval
         self._max_concurrent = max(1, int(max_concurrent))
         self._drain_seconds = max(0.0, float(drain_seconds))
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._in_flight: set[str] = set()
+        #: Delivery ids this scheduler is sending now: recovery never calls
+        #: them interrupted, however long the send outlives its lease
+        #: (audit 2026-10-26 AUD-017), as ``_in_flight`` does for fires.
+        self._sending: set[int] = set()
         # Strong refs to exec tasks -- the loop holds only weak refs, and a
         # GC'd task left its job id stuck in _in_flight.
         self._exec_tasks: set[asyncio.Task] = set()
@@ -477,6 +463,19 @@ class CronScheduler:
     def active_fire_count(self) -> int:
         """Fires in flight now (``/health/activity`` and ``--when-idle``)."""
         return len([t for t in self._exec_tasks if not t.done()])
+
+    def fire_owner_alive(self, job: ScheduledJob) -> bool | None:
+        """Whether a running job's fire still has its owner, as this scheduler knows.
+
+        Its own fire is alive while its task runs (``_in_flight``), however
+        long the turn takes; another owner's is not this scheduler's to say
+        (None: judge by its lease). The run supervisor asks this: judged by
+        the lease alone, a healthy 15-minute task fire was "stuck: nothing is
+        running it" once its lease ran out (audit 2026-10-26 AUD-019).
+        """
+        if not job.fire_owner or job.fire_owner != self._owner:
+            return None
+        return job.job_id in self._in_flight
 
     async def metrics(self) -> list[str]:
         """Prometheus lines for the last 24 hours (SCH-E11): fires by outcome,
@@ -818,17 +817,6 @@ class CronScheduler:
             await self._execute(job)
 
     @staticmethod
-    def _is_due(next_run_str: str, now: datetime) -> bool:
-        """Check if a job is due."""
-        try:
-            next_run = datetime.fromisoformat(next_run_str)
-            if next_run.tzinfo is None:
-                next_run = next_run.replace(tzinfo=UTC)
-            return now >= next_run
-        except (ValueError, TypeError):
-            return False
-
-    @staticmethod
     def _is_missed(job: ScheduledJob, now: datetime, default_catchup_s: int) -> bool:
         """Due longer ago than the job's catch-up window (a day, a reload...)."""
         try:
@@ -869,7 +857,10 @@ class CronScheduler:
                                               reason="interrupted" if boot else "lease expired"):
                 logger.warning("[CronScheduler] fire of %s was interrupted (owner %s); it runs again",
                                job.job_id, job.fire_owner or "-")
-        recovered = await self._store.recover_deliveries(owner=self._owner)
+        # A send this scheduler is making now is not interrupted, even past
+        # its lease (AUD-017); at start nothing of ours is being sent.
+        recovered = await self._store.recover_deliveries(
+            owner=self._owner, live=() if boot else frozenset(self._sending))
         for row in recovered:
             logger.warning("[CronScheduler] delivery %s of %s was interrupted mid-send; outcome unknown",
                            row["id"], row["job_id"])
@@ -880,10 +871,16 @@ class CronScheduler:
 
     async def _execute(self, job: ScheduledJob) -> None:
         """Fire one job: claim, produce, finish in one transaction, deliver."""
-        lease = 600.0
+        from kazma_core.cron.settings import cron_settings
+
         # In flight BEFORE the claim commits: recovery treats our own running
         # row that is not in flight as a dead fire.
         self._in_flight.add(job.job_id)
+        settings = await asyncio.to_thread(cron_settings)
+        # The lease covers the whole fire: the task budget (up to an hour)
+        # plus the time around the turn. It was a fixed 600 s, so a healthy
+        # 15-minute task fire outlived its own lease (audit 2026-10-26 AUD-019).
+        lease = max(_FIRE_LEASE_MIN_S, float(settings.task_budget_seconds) + _FIRE_LEASE_MARGIN_S)
         claimed = await self._store.claim_job(job.job_id, owner=self._owner, lease_seconds=lease,
                                               expected_version=job.version)
         if not claimed:
@@ -916,9 +913,6 @@ class CronScheduler:
 
         tenant_token = set_current_tenant_id(job.tenant_id or "default")
         try:
-            from kazma_core.cron.settings import cron_settings
-
-            settings = await asyncio.to_thread(cron_settings)
             zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
             current = await self._store.get(job.job_id) or job
             now = self._clock.now()
@@ -1096,8 +1090,15 @@ class CronScheduler:
             row = await self._store.claim_delivery(owner=self._owner, delivery_id=only_id)
             if row is None:
                 break
-            ok, error = await self._send(row)
-            res = await self._store.finish_delivery(row["id"], owner=self._owner, delivered=ok, error=error)
+            # Live until finish_delivery has recorded it; a send whose task
+            # ended without that is no longer in the set, and recovery takes
+            # it once its lease lapses.
+            self._sending.add(int(row["id"]))
+            try:
+                ok, error = await self._send(row)
+                res = await self._store.finish_delivery(row["id"], owner=self._owner, delivered=ok, error=error)
+            finally:
+                self._sending.discard(int(row["id"]))
             if res is None:
                 continue
             delivered += int(ok)

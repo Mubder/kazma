@@ -346,6 +346,13 @@ function xStudioPage() {
     destroy() {
       clearTimeout(this._composerTimer);
       clearTimeout(this._previewTimer);
+      // Leaving the page (a sidebar link) cancelled the pending autosave, and
+      // up to 600 ms of typing was lost (audit 2026-10-26 AUD-067). Save it
+      // now: a soft navigation keeps the page, so the request completes.
+      if (this._composerLoaded && !this.composerError
+          && this._composerSignature() !== this._composerSaved) {
+        this.saveComposer();
+      }
       if (this._unloadHandler) window.removeEventListener('beforeunload', this._unloadHandler);
     },
 

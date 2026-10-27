@@ -308,6 +308,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا يوجد نشاط حديث.",
         "en": "No recent activity.",
     },
+    "workspace.activity_load_failed": {
+        "ar": "تعذّر تحميل النشاط.",
+        "en": "The activity could not be loaded.",
+    },
     "workspace.no_description": {
         "ar": "لا يوجد وصف للمستودع.",
         "en": "No repository description set.",
