@@ -5475,9 +5475,8 @@ canvas { display: block; border-radius: 4px; }
 /* Responsive (consolidated into the main @media block in §25 above). */
 
 /* ── HITL Approval Panel ───────────────────────────────────────── */
-.hitl-panel.has-pending {
-  border-color: rgba(var(--accent-rgb), 0.3);
-}
+/* .hitl-panel.has-pending is styled once, in kazma.v5.css (AUD-121: it was
+   here too, and v5 -- loaded last -- silently won; §28). */
 /* The reasoning panel and the approval card are stacked siblings, and both
    must own the full width of the message. Measured against the live
    stylesheet: when their container becomes a flex row the panel collapses to

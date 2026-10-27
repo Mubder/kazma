@@ -163,7 +163,8 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             return {"status": "error", "error": safe_error(exc)}
         except Exception as exc:
             logger.exception("[mcp_api] OAuth start failed for %s", name)
-            return {"status": "error", "error": f"OAuth login failed: {exc}"}
+            # AUD-102: logged above with its traceback; never the raw text.
+            return {"status": "error", "error": f"OAuth login failed: {safe_error(exc, log=False)}"}
 
     @router.post("/api/mcp/servers/{name}/oauth/clear")
     def api_oauth_clear(name: str) -> dict[str, Any]:

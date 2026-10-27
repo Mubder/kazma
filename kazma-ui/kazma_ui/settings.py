@@ -273,13 +273,16 @@ class SettingsRouterBuilder:
             """Persist a browser PushSubscription JSON (P5)."""
             from kazma_ui.push import push_available, subscribe
 
-            if not push_available():
+            if not await asyncio.to_thread(push_available):
                 return {"status": "error", "error": "push support not installed"}
             try:
                 body = await request.json()
             except Exception:
                 return {"status": "error", "error": "invalid JSON"}
-            return subscribe(body.get("subscription") or body)
+            # AUD-103: the endpoint check resolves DNS and the save is a
+            # settings transaction -- both off the event loop. A store that
+            # refuses the write is a 500 (logged), never a reported success.
+            return await asyncio.to_thread(subscribe, body.get("subscription") or body)
 
         @router.post("/api/push/unsubscribe")
         async def api_push_unsubscribe(request: Request) -> dict[str, Any]:
@@ -290,7 +293,8 @@ class SettingsRouterBuilder:
                 body = await request.json()
             except Exception:
                 return {"status": "error", "error": "invalid JSON"}
-            return unsubscribe(str((body.get("endpoint")) or ""))
+            # AUD-103: one settings transaction, off the event loop.
+            return await asyncio.to_thread(unsubscribe, str((body.get("endpoint")) or ""))
 
         @router.get("/sw.js")
         def api_service_worker() -> Response:
@@ -1051,8 +1055,9 @@ class SettingsRouterBuilder:
                 loop.call_later(25.0, _hard_exit)
                 return {"status": "ok", "detail": "Server restarting…", "log": str(log_path)}
             except Exception as exc:  # noqa: BLE001
-                logger.error("[Settings] restart failed: %s", exc)
-                return {"status": "error", "detail": f"Restart failed: {exc}"}
+                # AUD-102: a server fault; the exception text (paths, the
+                # command line) stays in the log under the reference.
+                return {"status": "error", "detail": f"Restart failed: {safe_error(exc)}"}
 
         @router.put("/api/settings/agent/context")
         def api_save_context(req: dict[str, Any]) -> dict[str, str]:
@@ -1600,7 +1605,8 @@ class SettingsRouterBuilder:
             try:
                 results = asyncio.run(scan_skill_manifests())
             except DependencyQueryError as exc:
-                return {"status": "error", "error": str(exc), "results": []}
+                # AUD-102: OSV's transport error is logged, not returned.
+                return {"status": "error", "error": safe_error(exc), "results": []}
             return {"status": "ok", "results": [asdict(r) for r in results]}
 
         @router.get("/api/settings/system/updates")
@@ -1630,10 +1636,12 @@ class SettingsRouterBuilder:
                 # SSRF protection: validate the base_url
                 from kazma_core.security.ssrf import SSRFError, validate_url
                 await asyncio.to_thread(validate_url, req.base_url)
+            # AUD-102: a refused URL is the caller's answer (validation),
+            # passed through the redactor rather than raw.
             except SSRFError as exc:
-                return {"success": False, "error": f"Blocked: {exc}"}
+                return {"success": False, "error": f"Blocked: {validation_error(exc)}"}
             except ValueError as exc:
-                return {"success": False, "error": f"Invalid URL: {exc}"}
+                return {"success": False, "error": f"Invalid URL: {validation_error(exc)}"}
             except ImportError:
                 return {"success": False, "error": "SSRF validation module not available"}
 

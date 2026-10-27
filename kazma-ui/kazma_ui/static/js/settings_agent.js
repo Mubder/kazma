@@ -62,6 +62,20 @@
             }
         },
 
+        // AUD-104: the confirm/reject routes answer a code with a real
+        // status; the page words it in its language (the body's error is
+        // the server's English diagnostic).
+        _soulRefusal(data) {
+            const keys = {
+                not_found: 'settings.soul_not_found',
+                not_confirmed: 'settings.soul_not_confirmed',
+                not_applied: 'settings.soul_not_applied',
+                apply_failed: 'settings.soul_apply_failed',
+            };
+            const key = keys[(data && data.code) || ''] || 'settings.save_failed';
+            return window.t ? window.t(key) : key;
+        },
+
         async confirmSoul(cid) {
             try {
                 const resp = await fetch('/api/commitment/soul/' + encodeURIComponent(cid) + '/confirm', {
@@ -72,7 +86,7 @@
                 if (resp.ok && data.confirmed) {
                     showToast(window.t ? window.t('settings.soul_confirmed') : 'Soul delta confirmed', 'success');
                 } else {
-                    showToast(data.error || (window.t ? window.t('settings.save_failed') : 'Save failed'), 'error');
+                    showToast(this._soulRefusal(data), 'error');
                 }
                 await this.loadSoulPending();
             } catch (e) {
@@ -90,7 +104,7 @@
                 if (resp.ok && data.rejected) {
                     showToast(window.t ? window.t('settings.soul_rejected') : 'Soul delta rejected', 'success');
                 } else {
-                    showToast(data.error || (window.t ? window.t('settings.save_failed') : 'Save failed'), 'error');
+                    showToast(this._soulRefusal(data), 'error');
                 }
                 await this.loadSoulPending();
             } catch (e) {

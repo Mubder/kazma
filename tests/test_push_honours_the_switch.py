@@ -33,6 +33,11 @@ def sent(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     fake.webpush = lambda **kw: calls.append(kw)
     fake.WebPushException = WebPushException
     monkeypatch.setattr(push, "ensure_vapid_keys", lambda: ("pub", "priv"))
+    # The sender checks each endpoint (AUD-103), which resolves its name:
+    # answered locally, as a public address (no test reaches DNS).
+    from kazma_core.security import ssrf
+
+    monkeypatch.setattr(ssrf, "_resolve_host_ips", lambda host: ["93.184.216.34"])
     monkeypatch.setattr(
         push, "list_subscriptions",
         lambda: [{"endpoint": "https://push.example/1", "keys": {"p256dh": "k", "auth": "a"}}],

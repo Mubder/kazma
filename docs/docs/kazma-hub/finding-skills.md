@@ -25,14 +25,11 @@ kazma hub stats
 
 ## Install
 
-```bash
-kazma hub install author/skill-name
-# or with version if your registry uses @version ids:
-kazma hub install author/skill-name@1.0.0
-
-# Interactive installer
-kazma wizard
-```
+Installing a hub skill is not implemented. `kazma hub install` (and the
+`kazma wizard` installer, and the Skills page for a `kazma-hub://` id) says so
+and installs nothing: the hub registry lists skills but cannot fetch one or
+give the agent its tools. Install an Agent Skill instead (an `owner/repo` or a
+GitHub URL, from the Skills page or `kazma agent-skills`).
 
 Uninstall:
 

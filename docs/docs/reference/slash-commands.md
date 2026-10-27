@@ -417,7 +417,7 @@ Answers a paused danger-tool approval from the chat, as its buttons do.
 |:---|:---|
 | `/hitl approve [thread_id]` | Approve (also `yes`, `y`, `allow`) |
 | `/hitl deny [thread_id]` | Deny |
-| `/hitl approve_task [thread_id]` | Approve every danger tool of this task, until your next message (at most 10 minutes, `KAZMA_TASK_GRANT_TTL_SECONDS`). Not for an X card (`x_post`, `x_schedule_post`, `x_delete_post`, `x_cancel_scheduled_post`): those take a one-time approval only, and `approve_task` approves nothing. |
+| `/hitl approve_task [thread_id]` | Approve every danger tool of this task, until your next message (at most 10 minutes; the limit is fixed). Not for an X card (`x_post`, `x_schedule_post`, `x_delete_post`, `x_cancel_scheduled_post`): those take a one-time approval only, and `approve_task` approves nothing. |
 | `/hitl opt <thread_id> <option>` | Choose an option on a clarify / confirm card |
 
 The thread defaults to this chat's. Only the person who started the paused

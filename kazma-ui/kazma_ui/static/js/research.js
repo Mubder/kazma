@@ -824,12 +824,14 @@
             '<th style="text-align:right;padding:8px;">' + esc(i18n('research.run_a')) + '</th>' +
             '<th style="text-align:right;padding:8px;">' + esc(i18n('research.run_b')) + '</th>' +
             '<th style="text-align:right;padding:8px;">' + esc(i18n('research.delta')) + '</th></tr></thead><tbody>' +
-            row('Cost (USD)', d.a_cost.toFixed(4), d.b_cost.toFixed(4), arrow(d.cost_delta.toFixed(4))) +
-            row('Tokens', d.a_tokens, d.b_tokens, arrow(d.token_delta)) +
-            row('Duration (s)', d.a_duration.toFixed(1), d.b_duration.toFixed(1), arrow(d.duration_delta.toFixed(1))) +
-            row('Workers', d.a_worker_count, d.b_worker_count, arrow(d.worker_count_delta)) +
-            row('Output length', d.a_output_length, d.b_output_length, arrow(d.output_length_delta)) +
-            row('Output changed', '', '', d.output_changed ? 'yes' : 'no') +
+            // AUD-120: the row labels and yes/no are interface words, from
+            // the catalog (they were English on Arabic pages).
+            row(i18n('research.cmp_cost_usd'), d.a_cost.toFixed(4), d.b_cost.toFixed(4), arrow(d.cost_delta.toFixed(4))) +
+            row(i18n('research.cmp_tokens'), d.a_tokens, d.b_tokens, arrow(d.token_delta)) +
+            row(i18n('research.cmp_duration_s'), d.a_duration.toFixed(1), d.b_duration.toFixed(1), arrow(d.duration_delta.toFixed(1))) +
+            row(i18n('research.cmp_workers'), d.a_worker_count, d.b_worker_count, arrow(d.worker_count_delta)) +
+            row(i18n('research.cmp_output_length'), d.a_output_length, d.b_output_length, arrow(d.output_length_delta)) +
+            row(i18n('research.cmp_output_changed'), '', '', i18n(d.output_changed ? 'research.cmp_yes' : 'research.cmp_no')) +
             '</tbody></table>';
           if (d.output_diff) {
             html += '<h4 style="margin-top:1.5rem;">' + esc(i18n('research.text_diff')) + '</h4><pre style="background:rgba(0,0,0,0.1);padding:12px;border-radius:6px;font-size:0.8rem;overflow-x:auto;max-height:300px;">' + esc(d.output_diff) + '</pre>';

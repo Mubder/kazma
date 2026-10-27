@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +36,25 @@ def create_saas_router() -> APIRouter:
         if denied:
             return denied
         from kazma_core.db.backend import get_backend, get_database_url, is_postgres
-        from kazma_core.security.platform_rbac import list_users, multi_user_enabled
+        from kazma_core.security.platform_rbac import (
+            PlatformUsersUnavailable,
+            list_users,
+            multi_user_enabled,
+        )
         from kazma_core.security.oidc import oidc_configured
         from kazma_ui.auth import get_request_principal
 
         principal = get_request_principal(request) or {}
+        try:
+            multi_user: bool | None = multi_user_enabled()
+        except PlatformUsersUnavailable:
+            # Unknown, said as unknown (audit 2026-10-26 AUD-123).
+            multi_user = None
         return JSONResponse({
             "backend": get_backend().value,
             "postgres": is_postgres(),
             "database_url_set": bool(get_database_url()),
-            "multi_user": multi_user_enabled(),
+            "multi_user": multi_user,
             "user_count": len(list_users()),
             "oidc": oidc_configured(),
             "principal": {
@@ -114,16 +124,28 @@ def create_saas_router() -> APIRouter:
             })
         except Exception as exc:
             logger.exception("[saas] create user failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            # AUD-102: a 500 answers with a code and reference, never the
+            # exception's text (§26F).
+            return JSONResponse({"error": safe_error(exc, log=False)}, status_code=500)
 
     @router.delete("/users/{username}")
     def delete_platform_user(username: str, request: Request) -> JSONResponse:
         denied = _require_admin(request)
         if denied:
             return denied
-        from kazma_core.security.platform_rbac import _load_users_from_store, _save_users_to_store
+        from kazma_core.security.platform_rbac import (
+            PlatformUsersUnavailable,
+            _load_users_from_store,
+            _save_users_to_store,
+        )
 
-        users = _load_users_from_store()
+        # Strict read: an unreadable list is not "no users" (audit 2026-10-26
+        # AUD-123); read as empty, this answered 404 over a user who exists.
+        try:
+            users = _load_users_from_store()
+        except PlatformUsersUnavailable:
+            logger.warning("[saas] delete user: platform users unreadable", exc_info=True)
+            return JSONResponse({"error": "users_unavailable"}, status_code=503)
         new_users = [u for u in users if str(u.get("username", "")).lower() != username.lower()]
         if len(new_users) == len(users):
             return JSONResponse({"error": "User not found"}, status_code=404)
@@ -144,12 +166,18 @@ def create_saas_router() -> APIRouter:
 
     def _patch_user(username: str, body: dict[str, Any]) -> JSONResponse:
         from kazma_core.security.platform_rbac import (
+            PlatformUsersUnavailable,
+            _hash_password,
             _load_users_from_store,
             _save_users_to_store,
-            _hash_password,
         )
 
-        users = _load_users_from_store()
+        # Strict read (audit 2026-10-26 AUD-123), as for delete.
+        try:
+            users = _load_users_from_store()
+        except PlatformUsersUnavailable:
+            logger.warning("[saas] update user: platform users unreadable", exc_info=True)
+            return JSONResponse({"error": "users_unavailable"}, status_code=503)
         found = None
         for u in users:
             if str(u.get("username", "")).lower() == username.lower():

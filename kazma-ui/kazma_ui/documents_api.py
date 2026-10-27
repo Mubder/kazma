@@ -324,19 +324,18 @@ def create_documents_router() -> APIRouter:
                 return _capacity_error(exc)
             if isinstance(exc, DocumentIngestionError):
                 return _ingestion_error(exc)
-            # Log full detail for operators; return a short safe message to clients.
-            logger.warning(
-                "[documents_api] upload failed type=%s detail=%s",
-                type(exc).__name__,
-                str(exc)[:300],
-                exc_info=True,
-            )
+            # AUD-102: an exception no typed handler above claimed is a server
+            # fault, not the caller's mistake: a 500 with a code and a
+            # reference. The body used to carry the exception's type and its
+            # first 160 characters (paths, the store's own messages) as a 400.
+            info = safe_error(exc)
             return JSONResponse(
-                status_code=400,
+                status_code=500,
                 content={
                     "ok": False,
-                    "error": f"Upload failed ({type(exc).__name__}: {str(exc)[:160]})",
+                    "error": f"Upload failed ({info})",
                     "code": "upload_failed",
+                    "ref": info.ref,
                 },
             )
         finally:

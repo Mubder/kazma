@@ -1365,8 +1365,44 @@ class ModelRegistry:
             profile["provider"] = "custom"
         profile["name"] = clean_name
 
+        refused = self._restore_masked_profile_secrets(clean_name, profile)
+        if refused:
+            return {"error": refused}
+
         self._config_store.set(f"models.saved.{clean_name}", profile, category="models")
         return self._mask_profile(profile)
+
+    def _restore_masked_profile_secrets(self, name: str, profile: dict[str, Any]) -> str:
+        """Put back the stored secrets a form posted masked; the refusal, or "".
+
+        AUD-105: every profile list masks the key (``***``) and a URL's
+        password, and a form posts the profile back. ``POST
+        /api/models/profiles`` restored them in the route, but ``POST
+        /api/models/saved`` -- the same store -- wrote the stars verbatim
+        over the real key and URL password. The rule now lives here, where
+        every profile write passes (§26D): a masked key keeps the stored one;
+        a masked URL keeps the stored URL only when posted back unchanged
+        (``restore_masked_url``), and stars are never stored as a secret.
+        """
+        from kazma_core.config_store import is_masked_secret_placeholder
+        from kazma_core.security.url_credentials import (
+            restore_masked_url,
+            url_password_is_masked,
+        )
+
+        existing = self.get_model_profile(name) or {}
+        if is_masked_secret_placeholder(profile.get("api_key")):
+            if not existing.get("api_key"):
+                return "api_key: the key is masked. Enter it again."
+            profile["api_key"] = existing["api_key"]
+        base_url = restore_masked_url(profile.get("base_url"), existing.get("base_url"))
+        if url_password_is_masked(base_url):
+            return (
+                "base_url: the password in this URL is masked. Enter it again -- "
+                "the saved one is kept only when the URL itself is unchanged."
+            )
+        profile["base_url"] = base_url
+        return ""
 
     def list_model_profiles(self, *, mask_api_key: bool = True) -> list[dict[str, Any]]:
         """Return all saved model profiles."""

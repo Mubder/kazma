@@ -93,7 +93,34 @@ def _is_own_bridge_gate(item: dict) -> bool:
     return str(item.get("tenant_id") or "default") == _current_tenant()
 
 
-async def _decide_bridge_gate(thread_id: str, body: dict, approved: bool):
+async def _request_actor(request: Any) -> str:
+    """Who decided, from the SERVER-side session -- never the request body.
+
+    Body text is attacker-chosen and made the gate-registry decision log
+    spoofable (audit M-W3). Falls back to a short hash of the presented
+    credential so the trail is still attributable when no cookie session
+    exists. Shared by the graph path and the bus-bridge branch (AUD-100: the
+    bridge recorded ``body["actor"]`` as the human who decided).
+    """
+    try:
+        from kazma_core.security.web_sessions import (
+            SESSION_COOKIE as _SC,
+            get_session_payload,
+        )
+
+        actor_sid = request.cookies.get(_SC) or ""
+        payload = await asyncio.to_thread(get_session_payload, actor_sid) or {}
+        role = str(payload.get("role") or "user")
+        sid_short = str(payload.get("session_id") or actor_sid or "")[:8]
+        return f"web:{role}:{sid_short}" if sid_short else "web:token"
+    except Exception:
+        logger.debug("[HITL] approval actor lookup failed", exc_info=True)
+        return "web:anon"
+
+
+async def _decide_bridge_gate(
+    thread_id: str, body: dict, approved: bool, actor: str = "web:anon"
+):
     """Claim a pending bus-bridge gate for *thread_id*, or return ``None``.
 
     ``None`` means "not a bridge gate" and the caller carries on down the
@@ -136,7 +163,9 @@ async def _decide_bridge_gate(thread_id: str, body: dict, approved: bool):
         return None
 
     decision = "approve" if approved else "deny"
-    actor = str(body.get("actor") or "operator")
+    # AUD-100: the actor is the caller's server-side session (``actor``,
+    # from ``_request_actor``); ``body["actor"]`` was recorded verbatim, so
+    # any client could name who approved.
     try:
         await claim_gate_async(match.gate_id, decision, actor)
         await settle_gate_async(match.gate_id, decision)
@@ -543,7 +572,10 @@ def register_misc_routes(self: Any) -> None:
         # `kazma mcp`, polling the registry row for its answer. Handled before
         # the graph lookup so an approval does not need a graph that this
         # request has nothing to do with.
-        decided = await _decide_bridge_gate(thread_id, body, approved)
+        # Who decides, from the server-side session (AUD-100: the bridge
+        # branch recorded the body's ``actor``).
+        actor = await _request_actor(request)
+        decided = await _decide_bridge_gate(thread_id, body, approved, actor=actor)
         if decided is not None:
             return decided
 
@@ -725,25 +757,8 @@ def register_misc_routes(self: Any) -> None:
                         status_code=409,
                     )
 
-            # Audit identity from the SERVER-side session, not the client
-            # body: body session_id is attacker-chosen text and made the
-            # gate-registry decision log spoofable (audit M-W3). Fall back
-            # to a short hash of the presented credential so the trail is
-            # still attributable when no cookie session exists.
-            _actor_sid = ""
-            try:
-                from kazma_core.security.web_sessions import (
-                    SESSION_COOKIE as _SC,
-                    get_session_payload,
-                )
-
-                _actor_sid = request.cookies.get(_SC) or ""
-                _payload = await asyncio.to_thread(get_session_payload, _actor_sid) or {}
-                _role = str(_payload.get("role") or "user")
-                _sid_short = str(_payload.get("session_id") or _actor_sid or "")[:8]
-                actor = f"web:{_role}:{_sid_short}" if _sid_short else "web:token"
-            except Exception:
-                actor = "web:anon"
+            # ``actor`` came from the SERVER-side session above
+            # (``_request_actor``), never the client body (audit M-W3).
             # Never trust a client-supplied actor label.
             body.pop("actor", None)
 

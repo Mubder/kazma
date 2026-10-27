@@ -21,6 +21,11 @@ the agent a new way to run code or reach the network, or expose a secret:
 - ``security.`` / ``kazma_secret`` / ``vault.`` — auth, the shared secret,
   the secret vault.
 - ``notifications.lifecycle.`` — the operator's own status channel.
+- ``backups.offsite.`` / ``backups.extra_paths`` — where the universal
+  backup is sent and what it holds (audit 2026-10-26 AUD-094). That zip
+  carries ``.env`` and ``vault.db``: one approved ``config_save`` redirected
+  it to a WebDAV, S3 or FTP host of the agent's choosing, or added a folder
+  of the agent's choosing to it.
 
 And every key that is not a setting at all (2026-10-01): Kazma's own state,
 credentials and what it learned, as ``kazma_core.settings_restore.classify``
@@ -51,6 +56,9 @@ PROTECTED_CONFIG_PREFIXES: tuple[str, ...] = (
     "agent.hooks.",
     "mcp.",
     "notifications.lifecycle.",
+    # The offsite backup's destination and contents (AUD-094).
+    "backups.offsite.",
+    "backups.extra_paths",
     "security.",
     "vault.",
     "yolo.",

@@ -361,13 +361,20 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                 logger.exception("Agent skill install failed")
                 return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)
 
-        try:
-            from kazma_core.hub.registry import KazmaHub
+        from kazma_core.hub.registry import HubInstallNotImplemented, KazmaHub
 
+        try:
             hub = KazmaHub()
-            path = await hub.install(skill_id)
-            await hub.close()
-            return JSONResponse({"status": "ok", "path": str(path)})
+            try:
+                await hub.install(skill_id)
+            finally:
+                await hub.close()
+        except HubInstallNotImplemented as exc:
+            # The hub registry installs nothing (AGENTS.md §22G); this answered
+            # "ok" over an empty folder (audit 2026-10-26 AUD-074).
+            return JSONResponse({"status": "error", "error": str(exc)}, status_code=501)
+        except ValueError as exc:
+            return JSONResponse({"status": "error", "error": str(exc)}, status_code=400)
         except Exception as exc:
             logger.exception("Hub skill install failed")
             return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)

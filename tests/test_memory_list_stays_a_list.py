@@ -146,6 +146,53 @@ def test_the_repair_reopens_exactly_what_the_old_write_closed(mem, monkeypatch):
     assert find_closed_entries(mem.db) == []  # idempotent
 
 
+def _closed_then_forgotten(mem, monkeypatch) -> str:
+    """The old write closes the list; the user then forgets the entry it
+    superseded (Forget blanks the value and stamps ``forgotten``)."""
+    from kazma_core.memory import forget
+
+    _notes(mem)
+    out = _the_live_write(mem, conn=_old_code(monkeypatch, mem))
+    monkeypatch.undo()
+    gone = out["superseded_id"]
+    assert gone
+    row = mem.db.execute("SELECT * FROM beliefs WHERE id = ?", (gone,)).fetchone()
+    assert forget._forget_fact_rows(mem.db, [row], now=2_000_000.0) == [gone]
+    mem.db.commit()
+    return gone
+
+
+def _blank_current(mem) -> int:
+    return mem.db.execute(
+        "SELECT COUNT(*) FROM beliefs WHERE predicate='noted' AND object='' "
+        "AND valid_until IS NULL AND invalidated_at IS NULL").fetchone()[0]
+
+
+def test_the_repair_never_reopens_an_entry_the_user_forgot(mem, monkeypatch):
+    """(audit 2026-10-26 AUD-047) The superseded entry, forgotten afterwards,
+    is neither found nor reopened -- also from a plan read before the forget."""
+    gone = _closed_then_forgotten(mem, monkeypatch)
+    groups = find_closed_entries(mem.db)
+    assert gone not in groups[0]["closed"]
+    stale = [{**groups[0], "closed": [*groups[0]["closed"], gone]}]  # read before the forget
+    mem.db.isolation_level = None
+    out = reopen_entries(mem.db, mem.ops, stale)
+    assert out["reopened"] == NOTES - 1 and gone not in out["ids"]
+    assert _blank_current(mem) == 0
+
+
+def test_negative_control_without_the_forgotten_check_a_blank_fact_comes_back(mem, monkeypatch):
+    from kazma_core.memory import list_reopen
+
+    gone = _closed_then_forgotten(mem, monkeypatch)
+    monkeypatch.setattr(list_reopen, "_NOT_FORGOTTEN_SQL", "1")
+    groups = find_closed_entries(mem.db)
+    assert gone in groups[0]["closed"]
+    mem.db.isolation_level = None
+    reopen_entries(mem.db, mem.ops, groups)
+    assert _blank_current(mem) == 1
+
+
 def _forget_through_the_tool(mem, *, forget_source_turn: bool) -> dict:
     _chat(mem)
     _live_turn(turn=1, question="Remember this: my test codeword is BLUE-HERON-42.",

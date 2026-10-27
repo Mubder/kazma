@@ -123,24 +123,32 @@ def _insert_episode(
             emb_version,
         ),
     )
+    # The row is committed BEFORE it is embedded: the embedding ran between
+    # the INSERT and its commit, so memory_state.db's write lock was held for
+    # a whole embedder call (up to 8,000 characters) and every other memory
+    # write waited out its busy timeout (audit 2026-10-26 AUD-112, AGENTS.md
+    # §15 D2). The vector is then one guarded write (still no vector, not
+    # forgotten) through vector_write -- a forget in between keeps it out.
+    conn.commit()
     # Compute + store the episode embedding so dense vector recall can
     # find swarm results / evolution entries / compaction summaries.
-    # Best-effort: a missing embedder leaves embedding NULL (FTS5 still works).
+    # Best-effort: a missing embedder leaves embedding NULL (FTS5 still works,
+    # and the vector repair pass embeds it later).
     try:
-        from kazma_core.memory.embedder import encode_text_to_blob
         from kazma_core.memory.episode_text import embed_text
+        from kazma_core.memory.vector_write import encode_vector, write_local_vector
 
         ep_text = embed_text(user_text, None, summary_text)
-        if ep_text:
-            emb_blob = encode_text_to_blob(ep_text)
-            if emb_blob is not None:
-                conn.execute(
-                    "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL AND tier != ?",
-                    (emb_blob, eid, FORGOTTEN_TIER),
-                )
+        needs = conn.execute(
+            "SELECT 1 FROM episodes WHERE id = ? AND embedding IS NULL AND tier != ?",
+            (eid, FORGOTTEN_TIER),
+        ).fetchone()
+        vec = encode_vector(ep_text) if ep_text and needs is not None else None
+        if vec:
+            write_local_vector(conn, "episodes", eid, vec, still_sql="tier != ?",
+                               still_params=(FORGOTTEN_TIER,))
     except Exception:
         logger.debug("[swarm_bridge] episode embedding failed for %s", eid, exc_info=True)
-    conn.commit()
     return eid
 
 

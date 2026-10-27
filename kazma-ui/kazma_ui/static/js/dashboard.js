@@ -202,7 +202,10 @@
     (data.recent || []).forEach(function(row) {
       var item = document.createElement('li');
       var labels = (row.signals || []).map(function(s) { return window.tOr('dashboard.quality_' + s, s); }).join(' · ');
-      item.appendChild(document.createTextNode(new Date(row.ts).toLocaleString() + ' — ' + labels + ' '));
+      // AUD-120: the date in the page's language (Latin digits in Arabic),
+      // through KazmaFormat -- toLocaleString used the browser's locale.
+      var when = window.KazmaFormat ? window.KazmaFormat.dateTime(row.ts) : String(row.ts || '');
+      item.appendChild(document.createTextNode(when + ' — ' + labels + ' '));
       var identity = document.createElement('bdi');
       identity.textContent = row.turn_id || '';
       item.appendChild(identity);

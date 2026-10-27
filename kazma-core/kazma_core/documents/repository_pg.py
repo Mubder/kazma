@@ -36,6 +36,7 @@ from .repository import (
     DocumentRecord,
     TombstoneRecord,
     VersionRecord,
+    _ACL_COVERS,
     _ACL_PERMISSIONS,
     _BLOB_KINDS,
     _decode_json,
@@ -413,6 +414,47 @@ class PostgresDocumentRepository:
                     f"SELECT * FROM documents WHERE {' AND '.join(clauses)} "
                     f"ORDER BY created_at, id",
                     params,
+                )
+                rows = cur.fetchall()
+            conn.commit()
+        return [_document(row) for row in rows]
+
+    def list_documents_by_access(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        permission: str = "read",
+        granted: bool = True,
+    ) -> list[DocumentRecord]:
+        """The SQLite repository's twin: the tenant's live documents
+        *actor_id* holds *permission* on (``granted=False``: does not), in one
+        joined query (audit 2026-10-26 AUD-115).
+
+        The ACL table is the SQLite store's (``_ACL_COVERS``): an ``owner``
+        ACL row covers ``owner``, so the operator's grant (§19 B4b) is not
+        made again, and audited again, every minute on Postgres.
+        """
+        tenant = _required(tenant_id, "tenant_id")
+        actor = _required(actor_id, "actor_id")
+        if permission not in _ACL_PERMISSIONS:
+            raise ValueError(f"invalid permission: {permission!r}")
+        held = "(d.owner_id = %s OR COALESCE(a.permission, '') = ANY(%s))"
+        condition = held if granted else "NOT " + held
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT d.* FROM documents d
+                    LEFT JOIN document_acl a
+                      ON a.tenant_id = d.tenant_id
+                     AND a.document_id = d.id
+                     AND a.principal_id = %s
+                    WHERE d.tenant_id = %s AND d.deleted_at IS NULL
+                      AND {condition}
+                    ORDER BY d.created_at, d.id
+                    """,
+                    (actor, tenant, actor, sorted(_ACL_COVERS[permission])),
                 )
                 rows = cur.fetchall()
             conn.commit()

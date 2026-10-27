@@ -9,8 +9,11 @@ Auto-expiry is two-layered:
      the gateway message-entry point, so the moment the user sends a new
      message (not a tool-approval callback), the task is done and safety
      re-engages. This is the natural task boundary.
-  2. **TTL safety net** — default 10 minutes (``KAZMA_TASK_GRANT_TTL_SECONDS``),
-     so a grant can never persist indefinitely even if the user walks away.
+  2. **TTL safety net** — 10 minutes, fixed (a caller may pass a shorter
+     ``ttl_seconds``), so a grant can never persist indefinitely even if the
+     user walks away. No environment variable changes it: the docs named
+     one nothing read (audit 2026-10-26 AUD-062), and a longer net is a
+     wider blast radius, not a setting.
 
 Storage: ConfigStore key ``task_grant.{thread_id}``, category ``safety``.
 Mirrors the ``hitl_grants.py`` pattern exactly.
@@ -27,8 +30,8 @@ logger = logging.getLogger(__name__)
 __all__ = ["grant_task", "has_task_grant", "clear_task_grant", "task_grant_status"]
 
 # Default TTL: 10 minutes. Enough for a multi-step task (fix a PDF, run a
-# build, etc.) without leaving safety disabled indefinitely. Override with
-# KAZMA_TASK_GRANT_TTL_SECONDS.
+# build, etc.) without leaving safety disabled indefinitely. Not read from
+# the environment (audit 2026-10-26 AUD-062).
 _DEFAULT_GRANT_TTL = 10 * 60
 
 

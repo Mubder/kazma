@@ -207,15 +207,49 @@ class ApprovalPath:
         return cls(gated=True, reason="HITL enabled: danger tools require approval")
 
 
-def _is_danger(tool_name: str) -> bool:
+def _hitl_config() -> dict[str, Any] | None:
+    """The approval settings once per listing or call (a settings read); None
+    when they cannot be read, which :func:`_is_danger` takes as gated."""
+    try:
+        from kazma_core.safety.hitl import get_hitl_config
+
+        return get_hitl_config({})
+    except Exception:
+        logger.warning("[mcp-server] approval settings unreadable: gating every tool", exc_info=True)
+        return None
+
+
+def _is_danger(tool_name: str, hitl_config: dict[str, Any] | None = None) -> bool:
+    """Whether a call needs a human: the graph's and the swarm bus's own
+    floor (``hitl.approval_floor``, §26B) -- an unclassified tool included.
+
+    It asked only whether the tier was ``danger``/``unsafe``, so a tool with
+    no tier was published as read-only to a server with no approval path,
+    while the graph would have gated it (audit 2026-10-26 AUD-098).
+    """
+    try:
+        from kazma_core.safety.hitl import approval_floor
+
+        if hitl_config is None:
+            hitl_config = _hitl_config()
+            if hitl_config is None:
+                return True
+        return approval_floor(tool_name, hitl_config)
+    except Exception:
+        # Unknown classification is treated as dangerous. An unclassified
+        # mutator slipping out un-gated is the failure that matters.
+        logger.warning("[mcp-server] cannot classify %s: gating it", tool_name, exc_info=True)
+        return True
+
+
+def _read_only(tool_name: str) -> bool:
+    """A tool MCP may call read-only: its tier says it reads (never "no tier")."""
     try:
         from kazma_core.safety.hitl import get_tool_tier
 
-        return get_tool_tier(tool_name) in ("danger", "unsafe")
-    except Exception:  # pragma: no cover - defensive
-        # Unknown classification is treated as dangerous. An unclassified
-        # mutator slipping out un-gated is the failure that matters.
-        return True
+        return get_tool_tier(tool_name) in ("read", "safe")
+    except Exception:
+        return False
 
 
 def _annotations(tool_name: str, danger: bool) -> dict[str, Any]:
@@ -223,10 +257,11 @@ def _annotations(tool_name: str, danger: bool) -> dict[str, Any]:
 
     Clients surface these in their approval UI, so a Kazma danger tool shows
     up as destructive in Claude Desktop without the user reading our docs.
+    Read-only is claimed only for a tool whose tier says it reads (AUD-098).
     """
     if danger:
         return {"destructiveHint": True, "readOnlyHint": False}
-    return {"destructiveHint": False, "readOnlyHint": True}
+    return {"destructiveHint": False, "readOnlyHint": _read_only(tool_name)}
 
 
 def build_tool_list(approval: ApprovalPath) -> list[dict[str, Any]]:
@@ -234,6 +269,7 @@ def build_tool_list(approval: ApprovalPath) -> list[dict[str, Any]]:
     from kazma_core.agent.tool_registry import get_tool_registry
 
     allow = _tool_allowlist()
+    hitl_config = _hitl_config()  # one settings read for the whole list (AUD-098)
     tools: list[dict[str, Any]] = []
     for definition in get_tool_registry().get_tool_definitions():
         fn = definition.get("function") or {}
@@ -242,7 +278,7 @@ def build_tool_list(approval: ApprovalPath) -> list[dict[str, Any]]:
             continue
         if allow is not None and name not in allow:
             continue
-        danger = _is_danger(name)
+        danger = True if hitl_config is None else _is_danger(name, hitl_config)
         if danger and not approval.gated:
             # Withheld rather than advertised-then-refused: a tool a client
             # can see is a tool its model will plan around.
@@ -279,7 +315,8 @@ async def call_tool(name: str, arguments: dict[str, Any], approval: ApprovalPath
             is_error=True,
         )
 
-    if _is_danger(name) and not approval.gated:
+    # A settings read: off the loop (AUD-098).
+    if await asyncio.to_thread(_is_danger, name) and not approval.gated:
         return _text_result(
             f"Tool '{name}' is danger-tier and this server has no approval path: "
             f"{approval.reason}. Enable HITL (safety.hitl.enabled) so the call can "
@@ -372,7 +409,7 @@ class MCPServer:
             return {}
 
         if method == "tools/list":
-            return {"tools": build_tool_list(self.approval)}
+            return {"tools": await asyncio.to_thread(build_tool_list, self.approval)}
 
         if method == "tools/call":
             name = params.get("name")
@@ -442,7 +479,7 @@ async def serve_stdio(
         _force_utf8(stdout)
     server = MCPServer(approval=approval)
 
-    published = len(build_tool_list(server.approval))
+    published = len(await asyncio.to_thread(build_tool_list, server.approval))
     banner = f"[kazma mcp] {published} tools; {server.approval.reason}"
     try:
         from kazma_core.safety.bus_bridge import gate_db_path

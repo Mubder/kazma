@@ -167,9 +167,10 @@ def test_the_gate_sees_alias_and_attribute_openers() -> None:
 def test_the_source_readers_use_the_documents_service() -> None:
     # The declared own-output exemption above covers the intent handler's
     # quality gate only; its reader of the USER's PDF opens nothing itself.
+    # The document pipeline's ``_read_pdf`` was here too; the pipeline had no
+    # caller and was removed (audit 2026-10-26 AUD-075).
     for rel, name in (
         ("kazma-core/kazma_core/agent/intent/handlers/document.py", "_read_pdf_raw"),
-        ("kazma-core/kazma_core/agent/pipelines/document.py", "_read_pdf"),
     ):
         tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
         function = next(

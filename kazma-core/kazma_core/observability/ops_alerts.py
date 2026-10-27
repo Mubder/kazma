@@ -371,10 +371,16 @@ async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bo
                 content=text[:4000],
                 level="warn",
             )
+            # Bounded on the cancel too (audit 2026-10-26 AUD-071, §26E):
+            # asyncio.wait_for waits without a bound for a send whose cancel
+            # an httpx read absorbed.
+            from kazma_core.bounded_cancel import wait_for_bounded
+
             try:
-                results = await asyncio.wait_for(
+                results = await wait_for_bounded(
                     asyncio.gather(*(a.send(msg) for a in targets), return_exceptions=True),
-                    timeout=10.0,
+                    10.0,
+                    what="ops alert bus sends",
                 )
             except TimeoutError:
                 results = [TimeoutError()] * len(targets)

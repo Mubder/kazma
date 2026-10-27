@@ -146,6 +146,12 @@ def _handle_macro_sleep_sync(payload: dict[str, Any]) -> bool:
         try:
             ensure_primary_schema(conn)
             stats = run_macro_sleep(conn, cfg=cfg, tenant_id=tenant_id)
+            if stats.get("sweep_error"):
+                # A failed sweep stops here: the later steps commit this
+                # connection, and the queue retries the whole task (audit
+                # 2026-10-26 AUD-046).
+                logger.warning("[memory_worker] macro_sleep failed, later steps skipped: %s", stats)
+                return False
             logger.info("[memory_worker] macro_sleep done: %s", stats)
             # Ego-graph integrity sweep: anchor leaf subjects whose beliefs
             # all carry payload objects (the disconnected-"orphan" class).
@@ -173,10 +179,10 @@ def _handle_macro_sleep_sync(payload: dict[str, Any]) -> bool:
                     logger.info("[memory_worker] FTS drift check: %s", fts_stats)
             except Exception:
                 logger.debug("[memory_worker] FTS drift check skipped", exc_info=True)
-            # False when the sweep flagged sweep_error — run_macro_sleep
-            # never raises, so returning True unconditionally marked broken
-            # sweeps as done and the queue never retried them.
-            return not bool(stats.get("sweep_error"))
+            # A sweep that flagged sweep_error returned False above —
+            # run_macro_sleep never raises, so returning True unconditionally
+            # marked broken sweeps as done and the queue never retried them.
+            return True
         finally:
             conn.close()
     except Exception:

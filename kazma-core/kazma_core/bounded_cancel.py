@@ -63,6 +63,9 @@ async def cancel_and_wait(task: asyncio.Future[Any] | None, *, what: str, timeou
                     "[cancel] %s did not end %.0f s after it was cancelled; left running "
                     "(a cancel absorbed by the code it was in)", what, timeout,
                 )
+                # Its outcome is read when it does end, so asyncio never logs
+                # it as unretrieved (a gather left running ends with one).
+                task.add_done_callback(lambda done: _retrieve(done, what))
                 return False
             await asyncio.wait({task}, timeout=min(remaining, _REDELIVER_S))
             if not task.done():

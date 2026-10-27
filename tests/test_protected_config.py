@@ -31,6 +31,12 @@ REPO = Path(__file__).resolve().parents[1]
     "agent.commitment.mode", "yolo.window", "yolo",
     "security.secret", "kazma_secret", "vault.master",
     "notifications.lifecycle.events",
+    # Where the universal backup (with .env and vault.db) goes and what it
+    # holds (audit 2026-10-26 AUD-094).
+    "backups.offsite.provider", "backups.offsite.webdav.url",
+    "backups.offsite.s3.endpoint", "backups.offsite.ftp.host",
+    "backups.offsite.enabled", "backups.extra_paths",
+    "tenant.acme.backups.offsite.webdav.url",
     # Not settings at all (settings_restore.classify, 2026-10-01): approval
     # grants, sessions, the learned Soul.
     "task_grant.t1", "hitl_grant.t1.shell_exec", "path_grant.t1.g1",
@@ -47,6 +53,8 @@ def test_command_and_safety_keys_are_protected(key) -> None:
     "agent.personality", "agent.language", "agent.max_iterations",
     "connectors.telegram.allowed_users", "connectors.discord.allowed_users",
     "models.defaults.chat", "", "   ",
+    # Backup settings that do not move or widen the archive stay writable.
+    "backups.pg.retention",
 ])
 def test_ordinary_keys_are_not_protected(key) -> None:
     assert is_protected_config_key(key) is False
@@ -66,7 +74,8 @@ def test_config_save_blocks_a_hook_and_an_mcp_server(monkeypatch) -> None:
     assert save is not None, "config_save is registered"
     fn = save.func
     for key in ("agent.hooks.post_tool", "mcp.servers", "safety.hitl_enabled",
-                "task_grant.t1", "tenant.acme.mcp.servers"):
+                "task_grant.t1", "tenant.acme.mcp.servers",
+                "backups.offsite.webdav.url", "backups.extra_paths"):
         out = answer_now(fn, key=key, value='["echo x"]')
         assert out.startswith("Error: Cannot modify restricted key"), (key, out)
     # The value checks the Settings page applies (settings_validation).

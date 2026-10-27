@@ -74,9 +74,14 @@ def md_to_tg_html(text: str) -> str:
 
     s = _INLINE_CODE_RE.sub(_inline, s)
 
-    # Links [text](url) — URL already escaped; keep simple
+    # Links [text](url). The text was escaped without quotes, so a `"` in the
+    # URL ended the href attribute and Telegram refused the whole message
+    # (it fell back to plain text). The attribute value is escaped again
+    # with quotes, from its unescaped form so `&amp;` is not doubled
+    # (audit 2026-10-26 AUD-051).
     def _link(m: re.Match[str]) -> str:
-        return _stash(f'<a href="{m.group(2)}">{m.group(1)}</a>')
+        href = html.escape(html.unescape(m.group(2)), quote=True)
+        return _stash(f'<a href="{href}">{m.group(1)}</a>')
 
     s = _LINK_RE.sub(_link, s)
 

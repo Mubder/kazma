@@ -870,6 +870,25 @@ class PostgresDocumentJobRepository:
             conn.commit()
         return [JobId(row["id"]) for row in rows]
 
+    def latest_jobs_by_document(self, *, tenant_id: str) -> dict[str, DocumentJobRecord]:
+        """The SQLite queue's twin: each document's newest job (created_at,
+        then id, descending), in one query (audit 2026-10-26 AUD-115)."""
+        tenant = _required(tenant_id, "tenant_id")
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (document_id) *
+                    FROM document_jobs
+                    WHERE tenant_id = %s
+                    ORDER BY document_id, created_at DESC, id DESC
+                    """,
+                    (tenant,),
+                )
+                rows = cur.fetchall()
+            conn.commit()
+        return {row["document_id"]: _row_to_record(row) for row in rows}
+
     # ── Internal helpers ─────────────────────────────────────────────────
 
     def _recover_expired(self, cur: Any, now: datetime, *, tenant_id: str | None) -> int:

@@ -38,6 +38,7 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
     from kazma_core.agent.intent.types import ActKind, EntitySet
     from kazma_core.agent.long_task import consume_continue_context, store_continue_context
     from kazma_core.agent.research_policy import deep_research_route_hint
+    from kazma_core.agent.supervisor_watchdog import IncidentClass, _reflection_text
     from kazma_core.agent.task_ledger import TaskLedger, format_ledger_block
     from kazma_core.agent.turn_input import (
         format_working_memory_anchor,
@@ -84,6 +85,8 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
         "deep_research_route": deep_research_route_hint(
             "Do deep research on vector databases and write a comprehensive report"
         ) or "",
+        # Registered by audit 2026-10-26 AUD-122.
+        "recovery": _reflection_text(IncidentClass.TRANSIENT_LLM, 1, 2),
     }
     return notes
 

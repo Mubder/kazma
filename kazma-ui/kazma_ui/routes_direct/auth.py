@@ -103,6 +103,12 @@ def register_auth_routes(self: Any) -> None:
         table[key] = kept
         return kept
 
+    def _release(table: dict[str, list[float]], key: str, stamp: float) -> None:
+        """Take back one reserved attempt (it did not fail)."""
+        kept = table.get(key)
+        if kept and stamp in kept:
+            kept.remove(stamp)
+
     def _too_many() -> Response:
         return _JSONResponse(
             {"detail": "Too many failed login attempts — try again later"},
@@ -127,9 +133,18 @@ def register_auth_routes(self: Any) -> None:
         if len(recent) >= _LOGIN_MAX_FAILS:
             logger.warning("[auth] login rate limit hit for %s", client_ip)
             return _too_many()
+        # AUD-101: reserve this attempt's slot BEFORE the first await, and
+        # count it as a failure unless it proves otherwise. The check ran
+        # before the body read and the password hash (both awaited) and the
+        # failure was appended after them, so a burst of concurrent attempts
+        # all passed the check -- far more than ten guesses per window. The
+        # list is appended in place (``_recent_failures`` may replace it on
+        # another request's call; appending to a stale list lost the entry).
+        recent.append(now)
 
         expected = get_kazma_secret()
         if not expected:
+            _release(_login_failures, client_ip, now)
             return _JSONResponse(
                 {"status": "ok", "message": "Auth disabled (no KAZMA_SECRET)"},
                 status_code=200,
@@ -152,7 +167,11 @@ def register_auth_routes(self: Any) -> None:
         user_recent = _recent_failures(_login_failures_user, user_key, now) if user_key else []
         if user_key and len(user_recent) >= _LOGIN_MAX_FAILS:
             logger.warning("[auth] login rate limit hit for a username (from %s)", client_ip)
+            _release(_login_failures, client_ip, now)
             return _too_many()
+        if user_key:
+            # AUD-101: the username's slot too, before the hash is awaited.
+            user_recent.append(now)
 
         # Path A: multi-user local username + password (Phase 4.4). Off the
         # event loop: a user-store read and PBKDF2 at 600,000 iterations
@@ -181,9 +200,7 @@ def register_auth_routes(self: Any) -> None:
                 session_uid = "shared-secret"
 
         if not authenticated:
-            recent.append(now)
-            if user_key:
-                user_recent.append(now)
+            # The slots reserved above stay: this attempt failed.
             # One message for every failure mode (bad secret, unknown user,
             # wrong password) so the response cannot confirm which usernames
             # exist (audit F-12).

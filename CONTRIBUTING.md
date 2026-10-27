@@ -515,7 +515,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 - Delete your feature branch
 - Update local `main`: `git pull origin main`
-- If you created a skill, verify it installs: `kazma hub install my-skill`
+- If you created a skill, verify its manifest: `kazma hub validate ./my-skill`
 
 ---
 

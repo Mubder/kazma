@@ -7,14 +7,14 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import aiosqlite
 
 from kazma_core.hub.manifest_schema import SkillManifest
 from kazma_core.db.sql_patterns import like_literal
 
-__all__ = ["AgentInfo", "KazmaHub"]
+__all__ = ["AgentInfo", "HubInstallNotImplemented", "KazmaHub"]
 
 # ─── Agent Info (for delegation discovery) ────────────────────────────
 
@@ -71,12 +71,41 @@ CREATE TABLE IF NOT EXISTS agents (
 """
 
 
+class HubInstallNotImplemented(NotImplementedError):
+    """Installing a hub skill is not built (AGENTS.md §22G, audit AUD-074)."""
+
+
+#: Characters that make a skill id's author or name more than one path
+#: segment: separators of either platform, a drive colon, NUL.
+_NOT_IN_A_SEGMENT = frozenset("/\\:\0")
+
+
+def _one_path_segment(part: str) -> bool:
+    """Whether *part* names one entry of a folder and nothing above it."""
+    return (
+        bool(part)
+        and part == part.strip()
+        and part not in (".", "..")
+        and not any(ch in _NOT_IN_A_SEGMENT for ch in part)
+    )
+
+
 def _parse_skill_id(skill_id: str):
-    """Return (author, name, version) or raise ValueError."""
+    """Return (author, name, version) or raise ValueError.
+
+    The author and the name are each ONE path segment: the regex allowed
+    ``..`` (and a backslash), and the install stub joined the name onto the
+    skills folder (audit 2026-10-26 AUD-074).
+    """
     m = _SKILL_ID_RE.match(skill_id)
     if not m:
         raise ValueError(f"Invalid skill ID: {skill_id!r}")
-    return m.group(1), m.group(2), m.group(3)
+    author, name, version = m.group(1), m.group(2), m.group(3)
+    if not (_one_path_segment(author) and _one_path_segment(name)):
+        raise ValueError(
+            f"Invalid skill ID: {skill_id!r} (author and name must each be one path segment)"
+        )
+    return author, name, version
 
 
 def _make_skill_id(author: str, name: str, version: str) -> str:
@@ -275,26 +304,26 @@ class KazmaHub:
         return [_row_to_manifest(dict(r)) for r in rows]
 
     # ------------------------------------------------------------------
-    # Install / Update (stubs)
+    # Install / Update
     # ------------------------------------------------------------------
 
-    async def install(self, skill_id: str) -> Path:
-        """Stub: mark skill as installed and return install path."""
-        author, name, version = _parse_skill_id(skill_id)
-        try:
-            from kazma_core.paths import installed_skills_dir
+    async def install(self, skill_id: str) -> NoReturn:
+        """Refuse: installing a hub skill is not built.
 
-            install_path = installed_skills_dir() / name
-        except Exception:
-            install_path = Path("~/.kazma/skills").expanduser() / name
-        install_path.mkdir(parents=True, exist_ok=True)
-
-        conn = await self._get_conn()
-        await conn.execute(
-            "UPDATE skills SET installed_path=? WHERE name=? AND author=? AND version=?",
-            (str(install_path), name, author, version),
+        This was a stub that created an empty folder, marked the skill
+        installed and returned the folder, so ``kazma hub install``, the
+        Skills page and the wizard all said "Installed" over a skill with no
+        files and no tools (AGENTS.md §22G: hub skills register no tools).
+        Its name was also only checked for ``/``, so ``..`` made the folder
+        outside the skills directory (audit 2026-10-26 AUD-074). The id is
+        still validated, so a bad id is told apart from the refusal.
+        """
+        _parse_skill_id(skill_id)
+        raise HubInstallNotImplemented(
+            f"Installing hub skill {skill_id} is not implemented: Kazma's hub "
+            "registry lists skills but cannot install them. Install an Agent "
+            "Skill (owner/repo or a GitHub URL) from the Skills page instead."
         )
-        return install_path
 
     async def update(self, skill_id: str) -> SkillManifest | None:
         """Stub: return latest version of the given skill."""

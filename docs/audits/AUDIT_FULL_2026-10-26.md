@@ -1122,6 +1122,25 @@ tested.
 
 ### 3. Long-term improvements (architecture and performance)
 
+**Status (2026-10-27).** The Low rows and these items are fixed, each with a
+regression test, except where noted:
+- Fixed:
+  - Offsite uploads stream (AUD-113).
+  - Intake reuses its first inspection (AUD-114).
+  - Listings are joined queries, with their Postgres variants run against a
+    real Postgres 16 (AUD-115).
+  - The hub stub refuses (AUD-074).
+  - The unreached document pipeline is removed (AUD-075).
+- Partly done:
+  - AUD-109: the document branch of `file_read` is not a bug (the worker
+    enforces its own intake cap).
+  - AUD-063: tested against a recording fake, not a real Neo4j.
+- Not done here:
+  - AUD-062: the variable was never read, so it was removed from the docs
+    rather than wired in.
+- In progress: AUD-111 (the product-wide loop-stall inference) and the
+  result-must-be-used gate.
+
 - Extend the import-following loop-stall inference (§35 M34) to every area
   (AUD-111), retiring name-matching gates.
 - A "result must be used" gate for `bool`/`ok`-returning backup, send and

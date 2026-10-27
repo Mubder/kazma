@@ -2887,8 +2887,9 @@ SQLite choice (2026-09-28).
 **E. Fence + security honesty.**
 LLM-visible document text goes through untrusted fences
 (`source="document"` or chat `document_attachment`), the document intent
-handler's and pipeline's "reorganize this document" prompts included (they
-put it in raw until 2026-10-15; `tests/test_document_text_fenced_to_model.py`,
+handler's "reorganize this document" prompt included (it put it in raw
+until 2026-10-15; the unreached document pipeline was removed 2026-10-27,
+audit AUD-075; `tests/test_document_text_fenced_to_model.py`,
 the unfenced prompt as control). Auto-index is **off** by
 default. Redaction UI confirm is Web-only; API/tools can redact under ACL.
 **Malware:** `documents/malware.py` runs on quarantine via
@@ -3048,9 +3049,9 @@ one past its budget, is refused, never passed. It runs on intake (`sniff`), on
 every mutation input and output (redaction opened its source before the
 policy until 2026-10-13) and on every PDF Kazma renders (LibreOffice,
 WeasyPrint, ReportLab), always in the worker. No PDF library opens a PDF in
-the server process: the document intent handler and the document pipeline
-read through `DocumentService` (the pipeline used to fall back to fitz
-exactly when the worker had refused a file), and structural preflight and
+the server process: the document intent handler reads through
+`DocumentService` (a removed pipeline used to fall back to fitz exactly
+when the worker had refused a file), and structural preflight and
 local salvage run in the worker too. Gates:
 `tests/test_pdf_openers_stay_in_workers.py` (any PDF-library opener outside
 the worker-side modules fails, except declared checks of a PDF Kazma itself
@@ -3968,7 +3969,9 @@ loader); a switched-off skill's tools are left out of
 read once per settings store (weak reference, not `id()`) and updated by the
 page's toggle, so no model call reads settings. Built-in skills cannot be
 uninstalled (400; the page shows the switch only). Marketplace ("hub")
-skills install but register no tools with the agent -- not built.
+skill installs are not built: `kazma hub install` and the page refuse
+("not implemented", 501) instead of reporting an empty install (audit
+2026-10-26 AUD-074, `tests/test_hub_install_refuses.py`).
 `tests/test_skill_switches.py`. **Settings → Skills uses the same routes**
 (2026-10-01): it posted to `/api/settings/skills/*`, which wrote
 `skills.<name>.enabled` (read by nothing) and "uninstalled" any skill,
@@ -7707,6 +7710,66 @@ test that fails on the old code.
     `tests/js/test_soft_nav_lifecycle.js`). Dashboard chat links use `?s=`
     (AUD-031). The Dashboard's chat delete forgets the Time Travel steps
     (AUD-055).
+- **The remaining Low items (2026-10-27)**, each with its regression test:
+  - Core:
+    - The commitment kill switches in the environment win over stored
+      values (AUD-096).
+    - MCP children never inherit a proxy URL carrying a password
+      (AUD-097).
+    - The MCP server gates a tool with no tier through `approval_floor`
+      (AUD-098).
+    - The shared HTTP client follows no redirects and uses the shared TLS
+      context (AUD-099).
+    - The vision tool has one byte cap (AUD-109).
+    - The swarm worker's forced final answer is ledgered through
+      `resilient_chat` (AUD-119).
+    - `[KAZMA RECOVERY]` is a registered turn note (AUD-122).
+    - An unreadable platform-user store fails closed
+      (`PlatformUsersUnavailable`, AUD-123).
+    - A module kept alive only by modules nothing reaches is an orphan
+      (`tests/test_orphan_modules.py`, AUD-075).
+  - Memory:
+    - A failed macro sleep rolls back and commits nothing more (AUD-046).
+    - The list-reopen repair never reopens a forgotten entry (AUD-047).
+    - A failed ack counts attempts in SQL (AUD-048).
+    - Neo4j relationship types are backtick-quoted and Forget removes
+      orphaned value nodes (AUD-049, 063; unverified on a real Neo4j).
+    - The swarm bridge and reconsolidation make no slow call under the
+      write lock (AUD-112, in the D2 gate).
+    - The dual-write mirror is set up once under its lock (AUD-117).
+    - The bookmark store closes under its lock (AUD-118).
+  - Documents and backup:
+    - The parse floor counts the source (AUD-040).
+    - Generated artifacts are left to GC (AUD-041).
+    - Index, unindex and delete need write access (AUD-061).
+    - Backups of the database read the snapshot `immutable` (AUD-116).
+    - Intake inspects once when digest, name and policy match (AUD-114).
+    - Listings are two queries on both backends (AUD-115).
+    - Offsite uploads stream: OneDrive upload session, WebDAV streamed,
+      S3 multipart (AUD-113).
+    - `backups.offsite.` and `backups.extra_paths` are protected config
+      (AUD-094).
+    - The bounded-cancel gate also catches `wait_for` over a `gather`
+      (AUD-071).
+  - Gateway and CLI:
+    - Telegram webhook updates take the polling path (`_dispatch_update`,
+      AUD-065).
+    - Kazma announces only its own join to a group (AUD-050).
+    - Discord buttons follow the guild allowlist (AUD-066).
+    - `kazma gateway` reports the server's real answer (AUD-073).
+    - `kazma ask`'s "a" grants that one tool, never YOLO (AUD-107).
+    - Package installs refuse option arguments (AUD-108).
+  - Web UI:
+    - Every session write in the stream package goes through
+      `_mutate_session` (`SessionManager.transact`, AUD-052).
+    - Approve records the session's actor, not the body's (AUD-100).
+    - The login throttle reserves the slot before the await (AUD-101).
+    - Route errors carry no exception text (AUD-102).
+    - Push endpoints must be public https (AUD-103).
+    - Soul confirm is admin-only with real statuses (AUD-104).
+    - Every saved model profile keeps or refuses masked secrets
+      (`ModelRegistry.save_model_profile`, AUD-105).
+    - The OAuth message is origin-checked (AUD-106).
 
 ## UI Conventions (Web)
 

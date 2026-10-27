@@ -181,6 +181,8 @@ class TelegramAdapter(BaseAdapter):
         self._pending_updates: set[int] = set()   # dispatched, chain not finished
         self._unacked_updates: set[int] = set()   # dispatched, not yet committed
         self._max_seen_update_id: int = 0
+        # The bot's own user id, from getMe (who joined a group, AUD-050).
+        self._bot_user_id: int | None = None
         # What the connection received and why each unanswered message was
         # left (receive_log); the connector Test shows it.
         self._receive = ReceiveLog(TELEGRAM_REASONS)
@@ -309,6 +311,7 @@ class TelegramAdapter(BaseAdapter):
                     return
                 bot_info = me_resp.json().get("result", {})
                 self._bot_username = str(bot_info.get("username") or "")
+                self._bot_user_id = bot_info.get("id")
                 self._receive.extra.update(
                     bot_username=self._bot_username or None, bot_user_id=bot_info.get("id")
                 )
@@ -407,35 +410,7 @@ class TelegramAdapter(BaseAdapter):
                         break
 
                     try:
-                        try:
-                            update_id = int(update.get("update_id", 0) or 0)
-                        except (TypeError, ValueError):
-                            update_id = 0
-                        # While the committed offset lags behind an
-                        # in-flight chain, Telegram redelivers every
-                        # unconfirmed update on each poll — skip ids we
-                        # already dispatched but have not committed yet.
-                        if update_id and update_id in self._unacked_updates:
-                            continue
-
-                        # Handle inline keyboard callbacks
-                        if "callback_query" in update:
-                            cb_task = self._spawn(
-                                self._handle_callback_query(
-                                    update["callback_query"],
-                                )
-                            )
-                            self._track_update(update_id, cb_task)
-                            continue
-
-                        # Offload per-update processing off the poll loop
-                        # (deep-audit 2026-08-19, finding #15c): voice STT
-                        # and media downloads can take seconds — processed
-                        # inline they stalled every subsequent Telegram
-                        # update. Serialized PER CHAT so same-chat message
-                        # order is preserved; different chats proceed
-                        # concurrently.
-                        self._dispatch_update_to_chain(update, queue)
+                        self._dispatch_update(update, queue)
                     except Exception:
                         logger.exception(
                             "[telegram] Error dispatching update %s",
@@ -454,6 +429,45 @@ class TelegramAdapter(BaseAdapter):
             self._running = False
             self._receive.disconnected()
             logger.info("[telegram] Polling stopped")
+
+    def _dispatch_update(self, update: dict, queue: asyncio.Queue) -> bool:
+        """Hand one update to its processing, whichever way it arrived.
+
+        The ONE entry for an update: the polling loop and the webhook route
+        both call it (audit 2026-10-26 AUD-065). The webhook used to parse
+        the update itself, so it skipped the redelivery dedupe, the
+        ``/cmd@otherbot`` normalization, the receive record and callback
+        queries -- HITL buttons did nothing in webhook mode. Returns False
+        for an update already dispatched and not yet committed.
+        """
+        try:
+            update_id = int(update.get("update_id", 0) or 0)
+        except (TypeError, ValueError):
+            update_id = 0
+        # The commit mark (_on_update_done) is bounded by the highest id
+        # seen; polling records it in _poll, a webhook update only here.
+        if update_id > self._max_seen_update_id:
+            self._max_seen_update_id = update_id
+        # While the committed offset lags behind an in-flight chain,
+        # Telegram redelivers every unconfirmed update (each poll, or a
+        # webhook retry) — skip ids we already dispatched but have not
+        # committed yet.
+        if update_id and update_id in self._unacked_updates:
+            return False
+
+        # Handle inline keyboard callbacks
+        if "callback_query" in update:
+            cb_task = self._spawn(self._handle_callback_query(update["callback_query"]))
+            self._track_update(update_id, cb_task)
+            return True
+
+        # Offload per-update processing off the poll loop (deep-audit
+        # 2026-08-19, finding #15c): voice STT and media downloads can take
+        # seconds — processed inline they stalled every subsequent Telegram
+        # update. Serialized PER CHAT so same-chat message order is
+        # preserved; different chats proceed concurrently.
+        self._dispatch_update_to_chain(update, queue)
+        return True
 
     def _dispatch_update_to_chain(
         self, update: dict, queue: asyncio.Queue
@@ -1190,6 +1204,24 @@ class TelegramAdapter(BaseAdapter):
 
     # ── Typing indicator (fire-and-forget) ──────────────────────────
 
+    def _is_this_bot(self, member: dict[str, Any]) -> bool:
+        """True when a joining member is Kazma's own bot.
+
+        By its user id (getMe), else by its username when both are known
+        (audit 2026-10-26 AUD-050): ``is_bot`` matched ANY bot added to a
+        group, so another bot joining posted Kazma's setup text and the
+        chat id there -- and an empty username on both sides matched too.
+        """
+        me_id = getattr(self, "_bot_user_id", None)
+        if me_id:
+            try:
+                return int(member.get("id") or 0) == int(me_id)
+            except (TypeError, ValueError):
+                return False
+        me = str(getattr(self, "_bot_username", "") or "").lstrip("@").casefold()
+        theirs = str(member.get("username") or "").lstrip("@").casefold()
+        return bool(me) and theirs == me
+
     async def _announce_if_added_to_group(self, update: dict) -> None:
         """When the bot joins a group, post the group's chat id there.
 
@@ -1209,11 +1241,7 @@ class TelegramAdapter(BaseAdapter):
         )
         if not added:
             members = message.get("new_chat_members") or []
-            me = getattr(self, "_bot_username", "") or ""
-            for m in members:
-                if str(m.get("username") or "").lstrip("@") == me.lstrip("@") or m.get("is_bot"):
-                    added = True
-                    break
+            added = any(self._is_this_bot(m) for m in members)
         if not added:
             return
         chat_id = chat.get("id")
@@ -1789,10 +1817,9 @@ def telegram_webhook_router(resolve: Callable[[], TelegramAdapter | None]) -> An
     async def handle_update(request: Request) -> JSONResponse:
         """Accept a Telegram update via webhook POST.
 
-        Parses the update with the same ``_parse_update()`` as polling and
-        enqueues it on the unified message bus. The
-        X-Telegram-Bot-Api-Secret-Token header must match the adapter's
-        webhook secret.
+        The X-Telegram-Bot-Api-Secret-Token header must match the adapter's
+        webhook secret (checked first); the update then goes through the
+        adapter's ``_dispatch_update``, as a polled one does.
         """
         import hmac
 
@@ -1823,36 +1850,21 @@ def telegram_webhook_router(resolve: Callable[[], TelegramAdapter | None]) -> An
             update = await request.json()
         except Exception:
             return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-
-        msg = adapter._parse_update(update)
-        if msg is None:
-            return JSONResponse({"status": "ignored", "reason": "no_text"})
-
-        # User whitelist (fail-closed, same as polling / callbacks)
-        if not adapter.actor_allowed(msg.context_metadata.get("user_id", 0)):
-            return JSONResponse({"status": "ignored", "reason": "not_whitelisted"})
+        if not isinstance(update, dict):
+            return JSONResponse({"error": "Invalid update"}, status_code=400)
 
         if adapter._queue is None:
             logger.error("[telegram-webhook] Queue not initialized -- adapter not started")
             return JSONResponse({"error": "Gateway not ready"}, status_code=503)
 
-        try:
-            adapter._queue.put_nowait(msg)
-            logger.info(
-                "[telegram-webhook] Enqueued from %s (chat=%d): %.80s",
-                msg.context_metadata.get("username", "?"),
-                msg.context_metadata.get("chat_id", 0),
-                msg.text,
-            )
-            return JSONResponse(
-                {
-                    "status": "accepted",
-                    "sender_id": msg.sender_id,
-                }
-            )
-        except asyncio.QueueFull:
-            logger.warning("[telegram-webhook] Queue full -- dropping message")
-            return JSONResponse({"error": "Queue full"}, status_code=503)
+        # The same processing polling uses (audit 2026-10-26 AUD-065): the
+        # allowlist, the redelivery and edit dedupe, /cmd@otherbot
+        # normalization, voice and media, the receive record, and callback
+        # queries (the approval buttons). Its outcome is in the receive
+        # record and the log, never in this answer: Telegram only needs a
+        # 2xx so it does not resend.
+        dispatched = adapter._dispatch_update(update, adapter._queue)
+        return JSONResponse({"status": "accepted" if dispatched else "duplicate"})
 
     @router.get("/health")
     async def webhook_health() -> dict[str, Any]:

@@ -274,8 +274,22 @@ def perform_document_backup(
         return {"ok": False, "error": str(exc)[:200]}
 
 
+def _open_snapshot(db_path: Path, *, snapshot: bool = True) -> sqlite3.Connection:
+    """Open a document-store database to read, leaving its folder as it was.
+
+    A snapshot (a backup's copy, which nothing else opens) is opened
+    ``immutable=1`` (audit 2026-10-26 AUD-116): ``sqlite3.backup()`` keeps the
+    source's WAL journal mode in the copy's header, and ``mode=ro`` on a WAL
+    database creates ``-wal`` and ``-shm`` beside it -- files in a backup
+    folder its checksums never named. A live database (*snapshot* False) keeps
+    ``mode=ro``: ``immutable`` would ignore its WAL and miss recent rows.
+    """
+    query = "?mode=ro&immutable=1" if snapshot else "?mode=ro"
+    return sqlite3.connect(db_path.resolve().as_uri() + query, uri=True)
+
+
 def _read_references(
-    db_path: Path, *, promoted_versions: set[str] | None = None,
+    db_path: Path, *, promoted_versions: set[str] | None = None, snapshot: bool = True,
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """Return blobs and versions still owned by a document that is not deleted.
 
@@ -286,10 +300,12 @@ def _read_references(
 
     ``promoted_versions``: the versions whose source left quarantine, when
     the job queue is elsewhere (Postgres); else the snapshot's own events.
+    ``snapshot``: *db_path* is a copy nothing else opens (see
+    :func:`_open_snapshot`); False for a live database.
     """
     refs: list[tuple[str, str]] = []
     versions: list[tuple[str, str]] = []
-    conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+    conn = _open_snapshot(db_path, snapshot=snapshot)
     try:
         conn.row_factory = sqlite3.Row
         # Inspection must not mutate the snapshot whose bytes were hashed.
@@ -386,7 +402,7 @@ def verify_document_backup(
         try:
             refs, _versions = _read_references(db_path, promoted_versions=promoted_versions)
             required = {str(_blob_rel_path(kind, sha)).replace("\\", "/") for sha, kind in refs}
-            conn = sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)
+            conn = _open_snapshot(db_path)
             try:
                 has_jobs = conn.execute("SELECT 1 FROM sqlite_master WHERE name='document_jobs'").fetchone()
                 if has_jobs:

@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from kazma_core.http_tls import shared_ssl_context
 
@@ -91,6 +92,48 @@ class ServerNotRunningError(Exception):
     """Raised when the Kazma server cannot be reached."""
 
 
+class _GatewayRequestError(Exception):
+    """The server answered with an error status (audit 2026-10-26 AUD-073).
+
+    ``status`` is the HTTP status, ``detail`` the server's reason.
+    """
+
+    def __init__(self, status: int, detail: str) -> None:
+        super().__init__(f"HTTP {status}: {detail}")
+        self.status = status
+        self.detail = detail
+
+
+def _client(base_url: str) -> httpx.AsyncClient:
+    """The HTTP client for the gateway routes, carrying Kazma's credential.
+
+    The commands sent none, so a server with sign-in on answered 401/403
+    to every one of them (audit 2026-10-26 AUD-073); ``auth_headers`` is
+    the credential the TUI and the other local mouths send.
+    """
+    from kazma_core.runtime.local_api import auth_headers
+
+    return httpx.AsyncClient(
+        base_url=base_url,
+        timeout=DEFAULT_TIMEOUT,
+        headers=auth_headers(),
+        verify=shared_ssl_context(),
+    )
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """The server's reason for an error answer, short."""
+    try:
+        body = response.json()
+    except ValueError:
+        return (response.text or "").strip()[:300] or response.reason_phrase
+    if isinstance(body, dict):
+        for key in ("detail", "error", "message"):
+            if body.get(key):
+                return str(body[key])
+    return str(body)[:300]
+
+
 async def _request(
     client: httpx.AsyncClient,
     method: str,
@@ -99,7 +142,10 @@ async def _request(
 ) -> dict[str, Any]:
     """Perform an async HTTP request and return the JSON body.
 
-    Raises ``ServerNotRunningError`` on connection failures.
+    Raises ``ServerNotRunningError`` on connection failures and
+    ``_GatewayRequestError`` on an error status or a body that is not a
+    JSON object: every command printed its success line whatever the server
+    answered, a 401 or a 500 included (audit 2026-10-26 AUD-073).
     """
     try:
         response = await client.request(method, path, **kwargs)
@@ -108,10 +154,27 @@ async def _request(
     except httpx.TimeoutException as exc:
         raise ServerNotRunningError(str(exc)) from exc
 
+    if response.status_code >= 400:
+        raise _GatewayRequestError(response.status_code, _error_detail(response))
     try:
-        return response.json()
+        body = response.json()
     except ValueError:
-        return {"status": "error", "message": response.text}
+        raise _GatewayRequestError(response.status_code, "the server did not answer with JSON") from None
+    if not isinstance(body, dict):
+        raise _GatewayRequestError(response.status_code, "unexpected answer from the server")
+    return body
+
+
+def _request_failed(exc: _GatewayRequestError) -> None:
+    """Print why the server refused the request."""
+    if exc.status in (401, 403):
+        console.print(
+            f"[red]The server refused the request (HTTP {exc.status}):[/red] {escape(exc.detail)}\n"
+            "Set KAZMA_SECRET to the server's secret (or run from the install folder, "
+            "whose .env holds it)."
+        )
+    else:
+        console.print(f"[red]The server answered HTTP {exc.status}:[/red] {escape(exc.detail)}")
 
 
 # ---------------------------------------------------------------------------
@@ -120,11 +183,14 @@ async def _request(
 
 async def cmd_status(base_url: str) -> int:
     """GET /api/gateway/status and render an adapter table."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
+    async with _client(base_url) as client:
         try:
             data = await _request(client, "GET", "/api/gateway/status")
         except ServerNotRunningError:
             _server_not_running()
+            return 1
+        except _GatewayRequestError as exc:
+            _request_failed(exc)
             return 1
 
     adapters = data.get("adapters", []) or []
@@ -156,45 +222,48 @@ async def cmd_status(base_url: str) -> int:
     return 0
 
 
-async def cmd_start(base_url: str) -> int:
-    """POST /api/gateway/start."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
+async def _post_expecting(base_url: str, path: str, expected: str, done: str) -> int:
+    """POST *path*; success only when the server answers ``status == expected``."""
+    async with _client(base_url) as client:
         try:
-            data = await _request(client, "POST", "/api/gateway/start")
+            data = await _request(client, "POST", path)
         except ServerNotRunningError:
             _server_not_running()
             return 1
+        except _GatewayRequestError as exc:
+            _request_failed(exc)
+            return 1
 
-    if data.get("status") == "started":
-        console.print("[green]Gateway started.[/green]")
-    else:
-        console.print(f"[yellow]Gateway start response:[/yellow] {data}")
-    return 0
+    if data.get("status") == expected:
+        console.print(f"[green]{done}[/green]")
+        return 0
+    console.print(f"[red]Unexpected answer from the server:[/red] {escape(str(data))}")
+    return 1
+
+
+async def cmd_start(base_url: str) -> int:
+    """POST /api/gateway/start."""
+    return await _post_expecting(base_url, "/api/gateway/start", "started", "Gateway started.")
 
 
 async def cmd_stop(base_url: str) -> int:
     """POST /api/gateway/stop."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
-        try:
-            data = await _request(client, "POST", "/api/gateway/stop")
-        except ServerNotRunningError:
-            _server_not_running()
-            return 1
-
-    if data.get("status") == "stopped":
-        console.print("[green]Gateway stopped.[/green]")
-    else:
-        console.print(f"[yellow]Gateway stop response:[/yellow] {data}")
-    return 0
+    return await _post_expecting(base_url, "/api/gateway/stop", "stopped", "Gateway stopped.")
 
 
 async def cmd_restart(base_url: str) -> int:
     """POST stop then POST start."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
+    async with _client(base_url) as client:
         try:
-            await _request(client, "POST", "/api/gateway/stop")
+            stopped = await _request(client, "POST", "/api/gateway/stop")
         except ServerNotRunningError:
             _server_not_running()
+            return 1
+        except _GatewayRequestError as exc:
+            _request_failed(exc)
+            return 1
+        if stopped.get("status") != "stopped":
+            console.print(f"[red]The gateway did not stop:[/red] {escape(str(stopped))}")
             return 1
         # Brief pause so the stop settles before start.
         await asyncio.sleep(0.5)
@@ -203,27 +272,22 @@ async def cmd_restart(base_url: str) -> int:
         except ServerNotRunningError:
             console.print("[red]Server went away during restart.[/red]")
             return 1
+        except _GatewayRequestError as exc:
+            _request_failed(exc)
+            return 1
 
     if data.get("status") == "started":
         console.print("[green]Gateway restarted.[/green]")
-    else:
-        console.print(f"[yellow]Gateway restart response:[/yellow] {data}")
-    return 0
+        return 0
+    console.print(f"[red]The gateway stopped but did not start again:[/red] {escape(str(data))}")
+    return 1
 
 
 async def cmd_refresh(base_url: str) -> int:
     """POST /api/gateway/refresh-adapters."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
-        try:
-            data = await _request(client, "POST", "/api/gateway/refresh-adapters")
-        except ServerNotRunningError:
-            _server_not_running()
-            return 1
-
-    console.print("[green]Adapters refreshed.[/green]")
-    if data.get("status") and data.get("status") != "ok":
-        console.print(f"[yellow]Response:[/yellow] {data}")
-    return 0
+    return await _post_expecting(
+        base_url, "/api/gateway/refresh-adapters", "ok", "Adapters refreshed."
+    )
 
 
 # ---------------------------------------------------------------------------

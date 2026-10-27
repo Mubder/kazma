@@ -162,26 +162,39 @@ class DualWriteMirror:
         """Lazily open + initialize both DBs. Returns False if unavailable."""
         if self._ready:
             return True
-        try:
-            from kazma_core.memory.schema_v2 import (
-                ensure_ops_schema,
-                ensure_primary_schema,
-            )
-            from kazma_core.paths import memory_ops_db, primary_memory_db
+        # One initializer: two first writers both found ``_ready`` False, both
+        # ran the schema scripts on two connections at once, and the second
+        # overwrote the first's connections, leaking one. The connections are
+        # published only once both schemas are ready, and a failed setup
+        # closes what it opened (audit 2026-10-26 AUD-117).
+        with self._lock:
+            if self._ready:
+                return True
+            primary: sqlite3.Connection | None = None
+            ops: sqlite3.Connection | None = None
+            try:
+                from kazma_core.memory.schema_v2 import (
+                    ensure_ops_schema,
+                    ensure_primary_schema,
+                )
+                from kazma_core.paths import memory_ops_db, primary_memory_db
 
-            self._primary = sqlite3.connect(primary_memory_db(), check_same_thread=False)
-            self._primary.row_factory = sqlite3.Row
-            ensure_primary_schema(self._primary)
-            self._ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
-            self._ops.row_factory = sqlite3.Row
-            ensure_ops_schema(self._ops)
+                primary = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+                primary.row_factory = sqlite3.Row
+                ensure_primary_schema(primary)
+                ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+                ops.row_factory = sqlite3.Row
+                ensure_ops_schema(ops)
+            except Exception:
+                logger.warning("[dual_write] schema init failed — mirror inactive", exc_info=True)
+                for conn in (primary, ops):
+                    if conn is not None:
+                        conn.close()
+                return False
+            self._primary, self._ops = primary, ops
             self._ready = True
             logger.info("[dual_write] V2 schema mirror ready")
             return True
-        except Exception:
-            logger.debug("[dual_write] schema init failed — mirror inactive", exc_info=True)
-            self._ready = False
-            return False
 
     # ── Public mirror API ──────────────────────────────────────────────
 

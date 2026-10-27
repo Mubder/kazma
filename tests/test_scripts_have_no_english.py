@@ -848,3 +848,96 @@ def test_a_wrapper_called_with_a_translated_or_variable_argument_passes(helpers)
     )
     sinks = sinks_found([("page.js", src)])
     assert english_at_sinks(src, {"_mcpT", *helpers}, sinks) == []
+
+
+# ── English handed to a function that builds HTML ────────────────────────
+#
+# AUD-120 (2026-10-27): the Research compare table passed its labels through
+# a local builder -- ``row('Cost (USD)', a, b, d)`` returns
+# ``'<tr><td>' + esc(label) + ...`` -- so the English never sat at a sink the
+# gate reads, and every Arabic page showed "Cost (USD)", "Tokens", "yes".
+# A function whose ``return`` builds HTML (a tag in a string literal) from a
+# parameter is read like a sink at that parameter: a literal handed to it
+# there is checked. An options object (``f({title: ...})``) is not: which of
+# its properties the page shows is not known from here.
+#
+# Not done: a literal assigned to a variable that later reaches a sink
+# (``var msg = 'Saved'; showToast(msg)``). Measured on 2026-10-27 the same
+# rule over every ``var``/``let``/``const`` found 143 strings, nearly all API
+# paths, markup fragments, Mermaid source and log text, so it would gate
+# nothing reliably.
+
+_TAG = re.compile(r"<[A-Za-z/]")
+
+
+def html_builders(sources: list[tuple[str, str]]) -> dict[str, set[int]]:
+    """Function name -> the parameter indexes its returned HTML is built from."""
+    out: dict[str, set[int]] = {}
+    for _name, src in sources:
+        toks = lex(src)
+        for name, params, lo, hi in _definitions(toks):
+            if not params:
+                continue
+            for k in range(lo, hi):
+                if not (toks[k].kind == "id" and toks[k].text == "return"):
+                    continue
+                span = toks[k + 1:value_end(toks, k + 1)]
+                if not any(t.kind in ("str", "tpl") and _TAG.search(t.text) for t in span):
+                    continue
+                used = {t.text for t in span if t.kind == "id"}
+                hit = {i for i, p in enumerate(params) if p in used}
+                if hit:
+                    out.setdefault(name, set()).update(hit)
+    return out
+
+
+def english_through_builders(src: str, helpers: set[str], builders: dict[str, set[int]]) -> list[Tok]:
+    toks = lex(src)
+    found: list[Tok] = []
+    for k, t in enumerate(toks):
+        if t.kind != "id" or t.text not in builders or k + 1 >= len(toks) or toks[k + 1].text != "(":
+            continue
+        if k and toks[k - 1].text in ("function", "."):
+            continue
+        args = _arguments(toks, k + 1)
+        for i in sorted(builders[t.text]):
+            if i < len(args) and toks[args[i][0]].text != "{":
+                found.extend(english_in(toks, args[i][0], args[i][1], helpers))
+    return found
+
+
+def test_no_html_builder_is_handed_english(sources, helpers) -> None:
+    builders = html_builders(sources)
+    english = [
+        f"{name}:{tok.line}: {tok.text[:90]}"
+        for name, src in sources
+        for tok in english_through_builders(src, helpers, builders)
+    ]
+    assert not english, (
+        "English handed to a function that builds the page's HTML from it. "
+        "Pass the catalog's text instead (both languages): " + "; ".join(english)
+    )
+
+
+_ROW_BUILDER = """
+function row(label, a, b, delta) {
+  return '<tr><td>' + esc(label) + '</td><td>' + esc(a) + '</td></tr>';
+}
+"""
+
+
+def test_negative_control_the_old_compare_table_is_caught(helpers) -> None:
+    src = _ROW_BUILDER + "var html = row('Cost (USD)', 1, 2, 3) + row('Output changed', '', '', x ? 'yes' : 'no');"
+    builders = html_builders([("research.js", src)])
+    assert builders == {"row": {0, 1}}
+    found = {t.text.strip("'") for t in english_through_builders(src, helpers, builders)}
+    assert found == {"Cost (USD)", "Output changed"}, found
+
+
+def test_a_builder_handed_catalog_text_passes(helpers) -> None:
+    src = _ROW_BUILDER + (
+        "var html = row(i18n('research.cmp_cost_usd'), 1, 2, 3) + row(label, 'a', 'b', 'c');"
+    )
+    builders = html_builders([("research.js", src)])
+    assert english_through_builders(src, {"i18n", *helpers}, builders) == []
+

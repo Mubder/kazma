@@ -677,6 +677,17 @@ class DiscordAdapter(BaseAdapter):
             )
             await _ack({"type": 6})
             return
+        # The server allowlist too, as messages and slash commands apply it
+        # (audit 2026-10-26 AUD-066): a button pressed in a server Kazma is
+        # limited away from was answered like one in an allowed server.
+        _ia_guild = str(data.get("guild_id") or "")
+        if _ia_guild and self._allowed_guilds and _ia_guild not in self._allowed_guilds:
+            logger.info(
+                "[discord] Ignoring interaction from a server not allowed guild=%s action=%s",
+                _ia_guild, action.kind,
+            )
+            await _ack({"type": 6})
+            return
 
         # Admin gate for approval buttons (audit 2026-09-16 F-8). Audit H-8
         # made installs admin-grade and stopped there, leaving the privilege

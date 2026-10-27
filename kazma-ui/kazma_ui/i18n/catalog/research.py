@@ -64,6 +64,38 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أُلغي البحث",
         "en": "Research cancelled",
     },
+    "research.cmp_cost_usd": {
+        "ar": "التكلفة (دولار أمريكي)",
+        "en": "Cost (USD)",
+    },
+    "research.cmp_tokens": {
+        "ar": "الرموز",
+        "en": "Tokens",
+    },
+    "research.cmp_duration_s": {
+        "ar": "المدة (ثانية)",
+        "en": "Duration (s)",
+    },
+    "research.cmp_workers": {
+        "ar": "العمّال",
+        "en": "Workers",
+    },
+    "research.cmp_output_length": {
+        "ar": "طول المخرجات",
+        "en": "Output length",
+    },
+    "research.cmp_output_changed": {
+        "ar": "تغيّرت المخرجات",
+        "en": "Output changed",
+    },
+    "research.cmp_yes": {
+        "ar": "نعم",
+        "en": "yes",
+    },
+    "research.cmp_no": {
+        "ar": "لا",
+        "en": "no",
+    },
     "research.compare_desc": {
         "ar": "قارن تشغيلتين بحثيتين لرؤية كيف تختلف المخرجات والتكلفة والمدة.",
         "en": "Compare two research runs to see how outputs, cost, and duration differ.",

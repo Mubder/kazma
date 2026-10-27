@@ -1111,6 +1111,20 @@ class DocumentService:
                 message="Document is unavailable",
                 document_id=document_id,
             )
+        # The tombstone needs write access, so the unindex before it does too
+        # (audit 2026-10-26 AUD-061): checked only for read here, a read-only
+        # grantee took the document out of every library and was refused
+        # only at the tombstone, leaving it unsearchable but not deleted.
+        if not self.repository.has_access(
+            tenant_id=tenant_id, document_id=record.id, actor_id=actor_id,
+            permission="write",
+        ):
+            return DocumentResult(
+                ok=False,
+                code="document_access_denied",
+                message="Document is unavailable or you lack permission to delete it",
+                document_id=document_id,
+            )
         # One publication lock from reading the libraries to the tombstone:
         # an index published in between would have stayed searchable after
         # the delete (Q04 defensive check C14, 2026-10-15). The lock is

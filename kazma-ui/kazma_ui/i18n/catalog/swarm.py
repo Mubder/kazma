@@ -1066,6 +1066,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر تسجيل المهمة في سجل المهام، فلم تُشغَّل ولم يتغير شيء. أعد المحاولة بعد قليل.",
         "en": "The task could not be recorded in the task store, so it was not run and nothing changed. Try again shortly.",
     },
+    "swarm.engine_unavailable": {
+        "ar": "لم يُحمَّل محرك السرب، فلم تُسجَّل المهمة ولم تُشغَّل. سجل الخادم يذكر السبب.",
+        "en": "The swarm engine did not load, so the task was not recorded or run. The server log names the cause.",
+    },
     "swarm.retry_unknown_title": {
         "ar": "قد تكون المهمة غيّرت أشياء بالفعل",
         "en": "This task may already have changed things",

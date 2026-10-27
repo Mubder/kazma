@@ -23,12 +23,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import html
 import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 from kazma_core.http_tls import shared_ssl_context
@@ -436,6 +437,100 @@ _MS_GRAPH_DRIVE = "https://graph.microsoft.com/v1.0/me/drive/root"
 _MS_TOKEN_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 _MS_ROOT_FOLDER = "kazma-backups"
 
+#: A file this size or smaller goes up in one ``PUT …:/content``; anything
+#: larger through an upload session (audit 2026-10-26 AUD-113). Graph refuses
+#: a simple upload past 250 MB, and a universal backup zip is about 1.3 GB:
+#: every OneDrive offsite copy failed. 4 MiB is Graph's long-documented
+#: simple-upload size, kept so a small file needs no session.
+_MS_SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
+#: Upload-session fragment: Graph requires a multiple of 320 KiB, at most
+#: 60 MiB. 10 MiB is 32 x 320 KiB.
+_MS_SESSION_CHUNK = 32 * 320 * 1024
+
+
+def _read_chunk(local: Path, offset: int, length: int) -> bytes:
+    """Read *length* bytes of *local* from *offset* (run in a thread)."""
+    with open(local, "rb") as f:
+        f.seek(offset)
+        return f.read(length)
+
+
+#: Size of each piece of a streamed upload body (WebDAV).
+_STREAM_CHUNK = 1024 * 1024
+
+
+async def _file_chunks(local: Path, size: int) -> Any:
+    """Yield *local* in ``_STREAM_CHUNK`` pieces, each read in a thread.
+
+    Stops at *size*: the declared Content-Length is what is sent, and a file
+    that shrank under the upload raises rather than sending a short body.
+    """
+    offset = 0
+    while offset < size:
+        chunk = await asyncio.to_thread(
+            _read_chunk, local, offset, min(_STREAM_CHUNK, size - offset)
+        )
+        if not chunk:
+            raise OSError(f"{local.name} shrank during the upload ({offset} of {size} bytes)")
+        offset += len(chunk)
+        yield chunk
+
+
+async def _onedrive_session_upload(
+    client: httpx.AsyncClient, token: str, *, path: str, local: Path, size: int,
+) -> httpx.Response:
+    """Upload *local* through a Graph upload session, one fragment at a time.
+
+    Only one fragment (``_MS_SESSION_CHUNK``) is in memory at once, and each
+    read is off the loop. The session URL is pre-authenticated: Graph refuses
+    an ``Authorization`` header on it. A fragment refused, or a file that
+    changed size under the upload, cancels the session (DELETE) so Graph does
+    not keep a half file; the failing response is returned.
+    """
+    init = await client.post(
+        f"{_MS_GRAPH_DRIVE}:/{path}:/createUploadSession",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"item": {"@microsoft.graph.conflictBehavior": "replace"}},
+    )
+    if init.status_code != 200:
+        return init
+    try:
+        upload_url = str(init.json().get("uploadUrl") or "")
+    except ValueError:
+        upload_url = ""
+    if not upload_url:
+        logger.warning("[cloud_sync] OneDrive upload session answered without an uploadUrl")
+        return httpx.Response(502, request=init.request)
+
+    offset = 0
+    last = init
+    while offset < size:
+        chunk = await asyncio.to_thread(_read_chunk, local, offset, _MS_SESSION_CHUNK)
+        if not chunk:
+            # The file shrank under the upload: what was sent is not the file.
+            last = httpx.Response(409, request=init.request)
+            break
+        end = offset + len(chunk) - 1
+        last = await client.put(
+            upload_url,
+            content=chunk,
+            headers={"Content-Range": f"bytes {offset}-{end}/{size}"},
+        )
+        if last.status_code in (200, 201):
+            return last
+        # 202 = fragment stored, send the next; anything else is a failure.
+        if last.status_code != 202:
+            break
+        offset = end + 1
+    try:
+        await client.delete(upload_url)
+    except httpx.HTTPError as exc:
+        logger.warning("[cloud_sync] could not cancel the OneDrive upload session: %s", exc)
+    if last.status_code in (200, 201, 202):
+        # Every byte was sent and Graph never said the file was complete.
+        return httpx.Response(502, request=last.request)
+    return last
+
 
 class OneDriveSync:
     """OneDrive backup via the existing Microsoft OAuth tokens.
@@ -505,22 +600,23 @@ class OneDriveSync:
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
         token = await self._get_access_token()
         path = quote(f"{_MS_ROOT_FOLDER}/{remote_name}")
-        url = f"{_MS_GRAPH_DRIVE}:/{path}:/content"
-        # bytes read up-front: httpx 0.28 async clients reject sync file objects
-        with open(local, "rb") as f:
-            data = f.read()
-        async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
-            resp = await client.put(
-                url,
-                content=data,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/octet-stream",
-                },
-            )
         display = f"onedrive:{_MS_ROOT_FOLDER}/{remote_name}"
+        size = await asyncio.to_thread(lambda: local.stat().st_size)
+        async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
+            if size <= _MS_SIMPLE_UPLOAD_MAX:
+                data = await asyncio.to_thread(local.read_bytes)
+                resp = await client.put(
+                    f"{_MS_GRAPH_DRIVE}:/{path}:/content",
+                    content=data,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/octet-stream",
+                    },
+                )
+            else:
+                resp = await _onedrive_session_upload(client, token, path=path, local=local, size=size)
         if resp.status_code in (200, 201):
-            return {"ok": True, "remote": display, "files": 1}
+            return {"ok": True, "remote": display, "files": 1, "size": size}
         return {"ok": False, "remote": display, "error": f"Graph API error: {resp.status_code}"}
 
     async def test_connection(self) -> dict[str, Any]:
@@ -577,19 +673,22 @@ class WebDAVSync:
         auth = (username, password) if username else None
         host = url.split("//")[1] if "//" in url else url
         display = f"webdav:{host}/{self._ROOT_FOLDER}/{remote_name}"
-        # bytes read up-front: httpx 0.28 async clients reject sync file objects
-        with open(local, "rb") as f:
-            data = f.read()
+        size = await asyncio.to_thread(lambda: local.stat().st_size)
         async with httpx.AsyncClient(timeout=300, verify=_webdav_tls_verify()) as client:
             # MKCOL the root folder — idempotent (405/409 = already exists)
             await client.request("MKCOL", f"{url}/{self._ROOT_FOLDER}", auth=auth)
+            # Streamed, a chunk at a time read off the loop (audit 2026-10-26
+            # AUD-113): the whole archive (about 1.3 GB) was read into the
+            # server's memory first. The length is declared, so the server
+            # gets a plain body, not a chunked one.
             resp = await client.put(
                 f"{url}/{self._ROOT_FOLDER}/{remote_name}",
-                content=data,
+                content=_file_chunks(local, size),
+                headers={"Content-Length": str(size)},
                 auth=auth,
             )
         if resp.status_code in (200, 201, 204):
-            return {"ok": True, "remote": display, "files": 1}
+            return {"ok": True, "remote": display, "files": 1, "size": size}
         return {"ok": False, "remote": display, "error": f"WebDAV error: HTTP {resp.status_code}"}
 
     async def test_connection(self) -> dict[str, Any]:
@@ -778,6 +877,50 @@ class FTPSync:
 # ─── S3 (Amazon S3 / Backblaze B2 / S3-compatible) ─────────────────────
 
 
+#: A file this size or smaller is one signed PUT; anything larger a multipart
+#: upload (audit 2026-10-26 AUD-113). S3 parts are 5 MiB to 5 GiB (the last
+#: may be smaller), at most 10,000: 16 MiB parts cover 156 GiB.
+_S3_SINGLE_PUT_MAX = 16 * 1024 * 1024
+_S3_PART_SIZE = 16 * 1024 * 1024
+
+
+def _sigv4_query(query: str) -> str:
+    """The SigV4 canonical query string of *query* (as sent on the URL)."""
+    if not query:
+        return ""
+    pairs: list[tuple[str, str]] = []
+    for item in query.split("&"):
+        if not item:
+            continue
+        name, _, value = item.partition("=")
+        pairs.append((
+            quote(unquote(name), safe="-_.~"),
+            quote(unquote(value), safe="-_.~"),
+        ))
+    return "&".join(f"{n}={v}" for n, v in sorted(pairs))
+
+
+def _s3_xml_text(body: bytes, tag: str) -> str:
+    """The text of the first *tag* element in an S3 XML answer, else ''.
+
+    S3 answers in its own namespace; the tag is matched by local name. The
+    body comes from the network, so it is parsed with the guarded parser.
+    """
+    from kazma_core.security.safe_xml import UnsafeXMLError, parse_untrusted_xml
+
+    try:
+        root = parse_untrusted_xml(body)
+    except (UnsafeXMLError, ValueError, SyntaxError) as exc:
+        logger.warning("[cloud_sync] S3 answered XML that could not be read: %s", exc)
+        return ""
+    if root.tag.rsplit("}", 1)[-1] == "Error":
+        return ""
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] == tag:
+            return (element.text or "").strip()
+    return ""
+
+
 class S3Sync:
     """S3-compatible backup via raw httpx with SigV4 signing.
 
@@ -814,7 +957,11 @@ class S3Sync:
         parsed = urlparse(url)
         host = parsed.hostname or ""
         canonical_uri = quote(parsed.path or "/", safe="/")
-        canonical_querystring = ""  # we don't use query params for PUT
+        # The multipart calls carry ``?uploads``, ``?partNumber=&uploadId=``
+        # and ``?uploadId=`` (audit 2026-10-26 AUD-113): SigV4 signs them as
+        # name=value pairs, both URI-encoded, sorted by name (a bare name is
+        # ``name=``).
+        canonical_querystring = _sigv4_query(parsed.query)
 
         # Canonical headers (must be sorted)
         signed_headers_map = {"host": host}
@@ -877,20 +1024,105 @@ class S3Sync:
             return {"ok": False, "remote": "s3", "error": "S3 not configured"}
         key = f"{self._ROOT_FOLDER}/{remote_name}"
         url = self._build_url(config, key)
-        base_headers = {"content-type": "application/octet-stream"}
-        with open(local, "rb") as f:
-            payload = f.read()
-        signed = self._sign_request("PUT", url, base_headers, payload, config)
-        async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
-            resp = await client.put(url, content=payload, headers=signed)
         display = f"s3:{config['bucket']}/{key}"
-        if resp.status_code in (200, 201):
+        size = await asyncio.to_thread(lambda: local.stat().st_size)
+        async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
+            if size <= _S3_SINGLE_PUT_MAX:
+                base_headers = {"content-type": "application/octet-stream"}
+                payload = await asyncio.to_thread(local.read_bytes)
+                signed = await asyncio.to_thread(
+                    self._sign_request, "PUT", url, base_headers, payload, config
+                )
+                resp = await client.put(url, content=payload, headers=signed)
+                error = "" if resp.status_code in (200, 201) else f"S3 error: HTTP {resp.status_code}"
+            else:
+                # Multipart (audit 2026-10-26 AUD-113): the whole archive was
+                # read into the server's memory and signed in one piece.
+                error = await self._multipart_upload(client, config, url, local, size)
+        if not error:
             # The byte count is recorded so the restore drill can HEAD the
             # object later and compare. "The upload returned 200" and "the
             # object is there, whole" are different claims, and only the
             # second one is a backup.
-            return {"ok": True, "remote": display, "files": 1, "size": len(payload)}
-        return {"ok": False, "remote": display, "error": f"S3 error: HTTP {resp.status_code}"}
+            return {"ok": True, "remote": display, "files": 1, "size": size}
+        return {"ok": False, "remote": display, "error": error}
+
+    async def _multipart_upload(
+        self,
+        client: httpx.AsyncClient,
+        config: dict[str, str],
+        url: str,
+        local: Path,
+        size: int,
+    ) -> str:
+        """Upload *local* as an S3 multipart upload; '' on success, else the error.
+
+        One part (``_S3_PART_SIZE``) is in memory at a time; each read and
+        each SigV4 hash runs in a thread. A failure aborts the upload, so the
+        bucket keeps no parts it bills for and no half object appears.
+        """
+        async def signed(method: str, target: str, payload: bytes | None, headers: dict[str, str]) -> dict[str, str]:
+            return await asyncio.to_thread(self._sign_request, method, target, headers, payload, config)
+
+        init_url = f"{url}?uploads"
+        init = await client.post(
+            init_url,
+            headers=await signed("POST", init_url, None, {"content-type": "application/octet-stream"}),
+        )
+        if init.status_code != 200:
+            return f"S3 error: HTTP {init.status_code} starting a multipart upload"
+        upload_id = _s3_xml_text(init.content, "UploadId")
+        if not upload_id:
+            return "S3 error: the multipart upload started without an UploadId"
+        qid = quote(upload_id, safe="")
+
+        parts: list[tuple[int, str]] = []
+        offset = 0
+        number = 0
+        error = ""
+        while offset < size:
+            number += 1
+            chunk = await asyncio.to_thread(_read_chunk, local, offset, min(_S3_PART_SIZE, size - offset))
+            if not chunk:
+                error = f"S3 upload stopped: {local.name} shrank during the upload"
+                break
+            part_url = f"{url}?partNumber={number}&uploadId={qid}"
+            resp = await client.put(part_url, content=chunk, headers=await signed("PUT", part_url, chunk, {}))
+            etag = resp.headers.get("etag", "")
+            if resp.status_code != 200 or not etag:
+                error = f"S3 error: HTTP {resp.status_code} on part {number}"
+                break
+            parts.append((number, etag))
+            offset += len(chunk)
+
+        if not error:
+            body = (
+                "<CompleteMultipartUpload>"
+                + "".join(
+                    f"<Part><PartNumber>{n}</PartNumber><ETag>{html.escape(tag, quote=False)}</ETag></Part>"
+                    for n, tag in parts
+                )
+                + "</CompleteMultipartUpload>"
+            ).encode()
+            done_url = f"{url}?uploadId={qid}"
+            done = await client.post(
+                done_url, content=body,
+                headers=await signed("POST", done_url, body, {"content-type": "application/xml"}),
+            )
+            # S3 can answer 200 to a completion that failed, with an <Error>
+            # body: only a CompleteMultipartUploadResult is a stored object.
+            if done.status_code == 200 and _s3_xml_text(done.content, "ETag"):
+                return ""
+            error = f"S3 error: HTTP {done.status_code} completing the multipart upload"
+
+        abort_url = f"{url}?uploadId={qid}"
+        try:
+            abort = await client.delete(abort_url, headers=await signed("DELETE", abort_url, None, {}))
+            if abort.status_code not in (200, 204):
+                logger.warning("[cloud_sync] S3 abort of upload %s answered HTTP %s", upload_id, abort.status_code)
+        except httpx.HTTPError as exc:
+            logger.warning("[cloud_sync] S3 abort of upload %s failed: %s", upload_id, exc)
+        return error
 
     async def stat_file(self, remote_name: str) -> dict[str, Any]:
         """HEAD one uploaded object. Returns ``{ok, size, error}``.

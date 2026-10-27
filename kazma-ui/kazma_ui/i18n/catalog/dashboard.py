@@ -411,6 +411,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مرة واحدة",
         "en": "Once",
     },
+    "dashboard.hitl_patch_files.zero": {
+        "ar": "لا ملفات:",
+        "en": "{n} files:",
+    },
+    "dashboard.hitl_patch_files.one": {
+        "ar": "ملف واحد:",
+        "en": "1 file:",
+    },
+    "dashboard.hitl_patch_files.two": {
+        "ar": "ملفان:",
+        "en": "{n} files:",
+    },
+    "dashboard.hitl_patch_files.few": {
+        "ar": "{n} ملفات:",
+        "en": "{n} files:",
+    },
+    "dashboard.hitl_patch_files.many": {
+        "ar": "{n} ملفًا:",
+        "en": "{n} files:",
+    },
+    "dashboard.hitl_patch_files.other": {
+        "ar": "{n} ملف:",
+        "en": "{n} files:",
+    },
+    "dashboard.hitl_patch_preview": {
+        "ar": "معاينة التعديل",
+        "en": "Patch preview",
+    },
     "dashboard.hitl_running": {
         "ar": "تشغيل الأداة المعتمدة…",
         "en": "Running approved tool…",

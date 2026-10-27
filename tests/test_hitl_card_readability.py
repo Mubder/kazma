@@ -292,7 +292,9 @@ def test_a_timeout_is_not_reported_as_a_refusal():
 @pytest.mark.parametrize(
     "selector",
     [".hitl-approval-card", ".hitl-approval-header",
-     ".hitl-approval-actions", ".hitl-approval-args"],
+     ".hitl-approval-actions", ".hitl-approval-args",
+     # AUD-121: in kazma.css and kazma.v5.css both until 2026-10-27.
+     ".hitl-panel.has-pending"],
 )
 def test_each_hitl_rule_is_defined_once(selector):
     """Two competing blocks rendered the card as a hybrid of two designs.
