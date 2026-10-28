@@ -66,7 +66,13 @@ def format_operator_card(
     return "\n".join(lines)
 
 
+#: The source tags a finished card's first line carries. ``[X]`` is X's own
+#: notices (schedule outcomes, replies to review, threads), delivered by the
+#: X notice outbox (``x_api/notifications.py``).
+CARD_TAGS = ("[Guard]", "[Ops]", "[System]", "[X]")
+
+
 def is_operator_card(content: str) -> bool:
     """True when ``content`` is already a finished Kazma operator card."""
     first = (content or "").split("\n", 1)[0]
-    return any(tag in first for tag in ("[Guard]", "[Ops]", "[System]"))
+    return any(tag in first for tag in CARD_TAGS)

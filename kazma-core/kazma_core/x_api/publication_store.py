@@ -122,12 +122,15 @@ class _PublicationStore:
                          (row["id"], row["tenant_id"], time.time(), row["version"]))
 
         if row["origin"] == "schedule" and row["state"] in ("published", "outcome_unknown", "failed_permanent", "awaiting_approval", "expired"):
+            from kazma_core.observability.alert_card import format_operator_card
             from kazma_core.x_api.notifications import enqueue
 
             outcome = "Published" if row["state"] == "published" else ("Publication outcome unknown; verify on X before any resend" if row["state"] == "outcome_unknown" else "Publication held; review X Studio")
-            message = f"X schedule: {outcome}\nOperation: {row['id']}\n{row['reason']}"
+            severity = {"published": "success", "outcome_unknown": "error"}.get(row["state"], "warn")
+            body = f"Operation: {row['id']}\n{row['reason']}"
             if row["tweet_id"]:
-                message += f"\nhttps://x.com/i/web/status/{row['tweet_id']}"
+                body += f"\nhttps://x.com/i/web/status/{row['tweet_id']}"
+            message = format_operator_card("X", severity, f"X schedule: {outcome}", body)
             enqueue(conn, tenant=row["tenant_id"], key=f"operation:{row['id']}:{row['version']}", message=message)
 
     def notification_current(self, notice: dict[str, Any]) -> bool:

@@ -170,10 +170,13 @@ def _finish_thread(ident: str, *, owner: str) -> None:
         conn.execute("UPDATE x_threads SET state = ?, revision = revision + 1, token = ?, expires_at = ?, owner = '', lease_until = 0, updated_at = ? WHERE id = ?",
                      (state, secrets.token_hex(32), now + 86400, now, ident))
         _event(conn, ident, state, thread["actor"])
+        from kazma_core.observability.alert_card import format_operator_card
         from kazma_core.x_api.notifications import enqueue
 
         enqueue(conn, tenant=tenant, key=f"thread:{ident}:{thread['revision'] + 1}",
-                message=f"X thread {state}. Review ordered segment outcomes in X Studio. Thread: {ident}")
+                message=format_operator_card(
+                    "X", "success" if state == "published" else "warn", f"X thread {state}",
+                    f"Review ordered segment outcomes in X Studio. Thread: {ident}"))
 
 
 def cancel_thread(ident: str, *, revision: int, token: str, actor: str = "operator") -> dict[str, Any]:

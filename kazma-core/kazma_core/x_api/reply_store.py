@@ -404,14 +404,16 @@ class XReplyStore:
                     (*fields.values(), str(summon_id), x_tenant_id(), *allowed_statuses),
                 )
                 if cur.rowcount and fields.get("status") == STATUS_AWAITING:
+                    from kazma_core.observability.alert_card import format_operator_card
                     from kazma_core.x_api.notifications import enqueue
 
                     row = conn.execute("SELECT * FROM x_replies WHERE summon_id = ? AND tenant_id = ?", (str(summon_id), x_tenant_id())).fetchone()
                     rec = ReplyRecord(row)
-                    message = (f"X reply needs review — {rec.subject_id}\n"
-                               f"Source: https://x.com/i/web/status/{rec.parent_id}\n"
-                               f"{rec.reason}\n\n{rec.draft_text}\n\n"
-                               f"Approve this revision: /x approve {rec.summon_id} {rec.approval_token}")
+                    message = format_operator_card(
+                        "X", "info", f"X reply needs review — {rec.subject_id}",
+                        f"Source: https://x.com/i/web/status/{rec.parent_id}\n"
+                        f"{rec.reason}\n\n{rec.draft_text}\n\n"
+                        f"Approve this revision: /x approve {rec.summon_id} {rec.approval_token}")
                     enqueue(conn, tenant=row["tenant_id"], key=f"reply:{summon_id}:{rec.revision}", message=message)
                 conn.commit()
             finally:

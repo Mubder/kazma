@@ -131,7 +131,8 @@ async def _loop(poll_interval: float | None) -> None:
             raise
         except Exception as exc:
             errors += 1
-            await asyncio.to_thread(record_cycle, "mentions", success=False, interval=wait)
+            await asyncio.to_thread(record_cycle, "mentions", success=False, interval=wait,
+                                    error=_describe_failure(exc))
             logger.error("[x-mentions] poll error (%d consecutive): %s", errors,
                          _describe_failure(exc), exc_info=True)
             if errors >= _MAX_CONSECUTIVE_ERRORS:
