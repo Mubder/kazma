@@ -96,6 +96,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "سرب Temporal الدائم",
         "en": "Temporal durable swarm",
     },
+    "packages.extra.neo4j.desc": {
+        "ar": "مشغّل Neo4j، لحفظ رسم الذاكرة البياني في Neo4j (الإعدادات ← الذاكرة ← مخزن الرسم البياني). بدونه يبقى الرسم البياني في SQLite.",
+        "en": "The Neo4j driver, for keeping the memory graph in Neo4j (Settings → Memory → Graph store). Without it the graph stays in SQLite.",
+    },
+    "packages.extra.neo4j.title": {
+        "ar": "مخزن الرسم البياني Neo4j",
+        "en": "Neo4j graph store",
+    },
     "packages.extra.index.desc": {
         "ar": "قواعد tree-sitter لـ codebase_search. البحث بالتعبير النمطي يعمل بدون هذه الإضافة.",
         "en": "tree-sitter grammars for codebase_search. Regex fallback works without this extra.",

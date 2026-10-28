@@ -455,6 +455,17 @@ def register_system_routes(self: Any) -> None:
                 "packages": ["temporalio"],
                 "install_cmd": 'uv pip install -e ".[durable]"   # then set KAZMA_TEMPORAL_HOST',
             },
+            "neo4j": {
+                "title": _i18n("packages.extra.neo4j.title", "Neo4j graph store"),
+                "priority": 2,
+                "description": _i18n(
+                    "packages.extra.neo4j.desc",
+                    "The Neo4j driver, for keeping the memory graph in Neo4j "
+                    "(Settings → Memory → Graph store). Without it the graph stays in SQLite.",
+                ),
+                "packages": ["neo4j"],
+                "install_cmd": 'uv pip install -e ".[neo4j]"   # then Settings → Memory → Neo4j',
+            },
             "docling": {
                 "title": _i18n("packages.extra.docling.title", "Docling PDF salvage"),
                 "priority": 4,
@@ -618,21 +629,6 @@ def register_system_routes(self: Any) -> None:
             "kazma-tui": "Textual dashboard (`kazma-tui`)",
             "kazma-skills": "Native skills + manifests",
         }
-
-        # Surface neo4j driver if installed (not a pyproject extra — pip install neo4j)
-        try:
-            import importlib.util as _ilu
-
-            if _ilu.find_spec("neo4j") is not None:
-                EXTRA_GROUPS["neo4j"] = {
-                    "title": "Neo4j (graph dual-write)",
-                    "priority": 2,
-                    "description": "Official neo4j Python driver for optional belief graph dual-write.",
-                    "packages": ["neo4j"],
-                    "install_cmd": "pip install neo4j   # then Settings → Memory → Neo4j",
-                }
-        except Exception:
-            pass
 
         # Runtime DB backend badge for the Packages tab
         try:
