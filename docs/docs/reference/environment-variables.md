@@ -260,6 +260,12 @@ test server cannot start; its CI job sets it.
 | `KAZMA_AUTO_STORE_BELIEFS` | `conservative` | No | Which facts the memory extractor saves from a conversation without being asked: `off`, `conservative` (default) or `aggressive` (every extracted belief — the old behaviour). Wins over `memory.auto_store_beliefs`. |
 | `KAZMA_TRANSCRIPT_RECALL` | on | No | `0` stops searching past Web chat transcripts when memory recall comes back empty (ConfigStore `memory.transcript_fallback`; the env value wins). Transcript text reaches the model fenced as untrusted data. |
 
+Test-only, opt-in: `KAZMA_TEST_NEO4J_URL` with `KAZMA_TEST_NEO4J_USER`
+(default `neo4j`) and `KAZMA_TEST_NEO4J_PASSWORD` run
+`tests/test_neo4j_graph_cypher.py` against a real Neo4j server. Point it at a
+throwaway one: the tests write and delete nodes of their own test tenant
+only, never anything else, but a live graph is not the place to try.
+
 ---
 
 ## Web search, scrape & research
