@@ -8,13 +8,18 @@ behind (audit 2026-10-26 AUD-049, AUD-063).
 * AUD-063: Forget deleted the edge and kept both ends; a forgotten value is a
   node (``Entity.name`` = the value), so a codeword stayed in Neo4j.
 
-No Neo4j runs here: a fake driver records every statement, and the checks
-read those. The Cypher is unverified against a real Neo4j server.
+A fake driver records every statement, and most checks read those. The
+real-server tests at the end run the same calls against a Neo4j server when
+``KAZMA_TEST_NEO4J_URL`` names one (a throwaway server: they touch only nodes
+of their own test tenant), with the old statements as negative controls.
+First run 2026-10-28 on neo4j:5 with driver 6.2.0.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import uuid
 
 import pytest
 from kazma_core.memory import graph_backend
@@ -108,3 +113,85 @@ def test_graph_clear_takes_the_nodes_too(neo):
 def test_negative_control_the_old_delete_kept_the_value_node():
     old_by_id = "MATCH ()-[r]->() WHERE r.belief_id = $bid DELETE r"
     assert not _deletes_orphaned_ends(old_by_id)
+
+
+# ── the same calls on a real Neo4j server (opt-in) ─────────────────────────
+
+_REAL_URL = os.environ.get("KAZMA_TEST_NEO4J_URL", "").strip()
+
+
+@pytest.fixture()
+def real_neo():
+    if not _REAL_URL:
+        pytest.skip("KAZMA_TEST_NEO4J_URL is not set (a throwaway Neo4j server)")
+    pytest.importorskip("neo4j")
+    be = Neo4jGraphBackend(
+        url=_REAL_URL,
+        user=os.environ.get("KAZMA_TEST_NEO4J_USER", "neo4j"),
+        password=os.environ.get("KAZMA_TEST_NEO4J_PASSWORD", ""),
+    )
+    if not be.available:
+        pytest.fail(f"KAZMA_TEST_NEO4J_URL={_REAL_URL} is set but the server does not answer")
+    tenant = f"kazma-test-{uuid.uuid4().hex[:12]}"
+    yield be, tenant
+    _cypher(be, "MATCH (n:Entity {tenant_id: $tid}) DETACH DELETE n", tid=tenant)
+
+
+def _cypher(be, query: str, **params) -> list[dict]:
+    with be._get_driver().session() as session:
+        return [record.data() for record in session.run(query, **params)]
+
+
+def _names(be, tenant: str) -> list[str]:
+    rows = _cypher(be, "MATCH (n:Entity {tenant_id: $tid}) RETURN n.name AS n ORDER BY n", tid=tenant)
+    return [row["n"] for row in rows]
+
+
+def test_real_server_writes_an_edge_whose_predicate_starts_with_a_digit(real_neo):
+    be, tenant = real_neo
+    assert be.upsert_triple(subject="user", predicate="2fa_enabled", obj="true",
+                            belief_id=f"{tenant}-b1", tenant_id=tenant)
+    rows = _cypher(be, "MATCH (a:Entity {tenant_id: $tid})-[r]->(b) RETURN type(r) AS t, b.name AS b",
+                   tid=tenant)
+    assert rows == [{"t": "2FA_ENABLED", "b": "true"}]
+
+
+def test_real_server_negative_control_refuses_the_old_unquoted_type(real_neo):
+    from neo4j.exceptions import CypherSyntaxError
+
+    be, tenant = real_neo
+    with pytest.raises(CypherSyntaxError):
+        _cypher(be, "MERGE (a:Entity {name: 'user', tenant_id: $tid}) "
+                    "MERGE (b:Entity {name: 'true', tenant_id: $tid}) "
+                    "MERGE (a)-[r:2FA_ENABLED]->(b)", tid=tenant)
+
+
+@pytest.mark.parametrize("by_id", [True, False])
+def test_real_server_forget_takes_the_value_node_and_keeps_shared_ones(real_neo, by_id):
+    be, tenant = real_neo
+    assert be.upsert_triple(subject="user", predicate="noted", obj="BLUE-HERON-42",
+                            belief_id=f"{tenant}-code", tenant_id=tenant)
+    assert be.upsert_triple(subject="user", predicate="lives in", obj="Kuwait",
+                            belief_id=f"{tenant}-home", tenant_id=tenant)
+    kw = {"belief_id": f"{tenant}-code"} if by_id else {
+        "subject": "user", "predicate": "noted", "obj": "BLUE-HERON-42"}
+    assert be.delete_triple(tenant_id=tenant, **kw)
+    # The codeword is gone; "user" still has an edge, so it stays.
+    assert _names(be, tenant) == ["Kuwait", "user"]
+
+
+def test_real_server_negative_control_the_old_delete_kept_the_codeword(real_neo):
+    be, tenant = real_neo
+    assert be.upsert_triple(subject="user", predicate="noted", obj="BLUE-HERON-42",
+                            belief_id=f"{tenant}-code", tenant_id=tenant)
+    _cypher(be, "MATCH ()-[r]->() WHERE r.belief_id = $bid DELETE r", bid=f"{tenant}-code")
+    assert "BLUE-HERON-42" in _names(be, tenant)
+
+
+def test_real_server_graph_clear_leaves_no_node(real_neo):
+    be, tenant = real_neo
+    for i, obj in enumerate(("Kuwait", "BLUE-HERON-42")):
+        assert be.upsert_triple(subject="user", predicate=f"p{i}", obj=obj,
+                                belief_id=f"{tenant}-{i}", tenant_id=tenant)
+    assert be.clear_tenant_edges(tenant_id=tenant) == 2
+    assert _names(be, tenant) == []
