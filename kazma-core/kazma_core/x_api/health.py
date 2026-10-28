@@ -13,8 +13,34 @@ _lock = threading.Lock()
 _cycles: dict[str, dict[str, Any]] = {}
 
 
-def record_cycle(name: str, *, success: bool, interval: float) -> None:
-    """Run off-loop. Three consecutive failures alert once, recovery once."""
+#: What each loop is called in its notice.
+_LOOP_NAMES = {"mentions": "mentions polling", "scheduler": "post scheduler"}
+
+
+def _health_card(name: str, transition: str, failures: int, error: str) -> str:
+    """The [Ops] card for a loop that started failing or recovered.
+
+    It said "X mentions loop failed. Inspect X Studio health and the X
+    operations runbook." -- no heading, no severity, no cause; live
+    2026-10-28 the cause was X's API not answering.
+    """
+    from kazma_core.observability.alert_card import format_operator_card
+
+    what = _LOOP_NAMES[name]
+    if transition == "recovered":
+        return format_operator_card("Ops", "success", f"X {what} recovered", "It works again; no action needed.")
+    cause = f"Last error: {error[:300]}" if error else "The error is in Kazma's log."
+    return format_operator_card(
+        "Ops", "warn", f"X {what} is failing",
+        f"{failures} runs in a row failed. {cause}\n"
+        "Kazma keeps trying and sends one message when it recovers. Details: X Studio health.")
+
+
+def record_cycle(name: str, *, success: bool, interval: float, error: str = "") -> None:
+    """Run off-loop. Three consecutive failures alert once, recovery once.
+
+    ``error`` is the failed run's cause, one line; the failure notice names it.
+    """
     if name not in ("mentions", "scheduler"):
         raise ValueError("Unknown X loop.")
     now = time.time()
@@ -26,7 +52,8 @@ def record_cycle(name: str, *, success: bool, interval: float) -> None:
         _cycles[name] = {"last_cycle_at": now, "last_success_at": now if success else previous.get("last_success_at"),
                          "failures": failures, "incident": failures >= 3 or (incident and not success),
                          "last_monotonic": time.monotonic(), "interval": interval,
-                         "successful_cycles": previous.get("successful_cycles", 0) + int(success)}
+                         "successful_cycles": previous.get("successful_cycles", 0) + int(success),
+                         "last_error": "" if success else str(error or "")[:300]}
     if transition:
         from kazma_core.x_api.notifications import enqueue
         from kazma_core.x_api.publication_store import get_publication_store
@@ -34,7 +61,7 @@ def record_cycle(name: str, *, success: bool, interval: float) -> None:
         try:
             with get_publication_store()._connection(transaction=True) as conn:
                 enqueue(conn, tenant="default", key=f"health:{name}:{transition}:{now}",
-                        message=f"X {name} loop {transition}. Inspect X Studio health and the X operations runbook.")
+                        message=_health_card(name, transition, failures, error))
         except (sqlite3.Error, OSError, RuntimeError):
             logger.exception("X health incident notice could not be persisted")
 

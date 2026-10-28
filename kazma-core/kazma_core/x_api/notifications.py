@@ -27,9 +27,20 @@ CREATE TABLE IF NOT EXISTS x_notification_outbox (
 
 
 def enqueue(conn: sqlite3.Connection, *, tenant: str, key: str, message: str) -> None:
-    """Call within the same transaction that records the source transition."""
+    """Call within the same transaction that records the source transition.
+
+    ``message`` is a finished operator card (``alert_card.format_operator_card``):
+    the notices went out as bare text, so a chat showed "X mentions loop
+    failed..." with no ``[Ops]``/``[X]`` heading or severity beside every
+    other alert (2026-10-28). Plain text is refused here, so a new writer
+    cannot send one untagged.
+    """
+    from kazma_core.observability.alert_card import is_operator_card
+
     if not message or len(message) > 4000:
         raise ValueError("Notification exceeds the acknowledged transport boundary.")
+    if not is_operator_card(message):
+        raise ValueError("An X notice is an operator card: build it with format_operator_card.")
     conn.execute("INSERT OR IGNORE INTO x_notification_outbox "
                  "(tenant_id, event_key, message, created_at) VALUES (?, ?, ?, ?)",
                  (tenant, key, message, time.time()))

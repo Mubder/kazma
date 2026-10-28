@@ -79,9 +79,10 @@ async def _loop(poll_interval: float) -> None:
             await asyncio.to_thread(record_cycle, "scheduler", success=True, interval=poll_interval)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("[x-schedule] poll error (loop continues)")
-            await asyncio.to_thread(record_cycle, "scheduler", success=False, interval=poll_interval)
+            await asyncio.to_thread(record_cycle, "scheduler", success=False, interval=poll_interval,
+                                    error=f"{type(exc).__name__}: {exc}")
         await asyncio.sleep(poll_interval)
 
 
