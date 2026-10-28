@@ -24,7 +24,7 @@ _active_installations: set[str] = set()
 ALLOWED_EXTRAS: frozenset[str] = frozenset({
     "rag", "dev", "test", "tui", "observability", "web", "push", "postgres",
     "document", "ocr", "convert", "document-platform", "docling",
-    "index", "sandbox", "durable", "database", "all",
+    "index", "sandbox", "durable", "database", "neo4j", "all",
 })
 
 # Individual packages that may be installed without an extra name

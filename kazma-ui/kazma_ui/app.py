@@ -1887,6 +1887,12 @@ class KazmaAppBuilder:
 
             spawn_background(_aio.to_thread(probe_vector_backend), name="vector-store-probe")
 
+            # A graph store set to Neo4j with no driver installed sent every
+            # fact nowhere at DEBUG (2026-10-28). Say so once, at boot.
+            from kazma_core.memory.graph_backend import report_graph_driver
+
+            spawn_background(_aio.to_thread(report_graph_driver), name="graph-driver-check")
+
             # ── Does the environment hold what this build declares? ───
             # A deploy is a pull and a reload: nothing installs a package a
             # newer pyproject.toml raised. Say so at boot (WARNING + ops

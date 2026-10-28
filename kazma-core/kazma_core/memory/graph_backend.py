@@ -7,15 +7,63 @@ Neo4j receives dual-written triples for scale / neighbors and optional
 
 from __future__ import annotations
 
+import importlib.util
 import logging
+import threading
 from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+_driver_missing_lock = threading.Lock()
+_driver_missing_warned = False
+
+
+def _neo4j_driver_installed() -> bool:
+    """Whether the ``neo4j`` Python driver is installed (the ``neo4j`` extra)."""
+    return importlib.util.find_spec("neo4j") is not None
+
+
+def _warn_driver_missing() -> None:
+    """Say once per process that Neo4j is chosen and its driver is not there.
+
+    Without the driver every dual-write failed at DEBUG and the graph stayed
+    in SQLite with nothing above it to say why: the driver was in no extra,
+    so a fresh install set to Neo4j never had it (2026-10-28).
+    """
+    global _driver_missing_warned
+    with _driver_missing_lock:
+        if _driver_missing_warned:
+            return
+        _driver_missing_warned = True
+    from kazma_core.install_hint import extra_install_hint
+
+    logger.warning(
+        "[graph_backend] Neo4j is the memory graph store, but the neo4j driver is not "
+        "installed in Kazma's Python: no fact reaches Neo4j, and the graph is served "
+        "from SQLite until it is. Install it (%s), then restart Kazma.",
+        extra_install_hint("neo4j"),
+    )
+
+
+def report_graph_driver() -> bool:
+    """Boot check: True unless Neo4j is chosen and its driver is missing (warned once)."""
+    try:
+        from kazma_core.memory.backends import get_backends_cfg
+
+        g = get_backends_cfg().get("graph") or {}
+    except Exception:
+        logger.debug("[graph_backend] backends config unreadable at the driver check", exc_info=True)
+        return True
+    if str(g.get("provider") or "").lower() != "neo4j" or _neo4j_driver_installed():
+        return True
+    _warn_driver_missing()
+    return False
 
 __all__ = [
     "GraphBackend",
     "get_graph_backend",
     "graph_capability",
+    "report_graph_driver",
     "upsert_belief_edge",
     "delete_belief_edge",
     "clear_tenant_edges",
@@ -187,7 +235,10 @@ class Neo4jGraphBackend:
             return None
         try:
             from neo4j import GraphDatabase
-
+        except ImportError:
+            _warn_driver_missing()
+            return None
+        try:
             self._driver = GraphDatabase.driver(
                 self._url, auth=(self._user, self._password)
             )
@@ -482,6 +533,16 @@ def graph_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "status": "local",
             "detail": "Belief graph served from SQLite beliefs table",
         }
+    if provider == "neo4j" and url and not _neo4j_driver_installed():
+        return {
+            "provider": "neo4j",
+            "write_ready": False,
+            "status": "driver_missing",
+            "detail": (
+                "The neo4j Python driver is not installed: the graph is served from "
+                'SQLite. Install the neo4j extra (uv pip install -e ".[neo4j]") and restart.'
+            ),
+        }
     if provider == "neo4j" and url:
         return {
             "provider": "neo4j",
@@ -538,10 +599,11 @@ def get_graph_backend(conn: Any | None = None) -> Any:
                 _cached_backend = neo
                 _cached_key = cache_key
             return neo
-        logger.warning(
-            "[graph_backend] neo4j unavailable (url=%s) — falling back to sqlite",
-            url,
-        )
+        if _neo4j_driver_installed():  # a missing driver has said so already, once
+            logger.warning(
+                "[graph_backend] neo4j unavailable (url=%s) — falling back to sqlite",
+                url,
+            )
     be = SqliteGraphBackend(conn)
     if conn is None:
         _cached_backend = be
@@ -574,7 +636,7 @@ def test_neo4j_connection(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     except ImportError:
         return {
             "ok": False,
-            "error": "Python package missing: pip install neo4j  (in the same venv as Kazma)",
+            "error": 'The neo4j driver is not installed: uv pip install -e ".[neo4j]" in the Kazma folder, then restart',
             "latency_ms": 0,
             "hint": "Server Neo4j ≠ Python driver. Install both.",
         }

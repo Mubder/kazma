@@ -193,6 +193,11 @@ sandbox = [
 durable = [
     "temporalio>=1.34.0",
 ]
+# The memory graph in Neo4j (memory.backends.graph.provider = neo4j). Without
+# the driver the graph stays in SQLite and boot says so once.
+neo4j = [
+    "neo4j>=6.2.0",
+]
 # Database drivers beyond SQLite (database_client skill)
 database = [
     "sqlglot==30.22.0",
@@ -203,7 +208,7 @@ database = [
 # Convenience meta-extra — installs everything at once.
 # Usage: pip install -e ".[all]"  or  uv sync --all-extras
 all = [
-    "kazma[rag,dev,tui,observability,web,postgres,document,database,ocr,convert,document-platform,sandbox,durable,index,docling]",
+    "kazma[rag,dev,tui,observability,web,postgres,document,database,ocr,convert,document-platform,sandbox,durable,index,docling,neo4j]",
 ]
 
 [project.scripts]

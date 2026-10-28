@@ -95,9 +95,10 @@ _EXTRA_MARKERS: dict[str, tuple[str, ...]] = {
     "sandbox": ("e2b_code_interpreter",),
     "durable": ("temporalio",),
     "database": ("pymysql", "pymongo"),
+    "neo4j": ("neo4j",),
 }
 _KNOWN_EXTRAS: tuple[str, ...] = (
-    "rag", "postgres", "index", "sandbox", "durable", "docling",
+    "rag", "postgres", "index", "sandbox", "durable", "docling", "neo4j",
     "document", "ocr", "convert", "document-platform", "database",
     "tui", "observability", "web", "push", "dev", "test",
 )

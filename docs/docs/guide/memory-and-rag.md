@@ -309,9 +309,10 @@ Deep dive: [Knowledge Library](./knowledge-library.md).
 ### Operator setup
 
 1. Run Neo4j (e.g. `docker compose -f deploy/docker-compose.neo4j.yml up -d`).  
-2. Settings → Memory → Graph store **Neo4j**, URL `bolt://localhost:7687`, password, **Save**.  
-3. **Test Neo4j** (masked `***` passwords do not overwrite the vault secret).  
-4. **Sync beliefs → Neo4j**.  
+2. Install the driver in Kazma's Python: the `neo4j` extra (`uv pip install -e ".[neo4j]"`, or Settings → Packages). Without it the graph stays in SQLite, and Kazma says so once at boot and Settings shows `driver_missing`.  
+3. Settings → Memory → Graph store **Neo4j**, URL `bolt://localhost:7687`, password, **Save**.  
+4. **Test Neo4j** (masked `***` passwords do not overwrite the vault secret).  
+5. **Sync beliefs → Neo4j**.  
 
 ### Env install default (fail-open)
 
