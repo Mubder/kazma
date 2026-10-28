@@ -129,19 +129,53 @@ async def _loop(poll_interval: float | None) -> None:
             await asyncio.to_thread(record_cycle, "mentions", success=True, interval=wait)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             errors += 1
             await asyncio.to_thread(record_cycle, "mentions", success=False, interval=wait)
-            logger.exception("[x-mentions] poll error (%d consecutive)", errors)
+            logger.error("[x-mentions] poll error (%d consecutive): %s", errors,
+                         _describe_failure(exc), exc_info=True)
             if errors >= _MAX_CONSECUTIVE_ERRORS:
                 logger.error(
-                    "[x-mentions] %d consecutive failures — backing off %.0fs. "
-                    "Check the X tier (Free cannot read mentions) and the tokens.",
-                    errors, _BACKOFF_S,
+                    "[x-mentions] %d consecutive failures — backing off %.0fs. %s",
+                    errors, _BACKOFF_S, _failure_advice(exc),
                 )
                 wait = _BACKOFF_S
                 errors = 0
         await asyncio.sleep(wait)
+
+
+#: The statuses X answers when the account may not read mentions: the Free
+#: tier, a revoked or wrong token. Only these get the tier/token advice.
+_REFUSED_STATUSES = frozenset({401, 403})
+
+
+def _describe_failure(exc: BaseException) -> str:
+    """The poll failure in one line: X's own words and status, or the error."""
+    from kazma_core.x_api.client import XApiError
+
+    if isinstance(exc, XApiError):
+        text = str(exc) or "X API error"
+        return f"{text} (HTTP {exc.status})" if exc.status else text
+    return f"{type(exc).__name__}: {exc}"[:300]
+
+
+def _failure_advice(exc: BaseException) -> str:
+    """What to check after a run of failures, from the LAST failure's kind.
+
+    It always said "check the X tier and the tokens"; on 2026-10-28 the
+    failures were timeouts during a network outage, and that advice sent the
+    reader to the wrong place.
+    """
+    from kazma_core.x_api.client import XApiError
+
+    if isinstance(exc, XApiError) and exc.status in _REFUSED_STATUSES:
+        return (f"X refused the request (HTTP {exc.status}): check the X tier "
+                "(Free cannot read mentions) and the tokens.")
+    if isinstance(exc, XApiError) and exc.status == 429:
+        return "X is rate limiting (HTTP 429): the read quota or the poll interval."
+    if isinstance(exc, XApiError) and exc.status == 0:
+        return f"X could not be reached ({exc}): the network or X itself."
+    return f"Last error: {_describe_failure(exc)}"
 
 
 #: X ids are snowflakes: ``(id >> 22)`` is milliseconds since this epoch.
