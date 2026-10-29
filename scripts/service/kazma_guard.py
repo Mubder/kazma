@@ -654,6 +654,13 @@ class Notifier:
         self._flush_held()
         self._post(text)
 
+    def retry_lookup(self) -> None:
+        """Let the next page look the credentials up again whatever the
+        rate limit says: the guard calls it when Kazma becomes ready, which
+        proves the settings database answers."""
+        if not (self.token and self.chat):
+            self._looked_up_at = None
+
     def flush_held(self) -> None:
         """Send held pages once the credentials resolve (rate-limited)."""
         if self._held and self.configured:
@@ -2375,7 +2382,7 @@ class Guard:
             return False
         self._awaiting_recovery = ""
         title = "Kazma is healthy again"
-        detail = f"{reason} recovered."
+        detail = f"It answers again after: {reason}."
         return self._page("success", title, detail, fingerprint=f"recovered:{reason}")
 
     def _raise_own_priority(self) -> None:
@@ -2737,6 +2744,14 @@ class Guard:
                     _update_state(child_spawned=spawned_at)
 
                     if self._wait_ready(spawned_at):
+                        # A ready server reached its settings database, so a
+                        # lookup that failed while it started succeeds now:
+                        # ask at once, not when the rate limit next allows
+                        # (live 2026-10-29: Kazma ready at 11:19, the held
+                        # pages sent at 11:27). Held pages go before the
+                        # recovery card, in the order they happened.
+                        self.notify.retry_lookup()
+                        self.notify.flush_held()
                         if first:
                             # Safe to resolve now: the server is already
                             # running, so a slow vault import costs nothing

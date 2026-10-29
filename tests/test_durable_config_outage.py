@@ -87,8 +87,12 @@ def test_failed_boot_can_retry_durable_storage(monkeypatch, tmp_path):
     def unavailable():
         raise sqlite3.OperationalError("unable to open database file")
     monkeypatch.setattr(module, "ConfigStore", unavailable)
-    with pytest.raises(ConfigStoreUnavailableError):
+    with pytest.raises(ConfigStoreUnavailableError) as caught:
         module.get_config_store()
+    # Startup reads; it saves nothing (2026-10-29: a boot before Postgres was
+    # up paged "Settings save could not be confirmed").
+    assert "could not open its settings database" in str(caught.value)
+    assert "save" not in str(caught.value) and "save" in str(ConfigStoreUnavailableError())
     assert module.peek_config_store() is None
     monkeypatch.setattr(module, "ConfigStore", lambda: real(db_path=str(tmp_path / "settings.db")))
     store = module.get_config_store()

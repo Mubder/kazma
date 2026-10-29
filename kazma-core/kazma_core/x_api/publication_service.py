@@ -254,6 +254,138 @@ def _reconcile_receipts() -> int:
     return repaired
 
 
+#: The window of the account's posts a check reads around an unknown post's
+#: request: X stamps a post when it is made, after the request left.
+_CHECK_BEFORE_S = 120.0
+_CHECK_AFTER_S = 900.0
+#: X shows the account's latest posts a few seconds late, so a check waits
+#: this long after the request.
+_CHECK_SETTLE_S = 60.0
+_SNOWFLAKE_EPOCH_MS = 1288834974657
+
+
+def _post_text(post: dict[str, Any]) -> str:
+    """A post's text as it was written: the long-form text when there is
+    one, every t.co link back to the address written, entities unescaped,
+    whitespace runs as one space."""
+    import html
+
+    note = post.get("note_tweet") if isinstance(post.get("note_tweet"), dict) else {}
+    source = note if note.get("text") else post
+    text = str(source.get("text") or "")
+    for url in ((source.get("entities") or {}).get("urls") or []):
+        if isinstance(url, dict) and url.get("url") and url.get("expanded_url"):
+            text = text.replace(str(url["url"]), str(url["expanded_url"]))
+    return " ".join(html.unescape(text).split())
+
+
+def _same_post(post: dict[str, Any], row: dict[str, Any]) -> bool:
+    """The post X shows is the operation's: the same words and, for a
+    reply, the same parent. X starts a reply with the parent's handles."""
+    import re
+
+    want = " ".join(str(row["text"]).split())
+    if row["reply_to_id"]:
+        parents = {str(ref.get("id")) for ref in post.get("referenced_tweets") or []
+                   if isinstance(ref, dict) and ref.get("type") == "replied_to"}
+        if row["reply_to_id"] not in parents:
+            return False
+    got = _post_text(post)
+    return got == want or (bool(row["reply_to_id"]) and re.sub(r"^(?:@\w+\s+)+", "", got) == want)
+
+
+def _post_time(tweet_id: str) -> float:
+    """When X made a post, from its id."""
+    return ((int(tweet_id) >> 22) + _SNOWFLAKE_EPOCH_MS) / 1000.0
+
+
+def _utc(epoch: float) -> str:
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _deleted_nearby(store: Any, tenant: str, row: dict[str, Any], start: float, end: float) -> str:
+    """A post of this account made in the window that Kazma deleted: the
+    likely answer when the post is gone, said as a likelihood (its text is
+    not on X to compare)."""
+    for state in ("published", "outcome_unknown"):
+        for other in store.list_operations(tenant_id=tenant, state=state, limit=500):
+            target = str(other["reply_to_id"] or "")
+            if (other["kind"] == "delete" and other["account_id"] == row["account_id"]
+                    and target.isdigit() and start <= _post_time(target) <= end):
+                done = "deleted" if state == "published" else "asked X to delete"
+                lag = _post_time(target) - float(row["sent_at"] or row["created_at"])
+                return (f" Kazma {done} post {target}, made {lag:.0f} s after this request: "
+                        "most likely this one.")
+    return ""
+
+
+async def check_on_x(ident: str, *, expected_version: int | None = None) -> dict[str, Any]:
+    """Ask X what became of an operation whose answer was lost, and settle it.
+
+    A post or delete whose answer never came back stays ``outcome_unknown``
+    (it is never sent again, §29C), and only a recorded X answer could settle
+    it -- a timeout leaves none, so it stayed unknown for good and its text
+    could never be posted again (live 2026-10-28: a metrics post X published
+    3 s after the request, then its delete, both unknown). Two reads settle
+    it: a delete by looking the post up (gone: done; still there: it may be
+    sent again), a post by reading the account's posts around the request
+    (there: published, with its id; not there: ``not_on_x``). Anything X does
+    not answer plainly leaves the operation as it is.
+    """
+    tenant = await asyncio.to_thread(x_tenant_id)
+    store = await asyncio.to_thread(get_publication_store)
+    row = await asyncio.to_thread(store.get, ident, tenant_id=tenant)
+    if row is None:
+        return {"ok": False, "code": "not_found", "error": "No such X operation."}
+    if row["state"] != "outcome_unknown":
+        return {"ok": False, "code": "not_unknown", "state": row["state"],
+                "error": "This operation's outcome is already known."}
+    if expected_version is not None and int(row["version"]) != int(expected_version):
+        return {"ok": False, "code": "conflict", "error": "The operation changed. Refresh and check again."}
+    sent = float(row["sent_at"] or row["created_at"])
+    if time.time() - sent < _CHECK_SETTLE_S:
+        return {"ok": False, "code": "too_soon", "error": "X shows new posts a little late. Check again in a minute."}
+    cfg = await asyncio.to_thread(_config)
+    if not cfg.account_id or cfg.account_id != row["account_id"]:
+        return {"ok": False, "code": "account_changed",
+                "error": "Kazma is connected to another X account now. Check this one on X itself."}
+    client = _client(cfg)
+    checked = _utc(time.time())
+    try:
+        if row["kind"] == "delete":
+            target = str(row["reply_to_id"])
+            found = await client.lookup_post(target) is None
+            tweet_id, at = target, None
+            reason = (f"Checked on X {checked}: the post is gone." if found else
+                      f"Checked on X {checked}: the post is still there; the delete did not take effect. Delete it again.")
+        else:
+            start, end = sent - _CHECK_BEFORE_S, sent + _CHECK_AFTER_S
+            posts = await client.own_posts(cfg.account_id, start=start, end=end)
+            matches = [post for post in posts if _same_post(post, row)]
+            if len(matches) > 1:
+                return {"ok": False, "code": "ambiguous",
+                        "error": f"X shows {len(matches)} posts with this text then. Check on X which one is this."}
+            found = bool(matches)
+            tweet_id = str(matches[0].get("id") or "") if found else ""
+            at = _post_time(tweet_id) if found and tweet_id.isdigit() else None
+            reason = (f"Checked on X {checked}: published." if found else
+                      f"Checked on X {checked}: not among this account's posts from {_utc(start)} to {_utc(end)}. "
+                      "It never went out, or it was deleted since."
+                      + await asyncio.to_thread(_deleted_nearby, store, tenant, row, start, end))
+    except XApiError as exc:
+        return {"ok": False, "code": "x_error", "error": f"X did not answer the check: {exc}"}
+    settled = await asyncio.to_thread(store.settle_checked, ident, tenant_id=tenant, expected_version=int(row["version"]),
+                                      found=found, tweet_id=tweet_id, at=at, reason=reason)
+    if not settled:
+        return {"ok": False, "code": "conflict", "error": "The operation changed while it was checked. Refresh."}
+    logger.info("[x-publication] checked %s on X: %s", ident, "found" if found else "not found")
+    repair = await asyncio.to_thread(_project_pending)
+    _, result = _result(await asyncio.to_thread(store.get, ident, tenant_id=tenant), repair_needed=bool(repair["failed"]))
+    return {**result, "ok": True, "found": found, "reason": reason}
+
+
 async def _send(client: Any, row: dict[str, Any]) -> str:
     if row["origin"] == "thread":
         from kazma_core.x_api.threads import thread_dispatch_allowed
@@ -444,8 +576,16 @@ async def delete(*, tweet_id: str, idempotency_key: str = "") -> tuple[bool, dic
         return False, {"deleted": False, "outcome": "not_sent", "error": decision.reason}
     try:
         cfg = await _verified_config(cfg)
-        row = await asyncio.to_thread(_reserve, cfg, text="", reply_to_id=tid, due_at=time.time(),
-            idempotency_key=idempotency_key or "delete:" + tid, kind="delete", origin="delete")
+        key = idempotency_key or "delete:" + tid
+        for revision in range(2, 12):
+            row = await asyncio.to_thread(_reserve, cfg, text="", reply_to_id=tid, due_at=time.time(),
+                idempotency_key=key, kind="delete", origin="delete")
+            # A delete that ended unsent (refused, or checked on X and still
+            # there) is asked again under a new key revision, as a booking
+            # is: the fixed key replayed the ended one for good.
+            if idempotency_key or not row.get("_replayed") or row["state"] not in _REBOOKABLE_STATES:
+                break
+            key = f"delete:{tid}:r{revision}"
     except (PublicationPolicyError, PublicationConflictError, XApiError, ValueError) as exc:
         return False, {"deleted": False, "outcome": "not_sent", "error": str(exc)}
     return await _dispatch_operation(row["id"], cfg=cfg)

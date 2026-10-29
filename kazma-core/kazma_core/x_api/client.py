@@ -435,6 +435,55 @@ class XClient:
             if isinstance(post, dict) and post.get("id")
         }
 
+    async def lookup_post(self, tweet_id: str) -> dict[str, Any] | None:
+        """``GET /2/tweets?ids=`` for ONE post: the post, or None when X says
+        it does not exist (deleted, or never was). Any other answer -- a post
+        withheld or not visible to this account -- raises, because it says
+        nothing about whether the post is there. Used to settle a delete whose
+        answer was lost (``publication_service.check_on_x``)."""
+        tid = str(tweet_id).strip()
+        if not tid.isascii() or not tid.isdigit():
+            raise XApiError("tweet_id must be a numeric X identifier.", outcome="not_sent")
+        data = await self._request(
+            "GET", f"/2/tweets?ids={tid}&tweet.fields=author_id,created_at",
+            audit_action="check_post", audit_tweet_id=tid,
+        )
+        for post in data.get("data") or []:
+            if isinstance(post, dict) and str(post.get("id")) == tid:
+                return post
+        for error in data.get("errors") or []:
+            if (isinstance(error, dict) and str(error.get("value") or error.get("resource_id") or "") == tid
+                    and str(error.get("type") or "").endswith("/resource-not-found")):
+                return None
+        raise XApiError("X did not say whether the post exists.", outcome="unknown")
+
+    async def own_posts(self, user_id: str, *, start: float, end: float) -> list[dict[str, Any]]:
+        """``GET /2/users/:id/tweets`` between two times: every post the
+        account published then that X still shows (replies included), up to
+        three pages of 100. Used to settle a post whose answer was lost."""
+        from datetime import datetime, timezone
+        from urllib.parse import quote
+
+        def _rfc3339(epoch: float) -> str:
+            return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # X refuses an end_time less than 10 s before the request.
+        end = min(end, time.time() - 15)
+        base = (f"/2/users/{str(user_id).strip()}/tweets?max_results=100"
+                f"&start_time={quote(_rfc3339(start), safe='')}&end_time={quote(_rfc3339(end), safe='')}"
+                "&tweet.fields=created_at,text,note_tweet,entities,referenced_tweets")
+        posts: list[dict[str, Any]] = []
+        token = ""
+        for _ in range(3):
+            path = base + (f"&pagination_token={quote(token, safe='')}" if token else "")
+            data = await self._read_context(path, action="check_own_posts")
+            page = data.get("data")
+            posts.extend(self._canonical_post(p) for p in (page if isinstance(page, list) else []))
+            token = str((data.get("meta") or {}).get("next_token") or "")
+            if not token:
+                return posts
+        raise XApiError("More posts than one check reads in that window; check on X.", outcome="unknown")
+
     async def get_media(self, tweet_id: str) -> list[dict[str, Any]]:
         """``GET /2/tweets/:id`` with its media expanded -- each attached
         photo, video or GIF (``type``, ``url``, ``variants``, ``duration_ms``),

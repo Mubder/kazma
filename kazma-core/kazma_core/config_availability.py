@@ -12,14 +12,20 @@ from kazma_core.db.backend import get_backend
 class ConfigStoreUnavailableError(RuntimeError):
     """No settings write was acknowledged; retry after storage recovers."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, opening: bool = False) -> None:
         self.backend = str(get_backend())
         hint = (
             "Check PostgreSQL connectivity and credentials."
             if self.backend == "postgres"
             else "Check settings.db permissions, disk space and locks."
         )
-        super().__init__(f"Settings save could not be confirmed in durable storage ({self.backend}). {hint} Reload and review before retrying.")
+        if opening:
+            # Startup reads settings; it saves nothing. The save wording made
+            # a boot before Postgres was up read as a lost save (2026-10-29).
+            super().__init__(f"Kazma could not open its settings database ({self.backend}); "
+                             f"it may still be starting. {hint}")
+        else:
+            super().__init__(f"Settings save could not be confirmed in durable storage ({self.backend}). {hint} Reload and review before retrying.")
 
 
 def _storage_unavailable(exc: Exception) -> bool:

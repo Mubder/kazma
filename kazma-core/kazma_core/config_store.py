@@ -2769,7 +2769,7 @@ def get_config_store() -> ConfigStore:
                         if attempt < attempts - 1:
                             time.sleep(_INIT_RETRY_BACKOFF_S)
                 if last_exc is not None:
-                    error = ConfigStoreUnavailableError()
+                    error = ConfigStoreUnavailableError(opening=True)
                     logger.critical("ConfigStore initialization failed: %s", error)
                     # Leave the singleton unset. The guard's next boot, or
                     # a later caller, can recover against the real database.
