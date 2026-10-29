@@ -355,7 +355,7 @@
         <div class="xs-row">
           <div class="xs-body">
             <div class="txt" :dir="textDir(operation.text)" x-text="operation.text"></div>
-            <span x-text="t('x_studio.status_' + operation.state)"></span>
+            <span x-text="operation.outcome === 'not_on_x' ? t('x_studio.status_not_on_x') : t('x_studio.status_' + operation.state)"></span>
             <span translate="no" :dir="textDir(operation.reason)" x-text="operation.reason"></span>
             <a x-show="operation.tweet_id" :href="'https://x.com/i/web/status/' + operation.tweet_id" target="_blank" rel="noopener noreferrer" x-cloak>X</a>
           </div>
