@@ -59,6 +59,21 @@ def _bounded_response(resp: httpx.Response, limit: int = _MAX_RESPONSE_BYTES) ->
     return payload, text, truncated
 
 
+def _timeout_message(method: str, *, unsent: bool, timeout: float) -> str:
+    """Say what a timeout means for THIS request (2026-10-29).
+
+    Every timeout carried one write-guard sentence, so the mentions poller's
+    reads paged it, and a post X had published 3 s after the
+    request read the same as one that never left.
+    """
+    if method.upper() == "GET":
+        return f"X API timed out (no answer in {timeout:.0f} s)."
+    if unsent:
+        return "X API could not be reached in time; nothing was sent."
+    return (f"X API timed out after the request was sent (no answer in {timeout:.0f} s); "
+            "it may have taken effect. Verify on X before any resend.")
+
+
 def _default_audit_action(method: str, path: str) -> str:
     """Human-readable action label derived from the endpoint."""
     if method == "POST" and path.startswith("/2/tweets"):
@@ -199,7 +214,7 @@ class XClient:
             )
             unsent = isinstance(exc, (httpx.ConnectTimeout, httpx.PoolTimeout))
             raise XApiError(
-                "X API timed out. Did not retry (avoids double-post).",
+                _timeout_message(method, unsent=unsent, timeout=timeout),
                 transient=True, outcome="not_sent" if unsent else "unknown",
             ) from exc
         except httpx.HTTPError as exc:
