@@ -404,7 +404,8 @@ def test_an_error_in_the_guard_is_logged_and_the_same_child_supervised_again(
     monkeypatch.setattr(guard, "spawn", lambda *a: spawned.append(1) or _Child())
     g._foreign_server_present = lambda: False
     g._wait_ready = lambda spawned_at: True
-    g.notify = SimpleNamespace(describe=lambda: "test", send=lambda text: None)
+    g.notify = SimpleNamespace(describe=lambda: "test", send=lambda text: None,
+                               retry_lookup=lambda: None, flush_held=lambda: None)
     g._page = lambda severity, title, *a, **k: pages.append(title)
     g._sleep = lambda *a, **k: False
     calls = []

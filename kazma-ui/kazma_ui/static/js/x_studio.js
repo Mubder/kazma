@@ -38,6 +38,7 @@ function xStudioPage() {
     operationQuery: '',
     selectedOperation: null,
     operationError: '',
+    checkBusy: '',
     deleteBusy: '',
     threadSegments: ['', ''],
     threads: [],
@@ -430,6 +431,27 @@ function xStudioPage() {
       const url = '/api/x/operations?query=' + encodeURIComponent(this.operationQuery) + (more && this.operationsNext ? '&cursor=' + encodeURIComponent(this.operationsNext) : '');
       const data = await this._readSection('operations', url, 'operations', null, !!more);
       if (data) this.operationsNext = data.next_cursor || '';
+    },
+
+    // Ask X what became of an operation whose answer was lost; the server
+    // settles it from what X shows (publication_service.check_on_x).
+    async checkOnX(operation) {
+      if (this.checkBusy) return;
+      this.checkBusy = operation.id;
+      this.operationError = '';
+      try {
+        const resp = await this._mutating('POST', '/api/x/operations/' + encodeURIComponent(operation.id) + '/check',
+                                          { expected_version: operation.version });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          window.showToast(this.t('x_studio.check_done'), 'success');
+          await this.loadOperations();
+        } else {
+          this.operationError = data.error || this.t('common.request_failed');
+        }
+      } catch (e) {
+        this.operationError = String(e.message || e);
+      } finally { this.checkBusy = ''; }
     },
 
     async inspectOperation(operation) {

@@ -400,6 +400,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "x_studio.verify_unknown": {"en": "Publication may have reached X. Verify the result before any new send.", "ar": "قد يكون المنشور قد وصل إلى X. تحقق من النتيجة قبل أي إرسال جديد."},
     "x_studio.load_more": {"en": "Load more", "ar": "تحميل المزيد"},
     "x_studio.history": {"en": "Decision history", "ar": "سجل القرارات"},
+    "x_studio.check_on_x": {"en": "Check on X", "ar": "تحقّق في إكس"},
+    "x_studio.check_done": {"en": "Checked on X. The record is updated; its line says what X showed.", "ar": "تم التحقق في إكس. حُدّث السجل، ويذكر سطره ما أظهرته إكس."},
     "x_studio.no_history": {"en": "No earlier decisions.", "ar": "لا توجد قرارات سابقة."},
     "x_studio.attempt": {"en": "Attempt {number}", "ar": "المحاولة {number}"},
     "x_studio.model_budget": {"en": "Model calls: {used}/{limit} · UTC day", "ar": "استدعاءات النموذج: {used}/{limit} · يوم UTC"},

@@ -276,6 +276,22 @@ def x_operation(operation_id: str) -> JSONResponse:
                          "events": store.events(operation_id, tenant_id=_tenant_id())})
 
 
+class _XCheckBody(BaseModel):
+    expected_version: int = Field(..., ge=1, strict=True)
+
+
+@protected_router.post("/operations/{operation_id}/check", dependencies=[Depends(_verify_same_origin)])
+async def x_operation_check(operation_id: str, body: _XCheckBody) -> JSONResponse:
+    """Ask X what became of an operation whose outcome is unknown, and settle it.
+    An unexpected error is the app's catch-all's (logged, a safe 500)."""
+    from kazma_core.x_api.publication_service import check_on_x
+
+    result = await check_on_x(operation_id, expected_version=body.expected_version)
+    status = 200 if result.get("ok") else {"not_found": 404, "conflict": 409, "not_unknown": 409,
+                                           "x_error": 502}.get(str(result.get("code")), 422)
+    return JSONResponse(result, status_code=status)
+
+
 @router.post("/preview")
 async def x_preview(body: XPreviewBody) -> JSONResponse:
     """Dry-run ToU policy for the composer. No network, no ledger write."""

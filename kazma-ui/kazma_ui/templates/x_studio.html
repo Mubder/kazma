@@ -359,7 +359,10 @@
             <span translate="no" :dir="textDir(operation.reason)" x-text="operation.reason"></span>
             <a x-show="operation.tweet_id" :href="'https://x.com/i/web/status/' + operation.tweet_id" target="_blank" rel="noopener noreferrer" x-cloak>X</a>
           </div>
-          <button class="btn btn-secondary btn-sm" @click="inspectOperation(operation)">{{ t('x_studio.history') }}</button>
+          <div class="acts">
+            <button class="btn btn-primary btn-sm" x-show="operation.state === 'outcome_unknown'" :disabled="!!checkBusy" @click="checkOnX(operation)" x-cloak>{{ t('x_studio.check_on_x') }}</button>
+            <button class="btn btn-secondary btn-sm" @click="inspectOperation(operation)">{{ t('x_studio.history') }}</button>
+          </div>
         </div>
       </template>
       <button class="btn btn-secondary btn-sm" x-show="operationsNext" :disabled="loadStates.operations && loadStates.operations.loading" @click="loadOperations(true)" x-cloak>{{ t('x_studio.load_more') }}</button>

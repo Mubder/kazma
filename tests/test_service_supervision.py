@@ -1255,6 +1255,35 @@ def test_held_pages_go_before_the_next_page(monkeypatch, tmp_path):
     assert [s.split("\n")[-1] for s in sent] == ["first", "second"]
 
 
+def test_kazma_ready_sends_the_held_pages_at_once(monkeypatch, tmp_path):
+    """2026-10-29, after four Windows Update reboots: Kazma was ready at
+    11:19 UTC, and so was its settings database, but the held pages went
+    out at 11:27, when the 10-minute lookup limit next allowed. A ready
+    server proves the database answers: the guard looks again then."""
+    _clear_notifier_env(monkeypatch)
+    answers = [("", ""), ("tok", "chat")]
+    monkeypatch.setattr(guard.Notifier, "_from_config_store", lambda self: answers.pop(0))
+    sent = _capture_posts(monkeypatch)
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    n.send("Kazma stopped: never became healthy")
+    n.flush_held()
+    assert sent == [], "negative control: inside the rate limit nothing is looked up again"
+    n.retry_lookup()
+    n.flush_held()
+    assert len(sent) == 1 and sent[0].startswith("⏳ Delayed")
+
+
+def test_the_guard_retries_the_lookup_before_the_recovery_card():
+    """In the run loop, a ready child is followed by the lookup retry and
+    the held pages, then the recovery card -- so the pages arrive in order."""
+    import inspect
+
+    source = inspect.getsource(guard.Guard.run)
+    ready = source.index("if self._wait_ready(spawned_at):")
+    retry, flush = source.index("self.notify.retry_lookup()", ready), source.index("self.notify.flush_held()", ready)
+    assert ready < retry < flush < source.index("self.notify_recovered()", ready)
+
+
 def test_the_hold_is_bounded(monkeypatch, tmp_path):
     _clear_notifier_env(monkeypatch)
     monkeypatch.setattr(guard.Notifier, "_from_config_store", lambda self: ("", ""))

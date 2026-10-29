@@ -353,6 +353,41 @@ class _PublicationStore:
                              (confirmed_at, tenant_id, row["account_id"], tweet_id))
             return True
 
+    def settle_checked(self, ident: str, *, tenant_id: str, expected_version: int, found: bool,
+                       tweet_id: str = "", at: float | None = None, reason: str = "") -> bool:
+        """Settle an unknown operation from what X showed when asked
+        (``publication_service.check_on_x``): ``found`` -- the post is on X,
+        or the deleted post is gone -- is published under ``tweet_id``; not
+        found is ``failed_permanent`` (``not_on_x`` for a post, ``not_sent``
+        for a delete X still shows, which may be sent again)."""
+        if found and (not tweet_id.isascii() or not tweet_id.isdigit()):
+            raise ValueError("A settled operation needs a valid X identifier.")
+        now = time.time()
+        when = at if at is not None and math.isfinite(at) else now
+        with self._connection(transaction=True) as conn:
+            row = conn.execute("SELECT * FROM x_operations WHERE id = ? AND tenant_id = ? AND version = ? AND state = 'outcome_unknown'",
+                               (ident, tenant_id, expected_version)).fetchone()
+            if row is None:
+                return False
+            if found:
+                conn.execute("UPDATE x_operations SET state = 'published', outcome = 'confirmed', tweet_id = ?, published_at = ?, "
+                             "updated_at = ?, version = version + 1, lease_until = NULL, reason = ? WHERE id = ?",
+                             (tweet_id, when, now, reason[:500], ident))
+            else:
+                outcome = "not_sent" if row["kind"] == "delete" else "not_on_x"
+                conn.execute("UPDATE x_operations SET state = 'failed_permanent', outcome = ?, updated_at = ?, "
+                             "version = version + 1, lease_until = NULL, reason = ? WHERE id = ?",
+                             (outcome, now, reason[:500], ident))
+            updated = conn.execute("SELECT * FROM x_operations WHERE id = ?", (ident,)).fetchone()
+            self._event(conn, updated, {"action": "checked_on_x", "found": found})
+            conn.execute("INSERT INTO x_projection_outbox (operation_id, tenant_id, created_at, operation_version) VALUES (?, ?, ?, ?) "
+                         "ON CONFLICT(operation_id) DO UPDATE SET operation_version = excluded.operation_version, done_at = NULL, last_error = ''",
+                         (ident, tenant_id, now, updated["version"]))
+            if found and row["kind"] == "delete":
+                conn.execute("UPDATE x_operations SET deleted_at = ? WHERE tenant_id = ? AND account_id = ? AND kind = 'post' AND tweet_id = ?",
+                             (when, tenant_id, row["account_id"], tweet_id))
+            return True
+
     def operation_tenants(self) -> list[str]:
         """Every tenant holding an operation (the run supervisor's read,
         which runs with no request tenant, like the other background work)."""
