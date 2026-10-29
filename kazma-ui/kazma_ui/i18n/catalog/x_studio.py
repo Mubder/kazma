@@ -59,6 +59,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "x_studio.status_partial": {"en": "Stopped with posts remaining", "ar": "توقف مع بقاء منشورات"},
     "x_studio.status_claimed": {"en": "Preparing to send", "ar": "جارٍ التحضير للإرسال"},
     "x_studio.status_deferred": {"en": "Deferred", "ar": "مؤجل"},
+    "x_studio.status_not_on_x": {"en": "Not on X — checked", "ar": "غير موجود في إكس — تم التحقق"},
     "x_studio.status_failed_permanent": {"en": "Send failed — review required", "ar": "فشل الإرسال — تلزم المراجعة"},
     "x_studio.status_cancelled": {"en": "Cancelled", "ar": "أُلغي"},
     "x_studio.status_expired": {"en": "Expired — review required", "ar": "انتهت الصلاحية — تلزم المراجعة"},
