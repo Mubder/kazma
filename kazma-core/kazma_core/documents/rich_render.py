@@ -841,6 +841,15 @@ def pdf_flowables_from_body(
         data = [[cell(h) for h in headers]]
         for row in rows:
             data.append([cell(c) for c in row])
+        # A cell the house face cannot draw all of becomes a paragraph that
+        # draws the rest in a face that has it (the engine's Paragraph carries
+        # its glyph fallback; a plain cell string cannot change face).
+        fallback = getattr(Paragraph, "glyph_fallback", None)
+        if fallback is not None:
+            data = [[fallback.cell(
+                str(c), Paragraph=Paragraph, font_name=bold_font_name if r == 0 else font_name,
+                size=10.0, color=colors.HexColor("#16223a") if r == 0 else None, bold=r == 0,
+            ) for c in row] for r, row in enumerate(data)]
         tbl = Table(data, repeatRows=1)
         tbl.setStyle(
             TableStyle(

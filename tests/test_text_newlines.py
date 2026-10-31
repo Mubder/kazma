@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from kazma_core.agent.tool_builtins import filesystem
+from tests._tool_answer import answer
 from kazma_core.ide.workspace_scope import workspace_path_scope
 from kazma_core.tools.text_newlines import (
     existing_newline,
@@ -160,12 +161,12 @@ async def test_a_rollback_restores_the_exact_bytes(ws, nl):
     p.write_bytes(original)
     q.write_bytes(_bytes("bee\n", nl))
     async with workspace_path_scope(ws):
-        out = await file_apply_patch_set(
+        out = await answer(file_apply_patch_set(
             [
                 {"path": "a.py", "old_string": "keep", "new_string": "CHANGED"},
                 {"path": "b.py", "old_string": "not there", "new_string": "x"},
             ],
             verify=False,
-        )
-    assert "restored checkpoint" in out, out
+        ))
+    assert "No file was changed" in out, out
     assert p.read_bytes() == original

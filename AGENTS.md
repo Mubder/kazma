@@ -3511,6 +3511,20 @@ in another face. A file that cannot take them is still written (WARNING).
 Gate: `tests/test_docx_embeds_house_fonts.py` (Word 16's own encoding as a
 fixture; the engine without the step as the negative control).
 
+**A ReportLab PDF draws every letter, and bold is bold** (2026-10-31,
+`documents/glyph_fallback.py`). The house face has no Latin Extended-A or
+Additional (ā ḥ ṣ ẓ ḍ ṭ ʿ ʾ: every scholarly transliteration of Arabic), and
+ReportLab draws a letter its face lacks blank: live, a Kuwait history paper
+read "Kāẓima" as "K ima" and the agent stripped the transliteration from its
+own paper. `GlyphFallback` wraps each such run in a face whose cmap has it (a
+wide-Latin sans the machine has, else the bundled Amiri), in every paragraph
+(`paragraph_class`), table cell (`cell`) and contents entry; ReportLab's
+`<font>` resets bold, so a run inside `<b>` names the bold face. The house
+face is registered as a family (`addMapping`, italic mappings first): inline
+`**bold**` came out regular in every ReportLab PDF before. Gate:
+`tests/test_pdf_glyph_fallback.py` (the markup without the fallback and the
+font without the family as negative controls).
+
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
 in HTML) so a heading is never the last thing on a page. Paragraph widows and
@@ -5597,8 +5611,12 @@ missed) -- and on a
 `raise RefusedBeforeEffect` that the tool's own `except Exception` would turn
 back into a returned error (pass it through with `except RefusedBeforeEffect:
 raise`). An error returned from a handler (the action raised) stays uncertain;
-one known to come after the action (`send_file`'s "was not sent", the patch
-set's restored hunk) is marked `effect_unknown(...)`. A typed refusal raised
+one known to come after the action (`send_file`'s "was not sent") is marked
+`effect_unknown(...)`. A patch set whose failed hunk was rolled back checks
+it: every file hashed as it was before the set is a `KnownEffectError` ("No
+file was changed"); only a file the restore did not bring back stays unknown
+(2026-10-31: one letter of 19 replace-all patches did not occur, the
+checkpoint put the paper back, and the turn failed "effects unknown"). A typed refusal raised
 from inside an action counts too: the browser's launch refusal is
 `web_acquire.result.BrowserLaunchRefused` (an `AcquisitionError`, rebuilt
 whole by Playwright's `type(error)(message)`). A test that calls a tool

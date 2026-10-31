@@ -14,12 +14,13 @@ Two input shapes (one required):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 
 from kazma_core.tools.text_newlines import in_newline_style, newline_of, read_exact
 from kazma_core.workspace.binding import resolve_tool_path
 from kazma_core.workspace.path_policy import check_path_access, denied_message
-from kazma_core.agent.tool_refusal import RefusedBeforeEffect, effect_unknown
+from kazma_core.agent.tool_refusal import KnownEffectError, RefusedBeforeEffect, effect_unknown
 
 __all__ = [
     "PatchError",
@@ -343,17 +344,20 @@ async def file_apply_patch_set(
     if any(not p.strip() for p in paths):
         raise RefusedBeforeEffect("Error: every patch needs a path.")
 
-    checkpoint_id = ""
-    try:
-        from kazma_core.ide.file_checkpoints import create_checkpoint
+    from kazma_core.ide.file_checkpoints import create_checkpoint
 
-        checkpoint_id = create_checkpoint(paths, reason="file_apply_patch_set")
+    before = await asyncio.to_thread(_file_states, paths)
+    try:
+        checkpoint_id = await asyncio.to_thread(create_checkpoint, paths, reason="file_apply_patch_set")
     except Exception as exc:
-        return f"Error: could not checkpoint before patch set — {exc}"
+        raise RefusedBeforeEffect(
+            f"Error: could not checkpoint before the patch set ({exc}); no file was changed."
+        ) from exc
 
     lines: list[str] = []
-    try:
-        for item in items:
+    for n, item in enumerate(items, 1):
+        where = f"patch {n} of {len(items)} ({item.get('path')})"
+        try:
             msg = await file_apply_patch(
                 str(item.get("path") or ""),
                 old_string=str(item.get("old_string") or ""),
@@ -361,21 +365,13 @@ async def file_apply_patch_set(
                 patch=str(item.get("patch") or ""),
                 replace_all=bool(item.get("replace_all")),
             )
-            if str(msg).startswith("Error:"):
-                from kazma_core.ide.file_checkpoints import restore_checkpoint as _restore
-
-                _restore(checkpoint_id)
-                return effect_unknown(f"Error: hunk failed on {item.get('path')}: {msg} "
-                    f"(restored checkpoint {checkpoint_id})")
-            lines.append(str(msg))
-    except Exception as exc:
-        try:
-            from kazma_core.ide.file_checkpoints import restore_checkpoint as _restore
-
-            _restore(checkpoint_id)
-        except Exception:
-            pass
-        return f"Error: patch set aborted — {exc} (restored checkpoint {checkpoint_id})"
+        except RefusedBeforeEffect as exc:
+            return await _roll_back(checkpoint_id, before, f"{where} did not apply: {_reason(exc.content())}")
+        except Exception as exc:
+            return await _roll_back(checkpoint_id, before, f"{where} failed: {exc}")
+        if str(msg).startswith("Error:"):
+            return await _roll_back(checkpoint_id, before, f"{where} failed: {_reason(str(msg))}")
+        lines.append(str(msg))
     summary = "\n".join(lines) + f"\ncheckpoint={checkpoint_id}"
     if not verify:
         return summary + "\nverify=skipped"
@@ -388,6 +384,59 @@ async def file_apply_patch_set(
     cwd = await asyncio.to_thread(resolve_active_root)
     result = await asyncio.to_thread(_run_pytest, tests, cwd)
     return summary + "\n" + result
+
+
+def _reason(message: str) -> str:
+    return message[len("Error:"):].strip() if message.startswith("Error:") else message
+
+
+def _file_states(paths: list[str]) -> dict[str, str | None]:
+    """Each file's SHA-256 now, by the path its patches name (None: no file;
+    "unreadable" for a file this call may not read or could not)."""
+    states: dict[str, str | None] = {}
+    for raw in dict.fromkeys(paths):
+        try:
+            p = resolve_tool_path(raw)
+            if not check_path_access(p, "read").allowed:
+                states[raw] = "unreadable"
+            elif not p.is_file():
+                states[raw] = None
+            else:
+                states[raw] = hashlib.sha256(p.read_bytes()).hexdigest()
+        except (OSError, ValueError):
+            states[raw] = "unreadable"
+    return states
+
+
+async def _roll_back(checkpoint_id: str, before: dict[str, str | None], failure: str) -> str:
+    """A patch of the set failed: put every file back from the checkpoint.
+
+    When every file is then as it was before the set -- the usual case, a
+    hunk whose old_string matched nothing -- the call changed nothing, and
+    that is an ordinary error the model corrects (KnownEffectError). Live
+    2026-10-31, a 19-patch set on a research paper had one letter that did
+    not occur; the checkpoint put the paper back, but the returned error read
+    "effects unknown, must not be repeated" and the turn failed. Only a file
+    the restore did not bring back leaves the outcome unknown.
+    """
+    from kazma_core.ide.file_checkpoints import restore_checkpoint
+
+    problem = ""
+    try:
+        await asyncio.to_thread(restore_checkpoint, checkpoint_id)
+    except Exception as exc:
+        problem = f"; restoring checkpoint {checkpoint_id} failed: {exc}"
+    after = await asyncio.to_thread(_file_states, list(before))
+    if after == before and "unreadable" not in before.values():
+        raise KnownEffectError(
+            f"Error: {failure}. No file was changed: the patches before it were "
+            f"undone (checkpoint {checkpoint_id}). Fix or drop that patch and call again."
+        )
+    changed = sorted(path for path in before if after.get(path) != before[path]) or sorted(before)
+    return effect_unknown(
+        f"Error: {failure}{problem}. These files may not be as they were before the set: "
+        f"{', '.join(changed)}. Read them before changing anything else."
+    )
 
 
 def _touch_index(path: Path) -> None:
