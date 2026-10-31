@@ -171,6 +171,10 @@ class PdfEngine:
         from kazma_core.documents.style_theme import theme_colors_reportlab
 
         font, bold_font = self._setup_fonts(pdfmetrics, TTFont)
+        # Every paragraph draws what the house face lacks (a transliteration's
+        # ā, ḥ, ẓ, ʿ) in a face that has it; ReportLab would draw it blank.
+        if self._glyph_fallback is not None:
+            Paragraph = self._glyph_fallback.paragraph_class(Paragraph, bold_font)
         th = theme_colors_reportlab()
         style = self.profile.theme  # raw THEME dict (sizes are floats here)
 
@@ -271,6 +275,7 @@ class PdfEngine:
         def decorate(canvas: Any, document: Any) -> None:
             self._decorate(canvas, document, A4, font, th)
 
+        fallback = self._glyph_fallback
         # Subclass that registers heading bars into a TableOfContents via
         # afterFlowable → notify. multiBuild (two-pass) gives the TOC real
         # page numbers (pass 1 records where headings land, pass 2 renders).
@@ -279,6 +284,8 @@ class PdfEngine:
                 entry = getattr(flowable, "_toc_entry", None)
                 if entry:
                     level, text = entry
+                    if fallback is not None:  # the contents draw it with their own paragraphs
+                        text = fallback.markup(text)
                     self.notify("TOCEntry", (level - 1, text, self.page))
 
         _TocDocTemplate(
@@ -316,7 +323,12 @@ class PdfEngine:
 
         font = "Helvetica"
         bold_font = "Helvetica-Bold"
+        self._glyph_fallback = None
         if choice.regular is not None:
+            from reportlab.lib.fonts import addMapping
+
+            from kazma_core.documents.glyph_fallback import GlyphFallback
+
             pdfmetrics.registerFont(TTFont("KazmaUnicode", str(choice.regular)))
             font = "KazmaUnicode"
             if choice.bold is not None and choice.bold.is_file():
@@ -324,6 +336,15 @@ class PdfEngine:
                 bold_font = "KazmaUnicodeBold"
             else:
                 bold_font = font
+            # One family, so <b> in a paragraph draws the bold face: inline
+            # bold came out regular in every ReportLab PDF until 2026-10-31.
+            # The italic mappings first (there is no italic face): the last
+            # mapping of a face is what ReportLab reads back for it.
+            addMapping(font, 0, 1, font)
+            addMapping(font, 1, 1, bold_font)
+            addMapping(font, 0, 0, font)
+            addMapping(font, 1, 0, bold_font)
+            self._glyph_fallback = GlyphFallback(choice.regular, pdfmetrics, TTFont)
         else:
             self.warnings.append(
                 "Unicode font unavailable; PDF uses a limited deterministic fallback"
@@ -459,6 +480,7 @@ class PdfEngine:
 
     # cached model chrome (set at render start)
     _model_header: str | None = None
+    _glyph_fallback: Any = None  # set by _setup_fonts
     _model_footer: str | None = None
     _page_numbers: bool = True
 
@@ -693,14 +715,21 @@ class PdfEngine:
             headers = list(reversed(headers))
             rows = [list(reversed(row)) for row in rows]
 
-        data = [headers]
-        data.extend(rows)
         # Explicit complex-script size. The table carried no FONTSIZE at all and
         # fell through to ReportLab's 10pt default, so Arabic tables were set
         # two points smaller than the Arabic tables HTML and DOCX produce.
         from kazma_core.documents.style_theme import theme_cs_size
 
         cell_pt = theme_cs_size(10) if self.profile.rtl else 10.0
+        data = [headers]
+        data.extend(rows)
+        if self._glyph_fallback is not None:
+            from reportlab.platypus import Paragraph
+
+            data = [[self._glyph_fallback.cell(
+                str(c), Paragraph=Paragraph, font_name=bold_font if r == 0 else font, size=cell_pt,
+                color=th["table_header_fg"] if r == 0 else th["body"], bold=r == 0,
+            ) for c in row] for r, row in enumerate(data)]
         table = Table(data, repeatRows=1, splitByRow=len(data) > 12)
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),

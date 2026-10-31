@@ -8,6 +8,19 @@
   retries (16% of writes gave up with 4 writers on Postgres, 35% with 8).
   Writers of one job in one process now take turns; other processes still go
   through the compare-and-set, with a short random pause between attempts.
+- Then the next run was cut off by the chat's 120-second limit on any one
+  tool call: a deep research run takes minutes. Research, the Knowledge crawl
+  and `crawl_site` now get their own time (25, 25 and 15 minutes); every
+  other tool keeps the 120-second bound for a hung tool.
+- The same paper's PDF drew "Kāẓima" as "K ima": the house face has no
+  letters for a transliteration of Arabic, and the PDF engine drew them blank.
+  Such letters are now drawn in a face that has them, and inline **bold** in
+  these PDFs is drawn bold (it never was).
+- Kazma then tried to strip the transliteration with one 19-part edit; one
+  letter did not occur, the edit undid itself, and the turn still ended
+  "effects unknown, must not be repeated". An edit set that put every file
+  back now says nothing was changed and which part to fix, and the turn goes
+  on.
 
 ## A document that was not made is an ordinary error (2026-10-31)
 

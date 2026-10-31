@@ -626,7 +626,7 @@ class InProcessWorker(SwarmWorker):
 
                                     from kazma_core.agent.graph_helpers import _resolve_tool_timeout
 
-                                    _t = await _aio.to_thread(_resolve_tool_timeout)  # audit 2026-10-26 AUD-111
+                                    _t = await _aio.to_thread(_resolve_tool_timeout, tc.name)  # audit 2026-10-26 AUD-111
                                     if _t and _t > 0:
                                         result = await _aio.wait_for(
                                             execute_effect(tool_registry, effect_state,

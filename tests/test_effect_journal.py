@@ -319,7 +319,7 @@ async def test_mutator_timeout_surfaces_unknown_effect_and_prevents_replay(monke
     from kazma_core.agent.graph_respond import respond_node
 
     monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
-    monkeypatch.setattr(graph_tool_worker, "_resolve_tool_timeout", lambda: 1)
+    monkeypatch.setattr(graph_tool_worker, "_resolve_tool_timeout", lambda *a: 1)
     state = initial_supervisor_state(thread_id="timed-out-effect")
     state["messages"] = [{"role": "user", "content": "remember this fixture"}]
     call = {"id": "remember-1", "name": "memory_store", "arguments": {"subject": "fixture"}}

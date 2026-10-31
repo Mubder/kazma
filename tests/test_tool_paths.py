@@ -157,14 +157,14 @@ async def test_a_failed_patch_set_restores_the_workspace_file(places):
 
     (ws / "b.txt").write_text("bee\n", encoding="utf-8")
     async with workspace_path_scope(ws):
-        out = await file_apply_patch_set(
+        out = await answer(file_apply_patch_set(
             [
                 {"path": "notes.txt", "old_string": "from the", "new_string": "CHANGED"},
                 {"path": "b.txt", "old_string": "no such text", "new_string": "x"},
             ],
             verify=False,
-        )
-    assert "restored checkpoint" in out, out
+        ))
+    assert "No file was changed" in out, out
     assert (ws / "notes.txt").read_text(encoding="utf-8") == "from the workspace\n"
     assert (cwd / "notes.txt").read_text(encoding="utf-8") == "from the server cwd\n"
 

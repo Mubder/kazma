@@ -90,7 +90,7 @@ BASELINE = {
     # except Exception / except BaseException / bare except, any body
     "blind_except": 3394,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 401,
+    "silent_except": 400,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
@@ -98,7 +98,7 @@ STRUCTURAL_BASELINE = {
     # Turn workspace entry consumes the binding resolver through its module;
     # the Scheduled soak names health.check_cron, and the Time Travel soak
     # SnapshotStore and close_shared_checkpoints.
-    "module_local_public_symbols": 528,
+    "module_local_public_symbols": 527,
     "patched_value_imports": 72,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,
