@@ -119,6 +119,22 @@ def _primary_name(client: Any, model: str | None) -> str:
     return str(model or getattr(getattr(client, "config", None), "model", "") or "")
 
 
+def _kwargs_for(client: Any, chat_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """*chat_kwargs* for *client*: ``reasoning`` only where it is a switch.
+
+    ``LLMProvider.chat`` takes ``reasoning="off"`` (DeepSeek's own API turns
+    hidden reasoning off; elsewhere it is ignored), but the providers with a
+    ``chat`` of their own (Anthropic, Gemini, Azure, Bedrock) take no such
+    argument, and a failover can reach one of them.
+    """
+    if "reasoning" not in chat_kwargs:
+        return chat_kwargs
+    can_switch = getattr(client, "can_turn_off_reasoning", None)
+    if callable(can_switch) and can_switch() is True:
+        return chat_kwargs
+    return {key: value for key, value in chat_kwargs.items() if key != "reasoning"}
+
+
 async def resilient_chat(
     client: Any,
     *,
@@ -146,7 +162,8 @@ async def resilient_chat(
         iteration:    Ledger iteration counter.
         label:        Log prefix (e.g. worker name) for diagnostics.
         chat_kwargs:  Extra kwargs forwarded to ``client.chat`` (e.g.
-                      ``max_tokens``).
+                      ``max_tokens``). ``reasoning="off"`` reaches only a
+                      client whose ``can_turn_off_reasoning()`` is True.
 
     Returns the first successful response. Raises the last error when the
     primary and all failover models fail.
@@ -168,7 +185,7 @@ async def resilient_chat(
                 messages,
                 tools=tools if tools else None,
                 model=model,
-                **chat_kwargs,
+                **_kwargs_for(client, chat_kwargs),
             )
             usage = getattr(response, "usage", {}) or {}
             await _record(
@@ -249,7 +266,7 @@ async def resilient_chat(
                         messages,
                         tools=tools if tools else None,
                         model=fb_model,
-                        **chat_kwargs,
+                        **_kwargs_for(fb_client, chat_kwargs),
                     )
                     usage = getattr(response, "usage", {}) or {}
                     await _record(

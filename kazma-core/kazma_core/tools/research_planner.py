@@ -142,6 +142,7 @@ async def _llm_json(system: str, user: str, *, max_tokens: int = 1200) -> str:
         max_tokens=max_tokens,
         label="research-planner",
         frozen_failover=frozen_failover,
+        reasoning="off",  # a JSON plan; hidden reasoning spent its budget (live 2026-10-31)
     )
     if hasattr(result, "content"):
         return str(result.content or "")

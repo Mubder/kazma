@@ -55,6 +55,21 @@ _DEMOTE_HOST_SUBSTR = (
     "scribd.",
     "quizlet.",
     "coursehero.",
+    "studocu.",
+    # Fan and meme wikis, copies of Wikipedia (the pipeline reads Wikipedia
+    # itself) and pirate document sites: live 2026-10-31 a Kuwait history
+    # run took polandball's "Kuwaitball" page, a Wikipedia mirror and a book
+    # on dokumen.pub as sources, each the best address its search found.
+    "fandom.com",
+    "wikia.",
+    "miraheze.org",
+    "bharatpedia.",
+    "wikiwand.com",
+    "everybodywiki.",
+    "dokumen.pub",
+    "pdfcoffee.",
+    "epdf.",
+    "vdoc.pub",
 )
 _DEMOTE_PATH = re.compile(
     r"/(tag|tags|category|categories|login|signup|cart|share|embed)(/|$)",

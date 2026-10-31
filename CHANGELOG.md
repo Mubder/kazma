@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Deep research writes its report (2026-10-31)
+
+- A third live run of the Kuwait research searched and read for four
+  minutes, then failed writing the report: deepseek-flash spent its whole
+  8,000-token budget on hidden reasoning, then 11,015 of the 16,000 retry.
+  Research's planner, gap check and report now ask for the answer without
+  hidden reasoning (on DeepSeek's own API; other providers never get the
+  switch, a failover included).
+- The new ranking gave every search a source, and showed what judging by
+  address takes: a meme wiki, a Wikipedia mirror and a pirate book site. Fan
+  wikis, Wikipedia copies and pirate document sites now come last.
+
 ## Deep research covers what it was asked (2026-10-31)
 
 - Rerun live, the Kuwait research ran the whole pipeline in three minutes,
