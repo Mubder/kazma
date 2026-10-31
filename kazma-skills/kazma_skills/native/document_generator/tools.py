@@ -62,9 +62,22 @@ def _sections(values: list[Any] | None) -> list[dict[str, str]]:
     return result
 
 
+# A document operation that fails deletes its export (operations
+# ``_artifact_operation``): nothing was written, and calling again is safe. As
+# returned text, a write tool's error read "failed after invocation, effects
+# unknown, must not be repeated" and ended the turn -- live 2026-10-31, a
+# generate_docx while the document broker was down (a port Windows had
+# reserved): nothing had been written, and the same call worked once the
+# broker was back.
+def _not_produced(result: Any, label: str) -> str:
+    then = ("the document service is unavailable right now: tell the user and call again in a few minutes"
+            if result.retryable else "change the request and call again")
+    return f"Error: no {label} was written: {result.message} ({result.code}); {then}."
+
+
 def _output(result: Any, label: str) -> str:
     if not result.ok:
-        return f"Error: {result.message}"
+        raise KnownEffectError(_not_produced(result, label))
     artifact = result.data
     path = artifact.export_path if artifact is not None else None
     return (
