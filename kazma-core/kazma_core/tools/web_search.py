@@ -220,11 +220,35 @@ def _wikipedia_search(query: str, max_results: int) -> tuple[list[dict[str, str]
     return _http_backend('wikipedia', query, max_results)
 
 
+def _answers_the_query(query: str, results: list[dict[str, str]]) -> bool:
+    """Whether a backend's results are about the query at all.
+
+    Half of them at least must hold one of the query's content words in
+    their title, snippet or address. With its engines rate-limited, Bing
+    answered "Kuwait independence 1961 Iraqi claim Qasim British withdrawal"
+    with Telegram's download pages, and other history questions with a
+    perfume shop, a sports channel and Windows help (live 2026-10-31): the
+    chain stopped at the first non-empty answer and research read them as
+    its sources. A query with no content word is not judged.
+    """
+    from kazma_core.memory.query_terms import content_terms, mentions
+
+    terms = content_terms(query)
+    if not terms or not results:
+        return True
+    related = sum(
+        1 for row in results
+        if mentions(" ".join(str(row.get(key) or "") for key in ("title", "body", "href")), terms)
+    )
+    return related * 2 >= len(results)
+
+
 def _run_search(query: str, max_results: int) -> tuple[list[dict[str, str]], list[str], str]:
     """Run backend chain. Returns (results, attempt_notes, winning_backend).
 
-    Continues to the next backend when the current one is unavailable **or**
-    returns zero hits (rate-limit / soft-block on hot keywords).
+    Continues to the next backend when the current one is unavailable,
+    returns zero hits (rate-limit / soft-block on hot keywords), or answers
+    with results that are not about the query (:func:`_answers_the_query`).
     """
     attempts: list[str] = []
     backends: list[tuple[str, Any]] = [
@@ -245,6 +269,13 @@ def _run_search(query: str, max_results: int) -> tuple[list[dict[str, str]], lis
         results, note = fn(query, max_results)
         if cancelled is not None and cancelled.is_set():
             raise InterruptedError('Search cancelled')
+        if results and not _answers_the_query(query, results):
+            logger.warning(
+                "[web_search] %s answered %r with %d unrelated results; trying the next backend",
+                name, query, len(results),
+            )
+            attempts.append(f"{name}:unrelated")
+            continue
         attempts.append(note)
         if results:
             return results, attempts, name
@@ -328,7 +359,9 @@ async def web_search(query: str, max_results: int = 8) -> str:
     try:
         from kazma_core.tools.research_session import record_chat_research
 
-        record_chat_research(q, tool_name="web_search", result_text=res_text)
+        record_chat_research(
+            q, tool_name="web_search", result_text=res_text, result_count=len(results)
+        )
     except Exception as exc:
         # The search answered; only its Research-tab entry is missing.
         logger.warning("[web_search] search not recorded in Research history: %s", exc)

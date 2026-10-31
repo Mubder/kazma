@@ -34,15 +34,15 @@ function load(t) {
 const english = load(undefined);
 ok("a brief run is Brief", english({ id: "rs_1", depth: "brief" }) === "[Brief] ");
 ok("a deep run is Deep", english({ id: "rs_2", depth: "deep" }) === "[Deep] ");
-ok("a chat search is Chat", english({ id: "rs_chat_3", depth: "chat" }) === "[Chat] ");
-ok("an old row without depth: chat by its id", english({ id: "rs_chat_0123456789ab" }) === "[Chat] ");
+ok("a chat search is a Web search", english({ id: "rs_chat_3", depth: "chat" }) === "[Web search] ");
+ok("an old row without depth: chat by its id", english({ id: "rs_chat_0123456789ab" }) === "[Web search] ");
 ok("an old row without depth: otherwise Deep", english({ id: "rs_0123456789abcdef" }) === "[Deep] ");
 ok("no id is not a chat search", english({}) === "[Deep] ");
 
 const arabic = load(function (k) {
-  return { "research.source_chat": "محادثة", "research.depth_deep": "عميق", "research.depth_brief": "مختصر" }[k] || k;
+  return { "research.web_search_tag": "بحث ويب", "research.depth_deep": "عميق", "research.depth_brief": "مختصر" }[k] || k;
 });
-ok("the tag follows the page language", arabic({ id: "rs_chat_x", depth: "chat" }) === "[محادثة] ");
+ok("the tag follows the page language", arabic({ id: "rs_chat_x", depth: "chat" }) === "[بحث ويب] ");
 ok("...for deep runs too", arabic({ id: "rs_x", depth: "deep" }) === "[عميق] ");
 ok("...and brief ones", arabic({ id: "rs_y", depth: "brief" }) === "[مختصر] ");
 

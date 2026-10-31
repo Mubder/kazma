@@ -421,27 +421,47 @@ def get_session(session_id: str) -> ResearchSession | None:
         c.close()
 
 
+# A chat search: a row a chat tool's web search recorded (depth "chat"), or
+# an older row without a known depth whose id says so -- the page's
+# sessionTag rule (research.js).
+_CHAT_SEARCH_SQL = (
+    "(depth = 'chat' OR (COALESCE(depth, '') NOT IN ('brief', 'deep')"
+    " AND id LIKE 'rs\\_chat\\_%' ESCAPE '\\'))"
+)
+SESSION_KINDS = {
+    "research": f"NOT {_CHAT_SEARCH_SQL}",
+    "search": _CHAT_SEARCH_SQL,
+}
+
+
 def list_sessions(
-    *, limit: int = 50, archived: bool | None = False
+    *, limit: int = 50, archived: bool | None = False, kind: str | None = None
 ) -> list[ResearchSession]:
     """List sessions newest-first.
 
     Default excludes archived (the active list); ``archived=True`` returns
     only archived (the panel's Archived tab); ``archived=None`` returns
-    everything.
+    everything. ``kind="research"`` keeps research runs (deep and brief),
+    ``kind="search"`` the web searches the chat recorded; None both. A
+    page of the newest 30 rows held 26 chat searches and four research
+    runs (live 2026-10-31), so each kind is asked for on its own.
     """
+    if kind is not None and kind not in SESSION_KINDS:
+        raise ValueError(f"unknown session kind: {kind!r}")
     c = _conn()
     try:
         _reconcile_sessions(c)
-        where = ""
-        params: list[Any] = []
+        clauses: list[str] = []
         if archived is not None:
             # NULL (pre-migration rows / INSERT that omitted the column)
             # must not vanish from the active list (audit T-5).
             if archived:
-                where = "WHERE COALESCE(archived, 0) = 1"
+                clauses.append("COALESCE(archived, 0) = 1")
             else:
-                where = "WHERE COALESCE(archived, 0) = 0"
+                clauses.append("COALESCE(archived, 0) = 0")
+        if kind is not None:
+            clauses.append(SESSION_KINDS[kind])
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         rows = c.execute(
             f"""
             SELECT * FROM research_sessions
@@ -449,7 +469,7 @@ def list_sessions(
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (*params, max(1, min(200, int(limit or 50)))),  # static WHERE
+            (max(1, min(200, int(limit or 50))),),  # static WHERE
         ).fetchall()
         return [_row_to_session(r) for r in rows]
     finally:
@@ -873,12 +893,16 @@ def record_chat_research(
     result_text: str = "",
     session_id: str | None = None,
     meta: dict[str, Any] | None = None,
+    result_count: int | None = None,
 ) -> ResearchSession:
     """Record a research activity from chat tools into research_sessions.db.
 
     Ensures all chat research queries populate dynamically in the Research Tab list.
     Returns None (no row) when called inside :func:`suppress_chat_recording`
     (deep-pipeline sub-queries log into their parent session instead).
+    *result_count* (the results the search returned) is kept in the row's
+    meta as ``results`` with the snapshot it counts: the Research page says
+    "web search · 8 results", never "1 source".
     """
     if _chat_record_suppressed.get():
         logger.debug(
@@ -910,8 +934,10 @@ def record_chat_research(
                 new_summary = result_text[:_CHAT_RESULT_MAX]
                 if not sess.summary or len(new_summary) > len(sess.summary):
                     sess.summary = new_summary
+                    if result_count is not None:
+                        sess.meta = {**(sess.meta or {}), "results": int(result_count)}
             c.rollback()
-            update_session(sess.id, status=sess.status, stage=sess.stage, message=sess.message, sources=sess.sources, summary=sess.summary)
+            update_session(sess.id, status=sess.status, stage=sess.stage, message=sess.message, sources=sess.sources, summary=sess.summary, meta=sess.meta)
             return sess
         else:
             sess = ResearchSession(
@@ -926,7 +952,10 @@ def record_chat_research(
                 sources=1,
                 created_at=now,
                 updated_at=now,
-                meta=meta or {"source": "chat", "tool": tool_name},
+                meta={
+                    **(meta or {"source": "chat", "tool": tool_name}),
+                    **({"results": int(result_count)} if result_count is not None else {}),
+                },
             )
             _bounded_session_row(sess)
             _history_admission(c, chat=True)

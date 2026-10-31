@@ -11,6 +11,10 @@ _TIMEOUT = 30
 _MEMORY = 512 * 1024**2
 _BODY = 1024**2
 _OUTPUT = 512 * 1024
+# A User-Agent that names who to contact. Wikimedia refuses one that does
+# not ("Please respect our robot policy", 403): with "KazmaSearch/0.6" the
+# Wikipedia fallback answered 403 to every query (found 2026-10-31).
+USER_AGENT = 'KazmaSearch/0.7 (+https://github.com/Mubder/kazma; web search)'
 
 
 def run_http_search(backend, query, count, *, base=None, local=False):
@@ -115,21 +119,32 @@ def _bing(html):
     from html.parser import HTMLParser
 
     def decode_bing_url(b_url: str) -> str:
+        """The address a Bing result link leads to; "" when it cannot be read.
+
+        A result link is ``bing.com/ck/a?...&u=a1<address in URL-safe
+        base64>``. Decoded with the standard alphabet, every "-" and "_" was
+        dropped and the tail came out as control characters
+        ("support.google.com/accounts/answer/3463280\\x1a\\x1b..."), or the
+        decode failed and the Bing redirect itself was kept as a source
+        (live 2026-10-31). A redirect that does not decode to a plain
+        http(s) address is no source.
+        """
         if not b_url.startswith("http"):
             return b_url
         parsed_url = urllib.parse.urlparse(b_url)
-        q_params = urllib.parse.parse_qs(parsed_url.query)
-        u_param = q_params.get("u", [None])[0]
-        if u_param:
-            b64_str = u_param[2:] if u_param.startswith("a1") else u_param
-            padding = "=" * (4 - len(b64_str) % 4)
-            try:
-                return base64.b64decode(b64_str + padding).decode(
-                    "utf-8", errors="ignore"
-                )
-            except Exception:
-                pass
-        return b_url
+        if (parsed_url.hostname or "").lower() not in ("www.bing.com", "bing.com") or not parsed_url.path.startswith("/ck/"):
+            return b_url
+        u_param = urllib.parse.parse_qs(parsed_url.query).get("u", [""])[0]
+        if not u_param.startswith("a1"):
+            return ""
+        encoded = u_param[2:]
+        try:
+            target = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):  # binascii.Error is a ValueError
+            return ""
+        if not target.startswith(("http://", "https://")) or any(ord(ch) <= 32 or ord(ch) == 127 for ch in target):
+            return ""
+        return target
 
     class BingHTMLParser(HTMLParser):
         def __init__(self):
@@ -201,15 +216,42 @@ def _bing(html):
     parser.feed(html)
     processed: list[dict[str, str]] = []
     for res in parser.results:
-        if res.get("title") or res.get("href"):
+        href = decode_bing_url(res.get("href", ""))
+        if href.startswith(("http://", "https://")):
             processed.append(
                 {
                     "title": res.get("title", "Untitled"),
-                    "href": decode_bing_url(res.get("href", "")),
+                    "href": href,
                     "body": res.get("body", ""),
                 }
             )
     return processed
+
+
+def _wikipedia(payload, count):
+    """Rows of a Wikipedia full-text search answer (``list=search``).
+
+    The backend asked ``action=opensearch``, which matches the start of an
+    article's title: any query of more than a few words found nothing, so
+    the last fallback never answered a research query (2026-10-31). The
+    snippet is HTML (``<span class="searchmatch">``); it is read as text.
+    """
+    import html
+    import re
+    import urllib.parse
+
+    hits = payload.get('query', {}).get('search') if isinstance(payload, dict) else None
+    if not isinstance(hits, list):
+        raise ValueError('Invalid Wikipedia shape')
+    rows = []
+    for hit in hits[:count]:
+        title = hit.get('title') if isinstance(hit, dict) else None
+        if not isinstance(title, str) or not title:
+            raise ValueError('Invalid Wikipedia shape')
+        snippet = html.unescape(re.sub(r'<[^>]*>', '', str(hit.get('snippet') or '')))
+        rows.append({'title': title, 'href': 'https://en.wikipedia.org/wiki/' + urllib.parse.quote(title.replace(' ', '_')),
+            'body': ' '.join(snippet.split())})
+    return rows
 
 
 def _request(request):
@@ -223,11 +265,12 @@ def _request(request):
         url, params = 'https://www.bing.com/search', {'q': query}
     else:
         url = 'https://en.wikipedia.org/w/api.php'
-        params = dict(action='opensearch', search=query, limit=min(count, 8), namespace=0, format='json')
+        params = dict(action='query', list='search', srsearch=query, srlimit=min(count, 8), srprop='snippet',
+            srnamespace=0, format='json')
     initial = urlsplit(url)
     if initial.scheme not in {'http', 'https'} or not initial.hostname or initial.username or initial.password or initial.query or initial.fragment:
         raise ValueError('Invalid search endpoint')
-    headers = {'Accept-Encoding': 'identity', 'User-Agent': 'KazmaSearch/0.6', 'Accept': '*/*'}
+    headers = {'Accept-Encoding': 'identity', 'User-Agent': USER_AGENT, 'Accept': '*/*'}
     data = {'status': 'ok', 'results': [], 'reached': False, 'detail': ''}
     try:
         with httpx.Client(proxy=request['proxy'], trust_env=False, follow_redirects=False,
@@ -279,12 +322,7 @@ def _request(request):
                 if names:
                     data['detail'] = ' (engines suspended: ' + ', '.join(names) + ')'
         else:
-            payload = json.loads(raw)
-            if not isinstance(payload, list) or len(payload) < 4 or any(not isinstance(value, list) for value in payload[1:4]):
-                raise ValueError('Invalid Wikipedia shape')
-            titles, descriptions, urls = payload[1:4]
-            rows = [{'title': title, 'href': urls[i] if i < len(urls) else '',
-                'body': descriptions[i] if i < len(descriptions) else ''} for i, title in enumerate(titles[:count])]
+            rows = _wikipedia(json.loads(raw), count)
         data['results'] = [{key: str(row[key])[:8192] for key in ('title', 'href', 'body')} for row in rows]
         return data
     except httpx.ProxyError:

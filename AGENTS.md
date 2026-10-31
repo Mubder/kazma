@@ -4486,6 +4486,33 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   provider whose `chat` takes no such argument
   (`tests/test_research_reasoning_off.py`, passing it through as the
   negative control).
+- **A search answer about something else is no answer** (2026-10-31,
+  `web_search._answers_the_query`): a backend's results of which fewer than
+  half hold a content word of the query (`memory.query_terms`) in title,
+  snippet or address count as empty (`<backend>:unrelated`, a WARNING) and the
+  chain goes on. With the local SearXNG's engines rate-limited after a day of
+  runs, Bing answered Kuwait history queries with Telegram, a perfume shop and
+  a browser game, and the chain stopped there: nine of a run's ten sources.
+  Bing result links are decoded as URL-safe base64 and must decode to a plain
+  http(s) address, or the row is dropped (`search_http._bing`: the standard
+  alphabet left control characters, or kept the Bing redirect itself). The
+  Wikipedia fallback is a full-text search (`list=search`, `_wikipedia`), sent
+  with `search_http.USER_AGENT`, which names a contact: `opensearch` matched
+  title starts only, and Wikimedia answered "KazmaSearch/0.6" with 403, so it
+  had never answered a research query. Gate: `tests/test_web_search_unrelated.py`
+  (the chain without the check, and the old decoder, as negative controls).
+- **The Research page lists research, then the chat's web searches apart**
+  (2026-10-31). `list_sessions(kind=)` / `GET /api/research/sessions?kind=`:
+  `research` (deep and brief runs) or `search` (`_CHAT_SEARCH_SQL`: depth
+  `chat`, or an older row with no known depth and an `rs_chat_` id -- the
+  page's `sessionTag` rule). The page reads each kind on its own (26 of the
+  newest 30 rows were chat searches), lists papers and runs newest first, and
+  the searches in a "Web searches from chat" group after them, each "web search
+  from chat · N results" (`meta.results`, written by `record_chat_research(
+  result_count=)` with the snapshot it counts). They were listed first, as
+  "[Chat] <query> · session · done · 1 source", and read as Kazma's research.
+  Gates: `tests/test_research_web_searches.py`,
+  `tests/js/test_research_web_searches.js` (the old mixed list as control).
 - Research pipeline execution uses `web_acquire.research_runtime`: four active
   pipelines and four background sessions in this Python process, with no waiting
   queue. Admit before planning/session creation, freeze workspace/operator and
