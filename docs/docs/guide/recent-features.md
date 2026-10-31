@@ -706,7 +706,7 @@ Industry-grade web scraping resilience and model output truncation recovery.
 | Feature | Details |
 |---------|---------|
 | **Response Size Caps** | `read_url` streams body reads and enforces `KAZMA_FETCH_MAX_BYTES` (default 5 MB) to prevent memory exhaustion and gzip-bomb exploits. |
-| **Content-Type Gate** | Non-textual binary payloads (PDFs, images, archives) fail fast with actionable guidance instead of polluting the text extractor. |
+| **Content-Type Gate** | Non-textual binary payloads (images, archives) fail fast with actionable guidance instead of polluting the text extractor. A PDF is read as its text layer through the document worker (since 2026-10-31; see [web research](./web-research#pdf-sources)). |
 | **5xx Retry Loop** | HTTP scraper retry loop covers 500, 502, 503, and 504 status codes with backoff and jitter (3 attempts). |
 | **robots.txt policy** | Automated crawl/KB/research saves enforce bounded KazmaBot checks by default; failed checks refuse crawling and disallowed URLs report `robots_disallowed`. Explicit opt-out is visible. See [web research](./web-research#robots-policy) for limits. |
 | **Auto-Retry Truncation** | When LLM completion stops with `finish_reason='length'`, `llm_provider.chat` transparently retries ONCE with doubled `max_tokens` (capped at 4x configured / 32k) instead of returning broken tool JSON. |

@@ -215,6 +215,7 @@ See [Tools catalog](../reference/tools-catalog).
 |-------|---------|-----|
 | `read_url` window | 16 000 chars | `KAZMA_READ_URL_MAX_CHARS` |
 | HTTP/hosted response body | 5 000 000 bytes; hard ceiling 20 000 000 | `KAZMA_FETCH_MAX_BYTES` |
+| PDF response body | 20 000 000 bytes (read whole or not at all) | — |
 | Graph truncate (normal tools) | 4 000 | `KAZMA_TOOL_RESULT_MAX_CHARS` |
 | Graph truncate (research tools) | 16 000 | `KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS` |
 | Digest output | 12 000 | `KAZMA_RESEARCH_DIGEST_MAX` |
@@ -233,6 +234,24 @@ Full-page research:
 ```text
 read_url_to_file(url) → digest_research_file(path) → read_research_chunk for details
 ```
+
+### PDF sources
+
+A URL that answers with a PDF (a thesis, a journal article, a report) is read
+as its text layer, page by page (`--- Page N ---`), by the same document worker
+that reads your uploads: the PDF active-content policy and the sandbox or the
+per-job container run on it, and no PDF library opens it inside the server.
+Nothing is uploaded to a third-party parser. Chat (`read_url`), saved extracts
+and the deep research pipeline all read PDFs this way; Knowledge crawls keep
+leaving them out (add a PDF to a library through Documents instead).
+
+- A PDF is read whole, up to 20 MB, or not at all: a cut PDF cannot be read.
+- No OCR runs on a web read. A PDF with no text on any page is refused as a
+  scan; one whose pages OCR would read better is read for what it holds and
+  marked thin.
+- A PDF the policy refuses (scripts, embedded files, actions that leave the
+  document) is reported as unreadable, and a busy or stopped document worker
+  as a failure to try again later.
 
 ## Multi-page crawl (`crawl_site`)
 

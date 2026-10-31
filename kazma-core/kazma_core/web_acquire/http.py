@@ -108,7 +108,7 @@ async def _bounded_body(response: httpx.Response, limit: int) -> tuple[bytearray
 async def read_capped(
     client: Any,
     url: str,
-    max_bytes: int,
+    max_bytes: int | Callable[[httpx.Response], int],
     *,
     validated_ips: tuple[str, ...] = (),
     via_proxy: bool = False,
@@ -118,8 +118,12 @@ async def read_capped(
     request_headers: dict[str, str] | None = None,
     request_body: bytes | None = None,
 ) -> tuple[httpx.Response, str, bool]:
-    """Check the live peer before reading, cap decoded bytes, preserve evidence."""
-    if max_bytes < 1:
+    """Check the live peer before reading, cap decoded bytes, preserve evidence.
+
+    *max_bytes* may be decided from the response's headers (a callable): a
+    PDF is read whole up to its own, larger limit (``pdf_source``).
+    """
+    if not callable(max_bytes) and max_bytes < 1:
         raise ValueError("max_bytes must be positive")
     from kazma_core.web_acquire.origins import origin_scheduler
 
@@ -147,7 +151,8 @@ async def read_capped(
             if peer:
                 extensions["kazma_peer_ip"] = peer
             response.extensions.update(extensions)
-            return await read_response_capped(response, max_bytes)
+            return await read_response_capped(
+                response, max_bytes(response) if callable(max_bytes) else max_bytes)
 
 
 async def read_response_capped(
