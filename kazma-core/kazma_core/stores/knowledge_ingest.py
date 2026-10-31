@@ -1077,6 +1077,12 @@ async def _bfs_discover(
             await persist()
     if limited or queue:
         await _safe_progress(on_progress, "partial link discovery: page, depth or frontier limit reached; retained pages are not a deletion manifest")
+    if queue and len(ordered) >= max_pages and checkpoint is not None:
+        # Pages left to walk at the owner's page cap: the cap's note. The
+        # walk stops at the cap, so the frontier never holds more than it and
+        # the crawl's own check (more pages than the cap) cannot see it
+        # (live 2026-10-31: 6 of a tutorial's 18 pages, no note).
+        await crawl_jobs.call(checkpoint.update, lambda row: row.update(page_capped=True))
     return list(dict.fromkeys(ordered))
 
 
