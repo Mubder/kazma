@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Deep research covers what it was asked (2026-10-31)
+
+- Rerun live, the Kuwait research ran the whole pipeline in three minutes,
+  but its first source was a COVID-19 hospital cost study and NASA's oil
+  fields page came third: sources were ranked by their address (a `.gov`
+  first), not by the question they answered. Each search's results now
+  compete within that search, and the sources are taken in turns, so every
+  part of the plan gets one. The report's own list of gaps (the earliest
+  mentions, 2003, the 2006-2014 crises) now triggers the follow-up search
+  even when the source quota is full; before, it never ran.
+- When the model ran out of room mid-call, the owner was shown an approval
+  card for half a JSON object, which was skipped after approval. Such a call
+  is now refused before any card, and Kazma is told to write in pieces of up
+  to about 6,000 characters (it said 1,500, one approval card each).
+
 ## Deep research runs again (2026-10-31)
 
 - Every deep research on live failed right after its web searches with

@@ -92,8 +92,31 @@ def _last_user_text(state: SupervisorState) -> str:
     return ""
 
 
+def _severed_by_truncation(tc: PendingToolCall, truncated: bool) -> bool:
+    """The model's response was cut at max_tokens and this call's arguments
+    with it: they arrive as ``{"raw": "<partial JSON>"}`` or empty."""
+    args = tc.get("arguments") or {}
+    return truncated and (not args or set(args) <= {"raw", "_malformed"})
+
+
+def _severed_call_message(name: str) -> str:
+    return (
+        f"Error: Your previous response was TRUNCATED by the output token "
+        f"limit (max_tokens), which severed the '{name}' arguments "
+        f"mid-JSON -- the tool was NOT executed, and no approval was asked. "
+        f"Do NOT retry the same large call. Instead, write the file in "
+        f"SMALLER pieces: call file_write once with the first section, then "
+        f"call file_append for each following section (keep each piece under "
+        f"~6000 characters). The provider already auto-retried with a doubled "
+        f"output limit; if you still see this, the content is simply too "
+        f"large for one response."
+    )
+
+
 async def _refuse_unrunnable_calls(
     pending: list[PendingToolCall],
+    *,
+    truncated: bool = False,
 ) -> tuple[list[PendingToolCall], list[ToolResult]]:
     """Take out the calls that cannot run, before any card.
 
@@ -102,16 +125,30 @@ async def _refuse_unrunnable_calls(
     the turn failed. The same day an approved ``browser_navigate`` on a host
     that cannot launch the browser did the same. A refused call here gets an
     ordinary error the model can act on (``outcome="policy"``), and no card
-    (``safety/call_preflight``).
+    (``safety/call_preflight``). So does a call whose arguments the output
+    limit cut off (*truncated*: the response ended at max_tokens): live
+    2026-10-31 the owner was asked to approve ``file_write(raw="{\"path\":
+    ...")``, half a JSON object, which the worker then skipped.
     """
     from kazma_core.safety.call_preflight import PREFLIGHT_TOOLS, call_refusal
 
-    if not any(str(tc.get("name") or "") in PREFLIGHT_TOOLS for tc in pending):
+    if not truncated and not any(str(tc.get("name") or "") in PREFLIGHT_TOOLS for tc in pending):
         return pending, []
     kept: list[PendingToolCall] = []
     refused: list[ToolResult] = []
     for tc in pending:
         name = str(tc.get("name") or "")
+        if _severed_by_truncation(tc, truncated):
+            logger.warning("[ToolWorker] %s refused before approval: arguments truncated by max_tokens", name)
+            refused.append(ToolResult(
+                tool_call_id=str(tc.get("id") or ""),
+                name=name,
+                content=_severed_call_message(name),
+                is_error=True,
+                duration_ms=0,
+                outcome="policy",
+            ))
+            continue
         if name in PREFLIGHT_TOOLS:
             reason = await call_refusal(name, tc.get("arguments"))
             if reason:
@@ -816,7 +853,8 @@ async def tool_worker_node(
         allow_interrupt = False
 
     try:
-        pending, preflight_refused = await _refuse_unrunnable_calls(pending)
+        pending, preflight_refused = await _refuse_unrunnable_calls(
+            pending, truncated=state.get("_last_finish_reason") == "length")
         # The gate loads constraint beliefs (SQLite) and authorizes each
         # semantic call against the settings and the stores: off the loop
         # (audit 2026-10-26 AUD-111). Its clarify card is LangGraph's
@@ -906,22 +944,8 @@ async def tool_worker_node(
             # empty. Don't execute — tell the model exactly what happened and
             # how to recover (smaller chunks), or it will retry the identical
             # oversized call until the circuit breaker trips.
-            _malformed = not _args or set(_args.keys()) <= {"raw", "_malformed"}
-            if _malformed and state.get("_last_finish_reason") == "length":
-                result = {
-                    "content": (
-                        f"Error: Your previous response was TRUNCATED by the output token "
-                        f"limit (max_tokens), which severed the '{tc['name']}' arguments "
-                        f"mid-JSON — the tool was NOT executed. Do NOT retry the same "
-                        f"large call. Instead, write the file in SMALLER pieces: call "
-                        f"file_write once with the first section, then call file_append "
-                        f"for each following section (keep each chunk under ~1500 "
-                        f"characters). The provider already auto-retried with a doubled "
-                        f"output limit; if you still see this, the content is simply too "
-                        f"large for one response."
-                    ),
-                    "is_error": True,
-                }
+            if _severed_by_truncation(tc, state.get("_last_finish_reason") == "length"):
+                result = {"content": _severed_call_message(tc["name"]), "is_error": True}
                 duration_ms = (time.monotonic() - start) * 1000
                 tracer.trace_tool_execution(
                     tool_name=tc["name"],

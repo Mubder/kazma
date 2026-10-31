@@ -371,6 +371,18 @@ def _write_source_metadata(path, records):
         Path(temporary).unlink(missing_ok=True)
 
 
+def _gap_search_due(loops: int, max_loops: int, saved: int, max_sources: int) -> bool:
+    """Whether to run the gap critic and its follow-up searches.
+
+    It is for topics the draft could not cover, so it runs whatever the
+    source count, with its own budget. Gated on ``saved < max_sources`` it
+    never ran in a deep run that found its sources (live 2026-10-31: a Kuwait
+    report named 2003, the 2006-2014 crises and the earliest mentions as
+    gaps, "gap_loops=0").
+    """
+    return loops < max_loops
+
+
 async def _acquire_source_batches(urls, acquire, saved, maximum, concurrency, next_index, persist):
     """Reserve remaining publication slots before dispatching a batch.
 
@@ -544,6 +556,10 @@ async def _run_research_pipeline(
     await _emit(progress_cb, "discover", f"Searching {len(queries)} queries…")
     candidates: list[str] = []
     domain_count: dict[str, int] = {}
+    # Each search's own results, in the engine's order: the sources are
+    # chosen per search (rank_by_coverage), so every sub-question the plan
+    # asked gets a source before any gets a second.
+    by_query: dict[str, list[str]] = {}
     lock = asyncio.Lock()
 
     async def _one_search(q: str) -> None:
@@ -558,6 +574,7 @@ async def _run_research_pipeline(
                                           error=value.error, latency_ms=value.latency_ms),
                 decode=lambda value: SearchResult(**value))
             async with lock:
+                by_query[q] = list(sr.urls or [])
                 log.append(
                     f"Search `{q}` → ok={sr.ok} urls={len(sr.urls)} "
                     f"latency={sr.latency_ms}ms"
@@ -597,15 +614,14 @@ async def _run_research_pipeline(
         )
 
     # ── Stage 2b: rank sources (industry R1) ──────────────────────────
-    from kazma_core.web_acquire import rank_urls
+    from kazma_core.web_acquire import rank_by_coverage, rank_urls
 
-    ranked = rank_urls(
-        candidates,
-        topic,
+    ranked = rank_by_coverage(
+        {q: by_query[q] for q in queries if by_query.get(q)},
         max_per_domain=2,
         limit=max_sources * 3,
-    )
-    log.append(f"### Rank — top {min(8, len(ranked))} of {len(ranked)}")
+    ) or rank_urls(candidates, topic, max_per_domain=2, limit=max_sources * 3)
+    log.append(f"### Rank — top {min(8, len(ranked))} of {len(ranked)} (each search's best source first)")
     for r in ranked[:8]:
         log.append(
             f"  score={r.score:.1f} {r.url} ({','.join(r.reasons) or '—'})"
@@ -618,15 +634,17 @@ async def _run_research_pipeline(
     await _emit(progress_cb, "acquire", f"Fetching up to {max_sources} pages…")
     saved: list[str] = []
     acquire_meta: list[dict[str, Any]] = []
+    # How many sources may be saved; the gap fill raises it by its own budget.
+    source_cap = max_sources
     sem = asyncio.Semaphore(4 if parallel_acquire else 1)
     save_lock = asyncio.Lock()
 
     async def _acquire(url: str, idx: int) -> None:
         nonlocal saved, acquire_meta
-        if len(saved) >= max_sources:
+        if len(saved) >= source_cap:
             return
         async with sem:
-            if len(saved) >= max_sources:
+            if len(saved) >= source_cap:
                 return
             t_acq = time.time()
             try:
@@ -659,7 +677,7 @@ async def _run_research_pipeline(
                     return
                 saved_path = res.path
                 async with save_lock:
-                    if len(saved) < max_sources:
+                    if len(saved) < source_cap:
                         saved.append(saved_path)
                         acquire_meta.append(
                             {
@@ -679,7 +697,7 @@ async def _run_research_pipeline(
                         await _emit(
                             progress_cb,
                             "acquire",
-                            f"Acquired {len(saved)}/{max_sources}: {url[:80]}",
+                            f"Acquired {len(saved)}/{source_cap}: {url[:80]}",
                         )
             except UncertainEffect as exc:
                 _job.ambiguous_sources.add(source_key)
@@ -809,7 +827,8 @@ async def _run_research_pipeline(
     if _gap_env not in ("0", "false", "no", "off"):
         max_gap_loops = 1 if is_deep else 0
 
-    while gap_loops < max_gap_loops and len(saved) < max_sources:
+    gap_budget = max(2, max_sources // 2)
+    while _gap_search_due(gap_loops, max_gap_loops, len(saved), max_sources):
         await _emit(progress_cb, "verify", "Checking gaps in draft…")
         src_summary = "\n".join(
             f"- {m.get('url')} ({m.get('path')})"
@@ -839,20 +858,24 @@ async def _run_research_pipeline(
         with suppress_chat_recording():
             await gather_owned(*[_one_search(q) for q in dict.fromkeys(gap.followup_queries)])
         candidates = await _job.effect('discovered:gap', {}, discovered)
-        # Re-rank remaining unused URLs
+        # The follow-up searches' own results first, each search's best in
+        # turn; then any unused candidate.
         already = {m.get("url") for m in acquire_meta if m.get("url")}
-        new_cands = [u for u in candidates if u not in already]
-        ranked2 = rank_urls(
-            new_cands, topic, max_per_domain=2, limit=max(2, max_sources - len(saved)) * 2
-        )
+        followups = list(dict.fromkeys(gap.followup_queries))
+        ranked2 = rank_by_coverage(
+            {q: by_query.get(q, []) for q in followups},
+            max_per_domain=2, limit=gap_budget * 2, exclude=already,
+        ) or rank_urls([u for u in candidates if u not in already], topic,
+                       max_per_domain=2, limit=gap_budget * 2)
         more_urls = [r.url for r in ranked2]
+        source_cap = len(saved) + gap_budget
         if not more_urls:
             log.append("Gap loop: no new ranked URLs")
             break
         await _emit(progress_cb, "acquire", f"Gap fill acquire {len(more_urls)}…")
         try:
             next_source_index = await _acquire_source_batches(
-                more_urls, _acquire, saved, max_sources, 4 if parallel_acquire else 1, next_source_index, _persist_sources,
+                more_urls, _acquire, saved, source_cap, 4 if parallel_acquire else 1, next_source_index, _persist_sources,
             )
         except (OSError, ValueError) as exc:
             return f"Error: research source receipts could not be persisted ({type(exc).__name__}); acquisition stopped. Check workspace storage."
