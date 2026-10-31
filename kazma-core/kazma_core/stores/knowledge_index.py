@@ -363,6 +363,7 @@ class KnowledgeIndex:
         chunks: list[dict[str, Any]],
         *,
         force: bool = False,
+        on_vectors: Any = None,
     ) -> tuple[int, int]:
         """Publish the pages of a batch of chunks, one transaction per page.
 
@@ -417,7 +418,7 @@ class KnowledgeIndex:
             published.append(result)
 
         if published and self._store.library_exists(library_id):
-            self._write_vectors(library_id, published)
+            self._write_vectors(library_id, published, on_vectors)
 
         logger.info(
             "[KnowledgeIndex] Indexed library=%s: %d new chunks, %d unchanged "
@@ -428,7 +429,13 @@ class KnowledgeIndex:
             raise KnowledgePublishError(failures, new_count, unchanged)
         return (new_count, unchanged)
 
-    def _write_vectors(self, library_id: str, published: list[dict[str, Any]]) -> None:
+    #: Chunks embedded per vector-store call. A long page is hundreds of
+    #: chunks and minutes of embedding; each batch reports progress
+    #: (``on_vectors(done, total)``) so a crawl indexing one is seen moving
+    #: -- the research/crawl monitor called RFC 9110's 633 chunks a stall.
+    _VECTOR_BATCH = 64
+
+    def _write_vectors(self, library_id: str, published: list[dict[str, Any]], on_vectors: Any = None) -> None:
         """Retire the replaced pages' vectors and embed the new chunks.
 
         Best effort: a chunk the vector store did not take is embedded by
@@ -453,11 +460,16 @@ class KnowledgeIndex:
         ]
         if not docs:
             return
-        try:
-            vs.index_many(docs)
-        except Exception as exc:
-            logger.warning("[KnowledgeIndex] ChromaDB index failed for library %s: %s; the repair "
-                           "sweep embeds them", library_id, exc)
+        step = self._VECTOR_BATCH
+        for start in range(0, len(docs), step):
+            try:
+                vs.index_many(docs[start:start + step])
+            except Exception as exc:
+                logger.warning("[KnowledgeIndex] ChromaDB index failed for library %s: %s; the repair "
+                               "sweep embeds them", library_id, exc)
+                return
+            if on_vectors is not None:
+                on_vectors(min(start + step, len(docs)), len(docs))
 
     def publish_document_version(
         self,

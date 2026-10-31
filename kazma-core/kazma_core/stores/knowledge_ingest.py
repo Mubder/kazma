@@ -511,12 +511,37 @@ async def _http_get_text(url: str, *, timeout: float = 20.0, scope_check=None) -
 
 
 async def _note_partial_sitemap(on_progress, message):
+    await _mark_sitemap_limited()
+    await _safe_progress(on_progress, message)
+
+
+async def _mark_sitemap_limited():
+    """The sitemaps were read in part (``sitemap_limited``).
+
+    It makes the crawl partial only when the sitemaps are its list of pages
+    (``_sitemap_was_the_source``). A crawl that fell back to following links
+    did not lose pages to the cut: every RFC 9110 crawl that found both its
+    pages was reported "Partial results -- review missing sources" because
+    rfc-editor.org's sitemap holds 6,000 URLs (live 2026-10-31).
+    """
     from kazma_core.web_acquire import crawl_jobs
 
     job = crawl_jobs.current_crawl.get()
     if job is not None:
-        await crawl_jobs.call(job.update, lambda row: row.update(metadata_limited=True))
-    await _safe_progress(on_progress, message)
+        await crawl_jobs.call(job.update, lambda row: row.update(sitemap_limited=True))
+
+
+async def _sitemap_was_the_source():
+    from kazma_core.web_acquire import crawl_jobs
+
+    job = crawl_jobs.current_crawl.get()
+    if job is None:
+        return
+
+    def promote(row):
+        if row.get('sitemap_limited'):
+            row['metadata_limited'] = True
+    await crawl_jobs.call(job.update, promote)
 
 
 class _SitemapDocuments(list):
@@ -629,11 +654,7 @@ async def _fetch_sitemaps(seed_url: str, *, on_progress: Any = None) -> list[str
     except TimeoutError:
         limited = True
     if limited or queue:
-        from kazma_core.web_acquire import crawl_jobs
-
-        job = crawl_jobs.current_crawl.get()
-        if job is not None:
-            await crawl_jobs.call(job.update, lambda row: row.update(metadata_limited=True))
+        await _mark_sitemap_limited()
         await _safe_progress(on_progress, "partial sitemap discovery: time, document, depth or XML byte limit reached; retained pages are preserved")
     return docs
 
@@ -877,6 +898,7 @@ async def kb_discover_pages(
                 "[kb_discover] sitemap yielded %d in-scope URLs for %s",
                 len(ordered), seed,
             )
+            await _sitemap_was_the_source()
             return ordered
         await _safe_progress(on_progress, "sitemap had 0/sparse in-scope URLs; falling back")
     else:
@@ -1410,6 +1432,27 @@ async def ingest_url(
     return result
 
 
+def _indexing_progress():
+    """Record "embedded N of M chunks" on the running crawl, or None.
+
+    Runs in ``_store_page``'s thread (the crawl's context travels with
+    ``to_thread``). The research/crawl monitor reads it as progress: a long
+    page embeds for minutes, and was reported as a stall.
+    """
+    from kazma_core.web_acquire import crawl_jobs
+
+    job = crawl_jobs.current_crawl.get()
+    if job is None:
+        return None
+
+    def note(done: int, total: int) -> None:
+        try:
+            job.update(lambda row: row['progress'].update(indexing=[done, total]))
+        except Exception as exc:  # the chunks are stored; only the progress note is lost
+            logger.warning("[kb_ingest] indexing progress not recorded: %s", exc)
+    return note
+
+
 def _store_page(
     index: Any, library_id: str, url: str, text: str, document_title: str = ""
 ) -> tuple[int, int, int]:
@@ -1430,7 +1473,8 @@ def _store_page(
     )
     if not chunks:
         return 0, 0, 0
-    new, unchanged = index.index(library_id, [chunk_to_dict(c) for c in chunks])
+    new, unchanged = index.index(library_id, [chunk_to_dict(c) for c in chunks],
+                                 on_vectors=_indexing_progress())
     _save_provenance(library_id, url, text)
     return new, unchanged, len(chunks)
 

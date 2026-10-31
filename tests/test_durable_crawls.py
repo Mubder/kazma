@@ -397,7 +397,78 @@ async def test_an_oversized_sitemap_leaves_discovery_partial_never_failed(journa
         job.finish('partial')
     kept = 4000 if oversized == 'cut' else 0
     assert pages == [f'{root}/tree/p{i}' for i in range(kept)] + [root + '/tree/other']
-    assert crawl_jobs.projection(job.job_id)['acquisition']['discovery_limited'] is True
+    assert crawl_jobs.inspect_jobs(job.job_id)['sitemap_limited'] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('source', ['sitemap', 'links'])
+async def test_a_cut_sitemap_makes_the_crawl_partial_only_when_it_is_the_source(journal, monkeypatch, source):
+    """Live 2026-10-31: a crawl of RFC 9110 that found and fetched both its
+    pages by following links was alerted "Partial results -- review missing
+    sources": rfc-editor.org's sitemap had been cut at 4,000 URLs."""
+    from kazma_core.stores import knowledge_ingest as ki
+
+    seed = 'https://docs.example/tree/start'
+    async def cut_sitemaps(seed_url, *, on_progress=None):
+        await ki._mark_sitemap_limited()
+        docs = ki._SitemapDocuments()
+        if source == 'sitemap':
+            docs.pages.extend(f'https://docs.example/tree/p{i}' for i in range(30))
+        else:
+            docs.pages.append('https://other.example/elsewhere')  # nothing in scope: links decide
+        return docs
+    async def links(seed_url, mode, **kwargs):
+        return [seed_url, 'https://docs.example/tree/next']
+    async def no_llms(*args, **kwargs):
+        return []
+    monkeypatch.setattr(ki, '_fetch_sitemaps', cut_sitemaps)
+    monkeypatch.setattr(ki, '_bfs_discover', links)
+    monkeypatch.setattr(ki, '_llms_txt_discover', no_llms)
+    job = crawl_jobs.start('lib', seed, snapshot(), job_id='source-' + source)
+    token = crawl_jobs.current_crawl.set(job)
+    try:
+        await ki.kb_discover_pages(seed, mode='tree')
+    finally:
+        crawl_jobs.current_crawl.reset(token)
+        job.finish('completed')
+    assert crawl_jobs.projection(job.job_id)['acquisition']['discovery_limited'] is (source == 'sitemap')
+
+
+def test_a_long_page_reports_indexing_progress_the_monitor_sees(journal, monkeypatch):
+    """Live 2026-10-31: RFC 9110's 633 chunks embedded for over three minutes
+    with nothing recorded, and the monitor alerted "No observed progress"."""
+    from kazma_core.stores import knowledge_ingest as ki
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+    from kazma_core.web_acquire import monitor
+
+    calls = []
+    class Vectors:
+        available, identity = True, 'fixture-embedder'
+        def index_many(self, docs):
+            calls.append(len(docs))
+    index = KnowledgeIndex.__new__(KnowledgeIndex)
+    monkeypatch.setattr(index, '_vector_store_for', lambda library_id: Vectors(), raising=False)
+    monkeypatch.setattr(index, '_chunk_vector_metadata', lambda *a: {}, raising=False)
+    published = [{'retired_ids': [], 'chunks': [{'id': f'c{i}', 'content': f'chunk {i}'} for i in range(150)]}]
+
+    job = crawl_jobs.start('lib', 'https://docs.example/tree/', snapshot(), job_id='indexing')
+    def signature():
+        row = crawl_jobs.inspect_jobs('indexing')
+        progress = row['progress']
+        return [progress.get('phase'), progress.get('indexing')]
+    token = crawl_jobs.current_crawl.set(job)
+    try:
+        before = signature()
+        index._write_vectors('lib', published, ki._indexing_progress())
+        after = signature()
+    finally:
+        crawl_jobs.current_crawl.reset(token)
+        job.finish('completed')
+    assert calls == [64, 64, 22]
+    assert after[1] == [150, 150] and before != after
+    # The monitor's progress for a crawl row carries it (the stall signature).
+    source = Path(monitor.__file__).read_text(encoding='utf-8')
+    assert "progress.get('indexing')" in source
 
 
 @pytest.mark.asyncio
