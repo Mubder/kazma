@@ -90,6 +90,8 @@
                     <template x-if="alertLink()">
         <a :href="alertLink()" x-text="activeAlert.button_text || t('common.open')" style="background: var(--warning); border: 1px solid var(--warning); color: #000; font-weight: 600; padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; text-decoration: none;"></a>
                     </template>
+                    <!-- Clear the backlog behind the shown alert -->
+                    <button type="button" x-show="waitingAlerts.length > 1" @click="dismissAll()" style="background: none; border: 1px solid var(--border-color, rgba(255,255,255,0.15)); color: var(--text-secondary); cursor: pointer; padding: 4px 10px; font-size: 0.8rem; border-radius: 4px;">{{ t('common.dismiss_all') }}</button>
                     <!-- Close button -->
                     <button type="button" @click="dismissAlert()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px;" title="{{ t('common.dismiss') }}">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">

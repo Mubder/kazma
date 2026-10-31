@@ -434,13 +434,24 @@ export function systemAlertsBanner() {
         installing: false,
         dismissedAlerts: readDismissedAlerts(),
 
-        // The newest alert that needs attention and was not dismissed.
-        get activeAlert() {
+        // Alerts that need attention and were not dismissed, newest first.
+        get waitingAlerts() {
             const store = alertsStore();
             const alerts = (store && Array.isArray(store.items)) ? store.items : [];
-            const valid = alerts.filter((a) => a && needsAttention(a) && !this.dismissedAlerts.has(a.id));
-            if (!valid.length) return null;
-            return valid.slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))[0];
+            return alerts.filter((a) => a && needsAttention(a) && !this.dismissedAlerts.has(a.id))
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        },
+
+        get activeAlert() {
+            return this.waitingAlerts[0] || null;
+        },
+
+        // Behind the shown alert can wait a backlog (a day of failed test
+        // crawls left twelve): one click clears what is waiting now; an alert
+        // raised later still shows.
+        dismissAll() {
+            for (const alert of this.waitingAlerts) this.dismissedAlerts.add(alert.id);
+            saveDismissedAlerts(this.dismissedAlerts);
         },
 
         refreshAlerts() {

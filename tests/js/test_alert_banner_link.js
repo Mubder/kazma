@@ -123,4 +123,24 @@ ok("a non-string id is not a link", linkFor(42) === "");
     && JSON.parse(saved["kazma.banner.dismissed"]).includes("new-one"));
 }
 
+// A day of failed test crawls left twelve warnings behind the shown one: each
+// dismissal revealed the next. "Dismiss all" clears what waits now; an alert
+// raised afterwards still shows.
+{
+  const saved = {};
+  windowStub.localStorage = {
+    getItem: (k) => (k in saved ? saved[k] : null),
+    setItem: (k, v) => { saved[k] = String(v); },
+  };
+  store.items = Array.from({ length: 12 }, (_, i) => ({ id: `old-${i}`, timestamp: i, severity: "WARNING" }))
+    .concat([{ id: "news", timestamp: 99, severity: "INFO" }]);
+  const banner = systemAlertsBanner();
+  ok("the backlog is counted without news", banner.waitingAlerts.length === 12, banner.waitingAlerts.length);
+  banner.dismissAll();
+  ok("dismiss all clears the backlog", banner.activeAlert === null && banner.waitingAlerts.length === 0);
+  ok("and it survives a reload", systemAlertsBanner().activeAlert === null);
+  store.items = store.items.concat([{ id: "fresh", timestamp: 100, severity: "ERROR" }]);
+  ok("a later alert still shows", systemAlertsBanner().activeAlert.id === "fresh");
+}
+
 process.exit(fail ? 1 : 0);
