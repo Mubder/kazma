@@ -392,6 +392,9 @@ def _looks_like_bot_block(html: str, status_code: int) -> bool:
     return False
 
 
+_SHELL_TEXT_MAX = 5000
+
+
 def _looks_like_js_shell(html: str) -> bool:
     sample = html[:12000].lower()
     # Require JS app markers AND little article-like content
@@ -444,7 +447,11 @@ def _is_thin_extraction(text: str, html: str) -> bool:
     )
     if is_spa_doc and len(text) < 2000 and text.count("\n") < 25:
         return True
-    if _looks_like_js_shell(html) and len(html) >= 500:
+    # A shell's static extract is its chrome, a few hundred characters. A
+    # longer one is the page: every Wikipedia article (a <noscript> in its
+    # head, no <p> in its first 12 KB) was "thin" with 360,000 characters
+    # read, and research showed its sources as "quality thin" (2026-10-31).
+    if _looks_like_js_shell(html) and len(html) >= 500 and len(text) < _SHELL_TEXT_MAX:
         return True
     if len(text) >= MIN_USEFUL_CHARS:
         return False

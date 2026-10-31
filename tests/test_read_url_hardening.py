@@ -67,6 +67,20 @@ def test_is_thin_extraction() -> None:
     assert ru._is_thin_extraction(static, "<html><body><h1>x</h1></body></html>") is False
 
 
+def test_a_long_extract_is_not_a_shell() -> None:
+    # A Wikipedia article: a <noscript> in its head and no <p> in its first
+    # 12 KB, so it looks like a JS shell; 360,000 characters were read from
+    # it and research called the source "thin" (live 2026-10-31).
+    wikipedia = "<html><head><noscript>x</noscript>" + "<style>x{}</style>" * 800 + "</head><body>" + "<p>Kuwait</p>" * 400 + "</body></html>"
+    assert ru._looks_like_js_shell(wikipedia)
+    article = "Kuwait is a country in West Asia. " * 11000
+    assert ru._is_thin_extraction(article, wikipedia) is False
+    # A real shell's chrome still is thin.
+    assert ru._is_thin_extraction("Home About Contact " * 30, wikipedia) is True
+    # Negative control: the rule without the length test called the article thin.
+    assert ru._looks_like_js_shell(wikipedia) and len(wikipedia) >= 500
+
+
 def test_should_try_playwright_for_thin() -> None:
     html = '<html><body><div id="__next"></div>' + ("s" * 800) + "</body></html>"
     assert ru._should_try_playwright(html, 200, extracted="") is True
