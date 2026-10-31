@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Research sources and PDF tables (2026-10-31)
+
+- The fourth live run of the Kuwait research finished, follow-up search
+  included, and wrote a good paper, but its follow-up searches had found
+  games sites ("Sprunki") and took them as sources, and one "source" was the
+  search engine's own internal address, read off the line that says which
+  engine answered. Sources are now judged by the search result's title and
+  snippet as well as their address; anything with no sign of relevance comes
+  last, and a follow-up search takes none of it. Only the result links
+  themselves count as results, and an empty search has none.
+- The paper's chronology table ran off both sides of the PDF page, with a
+  date running into its event and `**1752**` printed with its asterisks.
+  Table cells in these PDFs now wrap within the page and show bold and
+  italic.
+
 ## Deep research writes its report (2026-10-31)
 
 - A third live run of the Kuwait research searched and read for four

@@ -158,3 +158,67 @@ def test_negative_control_without_the_demotions_the_meme_wiki_leads(monkeypatch)
     monkeypatch.setattr(rank, "_DEMOTE_HOST_SUBSTR", rank._DEMOTE_HOST_SUBSTR[:rank._DEMOTE_HOST_SUBSTR.index("studocu.")])
     chosen = rank_by_coverage(JUNK_FIRST, limit=1)
     assert chosen[0].url != "https://www.kuwaitculture.org/heritage/island-archaeology"
+
+
+# ── the next run: junk searches and the search engine's own address ─────
+
+LIVE_SEARCH_TEXT = """# Search results for: Dilmun civilization Kuwait Failaka archaeology
+_Source: duckduckgo (after: searxng:empty@http://host.docker.internal:8088)_
+
+## 1. Sprunki ITN - Play Online
+**URL:** https://www.crazygames.com/game/sprunki-itn
+Play Sprunki ITN for free on CrazyGames.
+
+## 2. Sprunki - the musical game
+**URL:** https://sprunky.gg/
+Mix beats with the Sprunki characters.
+"""
+SPRUNKI = {"Dilmun civilization Kuwait Failaka archaeology": ["https://www.crazygames.com/game/sprunki-itn", "https://sprunky.gg/"]}
+SPRUNKI_TEXT = {"https://www.crazygames.com/game/sprunki-itn": "Sprunki ITN - Play Online Play Sprunki ITN for free",
+                "https://sprunky.gg/": "Sprunki - the musical game Mix beats"}
+
+
+def _old_extract(markdown: str) -> list[str]:
+    import re
+    return list(dict.fromkeys(m.group(0).rstrip(".,;:)") for m in re.finditer(r"https?://[^\s\)\]\>\"']+", markdown)))
+
+
+def test_the_search_engine_s_own_address_is_never_a_result():
+    from kazma_core.web_acquire.serp import extract_urls_from_search
+
+    assert extract_urls_from_search(LIVE_SEARCH_TEXT) == [
+        "https://www.crazygames.com/game/sprunki-itn", "https://sprunky.gg/"]
+    assert "http://host.docker.internal:8088" in _old_extract(LIVE_SEARCH_TEXT)  # negative control
+
+
+def test_an_empty_search_has_no_result():
+    from kazma_core.web_acquire.serp import extract_urls_from_search
+
+    empty = ("No web results for: 'x'\n\n"
+             "**Backends tried:** searxng:empty@http://host.docker.internal:8088, ddgs:empty")
+    assert extract_urls_from_search(empty) == []
+    assert _old_extract(empty) == ["http://host.docker.internal:8088"]  # negative control: "ok", one result
+
+
+def test_a_gap_search_that_found_only_junk_adds_nothing():
+    assert rank_by_coverage(SPRUNKI, texts=SPRUNKI_TEXT, require_signal=True) == []
+
+
+def test_negative_control_without_the_signal_rule_the_junk_is_taken():
+    assert len(rank_by_coverage(SPRUNKI, texts=SPRUNKI_TEXT)) == 2
+
+
+def test_a_relevant_result_is_kept_though_its_address_names_nothing():
+    results = {"Dilmun civilization Kuwait Failaka archaeology": ["https://www.jstor.org/stable/4282963"]}
+    texts = {"https://www.jstor.org/stable/4282963": "The Dilmun settlement on Failaka island, Kuwait"}
+    assert [r.url for r in rank_by_coverage(results, texts=texts, require_signal=True)] == results[
+        "Dilmun civilization Kuwait Failaka archaeology"]
+    assert rank_by_coverage(results, require_signal=True) == []  # control: the address alone says nothing
+
+
+def test_relevant_links_from_every_search_come_before_any_junk():
+    results = {"Gulf War 1991 liberation of Kuwait aftermath": ["https://www.crazygames.com/"],
+               "Kuwait oil discovery 1938": ["https://kwt.one/en/oil-discovery-kuwait/",
+                                             "https://www.da.gov.kw/en/kuwait-history/"]}
+    chosen = [r.url for r in rank_by_coverage(results, limit=2)]
+    assert "https://www.crazygames.com/" not in chosen

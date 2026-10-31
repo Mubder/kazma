@@ -29,17 +29,37 @@ class SearchResult:
     query: str
     markdown: str = ""
     urls: list[str] = field(default_factory=list)
+    #: Each result's title and snippet, by its URL (bounded): what the
+    #: research ranker reads as evidence that a result is about its query.
+    snippets: dict[str, str] = field(default_factory=dict)
     error: str | None = None
     latency_ms: float = 0.0
     meta: dict[str, Any] = field(default_factory=dict)
 
 
+#: A result's own address in ``web_search``'s markdown.
+_RESULT_URL_RE = re.compile(r"^\*\*URL:\*\*\s*(https?://\S+)", re.I | re.M)
+
+
 def extract_urls_from_search(markdown: str) -> list[str]:
-    """Extract unique http(s) URLs from search markdown (order preserved)."""
+    """Extract unique http(s) URLs from search markdown (order preserved).
+
+    ``web_search``'s markdown names each result on a ``**URL:**`` line; when
+    it has those lines they are the results. Every other URL in it is not a
+    result: a snippet's text, or the backends it tried
+    ("searxng:empty@http://host.docker.internal:8088"), which made an empty
+    search "ok" with one candidate -- the search engine's own address (live
+    2026-10-31, a deep research). An empty search's text has no result.
+    Markdown with no such lines is read for any URL.
+    """
+    text = markdown or ""
+    if text.lstrip().startswith("No web results for:"):
+        return []
+    found = [m.group(1) for m in _RESULT_URL_RE.finditer(text)] or [m.group(0) for m in _URL_RE.finditer(text)]
     seen: set[str] = set()
     out: list[str] = []
-    for m in _URL_RE.finditer(markdown or ""):
-        u = m.group(0).rstrip(".,;:)")
+    for raw in found:
+        u = raw.rstrip(".,;:)")
         if u in seen:
             continue
         # Skip obvious non-content
@@ -48,6 +68,35 @@ def extract_urls_from_search(markdown: str) -> list[str]:
             continue
         seen.add(u)
         out.append(u)
+    return out
+
+
+#: Characters of a result's title and snippet kept for ranking.
+_SNIPPET_MAX = 400
+
+
+def _snippets_by_url(markdown: str) -> dict[str, str]:
+    """Each result's title and snippet from ``web_search``'s markdown
+    (``## n. title`` / ``**URL:** href`` / body), by URL."""
+    out: dict[str, str] = {}
+    title, url, body = "", "", []
+
+    def flush() -> None:
+        if url and url not in out:
+            out[url] = " ".join([title, *body]).strip()[:_SNIPPET_MAX]
+
+    for line in (markdown or "").splitlines():
+        heading = re.match(r"^##\s+\d+\.\s*(.*)$", line)
+        if heading:
+            flush()
+            title, url, body = heading.group(1).strip(), "", []
+            continue
+        found = _RESULT_URL_RE.match(line)
+        if found:
+            url = found.group(1).rstrip(".,;:)")
+        elif title and line.strip():
+            body.append(line.strip())
+    flush()
     return out
 
 
@@ -105,6 +154,7 @@ async def search(
         query=q,
         markdown=md,
         urls=urls,
+        snippets={u: t for u, t in _snippets_by_url(md).items() if u in urls},
         error="no results" if empty else None,
         latency_ms=round(ms, 1),
         meta={"purpose": purpose, "url_count": len(urls)},
