@@ -971,6 +971,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إخفاء",
         "en": "Dismiss",
     },
+    "common.dismiss_all": {
+        "ar": "إخفاء الكل",
+        "en": "Dismiss all",
+    },
     "common.open": {
         "ar": "فتح",
         "en": "Open",
