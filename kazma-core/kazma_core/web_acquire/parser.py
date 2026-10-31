@@ -85,9 +85,11 @@ def _decode(result, *, sitemap=False):
         if result.returncode != 0 or not isinstance(data, dict):
             raise ValueError('Invalid parser receipt')
         if data.get('status') == 'limit':
-            raise AcquisitionError(FetchErrorCode.LIMIT, 'Local HTML parser exceeded its memory/document budget.')
+            what = 'sitemap' if sitemap else 'HTML'
+            raise AcquisitionError(FetchErrorCode.LIMIT, f'Local {what} parser exceeded its memory/document budget.')
         if sitemap:
-            if (set(data) != {'status', 'kind', 'urls'} or data['status'] != 'ok'
+            if (set(data) != {'status', 'kind', 'urls', 'limited'} or data['status'] != 'ok'
+                    or type(data['limited']) is not bool
                     or data['kind'] not in {'urlset', 'sitemapindex', 'invalid'}
                     or not isinstance(data['urls'], list) or len(data['urls']) > 4000
                     or any(not isinstance(url, str) or len(url) > 8192 for url in data['urls'])
@@ -127,7 +129,10 @@ def _sitemap(text):
 
     safe = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'security' / 'safe_xml.py'),
         run_name='kazma_core.security.safe_xml')
-    result = {'status': 'ok', 'kind': 'invalid', 'urls': []}
+    # A sitemap past the bounds keeps its first URLs and says it was cut
+    # (``limited``). It answered "limit", which failed the whole crawl: live
+    # 2026-10-31, rfc-editor.org's sitemap-1.xml holds 6,000 URLs.
+    result = {'status': 'ok', 'kind': 'invalid', 'urls': [], 'limited': False}
     try:
         root = safe['parse_untrusted_xml'](text)
     except (ParseError, safe['UnsafeXMLError']):
@@ -145,9 +150,13 @@ def _sitemap(text):
             if loc.tag.split('}')[-1].lower() != 'loc' or not loc.text:
                 continue
             url = loc.text.strip()
+            if len(url) > 8192:
+                result['limited'] = True
+                continue
             used += len(url.encode('utf-8'))
-            if len(result['urls']) >= limit or len(url) > 8192 or used > 1024**2:
-                return {'status': 'limit'}
+            if len(result['urls']) >= limit or used > 1024**2:
+                result['limited'] = True
+                return result
             result['urls'].append(url)
     return result
 
