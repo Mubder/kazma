@@ -320,12 +320,12 @@ class TestAgentStateDerivation:
     def test_not_running_is_idle(self):
         from kazma_ui.agents import _derive_agent_state
 
-        assert _derive_agent_state(False, []) == "idle"
+        assert _derive_agent_state(False, [], 1) == "idle"
 
     def test_running_no_traces_is_idle(self):
         from kazma_ui.agents import _derive_agent_state
 
-        assert _derive_agent_state(True, []) == "idle"
+        assert _derive_agent_state(True, [], 1) == "idle"
 
     def test_running_latest_llm_is_thinking(self):
         from kazma_core.tracing import TraceEntry
@@ -335,7 +335,7 @@ class TestAgentStateDerivation:
             TraceEntry(timestamp=1.0, trace_type="tool", label="web_search", status="success", duration_ms=100),
             TraceEntry(timestamp=2.0, trace_type="llm", label="gpt-4o", status="success", duration_ms=200),
         ]
-        assert _derive_agent_state(True, traces) == "thinking"
+        assert _derive_agent_state(True, traces, 1) == "thinking"
 
     def test_running_latest_tool_is_acting(self):
         from kazma_core.tracing import TraceEntry
@@ -345,7 +345,7 @@ class TestAgentStateDerivation:
             TraceEntry(timestamp=1.0, trace_type="llm", label="gpt-4o", status="success", duration_ms=200),
             TraceEntry(timestamp=2.0, trace_type="tool", label="web_search", status="success", duration_ms=100),
         ]
-        assert _derive_agent_state(True, traces) == "acting"
+        assert _derive_agent_state(True, traces, 1) == "acting"
 
     def test_running_latest_state_trace_is_idle(self):
         from kazma_core.tracing import TraceEntry
@@ -354,7 +354,38 @@ class TestAgentStateDerivation:
         traces = [
             TraceEntry(timestamp=1.0, trace_type="state", label="idle → thinking", status="success", duration_ms=0),
         ]
-        assert _derive_agent_state(True, traces) == "idle"
+        assert _derive_agent_state(True, traces, 1) == "idle"
+
+    def test_a_finished_turn_is_idle_whatever_its_last_trace(self):
+        """Live 2026-10-31: the page said "Thinking" for minutes after a
+        research turn had finished -- its last trace was the answer's LLM
+        call. No turn running is idle."""
+        from kazma_core.tracing import TraceEntry
+        from kazma_ui.agents import _derive_agent_state
+
+        traces = [
+            TraceEntry(timestamp=1.0, trace_type="tool", label="read_url", status="success", duration_ms=100),
+            TraceEntry(timestamp=2.0, trace_type="llm", label="deepseek-flash", status="success", duration_ms=200),
+        ]
+        assert _derive_agent_state(True, traces, 0) == "idle"
+        assert _derive_agent_state(True, traces, 1) == "thinking"
+
+    def test_the_page_asks_whether_a_turn_runs(self, monkeypatch):
+        from kazma_core.tracing import TraceEntry
+        from kazma_ui import active_turns, agents
+
+        class _Store:
+            def recent(self, n):
+                return [TraceEntry(timestamp=2.0, trace_type="llm", label="m", status="success", duration_ms=1)]
+
+            def stats(self):
+                return {"total_traces": 1}
+
+        monkeypatch.setattr(agents, "_get_trace_store", lambda: _Store())
+        monkeypatch.setattr(active_turns, "running_turn_count", lambda: 0)
+        assert agents._get_agent_info(object())["agent_state"] == "idle"
+        monkeypatch.setattr(active_turns, "running_turn_count", lambda: 1)
+        assert agents._get_agent_info(object())["agent_state"] == "thinking"
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -51,6 +51,7 @@ import psutil
 from kazma_core import config_store
 from kazma_core.config_store import ConfigRevisionConflict
 from kazma_core.config_availability import _storage_failures
+from kazma_core.web_acquire.durable_state import refuse_vaulted
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 from kazma_core.playwright_loop import finish_owned
 
@@ -232,6 +233,7 @@ def _migrate_legacy(store):
                     items.append((_job_key(job_id), row, _CATEGORY))
                     items.append((_rev_key(job_id), 1, _CATEGORY))
             items.append((_KEY, {}, _CATEGORY))
+            refuse_vaulted(items)
             try:
                 store.batch_set(items, expected=(_REVISION, revision))
             except ConfigRevisionConflict:
@@ -359,6 +361,7 @@ def _mutate(change):
             for job_id in gone:
                 items.append((_job_key(job_id), {'evicted': True}, _CATEGORY))
                 items.append((_rev_key(job_id), mine[job_id][1] + _FENCE, _CATEGORY))
+            refuse_vaulted(items)
             try:
                 store.batch_set(items, expected=(_REVISION, revision))
             except ConfigRevisionConflict:
@@ -394,9 +397,10 @@ def _mutate_job(job_id, change):
             if row is None:
                 return copy.deepcopy(answer)
             _check_job_bytes(row)
+            items = [(_job_key(job_id), row, _CATEGORY), (_rev_key(job_id), revision + 1, _CATEGORY)]
+            refuse_vaulted(items)
             try:
-                store.batch_set([(_job_key(job_id), row, _CATEGORY), (_rev_key(job_id), revision + 1, _CATEGORY)],
-                                expected=(_rev_key(job_id), revision))
+                store.batch_set(items, expected=(_rev_key(job_id), revision))
                 return copy.deepcopy(answer)
             except ConfigRevisionConflict:
                 continue

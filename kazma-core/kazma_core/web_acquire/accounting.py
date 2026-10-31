@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from functools import wraps
 
 from kazma_core.config_availability import _storage_failures
+from kazma_core.web_acquire.durable_state import refuse_vaulted
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 from kazma_core.web_acquire import provider_usage
 
@@ -128,8 +129,10 @@ def _mutate(change):
             answer = change(state)
             if not _valid(state) or len(json.dumps(state, ensure_ascii=True)) > _MAX_BYTES:
                 raise AcquisitionError(FetchErrorCode.LIMIT, 'Remote allowance ledger reached its storage limit; dispatch refused.')
+            items = [(_KEY, state, _CATEGORY), (_REV, revision + 1, _CATEGORY)]
+            refuse_vaulted(items)
             try:
-                store.batch_set([(_KEY, state, _CATEGORY), (_REV, revision + 1, _CATEGORY)], expected=(_REV, revision))
+                store.batch_set(items, expected=(_REV, revision))
                 return answer
             except ConfigRevisionConflict:
                 continue

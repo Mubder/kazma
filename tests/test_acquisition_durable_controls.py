@@ -101,6 +101,34 @@ def test_session_history_bound_is_visible_and_archive_does_not_release(durable, 
         sessions.create_session('three')
 
 
+def test_chat_search_snapshots_never_block_research(durable, monkeypatch):
+    """Live 2026-10-31: 349 of 361 history rows were chat web searches, and
+    Deep Research refused to start. Each kind has its own allowance."""
+    monkeypatch.setattr(sessions, '_MAX_SESSIONS', 2)
+    monkeypatch.setattr(sessions, '_MAX_CHAT_SNAPSHOTS', 3)
+    for n in range(3):
+        sessions.record_chat_research(f'chat search {n}', result_text='results')
+    with pytest.raises(AcquisitionError, match='Chat search history is full'):
+        sessions.record_chat_research('one more chat search', result_text='results')
+    sessions.create_session('deep one')
+    sessions.create_session('deep two')
+    with pytest.raises(AcquisitionError, match='Research history is full'):
+        sessions.create_session('deep three')
+    # The same query again refreshes its own row; the full allowance is no refusal.
+    assert sessions.record_chat_research('chat search 0', result_text='more results').sources == 1
+
+
+def test_one_shared_allowance_was_the_live_lockout(durable, monkeypatch):
+    """Negative control: with the chat rows counted against research (the old
+    rule), the first deep research is refused."""
+    monkeypatch.setattr(sessions, '_MAX_SESSIONS', 2)
+    monkeypatch.setattr(sessions, '_allowance', lambda chat: (2, sessions._MAX_SESSION_BYTES, '1'))
+    for n in range(2):
+        sessions.record_chat_research(f'chat search {n}', result_text='results')
+    with pytest.raises(AcquisitionError, match='Research history is full'):
+        sessions.create_session('deep one')
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('crash', ['plan', 'terminal'])
 async def test_fresh_process_session_recovery_never_replays_completed_or_uncertain_work(durable, tmp_path, monkeypatch, crash):

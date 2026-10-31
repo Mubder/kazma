@@ -240,6 +240,36 @@ def _is_sensitive_config_value(key: str, value: Any) -> bool:
     return is_install_scoped_secret(_vault_secret_name(key))
 
 
+def vaulted_paths(key: str, value: Any) -> list[str]:
+    """The paths a write of *value* under *key* would move into the vault.
+
+    The same walk as ``ConfigStore._encrypt_nested_sensitive``: a non-empty
+    string at a credential-named path, inside dicts and lists (a list item is
+    named by its ``name`` or ``id``, else its index). ``get_category`` reads
+    rows raw, so state written there and read back must have none: the robots
+    claim's ``token`` came back as its ``vault://`` pointer, and every robots
+    lookup refused its own commit (live 2026-10-31).
+    """
+    found: list[str] = []
+
+    def walk(item: Any, path: str) -> None:
+        if isinstance(item, dict):
+            for k, v in item.items():
+                walk(v, f"{path}.{k}" if path else str(k))
+        elif isinstance(item, list):
+            for i, child in enumerate(item):
+                ident = ""
+                if isinstance(child, dict):
+                    ident = str(child.get("name") or child.get("id") or "").strip()
+                walk(child, f"{path}.{ident or i}")
+        elif (isinstance(item, str) and item and not is_vault_ref(item)
+              and not is_masked_secret_placeholder(item) and is_sensitive_config_key(path)):
+            found.append(path)
+
+    walk(value, key)
+    return found
+
+
 def _vault_secret_name(key: str) -> str:
     return f"{_VAULT_NAME_PREFIX}{key}"
 
