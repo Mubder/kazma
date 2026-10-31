@@ -50,6 +50,7 @@ def register_external_tools(registry: Any) -> None:
             description=(
                 "Fetch one public URL; text window (default ~16k, KAZMA_READ_URL_MAX_CHARS). "
                 "Args: url, offset=0, max_chars=None. Hard sites: Firecrawl/Jina recovery. "
+                "A PDF is read as its text layer, page-labelled (no OCR: a scan is refused). "
                 "For research: prefer read_url_to_file then digest_research_file; multi-page: crawl_site."
             ),
             category="search",

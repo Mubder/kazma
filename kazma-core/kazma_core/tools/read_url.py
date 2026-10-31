@@ -47,6 +47,7 @@ from kazma_core.web_acquire.result import AcquisitionError, ExtractSaveResult, F
 from kazma_core.web_acquire.trace import AttemptSpan, FetchTrace, active_trace, classify_failure
 from kazma_core.web_acquire.parser import parse_document
 from kazma_core.web_acquire import dns_worker
+from kazma_core.web_acquire import pdf_source
 from kazma_core.web_acquire import provider_usage
 
 __all__ = [
@@ -192,7 +193,7 @@ def _firecrawl_in_cooldown() -> bool:
 
 
 async def _get_capped(
-    client: Any, url: str, max_bytes: int, *,
+    client: Any, url: str, max_bytes: int | Callable[[Any], int], *,
     validated_ips: tuple[str, ...] = (), via_proxy: bool = False,
     require_peer: bool = False,
 ) -> tuple[Any, str, bool]:
@@ -825,6 +826,27 @@ def _succeeded(text: str, *, recovery: bool = False, quality: str = "usable") ->
                    links_complete=True if quality == "json" else source.links_complete)
 
 
+async def _pdf_result(body: bytes, *, truncated: bool) -> FetchResult:
+    """A PDF answer's text layer, read through the document worker."""
+    if truncated:
+        mb = min(_HARD_BODY_MAX, pdf_source.PDF_MAX_BYTES) // 1_000_000
+        return _failed(FetchErrorCode.LIMIT,
+                       f"This PDF is larger than the {mb} MB a web read takes; nothing of it was read.")
+    try:
+        read = await pdf_source.read_pdf_text(body, max_chars=PAGE_TEXT_MAX)
+    except AcquisitionError as exc:
+        return _failed(exc.code, str(exc), transient=exc.transient)
+    trace = active_trace.get()
+    if trace is not None and trace.http_source is not None:
+        source = trace.http_source
+        reasons = source.truncation_reasons + (("text_limit",) if read.cut else ())
+        trace.http_source = replace(source, truncated=bool(reasons), truncation_reasons=reasons,
+                                    links=(), links_complete=True)
+    result = _succeeded(read.text, quality="thin" if read.thin else "usable")
+    result.meta = {**result.meta, "document": read.evidence()}
+    return result
+
+
 async def fetch_result(
     url: str, *, purpose: str = "generic", scope_check: Callable[[str], bool] | None = None,
 ) -> FetchResult:
@@ -966,8 +988,19 @@ async def _fetch_full_text_impl(url: str) -> FetchResult:
             proxy=_proxy_url,
         ) as client:
             _max_bytes = _fetch_max_bytes()
+            _trace = active_trace.get()
+            _reads_pdf = pdf_source.reads_pdfs(_trace.profile if _trace is not None else None)
+
+            def _body_limit(answer: Any) -> int:
+                # A PDF is read whole or not at all (its own, larger limit);
+                # every other body keeps the page limit.
+                if _reads_pdf and pdf_source.is_pdf_type(
+                        answer.headers.get("content-type", ""), str(answer.request.url)):
+                    return max(_max_bytes, min(_HARD_BODY_MAX, pdf_source.PDF_MAX_BYTES))
+                return _max_bytes
+
             response, html_raw, _trunc = await _get_capped(
-                client, final_url, _max_bytes, validated_ips=validated_ips,
+                client, final_url, _body_limit, validated_ips=validated_ips,
                 via_proxy=_via_proxy, require_peer=True,
             )
             try:
@@ -998,7 +1031,7 @@ async def _fetch_full_text_impl(url: str) -> FetchResult:
                 if getattr(client, "headers", None) is not None:
                     client.headers["user-agent"] = _random_ua()
                 response, html_raw, _trunc = await _get_capped(
-                    client, final_url, _max_bytes, validated_ips=validated_ips,
+                    client, final_url, _body_limit, validated_ips=validated_ips,
                     via_proxy=_via_proxy, require_peer=True,
                 )
                 try:
@@ -1031,7 +1064,7 @@ async def _fetch_full_text_impl(url: str) -> FetchResult:
                 if _rh and validated_ips and not _via_proxy:
                     _pins[_rh] = validated_ips[0]
                 response, html_raw, _trunc = await _get_capped(
-                    client, redirect_url, _max_bytes, validated_ips=validated_ips,
+                    client, redirect_url, _body_limit, validated_ips=validated_ips,
                     via_proxy=_via_proxy, require_peer=True,
                 )
                 try:
@@ -1058,6 +1091,11 @@ async def _fetch_full_text_impl(url: str) -> FetchResult:
             _ct = response.headers.get("content-type", "")
             if not isinstance(_ct, str):
                 _ct = ""
+            # A PDF is read through the document worker (pdf_source); a
+            # research run used to skip every thesis and journal article.
+            if status_code < 400 and _reads_pdf and pdf_source.is_pdf(
+                    _ct, getattr(response, "content", None), final_url):
+                return await _pdf_result(response.content, truncated=_trunc)
             if status_code < 400:
                 if not _is_textual_content_type(_ct):
                     return _failed(FetchErrorCode.UNSUPPORTED_CONTENT, f"Error: URL returned non-text content ({_ct or 'unknown'}) — "
@@ -1219,6 +1257,8 @@ async def read_url(
         Text window with a header like ``[chars 0:16000 of 52000 — N remaining]``,
         or an ``Error:`` message.
 
+    A PDF is read as its text layer, page by page (``--- Page N ---``), up to
+    20 MB; a scanned PDF (no text on any page) is refused, as OCR is not run.
     For full-page research, use ``read_url_to_file`` then chunk tools.
     """
     if not url or not str(url).strip():

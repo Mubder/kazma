@@ -4464,7 +4464,20 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   a source, and an empty search ("No web results for:") as one result.
   Gate: `tests/test_research_source_coverage.py` (pooled ranking, the old
   gate, the old demotions, the old URL extraction and the rule without the
-  signal tier as negative controls). **The planner, the gap
+  signal tier as negative controls). **A PDF answer is read, through the
+  document worker** (`web_acquire/pdf_source.py`, the fifth step): the
+  ladder refused every non-text answer, so the research read no thesis or
+  journal article. A PDF type, or a nameless binary type whose bytes start
+  `%PDF-`, goes to `DocumentService.parse_transient(allow_ocr=False)` from a
+  private temporary copy (deleted after): the PDF policy and the sandbox or
+  per-job container, never a PDF library in the server (§19 E3), no remote
+  parse. Its body limit is decided from the headers
+  (`read_capped(max_bytes=callable)`): 20 MB, read whole or refused. No OCR:
+  no text on any page is refused as a scan, every page needing OCR is read
+  and marked thin. Knowledge crawls keep PDFs out (`reads_pdfs`: profile
+  generic only; the crawl corpus locks their outcomes). Gate:
+  `tests/test_web_pdf_sources.py` (real PDFs, the real worker; the old gate
+  as the negative control). **The planner, the gap
   critic and the report answer without hidden reasoning**
   (`reasoning="off"`): deepseek-flash spent all 8,000 tokens of a report on
   it, then 11,015 of the 16,000 retry, and the run failed at its last step.

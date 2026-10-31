@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Research reads PDF sources (2026-10-31)
+
+- Theses, journal articles and reports that the web serves as PDFs were
+  refused as "not extractable as a page", so a deep research run read none
+  of its academic sources. A PDF is now read as its text layer, page by page,
+  by the same sandboxed document worker that reads your uploads -- in chat
+  (`read_url`), in saved extracts and in the research pipeline. A PDF is read
+  whole up to 20 MB; a scan with no text is refused as a scan (no OCR on a
+  web read); a PDF with scripts or embedded files is refused as unreadable.
+  Knowledge crawls still leave PDFs out.
+
 ## Research sources and PDF tables (2026-10-31)
 
 - The fourth live run of the Kuwait research finished, follow-up search
