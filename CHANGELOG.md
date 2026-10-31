@@ -17,6 +17,9 @@
   Vantage".
 - Bing result links are decoded correctly: some came out as an address
   ending in control characters, or as the Bing redirect itself.
+- Every Wikipedia article was labelled a "thin" source (it looked like a
+  JavaScript app shell from its first 12 KB of HTML), even with 360,000
+  characters read from it. A page whose extract is long is no shell.
 - The Research page listed every web search the agent made in chat, first,
   as "[Chat] <query> · session · done · 1 source", above the papers; opened,
   each showed raw search results, which read as Kazma's research. Papers and
