@@ -72,9 +72,13 @@ async def test_pdf_redaction_delegates_and_fails_closed_when_engine_unavailable(
     monkeypatch.setattr(tools, "DocumentService", Mock(return_value=service))
     monkeypatch.setattr(tools, "_workspace_scope_error", Mock(return_value=None))
 
-    result = await tools.pdf_redact(str(path), ["secret"])
+    from tests._tool_answer import answer
 
-    assert result == "Error: required dependency fitz was not found"
+    # Re-pointed 2026-10-31: a failed operation is an ordinary error the model
+    # may act on (KnownEffectError: nothing was written), never "effects unknown".
+    result = await answer(tools.pdf_redact(str(path), ["secret"]))
+
+    assert result.startswith("Error: no Secure PDF redaction was written: required dependency fitz was not found")
     assert "secret" not in result
     service.redact.assert_awaited_once()
 

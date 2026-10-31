@@ -21,11 +21,14 @@ and stays uncertain. Delegating tools are checked in the functions they call
 from __future__ import annotations
 
 import ast
+import asyncio
 import inspect
 import json
 import re
 import textwrap
 from typing import Any
+
+import pytest
 
 from kazma_core.agent.tool_builtins import register_builtin_tools
 from kazma_core.agent.tool_refusal import RefusedBeforeEffect
@@ -152,12 +155,55 @@ def _resolve(spec: str, tool: Any = None) -> Any:
     return obj
 
 
+def returned_helpers(func: Any) -> list[Any]:
+    """The module's own functions *func* returns the answer of (``return
+    _output(result, "DOCX")``), outside an exception handler."""
+    func = inspect.unwrap(func)
+    root = ast.parse(textwrap.dedent(inspect.getsource(func))).body[0]
+    found: list[Any] = []
+
+    def visit(node: ast.AST, in_handler: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
+                continue
+            if isinstance(child, ast.ExceptHandler):
+                visit(child, True)
+                continue
+            if isinstance(child, ast.Return) and child.value is not None and not in_handler:
+                value = child.value.value if isinstance(child.value, ast.Await) else child.value
+                if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+                    helper = func.__globals__.get(value.func.id)
+                    if inspect.isfunction(helper) and helper.__module__ == func.__module__:
+                        found.append(helper)
+            visit(child, in_handler)
+
+    visit(root, False)
+    return found
+
+
+def _refusals_through_helpers(func: Any, seen: set[Any] | None = None) -> list[tuple[int, str]]:
+    """Refusals *func* returns, and those of the helpers whose answer it
+    returns, to any depth. ``generate_docx`` returned ``_output(...)``, whose
+    "Error: ..." the name-only rule could not see: live 2026-10-31 a broker
+    outage was reported as "effects unknown, must not be repeated"."""
+    seen = set() if seen is None else seen
+    func = inspect.unwrap(func)
+    if func in seen:
+        return []
+    seen.add(func)
+    hits = returned_refusals(func)
+    for helper in returned_helpers(func):
+        hits += [(line, f"{helper.__name__}(): {text}")
+                 for line, text in _refusals_through_helpers(helper, seen)]
+    return hits
+
+
 def _violations() -> dict[str, list[tuple[int, str]]]:
     out: dict[str, list[tuple[int, str]]] = {}
     for name, func in _mutating_tools().items():
-        hits = returned_refusals(func)
+        hits = _refusals_through_helpers(func)
         for spec in DELEGATES.get(name, []):
-            hits += returned_refusals(_resolve(spec, func))
+            hits += _refusals_through_helpers(_resolve(spec, func))
         if hits:
             out[name] = hits
     return out
@@ -297,3 +343,43 @@ def test_the_swallow_check_sees_a_broad_handler():
 
     assert len(swallowed_refusals(tool)) == 1
     assert swallowed_refusals(passed_through) == []
+
+
+def _planted_output(result: Any) -> str:
+    if not result:
+        return "Error: the operation failed"
+    return "done"
+
+
+def _planted_tool(result: Any) -> str:
+    return _planted_output(result)
+
+
+def test_the_gate_follows_a_returned_helper():
+    """Negative control: generate_docx's shape before 2026-10-31 -- the
+    tool returns a helper's answer, and the helper returns the error."""
+    assert returned_refusals(_planted_tool) == []  # the name-only rule missed it
+    assert [text for _, text in _refusals_through_helpers(_planted_tool)] == [
+        "_planted_output(): Error: the operation failed"]
+
+
+@pytest.mark.parametrize("retryable,then", [(True, "call again in a few minutes"), (False, "change the request")])
+def test_a_document_that_was_not_produced_is_an_ordinary_error(monkeypatch, retryable, then):
+    """Live 2026-10-31: generate_docx while the document broker was down ended
+    the turn as "effects unknown, must not be repeated" -- yet a failed
+    operation deletes its export, and the same call worked once the broker
+    was back."""
+    from kazma_core.agent.tool_refusal import KnownEffectError
+    from kazma_core.documents.models import DocumentResult
+    from kazma_skills.native.document_generator import tools as generator
+
+    async def generate(self, *args, **kwargs):
+        return DocumentResult(ok=False, code="worker_isolation_unavailable",
+                              message="The document broker does not answer", retryable=retryable)
+
+    monkeypatch.setattr(generator.DocumentService, "generate", generate)
+    with pytest.raises(KnownEffectError) as refused:
+        asyncio.run(generator.generate_docx("Report", sections=[{"heading": "A", "body": "words"}]))
+    text = refused.value.content()
+    assert text.startswith("Error: no DOCX was written") and then in text
+    assert "worker_isolation_unavailable" in text

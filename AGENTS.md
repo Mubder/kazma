@@ -5576,7 +5576,10 @@ failed. **Every tool that is not read-only refuses this way**:
 `tests/test_tools_refuse_before_effect.py` reads each one's own body (and the
 helper it hands the work to, `DELEGATES`) and fails on an error it RETURNS
 outside an exception handler -- an `"Error..."`/`"Safety:"` text, a refusal a
-helper built (`denied`, `refusal`...), or `{"ok": false}` -- and on a
+helper built (`denied`, `refusal`...), `{"ok": false}`, or the answer of one of
+its module's own helpers that returns one, followed to any depth (2026-10-31:
+`generate_docx` returned `_output(...)`, whose "Error:" the name-only rule
+missed) -- and on a
 `raise RefusedBeforeEffect` that the tool's own `except Exception` would turn
 back into a returned error (pass it through with `except RefusedBeforeEffect:
 raise`). An error returned from a handler (the action raised) stays uncertain;
@@ -5591,7 +5594,12 @@ raises `tool_refusal.KnownEffectError` (a `RefusedBeforeEffect`: the registry
 answers it as an ordinary error). `generate_pdf`'s check that the requested
 text reached the PDF names the incomplete file and asks for a new call;
 returned as `effect_unknown` it failed the turn and forbade the retry it asked
-for (live 2026-10-20). The check also compared table cells raw against
+for (live 2026-10-20). Every document tool's failed operation is one too
+(`document_generator._output`, `document_processor._artifact_output`): the
+operation deletes its export, so nothing was written, and the message says to
+call again later when the service is down (retryable) or to change the request;
+live 2026-10-31 a broker outage ended a `generate_docx` turn as "effects
+unknown, must not be repeated". The check also compared table cells raw against
 punctuation-free text, so every table with "°C" or "Jun – Sep" failed; cells
 and text are normalized alike now (`tests/test_pdf_verification.py`). Never
 for a send, a post or a payment. **And a call that cannot run gets no card**: `safety/call_preflight.call_refusal` (shell:

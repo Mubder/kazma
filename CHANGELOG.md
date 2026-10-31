@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## A document that was not made is an ordinary error (2026-10-31)
+
+- `generate_docx` failed during the broker outage and the chat said "effects
+  unknown ... this call must not be repeated", ending the turn -- yet a failed
+  document operation deletes its output, and the same call worked once the
+  broker was back. The generate, convert, merge, split, fill and redact tools
+  now say no file was written and whether to try again later (the service was
+  down) or change the request. The class gate that should have caught a
+  returned error follows a tool's helpers now; these five were its only
+  misses.
+
 ## The document broker survives a port Windows reserved (2026-10-31)
 
 - When Docker Desktop restarted, Windows reserved ports 20181-20780 and the
