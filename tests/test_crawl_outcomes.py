@@ -234,3 +234,43 @@ async def test_just_this_page_follows_the_page_moving_within_its_site(journal, t
     _, view, _ = await _crawl(tmp_path, monkeypatch, {SEED: [ok(SEED)]})
     assert view["acquisition"]["policy"]["scope"] == "exact"
     assert seen == [(True, False)]  # the same site, never another
+
+
+@pytest.mark.asyncio
+async def test_a_link_walk_stopped_at_the_page_cap_says_so(journal, tmp_path, monkeypatch):
+    """Live 2026-10-31: a tutorial's 18 pages, a cap of 6, and no note -- the
+    walk stops at the cap, so the frontier never held more than it."""
+    import kazma_core.security.ssrf as ssrf
+    from kazma_core.stores import knowledge_ingest as ki
+    from kazma_core.stores.knowledge import KnowledgeStore
+    from kazma_core.stores.knowledge_index import KnowledgeIndex
+
+    store = KnowledgeStore(db_path=str(tmp_path / "knowledge.db"))
+    store.create_library("docs", "Docs")
+    index = KnowledgeIndex(store)
+    index._vector_store_for = lambda _lib: type("V", (), {"available": False})()  # type: ignore[method-assign]
+    links = tuple(SEED + f"p{n}" for n in range(5))
+
+    async def fetch(url, **kwargs):
+        return FetchResult(ok=True, url=url, final_url=url, text="# Page\n\n" + "useful words " * 40,
+                           http_status=200, links=links, links_complete=True)
+
+    async def nothing(*a, **k):
+        return []
+
+    monkeypatch.setattr(ssrf, "validate_url", lambda *a, **k: ())
+    for name in ("_llms_txt_discover", "_fetch_sitemaps"):
+        monkeypatch.setattr(ki, name, nothing)
+    monkeypatch.setattr(ki, "_web_fetch_text", fetch)
+    monkeypatch.setattr(ki, "_kb_delay_ms", lambda: 0)
+    monkeypatch.setattr(ki, "get_knowledge_store", lambda: store)
+    monkeypatch.setattr(ki, "get_knowledge_index", lambda: index)
+    monkeypatch.setattr(ki, "_pw_browser_scope", contextlib.nullcontext)
+    monkeypatch.setattr(ki, "_save_provenance", lambda *a: None)
+    try:
+        _ = [u async for u in ki.ingest_site("docs", SEED, max_pages=3, job_id="capped")]
+    finally:
+        store.close()
+    view = crawl_jobs.projection("capped")
+    assert len(view["pages"]) == 3 and view["acquisition"]["status"] == "completed"
+    assert "page_cap" in view["notes"]

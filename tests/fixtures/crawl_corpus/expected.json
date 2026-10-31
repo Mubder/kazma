@@ -68,7 +68,8 @@
   "httpwg-specs": {
     "chunks": 1016,
     "notes": [
-      "link_walk_bounded"
+      "link_walk_bounded",
+      "page_cap"
     ],
     "pages": {
       "https://httpwg.org/specs/": [
@@ -221,7 +222,9 @@
   },
   "python-tutorial": {
     "chunks": 268,
-    "notes": [],
+    "notes": [
+      "page_cap"
+    ],
     "pages": {
       "https://docs.python.org/3/tutorial/": [
         "ingested",
@@ -274,7 +277,8 @@
   "rust-book": {
     "chunks": 41,
     "notes": [
-      "excluded"
+      "excluded",
+      "page_cap"
     ],
     "pages": {
       "https://doc.rust-lang.org/book/": [

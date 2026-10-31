@@ -83,19 +83,28 @@
     body.appendChild(line);
   }
 
-  function refresh() {
-    if (document.visibilityState === 'hidden' || !document.getElementById('crawl-panel-body')) return;
+  // The first read happens whatever the tab's state (a Dashboard opened in a
+  // background tab stayed empty until it had been shown for a minute); the
+  // polls after it only while the page is seen, and once more when it is.
+  function refresh(always) {
+    if ((!always && document.visibilityState === 'hidden') || !document.getElementById('crawl-panel-body')) return;
     var get = window.kazmaGetJson;
     if (!get) return;
     get('/api/kb/outcomes').then(render);
   }
 
-  refresh();
+  function onVisible() {
+    if (document.visibilityState === 'visible') refresh();
+  }
+
+  refresh(true);
   state.timer = setInterval(refresh, POLL_MS);
+  document.addEventListener('visibilitychange', onVisible);
   if (window.kazmaAddLeaveHook) {
     window.kazmaAddLeaveHook(function () {
       clearInterval(state.timer);
       state.timer = null;
+      document.removeEventListener('visibilitychange', onVisible);
     });
   }
 })();
