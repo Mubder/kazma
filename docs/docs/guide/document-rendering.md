@@ -5,6 +5,8 @@ sidebar_label: Document Rendering
 description: The unified rendering layer — one DocProfile drives DOCX, PDF, HTML, Markdown, XLSX, and PPTX so every file Kazma emits shares one design and correct RTL.
 ---
 
+> This page is published at [kazma.ai/docs/document-rendering/](https://kazma.ai/docs/document-rendering/) ([Arabic](https://kazma.ai/ar/docs/document-rendering/)).
+
 > Source-referenced guide to Kazma's unified document-rendering layer. Every output format flows through one `DocProfile`, so a generated DOCX, PDF, HTML, Markdown, XLSX, and PPTX share one design and correct right-to-left handling — regardless of extension or language.
 
 ---

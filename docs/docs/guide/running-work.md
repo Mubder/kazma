@@ -7,6 +7,8 @@ description: How Kazma watches every task it runs, tells you when one stalls, ge
 
 # Running work and incidents
 
+> This page is published at [kazma.ai/docs/running-work/](https://kazma.ai/docs/running-work/) ([Arabic](https://kazma.ai/ar/docs/running-work/)).
+
 Kazma runs many kinds of work that outlive one message: chat turns, swarm
 tasks, scheduled jobs, document jobs, research sessions, crawls and research
 pipelines, X posts, memory tasks and maintenance sweeps. The run supervisor

@@ -5,6 +5,8 @@ sidebar_label: Environment Variables
 description: Master reference for Kazma environment variables (dev, single-operator, production)
 ---
 
+> This page is published at [kazma.ai/docs/environment-variables/](https://kazma.ai/docs/environment-variables/) ([Arabic](https://kazma.ai/ar/docs/environment-variables/)).
+
 > Complete env reference for local, Docker, and production. Prefer strong secrets; never commit `.env` with real keys. Also see [Configuration](../guide/configuration) for `kazma.yaml` and ConfigStore.
 
 | Variable | Default | Purpose |

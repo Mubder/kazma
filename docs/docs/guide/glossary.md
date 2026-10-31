@@ -4,6 +4,8 @@ title: Glossary
 sidebar_label: Glossary
 description: Kazma Glossary — code-audited reference (unified docs, v0.9+)
 ---
+> This page is published at [kazma.ai/docs/glossary/](https://kazma.ai/docs/glossary/) ([Arabic](https://kazma.ai/ar/docs/glossary/)).
+
 > Terms used throughout Kazma, with precise meanings grounded in the codebase.
 
 ---

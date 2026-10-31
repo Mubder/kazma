@@ -614,4 +614,264 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The crawl was cancelled.",
         "ar": "أُلغي الزحف.",
     },
+    "knowledge.scope_label": {
+        "en": 'Scope',
+        "ar": 'النطاق',
+    },
+    "knowledge.scope_default": {
+        "en": 'Usual scope',
+        "ar": 'النطاق المعتاد',
+    },
+    "knowledge.scope_section": {
+        "en": 'This section',
+        "ar": 'هذا القسم',
+    },
+    "knowledge.scope_site": {
+        "en": 'Whole site',
+        "ar": 'الموقع كاملاً',
+    },
+    "knowledge.scope_page": {
+        "en": 'Just this page',
+        "ar": 'هذه الصفحة فقط',
+    },
+    "knowledge.preview": {
+        "en": 'Preview',
+        "ar": 'معاينة',
+    },
+    "knowledge.preview_title": {
+        "en": 'What this crawl would fetch',
+        "ar": 'ما سيجلبه هذا الزحف',
+    },
+    "knowledge.preview_failed": {
+        "en": 'Preview failed: {error}',
+        "ar": 'تعذرت المعاينة: {error}',
+    },
+    "knowledge.preview_source.sitemap": {
+        "en": "Listed by the site's sitemap.",
+        "ar": 'من خريطة الموقع.',
+    },
+    "knowledge.preview_source.llms_txt": {
+        "en": "Listed by the site's llms.txt.",
+        "ar": 'من ملف llms.txt الخاص بالموقع.',
+    },
+    "knowledge.preview_source.link_walk": {
+        "en": "Found by following the page's links.",
+        "ar": 'بتتبّع روابط الصفحة.',
+    },
+    "knowledge.preview_source.single_page": {
+        "en": 'Just this page.',
+        "ar": 'هذه الصفحة فقط.',
+    },
+    "knowledge.preview_source.seed_only": {
+        "en": 'Only this page could be read; its links could not be followed.',
+        "ar": 'أمكن قراءة هذه الصفحة فقط؛ تعذّر تتبّع روابطها.',
+    },
+    "knowledge.preview_unknown": {
+        "en": 'known once crawled',
+        "ar": 'يُعرف بعد الزحف',
+    },
+    "knowledge.preview_cap": {
+        "en": 'That is more than one crawl takes: it fetches the first pages, up to its limit.',
+        "ar": 'هذا أكثر مما يأخذه زحف واحد: يجلب الصفحات الأولى حتى حدّه.',
+    },
+    "knowledge.preview_bounded": {
+        "en": 'The sitemap is very large and was read in part; the crawl may find more.',
+        "ar": 'خريطة الموقع كبيرة جداً وقُرئت جزئياً؛ قد يجد الزحف المزيد.',
+    },
+    "knowledge.preview_upper": {
+        "en": 'Pages that robots.txt or a sign-in keeps out are found during the crawl.',
+        "ar": 'الصفحات التي يمنعها robots.txt أو تسجيل الدخول تُكتشف أثناء الزحف.',
+    },
+    "knowledge.verdict.success": {
+        "en": 'Completed',
+        "ar": 'اكتمل',
+    },
+    "knowledge.verdict.partial": {
+        "en": 'Finished with failures',
+        "ar": 'انتهى مع إخفاقات',
+    },
+    "knowledge.verdict.failed": {
+        "en": 'Failed',
+        "ar": 'فشل',
+    },
+    "knowledge.verdict.empty": {
+        "en": 'Stored nothing',
+        "ar": 'لم يُخزَّن شيء',
+    },
+    "knowledge.report_title": {
+        "en": 'Pages not stored, and why',
+        "ar": 'صفحات لم تُخزَّن، ولماذا',
+    },
+    "knowledge.outcome.ingested": {
+        "en": 'Stored',
+        "ar": 'خُزّنت',
+    },
+    "knowledge.outcome.unchanged": {
+        "en": 'Unchanged',
+        "ar": 'لم تتغير',
+    },
+    "knowledge.outcome.excluded": {
+        "en": 'Kept out',
+        "ar": 'مستبعدة',
+    },
+    "knowledge.outcome.failed": {
+        "en": 'Failed',
+        "ar": 'فشلت',
+    },
+    "knowledge.outcome.uncertain": {
+        "en": 'Uncertain',
+        "ar": 'غير مؤكدة',
+    },
+    "knowledge.outcome.pending": {
+        "en": 'Not reached',
+        "ar": 'لم يُوصل إليها',
+    },
+    "knowledge.note.excluded": {
+        "en": 'Some pages were kept out by robots.txt, the scope, a sign-in, removal or their size.',
+        "ar": 'استُبعدت صفحات بسبب robots.txt أو النطاق أو تسجيل الدخول أو حذفها أو حجمها.',
+    },
+    "knowledge.note.page_cap": {
+        "en": 'The crawl stopped at its page limit.',
+        "ar": 'توقف الزحف عند حد الصفحات.',
+    },
+    "knowledge.note.link_walk_bounded": {
+        "en": 'Following links stopped at its depth or size limit.',
+        "ar": 'توقف تتبع الروابط عند حد العمق أو الحجم.',
+    },
+    "knowledge.note.sitemap_bounded": {
+        "en": 'The sitemap is very large and was read in part.',
+        "ar": 'خريطة الموقع كبيرة جداً وقُرئت جزئياً.',
+    },
+    "knowledge.note.nothing_stored": {
+        "en": 'Nothing was stored: every page was kept out.',
+        "ar": 'لم يُخزَّن شيء: استُبعدت كل الصفحات.',
+    },
+    "knowledge.reason.robots": {
+        "en": 'robots.txt asks crawlers to stay out',
+        "ar": 'يطلب robots.txt من الزواحف عدم الدخول',
+    },
+    "knowledge.reason.out_of_scope": {
+        "en": "outside the crawl's scope",
+        "ar": 'خارج نطاق الزحف',
+    },
+    "knowledge.reason.login": {
+        "en": 'behind a sign-in',
+        "ar": 'خلف تسجيل دخول',
+    },
+    "knowledge.reason.gone": {
+        "en": 'no longer on the site',
+        "ar": 'لم تعد موجودة في الموقع',
+    },
+    "knowledge.reason.too_large": {
+        "en": 'larger than Kazma reads',
+        "ar": 'أكبر مما يقرؤه Kazma',
+    },
+    "knowledge.reason.server_error": {
+        "en": 'the site had an error',
+        "ar": 'حدث خطأ في الموقع',
+    },
+    "knowledge.reason.http_error": {
+        "en": 'the site refused the page',
+        "ar": 'رفض الموقع الصفحة',
+    },
+    "knowledge.reason.network": {
+        "en": 'the connection failed',
+        "ar": 'فشل الاتصال',
+    },
+    "knowledge.reason.blocked_address": {
+        "en": 'the address is on a private network',
+        "ar": 'العنوان على شبكة خاصة',
+    },
+    "knowledge.reason.bot_wall": {
+        "en": 'a bot check stood in the way',
+        "ar": 'اعترضه فحص للروبوتات',
+    },
+    "knowledge.reason.no_text": {
+        "en": 'no readable text',
+        "ar": 'لا يوجد نص مقروء',
+    },
+    "knowledge.reason.unreadable": {
+        "en": 'a format Kazma cannot read',
+        "ar": 'صيغة لا يقرؤها Kazma',
+    },
+    "knowledge.reason.incomplete": {
+        "en": 'the page could not be read completely',
+        "ar": 'تعذرت قراءة الصفحة كاملة',
+    },
+    "knowledge.reason.library_gone": {
+        "en": 'the library was deleted',
+        "ar": 'حُذفت المكتبة',
+    },
+    "knowledge.reason.storage_full": {
+        "en": 'the Knowledge store is full',
+        "ar": 'مخزن المعرفة ممتلئ',
+    },
+    "knowledge.reason.other": {
+        "en": 'an unexpected problem',
+        "ar": 'مشكلة غير متوقعة',
+    },
+    "knowledge.hint.robots": {
+        "en": 'Nothing to fix: the site asked not to be crawled.',
+        "ar": 'لا شيء لإصلاحه: طلب الموقع عدم الزحف إليه.',
+    },
+    "knowledge.hint.out_of_scope": {
+        "en": 'Choose a wider scope (Whole site) to include it.',
+        "ar": 'اختر نطاقاً أوسع (الموقع كاملاً) لتضمينها.',
+    },
+    "knowledge.hint.login": {
+        "en": 'Kazma does not sign in to sites.',
+        "ar": 'لا يسجل Kazma الدخول إلى المواقع.',
+    },
+    "knowledge.hint.gone": {
+        "en": 'The link is stale; nothing to fix.',
+        "ar": 'الرابط قديم؛ لا شيء لإصلاحه.',
+    },
+    "knowledge.hint.too_large": {
+        "en": 'Pages are stored whole, up to a million characters; a part is never stored.',
+        "ar": 'تُخزَّن الصفحات كاملة حتى مليون حرف؛ ولا يُخزَّن جزء منها أبداً.',
+    },
+    "knowledge.hint.server_error": {
+        "en": 'Try again later with Refresh.',
+        "ar": 'أعد المحاولة لاحقاً بالتحديث.',
+    },
+    "knowledge.hint.http_error": {
+        "en": 'The site may refuse crawlers; open the page in a browser to check.',
+        "ar": 'قد يرفض الموقع الزواحف؛ افتح الصفحة في المتصفح للتحقق.',
+    },
+    "knowledge.hint.network": {
+        "en": 'Kazma tried again and the connection still failed; check the internet connection, then Refresh.',
+        "ar": 'أعاد Kazma المحاولة وما زال الاتصال يفشل؛ تحقق من الاتصال بالإنترنت ثم حدّث.',
+    },
+    "knowledge.hint.blocked_address": {
+        "en": 'Kazma never crawls private addresses; if the site is public, Refresh once the network is back.',
+        "ar": 'لا يزحف Kazma إلى العناوين الخاصة أبداً؛ إن كان الموقع عاماً فحدّث عند عودة الشبكة.',
+    },
+    "knowledge.hint.bot_wall": {
+        "en": 'Kazma does not solve bot checks.',
+        "ar": 'لا يحل Kazma فحوص الروبوتات.',
+    },
+    "knowledge.hint.no_text": {
+        "en": 'The page may be empty or built entirely by scripts.',
+        "ar": 'قد تكون الصفحة فارغة أو مبنية بالكامل بالبرمجيات.',
+    },
+    "knowledge.hint.unreadable": {
+        "en": 'Add the file through Documents instead.',
+        "ar": 'أضف الملف من صفحة المستندات بدلاً من ذلك.',
+    },
+    "knowledge.hint.incomplete": {
+        "en": "Check that Kazma's local browser (Chromium) works, then Refresh.",
+        "ar": 'تحقق من عمل متصفح Kazma المحلي (Chromium) ثم حدّث.',
+    },
+    "knowledge.hint.library_gone": {
+        "en": 'The crawl stopped with its library.',
+        "ar": 'توقف الزحف مع مكتبته.',
+    },
+    "knowledge.hint.storage_full": {
+        "en": 'Delete or archive a library to make room.',
+        "ar": 'احذف مكتبة أو أرشفها لإفساح المجال.',
+    },
+    "knowledge.hint.other": {
+        "en": 'The server log names the cause.',
+        "ar": 'يذكر سجل الخادم السبب.',
+    },
 }

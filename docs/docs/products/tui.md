@@ -7,6 +7,8 @@ description: Textual-based Kazma dashboard and editor
 
 # Terminal UI (TUI)
 
+> This page is published at [kazma.ai/docs/tui/](https://kazma.ai/docs/tui/) ([Arabic](https://kazma.ai/ar/docs/tui/)).
+
 ```bash
 kazma-tui
 ```

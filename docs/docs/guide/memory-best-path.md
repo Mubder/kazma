@@ -5,6 +5,8 @@ sidebar_label: Memory best path
 
 # Memory — best path for Kazma
 
+> This page is published at [kazma.ai/docs/memory-best-path/](https://kazma.ai/docs/memory-best-path/) ([Arabic](https://kazma.ai/ar/docs/memory-best-path/)).
+
 Recommended way to run **V2 cognitive memory** + **Knowledge Library** after the memory program. **Do not merge stores into one table.** Use a **unified chat experience** on **separate stores**.
 
 Deep architecture: [Memory & RAG](./memory-and-rag.md).

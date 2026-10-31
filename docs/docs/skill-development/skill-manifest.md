@@ -4,6 +4,8 @@ sidebar_position: 2
 
 # Skill Manifest
 
+> This page is published at [kazma.ai/docs/skills/skill-manifest/](https://kazma.ai/docs/skills/skill-manifest/) ([Arabic](https://kazma.ai/ar/docs/skills/skill-manifest/)).
+
 The `skill_manifest.yaml` file defines your skill metadata, capabilities, and configuration.
 
 ## Full specification

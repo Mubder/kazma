@@ -7,6 +7,8 @@ description: The policy gate between the LLM and durable mutations — Kazma res
 
 # Commitment Layer — resolve-before-act
 
+> This page is published at [kazma.ai/docs/commitment-layer/](https://kazma.ai/docs/commitment-layer/) ([Arabic](https://kazma.ai/ar/docs/commitment-layer/)).
+
 > A **policy gate between the LLM and durable mutations.** Before the agent is
 > allowed to schedule, send, execute, or change config, Kazma resolves its
 > intent against memory and policy. Ambiguous acts are disambiguated with an

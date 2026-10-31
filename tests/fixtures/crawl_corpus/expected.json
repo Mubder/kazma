@@ -1,0 +1,394 @@
+{
+  "alpine-start": {
+    "chunks": 82,
+    "notes": [],
+    "pages": {
+      "http://alpinejs.dev/start-here": [
+        "ingested",
+        ""
+      ],
+      "https://alpinejs.dev/start-here": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "example-com": {
+    "chunks": 1,
+    "notes": [],
+    "pages": {
+      "https://example.com/": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "fastapi-tutorial": {
+    "chunks": 194,
+    "notes": [
+      "page_cap"
+    ],
+    "pages": {
+      "https://fastapi.tiangolo.com/tutorial/": [
+        "ingested",
+        ""
+      ],
+      "https://fastapi.tiangolo.com/tutorial/body/": [
+        "ingested",
+        ""
+      ],
+      "https://fastapi.tiangolo.com/tutorial/first-steps/": [
+        "ingested",
+        ""
+      ],
+      "https://fastapi.tiangolo.com/tutorial/path-params/": [
+        "ingested",
+        ""
+      ],
+      "https://fastapi.tiangolo.com/tutorial/query-params/": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "go-effective": {
+    "chunks": 1,
+    "notes": [],
+    "pages": {
+      "https://go.dev/doc/effective_go": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "httpwg-specs": {
+    "chunks": 1016,
+    "notes": [
+      "link_walk_bounded"
+    ],
+    "pages": {
+      "https://httpwg.org/specs/": [
+        "ingested",
+        ""
+      ],
+      "https://httpwg.org/specs/rfc9110.html": [
+        "ingested",
+        ""
+      ],
+      "https://httpwg.org/specs/rfc9111.html": [
+        "ingested",
+        ""
+      ],
+      "https://httpwg.org/specs/rfc9112.html": [
+        "ingested",
+        ""
+      ],
+      "https://httpwg.org/specs/rfc9113.html": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "llmstxt": {
+    "chunks": 124,
+    "notes": [
+      "page_cap"
+    ],
+    "pages": {
+      "https://llmstxt.org/": [
+        "ingested",
+        ""
+      ],
+      "https://llmstxt.org/core.html": [
+        "ingested",
+        ""
+      ],
+      "https://llmstxt.org/domains.html": [
+        "ingested",
+        ""
+      ],
+      "https://llmstxt.org/ed.html": [
+        "ingested",
+        ""
+      ],
+      "https://llmstxt.org/index.html": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "mdn-status": {
+    "chunks": 67,
+    "notes": [
+      "page_cap",
+      "sitemap_bounded"
+    ],
+    "pages": {
+      "https://developer.mozilla.org/en-US/": [
+        "ingested",
+        ""
+      ],
+      "https://developer.mozilla.org/en-US/404": [
+        "ingested",
+        ""
+      ],
+      "https://developer.mozilla.org/en-US/about": [
+        "ingested",
+        ""
+      ],
+      "https://developer.mozilla.org/en-US/advertising": [
+        "ingested",
+        ""
+      ],
+      "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "postgres-tutorial": {
+    "chunks": 62,
+    "notes": [
+      "page_cap",
+      "sitemap_bounded"
+    ],
+    "pages": {
+      "https://www.postgresql.org/docs/19/tutorial.html": [
+        "ingested",
+        ""
+      ],
+      "https://www.postgresql.org/docs/current/backup.html": [
+        "ingested",
+        ""
+      ],
+      "https://www.postgresql.org/docs/current/spgist.html": [
+        "ingested",
+        ""
+      ],
+      "https://www.postgresql.org/docs/current/sql-alterpublication.html": [
+        "ingested",
+        ""
+      ],
+      "https://www.postgresql.org/docs/current/tutorial.html": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "python-missing": {
+    "chunks": 0,
+    "notes": [
+      "excluded",
+      "nothing_stored"
+    ],
+    "pages": {
+      "https://docs.python.org/3/kazma-no-such-page.html": [
+        "excluded",
+        "gone"
+      ]
+    },
+    "status": "completed"
+  },
+  "python-moved": {
+    "chunks": 416,
+    "notes": [],
+    "pages": {
+      "https://docs.python.org/3/library/stdtypes": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "python-redirect": {
+    "chunks": 20,
+    "notes": [],
+    "pages": {
+      "http://python.org/": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "python-tutorial": {
+    "chunks": 268,
+    "notes": [],
+    "pages": {
+      "https://docs.python.org/3/tutorial/": [
+        "ingested",
+        ""
+      ],
+      "https://docs.python.org/3/tutorial/appetite.html": [
+        "ingested",
+        ""
+      ],
+      "https://docs.python.org/3/tutorial/controlflow.html": [
+        "ingested",
+        ""
+      ],
+      "https://docs.python.org/3/tutorial/interpreter.html": [
+        "ingested",
+        ""
+      ],
+      "https://docs.python.org/3/tutorial/introduction.html": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "rfc9110": {
+    "chunks": 633,
+    "notes": [],
+    "pages": {
+      "https://www.rfc-editor.org/rfc/rfc9110.html": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "robots-google-search": {
+    "chunks": 0,
+    "notes": [
+      "excluded",
+      "nothing_stored"
+    ],
+    "pages": {
+      "https://www.google.com/search?q=kazma": [
+        "excluded",
+        "robots"
+      ]
+    },
+    "status": "completed"
+  },
+  "rust-book": {
+    "chunks": 41,
+    "notes": [
+      "excluded"
+    ],
+    "pages": {
+      "https://doc.rust-lang.org/book/": [
+        "ingested",
+        ""
+      ],
+      "https://doc.rust-lang.org/book/appendix-05-editions.html": [
+        "ingested",
+        ""
+      ],
+      "https://doc.rust-lang.org/book/ch01-01-installation.html": [
+        "ingested",
+        ""
+      ],
+      "https://doc.rust-lang.org/book/print.html": [
+        "excluded",
+        "too_large"
+      ],
+      "https://doc.rust-lang.org/stable/book/": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "sqlite-lang": {
+    "chunks": 2,
+    "notes": [],
+    "pages": {
+      "https://www.sqlite.org/lang.html": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "textual-guide": {
+    "chunks": 188,
+    "notes": [
+      "page_cap"
+    ],
+    "pages": {
+      "https://textual.textualize.io/guide/": [
+        "ingested",
+        ""
+      ],
+      "https://textual.textualize.io/guide/CSS/": [
+        "ingested",
+        ""
+      ],
+      "https://textual.textualize.io/guide/actions/": [
+        "ingested",
+        ""
+      ],
+      "https://textual.textualize.io/guide/animation/": [
+        "ingested",
+        ""
+      ],
+      "https://textual.textualize.io/guide/app/": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "uv-docs": {
+    "chunks": 133,
+    "notes": [
+      "page_cap"
+    ],
+    "pages": {
+      "https://docs.astral.sh/uv/": [
+        "ingested",
+        ""
+      ],
+      "https://docs.astral.sh/uv/getting-started/features/index.md": [
+        "ingested",
+        ""
+      ],
+      "https://docs.astral.sh/uv/getting-started/first-steps/index.md": [
+        "ingested",
+        ""
+      ],
+      "https://docs.astral.sh/uv/getting-started/installation/index.md": [
+        "ingested",
+        ""
+      ],
+      "https://docs.astral.sh/uv/guides/install-python/index.md": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "wikipedia-ar-kuwait": {
+    "chunks": 111,
+    "notes": [],
+    "pages": {
+      "https://ar.wikipedia.org/wiki/%D8%A7%D9%84%D9%83%D9%88%D9%8A%D8%AA": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  },
+  "wikipedia-ar-python": {
+    "chunks": 96,
+    "notes": [],
+    "pages": {
+      "https://ar.wikipedia.org/wiki/%D8%A8%D8%A7%D9%8A%D8%AB%D9%88%D9%86_(%D9%84%D8%BA%D8%A9_%D8%A8%D8%B1%D9%85%D8%AC%D8%A9)": [
+        "ingested",
+        ""
+      ]
+    },
+    "status": "completed"
+  }
+}

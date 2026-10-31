@@ -1038,4 +1038,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تحذير",
         "en": "Warning",
     },
+    "dashboard.crawls.title": {"en": 'Knowledge crawls', "ar": 'زحف المعرفة'},
+    "dashboard.crawls.rate": {"en": 'Pages stored or kept out by a rule: {rate} (target {target})', "ar": 'الصفحات المخزنة أو المستبعدة بقاعدة: {rate} (الهدف {target})'},
+    "dashboard.crawls.none": {"en": 'No finished crawl yet.', "ar": 'لا يوجد زحف منتهٍ بعد.'},
+    "dashboard.crawls.reasons": {"en": 'Why pages were not stored', "ar": 'لماذا لم تُخزَّن صفحات'},
+    "dashboard.crawls.canary_passed": {"en": 'Daily crawl check passed: {when}', "ar": 'نجح فحص الزحف اليومي: {when}'},
+    "dashboard.crawls.canary_failed": {"en": 'Daily crawl check failed: {when}', "ar": 'فشل فحص الزحف اليومي: {when}'},
+    "dashboard.crawls.canary_never": {"en": 'Daily crawl check: not run yet', "ar": 'فحص الزحف اليومي: لم يُشغَّل بعد'},
+    "dashboard.crawls.unavailable": {"en": 'Crawl outcomes are unavailable right now.', "ar": 'نتائج الزحف غير متاحة حالياً.'},
 }

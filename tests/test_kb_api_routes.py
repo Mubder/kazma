@@ -105,6 +105,14 @@ class _Store:
     def ensure_capacity(self, library_id=None):
         self.seen("store.ensure_capacity")
 
+    def crawl_scope(self, lib_id):
+        self.seen("store.crawl_scope")
+        return (self.libs.get(lib_id) or {}).get("crawl_scope", "")
+
+    def set_crawl_scope(self, lib_id, scope):
+        self.seen("store.set_crawl_scope")
+        self.libs[lib_id]["crawl_scope"] = scope
+
     def set_chunk_count(self, lib_id, count):
         self.seen("store.set_chunk_count")
 

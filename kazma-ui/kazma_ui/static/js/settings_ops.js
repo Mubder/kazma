@@ -60,6 +60,57 @@
             this.acquisitionMonitor = saved;
             this.acquisitionMonitorMessage = _t('research.monitor.saved');
         },
+        // The daily crawl check (web_acquire/canary.py).
+        canary: null,
+        canaryBusy: false,
+        canaryLine: '',
+        canaryReason: '',
+        _showCanary(state) {
+            if (!state || !state.ran_at) {
+                this.canaryLine = _t('research.canary.never');
+                this.canaryReason = '';
+                return;
+            }
+            const when = window.KazmaFormat.dateTime(state.ran_at * 1000);
+            this.canaryLine = _t(state.ok ? 'research.canary.passed' : 'research.canary.failed',
+                state.ok ? 'Last check passed: {when}' : 'Last check failed: {when}', { when: when });
+            this.canaryReason = state.ok ? '' : (state.reason || '');
+        },
+        async loadCanary() {
+            if (this.canaryBusy) return;
+            this.canaryBusy = true;
+            try {
+                const response = await fetch('/api/settings/acquisition/canary', { credentials: 'same-origin' });
+                if (!response.ok) throw new Error();
+                const data = await response.json();
+                this.canary = data.settings;
+                this._showCanary(data.state);
+            } catch (_) { this.canaryLine = _t('research.ui.status_unavailable'); }
+            finally { this.canaryBusy = false; }
+        },
+        async saveCanary() {
+            if (this.canaryBusy || !this.canary) return;
+            this.canaryBusy = true;
+            try {
+                this.canary = await window.kazmaSave('/api/settings/acquisition/canary', {
+                    method: 'PUT', body: this.canary,
+                });
+            } catch (_) {
+                this.canaryLine = _t('research.canary.save_failed');
+            } finally { this.canaryBusy = false; }
+        },
+        async runCanary() {
+            if (this.canaryBusy) return;
+            this.canaryBusy = true;
+            try {
+                const response = await fetch('/api/settings/acquisition/canary/run', {
+                    method: 'POST', credentials: 'same-origin',
+                });
+                if (!response.ok) throw new Error();
+                this._showCanary(await response.json());
+            } catch (_) { this.canaryLine = _t('research.canary.run_failed'); }
+            finally { this.canaryBusy = false; }
+        },
         acquisitionBusy: false,
         acquisitionText: '',
         async inspectAcquisition(refreshCredits) {

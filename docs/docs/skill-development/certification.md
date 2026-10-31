@@ -4,6 +4,8 @@ sidebar_position: 5
 
 # Certification
 
+> This page is published at [kazma.ai/docs/skills/certification/](https://kazma.ai/docs/skills/certification/) ([Arabic](https://kazma.ai/ar/docs/skills/certification/)).
+
 Certification is a **local readiness check** plus an optional **remote submit** to a hub API. It is not a fully hosted “app store review” unless you deploy that API yourself.
 
 ## Local check (always available)

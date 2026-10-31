@@ -209,6 +209,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "store; loading an install's .env could redirect recovery to live data"
     ),
     "kazma-core/kazma_core/documents/parser_worker.py": "sandboxed: parses untrusted documents with a scrubbed environment",
+    "scripts/crawl_corpus.py": (
+        "records and replays the crawl corpus in a private temporary data folder on SQLite; "
+        "an install's .env would point it at that install's database and settings"
+    ),
     "kazma-core/kazma_core/documents/renderer_worker.py": "sandboxed: renders documents with a scrubbed environment",
     "kazma-core/kazma_core/documents/mutation_worker.py": "sandboxed: mutates documents with a scrubbed environment",
     "kazma-core/kazma_core/documents/worker_entry.py": (

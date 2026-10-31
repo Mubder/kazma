@@ -92,6 +92,14 @@ machine-readable output).
   `/docs/<page>/` of the page `docs/website-pages.json` maps it to; a link to
   a source that is not published becomes its GitHub URL. The plan flags a
   link left in the source's form.
+- **The "published at" line stays here.** Every copied source has, under its
+  title, `> This page is published at [kazma.ai/docs/<page>/](…) ([Arabic](…)).`
+  Do not copy it to the site. It exists because these pages are public on
+  GitHub word for word, and Google indexes one copy: it picked GitHub's for
+  some pages and left ten English docs pages "crawled, not indexed", while
+  their Arabic pages, found only on kazma.ai, were all indexed (2026-10-31).
+  A page added, renamed or unpublished here changes its line in the same
+  commit (`tests/test_website_pages.py`).
 - **Heading ids:** a source heading may end with a Docusaurus id,
   `## Title {#id}`. Keep it: the site gives the heading that id and shows
   only the title (`src/plugins/remark-heading-ids.mjs`). Until 2026-10-01 the

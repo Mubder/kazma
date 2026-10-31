@@ -4,6 +4,8 @@ sidebar_position: 2
 
 # Publishing & registering skills
 
+> This page is published at [kazma.ai/docs/hub/publishing-skills/](https://kazma.ai/docs/hub/publishing-skills/) ([Arabic](https://kazma.ai/ar/docs/hub/publishing-skills/)).
+
 Share skills by registering them locally and, optionally, submitting them to a remote hub API.
 
 :::warning No `publish` command

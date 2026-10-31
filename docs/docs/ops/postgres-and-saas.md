@@ -7,6 +7,8 @@ description: Postgres & SaaS Cutover — production ops
 
 # SaaS multi-user + full Postgres cutover
 
+> This page is published at [kazma.ai/docs/ops/postgres-and-saas/](https://kazma.ai/docs/ops/postgres-and-saas/) ([Arabic](https://kazma.ai/ar/docs/ops/postgres-and-saas/)).
+
 ## What is on Postgres when `KAZMA_DATABASE_URL` is set
 
 | Store | Table(s) | Module |

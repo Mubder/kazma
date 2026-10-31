@@ -7,6 +7,8 @@ description: What is shared-state ready vs process-local after residual hardenin
 
 # Multi-replica & SaaS residual hardening
 
+> This page is published at [kazma.ai/docs/ops/multi-replica-and-saas/](https://kazma.ai/docs/ops/multi-replica-and-saas/) ([Arabic](https://kazma.ai/ar/docs/ops/multi-replica-and-saas/)).
+
 Kazma's default profile remains **single-operator / single-node**. The
 work below closes residual gaps for multi-user and multi-replica *where
 the architecture allows* — it does not claim full multi-tenant SaaS.

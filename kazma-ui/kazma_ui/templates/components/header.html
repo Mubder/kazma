@@ -56,7 +56,10 @@
                 </template>
                 <template x-for="item in $store.notifications.items" :key="item.id">
                     <div class="dropdown-item" style="cursor:default;flex-direction:column;align-items:flex-start;gap:2px">
-                        <span translate="no" x-text="(item.severity || '') + ' · ' + (item.subsystem || item.title || t('common.alert'))"></span>
+                        <span style="display:flex;align-items:center;gap:6px">
+                            <span aria-hidden="true" style="font-weight:700" :style="{ color: $store.notifications.tone(item).color }" x-text="$store.notifications.tone(item).mark"></span>
+                            <span translate="no" x-text="item.title || item.subsystem || t('common.alert')"></span>
+                        </span>
                         <span translate="no" style="font-size:0.75rem;opacity:0.7" x-text="item.reason || item.status || ''"></span>
                     </div>
                 </template>

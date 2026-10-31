@@ -1,5 +1,7 @@
 # Supply chain — verifying a Kazma release
 
+> This page is published at [kazma.ai/docs/security/supply-chain/](https://kazma.ai/docs/security/supply-chain/) ([Arabic](https://kazma.ai/ar/docs/security/supply-chain/)).
+
 Kazma is self-hosted. You run it on your own box, often against your own
 vault, and it is allowed to touch your files, your shell and your repo. A
 release you cannot verify is a release you are taking on trust, and "trust me"

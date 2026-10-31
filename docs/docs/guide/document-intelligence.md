@@ -7,6 +7,8 @@ description: End-to-end document processing — ingest, parse, OCR, index, gener
 
 # Document Intelligence
 
+> This page is published at [kazma.ai/docs/document-intelligence/](https://kazma.ai/docs/document-intelligence/) ([Arabic](https://kazma.ai/ar/docs/document-intelligence/)).
+
 Kazma's document platform ingests, parses, OCRs, indexes, generates, converts
 and redacts documents through one orchestration layer, with isolated workers,
 an append-only audit trail and live configuration. What has been measured and

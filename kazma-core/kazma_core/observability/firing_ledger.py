@@ -110,6 +110,18 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("restore drill", r"\[restore-drill\] (deep: )?(PASS|FAIL|UNVERIFIED):",
               "a backup was verified readable, not merely written",
               kind=ROUTINE, per_week=7),
+    # Owner-started Knowledge crawls, tallied by verdict and, page by page,
+    # by why a page was not stored (the crawl target, 2026-10-31).
+    Signature("Knowledge crawl", r"\[kb_ingest\] crawl outcome:",
+              "a Knowledge crawl ended, by its verdict", kind=ROUTINE,
+              group=r"\[kb_ingest\] crawl outcome: (?P<k>\w+)"),
+    Signature("Knowledge page not stored", r"\[kb_ingest\] page \S+ \(",
+              "a page a crawl did not store, by outcome and reason", kind=SYMPTOM,
+              group=r"\[kb_ingest\] page (?P<k>\S+ \([^)]+\))"),
+    # Daily (web_acquire/canary.py): a real crawl of one known page.
+    Signature("crawl canary", r"\[acquisition\] canary (passed|failed)",
+              "a crawl was run end to end, not merely configured",
+              kind=ROUTINE, per_week=7),
     Signature("repetition loop breaker", r"\[Supervisor\] Tool LOOP detected",
               "never observed in production as of 2026-08-29"),
     Signature("iteration budget divert", r"\[Supervisor\] Iteration \d+ == max_iterations"),

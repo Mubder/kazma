@@ -4,6 +4,8 @@ sidebar_position: 4
 
 # Testing Skills
 
+> This page is published at [kazma.ai/docs/skills/testing-skills/](https://kazma.ai/docs/skills/testing-skills/) ([Arabic](https://kazma.ai/ar/docs/skills/testing-skills/)).
+
 Prefer **pytest** against your tool functions and hub validation against the package path.
 
 ## Native tools skill

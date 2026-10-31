@@ -5,6 +5,8 @@ sidebar_label: Voice & Media
 description: Send voice notes, photos, and documents to Kazma on any platform — STT/TTS and multimodal attachments.
 ---
 
+> This page is published at [kazma.ai/docs/voice-and-media/](https://kazma.ai/docs/voice-and-media/) ([Arabic](https://kazma.ai/ar/docs/voice-and-media/)).
+
 Kazma can **hear** (speech-to-text), **speak** (text-to-speech), and **see**
 (images/PDFs/docs) across every chat platform — Telegram, Discord, Slack, and
 the Web UI. This page covers how to enable and use voice and media.

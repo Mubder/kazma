@@ -4,6 +4,8 @@ sidebar_position: 1
 
 # Development Setup
 
+> This page is published at [kazma.ai/docs/contributing/development-setup/](https://kazma.ai/docs/contributing/development-setup/) ([Arabic](https://kazma.ai/ar/docs/contributing/development-setup/)).
+
 ## Prerequisites
 
 - Python 3.11+

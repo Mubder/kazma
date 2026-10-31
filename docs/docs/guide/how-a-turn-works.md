@@ -7,6 +7,8 @@ description: One message followed through Kazma, from the chat app to the answer
 
 # How a turn works
 
+> This page is published at [kazma.ai/docs/how-a-turn-works/](https://kazma.ai/docs/how-a-turn-works/) ([Arabic](https://kazma.ai/ar/docs/how-a-turn-works/)).
+
 A *turn* is everything Kazma does between a message and its answer. This page
 follows one message through the whole system:
 

@@ -318,6 +318,9 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "knowledge_provenance": DataDirEntry(
         "each Knowledge Library page's fetched text, by library: removed with its library",
         "bundle"),
+    "canary": DataDirEntry(
+        "the daily crawl check's private Knowledge store (web_acquire/canary.py)", "rebuilt",
+        reason="emptied and filled again by every day's check; it holds one public page"),
     "code-index": DataDirEntry(
         "codebase search indexes", "rebuilt", reason="re-indexed from the workspace"),
     "models": DataDirEntry(

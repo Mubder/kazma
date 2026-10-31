@@ -2135,6 +2135,29 @@ class KazmaAppBuilder:
 
         start_acquisition_monitor()
 
+        # A real crawl of one known page a day, told the day it fails.
+        from kazma_core.web_acquire.canary import start as start_crawl_canary
+
+        start_crawl_canary()
+
+        # A Knowledge crawl the last process's end cut off resumes once, on
+        # its own (kb_api.resume_interrupted_crawls).
+        from kazma_core.memory.worker_bootstrap import background_schedulers_enabled
+
+        if background_schedulers_enabled():
+            from kazma_core.background import spawn_background
+            from kazma_core.web_acquire.result import AcquisitionError
+            from kazma_ui.kb_api import resume_interrupted_crawls
+
+            async def _resume_crawls_after_start() -> None:
+                await asyncio.sleep(20)  # the server answers first
+                try:
+                    await resume_interrupted_crawls()
+                except AcquisitionError as exc:  # the owner's Resume still works
+                    logger.warning("[kb_api] resuming interrupted crawls failed: %s", exc)
+
+            spawn_background(_resume_crawls_after_start(), name="kb-crawl-auto-resume")
+
         # ── V2 memory worker (durable task queue) ────────────────────
         # Registers the macro_sleep / entity_merge / micro_consolidation
         # handlers and starts draining memory_ops.db. Pending rows
@@ -2362,6 +2385,9 @@ class KazmaAppBuilder:
         from kazma_core.web_acquire.monitor import stop as stop_acquisition_monitor
 
         await stop_acquisition_monitor()
+        from kazma_core.web_acquire.canary import stop as stop_crawl_canary
+
+        await stop_crawl_canary()
 
         # Give retained background tasks (crawls, rebuilds, promotions) a
         # bounded chance to finish before the loop closes (audit F-07).

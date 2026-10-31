@@ -7,6 +7,8 @@ description: The code Kazma writes itself so Arabic works as well as English, in
 
 # How Kazma handles Arabic
 
+> This page is published at [kazma.ai/docs/arabic-engineering/](https://kazma.ai/docs/arabic-engineering/) ([Arabic](https://kazma.ai/ar/docs/arabic-engineering/)).
+
 A language model can read and write Arabic. That does not make an *app*
 work in Arabic. Text has to run the right way, letters have to join, search
 has to match words written with or without vowel marks, and a scanned page

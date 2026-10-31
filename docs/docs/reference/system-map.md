@@ -7,6 +7,8 @@ description: Pointer to the full monorepo architecture system map
 
 # System map
 
+> This page is published at [kazma.ai/docs/system-map/](https://kazma.ai/docs/system-map/) ([Arabic](https://kazma.ai/ar/docs/system-map/)).
+
 The **full monorepo architecture map** (data-flow diagram, package catalogs, subsystem deep-dives, remediation crosswalk) is maintained as:
 
 **[`docs/ARCHITECTURE_AND_SYSTEM_MAP.md`](https://github.com/kazma-ai/kazma/blob/main/docs/ARCHITECTURE_AND_SYSTEM_MAP.md)**

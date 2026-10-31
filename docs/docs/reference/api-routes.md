@@ -5,6 +5,8 @@ sidebar_label: API Routes
 description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway control
 ---
 
+> This page is published at [kazma.ai/docs/api-routes/](https://kazma.ai/docs/api-routes/) ([Arabic](https://kazma.ai/ar/docs/api-routes/)).
+
 > Primary surfaces of the FastAPI app (`kazma_ui`). Auth is **default-deny** for `/api/*` unless listed open. HITL danger applies to tool execution, not every HTTP route.
 
 ## Always open (health)

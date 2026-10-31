@@ -6,6 +6,8 @@ description: Skill manifest format and signing fields
 ---
 # Kazma Skill Manifest Specification
 
+> This page is published at [kazma.ai/docs/reference/skill-manifest/](https://kazma.ai/docs/reference/skill-manifest/) ([Arabic](https://kazma.ai/ar/docs/reference/skill-manifest/)).
+
 > Version: 1.0.0 | Status: Active | Last updated: 2026-06-20
 
 This document defines the formal specification for Kazma skill manifests (`skill_manifest.yaml`). Every skill installed in Kazma MUST include a valid manifest file at its root directory.

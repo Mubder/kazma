@@ -5,6 +5,8 @@ sidebar_label: Tools Catalog
 description: Complete catalog of built-in agent tools and native skill tools
 ---
 
+> This page is published at [kazma.ai/docs/tools-catalog/](https://kazma.ai/docs/tools-catalog/) ([Arabic](https://kazma.ai/ar/docs/tools-catalog/)).
+
 > Exhaustive tool list extracted from `LocalToolRegistry` and native skill manifests. Regenerate with `python scripts/generate_tools_catalog.py`. Danger classification aligns with `CANONICAL_DANGER_TOOLS` — see [Security & Safety](../guide/security-and-safety).
 
 ## How tools run

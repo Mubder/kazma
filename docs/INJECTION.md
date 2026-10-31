@@ -1,5 +1,7 @@
 # Prompt injection — the number, and what it is worth
 
+> This page is published at [kazma.ai/docs/security/prompt-injection/](https://kazma.ai/docs/security/prompt-injection/) ([Arabic](https://kazma.ai/ar/docs/security/prompt-injection/)).
+
 Kazma says it fences untrusted text before that text reaches a model. This page
 is the measurement behind that sentence, and an honest account of where the
 measurement stops.

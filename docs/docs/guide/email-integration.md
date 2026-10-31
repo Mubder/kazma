@@ -7,6 +7,8 @@ description: Gmail, Microsoft Graph, IMAP, and sandbox email for Kazma agents
 
 # Email integration
 
+> This page is published at [kazma.ai/docs/email-integration/](https://kazma.ai/docs/email-integration/) ([Arabic](https://kazma.ai/ar/docs/email-integration/)).
+
 Kazma’s native **`email-manager`** skill gives the agent full mailbox tools: list, get, send, delete, categorize, and analyze. There is **no** required `/email` slash command — use **chat**.
 
 ## Quick start (sandbox — zero config)

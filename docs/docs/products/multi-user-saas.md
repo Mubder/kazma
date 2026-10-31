@@ -7,6 +7,8 @@ description: Platform RBAC, opaque sessions, OIDC, tenants, and Postgres cutover
 
 # Multi-user & SaaS foundation
 
+> This page is published at [kazma.ai/docs/multi-user-saas/](https://kazma.ai/docs/multi-user-saas/) ([Arabic](https://kazma.ai/ar/docs/multi-user-saas/)).
+
 Kazma ships a **multi-user foundation** (not a full multi-tenant cloud product): local users, roles, opaque sessions, optional OIDC, and shared Postgres state for multi-replica.
 
 ## Auth modes (login)

@@ -7,6 +7,8 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+> This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
+
 **New in 2026-10-16 through 2026-10-21 — approvals, forgetting, documents
 and tools that answer in one call.** An X card offers one approval and Deny,
 names what it does ("Post now"), and a draft the agent saves is posted only

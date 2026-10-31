@@ -1,5 +1,7 @@
 # Threat model — what Kazma's boundaries actually stop
 
+> This page is published at [kazma.ai/docs/security/threat-model/](https://kazma.ai/docs/security/threat-model/) ([Arabic](https://kazma.ai/ar/docs/security/threat-model/)).
+
 Kazma runs an LLM that can execute code, write files and send messages on your
 machine. This page states, mechanism by mechanism, what each safeguard stops and
 what it does not.

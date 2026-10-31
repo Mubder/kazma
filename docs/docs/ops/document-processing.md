@@ -4,6 +4,8 @@ title: Document Processing Operations
 
 # Document Processing — Operations & Scale
 
+> This page is published at [kazma.ai/docs/ops/document-processing/](https://kazma.ai/docs/ops/document-processing/) ([Arabic](https://kazma.ai/ar/docs/ops/document-processing/)).
+
 Operational surface for the
 [document intelligence platform](../guide/document-intelligence.md)
 (Phase 9+ residuals). Everything is driven by the shared

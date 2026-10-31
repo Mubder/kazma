@@ -4,6 +4,8 @@ sidebar_position: 2
 
 # Code Style
 
+> This page is published at [kazma.ai/docs/contributing/code-style/](https://kazma.ai/docs/contributing/code-style/) ([Arabic](https://kazma.ai/ar/docs/contributing/code-style/)).
+
 ## Python
 
 - Python 3.11+

@@ -2114,6 +2114,19 @@
                 </div>
             </template>
             <p translate="no" x-text="acquisitionMonitorMessage" aria-live="polite"></p>
+            <h4>{{ t('research.canary.title') }}</h4>
+            <p>{{ t('research.canary.hint') }}</p>
+            <button class="btn btn-secondary" @click="loadCanary()" :disabled="canaryBusy">{{ t('research.canary.load') }}</button>
+            <template x-if="canary">
+                <div>
+                    <label><input type="checkbox" x-model="canary.enabled"> {{ t('research.canary.enabled') }}</label>
+                    <label>{{ t('research.canary.url') }} <input type="url" class="form-input" dir="ltr" translate="no" x-model="canary.url"></label>
+                    <label>{{ t('research.canary.marker') }} <input type="text" class="form-input" translate="no" x-model="canary.marker"></label>
+                    <button class="btn btn-primary" @click="saveCanary()" :disabled="canaryBusy">{{ t('research.canary.save') }}</button>
+                    <button class="btn btn-secondary" @click="runCanary()" :disabled="canaryBusy">{{ t('research.canary.run') }}</button>
+                </div>
+            </template>
+            <p aria-live="polite"><span x-text="canaryLine"></span> <span translate="no" x-show="canaryReason" x-text="canaryReason" x-cloak></span></p>
         </div>
 
         <!-- Logging -->

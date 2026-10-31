@@ -4,6 +4,8 @@ sidebar_position: 1
 
 # Kazma Hub Overview
 
+> This page is published at [kazma.ai/docs/hub/overview/](https://kazma.ai/docs/hub/overview/) ([Arabic](https://kazma.ai/ar/docs/hub/overview/)).
+
 Kazma Hub is the **local skill registry and CLI** for discovering, validating, signing, and installing agent skills.  
 A remote marketplace API may be configured (`hub_url`); many flows work fully offline against the local SQLite registry.
 

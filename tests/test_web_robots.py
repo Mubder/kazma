@@ -61,9 +61,12 @@ def test_rule_matching(rules, path, allowed):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('status, code', [(404, None), (410, None), (401, 'robots_disallowed'),
-    (403, 'robots_disallowed'), (429, 'robots_unavailable'), (500, 'robots_unavailable'), (503, 'robots_unavailable')])
-async def test_missing_denied_and_failed_checks_are_distinct(robot_http, status, code):
+@pytest.mark.parametrize('status, code', [(404, None), (410, None), (401, None),
+    (403, None), (429, 'robots_unavailable'), (500, 'robots_unavailable'), (503, 'robots_unavailable')])
+async def test_missing_and_failed_checks_are_distinct(robot_http, status, code):
+    """RFC 9309: a 4xx robots.txt (401 and 403 too, re-pointed 2026-10-31) is
+    "unavailable" -- no rules apply, the page request decides; 429 and 5xx
+    refuse the crawl until the site answers."""
     _, install, calls = robot_http
     install(lambda request: httpx.Response(status, text='control response'))
     with robots.crawl_policy():
@@ -75,7 +78,7 @@ async def test_missing_denied_and_failed_checks_are_distinct(robot_http, status,
             await robots.require_robots('https://docs.example/article')
         evidence = robots.robots_evidence()
         assert evidence['checks'][0]['http_status'] == status
-        assert evidence['checks'][0]['status'] == ('missing' if status in (404, 410) else 'denied' if status in (401, 403) else 'unavailable')
+        assert evidence['checks'][0]['status'] == ('missing' if status in (401, 403, 404, 410) else 'unavailable')
     assert len(calls) == 1 and calls[0].url.path == '/robots.txt'
 
 
@@ -137,14 +140,20 @@ async def test_malformed_or_clipped_policy_does_not_grant_permission(robot_http,
 
 
 @pytest.mark.asyncio
-async def test_robots_cross_origin_redirect_is_refused_without_contacting_destination(robot_http):
+async def test_a_robots_redirect_to_another_host_is_followed_and_its_rules_apply(robot_http):
+    """RFC 9309 2.3.1.2 (re-pointed 2026-10-31): http://python.org/robots.txt
+    moves to https://www.python.org/robots.txt, and refusing the move left the
+    site uncrawlable. The rules found apply to the origin asked about."""
     _, install, calls = robot_http
-    install(lambda request: httpx.Response(302, headers={'Location': 'https://other.example/rules'}))
+    install(lambda request: httpx.Response(302, headers={'Location': 'https://other.example/robots.txt'})
+            if request.url.host == 'docs.example' else
+            httpx.Response(200, text='User-agent: *\nDisallow: /article'))
     with robots.crawl_policy():
         with pytest.raises(AcquisitionError) as failure:
             await robots.require_robots('https://docs.example/article')
-    assert failure.value.code == 'robots_unavailable'
-    assert len(calls) == 1 and calls[0].url.host == 'docs.example'
+        await robots.require_robots('https://docs.example/other')
+    assert failure.value.code == 'robots_disallowed'
+    assert [request.url.host for request in calls] == ['docs.example', 'other.example']
 
 
 @pytest.mark.asyncio

@@ -121,7 +121,9 @@ async def test_partial_html_is_visible_and_never_indexed(target, monkeypatch):
     render = AsyncMock(side_effect=AssertionError("must not silently re-fetch a budget-limited page"))
     monkeypatch.setattr(ki, "_render_with_playwright", render)
     text, status, reason = await ki._extract_page("https://first.example/large")
-    assert text is None and status == "error" and "partial content was not indexed" in reason
+    # Re-pointed 2026-10-31: past Kazma's size limit a page is kept out by
+    # that rule -- still never stored in part.
+    assert text is None and status == "excluded" and "a part of a page is never stored" in reason
     assert len(calls) == 2  # partial responses are not cached
     render.assert_not_awaited()
 
@@ -265,7 +267,8 @@ async def test_permanent_scope_failure_cannot_use_kb_secondary_renderer(monkeypa
     monkeypatch.setattr(ki, "_web_fetch_text", AsyncMock(return_value=result))
     render = AsyncMock(side_effect=AssertionError("scope bypass"))
     monkeypatch.setattr(ki, "_render_with_playwright", render)
-    assert await ki._extract_page(result.url) == (None, "error", "outside crawl scope")
+    # Re-pointed 2026-10-31: outside the scope is a rule (excluded), not a failure.
+    assert await ki._extract_page(result.url) == (None, "excluded", "outside crawl scope")
     render.assert_not_awaited()
 
 

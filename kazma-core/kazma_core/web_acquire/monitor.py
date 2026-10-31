@@ -32,13 +32,14 @@ _failure_cause = ''
 _paged = False
 _DEFAULTS = dict(enabled=True, stall_seconds=180, low_credit_threshold=100,
                  notify_completed=True)
-_TERMINAL = {'done', 'partial', 'error', 'cancelled', 'interrupted'}
+_TERMINAL = {'done', 'partial', 'error', 'cancelled', 'interrupted', 'empty'}
 _LABELS = {
     'done': ('Research completed', 'اكتمل البحث'),
     'completed': ('Crawl completed', 'اكتمل الزحف'),
     'partial': ('Partial results — review missing sources', 'نتائج جزئية — راجع المصادر الناقصة'),
     'error': ('Research failed — review saved details', 'فشل البحث — راجع التفاصيل المحفوظة'),
     'failed': ('Crawl failed — review saved details', 'فشل الزحف — راجع التفاصيل المحفوظة'),
+    'empty': ('Crawl stored nothing — every page was kept out', 'لم يُخزّن الزحف شيئاً — استُبعدت كل الصفحات'),
     'cancelled': ('Research cancelled', 'أُلغي البحث'),
     'interrupted': ('Run interrupted — explicit recovery required', 'انقطع التنفيذ — يلزم استئناف صريح'),
     'stalled': ('No observed progress — inspect the run', 'لا يوجد تقدم مرصود — راجع التنفيذ'),
@@ -118,6 +119,8 @@ def _collect():
     for row in crawl_jobs._read()[1].values():
         if row['job_id'] in linked:
             continue
+        if row.get('kind') == 'canary':
+            continue  # the daily crawl check speaks for itself (web_acquire.canary)
         if row.get('kind') in _AGENT_RUN_KINDS:
             left_to_agent.add('job:' + row['job_id'])
             # An agent's own call (crawl_site; run_research_pipeline outside
@@ -127,19 +130,30 @@ def _collect():
             # swarm worker worked around, under a complete answer; live
             # 2026-10-20). The job stays on the Research page.
             continue
+        if crawl_jobs.auto_resume_due(row):
+            # A restart cut it off and it resumes on its own at this start
+            # (kb_api.resume_interrupted_crawls): "interrupted -- explicit
+            # recovery required" would be wrong. One that could not resume
+            # is claimed and shown below.
+            continue
         counts = crawl_jobs._summary_counts(row)
         progress = row['progress']
         effects = row.get('effects', {})
         phase = progress.get('phase', 'starting')
         research = row.get('kind') in {'research_pipeline', 'research_crawl'}
         status = {'completed': 'done', 'failed': 'error'}.get(row['status'], row['status']) if research else row['status']
+        if status == 'completed' and 'nothing_stored' in row.get('notes', []):
+            status = 'empty'  # done, but nothing reached the library: a warning
         jobs.append(dict(key='job:' + row['job_id'], status=status, stage=phase,
             created=row['created_at'], updated=row['updated_at'], sources=counts['fetched'],
             progress=[phase, counts, row['ingested'],
                       {key: effect['status'] for key, effect in effects.items()},
                       progress.get('discovered'), progress.get('visited'), progress.get('indexing')],
             link=('/research?job=' if research else '/knowledge?job=') + quote(row['job_id'], safe=''),
-            result_available=row['fetched'] > 0 or effects.get('terminal-summary', {}).get('status') == 'completed', kind='research' if research else 'crawl'))
+            result_available=row['fetched'] > 0 or effects.get('terminal-summary', {}).get('status') == 'completed', kind='research' if research else 'crawl',
+            # The library a crawl fills: its next successful run settles
+            # this one's warnings. Notes are the limits and exclusions.
+            subject=None if research else row['library_id'], notes=list(row.get('notes', []))))
     return jobs, credits.snapshot(), accounting._read_evidence(), left_to_agent
 
 
@@ -147,9 +161,44 @@ def _identity(key):
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
+#: A run that finished as asked is a success (green), never info or a
+#: warning: "Crawl completed" took the yellow banner (live 2026-10-31).
+_SUCCESS = frozenset({'done', 'completed'})
+#: A library's later success settles these, and the monitor's own warnings.
+_SETTLED_BY_SUCCESS = frozenset({'failed', 'error', 'partial', 'stalled', 'interrupted', 'empty'})
+_ALERT_SEVERITY = {'WARNING': 'warn', 'ERROR': 'error', 'INFO': 'info', 'SUCCESS': 'success'}
+
+
 def _severity(condition):
+    if condition in _SUCCESS:
+        return 'SUCCESS'
     return 'ERROR' if condition in {'error', 'failed', 'payment_required', 'provider_failed'} else (
-        'INFO' if condition in {'done', 'completed', 'resumed', 'cancelled'} else 'WARNING')
+        'INFO' if condition in {'resumed', 'cancelled'} else 'WARNING')
+
+
+def _subject_of(row):
+    """The library an event's crawl filled (older events carry no subject:
+    their key is ``job:<library>:<run>``)."""
+    if row.get('subject'):
+        return row['subject']
+    key = str(row.get('key') or '')
+    if key.startswith('job:') and ':' in key[4:]:
+        return key[4:].rsplit(':', 1)[0]
+    return None
+
+
+def _settle_for_success(state, success_row):
+    """A library's successful crawl settles its earlier failure warnings:
+    the problem they reported is gone, so they leave the bell and banner."""
+    subject = _subject_of(success_row)
+    if not subject or success_row['key'].startswith('session:'):
+        return
+    for old in state['events']:
+        if (old is not success_row and not old['resolved'] and old['condition'] in _SETTLED_BY_SUCCESS
+                and old['timestamp'] <= success_row['timestamp'] and _subject_of(old) == subject
+                and old['key'].startswith('job:')):
+            old['resolved'] = True
+            old['settled_by'] = success_row['key']
 
 
 def _observe_jobs(state, jobs, cfg, now, event):
@@ -170,7 +219,10 @@ def _observe_jobs(state, jobs, cfg, now, event):
             # New terminal rows can finish between scans; do not lose their result.
             if terminal and not baseline:
                 if cfg['notify_completed'] or status not in {'done', 'completed'}:
-                    event(key, status, job['link'], sources=job['sources'], result_available=job['result_available'])
+                    event(key, status, job['link'], sources=job['sources'], result_available=job['result_available'],
+                          subject=job.get('subject'), notes=job.get('notes'))
+                elif status in _SUCCESS:  # not announced, still settles the library's warnings
+                    _settle_for_success(state, dict(key=key, subject=job.get('subject'), timestamp=now))
         elif previous['signature'] != signature:
             was_stalled = previous['stalled']
             # A finished run is told once. Its fingerprint can change without
@@ -184,11 +236,13 @@ def _observe_jobs(state, jobs, cfg, now, event):
                 pass
             elif terminal or was_stalled:
                 if not terminal or cfg['notify_completed'] or status not in {'done', 'completed'}:
-                    event(key, status if terminal else 'resumed', job['link'], sources=job['sources'], result_available=job['result_available'])
+                    event(key, status if terminal else 'resumed', job['link'], sources=job['sources'], result_available=job['result_available'],
+                          subject=job.get('subject'), notes=job.get('notes'))
                 else:
                     for old in state['events']:
                         if old['key'] == key and old['condition'] == 'stalled':
                             old['resolved'] = True
+                    _settle_for_success(state, dict(key=key, subject=job.get('subject'), timestamp=now))
         if not terminal and not previous['stalled'] and now - previous['since'] >= cfg['stall_seconds']:
             previous['stalled'] = True
             event(key, 'stalled', job['link'], sources=job['sources'], result_available=job['result_available'])
@@ -264,7 +318,8 @@ def tick(*, now=None):
         state['checked_at'] = now
 
         def event(key, condition, link, *, sources=None, result_available=False,
-                  provider=None, remaining=None, observed_at=None, http_status=None):
+                  provider=None, remaining=None, observed_at=None, http_status=None,
+                  subject=None, notes=None):
             for old in state['events']:
                 if old['key'] == key and old['condition'] == 'stalled':
                     old['resolved'] = condition != 'stalled'
@@ -272,9 +327,12 @@ def tick(*, now=None):
             row = dict(id='acquisition-' + identity, key=key, condition=condition,
                 timestamp=now, link=link, sources=sources, result_available=result_available,
                 resolved=False, dispatch='uncertain', provider=provider, remaining=remaining,
-                observed_at=observed_at, http_status=http_status)
+                observed_at=observed_at, http_status=http_status, subject=subject,
+                notes=list(notes or []))
             state['events'].append(row)
             emitted.append(row)
+            if condition in _SUCCESS:
+                _settle_for_success(state, row)
 
         retained = _observe_jobs(state, jobs, cfg, now, event)
         _observe_providers(state, balances, allowance, jobs, cfg, now, event)
@@ -301,7 +359,7 @@ def tick(*, now=None):
         title = _LABELS[condition][0]
         detail = '\n'.join(_detail(row, 'en') + ' ' + row['link'] for row in rows[:6])
         requested = alert('acquisition.' + condition, title, detail,
-                          severity={'WARNING': 'warn', 'ERROR': 'error', 'INFO': 'info'}[_severity(condition)],
+                          severity=_ALERT_SEVERITY[_severity(condition)],
                           cooldown_s=0, on_delivery=_receipt_callback([row['id'] for row in rows]))
         for row in rows:
             outcomes[row['id']] = 'requested' if requested else 'not_requested'
@@ -336,6 +394,17 @@ def _receipt_callback(identities):
     return receipt
 
 
+#: A crawl's notes (``page_outcome.NOTES``): limits and rules, not failures.
+_NOTE_WORDS = {
+    'excluded': ('some pages excluded by robots.txt, scope, login, removal or size',
+                 'استُبعدت صفحات بسبب robots.txt أو النطاق أو تسجيل الدخول أو الحذف أو الحجم'),
+    'nothing_stored': ('nothing was stored', 'لم يُخزَّن شيء'),
+    'page_cap': ('stopped at the page limit', 'توقف عند حد الصفحات'),
+    'link_walk_bounded': ('link walk stopped at its depth or size limit', 'توقف تتبع الروابط عند حد العمق أو الحجم'),
+    'sitemap_bounded': ('sitemap read up to its limit', 'قُرئت خريطة الموقع حتى حدها'),
+}
+
+
 def _detail(row, language):
     ar = language == 'ar'
     parts = [('التنفيذ: ' if ar else 'Run: ') + row['key']]
@@ -348,6 +417,10 @@ def _detail(row, language):
         parts.append('HTTP ' + str(row['http_status']))
     if row.get('sources') is not None:
         parts.append(('المصادر: ' if ar else 'Sources: ') + str(row['sources']))
+    notes = [(_NOTE_WORDS.get(note) or (note, note))[int(ar)] for note in row.get('notes') or []]
+    if notes:
+        parts.append(('ملاحظات: ' if ar else 'Notes: ') + '، '.join(notes) if ar else
+                     'Notes: ' + ', '.join(notes))
     if row['condition'] == 'stalled':
         parts.append('قد يكون العمل جارياً؛ هذه ملاحظة وليست حكماً بالفشل.' if ar else
                      'Work may still be running; this observation does not mark the job failed.')

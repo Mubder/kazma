@@ -199,6 +199,19 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
 
         lines.extend(repair_metric_lines())
 
+        # ── Knowledge crawls: pages by outcome and reason, the daily check ──
+        import asyncio
+
+        from kazma_core.db.pg_helpers import store_errors
+        from kazma_core.web_acquire import canary, crawl_jobs
+        from kazma_core.web_acquire.result import AcquisitionError
+
+        try:
+            lines.extend(await asyncio.to_thread(crawl_jobs.metric_lines))
+            lines.extend(await asyncio.to_thread(canary.metric_lines))
+        except (AcquisitionError, ValueError) + store_errors() as exc:  # a metric must not break the page
+            logger.debug("Failed to append crawl metrics: %s", exc)
+
         # ── In-process prometheus_client registry (kazma-core Counters) ──
         # Exposes counters that aren't DB-derivable — notably
         # kazma_commitment_terminal_total (PR3 loop-prevention signal) and the

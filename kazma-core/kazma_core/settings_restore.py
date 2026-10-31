@@ -155,6 +155,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("acquisition.monitor", RUNTIME, "research/crawl alerts already raised and whether each was "
             "delivered; restoring an older ledger would raise them again"),
     KeyRule("acquisition.monitor_revision", RUNTIME, "conditional-write revision for the alert ledger"),
+    KeyRule("acquisition.canary", RUNTIME, "the daily crawl check's last outcome; an older one would "
+            "hide a failure or announce a recovery that did not happen"),
     KeyRule("research.papers_index", RUNTIME, "papers research found"),
     KeyRule("memory.v2.last_reconsolidation", RUNTIME, "when reconsolidation last ran"),
     KeyRule("memory.v2.mirror_full_verify", RUNTIME, "when the memory mirror was last compared in full"),
@@ -186,6 +188,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     # ── Learned: restored only where the install has none ────────────────
     KeyRule("self_improvement.agent_evolution", LEARNED, "the Soul Kazma learned"),
     # ── Settings product code writes (named so the class gate sees them) ──
+    KeyRule("acquisition.canary_settings", SETTING, "the daily crawl check: on or off, the page it crawls "
+            "and the words it must find"),
     KeyRule("acquisition.monitor_settings", SETTING, "research/crawl alerts: on or off, the stall and "
             "low-credit thresholds, completion notices"),
     KeyRule("agent.", SETTING, "how Kazma behaves: language, personality, commitment"),

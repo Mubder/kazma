@@ -7,6 +7,8 @@ description: Primary operator path to upgrade a git install — stash, reset mai
 
 # Kazma Update
 
+> This page is published at [kazma.ai/docs/ops/kazma-update/](https://kazma.ai/docs/ops/kazma-update/) ([Arabic](https://kazma.ai/ar/docs/ops/kazma-update/)).
+
 **`kazma update` is the supported operator upgrade path** for git / monorepo
 installs. Prefer it over a manual `git pull` so local edits, optional extras,
 and CLI health are handled consistently.

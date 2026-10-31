@@ -7,6 +7,8 @@ description: FastAPI + Alpine web dashboard — chat, settings, swarm, IDE, logi
 
 # Web UI
 
+> This page is published at [kazma.ai/docs/web-ui/](https://kazma.ai/docs/web-ui/) ([Arabic](https://kazma.ai/ar/docs/web-ui/)).
+
 The primary operator surface is **`kazma-ui`**: FastAPI + Jinja templates + Alpine.js + SSE streaming.
 
 ## Start

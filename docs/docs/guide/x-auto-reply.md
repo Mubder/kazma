@@ -7,6 +7,8 @@ description: Mention the account and Kazma drafts a reply — declared sides, su
 
 # X auto-reply
 
+> This page is published at [kazma.ai/docs/x-auto-reply/](https://kazma.ai/docs/x-auto-reply/) ([Arabic](https://kazma.ai/ar/docs/x-auto-reply/)).
+
 X Studio composes and reviews posts, schedules approved text, and keeps
 conversations with their original sources. Automatic replies are off by
 default. Start in draft mode. Publishing uses the official X API and the

@@ -7,6 +7,8 @@ description: Live swarm orchestration UI, SSE events, and dispatch controls
 
 # Command Center & Swarm panel
 
+> This page is published at [kazma.ai/docs/command-center-swarm/](https://kazma.ai/docs/command-center-swarm/) ([Arabic](https://kazma.ai/ar/docs/command-center-swarm/)).
+
 The **Swarm / Command Center** UI surfaces multi-worker orchestration: dispatch, pipelines, fan-out, live task status, and metrics.
 
 ## Surfaces

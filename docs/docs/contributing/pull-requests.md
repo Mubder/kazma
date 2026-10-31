@@ -4,6 +4,8 @@ sidebar_position: 4
 
 # Pull Requests
 
+> This page is published at [kazma.ai/docs/contributing/pull-requests/](https://kazma.ai/docs/contributing/pull-requests/) ([Arabic](https://kazma.ai/ar/docs/contributing/pull-requests/)).
+
 ## Process
 
 1. Fork the repository

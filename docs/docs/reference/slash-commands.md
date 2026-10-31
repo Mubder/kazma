@@ -4,6 +4,8 @@ title: Slash Commands
 sidebar_label: Slash Commands
 description: Gateway slash commands reference (instant, no LLM)
 ---
+> This page is published at [kazma.ai/docs/slash-commands/](https://kazma.ai/docs/slash-commands/) ([Arabic](https://kazma.ai/ar/docs/slash-commands/)).
+
 Kazma's gateway handles slash commands in Telegram, Discord and Slack before a
 message reaches the agent. Most answer at once, without a model call;
 `/research`, `/swarm` and `/ide skill` start work that uses one. The order

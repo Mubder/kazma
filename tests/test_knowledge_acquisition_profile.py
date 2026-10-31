@@ -52,7 +52,8 @@ async def test_kb_never_indexes_an_error_json_body_retained_for_inspection(monke
                          text='{"detail": "Useful diagnostic words retained for API inspection only"}', quality='json')
     monkeypatch.setattr(ki, '_web_fetch_text', AsyncMock(return_value=result))
     text, outcome, reason = await ki._extract_page(result.url)
-    assert text is None and outcome == 'error' and f'HTTP {status}' in reason
+    # A 404 is a page that is gone: excluded, not a failure (2026-10-31).
+    assert text is None and outcome == ('excluded' if status == 404 else 'error') and f'HTTP {status}' in reason
 
 
 @pytest.mark.asyncio

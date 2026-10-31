@@ -7,6 +7,8 @@ description: Saved steps of the agent's state, and how to restore a conversation
 
 # Time travel, replay and forking
 
+> This page is published at [kazma.ai/docs/time-travel-and-replay/](https://kazma.ai/docs/time-travel-and-replay/) ([Arabic](https://kazma.ai/ar/docs/time-travel-and-replay/)).
+
 Kazma saves the agent's full state after steps of a turn (supervisor
 iterations), so a conversation can be looked at, restored or branched from
 any of those points. The code is `kazma_core/time_travel.py` (the steps) and

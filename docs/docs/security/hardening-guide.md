@@ -4,6 +4,8 @@ sidebar_position: 3
 
 # Hardening Guide
 
+> This page is published at [kazma.ai/docs/security/hardening-guide/](https://kazma.ai/docs/security/hardening-guide/) ([Arabic](https://kazma.ai/ar/docs/security/hardening-guide/)).
+
 **Document Intelligence:** treat every upload as hostile. The default `process`
 worker profile bounds time, memory and output but confines neither the file
 system nor the network; for documents you do not trust run the attested

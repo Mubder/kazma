@@ -5,6 +5,8 @@ sidebar_label: Native Skills
 description: Built-in tool skills that ship with Kazma — browser automation, calendar, document generation, image generation, database, and more.
 ---
 
+> This page is published at [kazma.ai/docs/native-skills/](https://kazma.ai/docs/native-skills/) ([Arabic](https://kazma.ai/ar/docs/native-skills/)).
+
 Native skills are **in-process Python tools** that ship with Kazma and are
 auto-registered on the `LocalToolRegistry` at startup (no subprocess, no
 network round-trip — unlike [MCP servers](../guide/skills-mcp-and-tools)).

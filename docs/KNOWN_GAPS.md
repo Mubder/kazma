@@ -1,5 +1,7 @@
 # Known gaps
 
+> This page is published at [kazma.ai/docs/security/known-gaps/](https://kazma.ai/docs/security/known-gaps/) ([Arabic](https://kazma.ai/ar/docs/security/known-gaps/)).
+
 What is weak, unproven, or unfinished in Kazma right now.
 
 `CHANGELOG.md` records what was fixed. This page records what has not been, and

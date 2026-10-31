@@ -4,6 +4,8 @@ sidebar_position: 3
 
 # MCP Integration
 
+> This page is published at [kazma.ai/docs/skills/mcp-integration/](https://kazma.ai/docs/skills/mcp-integration/) ([Arabic](https://kazma.ai/ar/docs/skills/mcp-integration/)).
+
 Kazma skills can connect to Model Context Protocol (MCP) servers for external tool access.
 
 ## What is MCP?

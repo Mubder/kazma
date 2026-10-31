@@ -7,6 +7,8 @@ description: Stable localhost / hostname for Kazma running inside WSL2
 
 # Fixed access to Kazma in WSL2
 
+> This page is published at [kazma.ai/docs/ops/wsl-fixed-access/](https://kazma.ai/docs/ops/wsl-fixed-access/) ([Arabic](https://kazma.ai/ar/docs/ops/wsl-fixed-access/)).
+
 WSL2 assigns a **changing** virtual IP (e.g. `172.28.225.216`). That breaks bookmarks like `http://172.28.x.x:9090/` after reboot.
 
 You cannot easily freeze Hyper-V’s WSL IP forever. Instead, pin a **stable Windows-side address**:

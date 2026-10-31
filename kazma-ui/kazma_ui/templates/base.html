@@ -67,10 +67,10 @@
             {# Global System Alerts Banner — x-cloak + x-show gate it; the
                flex layout lives in the .system-alerts-banner class so the
                inline style never forces display (which caused the flash). #}
-            <div x-data="systemAlertsBanner()" x-cloak x-show="activeAlert" class="system-alerts-banner" style="background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--warning); padding: 12px 24px; margin: 16px 24px 0 24px; border-radius: 6px; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: all 0.3s ease;">
+            <div x-data="systemAlertsBanner()" x-cloak x-show="activeAlert" class="system-alerts-banner" :style="bannerTone()" style="padding: 12px 24px; margin: 16px 24px 0 24px; border-radius: 6px; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: all 0.3s ease;">
                 <div style="display: flex; align-items: center; gap: 12px; color: var(--text-primary);">
                     <!-- Warning SVG Icon -->
-                    <svg style="color: var(--warning); flex-shrink: 0;" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <svg :style="{ color: bannerColor() }" style="flex-shrink: 0;" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                     </svg>
                     <div>

@@ -1,5 +1,7 @@
 # OpenTelemetry — Kazma in the dashboard you already have
 
+> This page is published at [kazma.ai/docs/opentelemetry/](https://kazma.ai/docs/opentelemetry/) ([Arabic](https://kazma.ai/ar/docs/opentelemetry/)).
+
 Kazma emits [OpenTelemetry GenAI spans](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
 for every LLM call and every tool execution. If your organisation already runs
 an OTel collector, Kazma's agent traces appear in it with no integration work

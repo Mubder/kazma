@@ -7,6 +7,8 @@ description: Search, scrape, crawl, and digest public web content with Kazma too
 
 # Web research
 
+> This page is published at [kazma.ai/docs/web-research/](https://kazma.ai/docs/web-research/) ([Arabic](https://kazma.ai/ar/docs/web-research/)).
+
 Kazma can search the web, fetch pages, page through long documents, crawl a site within bounds, and digest saved extracts — all from **normal chat**, `/swarm`, the **Research panel** (`/research`), or **`/research deep <topic>`**.
 
 **Operator tour of the latest research + proxy + sessions stack:** [Recent features](./recent-features).

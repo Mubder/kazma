@@ -7,6 +7,8 @@ description: Go-live checklist for single-node and multi-user Kazma deployments
 
 # Production checklist
 
+> This page is published at [kazma.ai/docs/production-checklist/](https://kazma.ai/docs/production-checklist/) ([Arabic](https://kazma.ai/ar/docs/production-checklist/)).
+
 Use this before exposing Kazma beyond loopback. Aligns with
 [`AUDIT_DEEP_2026-09-01_EXEC.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md)
 (waves 0–8 shipped) and the historical

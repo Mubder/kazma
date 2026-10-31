@@ -4,6 +4,8 @@ sidebar_position: 1
 
 # Creating Skills
 
+> This page is published at [kazma.ai/docs/skills/creating-skills/](https://kazma.ai/docs/skills/creating-skills/) ([Arabic](https://kazma.ai/ar/docs/skills/creating-skills/)).
+
 Skills extend Kazma with tools and workflows. Prefer the **native tools** shape used by built-in skills under `kazma-skills/kazma_skills/native/`.
 
 ## Recommended: native tools skill

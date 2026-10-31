@@ -7,6 +7,8 @@ description: X-relates-to-Y map of dual paths, shared elements, and first places
 
 # Diagnosis map — multi-path systems
 
+> This page is published at [kazma.ai/docs/diagnosis-map/](https://kazma.ai/docs/diagnosis-map/) ([Arabic](https://kazma.ai/ar/docs/diagnosis-map/)).
+
 **Purpose:** When a bug “touches many files,” this doc answers: **what is the same element**, **how many paths serve it**, and **where to look first**.
 
 **Audience:** operators, contributors, and coding agents.  

@@ -7,6 +7,8 @@ description: Transport-agnostic coding IDE — Web, TUI, and /ide slash commands
 
 # IDE
 
+> This page is published at [kazma.ai/docs/ide/](https://kazma.ai/docs/ide/) ([Arabic](https://kazma.ai/ar/docs/ide/)).
+
 Kazma’s IDE is a **transport-agnostic coding backend**: one service for Web, TUI, chat `/ide` commands, and the in-process CLI (`kazma ask` / `kazma acp`). Mutations always go through **`LocalToolRegistry`** so HITL cannot be bypassed.
 
 **Web editor (Hands 0.11):** CodeMirror 5 `fromTextArea` on `/ide` (nord

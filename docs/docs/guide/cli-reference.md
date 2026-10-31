@@ -4,6 +4,8 @@ title: CLI Reference
 sidebar_label: CLI Reference
 description: Kazma CLI Reference — code-audited reference (unified docs, v0.11+)
 ---
+> This page is published at [kazma.ai/docs/cli-reference/](https://kazma.ai/docs/cli-reference/) ([Arabic](https://kazma.ai/ar/docs/cli-reference/)).
+
 > The complete `kazma`, `kazma-tui`, and `kazma-web` command surface, every flag, and working examples — all verified against `kazma-cli/` source.
 
 ---

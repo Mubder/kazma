@@ -4,6 +4,8 @@ title: Development
 sidebar_label: Development
 description: Kazma Development — code-audited reference (unified docs, v0.9+)
 ---
+> This page is published at [kazma.ai/docs/development/](https://kazma.ai/docs/development/) ([Arabic](https://kazma.ai/ar/docs/development/)).
+
 > Repository layout, environment setup, and the test/lint/typecheck commands used across the Kazma monorepo.
 
 ---

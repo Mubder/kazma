@@ -229,6 +229,9 @@ STARTERS = {
     ("kazma-gateway/kazma_gateway/agent_handler/commands.py", "_try_kb_command"): "page",
     ("kazma-core/kazma_core/agent/tool_builtins/knowledge.py", "knowledge_ingest_site"): "admission",
     ("kazma-core/kazma_core/agent/tool_builtins/knowledge.py", "knowledge_ingest_url"): "page",
+    # The daily crawl check (its private store): tests/test_crawl_canary.py
+    # holds its refusal of a private seed.
+    ("kazma-core/kazma_core/web_acquire/canary.py", "crawl"): "admission",
 }
 _STARTER_CALLS = ("_prepare_ingest_site", "ingest_site", "ingest_url")
 

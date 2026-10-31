@@ -733,6 +733,30 @@ class SettingsRouterBuilder:
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+        @router.get("/api/settings/acquisition/canary")
+        def api_get_crawl_canary() -> dict[str, Any]:
+            """The daily crawl check: its settings and last outcome."""
+            from kazma_core.web_acquire import canary
+
+            return {"settings": canary.settings(), "state": canary.state()}
+
+        @router.put("/api/settings/acquisition/canary")
+        def api_save_crawl_canary(req: dict[str, Any]) -> dict[str, Any]:
+            from fastapi import HTTPException
+            from kazma_core.web_acquire import canary
+
+            try:
+                return canary.save_settings(req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @router.post("/api/settings/acquisition/canary/run")
+        async def api_run_crawl_canary() -> dict[str, Any]:
+            """Run the daily crawl check now; its outcome (and alert) as on schedule."""
+            from kazma_core.web_acquire.canary import run_canary
+
+            return await run_canary()
+
         @router.get("/api/settings/proxy")
         def api_get_proxy() -> dict[str, Any]:
             """Get proxy provider config (opt-in scraping resilience addon)."""
