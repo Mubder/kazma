@@ -85,7 +85,7 @@ def _route_count() -> bool:
     from kazma_ui.kb_api import create_kb_router
 
     pairs = [(m, r.path) for r in create_kb_router().routes for m in r.methods]
-    return len(pairs) == 16 and "16 routes" in _src("kazma-ui/kazma_ui/kb_api.py")
+    return len(pairs) == 18 and "18 routes" in _src("kazma-ui/kazma_ui/kb_api.py")
 
 
 def _kb_admin_only() -> bool:
@@ -251,7 +251,7 @@ CLAIMS = [
     Claim("/kb commands", "| `/kb add <id> <url>` | Create-or-use library, ingest ONE page (sync) |",
           "Commands that change a library are for the gateway's admins only.", _kb_admin_only),
     Claim("kb_api routes", None,
-          "`/api/kb/*` (`kazma-ui/kazma_ui/kb_api.py`) has 16 routes.", _route_count),
+          "`/api/kb/*` (`kazma-ui/kazma_ui/kb_api.py`) has 18 routes.", _route_count),
     Claim("relevance", "and retrieval quality on a versioned EN/AR benchmark, are open work",
           "A search shows only what is about the question.", _searches_are_judged),
     Claim("benchmark report", None, "### Benchmark report (dataset v1, 2026-10-15)", _benchmark_report_version),

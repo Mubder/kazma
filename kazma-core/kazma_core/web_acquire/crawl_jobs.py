@@ -272,10 +272,15 @@ def _valid_row(row):
 
         if not _valid(row['metadata']):
             return False
-    if any(key in row and type(row[key]) is not bool for key in ('metadata_limited', 'sitemap_limited')):
+    if any(key in row and type(row[key]) is not bool for key in ('metadata_limited', 'sitemap_limited', 'page_capped', 'auto_resumed')):
+        return False
+    if 'excluded' in row and (type(row['excluded']) is not int or row['excluded'] < 0):
+        return False
+    if 'notes' in row and (not isinstance(row['notes'], list) or len(row['notes']) > 8
+                           or any(not isinstance(note, str) for note in row['notes'])):
         return False
     if not all(isinstance(page, dict) and isinstance(page.get('url'), str) and len(page['url']) <= 8192
-            and page.get('status') in {'pending', 'running', 'completed', 'failed', 'ambiguous'} for page in pages):
+            and page.get('status') in {'pending', 'running', 'completed', 'failed', 'ambiguous', 'excluded'} for page in pages):
         return False
     if row.get('kind') == 'research_crawl':
         from kazma_core.web_acquire.research_crawl import valid
@@ -450,7 +455,9 @@ def _recover(jobs):
     now = time.time()
     for row in jobs.values():
         if row['status'] == 'running' and _owner_gone(row, now):
-            row.update(status='interrupted', owner=None, updated_at=now)
+            # ``process_ended``: a restart, not the owner, stopped it -- a
+            # Knowledge crawl this recent resumes on its own (auto_resume_due).
+            row.update(status='interrupted', owner=None, updated_at=now, interrupted_by='process_ended')
             _settle_discovery_unknown(row)
             for page in row['pages']:
                 if page['status'] == 'running':
@@ -505,6 +512,7 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
                 created_at=now, fetched=0, failed=0, ingested=0, skipped=0, pages_unchanged=0, progress={})
             jobs[job_id] = row
         elif (row.get('kind', 'site') in _KB_KINDS):
+            row.pop('interrupted_by', None)
             # A Knowledge page's effect is idempotent (one transaction per
             # page, KB-E02): an explicit resume replays the pages a crash
             # left uncertain.
@@ -569,6 +577,12 @@ class _CrawlJob:
             state = row.get('discovery')
             if state is not None:
                 row['discovery'] = dict(stage='complete', ambiguous=state['ambiguous'], limited=state['limited'])
+            # With the frontier saved, a sitemap's parsed list is read again by
+            # nothing: only an uncertain fetch matters (the verdict, a resume).
+            # A Knowledge crawl of MDN kept 4,000 URLs a sitemap (2026-10-31).
+            if row.get('kind', 'site') in _KB_KINDS and 'metadata' in row:
+                row['metadata'] = {url: record for url, record in row['metadata'].items()
+                                   if record['status'] != 'completed'}
         self.update(change)
 
     def discovery(self, state):
@@ -609,14 +623,31 @@ class _CrawlJob:
                 # one job's budget (KB-E04).
                 kb = row.get('kind', 'site') in _KB_KINDS
                 page['receipt'] = compact if kb and size > _KB_RECEIPT_BYTES else data
+                if kb:
+                    # Only the latest receipt is read (the job card's last
+                    # fetch); each page's outcome and reason stay on the page.
+                    for other in row['pages']:
+                        if other is not page and other.get('receipt') is not None:
+                            other['receipt'] = None
         self.update(change)
 
-    def end_page(self, url, *, error='', new=0, skipped=0, unchanged=False):
+    def end_page(self, url, *, error='', new=0, skipped=0, unchanged=False, excluded=False, reason=''):
+        """Settle one page: stored, ``excluded`` by a rule (robots, scope,
+        login, gone -- never a failure), or failed; ``reason`` is the code
+        the report words (``page_outcome``)."""
         def change(row):
             page = next(page for page in row['pages'] if page['url'] == url)
             if page['status'] != 'running':
                 raise AcquisitionError(FetchErrorCode.POLICY, 'Page outcome already settled; duplicate completion refused.')
-            page.update(status='failed' if error else 'completed', error=str(error)[:1000])
+            status = 'excluded' if excluded else 'failed' if error else 'completed'
+            page.update(status=status, error=str(error)[:1000])
+            if reason:
+                page['reason'] = str(reason)[:40]
+            if unchanged:
+                page['unchanged'] = True
+            if excluded:
+                row['excluded'] = row.get('excluded', 0) + 1
+                return
             row['failed' if error else 'fetched'] += 1
             row['ingested'] += new
             row['skipped'] += skipped
@@ -641,6 +672,76 @@ class _CrawlJob:
         finally:
             with _ACTIVE_LOCK:
                 _ACTIVE.discard(self.token)
+
+
+#: Pages a report lists, newest last: a crawl holds at most 1,000.
+_REPORT_PAGES = 1000
+
+
+def page_outcomes(row):
+    """Each page's outcome for the report: the page, what happened, why.
+
+    ``outcome`` is ``ingested`` / ``unchanged`` / ``excluded`` / ``failed`` /
+    ``uncertain`` / ``pending``; ``reason`` is ``page_outcome``'s code.
+    """
+    names = {'completed': 'ingested', 'ambiguous': 'uncertain', 'running': 'pending'}
+    out = []
+    for page in row['pages'][-_REPORT_PAGES:]:
+        outcome = names.get(page['status'], page['status'])
+        if outcome == 'ingested' and page.get('unchanged'):
+            outcome = 'unchanged'
+        out.append({'url': page['url'], 'outcome': outcome, 'reason': page.get('reason', ''),
+                    'error': str(page.get('error') or '')[:300]})
+    return out
+
+
+#: The crawl target (2026-10-31): of every page a Knowledge crawl reached,
+#: this share ends stored (ingested or unchanged) or kept out by a rule.
+PAGE_TARGET = 0.99
+#: The outcomes the target counts as handled.
+_HANDLED = ('ingested', 'unchanged', 'excluded')
+
+
+def outcome_summary():
+    """Every retained, finished Knowledge crawl's pages by outcome and by
+    reason, and the share handled (the Dashboard, /metrics, the guide)."""
+    from collections import Counter
+
+    rows = [row for row in _read()[1].values()
+            if row.get('kind', 'site') in _KB_KINDS and row['status'] in _TERMINAL]
+    statuses, outcomes, reasons = Counter(), Counter(), Counter()
+    for row in rows:
+        statuses[row['status']] += 1
+        for page in page_outcomes(row):
+            outcomes[page['outcome']] += 1
+            if page['outcome'] not in ('ingested', 'unchanged'):
+                reasons[(page['outcome'], page['reason'] or 'other')] += 1
+    total = sum(outcomes.values())
+    handled = sum(outcomes[name] for name in _HANDLED)
+    return dict(crawls=len(rows), statuses=dict(statuses), pages=total, outcomes=dict(outcomes),
+                reasons=[dict(outcome=outcome, reason=reason, pages=count)
+                         for (outcome, reason), count in reasons.most_common()],
+                rate=round(handled / total, 4) if total else None, target=PAGE_TARGET)
+
+
+def metric_lines():
+    """Prometheus gauges of :func:`outcome_summary` (``/metrics``)."""
+    summary = outcome_summary()
+    lines = [
+        "# HELP kazma_kb_crawl_pages Pages of the retained Knowledge crawls, by outcome",
+        "# TYPE kazma_kb_crawl_pages gauge",
+        *(f'kazma_kb_crawl_pages{{outcome="{name}"}} {count}' for name, count in sorted(summary['outcomes'].items())),
+        "# HELP kazma_kb_crawl_page_reasons Pages not stored, by outcome and reason",
+        "# TYPE kazma_kb_crawl_page_reasons gauge",
+        *(f'kazma_kb_crawl_page_reasons{{outcome="{r["outcome"]}",reason="{r["reason"]}"}} {r["pages"]}'
+          for r in summary['reasons']),
+    ]
+    if summary['rate'] is not None:
+        lines += ["# HELP kazma_kb_crawl_page_handled_ratio Share of pages stored or kept out by a rule "
+                  f"(target {PAGE_TARGET})",
+                  "# TYPE kazma_kb_crawl_page_handled_ratio gauge",
+                  f"kazma_kb_crawl_page_handled_ratio {summary['rate']}"]
+    return lines
 
 
 def _summary_counts(row):
@@ -687,6 +788,34 @@ def recover():
     _mutate(_recover)
 
 
+#: How recent a crawl a restart cut off may be to resume on its own. Older,
+#: the owner decides (the Knowledge page's Resume).
+AUTO_RESUME_WITHIN_S = 24 * 3600
+
+
+def auto_resume_due(row, now=None):
+    """A Knowledge crawl a restart cut off, recently, not yet resumed on its
+    own: it resumes at the next start, once. A crawl the owner stopped, an
+    older one, a research crawl, or one already resumed once are not."""
+    now = time.time() if now is None else now
+    return (row.get('status') == 'interrupted' and row.get('interrupted_by') == 'process_ended'
+            and row.get('kind', 'site') in _KB_KINDS and not row.get('auto_resumed')
+            and now - float(row.get('updated_at') or 0) <= AUTO_RESUME_WITHIN_S)
+
+
+def claim_auto_resume(job_id):
+    """Mark a due crawl as resumed on its own, once (compare-and-set)."""
+    def change(row):
+        if row is None or not auto_resume_due(row):
+            return False
+        row['auto_resumed'] = True
+        # A changed row: if the resume is refused, the monitor reports the
+        # crawl interrupted (an older row would read as quiet history).
+        row['updated_at'] = time.time()
+        return True
+    return _mutate_job(job_id, change)
+
+
 def purge_terminal(*, kinds=None):
     """The operator's purge: remove this install's finished jobs (of
     *kinds*, every kind when None). Never an active one. Returns how many."""
@@ -723,6 +852,9 @@ def projection(job_id):
         'completed': 'done', 'partial': 'done', 'failed': 'error', 'interrupted': 'interrupted'}[status]
     return {**row['progress'], 'job_id': job_id, 'library_id': row['library_id'], 'url': row['seed'], 'kind': row.get('kind', 'site'),
         'phase': phase, 'fetched': fetched, 'failed': failed + len(ambiguous),
+        'excluded': 0 if pipeline else row.get('excluded', 0),
+        'notes': list(row.get('notes', [])),
+        'pages': [] if pipeline else page_outcomes(row),
         'ingested': row['ingested'], 'skipped': row['skipped'], 'discovered': len(pages),
         'resume_available': status == 'interrupted' and not blocked, 'finished_at': None if status == 'running' else row['updated_at'],
         'acquisition': {'durable': True, 'status': status, 'policy': row['policy'],

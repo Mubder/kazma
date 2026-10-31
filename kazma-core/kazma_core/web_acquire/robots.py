@@ -1,8 +1,14 @@
 """Bounded, default-on crawl robots policy; content extraction is never a checker.
 
-Rules are public-origin metadata. Missing (404/410) is distinct from failed
-fetches, which deny crawling. Cross-origin robots redirects are refused to
-retain the crawler's existing metadata scope boundary.
+Rules are public-origin metadata, read as RFC 9309 says (2026-10-31, from
+the recorded corpus): a 4xx answer -- 401 and 403 included -- means no rules
+apply ("unavailable"; the page request then decides, and a site that refuses
+KazmaBot refuses the page too, which the crawl reports as such); a redirect
+is followed, up to five, across hosts (http://python.org/robots.txt moves to
+https://www.python.org/robots.txt), each hop checked public by the fetch; the
+rules found apply to the origin asked about. A failed fetch (network, 5xx,
+an oversized or HTML answer) denies crawling. Kazma refused 401/403 and
+cross-host redirects before, so a site behind either could never be crawled.
 """
 from __future__ import annotations
 
@@ -25,7 +31,9 @@ from kazma_core.web_acquire.policy import acquisition_policy
 from kazma_core.web_acquire.resources import _CapacityPool
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
-USER_AGENT = 'KazmaBot/1.0 (local research crawler)'
+#: Who is asking, with where to read about it (Wikimedia refuses a bot that
+#: names no contact; live corpus 2026-10-31).
+USER_AGENT = 'KazmaBot/1.0 (+https://github.com/Mubder/kazma; local research crawler)'
 _AUTOMATED = {'crawl', 'kb', 'kb_discovery', 'research', 'research_save'}
 _UNRESERVED = frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~')
 _HEX = frozenset('0123456789abcdefABCDEF')
@@ -194,9 +202,10 @@ class _RobotsManager:
     async def _fetch(self, url, proxy):
         from kazma_core.web_acquire.http import fetch_public
 
-        key = _origin(url)
+        # Any host a redirect names (RFC 9309 2.3.1.2); every hop is checked
+        # public by the fetch itself.
         return await fetch_public(url, max_bytes=500 * 1024, timeout=15, max_redirects=5,
-            scope=lambda target: _origin(target) == key, headers={'User-Agent': USER_AGENT},
+            scope=lambda target: True, headers={'User-Agent': USER_AGENT},
             capacity_pool=self._pool, proxy_url=proxy)
 
     async def _load(self, url, proxy):
@@ -204,10 +213,8 @@ class _RobotsManager:
         try:
             result = await self._fetch(url, proxy)
             status = result.response.status_code
-            if status in (404, 410):
-                return _Rules('missing', status)
-            if status in (401, 403):
-                return _Rules('denied', status, error='Robots access was denied by the origin.')
+            if 400 <= status < 500 and status != 429:
+                return _Rules('missing', status)  # RFC 9309: unavailable, no rules apply
             if status not in (200, 204) or result.truncated:
                 return _Rules('unavailable', status, error='Robots response failed or exceeded 500KiB; crawl was refused.')
             body = result.response.content

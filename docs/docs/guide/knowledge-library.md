@@ -259,7 +259,31 @@ Not measured: the corpus is small (76 chunks) and written for the purpose, and s
 
 ## The Web API
 
-`/api/kb/*` (`kazma-ui/kazma_ui/kb_api.py`) has 16 routes. Every refusal is a JSON body `{"ok": false, "code": ..., "transient": ..., "error": ...}` with a stable `code`: an acquisition code (`invalid_url`, `robots_disallowed`, `resource_limit`, ...) or one of the Knowledge codes (`kb_single_operator`, `invalid_request`, `request_too_large`, `not_found`, `library_exists`, `url_refused`, `kb_storage_full`, `library_busy`, `crawl_owns_library`, `documents_unavailable`, `page_not_ingested`, `no_seed`, `resume_refused`, `internal_error`). Expected refusals are logged once at INFO or WARNING, never as an ERROR with a traceback. Request bodies are read under 64 KiB and validated: `top_k` 1-20, `query` up to 2,000 characters, name and description up to 500, seed up to 2,048 and http(s) only, a library id slugged to at most 48 characters. A single-page ingest answers `ok` only when the page was stored.
+`/api/kb/*` (`kazma-ui/kazma_ui/kb_api.py`) has 18 routes. Every refusal is a JSON body `{"ok": false, "code": ..., "transient": ..., "error": ...}` with a stable `code`: an acquisition code (`invalid_url`, `robots_disallowed`, `resource_limit`, ...) or one of the Knowledge codes (`kb_single_operator`, `invalid_request`, `request_too_large`, `not_found`, `library_exists`, `url_refused`, `kb_storage_full`, `library_busy`, `crawl_owns_library`, `documents_unavailable`, `page_not_ingested`, `no_seed`, `resume_refused`, `internal_error`). Expected refusals are logged once at INFO or WARNING, never as an ERROR with a traceback. Request bodies are read under 64 KiB and validated: `top_k` 1-20, `query` up to 2,000 characters, name and description up to 500, seed up to 2,048 and http(s) only, a library id slugged to at most 48 characters. A single-page ingest answers `ok` only when the page was stored.
+
+## What a crawl did, page by page
+
+Every page a crawl reaches ends one of four ways:
+
+- **Stored** (or **Unchanged**, when the library already holds the same text).
+- **Kept out** by a rule: robots.txt asks crawlers to stay out, the page is outside the crawl's scope, behind a sign-in, no longer on the site (404/410), or larger than Kazma reads (a page is stored whole, up to a million characters; a part is never stored).
+- **Failed**: the site had an error, refused the page, the connection failed, the address is on a private network, a bot check stood in the way, or the page had no readable text.
+
+A crawl is **Completed** (green) when nothing failed, **Finished with failures** (yellow) when a page failed or is uncertain, **Stored nothing** (yellow) when every page was kept out, and **Failed** (red) when the crawl itself could not run. The page cap, a link walk stopped at its depth and a very large sitemap read in part are notes on a completed crawl, never failures. The job card lists the pages that were not stored, failures first, each with what to do.
+
+A dropped connection, a server's "try later" (408, 425, 429, 5xx) or a DNS answer that came back private while the line was down is tried again inside the crawl, after 5 and then 30 seconds, at most 20 times a crawl. A crawl a restart cut off resumes once on its own at the next start (within a day); one you stopped waits for **Resume**.
+
+robots.txt is read as RFC 9309 says: a 4xx answer means no rules apply, and a redirect is followed to another host (http://python.org/robots.txt moves to https://www.python.org/robots.txt). KazmaBot names a contact link in its user agent.
+
+### Preview and scope
+
+**Preview** runs the crawl's own discovery (sitemaps, llms.txt, then following links) without storing anything, and says how many pages **This section**, **Whole site** and **Just this page** hold, where the list came from, and a few of each. Following links counts only the scope it walks; the others say "known once crawled". The scope you choose is the library's: its refreshes keep it, and a resumed crawl keeps the scope it started with. **Just this page** follows the page's own redirects within its site. A version segment of the address (the `3` in `docs.python.org/3/tutorial/`) is not a section.
+
+### Measured: the recorded corpus and the daily check
+
+Twenty real sites were crawled once and every response they gave was recorded (`tests/fixtures/crawl_corpus/`). The tests replay them through the whole crawl -- admission, robots.txt with its stored claims, the sitemap and page parsers, retries, chunking, publication and the journal -- with the settings store's vault on, as production has it, and hold each page's outcome to `tests/fixtures/crawl_corpus/expected.json`. Of their 57 pages, every one is stored or kept out by a stated rule; the target is 99% (`crawl_jobs.PAGE_TARGET`). The Dashboard's **Knowledge crawls** card shows the same share over your retained crawls, with the reasons pages were not stored, and `/metrics` carries it (`kazma_kb_crawl_pages`, `kazma_kb_crawl_page_reasons`, `kazma_kb_crawl_page_handled_ratio`).
+
+Once a day Kazma crawls one known page (RFC 2606 by default; **Settings → System → Web acquisition → Daily crawl check**) the same way, into a private store you never see, and alerts you the same day if the page was not stored or does not say what it should. **Check now** runs it at once.
 
 ## Crawl progress and completion alerts
 

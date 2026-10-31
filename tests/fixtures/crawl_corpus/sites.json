@@ -1,0 +1,142 @@
+[
+  {
+    "name": "rfc9110",
+    "seed": "https://www.rfc-editor.org/rfc/rfc9110.html",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "a 464,000-character page; the site's sitemap holds 6,000 URLs"
+  },
+  {
+    "name": "python-moved",
+    "seed": "https://docs.python.org/3/library/stdtypes",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "a page that moved (301 to .html) crawled as 'just this page'"
+  },
+  {
+    "name": "example-com",
+    "seed": "https://example.com/",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "the smallest page there is"
+  },
+  {
+    "name": "python-tutorial",
+    "seed": "https://docs.python.org/3/tutorial/",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "a Sphinx docs section"
+  },
+  {
+    "name": "python-missing",
+    "seed": "https://docs.python.org/3/kazma-no-such-page.html",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "a page that is gone (404)"
+  },
+  {
+    "name": "python-redirect",
+    "seed": "http://python.org/",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "http to https and a host redirect"
+  },
+  {
+    "name": "sqlite-lang",
+    "seed": "https://www.sqlite.org/lang.html",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "plain HTML with no sitemap: a link walk"
+  },
+  {
+    "name": "fastapi-tutorial",
+    "seed": "https://fastapi.tiangolo.com/tutorial/",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "a MkDocs site with a sitemap"
+  },
+  {
+    "name": "uv-docs",
+    "seed": "https://docs.astral.sh/uv/",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "a docs root (no topic segment)"
+  },
+  {
+    "name": "llmstxt",
+    "seed": "https://llmstxt.org/",
+    "scope": "site",
+    "max_pages": 5,
+    "why": "a site that publishes llms.txt, crawled whole"
+  },
+  {
+    "name": "httpwg-specs",
+    "seed": "https://httpwg.org/specs/",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "a specification index"
+  },
+  {
+    "name": "go-effective",
+    "seed": "https://go.dev/doc/effective_go",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "one long document"
+  },
+  {
+    "name": "rust-book",
+    "seed": "https://doc.rust-lang.org/book/",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "an mdBook"
+  },
+  {
+    "name": "textual-guide",
+    "seed": "https://textual.textualize.io/guide/",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "a MkDocs Material section"
+  },
+  {
+    "name": "postgres-tutorial",
+    "seed": "https://www.postgresql.org/docs/current/tutorial.html",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "a large docs tree"
+  },
+  {
+    "name": "alpine-start",
+    "seed": "https://alpinejs.dev/start-here",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "a framework's docs"
+  },
+  {
+    "name": "mdn-status",
+    "seed": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status",
+    "scope": "section",
+    "max_pages": 5,
+    "why": "MDN: a very large gzipped sitemap"
+  },
+  {
+    "name": "wikipedia-ar-kuwait",
+    "seed": "https://ar.wikipedia.org/wiki/%D8%A7%D9%84%D9%83%D9%88%D9%8A%D8%AA",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "an Arabic article; Wikimedia refuses a bot that names no contact"
+  },
+  {
+    "name": "wikipedia-ar-python",
+    "seed": "https://ar.wikipedia.org/wiki/%D8%A8%D8%A7%D9%8A%D8%AB%D9%88%D9%86_(%D9%84%D8%BA%D8%A9_%D8%A8%D8%B1%D9%85%D8%AC%D8%A9)",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "Arabic text with Latin code terms; Wikimedia refuses a bot that names no contact"
+  },
+  {
+    "name": "robots-google-search",
+    "seed": "https://www.google.com/search?q=kazma",
+    "scope": "page",
+    "max_pages": 1,
+    "why": "a page robots.txt keeps out"
+  }
+]

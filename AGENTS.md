@@ -4304,11 +4304,18 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   Tests isolate the scheduler per case; production cooldowns persist across jobs.
   `web_acquire.robots` defaults automated crawl/KB/research-save jobs to KazmaBot
   robots enforcement. Check before cache reuse and every HTTP/browser hop,
-  including assets. Raw public metadata is bounded to 500KiB/15s/five same-origin
+  including assets. Raw public metadata is bounded to 500KiB/15s/five
   redirects, with dedicated bounded capacity to avoid nested content-slot
-  deadlock. 404/410 means missing; 401/403 denies; failed/malformed/clipped
-  checks refuse crawling. Cross-origin control redirects are conservatively
-  refused rather than widening scope. Explicit opt-out is visible; hosted
+  deadlock. **robots.txt is read as RFC 9309 says** (2026-10-31, from the
+  recorded corpus below): any 4xx but 429 -- 401 and 403 too -- means no rules
+  apply (the page request decides); 429, 5xx, network, malformed or clipped
+  checks refuse crawling; a redirect is followed across hosts, up to five,
+  each hop checked public (http://python.org/robots.txt moves to
+  https://www.python.org/), and the rules apply to the origin asked about.
+  Refusing 401/403 and cross-host redirects left such sites uncrawlable.
+  KazmaBot's name carries a contact link (`robots.USER_AGENT`): Wikimedia
+  refuses a bot that names none (403, "please respect our robot policy").
+  Explicit opt-out is visible; hosted
   recovery is refused while robots enforcement requires per-request control.
   Cache policy by origin, acquisition policy and route; separate manual/crawler
   page caches. Freeze policy per job; never retain a ContextVar across async
@@ -4324,6 +4331,49 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   is owned or was interrupted". Every `batch_set` in `web_acquire` passes
   `durable_state.refuse_vaulted` (`config_store.vaulted_paths`, the store's
   own walk). Gate: `tests/test_acquisition_state_never_vaulted.py`.
+  **A crawl's outcome says what happened to each page** (2026-10-31,
+  `web_acquire/page_outcome.py`): ingested, unchanged, excluded (a rule:
+  robots, scope, a sign-in, a page gone, a page past Kazma's size limit -- a
+  part is never stored) or failed, each with a reason code the Knowledge
+  page words with what to do (`knowledge.reason.*`, `knowledge.hint.*`). A
+  crawl is partial only for a failed or uncertain page; limits and exclusions
+  are notes (`crawl_verdict`); every page kept out with none failed is
+  completed with `nothing_stored` (the monitor's yellow "empty", never red).
+  A hiccup -- network, 408/425/429/5xx, a private DNS answer during an
+  outage -- is tried again inside the crawl (`_fetch_with_retries`, 5 s then
+  30 s, at most 20 a crawl). A crawl a restart cut off in the last day resumes
+  once on its own (`interrupted_by: process_ended`,
+  `kb_api.resume_interrupted_crawls`); one the owner stopped waits. The
+  Knowledge page previews a crawl (`knowledge_ingest.preview_site`: the
+  crawl's own discovery, nothing stored) and takes a scope in the owner's
+  words (this section / whole site / just this page), kept per library
+  (`knowledge_libraries.crawl_scope`) for refreshes; a resume keeps its own.
+  "Just this page" follows its seed's redirects within the site, and a
+  version segment ("3" in /3/tutorial/) is not a section's topic. After
+  discovery a Knowledge crawl's row keeps no parsed sitemap list and only the
+  latest receipt. Every retained crawl's pages by outcome and reason, against
+  the target of 99% stored or kept out by a rule (`crawl_jobs.PAGE_TARGET`),
+  are the Dashboard's Knowledge crawls card (`/api/kb/outcomes`), `/metrics`
+  (`kazma_kb_crawl_*`) and the weekly report ("Knowledge crawl", "Knowledge
+  page not stored"). Gates: `tests/test_crawl_outcomes.py`,
+  `tests/test_crawl_auto_resume.py`, `tests/test_crawl_preview.py`,
+  `tests/test_crawl_report.py`, `tests/js/test_kb_crawl_report.js`.
+  **Twenty real sites are recorded and replayed through the whole crawl**
+  (`tests/_crawl_replay.py`, `tests/fixtures/crawl_corpus/`): every HTTP
+  response a real crawl received, through the one HTTP seam
+  (`proxy.client.get_scraping_client`), replayed with production's robots
+  manager and the vault on; each site's outcome page by page is locked in
+  `expected.json` (`scripts/crawl_corpus.py record|lock|show`; review the diff
+  before committing a lock). The first recording found five bugs no synthetic
+  test had. Also with a real Chroma store and on real Postgres
+  (`tests/test_crawl_corpus.py`). **A daily canary crawls one known page
+  for real** (`web_acquire/canary.py`, RFC 2606 by default, Settings ->
+  System -> Web acquisition): the whole crawl into a private store
+  (`<data dir>/canary`, `knowledge_ingest._PRIVATE_KNOWLEDGE`), journal row
+  kind `canary` removed after; a failure is the ops alert
+  `acquisition.canary_failed` (error) the same day, a pass after one
+  `acquisition.canary_recovered`; the weekly report expects seven runs
+  (`tests/test_crawl_canary.py`).
   The factory provides
   (proxy provider + rotating UA pool); `web_acquire` is the façade
   (`fetch_text`/`search`/`rank_urls`/profiles) used by research pipeline, KB

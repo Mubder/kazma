@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## Crawls you can trust (2026-10-31)
+
+- **Each page's outcome, and the crawl's verdict from them.** A page is
+  stored, unchanged, kept out by a rule (robots.txt, scope, a sign-in, a page
+  gone, a page past Kazma's size limit) or failed, with a reason the Knowledge
+  page words with what to do. "Partial" now means a page failed; limits and
+  exclusions are notes. A crawl that stored nothing because every page was
+  kept out says so in yellow, never "failed". A finished crawl is a green
+  notice that fades; warnings stay in the banner, errors are red, and a
+  library's next success clears its earlier warnings.
+- **Hiccups are tried again; a restart does not strand a crawl.** Network
+  failures, 408/425/429/5xx and a private DNS answer during an outage are
+  retried inside the crawl (5 s, 30 s, at most 20 a crawl). A crawl a restart
+  cut off resumes once on its own.
+- **Preview and a scope in plain words.** Preview counts the pages of "this
+  section", "the whole site" and "just this page" before anything is stored;
+  the library keeps the chosen scope for its refreshes.
+- **Measured on real sites.** Twenty real sites were recorded and are replayed
+  through the whole crawl with the vault on (and on Postgres, and with a real
+  vector store). The first recording found five bugs: robots.txt answered
+  401/403 or behind a cross-host redirect blocked whole sites (now RFC 9309);
+  Wikimedia refused KazmaBot for naming no contact; "just this page" refused
+  a page that had moved; "this section" of docs.python.org/3/tutorial/ took
+  "3" as its topic; an oversized page failed the crawl. All 57 pages are now
+  stored or kept out by a stated rule (target 99%).
+- **A daily crawl check** crawls one known page for real and alerts the same
+  day it fails. The Dashboard shows the share of pages handled, why pages
+  were not stored, and the check's last result; `/metrics` and the weekly
+  report carry them.
+- **A smaller crawl journal.** After discovery a Knowledge crawl no longer
+  keeps every parsed sitemap list and a receipt per page.
+
 ## Engineering deep dives (2026-10-26)
 
 - Three new guide pages explain how Kazma works inside, each piece with the

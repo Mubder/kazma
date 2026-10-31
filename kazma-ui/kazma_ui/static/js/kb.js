@@ -129,7 +129,11 @@ function knowledgePage() {
     // (tests/test_empty_states_after_load.py).
     librariesLoaded: false,
     viewArchived: false,   // Active (false) / Archived (true) tab state
-    form: { id: "", name: "", seed_url: "" },
+    // scope: "" = the library's own choice, else Kazma's default.
+    form: { id: "", name: "", seed_url: "", scope: "" },
+    // What a crawl would fetch, before it starts (POST /api/kb/preview).
+    previewing: false,
+    previewResult: null,
     activeJob: null,    // latest ProgressUpdate from /api/kb/jobs/{id}
     _pollTimer: null,
     _pollBusy: false,
@@ -205,7 +209,8 @@ function knowledgePage() {
         const r = await fetch("/api/kb/ingest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ library_id: lib_id, name: name, url: url, mode: mode }),
+          body: JSON.stringify({ library_id: lib_id, name: name, url: url, mode: mode,
+                                 scope: mode === "site" ? (this.form.scope || null) : null }),
         });
         const data = await r.json();
         if (!data.ok) throw new Error(errorText(data, "knowledge.ui.ingest_failed", "Ingest failed"));
@@ -382,17 +387,65 @@ function knowledgePage() {
       }, 2000);
     },
 
-    // A crawl that finished with failed pages, or with discovery cut short,
-    // is never shown as plainly "Done" (KB-S15).
+    // A crawl that finished with failed or uncertain pages is never shown as
+    // plainly "Done" (KB-S15). A limit (the page cap, a sitemap read in part)
+    // is a note on a completed crawl, not a failure (2026-10-31).
     jobPartial() {
       const a = this.activeJob && this.activeJob.acquisition;
       return !!(this.activeJob && this.activeJob.phase === "done"
-        && ((a && (a.status === "partial" || a.discovery_limited)) || (this.activeJob.failed || 0) > 0));
+        && ((a && a.status === "partial") || (this.activeJob.failed || 0) > 0));
+    },
+    // Done, but every page was kept out by a rule: nothing reached the library.
+    jobEmpty() {
+      return !!(this.activeJob && (this.activeJob.notes || []).includes("nothing_stored"));
+    },
+    // The card's accent: green done, yellow partial or empty, red failed.
+    jobColor() {
+      if (!this.activeJob || !this.jobDone()) return "var(--primary)";
+      if (this.activeJob.phase === "error") return "var(--danger)";
+      if (this.activeJob.phase === "interrupted" || this.jobPartial() || this.jobEmpty()) return "var(--warning)";
+      return "var(--success)";
+    },
+    // How many pages ended each way, in report order; zero counts left out.
+    reportCounts() {
+      const pages = (this.activeJob && this.activeJob.pages) || [];
+      return ["ingested", "unchanged", "excluded", "failed", "uncertain", "pending"]
+        .map((outcome) => ({ outcome: outcome, count: pages.filter((p) => p.outcome === outcome).length }))
+        .filter((entry) => entry.count > 0);
+    },
+    // The pages that did not reach the library, failures first.
+    reportPages() {
+      const pages = (this.activeJob && this.activeJob.pages) || [];
+      const rank = { failed: 0, uncertain: 1, pending: 2, excluded: 3 };
+      return pages.filter((p) => p.outcome in rank).sort((a, b) => rank[a.outcome] - rank[b.outcome]);
+    },
+    outcomeLabel(outcome) {
+      return _k("knowledge.outcome." + outcome, outcome);
+    },
+    outcomeColor(outcome) {
+      if (outcome === "failed") return "var(--danger)";
+      if (outcome === "uncertain" || outcome === "pending") return "var(--warning)";
+      if (outcome === "excluded") return "var(--text-secondary)";
+      return "var(--success)";
+    },
+    // A page (or its reason code) worded from the catalog: why it was not
+    // stored, and what the owner can do.
+    reasonText(page) {
+      const reason = (page && page.reason !== undefined ? page.reason : page) || "other";
+      return _k("knowledge.reason." + reason, reason);
+    },
+    reasonHint(page) {
+      const reason = (page && page.reason !== undefined ? page.reason : page) || "other";
+      return _k("knowledge.hint." + reason, "");
+    },
+    noteText(note) {
+      return _k("knowledge.note." + note, note);
     },
     jobTitle() {
       if (!this.activeJob) return "";
       const p = this.activeJob.phase;
       if (p === "done" && this.jobPartial()) return _k("knowledge.phase_partial", "Finished with failures");
+      if (p === "done" && this.jobEmpty()) return _k("knowledge.verdict.empty", "Stored nothing");
       if (p === "done") return _k("knowledge.phase_done", "Done");
       if (p === "error") return _k("knowledge.phase_error", "Error");
       if (p === "interrupted") return _k("knowledge.phase_interrupted", "Interrupted");
@@ -400,7 +453,7 @@ function knowledgePage() {
     },
     jobIcon() {
       if (!this.activeJob) return "info";
-      if (this.activeJob.phase === "done") return this.jobPartial() ? "alert" : "check-circle";
+      if (this.activeJob.phase === "done") return this.jobPartial() || this.jobEmpty() ? "alert" : "check-circle";
       if (["error", "interrupted"].includes(this.activeJob.phase)) return "alert";
       return "spider";
     },
@@ -408,7 +461,71 @@ function knowledgePage() {
       return this.activeJob && ["done", "error", "interrupted"].includes(this.activeJob.phase);
     },
 
-    resetForm() { this.form = { id: "", name: "", seed_url: "" }; },
+    resetForm() {
+      this.form = { id: "", name: "", seed_url: "", scope: "" };
+      this.previewResult = null;
+    },
+
+    // The crawl's own discovery, nothing stored: where the list came from
+    // and how many pages each scope holds.
+    async preview() {
+      const url = (this.form.seed_url || "").trim();
+      if (!url || this.previewing) return;
+      this.previewing = true;
+      this.previewResult = null;
+      try {
+        const r = await fetch("/api/kb/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: url, scope: this.form.scope || null }),
+        });
+        const data = await r.json();
+        if (!data.ok) throw new Error(errorText(data, "knowledge.preview_failed", "Preview failed"));
+        this.previewResult = data.preview;
+        // The scope the preview was made for is now the owner's choice.
+        if (!this.form.scope) this.form.scope = this.scopeWord(data.preview.scope);
+      } catch (e) {
+        toast(_k("knowledge.preview_failed", "Preview failed: {error}", { error: e.message }), "error");
+      } finally {
+        this.previewing = false;
+      }
+    },
+
+    // A crawl scope in the owner's words (the server's PREVIEW_SCOPES).
+    scopeWord(mode) {
+      return { tree: "section", prefix: "section", domain: "site", exact: "page" }[mode] || "section";
+    },
+
+    scopeLabel(word) {
+      if (word === "site") return _k("knowledge.scope_site", "Whole site");
+      if (word === "page") return _k("knowledge.scope_page", "Just this page");
+      return _k("knowledge.scope_section", "This section");
+    },
+
+    previewSource() {
+      const source = this.previewResult ? this.previewResult.source : "";
+      if (source === "sitemap") return _k("knowledge.preview_source.sitemap", "Listed by the site's sitemap.");
+      if (source === "llms_txt") return _k("knowledge.preview_source.llms_txt", "Listed by the site's llms.txt.");
+      if (source === "link_walk") return _k("knowledge.preview_source.link_walk", "Found by following the page's links.");
+      if (source === "single_page") return _k("knowledge.preview_source.single_page", "Just this page.");
+      return _k("knowledge.preview_source.seed_only", "Only this page could be read; its links could not be followed.");
+    },
+
+    previewCount(word) {
+      const scope = this.previewResult && this.previewResult.scopes[word];
+      if (!scope) return _k("knowledge.preview_unknown", "known once crawled");
+      return window.kazmaCount("knowledge.pages_count", scope.pages);
+    },
+
+    previewSample() {
+      const scope = this.previewResult && this.previewResult.scopes[this.form.scope || "section"];
+      return scope ? scope.sample : [];
+    },
+
+    previewOverCap() {
+      const scope = this.previewResult && this.previewResult.scopes[this.form.scope || "section"];
+      return !!scope && scope.pages > this.previewResult.page_cap;
+    },
 
     switchTab(toArchived) {
       if (this.viewArchived === toArchived) return;

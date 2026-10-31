@@ -516,12 +516,57 @@ export function registerStores() {
                 }
                 this.items = Array.isArray(alerts) ? alerts : [];
                 this.count = this.items.length;
+                this._toastSuccesses();
                 this.loaded = true;
                 this.error = '';
                 this._failures = 0;
                 if (this._retry) {
                     try { clearTimeout(this._retry); } catch (e) { /* ignore */ }
                     this._retry = null;
+                }
+            },
+
+            // Each alert's colour and symbol by severity: never colour alone.
+            tone(item) {
+                const severity = String((item && item.severity) || '').toUpperCase();
+                if (severity === 'SUCCESS') return { color: 'var(--success)', mark: '✓' };
+                if (severity === 'ERROR' || severity === 'CRITICAL') return { color: 'var(--danger)', mark: '✕' };
+                if (severity === 'INFO') return { color: 'var(--accent, #3b82f6)', mark: 'ⓘ' };
+                return { color: 'var(--warning)', mark: '⚠' };
+            },
+
+            // A success is news: a green toast that fades, once per alert in
+            // this browser, and only while it is recent (an old success is
+            // in the bell). "Crawl completed" held the yellow problem banner
+            // (live 2026-10-31); the banner is for what needs attention.
+            _toastSuccesses() {
+                const KEY = 'kazma.alerts.toasted';
+                const w = typeof window !== 'undefined' ? window : {};
+                let shown = [];
+                try {
+                    const raw = JSON.parse(w.localStorage.getItem(KEY) || '[]');
+                    if (Array.isArray(raw)) shown = raw.filter((id) => typeof id === 'string');
+                } catch (e) { /* blocked storage: toast for this page only */ }
+                const seen = new Set(shown.concat(this._toastedHere || []));
+                const nowS = Date.now() / 1000;
+                const fresh = this.items.filter((a) => a && typeof a.id === 'string' && !seen.has(a.id)
+                    && String(a.severity || '').toUpperCase() === 'SUCCESS'
+                    && typeof a.timestamp === 'number' && nowS - a.timestamp < 600);
+                if (!fresh.length) return;
+                const toast = (w.Alpine && w.Alpine.store) ? w.Alpine.store('toast') : null;
+                this._toastedHere = (this._toastedHere || []).concat(fresh.map((a) => a.id));
+                try {
+                    w.localStorage.setItem(KEY, JSON.stringify(shown.concat(fresh.map((a) => a.id)).slice(-200)));
+                } catch (e) { /* storage unavailable: once for this page */ }
+                if (!toast) return;
+                for (const alert of fresh.slice(-3)) {
+                    const id = typeof alert.callback_id === 'string' ? alert.callback_id : '';
+                    const link = id.startsWith('link:/') && !id.startsWith('link://') ? id.slice(5) : '';
+                    const open = link ? {
+                        label: w.kazmaT ? w.kazmaT('common.open', 'Open') : 'Open',
+                        run: () => { w.location.href = link; },
+                    } : null;
+                    toast.add(alert.title || '', 'success', 8000, open);
                 }
             },
 

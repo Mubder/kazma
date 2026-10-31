@@ -7,7 +7,7 @@ delegates to ``KnowledgeStore``, deletion to
 ``ingest_site`` (a crawl runs as a background ``asyncio`` task), search to
 ``KnowledgeIndex``.
 
-Endpoints (all under ``/api/kb``; 16 routes):
+Endpoints (all under ``/api/kb``; 18 routes):
   GET    /libraries                         — list libraries (no storage side effects)
   POST   /libraries        {id,name,...}    — create an empty library
   GET    /libraries/archived/list           — the archived libraries
@@ -18,10 +18,12 @@ Endpoints (all under ``/api/kb``; 16 routes):
   POST   /libraries/{id}/unarchive          — restore from the archive
   GET    /libraries/{id}/chunks             — paginated chunk browser
   POST   /libraries/{id}/refresh            — re-crawl from the seed URL
-  POST   /ingest           {library_id,url,mode,max_pages?,name?}
+  POST   /ingest           {library_id,url,mode,max_pages?,name?,scope?}
                                              — one page now, or a crawl in the background
+  POST   /preview          {url,scope?}     — what a crawl would fetch, nothing stored
   GET    /jobs                              — this install's Knowledge crawls (the journal)
   GET    /jobs/{job_id}                     — one crawl's progress, from the journal
+  GET    /outcomes                          — retained crawls' pages by outcome and reason
   POST   /jobs/{job_id}/resume              — resume an interrupted crawl (the one resume path)
   POST   /search           {library_id,query,top_k?}
                                              — the page's test search
@@ -171,6 +173,14 @@ class _IngestBody(_Body):
     mode: Literal["page", "site"] = "page"
     max_pages: int | None = Field(None, ge=1, le=1000)
     name: str = Field("", max_length=500)
+    # A crawl's scope in the owner's words (``PREVIEW_SCOPES``); none: the
+    # library's own choice, else Kazma's default.
+    scope: Literal["section", "site", "page"] | None = None
+
+
+class _PreviewBody(_Body):
+    url: str = Field(min_length=1, max_length=2048)
+    scope: Literal["section", "site", "page"] | None = None
 
 
 class _SearchBody(_Body):
@@ -212,6 +222,46 @@ async def _body(request: Request, model: type[_Body]) -> Any:
 
 def _not_found() -> JSONResponse:
     return _fail("not_found", "Not found", 404)
+
+
+#: The resume route of the router the app built: the one resume path, which
+#: an automatic resume after a restart goes through too.
+_RESUME_ROUTE: dict[str, Any] = {}
+
+
+async def resume_interrupted_crawls() -> list[str]:
+    """Resume the Knowledge crawls a restart cut off, once each.
+
+    A reload in the middle of a crawl left it "interrupted -- explicit
+    recovery required" until the owner pressed Resume. A crawl the process's
+    end stopped (``interrupted_by: process_ended``) in the last day resumes
+    on its own through the resume route; one the owner stopped, an older one,
+    or one already resumed once waits for the owner. Returns the job ids
+    resumed.
+    """
+    from kazma_core.web_acquire.crawl_jobs import auto_resume_due, call, claim_auto_resume, inspect_jobs, recover
+
+    route = _RESUME_ROUTE.get("resume")
+    if route is None:
+        return []
+    await call(recover)
+    resumed = []
+    for summary in await call(inspect_jobs):
+        if summary["status"] != "interrupted":
+            continue
+        # The listing is a summary: why it stopped is on the whole row.
+        row = await call(inspect_jobs, summary["job_id"])
+        if row is None or not auto_resume_due(row) or not await call(claim_auto_resume, row["job_id"]):
+            continue
+        answer = await route(row["job_id"])
+        if isinstance(answer, dict) and answer.get("ok"):
+            resumed.append(row["job_id"])
+            logger.info("[kb_api] crawl %s resumed after a restart", row["job_id"])
+        else:
+            # Claimed, so not tried again: the monitor reports it interrupted.
+            logger.warning("[kb_api] crawl %s could not resume after a restart; it waits for Resume",
+                           row["job_id"])
+    return resumed
 
 
 def create_kb_router() -> APIRouter:
@@ -413,7 +463,27 @@ def create_kb_router() -> APIRouter:
         lib_id = slugify_library_id(data.library_id)
         if data.mode == "page":
             return await _ingest_page(lib_id, data.url, name=data.name)
-        return await _start_site(lib_id, data.url, max_pages=data.max_pages, kind="site", name=data.name)
+        return await _start_site(lib_id, data.url, max_pages=data.max_pages, kind="site", name=data.name,
+                                 scope=_crawl_scope(data.scope))
+
+    def _crawl_scope(word: str | None) -> str | None:
+        from kazma_core.stores.knowledge_ingest import PREVIEW_SCOPES
+
+        return PREVIEW_SCOPES[word] if word else None
+
+    @router.post("/preview")
+    async def preview(request: Request) -> Any:
+        """What a crawl would fetch, before it starts: the crawl's own
+        discovery, nothing stored (``knowledge_ingest.preview_site``)."""
+        data = await _body(request, _PreviewBody)
+        if isinstance(data, JSONResponse):
+            return data
+        from kazma_core.stores.knowledge_ingest import preview_site
+
+        try:
+            return {"ok": True, "preview": await preview_site(data.url, scope=_crawl_scope(data.scope))}
+        except AcquisitionError as exc:
+            return _acquisition_failure(exc)
 
     async def _ingest_page(lib_id: str, url: str, *, name: str) -> Any:
         """One page now. ``ok`` is the page's outcome (KB-S13): a page that
@@ -450,7 +520,7 @@ def create_kb_router() -> APIRouter:
         }
 
     async def _start_site(lib_id: str, url: str, *, max_pages: int | None, kind: str,
-                          name: str = "", resume_job_id: str | None = None) -> Any:
+                          name: str = "", resume_job_id: str | None = None, scope: str | None = None) -> Any:
         """Admit a crawl in the journal, make sure its library exists, and
         run it in the background. The library is created only once the
         crawl was admitted (KB-S09)."""
@@ -461,7 +531,7 @@ def create_kb_router() -> APIRouter:
         job_id = resume_job_id or f"{lib_id}:{uuid.uuid4().hex}"
         try:
             prepared = await _prepare_ingest_site(lib_id, url, max_pages=max_pages, job_id=job_id,
-                                                  resume=bool(resume_job_id))
+                                                  resume=bool(resume_job_id), scope=scope)
         except AcquisitionError as exc:
             return _acquisition_failure(exc)
         except KnowledgeStorageFull as exc:
@@ -476,6 +546,8 @@ def create_kb_router() -> APIRouter:
                     store.create_library(lib_id, name=name or lib_id, seed_url=url)
                 elif kind == "site" and not resume_job_id:
                     store.update_library(lib_id, seed_url=url)
+                if scope is not None:
+                    store.set_crawl_scope(lib_id, scope)  # its refreshes keep it
 
             await asyncio.to_thread(_ensure_library)
 
@@ -531,6 +603,18 @@ def create_kb_router() -> APIRouter:
         except AcquisitionError as exc:
             return _acquisition_failure(exc)
 
+    @router.get("/outcomes")
+    def crawl_outcomes() -> Any:
+        """Every retained crawl's pages by outcome and reason, the share
+        handled against its target, and the daily crawl check."""
+        from kazma_core.web_acquire import canary
+        from kazma_core.web_acquire.crawl_jobs import outcome_summary
+
+        try:
+            return {"ok": True, "summary": outcome_summary(), "canary": canary.state()}
+        except AcquisitionError as exc:
+            return _acquisition_failure(exc)
+
     @router.get("/jobs/{job_id}")
     def job_status(job_id: str) -> Any:
         from kazma_core.web_acquire.crawl_jobs import projection
@@ -565,6 +649,8 @@ def create_kb_router() -> APIRouter:
             return _fail("not_found", 'The crawl library no longer exists.', 404)
         return await _start_site(row['library_id'], row['seed'], max_pages=row['policy']['max_pages'],
                                  kind=row.get('kind', 'site'), resume_job_id=job_id)
+
+    _RESUME_ROUTE["resume"] = resume_job
 
     # ── Search (UI "Test search") ───────────────────────────────────────
 

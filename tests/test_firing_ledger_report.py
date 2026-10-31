@@ -108,7 +108,9 @@ def test_what_needs_a_look_comes_first(week):
            # prune is a scheduled job the report now watches, so a week on
            # schedule includes its seven runs.
            + [_app_line("[TimeTravel] maintenance: deleted=0 remaining_old=0 before=10 after=10 "
-                        "vacuumed=False")] * 7)
+                        "vacuumed=False")] * 7
+           # Re-pointed 2026-10-31: the daily crawl check is a scheduled job.
+           + [_app_line("[acquisition] canary passed in 4.2 s")] * 7)
     quiet_title, quiet_body = fl.render(fl.build_report(hours=168))
     assert "need a look" not in quiet_title
     assert not quiet_body.startswith("Needs a look")

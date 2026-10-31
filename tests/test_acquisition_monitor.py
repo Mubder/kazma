@@ -465,3 +465,87 @@ def test_the_real_collect_names_the_runs_it_leaves_to_the_agent(fixture, monkeyp
     jobs, _, _, left_to_agent = _REAL_COLLECT()
     assert left_to_agent == {'job:' + crawl.job_id}
     assert 'job:' + kb.job_id not in left_to_agent
+
+
+# ── 2026-10-31: success is green, and a library's success settles its warnings ──
+
+
+def crawl(status='running', updated=1000, run='r1', library='docs', sources=0, notes=None):
+    return dict(key=f'job:{library}:{run}', status=status, stage='fetch', created=1000, updated=updated,
+                sources=sources, progress=['fetch', sources], link=f'/knowledge?job={library}%3A{run}',
+                result_available=sources > 0, kind='crawl', subject=library, notes=list(notes or []))
+
+
+def test_a_completed_crawl_is_a_green_success_not_a_warning(fixture):
+    """Live 2026-10-31: "Crawl completed" held the yellow problem banner."""
+    fixture.jobs = [crawl()]
+    monitor.tick(now=1000)
+    fixture.jobs = [crawl('completed', 1001, sources=2, notes=['excluded'])]
+    assert [r['condition'] for r in monitor.tick(now=1002)] == ['completed']
+    shown = monitor.recent_alerts()[0]
+    assert shown['severity'] == 'SUCCESS'
+    assert fixture.sent[-1][1]['severity'] == 'success'
+    assert 'excluded by robots.txt' in shown['reason']
+
+
+@pytest.mark.parametrize('notify_completed', [True, False])
+def test_a_librarys_success_settles_its_earlier_warnings_only(fixture, notify_completed):
+    monitor.save_settings(dict(monitor.settings(), notify_completed=notify_completed))
+    fixture.jobs = [crawl(run='r1'), crawl(run='o1', library='other')]
+    monitor.tick(now=1000)
+    fixture.jobs = [crawl('failed', 1001, run='r1'), crawl('partial', 1001, run='o1', library='other')]
+    monitor.tick(now=1002)
+    fixture.jobs = [crawl('failed', 1001, run='r1'), crawl('partial', 1001, run='o1', library='other'),
+                    crawl('running', 1003, run='r2')]
+    monitor.tick(now=1004)
+    fixture.jobs[-1] = crawl('completed', 1005, run='r2', sources=2)
+    monitor.tick(now=1006)
+    open_runs = {a['callback_id'] for a in monitor.recent_alerts() if a['status'] in {'failed', 'partial'}}
+    assert open_runs == {'link:/knowledge?job=other%3Ao1'}  # the other library's warning stays
+
+
+def test_an_event_stored_before_subjects_is_settled_by_its_key(fixture):
+    fixture.store.set('acquisition.monitor', {
+        'started': 900, 'checked_at': 990, 'jobs': {}, 'providers': {},
+        'events': [dict(id='acquisition-old', key='job:live_test:abc', condition='failed', timestamp=950,
+                        link='/knowledge?job=x', sources=0, result_available=False, resolved=False,
+                        dispatch='delivered')]}, category='acquisition_monitor')
+    assert any(a['id'] == 'acquisition-old' for a in monitor.recent_alerts())
+    fixture.jobs = [crawl('running', 995, run='r9', library='live_test')]
+    monitor.tick(now=1000)
+    fixture.jobs = [crawl('completed', 1001, run='r9', library='live_test', sources=1)]
+    monitor.tick(now=1002)
+    assert not any(a['id'] == 'acquisition-old' for a in monitor.recent_alerts())
+
+
+def test_without_the_rule_the_old_warning_stays(fixture, monkeypatch):
+    """Negative control."""
+    monkeypatch.setattr(monitor, '_settle_for_success', lambda state, row: None)
+    fixture.jobs = [crawl(run='r1')]
+    monitor.tick(now=1000)
+    fixture.jobs = [crawl('failed', 1001, run='r1')]
+    monitor.tick(now=1002)
+    fixture.jobs = [crawl('failed', 1001, run='r1'), crawl('completed', 1003, run='r2', sources=1)]
+    monitor.tick(now=1004)
+    assert any(a['status'] == 'failed' for a in monitor.recent_alerts())
+
+
+def test_a_crawl_that_stored_nothing_is_a_warning_not_a_success(fixture, monkeypatch, tmp_path):
+    """Robots.txt kept out every page: nothing reached the library, so not
+    green -- and not red either: nothing failed (the corpus, 2026-10-31)."""
+    from kazma_core.tools import research_session
+    from kazma_core.web_acquire import crawl_jobs
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    job = crawl_jobs.start('kb-empty', 'https://docs.fixture.example/',
+                           dict(mode='local_only', robots=True, max_pages=1, scope='exact', delay_ms=0))
+    job.update(lambda row: row.update(excluded=1, notes=['excluded', 'nothing_stored']))
+    job.finish('completed')
+    [collected] = [j for j in _REAL_COLLECT()[0] if j['key'] == 'job:' + job.job_id]
+    assert collected['status'] == 'empty'
+    fixture.jobs = [crawl()]
+    monitor.tick(now=1000)
+    fixture.jobs = [crawl('empty', 1001, notes=['excluded', 'nothing_stored'])]
+    assert [r['condition'] for r in monitor.tick(now=1002)] == ['empty']
+    shown = monitor.recent_alerts()[0]
+    assert shown['severity'] == 'WARNING' and 'stored nothing' in shown['title']
+    assert fixture.sent[-1][1]['severity'] == 'warn'

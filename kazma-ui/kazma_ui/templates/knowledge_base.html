@@ -78,7 +78,7 @@
       >
       <input
         type="text" class="form-input" placeholder="{{ t('knowledge.seed_placeholder') }}"
-        x-model="form.seed_url" :disabled="creating"
+        x-model="form.seed_url" :disabled="creating" @input="previewResult = null"
       >
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -96,8 +96,46 @@
       >
         <span class="ki" data-icon="spider" aria-hidden="true"></span> {{ t('knowledge.crawl_tree') }}
       </button>
-      <span x-show="creating" class="spinner-inline" style="align-self:center;" x-cloak></span>
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;">
+        {{ t('knowledge.scope_label') }}
+        <select class="form-input" style="width:auto;" x-model="form.scope" :disabled="creating">
+          <option value="">{{ t('knowledge.scope_default') }}</option>
+          <option value="section">{{ t('knowledge.scope_section') }}</option>
+          <option value="site">{{ t('knowledge.scope_site') }}</option>
+          <option value="page">{{ t('knowledge.scope_page') }}</option>
+        </select>
+      </label>
+      <button
+        class="btn btn-secondary"
+        @click="preview()"
+        :disabled="previewing || creating || !form.seed_url"
+      >
+        {{ t('knowledge.preview') }}
+      </button>
+      <span x-show="creating || previewing" class="spinner-inline" style="align-self:center;" x-cloak></span>
     </div>
+    <template x-if="previewResult">
+      <div id="kb-preview" style="margin-top:0.75rem;border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:0.85rem;">
+        <div style="font-weight:600;margin-bottom:2px;">{{ t('knowledge.preview_title') }}</div>
+        <div style="color:var(--text-secondary);" x-text="previewSource()"></div>
+        <template x-for="word in ['section', 'site', 'page']" :key="word">
+          <label style="display:flex;align-items:baseline;gap:6px;margin-top:4px;">
+            <input type="radio" name="kb-preview-scope" :value="word" x-model="form.scope">
+            <span x-text="scopeLabel(word)"></span>
+            <span style="color:var(--text-secondary);">·</span>
+            <span x-text="previewCount(word)"></span>
+          </label>
+        </template>
+        <ul translate="no" dir="ltr" style="margin:6px 0 0 0;padding-inline-start:18px;font-size:0.78rem;color:var(--text-secondary);word-break:break-all;">
+          <template x-for="url in previewSample()" :key="url">
+            <li><bdi x-text="url"></bdi></li>
+          </template>
+        </ul>
+        <div x-show="previewOverCap()" x-cloak style="margin-top:4px;">{{ t('knowledge.preview_cap') }}</div>
+        <div x-show="previewResult.sitemap_limited" x-cloak style="margin-top:4px;">{{ t('knowledge.preview_bounded') }}</div>
+        <div style="margin-top:4px;color:var(--text-secondary);">{{ t('knowledge.preview_upper') }}</div>
+      </div>
+    </template>
     <p style="margin:0.5rem 0 0 0;font-size:0.82rem;color:var(--text-secondary);">
       {{ t('knowledge.add_hint') }}
     </p>
@@ -105,7 +143,7 @@
 
   {# ── Active job progress ── #}
   <template x-if="activeJob">
-    <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;border-left:3px solid var(--primary);">
+    <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;border-inline-start:3px solid var(--primary);" :style="{ borderInlineStartColor: jobColor() }">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
         <span class="spinner-inline" x-show="!jobDone()" x-cloak></span>
         <strong style="display:inline-flex;align-items:center;gap:6px;"><span class="ki" x-html="KazmaIcons.get(jobIcon())" aria-hidden="true"></span><span x-text="jobTitle()"></span></strong>
@@ -164,6 +202,31 @@
         {{ t('knowledge.job_unchanged') }}: <span x-text="activeJob.pages_unchanged || 0"></span> ·
         {{ t('knowledge.job_failed') }}: <span x-text="activeJob.failed || 0"></span>
       </div>
+      <template x-if="jobDone() && (activeJob.pages || []).length">
+        <div id="kb-crawl-report" style="margin-top:8px;border-top:1px dashed var(--border);padding-top:6px;font-size:0.8rem;">
+          <div style="display:flex;flex-wrap:wrap;gap:12px;">
+            <template x-for="entry in reportCounts()" :key="entry.outcome">
+              <span><span :style="{ color: outcomeColor(entry.outcome) }" x-text="outcomeLabel(entry.outcome)"></span>: <bdi x-text="KazmaFormat.number(entry.count)"></bdi></span>
+            </template>
+          </div>
+          <template x-for="note in (activeJob.notes || [])" :key="note">
+            <div style="margin-top:2px;color:var(--text-secondary);" x-text="noteText(note)"></div>
+          </template>
+          <details x-show="reportPages().length" x-cloak style="margin-top:4px;">
+            <summary>{{ t('knowledge.report_title') }}</summary>
+            <ul style="margin:4px 0 0 0;padding-inline-start:18px;">
+              <template x-for="page in reportPages()" :key="page.url">
+                <li style="margin-bottom:6px;">
+                  <span :style="{ color: outcomeColor(page.outcome) }" x-text="outcomeLabel(page.outcome)"></span>
+                  · <span x-text="reasonText(page)"></span>
+                  <div><code translate="no" dir="ltr" style="word-break:break-all;"><bdi x-text="page.url"></bdi></code></div>
+                  <div style="color:var(--text-secondary);" x-show="reasonHint(page)" x-cloak x-text="reasonHint(page)"></div>
+                </li>
+              </template>
+            </ul>
+          </details>
+        </div>
+      </template>
       <div x-show="activeJob.current_url" style="margin-top:4px;font-size:0.78rem;color:var(--text-secondary);word-break:break-all;" x-cloak>
         {{ t('knowledge.job_current') }} <code translate="no" dir="ltr"><bdi x-text="activeJob.current_url"></bdi></code>
       </div>

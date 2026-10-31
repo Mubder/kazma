@@ -45,6 +45,7 @@ from __future__ import annotations
 
 from kazma_core.web_acquire.origins import polite_requests
 from kazma_core.web_acquire.robots import crawl_policy, robots_for_job
+from kazma_core.web_acquire.page_outcome import worth_retrying
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
 import asyncio
@@ -211,6 +212,7 @@ class ProgressUpdate:
     skipped: int = 0         # chunks skipped (dedup / unchanged pages)
     failed: int = 0          # pages that failed
     pages_unchanged: int = 0  # smart re-index full-page skips
+    excluded: int = 0        # pages a rule kept out (robots, scope, login, gone)
     current_url: str = ""
     message: str = ""
     errors: list[str] = field(default_factory=list)  # per-page failure reasons
@@ -432,7 +434,10 @@ def _seed_topic_segments(seed_url: str) -> set[str]:
         "cloud-api",  # Meta-specific: appears in both prefixes
         "business-messaging",
     }
-    topic = {s.lower() for s in segments if s.lower() not in _NOISE and not s.startswith("v")}
+    # A version is not a topic: "3" in docs.python.org/3/tutorial/ made every
+    # Python 3 page "this section" (live corpus, 2026-10-31).
+    topic = {s.lower() for s in segments if s.lower() not in _NOISE and not s.startswith("v")
+             and not re.fullmatch(r"[\d.]+", s)}
     return topic
 
 
@@ -510,6 +515,34 @@ async def _http_get_text(url: str, *, timeout: float = 20.0, scope_check=None) -
         return None, url
 
 
+#: A private Knowledge store and its index that a crawl publishes into in
+#: place of the install's (the daily canary, ``web_acquire.canary``): the
+#: same code, its own file, never a library the owner sees.
+_PRIVATE_KNOWLEDGE: ContextVar[tuple[Any, Any] | None] = ContextVar("kb_private_knowledge", default=None)
+
+
+def _knowledge_store():
+    private = _PRIVATE_KNOWLEDGE.get()
+    return private[0] if private is not None else get_knowledge_store()
+
+
+def _knowledge_index():
+    private = _PRIVATE_KNOWLEDGE.get()
+    return private[1] if private is not None else get_knowledge_index()
+
+
+#: What a discovery found, for the crawl preview (:func:`preview_site`):
+#: where its list came from, whether a sitemap was read in part, and -- when
+#: the list came from a sitemap or llms.txt -- every URL before the scope.
+_DISCOVERY_REPORT: ContextVar[dict | None] = ContextVar("kb_discovery_report", default=None)
+
+
+def _report_discovery(**fields: Any) -> None:
+    report = _DISCOVERY_REPORT.get()
+    if report is not None:
+        report.update(fields)
+
+
 async def _note_partial_sitemap(on_progress, message):
     await _mark_sitemap_limited()
     await _safe_progress(on_progress, message)
@@ -526,6 +559,7 @@ async def _mark_sitemap_limited():
     """
     from kazma_core.web_acquire import crawl_jobs
 
+    _report_discovery(sitemap_limited=True)
     job = crawl_jobs.current_crawl.get()
     if job is not None:
         await crawl_jobs.call(job.update, lambda row: row.update(sitemap_limited=True))
@@ -832,6 +866,7 @@ async def kb_discover_pages(
     if scope_mode not in ("tree", "prefix", "domain", "exact"):
         scope_mode = "tree"
     if scope_mode == "exact":
+        _report_discovery(source="single_page")
         return [_canonical_page_url(seed) or seed]
     from kazma_core.web_acquire import crawl_jobs
 
@@ -899,6 +934,7 @@ async def kb_discover_pages(
                 len(ordered), seed,
             )
             await _sitemap_was_the_source()
+            _report_discovery(source="sitemap", raw=_with_llms(discovered))
             return ordered
         await _safe_progress(on_progress, "sitemap had 0/sparse in-scope URLs; falling back")
     else:
@@ -912,6 +948,7 @@ async def kb_discover_pages(
                 "[kb_discover] llms.txt yielded %d in-scope URLs for %s",
                 len(ordered), seed,
             )
+            _report_discovery(source="llms_txt", raw=list(llms_urls))
             return ordered
 
     # ── 2. Local BFS link-walk fallback ─────────
@@ -922,6 +959,7 @@ async def kb_discover_pages(
             ambiguous=[], inflight=None, visited=0, limited=False))
     bfs_urls = await _bfs_discover(seed, scope_mode, on_progress=on_progress)
     if bfs_urls and not _is_sparse_discovery(seed, bfs_urls):
+        _report_discovery(source="link_walk")
         return _scope_and_order(_with_llms(bfs_urls))
     # Hosted map/seed services do not provide enforceable navigation scope.
     # Post-fetch URL filtering cannot undo an out-of-scope remote acquisition.
@@ -930,6 +968,7 @@ async def kb_discover_pages(
 
     if bfs_urls:
         # Sparse but non-empty — still better than seed-only.
+        _report_discovery(source="link_walk")
         return _scope_and_order(_with_llms(bfs_urls))
     # BFS also found nothing usable — the seed page itself was unfetchable
     # (likely bot-walled).  Tell the user why this dropped to "just the
@@ -940,6 +979,7 @@ async def kb_discover_pages(
         "link-walk found no nav links (seed page unreadable — site is likely "
         "bot-walled; check Chromium installation and acquisition policy)",
     )
+    _report_discovery(source="seed_only")
     return [_canonical_page_url(seed) or seed]
 
 
@@ -1173,25 +1213,46 @@ async def _extract_page(url: str, *, scope_check=None) -> tuple[str | None, str,
     The shared boundary owns static/hidden-panel extraction, local rendering,
     deadlines and policy. Partial or failed results never reach the index.
     """
+    from kazma_core.web_acquire.page_outcome import judge
+
     checker = scope_check or (lambda target: _in_scope(url, target, "domain"))
     _OBSERVED_URL.set(None)
+    _PAGE_FETCH.set(None)
     fr = await _web_fetch_text(url, purpose="kb", scope_check=checker)
+    _PAGE_FETCH.set(fr)
     from kazma_core.web_acquire.crawl_jobs import call, current_crawl
 
     job = current_crawl.get()
     if job is not None:
         await call(job.receipt, fr)
+    code = str(fr.error_code or "")
     if fr.truncated:
+        # A part of a page is never stored. Past Kazma's size limit the page
+        # is kept out by that rule (the Rust book's print.html, the recorded
+        # corpus 2026-10-31); otherwise it is an incomplete page.
+        verdict = judge(code, fr.http_status, truncated=True, reasons=tuple(fr.truncation_reasons))
+        _PAGE_REASON.set(verdict.reason)
+        if verdict.outcome == "excluded":
+            return None, "excluded", (f"The page is larger than Kazma reads ({', '.join(fr.truncation_reasons)}); "
+                                      "a part of a page is never stored.")
         return None, "error", f"Acquisition resource limit ({', '.join(fr.truncation_reasons)}); partial content was not indexed."
     if not fr.ok or (fr.http_status is not None and fr.http_status >= 400):
-        return None, "error", fr.error or f"Acquisition failed (HTTP {fr.http_status}); no page was indexed."
+        verdict = judge(code, fr.http_status)
+        _PAGE_REASON.set(verdict.reason)
+        # A rule kept the page out (robots.txt, scope, a login wall, a page
+        # the site no longer has): excluded, never a failure of the crawl.
+        status = "excluded" if verdict.outcome == "excluded" else "error"
+        return None, status, fr.error or f"Acquisition failed (HTTP {fr.http_status}); no page was indexed."
     text = (fr.text or "").strip()
     if not text:
+        _PAGE_REASON.set("no_text")
         return None, "empty", "Acquisition produced no readable content."
     if len(text) < MIN_USEFUL_CHARS:
         if len(text.split()) >= 8:
             return text, "ok", f"short static page ({len(text)} chars)"
+        _PAGE_REASON.set("no_text")
         return None, "error", f"Insufficient readable content ({len(text)} chars); no page was indexed."
+    _PAGE_REASON.set("")
     _OBSERVED_URL.set(_observed_page_url(url, fr.final_url, checker))
     return text, "ok", ""
 
@@ -1339,6 +1400,15 @@ def delete_provenance(library_id: str) -> bool:
 #: stored under where it was found, so two links that redirect to one page
 #: index it once (KB-E14).
 _OBSERVED_URL: ContextVar[str | None] = ContextVar("kb_observed_url", default=None)
+#: Waits before a page's retries inside one crawl, and how many retries one
+#: crawl may spend (a site that is down is reported, not hammered).
+_PAGE_RETRY_WAITS = (5, 30)
+_PAGE_RETRY_BUDGET = 20
+#: The reason code of the last page ``_extract_page`` did not store
+#: (``web_acquire.page_outcome``), and its fetch: the crawl records the code
+#: and decides from the fetch whether a retry may clear it.
+_PAGE_REASON: ContextVar[str] = ContextVar("kb_page_reason", default="")
+_PAGE_FETCH: ContextVar[Any] = ContextVar("kb_page_fetch", default=None)
 
 
 async def ingest_url(
@@ -1371,7 +1441,7 @@ async def ingest_url(
         result.pages_failed = 1
         result.refused = True
         return result
-    store = await asyncio.to_thread(get_knowledge_store)
+    store = await asyncio.to_thread(_knowledge_store)
     try:
         await asyncio.to_thread(store.ensure_capacity, library_id)
     except KnowledgeStorageFull as exc:
@@ -1380,7 +1450,7 @@ async def ingest_url(
         result.pages_failed = 1
         result.refused = True
         return result
-    index = await asyncio.to_thread(get_knowledge_index)
+    index = await asyncio.to_thread(_knowledge_index)
     try:
         from kazma_core.security.ssrf import validate_url
 
@@ -1448,7 +1518,7 @@ def _indexing_progress():
     def note(done: int, total: int) -> None:
         try:
             job.update(lambda row: row['progress'].update(indexing=[done, total]))
-        except Exception as exc:  # the chunks are stored; only the progress note is lost
+        except AcquisitionError as exc:  # the chunks are stored; only the progress note is lost
             logger.warning("[kb_ingest] indexing progress not recorded: %s", exc)
     return note
 
@@ -1521,7 +1591,29 @@ async def _admit_public_seed(seed_url: str) -> None:
         raise AcquisitionError(code, f"crawl seed refused: {exc}", transient=transient) from None
 
 
-async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=None, resume=False):
+#: The scopes a crawl may take (:func:`_in_scope`).
+CRAWL_SCOPES = ("tree", "prefix", "domain", "exact")
+
+
+def _crawl_scope_for(store, library_id: str, scope: str | None, *, resume_job_id: str | None) -> str:
+    """The scope a crawl takes: the one asked for; on a resume, the one the
+    crawl ran with; else the one the owner chose for the library (its
+    refreshes keep it); else Kazma's default. Runs in a thread."""
+    from kazma_core.web_acquire import crawl_jobs
+
+    if scope is None and resume_job_id:
+        row = crawl_jobs.inspect_jobs(resume_job_id)
+        if row is not None:
+            scope = row['policy'].get('scope')
+    if scope is None:
+        scope = store.crawl_scope(library_id) or None
+    scope = scope or _kb_scope_mode()
+    if scope not in CRAWL_SCOPES:
+        raise AcquisitionError(FetchErrorCode.POLICY, f'Unknown crawl scope {scope!r}; crawl admission refused.')
+    return scope
+
+
+async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=None, resume=False, scope=None):
     """Admit a crawl: a refused seed (not http(s), KB-S09; on a private
     network or not resolving, :func:`_admit_public_seed`) or a store at its
     quota (KB-E10) is refused here, before anything is fetched or created;
@@ -1534,8 +1626,10 @@ async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=N
         seed_url = validate_web_url(seed_url)
     except KnowledgeUrlRefused as exc:
         raise AcquisitionError(FetchErrorCode.INVALID_URL, str(exc)) from None
-    store = await asyncio.to_thread(get_knowledge_store)
+    store = await asyncio.to_thread(_knowledge_store)
     await asyncio.to_thread(store.ensure_capacity, library_id)  # KnowledgeStorageFull, typed
+    scope = await asyncio.to_thread(_crawl_scope_for, store, library_id, scope,
+                                    resume_job_id=job_id if resume else None)
     policy = acquisition_policy()
     with crawl_policy(purpose="kb") as robots:
         respect = robots.enforce()
@@ -1547,7 +1641,7 @@ async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=N
     except (ValueError, TypeError, OverflowError):
         raise AcquisitionError(FetchErrorCode.POLICY, 'max_pages must be an integer; crawl admission refused.') from None
     snapshot = dict(mode=policy.mode, providers=sorted(policy.providers), robots=respect,
-        scope=_kb_scope_mode(), max_pages=page_cap, max_depth=_kb_max_depth(), delay_ms=_kb_delay_ms())
+        scope=scope, max_pages=page_cap, max_depth=_kb_max_depth(), delay_ms=_kb_delay_ms())
     # Last of the checks (it starts a resolver child), and before the
     # journal row: a refused seed leaves no job and, its callers creating
     # the library only after this returns, no library.
@@ -1557,6 +1651,153 @@ async def _prepare_ingest_site(library_id, seed_url, *, max_pages=None, job_id=N
     return job, policy, respect, page_cap
 
 
+def crawl_verdict(status: str, row: dict) -> tuple[str, list[str]]:
+    """The crawl's verdict and its notes, from the journal row.
+
+    Partial only for what may have lost pages the owner expected: a failed
+    page (``status`` already says it) or an uncertain discovery or metadata
+    fetch, which a resume can settle. Exclusions (robots, scope, login,
+    gone) and limits -- the owner's page cap, the link walk's depth and
+    frontier bounds, a sitemap read in part -- are notes on a completed crawl.
+    "Partial" used to cover them all, so nearly every real crawl read as a
+    problem (live 2026-10-31).
+    """
+    state = row.get('discovery') or {}
+    notes = []
+    if row.get('excluded'):
+        notes.append('excluded')
+    if row.get('page_capped'):
+        notes.append('page_cap')
+    if state.get('limited'):
+        notes.append('link_walk_bounded')
+    if row.get('metadata_limited'):
+        notes.append('sitemap_bounded')
+    if status == 'completed' and not row.get('fetched') and row.get('excluded'):
+        notes.append('nothing_stored')  # every page kept out: a warning, not a success
+    if status == 'completed' and (state.get('ambiguous') or any(
+            record['status'] == 'ambiguous' for record in row.get('metadata', {}).values())):
+        status = 'partial'
+    return status, notes
+
+
+#: The scopes the Knowledge page offers, in the owner's words.
+PREVIEW_SCOPES = {"section": "tree", "site": "domain", "page": "exact"}
+#: How long a preview may take; a site slower than this is told to crawl.
+_PREVIEW_DEADLINE_S = 90.0
+#: How many of each scope's pages a preview names.
+_PREVIEW_SAMPLE = 10
+
+
+async def preview_site(seed_url: str, *, scope: str | None = None) -> dict[str, Any]:
+    """What a crawl of *seed_url* would fetch, before it starts.
+
+    Runs the crawl's own discovery -- sitemaps, llms.txt, then a link walk --
+    behind the crawl's own admission (an http(s) address on a public
+    network) and under its acquisition and robots policy, with no journal
+    row, no library and nothing fetched page by page or indexed. Answers
+    where the list came from (``source``), how many pages each scope the
+    Knowledge page offers holds with a few of each (``None`` where only a
+    crawl can tell: a link walk follows the chosen scope's links, so the
+    other scopes are not walked), whether a sitemap was read in part, and
+    the crawl's page cap. Robots rules, logins and dead links are found page
+    by page during the crawl, so a preview's count is an upper bound.
+    """
+    from kazma_core.bounded_cancel import wait_for_bounded
+    from kazma_core.stores.knowledge import KnowledgeUrlRefused, validate_web_url
+    from kazma_core.web_acquire.policy import acquisition_policy, policy_scope
+
+    try:
+        seed = validate_web_url(seed_url)
+    except KnowledgeUrlRefused as exc:
+        raise AcquisitionError(FetchErrorCode.INVALID_URL, str(exc)) from None
+    chosen = scope or _kb_scope_mode()
+    if chosen not in CRAWL_SCOPES:
+        raise AcquisitionError(FetchErrorCode.POLICY, f'Unknown crawl scope {chosen!r}; preview refused.')
+    await _admit_public_seed(seed)
+    policy = acquisition_policy()
+    with crawl_policy(purpose="kb") as job_policy:
+        job_policy.enforce()
+    report: dict[str, Any] = {}
+    token = _DISCOVERY_REPORT.set(report)
+    try:
+        # The task copies the context: its discovery writes into ``report``.
+        with policy_scope(policy), crawl_policy(job=job_policy):
+            task = asyncio.ensure_future(kb_discover_pages(seed, mode=chosen))
+    finally:
+        _DISCOVERY_REPORT.reset(token)
+    try:
+        pages = await wait_for_bounded(task, _PREVIEW_DEADLINE_S, what="crawl preview", cancel_timeout=15.0)
+    except TimeoutError:
+        raise AcquisitionError(FetchErrorCode.TIMEOUT, 'The site took too long to list its pages; '
+                               'start the crawl, which lists them as it goes.', transient=True) from None
+    raw = report.get("raw")
+    scopes: dict[str, Any] = {}
+    for word, mode in PREVIEW_SCOPES.items():
+        if mode == "exact":
+            urls = [_canonical_page_url(seed) or seed]
+        elif mode == chosen:
+            urls = pages
+        elif raw is not None:
+            urls = _order_urls_seed_first(seed, [url for url in raw if _in_scope(seed, url, mode)])
+        else:
+            urls = None
+        scopes[word] = None if urls is None else {"pages": len(urls), "sample": urls[:_PREVIEW_SAMPLE]}
+    source = report.get("source", "seed_only")
+    return {"seed": seed, "scope": chosen, "source": source, "scopes": scopes, "page_cap": _kb_max_pages(),
+            "sitemap_limited": source == "sitemap" and bool(report.get("sitemap_limited"))}
+
+
+class _RetryBudget:
+    """The retries one crawl has left for all its pages (``_PAGE_RETRY_BUDGET``):
+    a site that is down costs a bounded wait, never one per page."""
+
+    def __init__(self) -> None:
+        self.left = _PAGE_RETRY_BUDGET
+
+
+async def _fetch_with_retries(url: str, checker: Any, job_policy: Any, budget: _RetryBudget):
+    """Fetch one crawl page, trying a hiccup again inside the crawl.
+
+    A dropped connection, a server's "try later", a DNS answer that came back
+    private while the line was down (live 2026-10-31) is tried again after
+    ``_PAGE_RETRY_WAITS``, every check run again. Yields ``("retry", wait,
+    None, reason)`` before each wait, then ``("done", text, status, reason)``
+    from :func:`_extract_page`.
+    """
+    attempt = 0
+    while True:
+        with crawl_policy(job=job_policy):
+            text, status, reason = await _extract_page(url, scope_check=checker)
+        fetch = _PAGE_FETCH.get()
+        settled = (text is not None and status == "ok") or status == "excluded" or fetch is None
+        if (settled or attempt >= len(_PAGE_RETRY_WAITS) or budget.left <= 0
+                or not worth_retrying(fetch.error_code, fetch.http_status,
+                                      transient=bool(getattr(fetch, "transient", False)))):
+            yield "done", text, status, reason
+            return
+        wait = _PAGE_RETRY_WAITS[attempt]
+        attempt += 1
+        budget.left -= 1
+        yield "retry", wait, None, reason
+        await asyncio.sleep(wait)
+
+
+def _log_outcome(row: dict, status: str, notes: list[str]) -> None:
+    """One line per crawl and one per page not stored, for the weekly
+    report's tally by verdict and by reason (``observability.firing_ledger``)."""
+    from kazma_core.web_acquire.crawl_jobs import page_outcomes
+
+    pages = page_outcomes(row)
+    counts = {name: sum(page["outcome"] == name for page in pages)
+              for name in ("ingested", "unchanged", "excluded", "failed")}
+    logger.info("[kb_ingest] crawl outcome: %s library=%s ingested=%d unchanged=%d excluded=%d failed=%d notes=%s",
+                status, row["library_id"], counts["ingested"], counts["unchanged"], counts["excluded"],
+                counts["failed"], ",".join(notes) or "-")
+    for page in pages:
+        if page["outcome"] in ("excluded", "failed"):
+            logger.info("[kb_ingest] page %s (%s): %s", page["outcome"], page["reason"] or "other", page["url"])
+
+
 async def ingest_site(
     library_id: str,
     seed_url: str,
@@ -1564,6 +1805,7 @@ async def ingest_site(
     max_pages: int | None = None,
     job_id: str | None = None,
     resume: bool = False,
+    scope: str | None = None,
     _prepared=None,
 ) -> AsyncIterator[ProgressUpdate]:
     """Run a durable crawl; an explicit resume skips settled/ambiguous pages."""
@@ -1573,7 +1815,7 @@ async def ingest_site(
 
     try:
         job, policy, respect, page_cap = _prepared or await _prepare_ingest_site(
-            library_id, seed_url, max_pages=max_pages, job_id=job_id, resume=resume)
+            library_id, seed_url, max_pages=max_pages, job_id=job_id, resume=resume, scope=scope)
     except AcquisitionError as exc:
         if exc.code != FetchErrorCode.POLICY:
             raise
@@ -1595,11 +1837,10 @@ async def ingest_site(
             await crawl_jobs.call(job.progress, update)
             if update.phase in ('done', 'error'):
                 status = 'failed' if update.phase == 'error' else 'partial' if update.failed else 'completed'
-                if status == 'completed':
-                    row = await crawl_jobs.call(job.read)
-                    state = row.get('discovery') or {}
-                    if row.get('metadata_limited') or state.get('limited') or state.get('ambiguous') or any(record['status'] == 'ambiguous' for record in row.get('metadata', {}).values()):
-                        status = 'partial'
+                row = await crawl_jobs.call(job.read)
+                status, notes = crawl_verdict(status, row)
+                await crawl_jobs.call(job.update, lambda saved, notes=notes: saved.update(notes=notes))
+                _log_outcome(row, status, notes)
             yield update
     finally:
         try:
@@ -1662,7 +1903,12 @@ async def _ingest_site_impl(
         return
 
     scope_mode = saved['policy']['scope']
-    checker = lambda target: _in_scope(seed_url, target, scope_mode)
+    # "Just this page" crawls only its seed, so a fetch may follow the seed's
+    # redirects within the site: a page that moved is the page asked for
+    # (rfc-editor.org moved every /rfc/rfcNNNN; the crawl refused it as out
+    # of scope, live corpus 2026-10-31).
+    fetch_scope = "domain" if scope_mode == "exact" else scope_mode
+    checker = lambda target: _in_scope(seed_url, target, fetch_scope)
     async def discover_or_resume():
         if saved['discovered']:
             return [page['url'] for page in saved['pages']]
@@ -1699,6 +1945,9 @@ async def _ingest_site_impl(
             disco_task.cancel()
         await _aio.gather(disco_task, return_exceptions=True)
 
+    if len(pages) > page_cap and not saved['discovered']:
+        # The owner's page cap, a note on the result -- never a failure.
+        await call(checkpoint.update, lambda row: row.update(page_capped=True))
     pages = pages[:page_cap]
     if not saved['discovered']:
         await call(checkpoint.frontier, pages)
@@ -1711,8 +1960,8 @@ async def _ingest_site_impl(
     # ── Fetch + ingest each page (shared Playwright for the job) ─────
     from kazma_core.stores.knowledge import KnowledgeLibraryGone, KnowledgeStorageFull
 
-    index = await call(get_knowledge_index)
-    store = await call(get_knowledge_store)
+    index = await call(_knowledge_index)
+    store = await call(_knowledge_store)
     fetched = saved['fetched']
     failed = saved['failed'] + sum(page['status'] == 'ambiguous' for page in saved['pages'])
     chunks_new = saved['ingested']
@@ -1721,6 +1970,8 @@ async def _ingest_site_impl(
     stopped = ""  # why the crawl stopped early, if it did
 
     pages_unchanged = saved['pages_unchanged']
+    excluded = saved.get('excluded', 0)
+    budget = _RetryBudget()
     async with _pw_browser_scope():
         for i, url in enumerate(pages):
             # A deleted library stops its crawl before the next fetch: no
@@ -1739,8 +1990,24 @@ async def _ingest_site_impl(
                 started_at=started,
             )
             try:
-                with crawl_policy(job=job_policy):
-                    text, status, reason = await _extract_page(url, scope_check=checker)
+                async for event, text, status, reason in _fetch_with_retries(url, checker, job_policy, budget):
+                    if event == "retry":
+                        yield ProgressUpdate(
+                            phase="fetch", discovered=len(pages), fetched=fetched, ingested=chunks_new,
+                            skipped=chunks_skipped, failed=failed, excluded=excluded, current_url=url,
+                            message=f"[{i + 1}/{len(pages)}] retrying in {text} s: {reason or 'no content'}",
+                            started_at=started,
+                        )
+                if status == "excluded":
+                    excluded += 1
+                    await call(checkpoint.end_page, url, error=reason, excluded=True, reason=_PAGE_REASON.get())
+                    yield ProgressUpdate(
+                        phase="fetch", discovered=len(pages), fetched=fetched, ingested=chunks_new,
+                        skipped=chunks_skipped, failed=failed, excluded=excluded, current_url=url,
+                        message=f"[{i + 1}/{len(pages)}] excluded: {reason}",
+                        started_at=started,
+                    )
+                    continue
                 if text is None or status == "error":
                     failed += 1
                     result.failed_urls.append(url)
@@ -1751,11 +2018,12 @@ async def _ingest_site_impl(
                     else:
                         err_msg = f"{url}: fetch returned no content"
                         result.errors.append(err_msg)
-                    await call(checkpoint.end_page, url, error=reason or 'No readable content')
+                    await call(checkpoint.end_page, url, error=reason or 'No readable content',
+                               reason=_PAGE_REASON.get() or 'no_text')
                     yield ProgressUpdate(
                         phase="fetch",
                         discovered=len(pages), fetched=fetched, ingested=chunks_new,
-                        skipped=chunks_skipped, failed=failed,
+                        skipped=chunks_skipped, failed=failed, excluded=excluded,
                         current_url=url,
                         message=f"[{i + 1}/{len(pages)}] failed: {reason or 'no content'}",
                         errors=list(result.errors[-5:]),
@@ -1788,14 +2056,14 @@ async def _ingest_site_impl(
             except KnowledgeLibraryGone:
                 failed += 1
                 result.failed_urls.append(url)
-                await call(checkpoint.end_page, url, error="The library was deleted.")
+                await call(checkpoint.end_page, url, error="The library was deleted.", reason="library_gone")
                 stopped = "the library was deleted; the crawl stopped"
                 break
             except KnowledgeStorageFull as exc:
                 failed += 1
                 result.failed_urls.append(url)
                 result.errors.append(f"{url}: {exc}")
-                await call(checkpoint.end_page, url, error=str(exc))
+                await call(checkpoint.end_page, url, error=str(exc), reason="storage_full")
                 stopped = str(exc)
                 break
             except Exception as exc:
@@ -1805,7 +2073,7 @@ async def _ingest_site_impl(
                 result.failed_urls.append(url)
                 result.errors.append(f"{url}: {exc}")
                 logger.warning("[kb_ingest] page failed %s: %s", url, exc)
-                await call(checkpoint.end_page, url, error=str(exc))
+                await call(checkpoint.end_page, url, error=str(exc), reason="other")
 
             if delay_ms:
                 await asyncio.sleep(delay_ms / 1000.0)
@@ -1817,7 +2085,7 @@ async def _ingest_site_impl(
         yield ProgressUpdate(
             phase="error",
             discovered=len(pages), fetched=fetched, ingested=chunks_new,
-            skipped=chunks_skipped, failed=failed, pages_unchanged=pages_unchanged,
+            skipped=chunks_skipped, failed=failed, pages_unchanged=pages_unchanged, excluded=excluded,
             message=f"stopped: {stopped}", errors=list(result.errors) or [stopped],
             started_at=started,
         )
@@ -1827,10 +2095,11 @@ async def _ingest_site_impl(
     # message — that's what the user sees in the toast/progress panel, and
     # "0/1 pages, 0 chunks, 1 failed" without a reason is unactionable.
     done_msg = (
-        f"{'done' if fetched else 'failed'}: {fetched}/{len(pages)} pages, "
+        f"{'done' if fetched or (excluded and not failed) else 'failed'}: {fetched}/{len(pages)} pages, "
         f"{chunks_new} new chunks"
         + (f", {pages_unchanged} pages unchanged" if pages_unchanged else "")
         + f", {failed} failed"
+        + (f", {excluded} excluded by robots.txt, scope, login, removal or size" if excluded else "")
     )
     if failed > 0 and fetched == 0 and result.errors:
         # All pages failed — append the first reason to the summary so the
@@ -1838,11 +2107,13 @@ async def _ingest_site_impl(
         first_reason = result.errors[0]
         done_msg += f" — first failure: {first_reason}"
 
+    # Every page kept out by a rule and none failed: done, with nothing
+    # stored (a warning, ``nothing_stored``), never "failed".
     yield ProgressUpdate(
-        phase="done" if fetched else "error",
+        phase="done" if fetched or (excluded and not failed) else "error",
         discovered=len(pages), fetched=fetched, ingested=chunks_new,
         skipped=chunks_skipped, failed=failed,
-        pages_unchanged=pages_unchanged,
+        pages_unchanged=pages_unchanged, excluded=excluded,
         message=done_msg,
         errors=list(result.errors),
         started_at=started,

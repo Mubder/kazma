@@ -552,6 +552,9 @@ class KnowledgeStore:
             (
                 ("archived", "INTEGER NOT NULL DEFAULT 0"),
                 ("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),
+                # The scope the owner chose for this library's crawls, which
+                # its refreshes keep ('' = Kazma's default).
+                ("crawl_scope", "TEXT NOT NULL DEFAULT ''"),
             ),
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_kl_tenant ON knowledge_libraries(tenant_id)")
@@ -796,6 +799,20 @@ class KnowledgeStore:
             if lib_tenant != self._current_tenant():
                 return None
         return lib
+
+    def crawl_scope(self, library_id: str) -> str:
+        """The crawl scope the owner chose for *library_id* ('' = the default)."""
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT crawl_scope FROM knowledge_libraries WHERE id = ?", (library_id,)
+            ).fetchone()
+        return str(row[0] or "") if row is not None else ""
+
+    def set_crawl_scope(self, library_id: str, scope: str) -> None:
+        """Remember the crawl scope chosen for *library_id*; refreshes keep it."""
+        with self._lock:  # autocommit: the statement is its own transaction
+            self._get_conn().execute(
+                "UPDATE knowledge_libraries SET crawl_scope = ? WHERE id = ?", (scope, library_id))
 
     def get_library_for_tenant(
         self, library_id: str, tenant_id: str

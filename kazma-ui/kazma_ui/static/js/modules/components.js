@@ -426,7 +426,8 @@ function saveDismissedAlerts(ids) {
 }
 
 function needsAttention(alert) {
-    return String((alert && alert.severity) || '').toUpperCase() !== 'INFO';
+    const severity = String((alert && alert.severity) || '').toUpperCase();
+    return severity !== 'INFO' && severity !== 'SUCCESS';  // a success is a green toast
 }
 
 export function systemAlertsBanner() {
@@ -444,6 +445,20 @@ export function systemAlertsBanner() {
 
         get activeAlert() {
             return this.waitingAlerts[0] || null;
+        },
+
+        // An error is red, anything else that needs attention yellow.
+        bannerColor() {
+            const severity = String((this.activeAlert && this.activeAlert.severity) || '').toUpperCase();
+            return severity === 'ERROR' || severity === 'CRITICAL' ? 'var(--danger)' : 'var(--warning)';
+        },
+
+        bannerTone() {
+            const red = this.bannerColor() === 'var(--danger)';
+            return {
+                background: red ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                borderLeft: '4px solid ' + this.bannerColor(),
+            };
         },
 
         // Behind the shown alert can wait a backlog (a day of failed test
