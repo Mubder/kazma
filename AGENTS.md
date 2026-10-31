@@ -658,6 +658,14 @@ compatibility. **All public API methods and constructors are unchanged.**
   edit goes through `_post_message` / `_patch_message` / `_update_message`,
   which apply the chat adapters' `sanitize_outbound` (and Discord's
   `allowed_mentions: {"parse": []}`).
+- **A tool long by design gets its time** (`graph_helpers.LONG_RUNNING_TOOLS`,
+  2026-10-31): every tool call is bounded at `agent.tool_timeout_seconds`
+  (120 s, a hung tool's bound), and `run_research_pipeline` and
+  `knowledge_ingest_site` get at least 1,500 s, `crawl_site` 900 s (the turn's
+  budget still bounds the turn; a disabled bound stays disabled). Cut at 120
+  s, a deep research from chat never finished: live, a Kuwait history paper
+  became a page-by-page search by the model
+  (`tests/test_long_running_tool_timeout.py`).
 - **`check_swarm_task` waits for the result** (`wait_seconds`, default 60,
   at most 90: below the 120 s tool timeout), answering the moment the task
   finishes. Answering "still running" at once, with "poll every few seconds"

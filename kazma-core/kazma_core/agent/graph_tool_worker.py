@@ -983,7 +983,7 @@ async def tool_worker_node(
             # a HARD tool error so the loop breaker can trip after repeated
             # hangs. Config: ConfigStore agent.tool_timeout_seconds or
             # KAZMA_TOOL_TIMEOUT_SECONDS (default 120s; <=0 disables).
-            _tool_timeout = await asyncio.to_thread(_resolve_tool_timeout)  # a settings read (audit 2026-10-26 AUD-111)
+            _tool_timeout = await asyncio.to_thread(_resolve_tool_timeout, tc["name"])  # a settings read (audit 2026-10-26 AUD-111)
             # Phase 0 instrumentation (Commitment Layer): log every tool
             # execution with its side-effect tier + an args digest so mutator
             # traffic is observable before authorize_effect lands (Phase 1/2).

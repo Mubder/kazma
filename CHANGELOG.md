@@ -8,6 +8,10 @@
   retries (16% of writes gave up with 4 writers on Postgres, 35% with 8).
   Writers of one job in one process now take turns; other processes still go
   through the compare-and-set, with a short random pause between attempts.
+- Then the next run was cut off by the chat's 120-second limit on any one
+  tool call: a deep research run takes minutes. Research, the Knowledge crawl
+  and `crawl_site` now get their own time (25, 25 and 15 minutes); every
+  other tool keeps the 120-second bound for a hung tool.
 
 ## A document that was not made is an ordinary error (2026-10-31)
 

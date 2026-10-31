@@ -75,12 +75,35 @@ _RESEARCH_TOOL_NAMES = frozenset(
 )
 
 
-def _resolve_tool_timeout() -> float:
+#: Tools whose work is long by design, and the least time a call of one gets
+#: (seconds). The default bound (120 s) is for a hung tool; a deep research
+#: run plans, searches, fetches and reads up to fifteen pages and writes and
+#: checks a report, which takes minutes. Cut at 120 s it never finished from
+#: chat: live 2026-10-31 a Kuwait history paper fell back to a page-by-page
+#: search by the model. The turn's own wall-clock budget
+#: (``agent/turn_budget.py``) still bounds the whole turn.
+LONG_RUNNING_TOOLS: dict[str, float] = {
+    "run_research_pipeline": 1500.0,
+    "knowledge_ingest_site": 1500.0,
+    "crawl_site": 900.0,
+}
+
+
+def _resolve_tool_timeout(tool_name: str | None = None) -> float:
     """Per-tool wall-clock timeout in seconds (default 120, <=0 disables).
 
     Resolution order: ConfigStore ``agent.tool_timeout_seconds`` →
-    ``KAZMA_TOOL_TIMEOUT_SECONDS`` env → 120.0. Never raises.
+    ``KAZMA_TOOL_TIMEOUT_SECONDS`` env → 120.0. A tool in
+    :data:`LONG_RUNNING_TOOLS` gets at least its own time (unless the bound is
+    switched off). Never raises.
     """
+    base = _configured_tool_timeout()
+    if base > 0 and tool_name in LONG_RUNNING_TOOLS:
+        return max(base, LONG_RUNNING_TOOLS[tool_name])
+    return base
+
+
+def _configured_tool_timeout() -> float:
     try:
         from kazma_core.config_store import get_config_store
 
