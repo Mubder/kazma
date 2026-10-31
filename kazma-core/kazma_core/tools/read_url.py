@@ -38,6 +38,7 @@ from kazma_core.safety.prompt_fence import fence_untrusted
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.install_hint import extra_install_hint
 from kazma_core.errors import redact_secrets
+from kazma_core.web_acquire.document import PAGE_TEXT_MAX  # a page's whole text, paged in windows
 from kazma_core.web_acquire.policy import acquisition_policy, AcquisitionPolicyError
 from kazma_core.web_acquire.scope import (
     AcquisitionScope, AcquisitionScopeError, active_scope, require_scope,
@@ -64,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 # Default window for a single read_url response (env-overridable).
 _DEFAULT_MAX = 16_000
-_HARD_MAX = 100_000  # single-window absolute ceiling
+_HARD_MAX = 100_000  # single-window absolute ceiling (what one reply shows)
 _HARD_BODY_MAX = 20_000_000
 _CACHE_MAX_ENTRIES = 32
 _CACHE_TTL_S = 900  # 15 minutes
@@ -413,12 +414,13 @@ def _extract_text(html: str) -> str:
     if trace is not None and trace.profile == "knowledge":
         from kazma_core.web_acquire.document import extract_knowledge_document
 
-        document = extract_knowledge_document(html, _HARD_MAX)
+        document = extract_knowledge_document(html, PAGE_TEXT_MAX)
         trace.extract_truncated, trace.dynamic_tabs = document.truncated, document.dynamic_tabs
         return document.text
+    from kazma_core.web_acquire.document import article_or_whole
     from kazma_core.web_acquire.html_extract import extract_article
 
-    text, truncated = extract_article(html, _HARD_MAX)
+    text, truncated = article_or_whole(*extract_article(html, PAGE_TEXT_MAX), html)
     if trace is not None:
         trace.extract_truncated = truncated
     return text
@@ -632,10 +634,10 @@ async def _try_jina_reader(url: str) -> str | None:
                     trace.recovered_source = FetchResult(
                         ok=True, url=trace.url, backend="jina", quality="unverified",
                         meta={"service_http_status": r.status_code, "service_decoded_bytes": len(r.content)},
-                        truncated=len(text) > _HARD_MAX,
-                        truncation_reasons=("text_limit",) if len(text) > _HARD_MAX else (),
+                        truncated=len(text) > PAGE_TEXT_MAX,
+                        truncation_reasons=("text_limit",) if len(text) > PAGE_TEXT_MAX else (),
                     )
-                return text[:_HARD_MAX]
+                return text[:PAGE_TEXT_MAX]
     except AcquisitionError:
         raise
     except Exception as exc:
@@ -704,10 +706,10 @@ async def _try_firecrawl(url: str) -> str | None:
                             trace.recovered_source = FetchResult(
                                 ok=True, url=trace.url, backend="firecrawl", quality="unverified",
                                 meta={"service_http_status": r.status_code, "service_decoded_bytes": len(r.content)},
-                                truncated=len(text.strip()) > _HARD_MAX,
-                                truncation_reasons=("text_limit",) if len(text.strip()) > _HARD_MAX else (),
+                                truncated=len(text.strip()) > PAGE_TEXT_MAX,
+                                truncation_reasons=("text_limit",) if len(text.strip()) > PAGE_TEXT_MAX else (),
                             )
-                        return text.strip()[:_HARD_MAX]
+                        return text.strip()[:PAGE_TEXT_MAX]
                 if r.status_code in (429, 502, 503) and retry < 2:
                     # The origin scheduler retains the complete server delay;
                     # a local retry must never shorten it to fit this call.
@@ -1148,11 +1150,11 @@ async def _fetch_full_text_impl(url: str) -> FetchResult:
         parsed = await parse_document(html, final_url, profile='knowledge' if trace and trace.profile == 'knowledge' else 'generic')
         text, links, links_complete = parsed['text'], parsed['links'], parsed['links_complete']
     else:
-        text = html[:_HARD_MAX]
+        text = html[:PAGE_TEXT_MAX]
         links, links_complete = (), True
     trace = active_trace.get()
     if trace is not None and trace.http_source is not None:
-        text_capped = trace.extract_truncated if is_html else len(html) > _HARD_MAX
+        text_capped = trace.extract_truncated if is_html else len(html) > PAGE_TEXT_MAX
         reasons = trace.http_source.truncation_reasons + (("text_limit",) if text_capped else ())
         trace.http_source = replace(trace.http_source, truncated=bool(reasons),
                                     truncation_reasons=reasons, links=links,

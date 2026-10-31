@@ -456,11 +456,13 @@ async def test_renderer_caps_parser_output_and_marks_partial(chromium, broker_tr
     from kazma_core.playwright_loop import run_in_browser_loop
     from kazma_core.web_acquire.browser import render_document
 
-    broker_transport(lambda request: httpx.Response(200, headers={"content-type": "text/html"}, text='x' * 100_001))
+    from kazma_core.web_acquire.document import PAGE_TEXT_MAX
+
+    broker_transport(lambda request: httpx.Response(200, headers={"content-type": "text/html"}, text='x' * (PAGE_TEXT_MAX + 1)))
     result = (await run_in_browser_loop(render_document("https://docs.example/article",
         challenge=lambda html, status: False, profile='knowledge'))).result
     assert result.ok and result.truncated and "text_limit" in result.truncation_reasons
-    assert len(result.text) == 100_000
+    assert len(result.text) == PAGE_TEXT_MAX
 
 
 @pytest.mark.asyncio

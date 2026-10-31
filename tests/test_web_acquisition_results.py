@@ -126,6 +126,82 @@ async def test_partial_html_is_visible_and_never_indexed(target, monkeypatch):
     render.assert_not_awaited()
 
 
+def _long_reference(sections=600):
+    """A long documentation page, ~170K characters of text (RFC 9110: 464K)."""
+    body = ''.join(
+        f'<section id="s{i}"><h2>Section {i}. Field semantics</h2><p>Section {i} defines how a recipient '
+        f'parses the field value, which octets are significant and how a sender generates it, with '
+        f'a worked example that ends in marker-{i}-end so every section can be found again.</p>'
+        f'<pre>Example-{i}: token; q=0.{i % 10}</pre></section>' for i in range(sections))
+    return f'<html><head><title>Long reference</title></head><body><main>{body}</main></body></html>'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('purpose', ['chat', 'crawl', 'kb'])
+async def test_a_long_page_is_read_whole_by_every_reader(target, purpose):
+    """Live 2026-10-31: RFC 9110 (464K characters) failed its Knowledge crawl
+    "Acquisition resource limit (text_limit); partial content was not indexed".
+    Every reader had a 100K budget; a page is now read whole up to 1M."""
+    from kazma_core.web_acquire.document import PAGE_TEXT_MAX
+
+    html = _long_reference()
+    target(lambda r: httpx.Response(200, text=html, headers={"content-type": "text/html"}))
+    result = await fetch_text("https://first.example/rfc", purpose=purpose)
+    assert result.ok and not result.truncated and result.quality != "partial", result.truncation_reasons
+    assert len(result.text) > 150_000 and len(result.text) <= PAGE_TEXT_MAX
+    assert 'marker-0-end' in result.text and 'marker-599-end' in result.text
+
+
+def test_the_old_budget_cut_the_same_page():
+    """Negative control: the same page at the old 100K budget is partial."""
+    from kazma_core.web_acquire.document import extract_knowledge_document
+    from kazma_core.web_acquire.html_extract import extract_article
+
+    html = _long_reference()
+    assert extract_knowledge_document(html, 100_000).truncated
+    assert extract_article(html, 100_000)[1]
+
+
+@pytest.mark.asyncio
+async def test_chat_pages_through_a_long_page_past_the_old_budget(target):
+    html = _long_reference()
+    target(lambda r: httpx.Response(200, text=html, headers={"content-type": "text/html"}))
+    first = await ru.read_url("https://first.example/rfc")
+    assert "remaining; next offset=" in first and len(first) < 40_000  # one window, not the page
+    late = await ru.read_url("https://first.example/rfc", offset=150_000)
+    assert "past end" not in late and "marker-" in late
+
+
+def test_an_article_that_is_a_fragment_of_a_long_page_gives_way_to_the_whole():
+    """RFC 9110: article extraction kept section 6.4 (7,067 of 464K
+    characters) and called it complete."""
+    from kazma_core.web_acquire.document import article_or_whole
+
+    html = _long_reference()
+    fragment = "Section 7. Field semantics: one section only."
+    text, truncated = article_or_whole(fragment, False, html)
+    assert len(text) > 150_000 and "marker-599-end" in text and not truncated
+
+
+@pytest.mark.parametrize('share', [0.75, 1.0, 1.9])
+def test_an_ordinary_article_is_kept(share):
+    """Measured: documentation and articles keep 75-186 % of the whole reading."""
+    from kazma_core.web_acquire.document import article_or_whole, extract_knowledge_document
+
+    html = _long_reference()
+    whole = extract_knowledge_document(html).text
+    article = whole[:int(len(whole) * share)] if share < 1 else whole + ' links' * int(len(whole) * (share - 1) / 6)
+    assert article_or_whole(article, False, html) == (article, False)
+
+
+def test_a_short_page_keeps_its_article():
+    """News front pages keep 0.2-9 % but are 9-28K characters: not long pages."""
+    from kazma_core.web_acquire.document import article_or_whole
+
+    html = _long_reference(sections=40)
+    assert article_or_whole("Top story.", False, html) == ("Top story.", False)
+
+
 @pytest.mark.asyncio
 async def test_partial_json_is_refused_as_incomplete_data(target, monkeypatch):
     monkeypatch.setattr(ru, "_fetch_max_bytes", lambda: 12)

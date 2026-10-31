@@ -9,7 +9,9 @@ import sys
 _TIMEOUT = 15
 _MEMORY = 768 * 1024**2
 _INPUT = 24 * 1024**2
-_OUTPUT = 4 * 1024**2
+# A page's 1M characters (document.PAGE_TEXT_MAX) at up to three UTF-8
+# bytes each, plus 1 MiB of links.
+_OUTPUT = 8 * 1024**2
 
 if __name__ != '__main__':
     from kazma_core.web_acquire import resources
@@ -78,6 +80,7 @@ def _parse(owner, html, url, profile, login_only):
 
 
 def _decode(result, *, sitemap=False):
+    from kazma_core.web_acquire.document import PAGE_TEXT_MAX
     from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
     try:
@@ -97,7 +100,7 @@ def _decode(result, *, sitemap=False):
                 raise ValueError('Invalid sitemap output')
             return data
         keys = {'status', 'text', 'truncated', 'dynamic_tabs', 'links', 'links_complete', 'login'}
-        if set(data) != keys or data['status'] != 'ok' or not isinstance(data['text'], str) or len(data['text']) > 100_000:
+        if set(data) != keys or data['status'] != 'ok' or not isinstance(data['text'], str) or len(data['text']) > PAGE_TEXT_MAX:
             raise ValueError('Invalid parser output')
         if any(type(data[key]) is not bool for key in ('truncated', 'dynamic_tabs', 'links_complete', 'login')):
             raise ValueError('Invalid parser metadata')
@@ -186,11 +189,13 @@ def _worker():
         'links': [], 'links_complete': True, 'login': _load('quality').is_login_document(html)}
     if not request['login_only'] and not data['login']:
         with contextlib.redirect_stdout(sys.stderr):
+            reader = _load('document')
             if profile == 'knowledge':
-                document = _load('document').extract_knowledge_document(html)
+                document = reader.extract_knowledge_document(html, reader.PAGE_TEXT_MAX)
                 data.update(text=document.text, truncated=document.truncated, dynamic_tabs=document.dynamic_tabs)
             else:
-                data['text'], data['truncated'] = _load('html_extract').extract_article(html)
+                article, truncated = _load('html_extract').extract_article(html, reader.PAGE_TEXT_MAX)
+                data['text'], data['truncated'] = reader.article_or_whole(article, truncated, html)
         links, data['links_complete'] = _load('links').extract_document_links(html, url)
         used = 0
         for link in links:

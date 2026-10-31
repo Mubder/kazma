@@ -466,21 +466,26 @@ async def test_sitemap_frontier_has_a_finite_document_cap(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_oversized_sitemap_index_refuses_before_fetching_any_child(monkeypatch):
-    from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
-
-    visited = []
+async def test_oversized_sitemap_index_fetches_only_its_bounded_children(monkeypatch):
+    """A 1,000-child index is cut to its first 64 children and discovery reads
+    at most 64 sitemap documents. It used to refuse the whole crawl (an
+    oversized sitemap failed every crawl of rfc-editor.org, 2026-10-31)."""
+    visited, progress = [], []
+    index = '<sitemapindex>' + ''.join(
+        f'<sitemap><loc>https://docs.example/{i}.xml</loc></sitemap>' for i in range(1000)) + '</sitemapindex>'
     async def fetch(url, **kwargs):
         visited.append(url)
-        if url.endswith('/robots.txt'):
-            return None, url
-        return '<sitemapindex>' + ''.join(
-            f'<sitemap><loc>https://docs.example/{i}.xml</loc></sitemap>' for i in range(1000)) + '</sitemapindex>', url
+        return (index if url == 'https://docs.example/sitemap.xml' else None), url
+    async def note(message):
+        progress.append(message)
     monkeypatch.setattr(ki, '_http_get_text', fetch)
-    with pytest.raises(AcquisitionError) as raised:
-        await ki._fetch_sitemaps('https://docs.example')
-    assert raised.value.code == FetchErrorCode.LIMIT
-    assert visited == ['https://docs.example/robots.txt', 'https://docs.example/sitemap.xml']
+    await ki._fetch_sitemaps('https://docs.example', on_progress=note)
+    sitemaps = [url for url in visited if not url.endswith('/robots.txt')]
+    assert len(sitemaps) <= 64
+    children = {f'https://docs.example/{i}.xml' for i in range(64)}
+    assert all(url in children or url.startswith('https://docs.example/sitemap') or url.startswith('https://docs.example/docs/')
+               for url in sitemaps)
+    assert any('partial sitemap discovery' in message for message in progress)
 
 
 @pytest.mark.asyncio

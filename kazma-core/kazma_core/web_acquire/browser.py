@@ -11,6 +11,7 @@ from typing import Any
 
 from kazma_core.errors import redact_secrets
 from kazma_core.web_acquire.browser_network import BrowserNetwork
+from kazma_core.web_acquire.document import PAGE_TEXT_MAX
 from kazma_core.web_acquire.parser import parse_document
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode, FetchResult
 from kazma_core.web_acquire.scope import active_scope, require_scope
@@ -18,8 +19,7 @@ from kazma_core.web_acquire.trace import classify_failure
 
 logger = logging.getLogger(__name__)
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-_DOM_CAP = 2_000_000
-_TEXT_CAP = 100_000
+_DOM_CAP = 5_000_000  # the HTTP path's default body budget, so both read the same pages
 _NATIVE_CONNECTION_CAP = 16
 
 
@@ -273,13 +273,14 @@ async def _render_in_job(owner, url, *, challenge, profile):
                 html = snapshot["html"]
                 parsed = await parse_document(html, final_url, profile=profile)
                 text, text_capped = parsed['text'], parsed['truncated']
-                if len(text) >= _TEXT_CAP:
-                    text, text_capped = text[:_TEXT_CAP], True
+                cap = PAGE_TEXT_MAX
+                if len(text) > cap:
+                    text, text_capped = text[:cap], True
                 if not text or len(text) < 80:
-                    body = await page.evaluate("cap => (document.body?.innerText || '').slice(0, cap + 1)", _TEXT_CAP)
+                    body = await page.evaluate("cap => (document.body?.innerText || '').slice(0, cap + 1)", cap)
                     if body and body.strip():
-                        text_capped = len(body) > _TEXT_CAP
-                        text = body[:_TEXT_CAP].strip()
+                        text_capped = len(body) > cap
+                        text = body[:cap].strip()
                 status = broker.root_status
                 reasons = set(broker.reasons)
                 if snapshot["truncated"]:
@@ -414,10 +415,10 @@ async def _expand_tabs(page, broker, initial):
                 links = links[:2000]
             if text and text not in seen:
                 seen.add(text)
-                remaining = _TEXT_CAP - length - 2
+                remaining = PAGE_TEXT_MAX - length - 2
                 texts.append(text[:max(0, remaining)])
                 length += len(text) + 2
-                if length > _TEXT_CAP:
+                if length > PAGE_TEXT_MAX:
                     reasons.add("text_limit")
                     break
         except BrowserError:

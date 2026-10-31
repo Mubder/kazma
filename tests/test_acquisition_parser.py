@@ -128,13 +128,13 @@ async def test_parser_child_has_no_credentials_and_uses_fixed_limits(child_parse
     command, options = calls[0]
     assert command[1] == '-I' and 'private' not in repr(command)
     assert options['timeout'] == 15 and options['memory_bytes'] == 768 * 1024**2
-    assert options['output_bytes'] == 4 * 1024**2
+    assert options['output_bytes'] == 8 * 1024**2
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('body,code', [
     (' time.sleep(30)\n', FetchErrorCode.TIMEOUT),
-    (' return "x"*(5*1024**2),False\n', FetchErrorCode.LIMIT),
+    (' return "x"*(9*1024**2),False\n', FetchErrorCode.LIMIT),
     (' data=bytearray(128*1024**2); return "bad",False\n', FetchErrorCode.LIMIT),
     (' return 123,False\n', FetchErrorCode.DECODING),
 ], ids=['deadline','output','memory','malformed'])

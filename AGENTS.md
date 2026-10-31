@@ -4219,7 +4219,7 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   `tests/test_acquisition_dns.py`; Linux evidence in
   `docs/audits/evidence/dns_linux_boundary_2026_10_11.py`.
   HTML and sitemap XML extraction use `web_acquire.parser` owned children (15s, 768MiB,
-  24MiB encoded input, 4MiB output; XML refuses DTDs/entities and bounds
+  24MiB encoded input, 8MiB output; XML refuses DTDs/entities and bounds
   leaf/index frontiers at 4000/64 -- a larger sitemap keeps its first URLs,
   answers `limited`, and discovery is marked partial; a sitemap past the
   parser's budget is skipped, never a failed crawl: rfc-editor.org's
@@ -4233,8 +4233,17 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   `BrowserJob` owns the context and a native deny proxy; sandbox enabled, service
   workers blocked, DNS/UDP suppression are defense in depth, NOT OS network
   isolation. Fixed per-page limits: 128 intercepted requests, 4 concurrent,
-  5MB per response, 32MB aggregate retained decoded bytes, 5 redirects; DOM 2M
-  characters, text 100K, links 2000, supported lazy tabs 12. Refusals/failed
+  5MB per response, 32MB aggregate retained decoded bytes, 5 redirects; DOM 5M
+  characters, links 2000, supported lazy tabs 12. A page's text is
+  `document.PAGE_TEXT_MAX` (1M characters) for every reader -- chat, research,
+  crawls, Knowledge -- on the HTTP and browser paths alike (2026-10-31: at
+  100K, RFC 9110's 464K was partial, so never indexed or saved). What a model
+  gets stays bounded by its reader: `read_url` windows (16K default, 100K at
+  most, `_HARD_MAX`), research synthesis 16K a source. On a page whose whole
+  reading is 50K+, an article extract under a tenth of it is a fragment and
+  the whole reading is used (`document.article_or_whole`: trafilatura kept
+  7,067 of RFC 9110's characters and called it complete). Gate: the long-page
+  tests in `tests/test_web_acquisition_results.py`. Refusals/failed
   resources are typed or partial; KB never indexes partial content. KB text
   and BFS use the same typed ladder, with explicit seed scope and query-safe
   identity; metadata redirects stay on the seed host. Gate:

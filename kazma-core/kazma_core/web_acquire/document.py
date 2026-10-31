@@ -90,7 +90,34 @@ class _KnowledgeText(HTMLParser):
             self._append(data if self.pre is not None else re.sub(r"[\t\r\n ]+", " ", data))
 
 
-def extract_knowledge_document(html: str, limit: int = 100_000) -> KnowledgeDocument:
+#: One page's text, for every reader (chat, research, crawls, the Knowledge
+#: Library). It was 100K characters: a truncated page is never indexed or
+#: saved, so long references could not be added at all -- RFC 9110 extracts to
+#: 464K characters (live 2026-10-31, "Acquisition resource limit
+#: (text_limit)"). What reaches a model stays bounded by its reader: read_url
+#: pages it in windows, research synthesis reads 16K a source.
+PAGE_TEXT_MAX = 1_000_000
+
+#: Article extraction picked one section of a long document and called it
+#: complete: 7,067 of RFC 9110's 464K characters (2026-10-31). On a page whose
+#: whole reading is at least this long, an article under this share of it is
+#: a fragment. Measured: documentation and articles keep 75-186 %; news front
+#: pages 0.2-9 % but at 9-28K characters, below the length.
+_LONG_PAGE = 50_000
+_FRAGMENT_SHARE = 0.1
+
+
+def article_or_whole(article: str, truncated: bool, html: str, limit: int = PAGE_TEXT_MAX) -> tuple[str, bool]:
+    """The article, unless it is a fragment of a long page: then the whole reading."""
+    if truncated or len(html) < _LONG_PAGE:
+        return article, truncated
+    whole = extract_knowledge_document(html, limit)
+    if len(whole.text) >= _LONG_PAGE and len(article) < _FRAGMENT_SHARE * len(whole.text):
+        return whole.text, whole.truncated
+    return article, truncated
+
+
+def extract_knowledge_document(html: str, limit: int = PAGE_TEXT_MAX) -> KnowledgeDocument:
     """Keep code/tables/headings/hidden panels; exclude executable/site chrome.
 
     Parsing and retained output are bounded. The caller runs parsing off-loop.
