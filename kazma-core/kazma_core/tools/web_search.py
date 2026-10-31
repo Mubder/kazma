@@ -330,7 +330,8 @@ async def web_search(query: str, max_results: int = 8) -> str:
 
         record_chat_research(q, tool_name="web_search", result_text=res_text)
     except Exception as exc:
-        logger.debug("[web_search] record_chat_research notice: %s", exc)
+        # The search answered; only its Research-tab entry is missing.
+        logger.warning("[web_search] search not recorded in Research history: %s", exc)
 
     # Titles and snippets are remote-authored text (audit F-09) — a result
     # snippet is a cheap injection vector precisely because it looks like

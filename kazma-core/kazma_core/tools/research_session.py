@@ -260,12 +260,31 @@ def _row_to_session(r: sqlite3.Row) -> ResearchSession:
 
 _MAX_SESSIONS = 256
 _MAX_SESSION_BYTES = 128 * 1024**2
+#: Snapshots of chat web searches (``record_chat_research``) have their own
+#: allowance. They shared the research one, and on live 349 of 361 rows were
+#: chat searches: Deep Research refused to start, "history is full", over a
+#: history the user had never started (2026-10-31).
+_MAX_CHAT_SNAPSHOTS = 1024
+_MAX_CHAT_SNAPSHOT_BYTES = 32 * 1024**2
+_ROW_BYTES = ("length(CAST(log_json AS BLOB))+length(CAST(summary AS BLOB))+length(CAST(meta_json AS BLOB))"
+              "+length(CAST(error AS BLOB))+length(CAST(topic AS BLOB))")
 
 
-def _history_admission(connection):
-    count, size = connection.execute("SELECT COUNT(*), COALESCE(SUM(length(CAST(log_json AS BLOB))+length(CAST(summary AS BLOB))+length(CAST(meta_json AS BLOB))+length(CAST(error AS BLOB))+length(CAST(topic AS BLOB))),0) FROM research_sessions").fetchone()
-    if count >= _MAX_SESSIONS or size >= _MAX_SESSION_BYTES - 2 * 1024**2:
-        raise AcquisitionError(FetchErrorCode.LIMIT, 'Research history is full (256 sessions / 128MiB); remove settled history before starting more work. Archiving does not release storage.')
+def _allowance(chat: bool):
+    """``(rows, bytes, which rows)`` of the allowance a row of this kind draws on."""
+    if chat:
+        return _MAX_CHAT_SNAPSHOTS, _MAX_CHAT_SNAPSHOT_BYTES, "depth = 'chat'"
+    return _MAX_SESSIONS, _MAX_SESSION_BYTES, "COALESCE(depth, '') != 'chat'"
+
+
+def _history_admission(connection, *, chat: bool = False):
+    rows, budget, which = _allowance(chat)
+    count, size = connection.execute(
+        f"SELECT COUNT(*), COALESCE(SUM({_ROW_BYTES}),0) FROM research_sessions WHERE {which}").fetchone()
+    if count >= rows or size >= budget - 2 * 1024**2:
+        if chat:
+            raise AcquisitionError(FetchErrorCode.LIMIT, f'Chat search history is full ({rows} snapshots / {budget // 1024**2}MiB); delete old chat research entries to keep recording them.')
+        raise AcquisitionError(FetchErrorCode.LIMIT, f'Research history is full ({rows} sessions / {budget // 1024**2}MiB); remove settled history before starting more work. Archiving does not release storage.')
 
 
 def _bounded_session_row(session):
@@ -487,9 +506,10 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
             if hasattr(sess, k) and k not in ("id", "created_at"):
                 setattr(sess, k, v)
         _bounded_session_row(sess)
-        size = c.execute("SELECT COALESCE(SUM(length(CAST(log_json AS BLOB))+length(CAST(summary AS BLOB))+length(CAST(meta_json AS BLOB))+length(CAST(error AS BLOB))+length(CAST(topic AS BLOB))),0) FROM research_sessions WHERE id != ?", (session_id,)).fetchone()[0]
+        _rows, budget, which = _allowance(sess.depth == "chat")
+        size = c.execute(f"SELECT COALESCE(SUM({_ROW_BYTES}),0) FROM research_sessions WHERE id != ? AND {which}", (session_id,)).fetchone()[0]
         incoming = len(json.dumps(sess.log).encode()) + len(sess.summary.encode()) + len(json.dumps(sess.meta).encode()) + len(sess.error.encode()) + len(sess.topic.encode())
-        if size + incoming > _MAX_SESSION_BYTES:
+        if size + incoming > budget:
             raise AcquisitionError(FetchErrorCode.LIMIT, 'Research session storage budget exhausted; retained history must be reviewed.')
         sess.updated_at = max(time.time(), sess.updated_at + 0.000001)
         c.execute(
@@ -909,7 +929,7 @@ def record_chat_research(
                 meta=meta or {"source": "chat", "tool": tool_name},
             )
             _bounded_session_row(sess)
-            _history_admission(c)
+            _history_admission(c, chat=True)
             c.execute(
                 """
                 INSERT INTO research_sessions

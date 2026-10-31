@@ -53,15 +53,20 @@ def _serving() -> bool:
     return not is_shutting_down()
 
 
-def _derive_agent_state(running: bool, recent_traces: list[Any]) -> str:
+def _derive_agent_state(running: bool, recent_traces: list[Any], turns_running: int) -> str:
     """Derive a high-level agent state from running flag + recent traces.
 
     Returns one of: "thinking", "acting", "idle".
-    - "thinking" when the most recent trace is an LLM call.
-    - "acting" when the most recent trace is a tool call.
-    - "idle" when stopped or no recent activity.
+    - "idle" when stopped, when no turn is running, or with no traces.
+    - "thinking" when a turn runs and the most recent trace is an LLM call.
+    - "acting" when a turn runs and the most recent trace is a tool call.
+
+    The traces say what the LAST turn did, not that one is running: every
+    turn ends on its answer's LLM call, so the page said "Thinking" from the
+    end of a turn until the next one (live 2026-10-31, after a finished
+    research turn). Whether a turn runs is ``active_turns``' answer.
     """
-    if not running:
+    if not running or turns_running <= 0:
         return "idle"
     if not recent_traces:
         return "idle"
@@ -177,7 +182,9 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
     # read by nothing else, so it said "Stopped" over a working agent.
     recent_traces = store.recent(10)
     running = _serving()
-    agent_state = _derive_agent_state(running, recent_traces)
+    from kazma_ui.active_turns import running_turn_count
+
+    agent_state = _derive_agent_state(running, recent_traces, running_turn_count())
 
     # Build a human-readable description of the last activity (if any)
     # A trace's label (data, shown as it is); the page says itself, in its
