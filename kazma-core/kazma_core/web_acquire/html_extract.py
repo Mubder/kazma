@@ -30,7 +30,7 @@ def strip_html_fallback(html: str) -> str:
     return text.strip()
 
 
-def extract_article(html: str, limit: int = 100_000) -> tuple[str, bool]:
+def extract_article(html: str, limit: int = 1_000_000) -> tuple[str, bool]:  # document.PAGE_TEXT_MAX
     text = ''
     try:
         import trafilatura
