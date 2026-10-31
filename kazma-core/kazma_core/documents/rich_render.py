@@ -737,6 +737,70 @@ def _highlight_code_pdf(raw: str, lang: str) -> str:
     return "".join(parts) if parts else fallback
 
 
+#: A table cell's padding, left plus right (the tables' LEFTPADDING and
+#: RIGHTPADDING), and the narrowest a wrapping column may be made.
+_CELL_PAD = 16.0
+_MIN_COLUMN = 48.0
+
+
+def ltr_table_cells(
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    Paragraph: Any,
+    font_name: str,
+    bold_font_name: str,
+    size: float,
+    avail_width: float | None,
+    header_color: Any = None,
+    body_color: Any = None,
+) -> tuple[list[list[Any]], list[float] | None]:
+    """A left-to-right table's cells as wrapping paragraphs, with column
+    widths that fit *avail_width*.
+
+    ReportLab draws a plain-string cell on one line at its natural width:
+    live 2026-10-31 a Kuwait chronology's event cells ran past the page's
+    edge, a short date ran into the next column ("c. 3000 BCE
+    onwardDilmunite") and "**1752**" was printed with its asterisks; the
+    agent then rewrote its table as a list. A column takes its natural width
+    when the table fits; otherwise the narrow ones keep theirs and the wide
+    ones share the rest by how much they hold.
+    """
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    grid = [list(headers)] + [list(r) for r in rows]
+    ncols = max((len(r) for r in grid), default=0)
+    grid = [[str(c) for c in r] + [""] * (ncols - len(r)) for r in grid]
+    body = ParagraphStyle("kazma-table-cell", fontName=font_name, fontSize=size, leading=size * 1.3,
+                          **({"textColor": body_color} if body_color is not None else {}))
+    head = ParagraphStyle("kazma-table-head", parent=body, fontName=bold_font_name,
+                          **({"textColor": header_color} if header_color is not None else {}))
+    data = [[Paragraph(inline_markdown_to_reportlab(cell, shape_arabic=False), head if r == 0 else body)
+             for cell in row] for r, row in enumerate(grid)]
+    if not avail_width or ncols == 0:
+        return data, None
+
+    def natural(cell: str, font: str) -> float:
+        plain = re.sub(r"[*_`]", "", cell)
+        try:
+            return stringWidth(plain, font, size)
+        except (KeyError, ValueError):  # a face ReportLab cannot measure here
+            return len(plain) * size * 0.5
+
+    need = [max(natural(row[c], bold_font_name if r == 0 else font_name) for r, row in enumerate(grid)) + _CELL_PAD
+            for c in range(ncols)]
+    avail = float(avail_width)
+    if sum(need) <= avail:
+        return data, need
+    share = avail / ncols
+    fixed = {c for c in range(ncols) if need[c] <= share}
+    left = avail - sum(need[c] for c in fixed)
+    wide = sum(need[c] for c in range(ncols) if c not in fixed) or 1.0
+    widths = [need[c] if c in fixed else max(_MIN_COLUMN, left * need[c] / wide) for c in range(ncols)]
+    return data, widths
+
+
 def pdf_flowables_from_body(
     body: str,
     *,
@@ -833,6 +897,25 @@ def pdf_flowables_from_body(
                     body_style,
                 )
             )
+            return
+
+        if not shape_arabic:
+            data, widths = ltr_table_cells(
+                headers, rows, Paragraph=Paragraph, font_name=font_name, bold_font_name=bold_font_name,
+                size=10.0, avail_width=col_width, header_color=colors.HexColor("#16223a"),
+            )
+            tbl = Table(data, colWidths=widths, repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eff6ff")),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#bfdbfe")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ]))
+            flow.extend((tbl, Spacer(1, 10)))
             return
 
         def cell(val: str) -> str:

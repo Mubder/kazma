@@ -3525,6 +3525,18 @@ face is registered as a family (`addMapping`, italic mappings first): inline
 `tests/test_pdf_glyph_fallback.py` (the markup without the fallback and the
 font without the family as negative controls).
 
+**A ReportLab table's cells wrap inside the page** (2026-10-31,
+`rich_render.ltr_table_cells`, used by the body's Markdown tables and
+`PdfEngine._add_table` for left-to-right tables). A plain-string cell is drawn
+on one line at its natural width: live, the Kuwait paper's chronology ran
+past both page edges, a date ran into its event ("c. 3000 BCE onwardDilmunite")
+and `**1752**` kept its asterisks, and the agent rewrote the table as a list.
+Cells are Paragraphs with inline Markdown; columns keep their natural width
+when the table fits, else narrow columns keep theirs and wide ones share the
+rest (at least 48 pt). Right-to-left and shaped Arabic tables keep their own
+path. Gate: `tests/test_pdf_table_cells_fit.py` (plain cells as the negative
+control).
+
 Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
 DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
 in HTML) so a heading is never the last thing on a page. Paragraph widows and
@@ -4440,8 +4452,19 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   on a full quota it never ran in a deep run. Fan and meme wikis, copies of
   Wikipedia and pirate document sites are demoted (`rank._DEMOTE_HOST_SUBSTR`:
   the next run took polandball's "Kuwaitball" as its search's best address).
+  **A link is judged by its search result too** (the fourth run): a query
+  word in the result's own title and snippet (`SearchResult.snippets`, kept
+  per URL in the search effect) counts like one in its address
+  (`rank_by_coverage(texts=)`), and links with no sign of relevance come
+  after every link that has one, from any search; a gap fill takes none
+  (`require_signal=True`), so a follow-up search that found only games
+  sites adds nothing. Result links are the `**URL:**` lines
+  (`serp.extract_urls_from_search`): any URL in the text took the search
+  engine's own address from the "_Source: ... searxng@http://..._" line as
+  a source, and an empty search ("No web results for:") as one result.
   Gate: `tests/test_research_source_coverage.py` (pooled ranking, the old
-  gate and the old demotions as negative controls). **The planner, the gap
+  gate, the old demotions, the old URL extraction and the rule without the
+  signal tier as negative controls). **The planner, the gap
   critic and the report answer without hidden reasoning**
   (`reasoning="off"`): deepseek-flash spent all 8,000 tokens of a report on
   it, then 11,015 of the 16,000 retry, and the run failed at its last step.

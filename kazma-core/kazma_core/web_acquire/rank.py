@@ -146,12 +146,31 @@ def score_url(url: str, query: str = "") -> tuple[float, list[str]]:
     return score, reasons
 
 
+#: Reasons that say a link may answer its query: a query word in its address
+#: or in the search result's own title and snippet, or a host or domain
+#: research prefers. A demotion says nothing for it.
+_SIGNALS = ("tld:", "host:", "docs_path", "qhits:", "text:")
+
+
+def _text_hits(query: str, text: str) -> int:
+    """How many of *query*'s words (3+ letters, any script) *text* holds."""
+    words = {w for w in re.findall(r"\w+", (query or "").casefold()) if len(w) > 2}
+    held = set(re.findall(r"\w+", (text or "").casefold()))
+    return len(words & held)
+
+
+def _has_signal(r: RankedUrl) -> bool:
+    return any(reason.startswith(_SIGNALS) for reason in r.reasons)
+
+
 def rank_by_coverage(
     results: Mapping[str, Sequence[str]],
     *,
     max_per_domain: int = 2,
     limit: int | None = None,
     exclude: Iterable[str] = (),
+    require_signal: bool = False,
+    texts: Mapping[str, str] | None = None,
 ) -> list[RankedUrl]:
     """Rank each search's results against its OWN query, then take them in
     turns: every search's best source before any search's second.
@@ -162,7 +181,15 @@ def rank_by_coverage(
     source was a COVID-19 hospital cost study, its third NASA's oil fields
     page, and the earliest mentions, 2003 and the 2006-2014 crises had none.
     Within one search the engine's own order breaks ties.
+
+    A link with no sign of relevance (no query word in its address, no
+    preferred host or domain, no query word in the search result's own
+    title and snippet, *texts*) comes after every link that has one, from
+    any search: the next run took a games site and four "Sprunki" game
+    pages, each the "best" of a search that had returned nothing else. With
+    *require_signal* (a gap fill) such links are not taken at all.
     """
+    texts = texts or {}
     skip = {u for u in exclude if u}
     per_query: list[list[RankedUrl]] = []
     for query, urls in results.items():
@@ -172,6 +199,10 @@ def rank_by_coverage(
             if not u or u in skip:
                 continue
             sc, reasons = score_url(u, query)
+            hits = _text_hits(query, texts.get(u, ""))
+            if hits:
+                sc += min(3.0, hits * 0.6)
+                reasons.append(f"text:{hits}")
             scored.append((sc, position, RankedUrl(url=u, score=sc, domain=_domain(u), reasons=tuple(reasons))))
         scored.sort(key=lambda item: (-item[0], item[1]))
         per_query.append([item[2] for item in scored])
@@ -180,19 +211,26 @@ def rank_by_coverage(
     seen: set[str] = set()
     domain_n: dict[str, int] = {}
     cap = max(1, int(max_per_domain))
-    while any(per_query):
-        for queue in per_query:
-            while queue:
-                r = queue.pop(0)
-                d = r.domain or "_"
-                if r.url in seen or domain_n.get(d, 0) >= cap:
-                    continue
-                seen.add(r.url)
-                domain_n[d] = domain_n.get(d, 0) + 1
-                out.append(r)
-                break
-            if limit is not None and len(out) >= max(1, int(limit)):
-                return out
+    full = limit is not None and (lambda: len(out) >= max(1, int(limit)))
+
+    def take_in_turns(queues: list[list[RankedUrl]]) -> None:
+        while any(queues):
+            for queue in queues:
+                while queue:
+                    r = queue.pop(0)
+                    d = r.domain or "_"
+                    if r.url in seen or domain_n.get(d, 0) >= cap:
+                        continue
+                    seen.add(r.url)
+                    domain_n[d] = domain_n.get(d, 0) + 1
+                    out.append(r)
+                    break
+                if full and full():
+                    return
+
+    take_in_turns([[r for r in queue if _has_signal(r)] for queue in per_query])
+    if not require_signal and not (full and full()):
+        take_in_turns([[r for r in queue if not _has_signal(r)] for queue in per_query])
     return out
 
 

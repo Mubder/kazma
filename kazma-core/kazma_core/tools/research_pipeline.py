@@ -560,6 +560,7 @@ async def _run_research_pipeline(
     # chosen per search (rank_by_coverage), so every sub-question the plan
     # asked gets a source before any gets a second.
     by_query: dict[str, list[str]] = {}
+    snippets: dict[str, str] = {}  # each result's title and snippet, by URL
     lock = asyncio.Lock()
 
     async def _one_search(q: str) -> None:
@@ -571,10 +572,13 @@ async def _run_research_pipeline(
             sr = await _job.effect('search:' + hashlib.sha256(q.encode()).hexdigest(), {'query': q},
                 lambda: web_acquire_search(q, max_results=8 if is_deep else 5, purpose="research"),
                 encode=lambda value: dict(ok=value.ok, query=value.query, urls=value.urls,
+                                          snippets=value.snippets,
                                           error=value.error, latency_ms=value.latency_ms),
                 decode=lambda value: SearchResult(**value))
             async with lock:
                 by_query[q] = list(sr.urls or [])
+                for u, text in (sr.snippets or {}).items():
+                    snippets.setdefault(u, text)
                 log.append(
                     f"Search `{q}` → ok={sr.ok} urls={len(sr.urls)} "
                     f"latency={sr.latency_ms}ms"
@@ -620,6 +624,7 @@ async def _run_research_pipeline(
         {q: by_query[q] for q in queries if by_query.get(q)},
         max_per_domain=2,
         limit=max_sources * 3,
+        texts=snippets,
     ) or rank_urls(candidates, topic, max_per_domain=2, limit=max_sources * 3)
     log.append(f"### Rank — top {min(8, len(ranked))} of {len(ranked)} (each search's best source first)")
     for r in ranked[:8]:
@@ -862,11 +867,13 @@ async def _run_research_pipeline(
         # turn; then any unused candidate.
         already = {m.get("url") for m in acquire_meta if m.get("url")}
         followups = list(dict.fromkeys(gap.followup_queries))
+        # A follow-up that found nothing relevant adds nothing: the gap fill
+        # takes only links with a sign of relevance (rank_by_coverage).
         ranked2 = rank_by_coverage(
             {q: by_query.get(q, []) for q in followups},
-            max_per_domain=2, limit=gap_budget * 2, exclude=already,
-        ) or rank_urls([u for u in candidates if u not in already], topic,
-                       max_per_domain=2, limit=gap_budget * 2)
+            max_per_domain=2, limit=gap_budget * 2, exclude=already, require_signal=True,
+            texts=snippets,
+        )
         more_urls = [r.url for r in ranked2]
         source_cap = len(saved) + gap_budget
         if not more_urls:

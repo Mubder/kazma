@@ -228,6 +228,7 @@ class PdfEngine:
 
         page_margin = float(self.theme.get("page_margin", 54))
         col_width = float(A4[0]) - 2 * page_margin
+        self._col_width = col_width
 
         # Stash chrome for the canvas callback (set per-render on the instance).
         self._model_header = model.header
@@ -481,6 +482,7 @@ class PdfEngine:
     # cached model chrome (set at render start)
     _model_header: str | None = None
     _glyph_fallback: Any = None  # set by _setup_fonts
+    _col_width: float | None = None  # the page's text width, set per render
     _model_footer: str | None = None
     _page_numbers: bool = True
 
@@ -721,6 +723,38 @@ class PdfEngine:
         from kazma_core.documents.style_theme import theme_cs_size
 
         cell_pt = theme_cs_size(10) if self.profile.rtl else 10.0
+        if not table_rtl and not self.shape_ar:
+            # Wrapping cells with inline formatting, sized to the page
+            # (rich_render.ltr_table_cells).
+            from reportlab.platypus import Paragraph
+
+            from kazma_core.documents.rich_render import ltr_table_cells
+
+            if self._glyph_fallback is not None:
+                Paragraph = self._glyph_fallback.paragraph_class(Paragraph, bold_font)
+            data, widths = ltr_table_cells(
+                headers, rows, Paragraph=Paragraph, font_name=font, bold_font_name=bold_font,
+                size=cell_pt, avail_width=self._col_width, header_color=th["table_header_fg"],
+                body_color=th["body"],
+            )
+            table = Table(data, colWidths=widths, repeatRows=1, splitByRow=len(data) > 12)
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), th["table_header_bg"]),
+                ("BACKGROUND", (0, 1), (-1, -1), th["table_row_bg"]),
+                ("GRID", (0, 0), (-1, -1), 0.5, th["table_grid"]),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ]))
+            if len(data) <= 12:
+                from reportlab.platypus import KeepTogether
+
+                story.append(KeepTogether([table]))
+            else:
+                story.append(table)
+            return
         data = [headers]
         data.extend(rows)
         if self._glyph_fallback is not None:

@@ -375,7 +375,10 @@ async def test_pipeline_limits_actual_publications_and_keeps_every_success(contr
     async def plan(*args, **kwargs):
         return research_planner.ResearchPlan(search_queries=['initial'])
     async def search(query, **kwargs):
-        return serp.SearchResult(ok=True, query=query, urls=followups if query == 'followup' else urls)
+        # The follow-ups' snippets name their query: a gap fill takes only
+        # results with a sign of relevance (rank_by_coverage).
+        return serp.SearchResult(ok=True, query=query, urls=followups if query == 'followup' else urls,
+                                 snippets={u: 'followup evidence' for u in followups} if query == 'followup' else {})
     monkeypatch.setattr(research_planner, 'plan_research_queries', plan)
     monkeypatch.setattr(acquisition, 'search', search)
     # Keep ranking deterministic so a failed low-index candidate can precede a
