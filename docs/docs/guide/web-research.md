@@ -154,6 +154,11 @@ Deep runs can be started from the **Research** page (`/research`) without chat:
 
 Sessions survive restarts for list/detail; live SSE is in-process only (reconnect after restart falls back to polling session status).
 
+The results list shows papers and research runs, newest first. Every web search
+the agent makes while answering in a chat is kept too, but in its own group
+below them, **Web searches from chat**: each is the result list of one search
+("web search from chat · 8 results"), not a research report.
+
 ### Routing + eval (R4)
 
 | Mechanism | Role |
@@ -183,7 +188,7 @@ The supervisor chooses tools; you do not need to name them unless you want contr
 
 | Tool | Role |
 |------|------|
-| `web_search` | Search (SearXNG → DuckDuckGo → Bing HTML). Prefer `KAZMA_SEARXNG_URL`. |
+| `web_search` | Search (SearXNG → DuckDuckGo → Bing HTML → Wikipedia). Prefer `KAZMA_SEARXNG_URL`. |
 | `read_url` | One URL, **paged window** (`offset`, `max_chars`). Header shows total length + next offset. |
 | `read_url_to_file` | Full extract saved **inside the workspace** (default folder `KAZMA_RESEARCH_DIR`, usually `research/`). |
 | `crawl_page` | Native alias of `read_url` (advanced-web-crawler skill). |
@@ -274,6 +279,12 @@ recovery with their original scope; see the durable pipeline recovery section.
 ## Stronger search (SearXNG)
 
 `web_search` tries **SearXNG first**, then DuckDuckGo → Bing → Wikipedia.
+A backend that answers with nothing goes on to the next, and so does one whose
+results are mostly about something else: fewer than half of them hold a word of
+the query in their title, snippet or address. A search engine that blocks
+automated queries often answers that way rather than with nothing. Wikipedia is
+a full-text search of English Wikipedia articles, the last fallback when the
+other engines are rate-limited.
 
 | Setup | Command / env |
 |-------|----------------|

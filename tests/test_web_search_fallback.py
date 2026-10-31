@@ -22,7 +22,7 @@ def test_run_search_falls_through_empty_backends(monkeypatch):
 
     def hit_bing(q, n):
         calls.append("bing")
-        return [{"title": "T", "href": "https://example.com", "body": "ok"}], "bing:ok"
+        return [{"title": "OpenAI", "href": "https://example.com", "body": "ok"}], "bing:ok"
 
     def no_wiki(q, n):
         calls.append("wikipedia")

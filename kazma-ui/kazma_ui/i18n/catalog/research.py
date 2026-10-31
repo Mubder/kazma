@@ -116,9 +116,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "عميق",
         "en": "Deep",
     },
-    "research.source_chat": {
-        "ar": "محادثة",
-        "en": "Chat",
+    "research.web_search_tag": {
+        "ar": "بحث ويب",
+        "en": "Web search",
     },
     "research.depth_label": {
         "ar": "العمق",
@@ -351,6 +351,46 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "research.ui.kind_session": {
         "ar": "جلسة",
         "en": "session",
+    },
+    "research.ui.kind_web_search": {
+        "ar": "بحث ويب من المحادثة",
+        "en": "web search from chat",
+    },
+    "research.ui.web_searches": {
+        "ar": "عمليات البحث على الويب من المحادثة",
+        "en": "Web searches from chat",
+    },
+    "research.ui.web_searches_note": {
+        "ar": "كل واحدة منها قائمة نتائج بحث واحد على الويب أجراه Kazma أثناء الرد في محادثة، وليست تقريرًا بحثيًا. التقارير وعمليات البحث المعمّق مدرجة أعلاه.",
+        "en": "Each is the result list of one web search Kazma ran while answering in a chat, not a research report. Reports and research runs are listed above.",
+    },
+    "research.ui.detail_web_search": {
+        "ar": "بحث ويب من المحادثة: نتائج بحث واحد، وليست تقريرًا بحثيًا",
+        "en": "Web search from chat: the results of one search, not a research report",
+    },
+    "research.ui.results_n.zero": {
+        "ar": "لا نتائج",
+        "en": "{n} results",
+    },
+    "research.ui.results_n.one": {
+        "ar": "نتيجة واحدة",
+        "en": "1 result",
+    },
+    "research.ui.results_n.two": {
+        "ar": "نتيجتان",
+        "en": "{n} results",
+    },
+    "research.ui.results_n.few": {
+        "ar": "{n} نتائج",
+        "en": "{n} results",
+    },
+    "research.ui.results_n.many": {
+        "ar": "{n} نتيجةً",
+        "en": "{n} results",
+    },
+    "research.ui.results_n.other": {
+        "ar": "{n} نتيجة",
+        "en": "{n} results",
     },
     "research.ui.kind_pipeline": {
         "ar": "خط المعالجة",

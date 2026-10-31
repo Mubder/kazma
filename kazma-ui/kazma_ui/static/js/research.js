@@ -14,6 +14,7 @@
 
   var allTasks = [];
   var archivedTasks = [];
+  var searchTasks = [];
   var currentId = null;
   var pollTimer = null;
   var liveSource = null;
@@ -165,17 +166,23 @@
   // The session's own depth: "chat" (a chat tool's web search, recorded as
   // a session too), "brief" or "deep". Every row read "[Deep]" -- a one-line
   // search from the chat and a Brief run included (2026-09-28). An old row
-  // with no depth is judged by its id (rs_chat_... is a chat search).
+  // with no depth is judged by its id (rs_chat_... is a chat search); the
+  // server's kind=search filter (research_session._CHAT_SEARCH_SQL) is the
+  // same rule.
   var SESSION_TAGS = {
-    chat: ['research.source_chat', 'Chat'],
+    chat: ['research.web_search_tag', 'Web search'],
     brief: ['research.depth_brief', 'Brief'],
     deep: ['research.depth_deep', 'Deep'],
   };
-  function sessionTag(s) {
+  function sessionDepth(s) {
     var depth = String((s && s.depth) || '').toLowerCase();
     if (!SESSION_TAGS[depth]) {
       depth = String((s && s.id) || '').indexOf('rs_chat_') === 0 ? 'chat' : 'deep';
     }
+    return depth;
+  }
+  function sessionTag(s) {
+    var depth = sessionDepth(s);
     var key = SESSION_TAGS[depth][0];
     var label = (typeof window.t === 'function') ? window.t(key) : '';
     return '[' + (label && label !== key ? label : SESSION_TAGS[depth][1]) + '] ';
@@ -331,16 +338,21 @@
     },
 
     load: function () {
+      // Research runs and the chat's web searches are asked for apart: the
+      // newest 30 rows held 26 chat searches (live 2026-10-31), and they were
+      // listed first, above every report, as "session · done · 1 source".
       Promise.all([
         readResults('/api/research/tasks?page=1&page_size=50&archived=false', 'tasks'),
         readResults('/api/research/papers?limit=50', 'papers'),
-        readResults('/api/research/sessions?limit=30', 'sessions'),
+        readResults('/api/research/sessions?limit=30&kind=research', 'sessions'),
+        readResults('/api/research/sessions?limit=30&kind=search', 'sessions'),
       ]).then(function (triple) {
         listIncomplete = triple.some(function (p) { return p.error; });
         warning('research-load-error', listIncomplete, 'research.ui.results_unavailable');
         var data = triple[0] || {};
         var papersPayload = triple[1] || {};
         var sessionsPayload = triple[2] || {};
+        var searchesPayload = triple[3] || {};
         var papers = papersPayload.papers || [];
         var paperTasks = papers.map(function (p) {
           var topic = p.topic || p.report_path || 'report';
@@ -362,8 +374,7 @@
             metadata: { kind: 'research_paper' },
           };
         });
-        var sessions = sessionsPayload.sessions || [];
-        var sessionTasks = sessions.map(function (s) {
+        function sessionTask(s) {
           return {
             id: 'session:' + s.id,
             prompt: sessionTag(s) + (s.topic || s.id),
@@ -382,12 +393,17 @@
             session_id: s.id,
             rubric_score: s.rubric_score,
             rubric_ok: s.rubric_ok,
+            search: sessionDepth(s) === 'chat',
+            results: (s.meta && s.meta.results != null) ? s.meta.results : null,
             metadata: { kind: 'research_session' },
           };
-        });
-        // Prefer session cards over paper dups when both exist for same report
+        }
+        var sessionTasks = (sessionsPayload.sessions || []).map(sessionTask);
+        // Newest first, whatever made it: a deep run, a paper, a swarm task.
         allTasks = sessionTasks.concat(paperTasks).concat(data.tasks || []);
-        renderList(allTasks);
+        allTasks.sort(function (a, b) { return startedAt(b) - startedAt(a); });
+        searchTasks = (searchesPayload.sessions || []).map(sessionTask);
+        renderList(allTasks, searchTasks);
         populateCompareDropdowns(data.tasks || []);
 
       });
@@ -434,10 +450,8 @@
 
     search: function (e) {
       var q = (e.target.value || '').toLowerCase();
-      var filtered = q ? allTasks.filter(function (t) {
-        return (t.prompt || '').toLowerCase().indexOf(q) !== -1;
-      }) : allTasks;
-      renderList(filtered);
+      function matches(t) { return (t.prompt || '').toLowerCase().indexOf(q) !== -1; }
+      renderList(q ? allTasks.filter(matches) : allTasks, q ? searchTasks.filter(matches) : searchTasks);
     },
 
     viewAcquisitionJob: function (id) {
@@ -489,7 +503,11 @@
             }
             var s = data.session;
             $('research-detail-title').textContent = (s.topic || i18n('research.ui.deep_research', 'Deep research')).slice(0, 100);
-            $('research-detail-meta').innerHTML =
+            var searchResults = (s.meta && s.meta.results != null) ? s.meta.results : null;
+            $('research-detail-meta').innerHTML = sessionDepth(s) === 'chat'
+              ? '<span>' + esc(i18n('research.ui.detail_web_search', 'Web search from chat')) + '</span>' +
+                (searchResults != null ? ' · <span>' + esc(window.kazmaCount('research.ui.results_n', searchResults)) + '</span>' : '')
+              :
               '<span>' + esc(i18n('research.ui.detail_session', 'Session')) + '</span> · <span>' + esc(stateLabel(s.status)) + '</span> · ' +
               (s.stage ? '<span>' + esc(i18n('research.ui.detail_stage', 'Stage: {stage}', { stage: stateLabel(s.stage) })) + '</span> · ' : '') +
               (s.sources != null ? '<span>' + esc(i18n('research.ui.detail_sources', 'Sources: {n}', { n: s.sources })) + '</span> · ' : '') +
@@ -1054,65 +1072,95 @@
   var listIncomplete = false;
   var archivedIncomplete = false;
 
-  function renderList(tasks) {
+  function startedAt(t) {
+    var n = Date.parse(t.created_at || t.completed_at || '');
+    return isNaN(n) ? 0 : n;
+  }
+
+  // The chat's web searches are not research: each is the result list of
+  // one search. Listed first as "[Chat] <query> · session · done · 1
+  // source", above every report, they read as Kazma's research (live
+  // 2026-10-31). Their own group, after the research, says what they are.
+  function searchesHtml(searches) {
+    return '<details class="research-searches" style="margin-top:12px;">' +
+      '<summary style="cursor:pointer;font-weight:600;color:var(--text-primary);padding:6px 0;">' +
+        esc(i18n('research.ui.web_searches', 'Web searches from chat')) +
+        ' <span style="font-weight:400;color:var(--text-muted);">(' + searches.length + ')</span>' +
+      '</summary>' +
+      '<div style="font-size:0.85rem;color:var(--text-muted);margin:2px 0 8px;">' +
+        esc(i18n('research.ui.web_searches_note')) + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;">' + searches.map(cardHtml).join('') + '</div>' +
+    '</details>';
+  }
+
+  function renderList(tasks, searches) {
     var el = $('research-list');
-    if (!tasks.length) {
+    searches = searches || [];
+    if (!tasks.length && !searches.length) {
       el.innerHTML = listIncomplete ? '' : '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_results')) + '</div>';
       return;
     }
-    el.innerHTML = tasks.map(function (t) {
-      var isPaper = t.status === 'paper' || (t.id && String(t.id).indexOf('paper:') === 0);
-      var isSession = t.id && String(t.id).indexOf('session:') === 0;
-      var meta;
-      var rubricBit = (t.rubric_score != null && t.rubric_score !== '')
-        ? (' · ' + esc(rubricText(t.rubric_score, t.rubric_ok)))
-        : '';
-      if (isSession) {
-        meta = esc(i18n('research.ui.kind_session', 'session')) + ' · ' + esc(stateLabel(t.status)) +
-          (t.stage ? ' · ' + esc(stateLabel(t.stage)) : '') +
-          (t.sources != null && t.sources > 0 ? ' · ' + esc(sourcesText(t.sources)) : '') +
-          rubricBit +
-          ' · ' + esc(timeAgo(t.completed_at || t.created_at));
-      } else if (isPaper) {
-        meta = esc(i18n('research.ui.kind_pipeline', 'pipeline')) + ' · ' +
-          (t.sources != null ? esc(sourcesText(t.sources)) + ' · ' : '') +
-          (t.report_path ? '<span translate="no">' + esc(t.report_path) + '</span> · ' : '') +
-          (rubricBit ? rubricBit.replace(/^ · /, '') + ' · ' : '') +
-          esc(timeAgo(t.created_at));
-      } else {
-        meta = '<span translate="no">' + esc((t.workers || []).join(', ')) + '</span> · ' +
-          '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
-          '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
-          '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>';
-      }
-      var actions;
-      if (isPaper || (isSession && t.report_path)) {
-        actions = (t.report_path
-          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md', 'Open report')) + '">MD</a>'
-          : '') +
-          (t.docx_path
-            ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.docx_path) + '" onclick="event.stopPropagation();" target="_blank" title="DOCX">DOCX</a>'
-            : '');
-      } else if (isSession) {
-        actions = '';
-      } else {
-        actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="archive" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.archive', 'Archive')) + '">' + ARCHIVE_SVG + '</button>' +
-          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>';
-      }
-      if (isSession && t.status === 'interrupted') actions += '<button class="btn btn-primary btn-sm" data-act="resume" data-task-id="' + esc(t.id) + '">' + esc(i18n('research.ui.resume')) + '</button>';
-      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
-        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
-          '<div style="flex:1;min-width:0;overflow:hidden;">' +
-            '<div dir="' + titleDir(t) + '" style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
-            '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
-              meta +
-            '</div>' +
+    var html = tasks.length ? tasks.map(cardHtml).join('')
+      : (listIncomplete ? '' : '<div style="padding:1rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_results')) + '</div>');
+    el.innerHTML = html + (searches.length ? searchesHtml(searches) : '');
+  }
+
+  function cardHtml(t) {
+    var isPaper = t.status === 'paper' || (t.id && String(t.id).indexOf('paper:') === 0);
+    var isSession = t.id && String(t.id).indexOf('session:') === 0;
+    var meta;
+    var rubricBit = (t.rubric_score != null && t.rubric_score !== '')
+      ? (' · ' + esc(rubricText(t.rubric_score, t.rubric_ok)))
+      : '';
+    if (isSession && t.search) {
+      meta = esc(i18n('research.ui.kind_web_search', 'web search from chat')) +
+        (t.results != null ? ' · ' + esc(window.kazmaCount('research.ui.results_n', t.results)) : '') +
+        ' · ' + esc(timeAgo(t.completed_at || t.created_at));
+    } else if (isSession) {
+      meta = esc(i18n('research.ui.kind_session', 'session')) + ' · ' + esc(stateLabel(t.status)) +
+        (t.stage ? ' · ' + esc(stateLabel(t.stage)) : '') +
+        (t.sources != null && t.sources > 0 ? ' · ' + esc(sourcesText(t.sources)) : '') +
+        rubricBit +
+        ' · ' + esc(timeAgo(t.completed_at || t.created_at));
+    } else if (isPaper) {
+      meta = esc(i18n('research.ui.kind_pipeline', 'pipeline')) + ' · ' +
+        (t.sources != null ? esc(sourcesText(t.sources)) + ' · ' : '') +
+        (t.report_path ? '<span translate="no">' + esc(t.report_path) + '</span> · ' : '') +
+        (rubricBit ? rubricBit.replace(/^ · /, '') + ' · ' : '') +
+        esc(timeAgo(t.created_at));
+    } else {
+      meta = '<span translate="no">' + esc((t.workers || []).join(', ')) + '</span> · ' +
+        '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
+        '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
+        '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>';
+    }
+    var actions;
+    if (isPaper || (isSession && t.report_path)) {
+      actions = (t.report_path
+        ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md', 'Open report')) + '">MD</a>'
+        : '') +
+        (t.docx_path
+          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.docx_path) + '" onclick="event.stopPropagation();" target="_blank" title="DOCX">DOCX</a>'
+          : '');
+    } else if (isSession) {
+      actions = '';
+    } else {
+      actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="archive" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.archive', 'Archive')) + '">' + ARCHIVE_SVG + '</button>' +
+        '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>';
+    }
+    if (isSession && t.status === 'interrupted') actions += '<button class="btn btn-primary btn-sm" data-act="resume" data-task-id="' + esc(t.id) + '">' + esc(i18n('research.ui.resume')) + '</button>';
+    return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
+        '<div style="flex:1;min-width:0;overflow:hidden;">' +
+          '<div dir="' + titleDir(t) + '" style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
+          '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+            meta +
           '</div>' +
-          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(stateLabel(t.status)) + '</span>' +
-          actions +
         '</div>' +
-      '</div>';
-    }).join('');
+        (t.search ? '' : '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(stateLabel(t.status)) + '</span>') +
+        actions +
+      '</div>' +
+    '</div>';
   }
 
   function renderArchivedList(tasks) {

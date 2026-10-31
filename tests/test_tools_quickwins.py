@@ -99,8 +99,8 @@ class TestWebSearch:
     async def test_web_search_returns_results(self) -> None:
         """web_search returns formatted markdown when a bounded HTTP backend returns results."""
         mock_results = [
-            {"title": "Result 1", "href": "https://example.com/1", "body": "First result body."},
-            {"title": "Result 2", "href": "https://example.com/2", "body": "Second result body."},
+            {"title": "Result 1", "href": "https://example.com/1", "body": "First test result body."},
+            {"title": "Result 2", "href": "https://example.com/2", "body": "Second test result body."},
         ]
 
         from contextlib import ExitStack

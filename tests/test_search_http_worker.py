@@ -52,18 +52,22 @@ def child_http(tmp_path, monkeypatch):
         assert all(stream.closed for stream in (proc.stdin, proc.stdout, proc.stderr))
 
 
-@pytest.mark.parametrize('backend,body', [
-    ('searxng', '  return httpx.Response(200,json={"results":[{"title":"دليل","url":"https://docs.example/a?q=1","content":"snippet"}]})'),
-    ('bing', '  return httpx.Response(200,text=\'<li class="b_algo"><h2><a href="https://docs.example/a?q=1">دليل</a></h2><div class="b_caption">snippet</div></li>\')'),
-    ('wikipedia', '  return httpx.Response(200,json=["q",["دليل"],["snippet"],["https://docs.example/a?q=1"]])'),
+@pytest.mark.parametrize('backend,body,href', [
+    ('searxng', '  return httpx.Response(200,json={"results":[{"title":"دليل","url":"https://docs.example/a?q=1","content":"snippet"}]})',
+     'https://docs.example/a?q=1'),
+    ('bing', '  return httpx.Response(200,text=\'<li class="b_algo"><h2><a href="https://docs.example/a?q=1">دليل</a></h2><div class="b_caption">snippet</div></li>\')',
+     'https://docs.example/a?q=1'),
+    # Wikipedia's full-text search: the snippet is HTML, the address is the article's.
+    ('wikipedia', '  return httpx.Response(200,json={"query":{"search":[{"title":"دليل","snippet":"<span class=\'searchmatch\'>snippet</span>"}]}})',
+     'https://en.wikipedia.org/wiki/%D8%AF%D9%84%D9%8A%D9%84'),
 ])
-def test_actual_child_extracts_each_backend_without_ambient_secrets(child_http, monkeypatch, backend, body):
+def test_actual_child_extracts_each_backend_without_ambient_secrets(child_http, monkeypatch, backend, body, href):
     install, marker, calls, _, _ = child_http
     install(body)
     for key in ('HTTP_PROXY', 'OPENAI_API_KEY', 'NODE_OPTIONS', 'PYTHONPATH'):
         monkeypatch.setenv(key, 'fixture-private')
     result = search_http.run_http_search(backend, 'private query', 2, base='http://localhost:8088')
-    assert result['results'] == [{'title': 'دليل', 'href': 'https://docs.example/a?q=1', 'body': 'snippet'}]
+    assert result['results'] == [{'title': 'دليل', 'href': href, 'body': 'snippet'}]
     assert 'fixture-private' not in json.loads(marker.read_text())['env'].values()
     command, options = calls[0]
     assert 'private query' not in repr(command) and command[1] == '-I'

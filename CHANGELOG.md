@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Research skips junk search answers; the Research page lists research first (2026-10-31)
+
+- After a day of runs, the local SearXNG's engines were rate-limited and Bing
+  answered history questions with Telegram's download pages, a perfume shop,
+  a sports channel and a browser game. Search took the first answer it got,
+  so a deep research run on Kuwait read nine of those as its sources. A
+  search answer whose results are mostly not about the query (fewer than half
+  hold one of its words) now counts as no answer, and the next engine is
+  asked.
+- The last fallback, Wikipedia, had never answered a research question: it
+  searched article titles only, and Wikimedia refused Kazma's search
+  User-Agent. It is now a full-text search of English Wikipedia, sent with a
+  User-Agent that says who to contact. With every other engine down, the same
+  questions now find "History of Kuwait", "Economy of Kuwait" and "Operation
+  Vantage".
+- Bing result links are decoded correctly: some came out as an address
+  ending in control characters, or as the Bing redirect itself.
+- The Research page listed every web search the agent made in chat, first,
+  as "[Chat] <query> · session · done · 1 source", above the papers; opened,
+  each showed raw search results, which read as Kazma's research. Papers and
+  research runs are now listed first, newest first, and the chat's searches
+  in their own group below, "Web searches from chat", each "web search from
+  chat · 8 results".
+
 ## Research reads PDF sources (2026-10-31)
 
 - Theses, journal articles and reports that the web serves as PDFs were

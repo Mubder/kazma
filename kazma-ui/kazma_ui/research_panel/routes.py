@@ -346,17 +346,22 @@ def create_research_router() -> APIRouter:
 
     @router.get("/api/research/sessions")
     def list_research_sessions(
-        limit: int = 50, archived: bool = False
+        limit: int = 50, archived: bool = False, kind: str | None = None
     ) -> JSONResponse:
         """List durable deep-research sessions (newest first).
 
         Archived sessions are excluded by default (mirrors the tasks list);
-        pass ``archived=true`` for the Archived tab.
+        pass ``archived=true`` for the Archived tab. ``kind=research`` lists
+        research runs, ``kind=search`` the chat's web searches; none, both.
         """
-        try:
-            from kazma_core.tools.research_session import list_sessions
+        from kazma_core.tools.research_session import SESSION_KINDS, list_sessions
 
-            sessions = list_sessions(limit=limit, archived=archived)
+        if kind is not None and kind not in SESSION_KINDS:
+            return JSONResponse(
+                {"ok": False, "error": "unknown_kind", "sessions": []}, status_code=400
+            )
+        try:
+            sessions = list_sessions(limit=limit, archived=archived, kind=kind)
             return JSONResponse(
                 {
                     "ok": True,
