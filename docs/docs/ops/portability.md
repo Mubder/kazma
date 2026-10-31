@@ -7,6 +7,8 @@ description: Cross-platform guarantees — project data, user prefs, and path po
 
 # Portability guarantees
 
+> This page is published at [kazma.ai/docs/ops/portability/](https://kazma.ai/docs/ops/portability/) ([Arabic](https://kazma.ai/ar/docs/ops/portability/)).
+
 Kazma runs on **Windows, Linux, macOS, and WSL** from the same codebase.  
 This page defines what “portable” means here — and what it does **not**.
 

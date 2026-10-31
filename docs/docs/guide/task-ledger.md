@@ -7,6 +7,8 @@ description: Durable task state that intent resolves against — continuation bi
 
 # Task Ledger
 
+> This page is published at [kazma.ai/docs/task-ledger/](https://kazma.ai/docs/task-ledger/) ([Arabic](https://kazma.ai/ar/docs/task-ledger/)).
+
 > **Born from a live incident (2026-08-27).** The user replied
 > *"proceed with next"* to a running brand-name sweep. The turn's transcript
 > had just been truncated to a 158-char fragment by a mid-stream stop, so

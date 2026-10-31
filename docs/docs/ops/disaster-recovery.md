@@ -7,6 +7,8 @@ description: Disaster Recovery — production ops
 
 # Kazma Disaster Recovery Runbook
 
+> This page is published at [kazma.ai/docs/ops/disaster-recovery/](https://kazma.ai/docs/ops/disaster-recovery/) ([Arabic](https://kazma.ai/ar/docs/ops/disaster-recovery/)).
+
 **Version:** 0.6.x / Phase 4.5  
 **Audience:** Operators deploying single-node or multi-replica Kazma  
 **Related:** `kazma_core.backup.restore`, `kazma_core.backup.restore_drill`, `SECURITY.md`

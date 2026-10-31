@@ -12,6 +12,7 @@ deleted here must change the map in the same commit.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -108,3 +109,62 @@ def test_the_page_scan_includes_a_file_not_yet_committed(tmp_path):
     (tmp_path / "docs" / "plans" / "note.md").write_text("# Note\n", encoding="utf-8")
     (tmp_path / "docs" / "FEATURES.md").write_text("# F\n", encoding="utf-8")
     assert documentation_pages(tmp_path) == {"docs/docs/guide/new.md", "docs/FEATURES.md"}
+
+
+#: The line under the title of every page the site copies. The page is public
+#: on GitHub too, word for word, and Google indexes one copy of a page: it
+#: chose GitHub's for docs/ops/portability.md and left ten English docs pages
+#: "crawled, not indexed" while all their Arabic pages, which exist only on
+#: kazma.ai, were indexed (2026-10-31). This link says which copy is the page.
+#: The site's own copy does not carry it.
+PUBLISHED_AT = re.compile(r"^> This page is published at \[kazma\.ai/docs/(.+?)/\]")
+
+
+def published_line(slug: str) -> str:
+    return (
+        f"> This page is published at [kazma.ai/docs/{slug}/](https://kazma.ai/docs/{slug}/) "
+        f"([Arabic](https://kazma.ai/ar/docs/{slug}/))."
+    )
+
+
+def published_line_problems(repo: Path, manifest: dict) -> list[str]:
+    problems = []
+    for e in manifest.get("pages") or []:
+        path = repo / e["source"]
+        if not path.is_file():
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        found = [m.group(1) for m in map(PUBLISHED_AT.match, lines) if m]
+        wanted = e.get("site") if e.get("site") and not e.get("adapted") else None
+        if wanted is None and found:
+            problems.append(f"{e['source']}: says it is published at {found[0]}, but the site does not copy it")
+        elif wanted and found != [wanted]:
+            problems.append(f"{e['source']}: needs, under its title, the line\n    {published_line(wanted)}")
+        elif wanted and published_line(wanted) not in lines:
+            problems.append(f"{e['source']}: its published-at line is not exactly\n    {published_line(wanted)}")
+    return problems
+
+
+def test_every_copied_page_names_its_kazma_ai_address():
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    assert published_line_problems(REPO, manifest) == []
+
+
+def test_the_published_line_check_sees_a_missing_stale_or_stray_line(tmp_path):
+    """Negative control: no line, a line for an old slug, a line on an unpublished page."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.md").write_text("# A\n\nText.\n", encoding="utf-8")
+    (docs / "b.md").write_text(f"# B\n\n{published_line('old-b')}\n", encoding="utf-8")
+    (docs / "c.md").write_text(f"# C\n\n{published_line('c')}\n", encoding="utf-8")
+    (docs / "d.md").write_text(f"# D\n\n{published_line('d')}\n", encoding="utf-8")
+    manifest = {
+        "pages": [
+            {"source": "docs/a.md", "site": "a"},
+            {"source": "docs/b.md", "site": "b"},
+            {"source": "docs/c.md", "site": None, "why": "internal"},
+            {"source": "docs/d.md", "site": "d"},
+        ]
+    }
+    problems = published_line_problems(tmp_path, manifest)
+    assert [p.split(":")[0] for p in problems] == ["docs/a.md", "docs/b.md", "docs/c.md"]

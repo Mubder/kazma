@@ -4,6 +4,8 @@ title: Swarm Orchestration
 sidebar_label: Swarm Orchestration
 description: Kazma Swarm Orchestration — code-audited reference
 ---
+> This page is published at [kazma.ai/docs/swarm-orchestration/](https://kazma.ai/docs/swarm-orchestration/) ([Arabic](https://kazma.ai/ar/docs/swarm-orchestration/)).
+
 > The complete swarm system: the engine, six dispatch patterns, aggregation strategies, the reliability layer (circuit breakers, retries, timeouts, validators, concurrency), the worker registry, pipeline checkpoints, HITL bus (one shared decision per request), and metrics. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §4–§7, §9, §14, §30.
 
 ---

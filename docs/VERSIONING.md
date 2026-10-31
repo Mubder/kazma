@@ -1,5 +1,7 @@
 # Versioning & Releases
 
+> This page is published at [kazma.ai/docs/reference/versioning/](https://kazma.ai/docs/reference/versioning/) ([Arabic](https://kazma.ai/ar/docs/reference/versioning/)).
+
 Kazma uses a **fixed public base** plus a **live git commit id**.
 
 ## Format

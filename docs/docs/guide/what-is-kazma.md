@@ -7,6 +7,8 @@ description: Kazma on one page — what it is, what it can do, what sets it apar
 
 # What Kazma is and what it can do
 
+> This page is published at [kazma.ai/docs/what-is-kazma/](https://kazma.ai/docs/what-is-kazma/) ([Arabic](https://kazma.ai/ar/docs/what-is-kazma/)).
+
 **Kazma is the self-hosted AI agent that asks before it acts.** You run it on
 your own machine and connect the AI models you choose. Then you reach one
 assistant from the browser, the terminal, your code editor, Telegram, Discord

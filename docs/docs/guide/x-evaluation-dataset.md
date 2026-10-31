@@ -3,6 +3,8 @@ title: Building an X evaluation dataset
 sidebar_position: 18
 ---
 
+> This page is published at [kazma.ai/docs/x-evaluation-dataset/](https://kazma.ai/docs/x-evaluation-dataset/) ([Arabic](https://kazma.ai/ar/docs/x-evaluation-dataset/)).
+
 Start with **draft mode**. You can use X Studio with an exact local model,
 manual post drafting and attended review before you have a dataset. Keep
 `allow_auto` disabled on subject cards while you tune them. Missing evaluation

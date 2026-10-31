@@ -7,6 +7,8 @@ description: Security architecture and threat model for the Kazma document intel
 
 # Document Security
 
+> This page is published at [kazma.ai/docs/security/document-security/](https://kazma.ai/docs/security/document-security/) ([Arabic](https://kazma.ai/ar/docs/security/document-security/)).
+
 The document intelligence platform is designed with the assumption that every
 document is hostile until proven otherwise. This page documents the security
 architecture, threat model, and defense-in-depth measures, and states where

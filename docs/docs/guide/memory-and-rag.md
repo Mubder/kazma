@@ -5,6 +5,8 @@ sidebar_label: Memory & RAG
 description: Kazma V2 cognitive memory — beliefs, episodes, KB inject, /memory admin, ego-graph anchoring, optional Neo4j/Postgres adapters
 ---
 
+> This page is published at [kazma.ai/docs/memory-and-rag/](https://kazma.ai/docs/memory-and-rag/) ([Arabic](https://kazma.ai/ar/docs/memory-and-rag/)).
+
 > **Live SoT (2026-09).** V2 is the **only** chat memory stack. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §15, §20 (source-trust), §29 (context integrity / shift).
 >
 > - **Personal memory** — bi-temporal beliefs, 4-tier episodes, PPR, FTS5 + dense (sqlite-vec on one node; **pgvector** when Postgres is on), durable queue.
