@@ -34,7 +34,7 @@ function answer(url) {
   return { ok: true, json: async () => body };
 }
 
-async function run(code) {
+async function run(code, { reopen = false } = {}) {
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, { innerHTML: '', textContent: '', style: {} });
@@ -55,6 +55,12 @@ async function run(code) {
   });
   window.KazmaResearch.load();
   for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve));
+  if (reopen) {
+    // The reader opens the group; the page's 15-second refresh draws the list again.
+    element('research-list').querySelector = selector => (selector === 'details.research-searches' ? { open: true } : null);
+    window.KazmaResearch.load();
+    for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve));
+  }
   return { html: element('research-list').innerHTML, requested };
 }
 
@@ -78,6 +84,15 @@ test('a search says it is a web search and how many results it found, not "sessi
   assert.doesNotMatch(searchCard, /session ·/);
   assert.doesNotMatch(searchCard, /1 sources?/);
   assert.match(searchCard, /Web searches from chat/);
+});
+
+test('an opened group stays open when the list is drawn again', async () => {
+  assert.ok(!(await run(source)).html.includes('research-searches" style="margin-top:12px;" open>'));
+  assert.ok((await run(source, { reopen: true })).html.includes('research-searches" style="margin-top:12px;" open>'));
+  // Negative control: without reading the drawn group back, the refresh closed it (live 2026-10-31).
+  const old = source.replace('    if (shown) searchesOpen = !!shown.open;\n', '');
+  assert.notEqual(old, source, 'the control must change the renderer');
+  assert.ok(!(await run(old, { reopen: true })).html.includes(' open>'));
 });
 
 test('negative control: the old mixed list put the search above every report', async () => {
