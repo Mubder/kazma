@@ -4159,7 +4159,13 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   install, host, pid, start time and a lease renewed on every write (300 s,
   KB-E07): a dead owner on this host is recovered, another host's only after
   its lease lapsed, and the taken-over owner's next write is refused; rows of
-  another install are never read. One crawl per KB library (`CrawlLibraryBusy`,
+  another install are never read. **A job's writers in one process take turns**
+  (`_job_lock`, `_REGISTRY_LOCK`, 2026-10-31): the compare-and-set is for other
+  processes, with a random pause between its 8 attempts (`_retry_pause`).
+  Racing it, a research run's four parallel fetches starved each other
+  ("journal is busy" on 16% of writes with 4 writers on Postgres) and every
+  live deep research failed after its searches
+  (`tests/test_crawl_journal_concurrency.py`). One crawl per KB library (`CrawlLibraryBusy`,
   KB-E14); the journal is the only crawl state (`kb.ingest_jobs` and
   `stores/kb_jobs.py` retired). An explicit KB resume fetches uncertain pages
   again and skips completed ones; resume requires identical policy. Gate:
