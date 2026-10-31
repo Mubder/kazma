@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Deep research runs again (2026-10-31)
+
+- Every deep research on live failed right after its web searches with
+  "Durable crawl journal is busy": its four parallel page fetches each wrote
+  the job's record, and the writers raced one compare-and-set with 8 instant
+  retries (16% of writes gave up with 4 writers on Postgres, 35% with 8).
+  Writers of one job in one process now take turns; other processes still go
+  through the compare-and-set, with a short random pause between attempts.
+
 ## A document that was not made is an ordinary error (2026-10-31)
 
 - `generate_docx` failed during the broker outage and the chat said "effects

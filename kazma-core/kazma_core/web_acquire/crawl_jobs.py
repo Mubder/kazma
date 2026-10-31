@@ -39,6 +39,7 @@ import asyncio
 import hashlib
 import json
 import os
+import random
 import socket
 import time
 import uuid
@@ -77,6 +78,38 @@ _KB_KINDS = frozenset({'site', 'refresh'})
 current_crawl = ContextVar('current_acquisition_crawl', default=None)
 _TERMINAL = {'completed', 'partial', 'failed', 'interrupted'}
 _ACTIVE, _ACTIVE_LOCK = set(), threading.Lock()
+#: Writers in this process take turns: a job's writes under its own lock, a
+#: registry-wide change under one lock. The compare-and-set stays for other
+#: processes (and installs on one Postgres), which wait a random moment
+#: before trying again. Racing it in one process, the writers starved each
+#: other: a research run fetches four pages at once and each records its
+#: start, its receipt and its end on the job's row; 8 attempts with no wait
+#: gave up as "journal is busy" on 16% of writes with 4 writers on Postgres
+#: (35% with 8), and every live deep research failed after its searches
+#: (2026-10-31).
+_JOB_LOCKS: dict[str, threading.Lock] = {}
+_JOB_LOCKS_GUARD = threading.Lock()
+_REGISTRY_LOCK = threading.RLock()
+#: How many idle per-job locks are kept before the unused ones are dropped.
+_JOB_LOCKS_KEPT = 256
+
+
+def _job_lock(job_id: str) -> threading.Lock:
+    """The lock this process's writers of *job_id* take in turn."""
+    with _JOB_LOCKS_GUARD:
+        lock = _JOB_LOCKS.get(job_id)
+        if lock is None:
+            if len(_JOB_LOCKS) >= _JOB_LOCKS_KEPT:
+                for key in [key for key, held in _JOB_LOCKS.items() if not held.locked()]:
+                    del _JOB_LOCKS[key]
+            lock = _JOB_LOCKS[job_id] = threading.Lock()
+        return lock
+
+
+def _retry_pause(attempt: int) -> None:
+    """Before trying a write again: a writer in another process moved the
+    revision. A short random wait, growing, so two do not collide again."""
+    time.sleep(random.uniform(0, min(0.4, 0.02 * 2 ** attempt)))
 
 
 class CrawlLibraryBusy(AcquisitionError):
@@ -340,12 +373,14 @@ def _mutate(change):
     """Registry-wide change under the admission revision: start, resume,
     evict, recover, purge. Only the rows it changes are written; a changed
     existing row's revision is moved by :data:`_FENCE`."""
+    _REGISTRY_LOCK.acquire()
     try:
         store = _store()
         all_jobs, revision = _migrate_legacy(store)
         install, _host = _identity()
         for attempt in range(8):
             if attempt:
+                _retry_pause(attempt)
                 all_jobs, revision, _legacy = _read_all(store)
             mine = {job_id: entry for job_id, entry in all_jobs.items() if _mine(entry[0], install)}
             jobs = {job_id: copy.deepcopy(row) for job_id, (row, _rev) in mine.items()}
@@ -378,6 +413,8 @@ def _mutate(change):
         raise AcquisitionError(FetchErrorCode.LIMIT, 'Durable crawl journal is busy; retry after active work finishes.', transient=True)
     except _storage_failures() as exc:
         raise _storage_error() from exc
+    finally:
+        _REGISTRY_LOCK.release()
 
 
 def _read_job(store, job_id):
@@ -394,9 +431,13 @@ def _read_job(store, job_id):
 def _mutate_job(job_id, change):
     """Change ONE job under its own revision: bytes written stay those of
     this job, whatever the other jobs hold (KB-E04)."""
+    lock = _job_lock(job_id)
+    lock.acquire()
     try:
         store = _store()
-        for _ in range(8):
+        for attempt in range(8):
+            if attempt:
+                _retry_pause(attempt)
             row, revision = _read_job(store, job_id)
             answer = change(row)
             if row is None:
@@ -412,6 +453,8 @@ def _mutate_job(job_id, change):
         raise AcquisitionError(FetchErrorCode.LIMIT, 'Durable crawl journal is busy; retry after active work finishes.', transient=True)
     except _storage_failures() as exc:
         raise _storage_error() from exc
+    finally:
+        lock.release()
 
 
 def _alive(identity):
