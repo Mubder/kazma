@@ -510,6 +510,15 @@ async def _http_get_text(url: str, *, timeout: float = 20.0, scope_check=None) -
         return None, url
 
 
+async def _note_partial_sitemap(on_progress, message):
+    from kazma_core.web_acquire import crawl_jobs
+
+    job = crawl_jobs.current_crawl.get()
+    if job is not None:
+        await crawl_jobs.call(job.update, lambda row: row.update(metadata_limited=True))
+    await _safe_progress(on_progress, message)
+
+
 class _SitemapDocuments(list):
     def __init__(self):
         super().__init__()
@@ -524,7 +533,17 @@ async def _sitemap_links(text, final, docs, *, on_progress):
     result = dict(pages=[], children=[], bytes=len((text or '').encode('utf-8')))
     if not text:
         return result
-    parsed = await parse_sitemap(text, final)
+    try:
+        parsed = await parse_sitemap(text, final)
+    except AcquisitionError as exc:
+        if exc.code is not FetchErrorCode.LIMIT:
+            raise
+        # One sitemap past the parser's budget leaves discovery partial; it
+        # never fails the crawl (the seed and the other sitemaps still count).
+        await _note_partial_sitemap(on_progress, 'a sitemap exceeded the parser budget and was skipped')
+        return result
+    if parsed['limited']:
+        await _note_partial_sitemap(on_progress, f'a sitemap held more URLs than discovery reads; its first {len(parsed["urls"])} were kept')
     if parsed['kind'] == 'invalid':
         await _safe_progress(on_progress, 'invalid/unsafe sitemap ignored')
         return result

@@ -76,7 +76,7 @@ async def test_sitemap_xml_runs_in_owned_child_and_preserves_literal_urls(monkey
     monkeypatch.setattr(process_budget, 'run_bounded', bounded)
     literal = 'https://docs.example/guide.md;a=1?x=1&amp;x=2&amp;blank='
     result = await parser.parse_sitemap('<urlset><url><loc>' + literal + '</loc></url></urlset>', 'https://docs.example/')
-    assert result == {'status': 'ok', 'kind': 'urlset', 'urls': [literal.replace('&amp;', '&')]}
+    assert result == {'status': 'ok', 'kind': 'urlset', 'urls': [literal.replace('&amp;', '&')], 'limited': False}
     assert len(children) == len(calls) == 1
     assert calls[0]['memory_bytes'] == 768 * 1024**2 and calls[0]['timeout'] == 15
     assert children[0][0].poll() is not None and children[0][1].closed
@@ -86,16 +86,26 @@ async def test_sitemap_xml_runs_in_owned_child_and_preserves_literal_urls(monkey
 @pytest.mark.asyncio
 @pytest.mark.parametrize('text', ['<broken', '<!DOCTYPE urlset [<!ENTITY x "bad">]><urlset/>', '<other><loc>bad</loc></other>'])
 async def test_sitemap_invalid_and_entity_documents_are_refused(text):
-    assert await parser.parse_sitemap(text, 'https://docs.example/') == {'status': 'ok', 'kind': 'invalid', 'urls': []}
+    assert await parser.parse_sitemap(text, 'https://docs.example/') == {'status': 'ok', 'kind': 'invalid', 'urls': [], 'limited': False}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('kind,entry,count', [('urlset','url',4001), ('sitemapindex','sitemap',65)])
-async def test_sitemap_frontier_excess_is_typed_instead_of_silent_clipping(kind, entry, count):
+@pytest.mark.parametrize('kind,entry,count,kept', [('urlset','url',6000,4000), ('sitemapindex','sitemap',65,64)])
+async def test_sitemap_frontier_excess_is_kept_bounded_and_said(kind, entry, count, kept):
+    """An oversized sitemap is cut at the bound and says so -- never silent,
+    and never a failed crawl: rfc-editor.org's sitemap-1.xml holds 6,000 URLs,
+    and the old "limit" answer failed every crawl of that site (2026-10-31)."""
     text = '<' + kind + '>' + ''.join(f'<{entry}><loc>https://docs.example/{i}</loc></{entry}>' for i in range(count)) + '</' + kind + '>'
-    with pytest.raises(AcquisitionError) as failure:
-        await parser.parse_sitemap(text, 'https://docs.example/')
-    assert failure.value.code == FetchErrorCode.LIMIT
+    result = await parser.parse_sitemap(text, 'https://docs.example/')
+    assert result['limited'] is True and result['kind'] == kind
+    assert result['urls'] == [f'https://docs.example/{i}' for i in range(kept)]
+
+
+@pytest.mark.asyncio
+async def test_a_sitemap_at_its_bound_is_not_cut():
+    text = '<urlset>' + ''.join(f'<url><loc>https://docs.example/{i}</loc></url>' for i in range(4000)) + '</urlset>'
+    result = await parser.parse_sitemap(text, 'https://docs.example/')
+    assert result['limited'] is False and len(result['urls']) == 4000
 
 
 @pytest.mark.asyncio

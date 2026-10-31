@@ -4078,6 +4078,9 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
 - Session process owners reconcile to interrupted; explicit session resume links
   the original durable job and restores verified terminal output without replay.
   History is bounded to 256 rows/128MiB; archive does not release storage.
+  Chat `web_search` snapshots (`record_chat_research`, depth `chat`) have their
+  own 1024 rows/32MiB: sharing the research allowance, 349 of the live 361
+  rows were chat searches and Deep Research refused to start (2026-10-31).
 - Origins/robots persist via shared ConfigStore CAS with finite tables and
   fail-closed clock/storage behavior. Fixed sync search and native HTTP share
   origin feedback. Opaque DDGS SDK fanout is skipped, not silently unmetered.
@@ -4217,7 +4220,10 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   `docs/audits/evidence/dns_linux_boundary_2026_10_11.py`.
   HTML and sitemap XML extraction use `web_acquire.parser` owned children (15s, 768MiB,
   24MiB encoded input, 4MiB output; XML refuses DTDs/entities and bounds
-  leaf/index frontiers at 4000/64); do not put hostile parsing back on shared
+  leaf/index frontiers at 4000/64 -- a larger sitemap keeps its first URLs,
+  answers `limited`, and discovery is marked partial; a sitemap past the
+  parser's budget is skipped, never a failed crawl: rfc-editor.org's
+  sitemap-1.xml holds 6,000 URLs, 2026-10-31); do not put hostile parsing back on shared
   Python threads. `search_runtime` owns the complete backend chain/deadline;
   `search_http` bounds HTTP and parsing in a fixed child. Both use the common
   owned-worker cleanup/quarantine contract. Research crawl seed/page
@@ -4302,6 +4308,13 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   Parsed robots policy and interrupted lookup refusals persist in a bounded CAS
   table. Full RFC conformance and broader compatibility qualification remain open.
   Gates: `tests/test_web_robots.py`, actual Chromium broker fixtures.
+  **No acquisition state field is named like a credential** (2026-10-31): the
+  settings store moves such a field into the vault and `get_category` reads
+  the `vault://` pointer back, so the robots claim (then `token`, now
+  `claim`) never matched and every robots-checked crawl failed "Robots lookup
+  is owned or was interrupted". Every `batch_set` in `web_acquire` passes
+  `durable_state.refuse_vaulted` (`config_store.vaulted_paths`, the store's
+  own walk). Gate: `tests/test_acquisition_state_never_vaulted.py`.
   The factory provides
   (proxy provider + rotating UA pool); `web_acquire` is the façade
   (`fetch_text`/`search`/`rank_urls`/profiles) used by research pipeline, KB

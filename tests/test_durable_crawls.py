@@ -362,6 +362,63 @@ async def test_metadata_resume_keeps_parsed_results_and_skips_unknown_requests(j
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('oversized', ['cut', 'over_budget'])
+async def test_an_oversized_sitemap_leaves_discovery_partial_never_failed(journal, monkeypatch, oversized):
+    """Live 2026-10-31: rfc-editor.org's sitemap index names sitemap-1.xml
+    with 6,000 URLs, and every crawl of the site failed "discovery failed:
+    Local HTML parser exceeded its memory/document budget". A sitemap past the
+    parser's bound is cut there (or, past its budget, skipped); the job says
+    discovery was partial and goes on."""
+    from kazma_core.stores import knowledge_ingest as ki
+    from kazma_core.web_acquire import parser
+    from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
+
+    seed, root = 'https://docs.example/tree/start', 'https://docs.example'
+    big = '<urlset>' + ''.join(f'<url><loc>{root}/tree/p{i}</loc></url>' for i in range(6000)) + '</urlset>'
+    small = f'<urlset><url><loc>{root}/tree/other</loc></url></urlset>'
+    async def fetch(url, **kwargs):
+        if url == root + '/sitemap.xml':
+            return '<sitemapindex><sitemap><loc>/big.xml</loc></sitemap><sitemap><loc>/small.xml</loc></sitemap></sitemapindex>', url
+        return {root + '/big.xml': big, root + '/small.xml': small}.get(url), url
+    monkeypatch.setattr(ki, '_http_get_text', fetch)
+    if oversized == 'over_budget':
+        real = parser.parse_sitemap
+        async def over_budget(text, url):
+            if text is big:
+                raise AcquisitionError(FetchErrorCode.LIMIT, 'Local sitemap parser exceeded its memory/document budget.')
+            return await real(text, url)
+        monkeypatch.setattr(parser, 'parse_sitemap', over_budget)
+    job = crawl_jobs.start('lib', seed, snapshot(), job_id='oversized-' + oversized)
+    token = crawl_jobs.current_crawl.set(job)
+    try:
+        pages = (await ki._fetch_sitemaps(seed)).pages
+    finally:
+        crawl_jobs.current_crawl.reset(token)
+        job.finish('partial')
+    kept = 4000 if oversized == 'cut' else 0
+    assert pages == [f'{root}/tree/p{i}' for i in range(kept)] + [root + '/tree/other']
+    assert crawl_jobs.projection(job.job_id)['acquisition']['discovery_limited'] is True
+
+
+@pytest.mark.asyncio
+async def test_the_old_sitemap_answer_failed_discovery(journal, monkeypatch):
+    """Negative control: a LIMIT that escapes the sitemap step fails discovery."""
+    from kazma_core.stores import knowledge_ingest as ki
+    from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
+
+    async def fetch(url, **kwargs):
+        return ('<urlset><url><loc>https://docs.example/tree/a</loc></url></urlset>', url) if url.endswith('/sitemap.xml') else (None, url)
+    async def old_links(text, final, docs, *, on_progress):
+        if text:
+            raise AcquisitionError(FetchErrorCode.LIMIT, 'Local HTML parser exceeded its memory/document budget.')
+        return dict(pages=[], children=[], bytes=0)
+    monkeypatch.setattr(ki, '_http_get_text', fetch)
+    monkeypatch.setattr(ki, '_sitemap_links', old_links)
+    with pytest.raises(AcquisitionError, match='memory/document budget'):
+        await ki._fetch_sitemaps('https://docs.example/tree/start')
+
+
+@pytest.mark.asyncio
 async def test_metadata_storage_denial_precedes_fetch_and_corruption_is_visible(journal, monkeypatch):
     from kazma_core.web_acquire.discovery_metadata import _acquire
 
