@@ -4437,9 +4437,19 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   decided alone (`.gov` +4): a Kuwait history report's first source was a
   COVID-19 cost study. The gap critic runs whatever the source count, with
   its own budget (`_gap_search_due`; half `max_sources`, at least 2); gated
-  on a full quota it never ran in a deep run. Gate:
-  `tests/test_research_source_coverage.py` (pooled ranking and the old gate
-  as negative controls).
+  on a full quota it never ran in a deep run. Fan and meme wikis, copies of
+  Wikipedia and pirate document sites are demoted (`rank._DEMOTE_HOST_SUBSTR`:
+  the next run took polandball's "Kuwaitball" as its search's best address).
+  Gate: `tests/test_research_source_coverage.py` (pooled ranking, the old
+  gate and the old demotions as negative controls). **The planner, the gap
+  critic and the report answer without hidden reasoning**
+  (`reasoning="off"`): deepseek-flash spent all 8,000 tokens of a report on
+  it, then 11,015 of the 16,000 retry, and the run failed at its last step.
+  `resilient_chat` passes the switch only to a client whose
+  `can_turn_off_reasoning()` is True (`_kwargs_for`): a failover can reach a
+  provider whose `chat` takes no such argument
+  (`tests/test_research_reasoning_off.py`, passing it through as the
+  negative control).
 - Research pipeline execution uses `web_acquire.research_runtime`: four active
   pipelines and four background sessions in this Python process, with no waiting
   queue. Admit before planning/session creation, freeze workspace/operator and

@@ -175,6 +175,11 @@ async def synthesize_from_digests(
             max_tokens=min(8000, max(1024, cap_out // 3)),
             label="research-synthesize",
             frozen_failover=frozen_failover,
+            # A thinking model's hidden reasoning counts against max_tokens:
+            # live 2026-10-31 deepseek-flash spent all 8,000 on it, then
+            # 11,015 of the 16,000 retry, and the report was cut off --
+            # one deep research in two failed at its last step.
+            reasoning="off",
         )
         text = ""
         if hasattr(result, "content"):

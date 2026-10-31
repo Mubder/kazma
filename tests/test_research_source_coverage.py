@@ -133,3 +133,28 @@ async def test_negative_control_the_old_gate_never_searches_a_full_quota(control
     report, saved, gap_calls = await _run_with_full_quota(controlled, monkeypatch, old_gate=True)
     assert report.startswith("# Deep research complete")
     assert gap_calls == [] and not [u for u in saved if "gap" in u]
+
+
+JUNK_FIRST = {
+    "Kuwait history Failaka Ikaros": [
+        "https://polandball.miraheze.org/wiki/Kuwaitball",
+        "https://en.bharatpedia.org/wiki/Kuwait",
+        "https://dokumen.pub/stateless-in-the-gulf-migration-nationality-and-society-in-kuwait.html",
+        "https://www.kuwaitculture.org/heritage/island-archaeology",
+    ],
+}
+
+
+def test_a_search_s_best_source_is_not_a_meme_wiki_or_a_mirror():
+    """Live 2026-10-31: each search's best ADDRESS was taken, and three of
+    them were a meme wiki, a Wikipedia mirror and a pirate book site."""
+    chosen = rank_by_coverage(JUNK_FIRST, limit=1)
+    assert [r.url for r in chosen] == ["https://www.kuwaitculture.org/heritage/island-archaeology"]
+
+
+def test_negative_control_without_the_demotions_the_meme_wiki_leads(monkeypatch):
+    from kazma_core.web_acquire import rank
+
+    monkeypatch.setattr(rank, "_DEMOTE_HOST_SUBSTR", rank._DEMOTE_HOST_SUBSTR[:rank._DEMOTE_HOST_SUBSTR.index("studocu.")])
+    chosen = rank_by_coverage(JUNK_FIRST, limit=1)
+    assert chosen[0].url != "https://www.kuwaitculture.org/heritage/island-archaeology"
