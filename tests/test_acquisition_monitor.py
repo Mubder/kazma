@@ -60,6 +60,32 @@ def test_quick_completion_between_scans_is_not_lost_but_old_history_is_quiet(fix
     assert [r['key'] for r in monitor.tick(now=1015)] == ['session:quick']
 
 
+@pytest.mark.parametrize('status', ['partial', 'error', 'failed'])
+def test_a_finished_run_is_told_once_whatever_its_fingerprint(fixture, status):
+    """Live 2026-10-31: a deploy added a field to the progress fingerprint,
+    and the first scan re-sent every finished run's "Partial results" and
+    "Crawl failed" to Telegram."""
+    fixture.jobs = [job()]
+    monitor.tick(now=1000)
+    fixture.jobs = [job(status, 1001, sources=1)]
+    assert [r['condition'] for r in monitor.tick(now=1002)] == [status]
+    fixture.jobs[0]['progress'] = fixture.jobs[0]['progress'] + [None]  # the new fingerprint field
+    assert monitor.tick(now=1300) == []
+    fixture.jobs[0]['updated'] = 1301  # a late write to the finished row
+    fixture.jobs[0]['progress'] = ['reading', 1, 'late']
+    assert monitor.tick(now=1302) == []
+    assert len(fixture.sent) == 1
+
+
+def test_a_finished_run_whose_status_changes_is_told_again(fixture):
+    fixture.jobs = [job('interrupted', 1001)]
+    monitor.tick(now=1000)
+    fixture.jobs = [job()]
+    monitor.tick(now=1002)
+    fixture.jobs = [job('partial', 1003, sources=1)]
+    assert [r['condition'] for r in monitor.tick(now=1004)] == ['partial']
+
+
 @pytest.mark.parametrize('status', ['partial', 'error', 'cancelled', 'interrupted', 'failed', 'completed'])
 def test_terminal_outcomes_are_distinct(fixture, status):
     fixture.jobs = [job()]
