@@ -401,16 +401,44 @@ function alertsStore() {
     return (A && typeof A.store === 'function') ? A.store('notifications') : null;
 }
 
+// The banner is for what needs attention. The bell keeps everything, news
+// included: an INFO alert ("Crawl completed") took the yellow warning banner
+// and kept it, since a finished run's alert stays in the bell's history
+// (live 2026-10-31). A dismissal is remembered in this browser -- it lived in
+// the page's memory, so every reload brought the banner back.
+const BANNER_DISMISSED_KEY = 'kazma.banner.dismissed';
+const BANNER_DISMISSED_MAX = 200;
+
+function readDismissedAlerts() {
+    try {
+        const raw = window.localStorage && window.localStorage.getItem(BANNER_DISMISSED_KEY);
+        const ids = JSON.parse(raw || '[]');
+        return new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []);
+    } catch (e) {
+        return new Set();  // a private window or blocked storage: dismiss for this page only
+    }
+}
+
+function saveDismissedAlerts(ids) {
+    try {
+        window.localStorage.setItem(BANNER_DISMISSED_KEY, JSON.stringify([...ids].slice(-BANNER_DISMISSED_MAX)));
+    } catch (e) { /* storage unavailable: the dismissal holds for this page */ }
+}
+
+function needsAttention(alert) {
+    return String((alert && alert.severity) || '').toUpperCase() !== 'INFO';
+}
+
 export function systemAlertsBanner() {
     return {
         installing: false,
-        dismissedAlerts: new Set(),
+        dismissedAlerts: readDismissedAlerts(),
 
-        // The newest alert not dismissed, from the store's list.
+        // The newest alert that needs attention and was not dismissed.
         get activeAlert() {
             const store = alertsStore();
             const alerts = (store && Array.isArray(store.items)) ? store.items : [];
-            const valid = alerts.filter((a) => a && !this.dismissedAlerts.has(a.id));
+            const valid = alerts.filter((a) => a && needsAttention(a) && !this.dismissedAlerts.has(a.id));
             if (!valid.length) return null;
             return valid.slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))[0];
         },
@@ -425,6 +453,7 @@ export function systemAlertsBanner() {
             const alert = this.activeAlert;
             if (alert) {
                 this.dismissedAlerts.add(alert.id);
+                saveDismissedAlerts(this.dismissedAlerts);
             }
         },
 

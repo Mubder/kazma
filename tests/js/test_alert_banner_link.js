@@ -82,4 +82,45 @@ ok("a non-string id is not a link", linkFor(42) === "");
   ok("the banner has no poller of its own", typeof banner.init !== "function" && !("pollInterval" in banner));
 }
 
+// Live 2026-10-31: "Crawl completed" (INFO) took the yellow warning banner,
+// and a dismissal came back with every reload. The banner shows only what
+// needs attention, and a dismissal is kept in this browser.
+{
+  const saved = {};
+  windowStub.localStorage = {
+    getItem: (k) => (k in saved ? saved[k] : null),
+    setItem: (k, v) => { saved[k] = String(v); },
+  };
+  store.items = [
+    { id: "crawl-done", timestamp: 9, title: "Crawl completed", severity: "INFO" },
+    { id: "crawl-partial", timestamp: 5, title: "Partial results", severity: "WARNING" },
+    { id: "fallback", timestamp: 3, title: "Model fallback", severity: "warning" },
+  ];
+  const first = systemAlertsBanner();
+  ok("news (INFO) never takes the banner", first.activeAlert && first.activeAlert.id === "crawl-partial",
+    first.activeAlert && first.activeAlert.id);
+  first.dismissAlert();
+  const reloaded = systemAlertsBanner();  // a new page load: a new component
+  ok("a dismissal survives a reload", reloaded.activeAlert && reloaded.activeAlert.id === "fallback",
+    reloaded.activeAlert && reloaded.activeAlert.id);
+  reloaded.dismissAlert();
+  ok("all dismissed stays dismissed after a reload", systemAlertsBanner().activeAlert === null);
+  store.items = [{ id: "info-only", timestamp: 1, severity: "INFO" }];
+  ok("only news: no banner", systemAlertsBanner().activeAlert === null);
+  saved["kazma.banner.dismissed"] = "not json";
+  store.items = [{ id: "x", timestamp: 1, severity: "ERROR" }];
+  ok("unreadable storage is no dismissal", systemAlertsBanner().activeAlert.id === "x");
+  windowStub.localStorage = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
+  const blocked = systemAlertsBanner();
+  blocked.dismissAlert();
+  ok("blocked storage still dismisses for the page", blocked.activeAlert === null);
+  const cap = Array.from({ length: 250 }, (_, i) => `a${i}`);
+  windowStub.localStorage = { getItem: () => JSON.stringify(cap), setItem: (k, v) => { saved[k] = v; } };
+  store.items = [{ id: "new-one", timestamp: 1, severity: "ERROR" }];
+  const many = systemAlertsBanner();
+  many.dismissAlert();
+  ok("the remembered list is capped", JSON.parse(saved["kazma.banner.dismissed"]).length === 200
+    && JSON.parse(saved["kazma.banner.dismissed"]).includes("new-one"));
+}
+
 process.exit(fail ? 1 : 0);
