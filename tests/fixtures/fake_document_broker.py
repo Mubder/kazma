@@ -15,6 +15,8 @@ each way the guard must handle:
     {"never_listen": true}      run, never answer
     {"stop_answering_after_s": 3}  keep running, stop answering
     {"ignore_stop": true}       ignore the graceful stop (only a kill works)
+    {"refuse_first_port": true} the first address it is given cannot be listened
+                                on (exit 7, as a port Windows reserved)
 
 Each start, answer and stop is appended to ``fake_broker.marker.jsonl`` beside
 the token file. Standard library only, like the real one.
@@ -71,6 +73,14 @@ def main() -> int:
     if config.get("exit_code_at_start") is not None:
         note("exit_at_start", code=int(config["exit_code_at_start"]))
         return int(config["exit_code_at_start"])
+    refused = here / "fake_broker.refused_port"
+    if config.get("refuse_first_port") and not refused.exists():
+        refused.write_text(args.listen, encoding="utf-8")
+        note("port_refused", listen=args.listen)
+        return 7
+    if config.get("refuse_first_port") and refused.read_text(encoding="utf-8") == args.listen:
+        note("port_refused", listen=args.listen)
+        return 7
     token = args.token_file.read_text(encoding="utf-8").strip()
     time.sleep(float(config.get("ready_delay_s", 0)))
     if config.get("never_listen"):

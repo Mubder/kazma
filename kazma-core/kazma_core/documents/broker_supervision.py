@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -73,6 +74,32 @@ def _guard_state() -> dict[str, Any] | None:
     return data if isinstance(data, dict) else {}
 
 
+_GUARD_LOOPBACK_URL = re.compile(r"tcp://127\.0\.0\.1:\d{1,5}")
+
+
+def broker_url() -> str:
+    """The document broker's address: ``KAZMA_DOCUMENT_BROKER_URL``, or -- when
+    the guard handed it (``KAZMA_DOCUMENT_BROKER_URL_SOURCE=guard``) -- the
+    address the guard runs the broker on now, from its state file.
+
+    The guard moves the broker to another port when the one it had cannot be
+    listened on: live 2026-10-31 Windows reserved 20181-20780 when Docker
+    restarted, and documents were refused for hours on a port no broker could
+    take. Following the state file, Kazma needs no restart for a move. Only a
+    loopback TCP address is taken from the file; anything else keeps the
+    handed one. Never raises; reads one small file.
+    """
+    url = (os.environ.get("KAZMA_DOCUMENT_BROKER_URL") or "").strip()
+    if not url or (os.environ.get("KAZMA_DOCUMENT_BROKER_URL_SOURCE") or "").strip() != "guard":
+        return url
+    state = _guard_state() or {}
+    broker = state.get("document_broker") if isinstance(state.get("document_broker"), dict) else {}
+    current = broker.get("url")
+    if isinstance(current, str) and _GUARD_LOOPBACK_URL.fullmatch(current):
+        return current
+    return url
+
+
 def supervisor_report() -> dict[str, Any]:
     """Who runs the broker Kazma uses, and what the guard says about it.
 
@@ -82,7 +109,7 @@ def supervisor_report() -> dict[str, Any]:
     ``none`` (no guard started Kazma). Never raises; reads one small file.
     """
 
-    url = (os.environ.get("KAZMA_DOCUMENT_BROKER_URL") or "").strip()
+    url = broker_url()
     state = _guard_state()
     if state is None:
         return {"by": "external" if url else "none", "url": url or None, "guard": None, "broker": None}
@@ -148,7 +175,7 @@ def _publish_broker_request() -> bool:
         return False
     request = {
         "want": selection["mode"] == "container",
-        "url": (os.environ.get("KAZMA_DOCUMENT_BROKER_URL") or "").strip(),
+        "url": broker_url(),
         "mode": selection["mode"],
         "source": selection["source"],
     }
