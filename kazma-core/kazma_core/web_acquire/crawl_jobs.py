@@ -272,7 +272,7 @@ def _valid_row(row):
 
         if not _valid(row['metadata']):
             return False
-    if 'metadata_limited' in row and type(row['metadata_limited']) is not bool:
+    if any(key in row and type(row[key]) is not bool for key in ('metadata_limited', 'sitemap_limited')):
         return False
     if not all(isinstance(page, dict) and isinstance(page.get('url'), str) and len(page['url']) <= 8192
             and page.get('status') in {'pending', 'running', 'completed', 'failed', 'ambiguous'} for page in pages):

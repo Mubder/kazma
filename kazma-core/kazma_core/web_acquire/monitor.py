@@ -137,7 +137,7 @@ def _collect():
             created=row['created_at'], updated=row['updated_at'], sources=counts['fetched'],
             progress=[phase, counts, row['ingested'],
                       {key: effect['status'] for key, effect in effects.items()},
-                      progress.get('discovered'), progress.get('visited')],
+                      progress.get('discovered'), progress.get('visited'), progress.get('indexing')],
             link=('/research?job=' if research else '/knowledge?job=') + quote(row['job_id'], safe=''),
             result_available=row['fetched'] > 0 or effects.get('terminal-summary', {}).get('status') == 'completed', kind='research' if research else 'crawl'))
     return jobs, credits.snapshot(), accounting._read_evidence(), left_to_agent
