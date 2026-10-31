@@ -1578,6 +1578,11 @@ BROKER_ENGINE_PAGE_AFTER_S = 600.0
 BROKER_STOP_GRACE_S = 45.0
 #: worker_broker.py's exit codes the guard tells apart.
 BROKER_EXIT_NO_IMAGE, BROKER_EXIT_NO_ENGINE, BROKER_EXIT_NEWER_IMAGE = 4, 5, 6
+#: The address it was given cannot be listened on: the guard moves it.
+BROKER_EXIT_PORT_UNAVAILABLE = 7
+#: Ports in a row that could not be listened on before the guard stops moving
+#: and backs off (something refuses every port, not just one).
+BROKER_PORT_MOVES = 3
 BROKER_LOG_MAX_BYTES = 2 * 1024 * 1024
 #: Everything else in the guard's environment stays out of the broker, the
 #: one process with authority over Docker: the guard's own secrets
@@ -1629,21 +1634,33 @@ def _port_is_free(port: int) -> bool:
     return True
 
 
-def _choose_broker_port(preferred: int | None) -> int:
+def _named_broker_port() -> int | None:
+    """The port the operator pinned (``KAZMA_GUARD_BROKER_PORT``), or None."""
+    named = (os.environ.get("KAZMA_GUARD_BROKER_PORT") or "").strip()
+    return int(named) if named else None
+
+
+def _choose_broker_port(preferred: int | None, *, avoid: frozenset[int] = frozenset()) -> int:
     """The broker's loopback port: KAZMA_GUARD_BROKER_PORT, else the one used
     before, else one derived from the install folder, below the ephemeral
     ranges (an outgoing connection can take an ephemeral port while the
-    broker restarts), the first free of 64."""
-    named = (os.environ.get("KAZMA_GUARD_BROKER_PORT") or "").strip()
-    if named:
-        return int(named)
-    if preferred and _port_is_free(preferred):
+    broker restarts): the first free one from there, through all of 20000 to
+    29999. *avoid* are ports the broker could not listen on.
+
+    The search covered 64 ports. Windows reserves ports in blocks of a hundred
+    (Hyper-V and WinNAT, when Docker Desktop starts): live 2026-10-31 it took
+    20181-20780 after a Docker restart, the recorded port 20527 and the 64
+    after it with it, and the broker could not start for hours."""
+    named = _named_broker_port()
+    if named is not None:
+        return named
+    if preferred and preferred not in avoid and _port_is_free(preferred):
         return preferred
     digest = hashlib.sha256(str(REPO_ROOT).lower().encode("utf-8")).hexdigest()
     base = 20000 + int(digest[:8], 16) % 10000
-    for step in range(64):
+    for step in range(10000):
         port = 20000 + (base - 20000 + step) % 10000
-        if _port_is_free(port):
+        if port not in avoid and _port_is_free(port):
             return port
     return base
 
@@ -1784,6 +1801,11 @@ class DocumentBroker:
         self.wanted = False
         self.detail = ""
         self.port: int | None = None
+        # Addresses this guard handed Kazma before moving the broker: a
+        # request naming one is still Kazma asking for this broker.
+        self._retired_urls: set[str] = set()
+        self._bad_ports: set[int] = set()
+        self._port_moves = 0
         self.token = ""
         self.image_requested = ""
         self.fallback = False
@@ -1824,7 +1846,11 @@ class DocumentBroker:
     def _ensure_port(self) -> None:
         if self.port is None:
             recorded = (_read_state().get("document_broker") or {}).get("port")
-            self.port = _choose_broker_port(recorded if isinstance(recorded, int) else None)
+            recorded = recorded if isinstance(recorded, int) else None
+            self.port = _choose_broker_port(recorded)
+            if recorded and recorded != self.port:
+                # Kazma's last request may still name the old address.
+                self._retired_urls.add(f"tcp://127.0.0.1:{recorded}")
 
     def server_env(self) -> dict[str, str]:
         """What the server needs to use and ask for the broker (empty when off)."""
@@ -1833,6 +1859,9 @@ class DocumentBroker:
         self._ensure_port()
         return {
             "KAZMA_DOCUMENT_BROKER_URL": self.url,
+            # The address may move (a port Windows reserved): Kazma then reads
+            # the current one from this guard's state file.
+            "KAZMA_DOCUMENT_BROKER_URL_SOURCE": "guard",
             "KAZMA_DOCUMENT_BROKER_TOKEN_FILE": str(self.token_path),
             "KAZMA_GUARD_BROKER_REQUEST_FILE": str(self.request_path),
         }
@@ -1865,7 +1894,7 @@ class DocumentBroker:
         if req.get("want") is not True:
             return False, "not_requested"
         self._ensure_port()
-        if str(req.get("url") or "") != self.url:
+        if str(req.get("url") or "") not in {self.url, *self._retired_urls}:
             # Kazma uses another broker (its .env names one): not this one.
             return False, "external"
         return True, "requested"
@@ -2122,6 +2151,7 @@ class DocumentBroker:
         self.ready_at = time.time()
         self.failures = 0
         self._next_probe = time.monotonic() + BROKER_PROBE_INTERVAL_S
+        self._port_moves = 0
         self.log("info", "broker.ready", pid=self.proc.pid if self.proc else None,
                  image=status.get("image_ref"), image_id=status.get("image_id"),
                  fallback=bool(status.get("image_fallback")),
@@ -2151,8 +2181,32 @@ class DocumentBroker:
         if code == BROKER_EXIT_NO_ENGINE:
             self._quiet_retry("docker_unavailable", "Docker does not answer", code, tail)
             return
+        if code == BROKER_EXIT_PORT_UNAVAILABLE and self._move_port(tail):
+            return
         self.log("warn", "broker.exited", code=code, tail=tail)
         self._failed(f"exited with code {code}", tail)
+
+    def _move_port(self, tail: str) -> bool:
+        """The broker could not listen on its port (taken, or reserved by
+        Windows): start it on another, at once. Kazma follows the address
+        through the state file (``KAZMA_DOCUMENT_BROKER_URL_SOURCE``), so
+        nothing restarts. False -- the caller backs off -- for a port the
+        operator pinned, or after BROKER_PORT_MOVES moves in a row."""
+        old = self.port
+        if _named_broker_port() is not None or self._port_moves >= BROKER_PORT_MOVES:
+            self.log("error", "broker.port_unavailable", port=old, moves=self._port_moves,
+                     pinned=_named_broker_port() is not None, tail=tail)
+            return False
+        self._port_moves += 1
+        if old:
+            self._bad_ports.add(old)
+            self._retired_urls.add(self.url)
+        self.port = _choose_broker_port(None, avoid=frozenset(self._bad_ports))
+        self.log("warn", "broker.port_moved", was=old, port=self.port, url=self.url,
+                 moves=self._port_moves, tail=tail)
+        self._write()
+        self._start()
+        return True
 
     def _quiet_retry(self, state: str, detail: str, code: int, tail: str) -> None:
         """A condition the operator fixes (an image to build, Docker to start):

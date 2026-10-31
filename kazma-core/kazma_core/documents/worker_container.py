@@ -233,7 +233,9 @@ def _no_endpoint_message() -> str:
 
 
 def _endpoint() -> _Endpoint:
-    url = (os.environ.get(BROKER_URL_ENV) or "").strip()
+    from .broker_supervision import broker_url
+
+    url = broker_url()  # the guard's current address when it handed the broker
     token_file = (os.environ.get(BROKER_TOKEN_FILE_ENV) or "").strip()
     if not url or not token_file:
         raise _unavailable(_no_endpoint_message())

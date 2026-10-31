@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## The document broker survives a port Windows reserved (2026-10-31)
+
+- When Docker Desktop restarted, Windows reserved ports 20181-20780 and the
+  document worker broker's port 20527 with them: documents were refused for
+  hours, and even a guard restart would have chosen the same port (its search
+  covered 64 ports). The broker now says "cannot listen" with its own exit
+  code before anything slow, the guard moves it to a free port at once
+  (searching the whole range; never a port the operator pinned), and Kazma
+  reads the broker's current address from the guard's state file, so a move
+  needs no restart.
+
 ## Crawls you can trust (2026-10-31)
 
 - **Each page's outcome, and the crawl's verdict from them.** A page is

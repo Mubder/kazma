@@ -38,7 +38,9 @@ Exit codes say why the broker stopped, so a supervisor (the guard,
 requested stop, 2 it could not start, 3 the policy did not hold or the image
 reported no engines, 4 no worker image is built, 5 the Docker engine does not
 answer, 6 the image built for this code appeared while an older one served
-(start again to use it).
+(start again to use it), 7 the TCP address it was given cannot be listened on
+(taken, or reserved by Windows -- the supervisor gives it another; checked
+first, before the image is attested).
 """
 
 from __future__ import annotations
@@ -79,6 +81,7 @@ PROTOCOL = 1
 #: Exit codes (see the module docstring).
 EXIT_STOPPED, EXIT_CANNOT_START, EXIT_POLICY = 0, 2, 3
 EXIT_NO_IMAGE, EXIT_NO_ENGINE, EXIT_NEWER_IMAGE = 4, 5, 6
+EXIT_PORT_UNAVAILABLE = 7
 #: Mirrors kazma_core.documents.worker_image.SOURCE_LABEL / DOCUMENTS_LABEL
 #: (kept equal by a test): the broker image is this file alone.
 IMAGE_SOURCE_LABEL = "io.kazma.document-worker-image.source"
@@ -1143,9 +1146,31 @@ def _stop_on_signals(server: socketserver.BaseServer) -> list[threading.Thread]:
     return stoppers
 
 
+def _tcp_listen_refused(listen: str) -> OSError | None:
+    """Why a ``tcp:host:port`` address cannot be listened on, or None. A test
+    bind, made before the image is attested (a container run): a port Windows
+    reserved answers at once instead of after the attestation every retry."""
+    if not listen.startswith("tcp:"):
+        return None
+    host, _, port = listen[4:].rpartition(":")
+    try:
+        family = socket.AF_INET6 if ":" in host.strip("[]") else socket.AF_INET
+        with socket.socket(family, socket.SOCK_STREAM) as probe:
+            probe.bind((host.strip("[]"), int(port)))
+    except OSError as exc:
+        return exc
+    except ValueError:
+        return None  # a malformed address is _make_server's to refuse
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = _parse_args(argv)
+    refused = _tcp_listen_refused(args.listen)
+    if refused is not None:
+        logger.error("[broker] cannot listen on %s: %s", args.listen, refused)
+        return EXIT_PORT_UNAVAILABLE
     docker = args.docker or _find_docker_cli()
     if not docker:
         logger.error("[broker] docker CLI not found")
@@ -1218,7 +1243,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (OSError, ValueError) as exc:
         logger.error("[broker] cannot listen on %s: %s", args.listen, exc)
-        return EXIT_CANNOT_START
+        taken = isinstance(exc, OSError) and args.listen.startswith("tcp:")
+        return EXIT_PORT_UNAVAILABLE if taken else EXIT_CANNOT_START
     logger.info("[broker] serving %s image=%s (%s) on %s", settings.name, broker.image_id,
                 broker.image_ref, args.listen)
     stoppers = _stop_on_signals(server)

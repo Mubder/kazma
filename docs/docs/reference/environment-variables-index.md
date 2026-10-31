@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**279** variables are read by the product code; **279** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**280** variables are read by the product code; **280** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -77,6 +77,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DOCUMENTS_METADATA_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
 | `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` | (none) | `kazma_core.documents.worker_container` | yes |
 | `KAZMA_DOCUMENT_BROKER_URL` | (none) | `kazma_core.documents.broker_supervision`, `kazma_core.documents.worker_container` | yes |
+| `KAZMA_DOCUMENT_BROKER_URL_SOURCE` | (none) | `kazma_core.documents.broker_supervision` | yes |
 | `KAZMA_DOCUMENT_FONT_DIR` | `""` | `kazma_core.documents.fonts` | yes |
 | `KAZMA_DOCUMENT_WORKER_ISOLATION` | (none) | `kazma_core.documents.worker_container` | yes |
 | `KAZMA_E2B` | (none) | `kazma_core.sandbox.e2b` | yes |

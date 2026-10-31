@@ -555,3 +555,92 @@ def test_a_broker_left_by_a_killed_guard_is_reaped(tmp_path):
     while time.time() < deadline and guard._pid_alive(orphan):
         time.sleep(0.5)
     assert not guard._pid_alive(orphan)
+
+
+# ── a port the broker cannot listen on (live 2026-10-31) ──────────────────
+
+
+def _reserve(monkeypatch, ports: set[int]) -> None:
+    """Windows' reserved block: these ports cannot be bound."""
+    monkeypatch.setattr(guard, "_port_is_free", lambda port: port not in ports)
+
+
+def test_a_port_windows_reserved_is_replaced_and_kazma_still_asks_for_it(monkeypatch, tmp_path):
+    """Docker restarted, Windows reserved 20181-20780, and the broker could not
+    listen on its recorded port 20527 for hours. It moves now, at once."""
+    h = _Harness(monkeypatch, tmp_path)
+    monkeypatch.delenv("KAZMA_GUARD_BROKER_PORT")
+    h.b.port = None
+    h.b.before_spawn()
+    old_port, old_url = h.b.port, h.b.url
+    _reserve(monkeypatch, set(range(old_port - 300, old_port + 300)))
+    h.exit_current(guard.BROKER_EXIT_PORT_UNAVAILABLE)
+    h.run_for(1)
+    assert h.b.port not in range(old_port - 300, old_port + 300)
+    assert len(h.procs) == 2 and f"tcp:127.0.0.1:{h.b.port}" in h.procs[-1].cmd
+    assert "broker.port_moved" in h.events() and "broker.restarting" not in h.events()
+    state = json.loads(Path(os.environ["KAZMA_GUARD_STATE"]).read_text(encoding="utf-8"))
+    assert state["document_broker"]["url"] == h.b.url != old_url
+    # Kazma's request still names the address it was handed: still ours.
+    h.b.request_path.parent.mkdir(parents=True, exist_ok=True)
+    h.b.request_path.write_text(json.dumps({"want": True, "url": old_url}), encoding="utf-8")
+    monkeypatch.setenv("KAZMA_GUARD_DOCUMENT_BROKER", "auto")
+    h.b.mode = "auto"
+    assert h.b._decide() == (True, "requested")
+    assert h.b.server_env()["KAZMA_DOCUMENT_BROKER_URL_SOURCE"] == "guard"
+
+
+def test_the_search_crosses_a_reserved_block(monkeypatch):
+    """The 64-port search found nothing in a block of hundreds and fell back
+    to the reserved port itself; the search crosses the whole range now."""
+    monkeypatch.delenv("KAZMA_GUARD_BROKER_PORT", raising=False)
+    base = guard._choose_broker_port(None)
+    _reserve(monkeypatch, set(range(base, base + 600)))
+    assert guard._choose_broker_port(base) not in range(base, base + 600)
+
+    def old_search():  # negative control: the search before 2026-10-31
+        for step in range(64):
+            port = 20000 + (base - 20000 + step) % 10000
+            if guard._port_is_free(port):
+                return port
+        return base
+
+    assert old_search() == base
+
+
+def test_a_pinned_port_is_not_moved(monkeypatch, tmp_path):
+    """KAZMA_GUARD_BROKER_PORT is the operator's: it backs off and says so."""
+    h = _Harness(monkeypatch, tmp_path)
+    h.b.before_spawn()
+    h.exit_current(guard.BROKER_EXIT_PORT_UNAVAILABLE)
+    h.run_for(1)
+    assert h.b.port == 28765 and h.b.state == "backoff"
+    assert "broker.port_unavailable" in h.events() and "broker.port_moved" not in h.events()
+
+
+def test_moving_stops_after_a_few_ports_in_a_row(monkeypatch, tmp_path):
+    h = _Harness(monkeypatch, tmp_path)
+    monkeypatch.delenv("KAZMA_GUARD_BROKER_PORT")
+    h.b.port = None
+    h.ready = False
+    h.b.before_spawn()
+    for _ in range(guard.BROKER_PORT_MOVES + 1):
+        h.exit_current(guard.BROKER_EXIT_PORT_UNAVAILABLE)
+        h.run_for(1)
+    assert h.events().count("broker.port_moved") == guard.BROKER_PORT_MOVES
+    assert h.b.state == "backoff" and "broker.port_unavailable" in h.events()
+
+
+def test_the_real_guard_moves_a_broker_whose_port_is_refused(tmp_path):
+    """The guard process itself, a fake broker refusing its first port: the
+    broker is answering on another port with no backoff, and the state file
+    (which Kazma reads, documents/broker_supervision.broker_url) names it."""
+    port = _free_port()
+    run = _BrokerRun(tmp_path, port, broker={"refuse_first_port": True})
+    run.env.pop("KAZMA_GUARD_BROKER_PORT")  # not pinned: the guard chooses
+    with run as g:
+        g.wait_for("broker.ready", timeout=90)
+        refused = (tmp_path / "fake_broker.refused_port").read_text(encoding="utf-8")
+        record = g.state()["document_broker"]
+        assert g.count("broker.port_moved") == 1 and g.count("broker.restarting") == 0
+        assert record["url"] != "tcp://" + refused[len("tcp:"):] and record["state"] == "running"

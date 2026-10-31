@@ -3011,7 +3011,8 @@ lines and a hand-run process -- and every document was refused.
   `system.documents.worker_image_alerted`).
 - **Broker exit codes** are the guard's vocabulary: 2 cannot start, 3 policy or
   no engines, 4 no image (`_NoWorkerImageError`), 5 no Docker engine
-  (`_DockerEngineUnavailableError`, `check_engine` first), 6 newer image. The
+  (`_DockerEngineUnavailableError`, `check_engine` first), 6 newer image, 7 the
+  TCP address cannot be listened on (a test bind, first, before attesting). The
   broker handles the guard's CTRL_BREAK (SIGBREAK) and SIGTERM, also while it
   attests, and removes its job containers on the way out.
 Gates: `tests/test_document_worker_profile.py`, `tests/test_document_worker_image.py`
@@ -6831,8 +6832,22 @@ code) and Kazma ran with nobody supervising it.
   earlier guard left (`broker.orphan_reaped`). Its environment is scrubbed
   (`_BROKER_ENV_KEEP`: the guard's Telegram token never reaches the Docker
   holder). The loopback port is kept for the install
-  (`KAZMA_GUARD_BROKER_PORT`, else the recorded one, else derived from the
-  install folder below the ephemeral ranges). The token
+  (`KAZMA_GUARD_BROKER_PORT`, else the recorded one while free, else the first
+  free one from a port derived from the install folder, through all of
+  20000-29999). **A port the broker cannot listen on is replaced, and Kazma
+  follows** (2026-10-31): live, Docker Desktop restarted, Windows reserved
+  20181-20780, the recorded 20527 with it, and documents were refused for
+  hours -- the 64-port search could only fall back to the reserved port. On
+  exit 7 the guard moves the broker at once (`_move_port`, three times in a
+  row at most; a pinned port is never moved), remembers the addresses it
+  handed out (a request naming one is still Kazma's), and hands Kazma
+  `KAZMA_DOCUMENT_BROKER_URL_SOURCE=guard`: Kazma then takes the broker's
+  current loopback address from the guard's state file
+  (`broker_supervision.broker_url`), no restart. Gates:
+  `tests/test_document_broker_port.py`, the port tests in
+  `tests/test_guard_document_broker.py` (the old search as the negative
+  control, and the real guard with a fake broker refusing its first port).
+  The token
   `.kazma/document_broker.token` is made once, restricted to the guard's
   account (`icacls /inheritance:r` + its SID) before the secret is written,
   never logged; it is restricted again at every start, and a file that
