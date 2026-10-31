@@ -1081,8 +1081,11 @@
   // one search. Listed first as "[Chat] <query> · session · done · 1
   // source", above every report, they read as Kazma's research (live
   // 2026-10-31). Their own group, after the research, says what they are.
+  // The list is drawn again on every 15-second refresh: an opened group
+  // stays open.
+  var searchesOpen = false;
   function searchesHtml(searches) {
-    return '<details class="research-searches" style="margin-top:12px;">' +
+    return '<details class="research-searches" style="margin-top:12px;"' + (searchesOpen ? ' open' : '') + '>' +
       '<summary style="cursor:pointer;font-weight:600;color:var(--text-primary);padding:6px 0;">' +
         esc(i18n('research.ui.web_searches', 'Web searches from chat')) +
         ' <span style="font-weight:400;color:var(--text-muted);">(' + searches.length + ')</span>' +
@@ -1096,6 +1099,8 @@
   function renderList(tasks, searches) {
     var el = $('research-list');
     searches = searches || [];
+    var shown = el.querySelector ? el.querySelector('details.research-searches') : null;
+    if (shown) searchesOpen = !!shown.open;
     if (!tasks.length && !searches.length) {
       el.innerHTML = listIncomplete ? '' : '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_results')) + '</div>';
       return;
