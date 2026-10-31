@@ -7,6 +7,8 @@ description: Manual verification matrix for research, KB, proxy, memory, chat ex
 
 # Smoke test matrix
 
+> This page is published at [kazma.ai/docs/ops/smoke-matrix/](https://kazma.ai/docs/ops/smoke-matrix/) ([Arabic](https://kazma.ai/ar/docs/ops/smoke-matrix/)).
+
 Run after pulls that touch research, Knowledge Library, proxy, V2 memory, or
 **Document Intelligence**. Check off each row; note environment (local / Docker /
 SearXNG / proxy).

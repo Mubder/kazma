@@ -4,6 +4,8 @@ title: FAQ
 sidebar_label: FAQ
 description: Kazma FAQ — code-audited reference (unified docs, v0.9+)
 ---
+> This page is published at [kazma.ai/docs/faq/](https://kazma.ai/docs/faq/) ([Arabic](https://kazma.ai/ar/docs/faq/)).
+
 > Short answers to the questions operators and integrators actually ask.
 
 ---

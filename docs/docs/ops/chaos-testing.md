@@ -7,6 +7,8 @@ description: Inject latency, errors and timeouts into a running Kazma to watch i
 
 # Chaos testing (fault injection)
 
+> This page is published at [kazma.ai/docs/chaos-testing/](https://kazma.ai/docs/chaos-testing/) ([Arabic](https://kazma.ai/ar/docs/chaos-testing/)).
+
 Kazma can inject failures into itself: slow or failing model calls, failing
 tool calls, failing database writes. It exists to prove that the retry,
 failover and error paths work, on a test server, before a real outage tests

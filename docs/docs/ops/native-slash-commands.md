@@ -2,6 +2,8 @@
 title: Native chat commands
 ---
 
+> This page is published at [kazma.ai/docs/native-slash-commands/](https://kazma.ai/docs/native-slash-commands/) ([Arabic](https://kazma.ai/ar/docs/native-slash-commands/)).
+
 Kazma accepts ordinary slash text in Telegram, Discord and Slack. Discord and
 Slack also accept a native **`/kazma`** command with a command-and-arguments
 field: `x help`, `ide help`, `documents list`, or `help`. All execution goes

@@ -1,5 +1,7 @@
 # `kazma mcp` — your agent keeps its brain, its tools get a seatbelt
 
+> This page is published at [kazma.ai/docs/mcp-server/](https://kazma.ai/docs/mcp-server/) ([Arabic](https://kazma.ai/ar/docs/mcp-server/)).
+
 Kazma is mostly an MCP *client*: it consumes other people's tools. This is the
 other direction, and it is the more useful one.
 

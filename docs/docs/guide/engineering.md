@@ -7,6 +7,8 @@ description: What Kazma builds itself on top of LangGraph and its libraries, the
 
 # Engineering inside Kazma
 
+> This page is published at [kazma.ai/docs/engineering/](https://kazma.ai/docs/engineering/) ([Arabic](https://kazma.ai/ar/docs/engineering/)).
+
 Kazma uses LangGraph for its agent loop and ordinary libraries for the rest
 (FastAPI, httpx, SQLite, Postgres, Chroma, Playwright). This page is about the
 parts it builds itself. Most of them exist because something went wrong on a

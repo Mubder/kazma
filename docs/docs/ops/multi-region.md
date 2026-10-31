@@ -7,6 +7,8 @@ description: Prepare and qualify Kazma's single-owner active/passive deployment
 
 # Multi-region and HA qualification
 
+> This page is published at [kazma.ai/docs/ops/multi-region/](https://kazma.ai/docs/ops/multi-region/) ([Arabic](https://kazma.ai/ar/docs/ops/multi-region/)).
+
 Kazma's HA preparation profile runs **one active runtime owner**. A replacement
 may start after the previous owner has been fenced and the complete state volume
 has moved safely. Postgres support in individual stores does not make every

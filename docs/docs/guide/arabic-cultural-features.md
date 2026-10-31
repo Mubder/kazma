@@ -4,6 +4,8 @@ title: Arabic & Cultural Features
 sidebar_label: Arabic & Cultural Features
 description: Kazma Arabic & Cultural Features — code-audited reference (unified docs, v0.9+)
 ---
+> This page is published at [kazma.ai/docs/arabic-cultural-features/](https://kazma.ai/docs/arabic-cultural-features/) ([Arabic](https://kazma.ai/ar/docs/arabic-cultural-features/)).
+
 > Kazma is Arabic-native: Arabic works out of the box, beside English. This document covers the components that implement it: dialect detection and the tokenizers, Arabic in search, the i18n + RTL UI layer, and the Majlis cultural protocol — all source-referenced, with honest notes on scope. For the engineering underneath (direction, shaping, search folding, Arabic memory, PDF and OCR reading), see [How Kazma handles Arabic](arabic-engineering.md).
 
 ---

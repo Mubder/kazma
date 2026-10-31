@@ -7,6 +7,8 @@ description: Three-part diagnostic — chat tools, HTTP/ops, one HITL write — 
 
 # Full-system battery
 
+> This page is published at [kazma.ai/docs/ops/full-battery/](https://kazma.ai/docs/ops/full-battery/) ([Arabic](https://kazma.ai/ar/docs/ops/full-battery/)).
+
 Three independent runs. **A green Part A is not a green Kazma.** Score at the bottom.
 
 | Part | What it proves | What it cannot prove |

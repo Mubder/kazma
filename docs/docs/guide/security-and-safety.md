@@ -4,6 +4,8 @@ title: Security & Safety
 sidebar_label: Security & Safety
 description: Kazma Security & Safety — code-audited reference
 ---
+> This page is published at [kazma.ai/docs/security-and-safety/](https://kazma.ai/docs/security-and-safety/) ([Arabic](https://kazma.ai/ar/docs/security-and-safety/)).
+
 > Kazma's safety model: **three HITL execution paths + one gate registry**, default-deny tool tiers, fail-closed bus, CSRF / trusted-proxy, SSRF pin-IP, HMAC skills, and hardening. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §7, §26, §30–§32.
 
 **Also see:** [Document security](../security/document-security) — hostile intake,

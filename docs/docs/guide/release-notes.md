@@ -4,6 +4,8 @@ sidebar_label: Release notes
 description: Dated changes and links to the Kazma upgrade guides.
 ---
 
+> This page is published at [kazma.ai/docs/release-notes/](https://kazma.ai/docs/release-notes/) ([Arabic](https://kazma.ai/ar/docs/release-notes/)).
+
 ## What's new (2026-10-26)
 
 | Area | Change |

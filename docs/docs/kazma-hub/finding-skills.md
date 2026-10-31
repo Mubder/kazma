@@ -4,6 +4,8 @@ sidebar_position: 3
 
 # Finding Skills
 
+> This page is published at [kazma.ai/docs/hub/finding-skills/](https://kazma.ai/docs/hub/finding-skills/) ([Arabic](https://kazma.ai/ar/docs/hub/finding-skills/)).
+
 Discover and install skills from the Hub registry and built-in natives.
 
 ## Search
