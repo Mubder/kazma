@@ -4430,6 +4430,16 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   `tests/test_research_crawl_recovery.py` (real SQLite child crashes before/after
   publication, cancellation/terminal race, concurrent resume and invalid state),
   `tests/test_acquisition_postgres.py` (real independent PostgreSQL connections).
+- **A deep research covers what its plan asked** (2026-10-31). Each search's
+  results are ranked against that search's own query and taken in turns
+  (`web_acquire.rank_by_coverage`): every sub-question gets a source before
+  any gets a second. Pooled and ranked against the topic, the address score
+  decided alone (`.gov` +4): a Kuwait history report's first source was a
+  COVID-19 cost study. The gap critic runs whatever the source count, with
+  its own budget (`_gap_search_due`; half `max_sources`, at least 2); gated
+  on a full quota it never ran in a deep run. Gate:
+  `tests/test_research_source_coverage.py` (pooled ranking and the old gate
+  as negative controls).
 - Research pipeline execution uses `web_acquire.research_runtime`: four active
   pipelines and four background sessions in this Python process, with no waiting
   queue. Admit before planning/session creation, freeze workspace/operator and
@@ -5644,7 +5654,11 @@ registry before the swarm bus. The cards had said "BLOCKED: host shell is
 disabled" and asked to approve a navigation Windows refuses. Gates:
 `tests/test_shell_refused_before_card.py`, `tests/test_browser_refused_before_card.py`
 (the live URL; the old browser tools give exactly the live `effect_uncertain`;
-a launchable or runnable call still gets its card).
+a launchable or runnable call still gets its card). So does a call whose
+arguments the output limit cut off (`_refuse_unrunnable_calls(truncated=)`:
+the response ended at max_tokens and the arguments are `{"raw": ...}` or
+empty): live 2026-10-31 the owner was asked to approve half a JSON object
+that the worker then skipped (`tests/test_truncated_tool_call.py`).
 `dispatch_effects` tracks actual local/MCP mutator invocation across the worker
 retry boundary, after validation and HITL. An unsuccessful dispatch after such
 an invocation carries `retry_safe=False`; keep it on `WorkerResult` through

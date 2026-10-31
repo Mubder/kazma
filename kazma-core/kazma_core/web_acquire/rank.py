@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 
-__all__ = ["RankedUrl", "rank_urls", "score_url"]
+__all__ = ["RankedUrl", "rank_by_coverage", "rank_urls", "score_url"]
 
 # Higher = more preferred for research grounding
 _BOOST_TLDS = (".gov", ".edu", ".mil", ".int")
@@ -129,6 +129,56 @@ def score_url(url: str, query: str = "") -> tuple[float, list[str]]:
         score -= 0.5
 
     return score, reasons
+
+
+def rank_by_coverage(
+    results: Mapping[str, Sequence[str]],
+    *,
+    max_per_domain: int = 2,
+    limit: int | None = None,
+    exclude: Iterable[str] = (),
+) -> list[RankedUrl]:
+    """Rank each search's results against its OWN query, then take them in
+    turns: every search's best source before any search's second.
+
+    A research plan asks one search per sub-question. Ranked together against
+    the whole topic, the address score decides alone (a `.gov` +4, the topic's
+    words rarely in a URL): live 2026-10-31 a Kuwait history paper's first
+    source was a COVID-19 hospital cost study, its third NASA's oil fields
+    page, and the earliest mentions, 2003 and the 2006-2014 crises had none.
+    Within one search the engine's own order breaks ties.
+    """
+    skip = {u for u in exclude if u}
+    per_query: list[list[RankedUrl]] = []
+    for query, urls in results.items():
+        scored: list[tuple[float, int, RankedUrl]] = []
+        for position, raw in enumerate(urls):
+            u = (raw or "").strip().rstrip(".,;:)")
+            if not u or u in skip:
+                continue
+            sc, reasons = score_url(u, query)
+            scored.append((sc, position, RankedUrl(url=u, score=sc, domain=_domain(u), reasons=tuple(reasons))))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        per_query.append([item[2] for item in scored])
+
+    out: list[RankedUrl] = []
+    seen: set[str] = set()
+    domain_n: dict[str, int] = {}
+    cap = max(1, int(max_per_domain))
+    while any(per_query):
+        for queue in per_query:
+            while queue:
+                r = queue.pop(0)
+                d = r.domain or "_"
+                if r.url in seen or domain_n.get(d, 0) >= cap:
+                    continue
+                seen.add(r.url)
+                domain_n[d] = domain_n.get(d, 0) + 1
+                out.append(r)
+                break
+            if limit is not None and len(out) >= max(1, int(limit)):
+                return out
+    return out
 
 
 def rank_urls(

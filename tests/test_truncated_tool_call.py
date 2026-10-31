@@ -66,3 +66,54 @@ async def test_malformed_args_without_truncation_still_schema_error() -> None:
 
     executor.execute.assert_called_once()
     assert "missing required argument" in out["tool_calls_done"][0]["content"]
+
+
+LIVE_SEVERED = '{"path": "research/kuwait/KUWAIT_HISTORY_PAPER.md", "content": "# Kuwait: From Kazima to the Modern State\n\n## A Research Pap'
+
+
+def _paper_state(finish_reason: str) -> dict[str, Any]:
+    from kazma_core.agent.state import initial_supervisor_state
+
+    state = initial_supervisor_state()
+    state["tool_calls_pending"] = [{"id": "w1", "name": "file_write", "arguments": {"raw": LIVE_SEVERED}}]
+    state["_last_finish_reason"] = finish_reason
+    return state
+
+
+async def _run_with_cards(monkeypatch, state) -> tuple[list[Any], dict[str, Any], MagicMock]:
+    cards: list[Any] = []
+
+    def _card(payload):
+        cards.append(payload)
+        return {"approved": True}
+
+    monkeypatch.setattr("langgraph.types.interrupt", _card, raising=False)
+    from kazma_core.agent.graph_builder import tool_worker_node
+
+    executor = MagicMock()
+    executor.execute = AsyncMock(return_value={"content": "Error: missing required argument(s): path, content", "is_error": True})
+    out = await tool_worker_node(state, tool_executor=executor, tracer=MagicMock(),
+                                 hitl_config={"enabled": True, "require_approval_for": ["file_write"]})
+    return cards, out, executor
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_output_limit_cut_off_gets_no_approval_card(monkeypatch) -> None:
+    """Live 2026-10-31: a research paper written in one file_write ran past
+    the output limit, and the owner was asked to approve
+    ``file_write(raw="{\\"path\\": ...")`` -- half a JSON object that the worker
+    then skipped after the approval. It is refused before any card."""
+    cards, out, executor = await _run_with_cards(monkeypatch, _paper_state("length"))
+    assert cards == []
+    executor.execute.assert_not_called()
+    done = out["tool_calls_done"]
+    assert done[0]["is_error"] and done[0].get("outcome") == "policy"
+    assert "TRUNCATED" in done[0]["content"] and "no approval was asked" in done[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_negative_control_the_same_call_with_no_cut_off_still_asks(monkeypatch) -> None:
+    """Without a cut-off response the call is the registry's to refuse (it
+    names the missing arguments), and the card is asked as before."""
+    cards, out, executor = await _run_with_cards(monkeypatch, _paper_state("tool_calls"))
+    assert len(cards) == 1
