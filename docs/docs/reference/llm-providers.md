@@ -5,6 +5,8 @@ sidebar_label: LLM Providers
 description: All supported LLM providers — OpenAI-compatible presets and native provider classes (Anthropic, Azure, Bedrock, Gemini).
 ---
 
+> This page is published at [kazma.ai/docs/llm-providers/](https://kazma.ai/docs/llm-providers/) ([Arabic](https://kazma.ai/ar/docs/llm-providers/)).
+
 Kazma talks to LLMs over plain HTTP (no SDK lock-in). Most providers speak the
 **OpenAI Chat Completions wire format** and work through the generic
 `LLMProvider` with `Authorization: Bearer`. A few providers need a **dedicated

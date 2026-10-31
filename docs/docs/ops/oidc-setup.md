@@ -7,6 +7,8 @@ description: OIDC IdP Setup — production ops
 
 # OIDC / IdP setup (Okta, Auth0, Entra, Keycloak)
 
+> This page is published at [kazma.ai/docs/ops/oidc-setup/](https://kazma.ai/docs/ops/oidc-setup/) ([Arabic](https://kazma.ai/ar/docs/ops/oidc-setup/)).
+
 Kazma uses standard OpenID Connect (authorization code + PKCE).
 
 **Fail-closed:** the callback **verifies** the `id_token` (JWKS for RS/ES/PS,

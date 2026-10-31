@@ -4,6 +4,8 @@ title: Roadmap & Future
 sidebar_label: Roadmap & Future
 description: Kazma Roadmap & Future — code-audited reference (unified docs, v0.11+)
 ---
+> This page is published at [kazma.ai/docs/roadmap-and-future/](https://kazma.ai/docs/roadmap-and-future/) ([Arabic](https://kazma.ai/ar/docs/roadmap-and-future/)).
+
 > An honest separation of what Kazma does today from what is planned, aspirational, or partially wired. Every row re-checked against the code on 2026-09-27.
 
 ---

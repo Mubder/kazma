@@ -4,6 +4,8 @@ title: Architecture
 sidebar_label: Architecture
 description: Kazma Architecture — code-audited reference (unified docs)
 ---
+> This page is published at [kazma.ai/docs/architecture/](https://kazma.ai/docs/architecture/) ([Arabic](https://kazma.ai/ar/docs/architecture/)).
+
 > A deep, source-referenced breakdown of the Kazma engine: the supervisor brain, the data path from user intent to tool execution, and the subsystems that make it durable, safe, and multilingual. Binding invariants live in [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md); this page describes structure. For what Kazma builds itself, each piece with its code and its test, see [Engineering inside Kazma](engineering.md); for one message followed through the code, see [How a turn works](how-a-turn-works.md). Binding audit: [`AUDIT_DEEP_2026-09-01_EXEC.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md) (waves 0–8 shipped).
 
 ---

@@ -7,6 +7,8 @@ description: Ingest whole documentation sites once, then have the agent reason o
 
 # Knowledge Library
 
+> This page is published at [kazma.ai/docs/knowledge-base-and-rag/](https://kazma.ai/docs/knowledge-base-and-rag/) ([Arabic](https://kazma.ai/ar/docs/knowledge-base-and-rag/)).
+
 A **Knowledge Library** is a named, managed corpus of ingested documentation — for example, the Meta WhatsApp Cloud API. You point Kazma at a doc root once; it crawls the tree, chunks it by heading, embeds it, and indexes it. The agent then **reasons over** the corpus and **cites sources** when you ask questions.
 
 **Operator tour (re-index, inject, Settings toggles):** [Recent features](./recent-features#3-knowledge-library-hardening).

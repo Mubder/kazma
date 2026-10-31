@@ -4,6 +4,8 @@ title: Skills, MCP & Tools
 sidebar_label: Skills, MCP & Tools
 description: Kazma Skills, MCP & Tools — code-audited reference (unified docs, v0.9+)
 ---
+> This page is published at [kazma.ai/docs/skills-mcp-and-tools/](https://kazma.ai/docs/skills-mcp-and-tools/) ([Arabic](https://kazma.ai/ar/docs/skills-mcp-and-tools/)).
+
 > Skill manifests, cryptographic signing, MCP transports, tool classification, the Hub, and how to extend Kazma with new tools — all source-referenced.
 
 ---

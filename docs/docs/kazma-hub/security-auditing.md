@@ -4,6 +4,8 @@ sidebar_position: 4
 
 # Security auditing (skills)
 
+> This page is published at [kazma.ai/docs/hub/security-auditing/](https://kazma.ai/docs/hub/security-auditing/) ([Arabic](https://kazma.ai/ar/docs/hub/security-auditing/)).
+
 Hub validation scores skills for unsafe patterns and weak packaging. Treat this as a **local gate**, not a substitute for production HITL.
 
 ## What validation covers

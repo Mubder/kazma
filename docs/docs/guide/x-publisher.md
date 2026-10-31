@@ -5,6 +5,8 @@ sidebar_label: X publisher
 description: Post to X through the official API v2 with OAuth 1.0a, vaulted keys, X Studio, always-on chat HITL, and ToU fail-safes.
 ---
 
+> This page is published at [kazma.ai/docs/x-publisher/](https://kazma.ai/docs/x-publisher/) ([Arabic](https://kazma.ai/ar/docs/x-publisher/)).
+
 Kazma tweets **only** through the [official X API v2](https://docs.x.com/x-api/posts/manage-tweets/introduction) using **OAuth 1.0a user context**. There is no scrape path, no Playwright/computer-use poster, and no app-only Bearer posting. X also supports OAuth 2.0 user tokens; this connector uses its four OAuth 1.0a credentials.
 
 ## Posting fresh Kazma repository metrics

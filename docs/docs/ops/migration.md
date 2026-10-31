@@ -7,6 +7,8 @@ description: Move a full Kazma installation across machines/OSes with kazma migr
 
 # Cross-machine migration (`kazma migrate`)
 
+> This page is published at [kazma.ai/docs/migration/](https://kazma.ai/docs/migration/) ([Arabic](https://kazma.ai/ar/docs/migration/)).
+
 > Move a full Kazma installation — config, secrets, memory, chat history, snapshots, scheduled jobs, assets — from one machine to another (WSL→Windows, Linux→Mac, server→laptop) **without the silent breakage of a naive copy-paste.**
 
 A naive file copy breaks in three specific ways: the encrypted vault becomes undecryptable (wrong key), embedded file paths point at a dead `/home/user/...`, and Postgres-backed data (chat history, settings, checkpoints) is missed entirely. `kazma migrate` prevents all three.

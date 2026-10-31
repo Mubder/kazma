@@ -4,6 +4,8 @@ sidebar_position: 1
 
 # Security Policy
 
+> This page is published at [kazma.ai/docs/security/security-policy/](https://kazma.ai/docs/security/security-policy/) ([Arabic](https://kazma.ai/ar/docs/security/security-policy/)).
+
 **Canonical policy:** repository root
 [`SECURITY.md`](https://github.com/Mubder/kazma/blob/main/SECURITY.md).
 For how to report issues, see [Vulnerability reporting](./vulnerability-reporting).

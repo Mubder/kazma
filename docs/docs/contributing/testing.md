@@ -4,6 +4,8 @@ sidebar_position: 3
 
 # Testing
 
+> This page is published at [kazma.ai/docs/contributing/testing/](https://kazma.ai/docs/contributing/testing/) ([Arabic](https://kazma.ai/ar/docs/contributing/testing/)).
+
 ## Test framework
 
 - pytest with pytest-asyncio

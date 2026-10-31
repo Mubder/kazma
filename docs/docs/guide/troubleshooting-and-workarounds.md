@@ -4,6 +4,8 @@ title: Troubleshooting
 sidebar_label: Troubleshooting
 description: Kazma Troubleshooting — code-audited reference (unified docs, v0.9+)
 ---
+> This page is published at [kazma.ai/docs/troubleshooting-and-workarounds/](https://kazma.ai/docs/troubleshooting-and-workarounds/) ([Arabic](https://kazma.ai/ar/docs/troubleshooting-and-workarounds/)).
+
 > Practical fixes for the issues you will actually hit: provider limits, Windows/Docker specifics, SQLite concurrency, Arabic tokenization edge cases, and the known codebase gaps the audit uncovered. Every item is source-referenced.
 >
 > **Multi-path bugs** (same feature, several code paths): start with the

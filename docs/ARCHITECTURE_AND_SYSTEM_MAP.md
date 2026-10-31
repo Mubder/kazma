@@ -1,5 +1,7 @@
 # Kazma — Architecture & System Map
 
+> This page is published at [kazma.ai/docs/reference/architecture-system-map/](https://kazma.ai/docs/reference/architecture-system-map/) ([Arabic](https://kazma.ai/ar/docs/reference/architecture-system-map/)).
+
 **Map of production-wired modules** (invariants live in `AGENTS.md`)  
 **Version:** 0.10.x  
 **Date:** 2026-09-02  

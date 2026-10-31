@@ -7,6 +7,8 @@ description: Code-backed map of Document Intelligence build phases 0–10, tests
 
 # Document Intelligence — Phase map (0–10)
 
+> This page is published at [kazma.ai/docs/document-phases/](https://kazma.ai/docs/document-phases/) ([Arabic](https://kazma.ai/ar/docs/document-phases/)).
+
 This page is the **source of truth for phase narrative**. Product usage lives in
 [Document Intelligence](./document-intelligence.md); security in
 [Document security](../security/document-security.md); ops in
