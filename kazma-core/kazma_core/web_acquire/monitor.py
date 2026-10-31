@@ -173,9 +173,16 @@ def _observe_jobs(state, jobs, cfg, now, event):
                     event(key, status, job['link'], sources=job['sources'], result_available=job['result_available'])
         elif previous['signature'] != signature:
             was_stalled = previous['stalled']
+            # A finished run is told once. Its fingerprint can change without
+            # its status (a later write, or the fingerprint's own fields: a
+            # deploy that added one re-sent every finished run's "Partial
+            # results" and "Crawl failed" to Telegram, live 2026-10-31).
+            repeat = terminal and previous['status'] == status and not was_stalled
             previous.update(signature=signature, since=now, status=status, stalled=False,
                             observed_at=job['updated'])
-            if terminal or was_stalled:
+            if repeat:
+                pass
+            elif terminal or was_stalled:
                 if not terminal or cfg['notify_completed'] or status not in {'done', 'completed'}:
                     event(key, status if terminal else 'resumed', job['link'], sources=job['sources'], result_available=job['result_available'])
                 else:
