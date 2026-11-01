@@ -52,7 +52,13 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     access = check_path_access(resolved_p, mode)
     if access.allowed:
         return None
-    if op in ("reads", "listings", "searches") and _is_under_agent_skill_dir(resolved_p):
+    # A Kazma store or secret file is refused wherever it sits, a skill
+    # folder included (the skill folders are in the home, beside .kazma).
+    if (
+        access.via != "store"
+        and op in ("reads", "listings", "searches")
+        and _is_under_agent_skill_dir(resolved_p)
+    ):
         return None
     return denied_message(path, mode, result=access)  # type: ignore[arg-type]
 

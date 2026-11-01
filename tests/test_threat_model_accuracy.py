@@ -61,10 +61,16 @@ def test_every_documented_container_flag_is_real(flag, code_exec):
     assert flag in code_exec, f"THREAT_MODEL.md claims {flag} and the code no longer has it"
 
 
-def test_the_workspace_is_mounted_read_only(code_exec):
+def test_the_workspace_is_mounted_read_only(tmp_path):
     """The page says your code is visible, not writable. Written against the
-    old `-v src:dst:ro` form; the `--mount` switch made `,ro` the spelling."""
-    assert ",ro" in code_exec or ":ro" in code_exec
+    old `-v src:dst:ro` form, then the `--mount` spelling; since the 2026-11
+    audit the mounts are built by `_workspace_mounts`, so the check reads the
+    mount it builds: the workspace's own bind ends in `ro`."""
+    from kazma_core.tools.code_exec import _workspace_mounts
+
+    mounts = _workspace_mounts(tmp_path)
+    workspace = mounts[1]
+    assert workspace.startswith("type=bind,") and workspace.split(",")[-1] == "ro"
 
 
 @pytest.mark.parametrize("flag", ["--cap-drop=ALL", "--security-opt=no-new-privileges"])

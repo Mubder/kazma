@@ -209,6 +209,24 @@ def _verify_pdf_content(
         return None
 
 
+async def _markdown_source(markdown_path: str) -> Path:
+    """The Markdown file a document is made from, under the file tools' rule.
+
+    The same check as ``file_read`` (workspace, grants, never a Kazma store or
+    secret file): the path used to be read wherever it pointed, so
+    ``markdown_path=".env"`` printed the install's secrets into a PDF
+    (audit 2026-11, FA-001).
+    """
+    from kazma_core.agent.tool_scope import resolve_in_scope
+
+    p, refusal = await resolve_in_scope(markdown_path, "reads")
+    if refusal:
+        raise RefusedBeforeEffect(refusal)
+    if not p.is_file():
+        raise RefusedBeforeEffect(f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write.")
+    return p
+
+
 async def generate_pdf(
     title: str,
     sections: list[dict[str, str]] | None = None,
@@ -242,20 +260,11 @@ async def generate_pdf(
     Arabic is auto-detected (or set ``lang="ar"`` / ``rtl=True``). PDF path
     applies arabic-reshaper + python-bidi so letters join and order correctly.
     """
-    from pathlib import Path as _P
 
     source_md = None
     if markdown_path:
         # Resolve within the workspace (same ladder as file_read).
-        from kazma_core.workspace.binding import resolve_active_root
-
-        root = await asyncio.to_thread(resolve_active_root)
-        p = _P(markdown_path)
-        if not p.is_absolute():
-            p = root / p
-        p = p.resolve()
-        if not p.is_file():
-            raise RefusedBeforeEffect(f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write.")
+        p = await _markdown_source(markdown_path)
         md = p.read_text(encoding="utf-8", errors="replace")
         source_md = p
         # Parse markdown headings into sections (same split as the export endpoints).
@@ -326,19 +335,10 @@ async def generate_docx(
     Word shapes Arabic; we set ``w:bidi``, justify (``w:jc=both``), heading
     fills, and styled tables.
     """
-    from pathlib import Path as _P
 
     source_md = None
     if markdown_path:
-        from kazma_core.workspace.binding import resolve_active_root
-
-        root = await asyncio.to_thread(resolve_active_root)
-        p = _P(markdown_path)
-        if not p.is_absolute():
-            p = root / p
-        p = p.resolve()
-        if not p.is_file():
-            raise RefusedBeforeEffect(f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write.")
+        p = await _markdown_source(markdown_path)
         md = p.read_text(encoding="utf-8", errors="replace")
         source_md = p
         parsed: list[dict[str, str]] = []

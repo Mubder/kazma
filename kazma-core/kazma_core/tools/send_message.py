@@ -249,9 +249,13 @@ def _file_attachment(file_path: str) -> dict[str, Any] | str:
     """
     import mimetypes
 
+    from kazma_core.store_registry import is_kazma_store, store_refusal
     from kazma_core.workspace.binding import resolve_tool_path
 
     p = resolve_tool_path(file_path)
+    if is_kazma_store(p):
+        # send_file checks first; this holds for any other caller.
+        return f"Error: {store_refusal(p, door='a chat attachment')}"
     if not p.exists():
         return f"Error: file not found: {file_path}"
     if not p.is_file():

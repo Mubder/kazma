@@ -113,10 +113,21 @@ def _strip_db_sidecars(name: str) -> str:
 
 
 def _looks_like_store_token(token: str) -> bool:
+    from kazma_core.store_registry import is_secret_file_name
+
     name = _strip_db_sidecars(Path(token).name)
-    if name in control_plane_db_names():
+    if name in control_plane_db_names() or is_secret_file_name(name):
         return True
     return name.endswith(_DB_SUFFIXES)
+
+
+def _is_env_name(token: str) -> bool:
+    """An env-file name (``.env``, ``.env.local``): Kazma's only where it
+    sits, never by name alone (a project's own ``.env`` is the user's)."""
+    from kazma_core.store_registry import SECRET_FILE_NAMES, is_secret_file_name
+
+    name = Path(token).name.lower()
+    return is_secret_file_name(name) and name not in SECRET_FILE_NAMES
 
 
 def control_plane_store_targeted(
@@ -139,9 +150,11 @@ def control_plane_store_targeted(
     raw = Path(text)
     if raw.is_absolute():
         candidates.append(raw)
-    else:
-        if cwd is not None:
-            candidates.append(Path(cwd) / text)
+    elif cwd is not None:
+        candidates.append(Path(cwd) / text)
+    # ``.env`` means the file where the command runs; the data dir's own
+    # copies are reached by their path (``backups/.../.env``).
+    if not raw.is_absolute() and not _is_env_name(text):
         try:
             from kazma_core.paths import data_dir
 
@@ -165,6 +178,43 @@ def control_plane_store_targeted(
     return None
 
 
+#: Where ``python_exec``'s container sees the workspace when the host path
+#: cannot be a container path (a Windows path). A POSIX host mounts the
+#: workspace at its own path, so absolute paths in a snippet mean the same
+#: file inside and out.
+SANDBOX_WORKSPACE_MOUNT = "/workspace"
+
+
+def _sandbox_mount_is_fixed() -> bool:
+    """True where the container sees the workspace at :data:`SANDBOX_WORKSPACE_MOUNT`."""
+    import os
+
+    return os.name == "nt"
+
+
+def sandbox_workspace_target(ws_path: str) -> str:
+    """The container path the workspace *ws_path* is mounted at."""
+    return SANDBOX_WORKSPACE_MOUNT if _sandbox_mount_is_fixed() else ws_path
+
+
+def _sandbox_token_on_host(token: str, root: Path) -> str | None:
+    """The host path a snippet's ``/workspace/...`` names, or None.
+
+    On Windows the container sees the active workspace at ``/workspace``, so
+    ``open('/workspace/.env')`` reads the workspace's ``.env``; resolved as
+    a Windows path it was ``<drive>:\\workspace\\.env``, nothing of Kazma's,
+    and the 2026-11 audit's snippet reached the approval card and read the
+    live install's ``.env``.
+    """
+    if not _sandbox_mount_is_fixed():
+        return None
+    text = token.replace("\\", "/")
+    if text != SANDBOX_WORKSPACE_MOUNT and not text.startswith(SANDBOX_WORKSPACE_MOUNT + "/"):
+        return None
+    rest = text[len(SANDBOX_WORKSPACE_MOUNT):].lstrip("/")
+    return str(root / rest) if rest else str(root)
+
+
 def code_mentions_control_plane(code: str) -> str | None:
     """Return the store name when *code* names a control-plane database.
 
@@ -173,14 +223,18 @@ def code_mentions_control_plane(code: str) -> str | None:
     already refuse. Quoted paths count too — absolute, or relative to the
     server's working directory or the active workspace — so
     ``'kazma-data/agent_artifacts.db'`` (the 2026-09-25 dump) is caught even
-    for a store whose bare name is too generic to match. Dynamic
-    construction that never spells the filename still gets through — that
-    limit stays written down.
+    for a store whose bare name is too generic to match. A path under the
+    container's ``/workspace`` means the active workspace's file (Windows).
+    Dynamic construction that never spells the filename still gets through
+    this check; the container shows Kazma's folders and secret files empty
+    (``code_exec``, :func:`kazma_core.store_registry.kazma_paths_inside`).
     """
     low = (code or "").lower()
     if not low:
         return None
-    for name in sorted(control_plane_db_names()):
+    from kazma_core.store_registry import SECRET_FILE_NAMES
+
+    for name in sorted(control_plane_db_names() | SECRET_FILE_NAMES):
         if name and name in low:
             return name
     bases: list[Path] = [Path.cwd()]
@@ -189,11 +243,17 @@ def code_mentions_control_plane(code: str) -> str | None:
     except (OSError, RuntimeError, ValueError, ImportError):
         logger.debug("[path_policy] no active workspace; cwd only", exc_info=True)
     for token in re.findall(r"""['"]([^'"]+)['"]""", code):
+        token = _sandbox_token_on_host(token, bases[-1]) or token
         absolute = token.startswith(("/", "\\")) or (
             len(token) > 2 and token[1] == ":"
         )
         if absolute:
             hit = control_plane_store_targeted(token)
+        elif _is_env_name(token):
+            # The snippet runs in the active workspace (code_exec), so a
+            # relative ``.env`` is that folder's; the server's own working
+            # directory is not where it runs.
+            hit = control_plane_store_targeted(token, cwd=bases[-1])
         elif _strip_db_sidecars(Path(token).name).endswith(_DB_SUFFIXES):
             hit = next(
                 (h for h in (control_plane_store_targeted(token, cwd=b) for b in bases) if h),
@@ -308,13 +368,16 @@ def check_path_access(
     #    and on 2026-09-25 file_read on agent_artifacts.db and
     #    chat_sessions.db was one leg of a 67-call dig for drafts the model
     #    had no tool to read. The refusal names the tool that does read it.
+    #    Kazma's secret files (.env, restic.pass, the broker token) are
+    #    refused here too (is_kazma_store): until 2026-11-02 file_read and
+    #    file_search returned the live install's .env and restic.pass.
     if _is_control_plane_store(resolved):
-        from kazma_core.store_registry import store_refusal
+        from kazma_core.store_registry import is_kazma_secret_file, store_refusal
 
         return PathAccessResult(
             allowed=False,
             reason=(
-                "Kazma control-plane store — "
+                ("Kazma secret file — " if is_kazma_secret_file(resolved) else "Kazma control-plane store — ")
                 + ("never writable" if need == "write" else "not readable")
                 + " by file tools. "
                 + store_refusal(resolved, door="file tools")

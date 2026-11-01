@@ -186,12 +186,18 @@ def _search_candidates(root: Path, matcher: _Glob) -> Iterator[Path]:
 def _searchable_text(path: Path, root: Path) -> str | None:
     """A file's text for searching, or None to skip it.
 
-    Skipped: a link that leads out of *root*, files over the size cap, and
+    Skipped: a link that leads out of *root*, files over the size cap,
     binary files (a NUL in the first 8 KB) -- a database or an image read as
-    text only ever produced noise lines.
+    text only ever produced noise lines -- and Kazma's own stores and secret
+    files (``.env``, ``restic.pass``): a search of the install folder printed
+    their lines (audit 2026-11, FA-001).
     """
+    from kazma_core.store_registry import is_kazma_store
+
     try:
         if path.is_symlink() and not path.resolve().is_relative_to(root):
+            return None
+        if is_kazma_store(path):
             return None
         if path.stat().st_size > _SEARCH_MAX_FILE_BYTES:
             return None

@@ -96,6 +96,12 @@ def _resolve_workspace_file(path: str) -> tuple[Path | None, str | None]:
         candidate.relative_to(root)
     except ValueError:
         return None, f"Error: path is outside the active workspace: {path}"
+    from kazma_core.store_registry import is_kazma_store, store_refusal
+
+    # The workspace can be the install folder, which holds Kazma's .env
+    # (audit 2026-11, FA-001).
+    if is_kazma_store(candidate):
+        return None, f"Safety: {store_refusal(candidate, door='the document tools')}"
     if not candidate.is_file():
         return None, f"Error: file not found: {path}"
     return candidate, None

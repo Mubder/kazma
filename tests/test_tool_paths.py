@@ -450,10 +450,43 @@ _NOT_TOOL_INPUT = {
 }
 
 
+def _openers(tree: ast.AST) -> set[str]:
+    """``_OPENERS`` under the names this source imports them by.
+
+    ``from pathlib import Path as _P`` hid ``_P(markdown_path)`` from the
+    gate: generate_pdf and generate_docx read ``markdown_path`` wherever it
+    pointed, and ``markdown_path=".env"`` printed the install's secrets into
+    a PDF (audit 2026-11, FA-001).
+    """
+    names = set(_OPENERS)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                full = f"{node.module}.{alias.name}"
+                if alias.asname and (full in _OPENERS or alias.name in _OPENERS):
+                    names.add(alias.asname)
+                if alias.name in ("path",) and node.module == "os":
+                    local = alias.asname or alias.name
+                    names |= {
+                        o.replace("os.path.", f"{local}.") for o in _OPENERS if o.startswith("os.path.")
+                    }
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if not alias.asname:
+                    continue
+                prefix = f"{alias.name}."
+                names |= {
+                    alias.asname + "." + o[len(prefix):] for o in _OPENERS if o.startswith(prefix)
+                }
+    return names
+
+
 def _raw_path_uses(source: str) -> list[tuple[str, int, str]]:
     """``(function, line, parameter)`` for each path parameter used raw."""
     hits: list[tuple[str, int, str]] = []
-    for fn in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    openers = _openers(tree)
+    for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         params = {a.arg for a in fn.args.args + fn.args.kwonlyargs if _PATHY.search(a.arg)}
@@ -463,7 +496,7 @@ def _raw_path_uses(source: str) -> list[tuple[str, int, str]]:
                 and node.args
                 and isinstance(node.args[0], ast.Name)
                 and node.args[0].id in params
-                and ast.unparse(node.func) in _OPENERS
+                and ast.unparse(node.func) in openers
             ):
                 hits.append((fn.name, node.lineno, node.args[0].id))
     return hits
@@ -504,6 +537,25 @@ def test_the_gate_sees_a_raw_path():
     assert _raw_path_uses("def f(image_path):\n    open(image_path)\n") == [("f", 2, "image_path")]
     # database_client named its path ``db_uri`` and opened it with sqlite3.connect.
     assert _raw_path_uses("async def q(db_uri):\n    sqlite3.connect(db_uri)\n") == [("q", 2, "db_uri")]
+
+
+def test_the_gate_sees_an_opener_imported_under_another_name():
+    """Negative control: generate_pdf's shape until 2026-11-02 (FA-001)."""
+    old_generator = (
+        "async def generate_pdf(title, markdown_path=None):\n"
+        "    from pathlib import Path as _P\n"
+        "    p = _P(markdown_path)\n"
+    )
+    assert _raw_path_uses(old_generator) == [("generate_pdf", 3, "markdown_path")]
+    assert _raw_path_uses("import pathlib as pl\ndef f(path):\n    pl.Path(path)\n") == [("f", 3, "path")]
+    assert _raw_path_uses("from os import path as osp\ndef f(path):\n    osp.exists(path)\n") == [
+        ("f", 3, "path")
+    ]
+    assert _raw_path_uses("import sqlite3 as sq\ndef f(db_path):\n    sq.connect(db_path)\n") == [
+        ("f", 3, "db_path")
+    ]
+    # An alias of something that is not an opener is not one.
+    assert _raw_path_uses("from json import loads as _P\ndef f(path):\n    _P(path)\n") == []
 
 
 # ── the CLI's explicit workspace ─────────────────────────────────────────
