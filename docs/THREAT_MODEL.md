@@ -76,13 +76,14 @@ job and you still ran the command.
 
 **`KAZMA_ALLOW_YOLO=1`** turns the gate off per-thread for canonical danger
 tools. It cannot bypass `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`,
-`x_schedule_post`, `x_cancel_scheduled_post`) or git write commands, which are
-re-gated regardless. But for everything else, YOLO means the boundary above is
-not in place.
+`x_schedule_post`, `x_cancel_scheduled_post`, and `request_path_access`, which
+widens what the file tools may read or write) or git write commands, which
+still show their card under YOLO. But for everything else, YOLO means the
+boundary above is not in place.
 
 The approval of an always-ask tool is one-time only: there is no session
-grant, no task approval and no YOLO answer for it, and the card names the
-public action ("Post now"). A draft the agent saves with `save_proposal`
+grant, no task approval and no YOLO answer for it, and the card of a public
+action names it ("Post now"). A draft the agent saves with `save_proposal`
 cannot be posted in the turn that saved it: the agent shows it, and the post
 waits for your next message. Separately, a call the host would refuse anyway
 (a shell command the host-shell policy or the shell syntax rules refuse, a

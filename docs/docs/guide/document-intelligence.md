@@ -73,7 +73,7 @@ does **not** create a second durable store.
 Outside-workspace paths are **denied by default**. To open a folder with permission:
 
 1. **Chat (smooth):** when a file tool fails, the agent calls `request_path_access`
-   (HITL approval card). On approve, a **session grant** is created for that
+   (HITL approval card; it asks every time, even under YOLO). On approve, a **session grant** is created for that
    folder and the agent retries the tool.
 2. **Workspace page / API:** Workspace → **Folders outside the workspace**
    lists, adds (read only, or read and write) and removes the durable list

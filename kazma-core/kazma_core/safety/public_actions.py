@@ -1,8 +1,9 @@
 """What an always-ask card says it does.
 
-The always-ask tools (``safety.hitl.ALWAYS_HITL_TOOLS``: X writes) act in
-public and cannot be undone. Their approval card used to look like every other
-card -- "Approval required", a tool name, "Approve" -- and on 2026-10-16 the
+The always-ask tools that act in public (the X writes among
+``safety.hitl.ALWAYS_HITL_TOOLS``) cannot be undone. Their approval card used
+to look like every other card -- "Approval required", a tool name, "Approve"
+-- and on 2026-10-16 the
 owner approved an ``x_post`` card believing it was part of reading the
 metrics. Each card now names the public action in its header and on the
 button that does it ("Post now", never "Approve").

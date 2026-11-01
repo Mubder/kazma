@@ -565,9 +565,14 @@ def _public_card(tool: Any, tools: Any) -> tuple[tuple[str, str] | None, dict[st
     return public, labels, (600 if one_time else 240)
 
 
+#: What a card for an always-ask tool that is not a public action says (a
+#: folder-access request): the web card's ``chat.hitl_tip_always``.
+ASKS_EVERY_TIME = "This tool asks you every time: YOLO and grants cannot skip it."
+
+
 def _single_tool_card_text(
     tool: Any, args_str: str, proposal_lines: list[str], request_id: str,
-    public: tuple[str, str] | None,
+    public: tuple[str, str] | None, *, always: bool = False,
 ) -> str:
     """A one-tool card's text: a public action first names itself and shows
     exactly what it publishes, then the call."""
@@ -579,7 +584,8 @@ def _single_tool_card_text(
             "This is a public action and asks you every time. Read the text "
             f"above before you answer.\n\n{reply}"
         )
-    return f"⚠️ Approval required\nTool: {tool}\nArgs: {args_str}\n\n{drafts}{reply}"
+    note = f"{ASKS_EVERY_TIME}\n\n" if always else ""
+    return f"⚠️ Approval required\nTool: {tool}\nArgs: {args_str}\n\n{drafts}{note}{reply}"
 
 
 def _build_approval_prompt(
@@ -665,6 +671,8 @@ def _build_approval_prompt(
             tstr = _format_args_for_approval(tname, targs, budget=_MULTI_BUDGET)
             lines.append(f"{i}. {tname}: {tstr}")
         lines.extend(proposal_lines)
+        if not _labels["task"] and not _public:
+            lines.extend(["", ASKS_EVERY_TIME])
         lines.extend(
             [
                 "",
@@ -725,7 +733,9 @@ def _build_approval_prompt(
             except Exception:
                 pass
         return {"text": text, "markup": markup, "platform": plat}
-    text = _single_tool_card_text(tool, args_str, proposal_lines, request_id, _public)
+    text = _single_tool_card_text(
+        tool, args_str, proposal_lines, request_id, _public, always=not _labels["task"],
+    )
     markup = None
     plat = (platform or "telegram").lower()
     try:

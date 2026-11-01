@@ -103,6 +103,7 @@ _ALWAYS_HITL_FALLBACK: frozenset[str] = frozenset({
     "x_delete_post",
     "x_schedule_post",
     "x_cancel_scheduled_post",
+    "request_path_access",
 })
 
 
@@ -359,7 +360,7 @@ class SafetyMiddleware:
 
         # Classification BEFORE the YOLO shortcut (audit fix — HIGH): YOLO used
         # to short-circuit ahead of danger/ALWAYS evaluation, so
-        # ALWAYS_HITL_TOOLS (x_post / x_delete_post) auto-ran through
+        # ALWAYS_HITL_TOOLS (X writes, folder access) auto-ran through
         # LocalToolRegistry. Mirrors hitl.requires_approval(), which resolves
         # ALWAYS first: YOLO may bypass CANONICAL-danger tools only.
         try:

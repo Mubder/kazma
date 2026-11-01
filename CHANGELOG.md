@@ -28,6 +28,15 @@
   now log it in one line, and the chat no longer stays silent about a call an
   "Allow tool" grant let through. The call on the card that turned YOLO on is
   not counted: it was asked.
+- A request for a folder outside the workspace now always asks, even under
+  YOLO or a grant. Its card takes a one-time approval only and says it asks
+  every time. On 26 October a YOLO window let one through with no card, and
+  such a request widens what every file tool may read or write for the
+  session.
+- With YOLO on, the chat refused an always-ask tool (an X post, and now a
+  folder request) as if approvals were turned off, and told the agent to
+  turn them back on. It now shows the tool's card. With approvals turned off
+  in Settings, those tools are still refused.
 
 ## Research skips junk search answers; the Research page lists research first (2026-10-31)
 
