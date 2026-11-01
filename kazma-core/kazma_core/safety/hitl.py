@@ -34,7 +34,9 @@ __all__ = [
     "get_hitl_config",
     "get_tool_tier",
     "approval_floor",
+    "approval_need",
     "requires_approval",
+    "standing_approval",
     "set_current_thread_id",
     "reset_current_thread_id",
     "get_current_thread_id",
@@ -618,37 +620,64 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
     Returns:
         True if the tool requires approval.
     """
+    return approval_need(tool_name, hitl_config)[0]
+
+
+def approval_need(tool_name: str, hitl_config: dict[str, Any]) -> tuple[bool, str | None]:
+    """``(asks a card, the standing approval that lets it run unasked)``.
+
+    The second is set only for a call its card WOULD have asked about, so a
+    read tool under YOLO is not "ran without asking" (``safety.unasked``).
+    """
     if tool_name in ALWAYS_HITL_TOOLS:
-        return True
+        return True, None
 
     tid = get_current_thread_id()
-    if tid:
-        try:
-            from kazma_core.safety.yolo import is_yolo_active
-
-            if is_yolo_active(tid):
-                return False
-        except Exception as exc:
-            logger.warning("YOLO check failed in requires_approval: %s", exc)
-        try:
-            from kazma_core.safety.task_grants import has_task_grant
-
-            if has_task_grant(tid):
-                return False
-        except Exception as exc:
-            logger.debug("Task grant check failed in requires_approval: %s", exc)
-        try:
-            from kazma_core.safety.hitl_grants import has_tool_grant
-
-            if has_tool_grant(tid, tool_name):
-                return False
-        except Exception as exc:
-            logger.warning("Tool grant check failed in requires_approval: %s", exc)
+    by = standing_approval(tid, tool_name) if tid else None
+    if by:
+        asked = bool(hitl_config.get("enabled", True)) and approval_floor(tool_name, hitl_config)
+        return False, (by if asked else None)
 
     if not hitl_config.get("enabled", True):
-        return False
+        return False, None
 
-    return approval_floor(tool_name, hitl_config)
+    return approval_floor(tool_name, hitl_config), None
+
+
+def standing_approval(thread_id: str | None, tool_name: str) -> str | None:
+    """The standing approval covering *tool_name* on *thread_id*: YOLO, a
+    task grant or a tool grant (``safety.unasked.BY_*``), else None.
+
+    The one answer for every gate: the chat graph (:func:`approval_need`),
+    the MCP gate and -- through the same three checks -- the swarm bus. A
+    settings read: async callers use ``asyncio.to_thread``.
+    """
+    from kazma_core.safety.unasked import BY_TASK_GRANT, BY_TOOL_GRANT, BY_YOLO
+
+    if not thread_id:
+        return None
+    try:
+        from kazma_core.safety.yolo import is_yolo_active
+
+        if is_yolo_active(thread_id):
+            return BY_YOLO
+    except Exception as exc:
+        logger.warning("YOLO check failed in requires_approval: %s", exc)
+    try:
+        from kazma_core.safety.task_grants import has_task_grant
+
+        if has_task_grant(thread_id):
+            return BY_TASK_GRANT
+    except Exception as exc:
+        logger.debug("Task grant check failed in requires_approval: %s", exc)
+    try:
+        from kazma_core.safety.hitl_grants import has_tool_grant
+
+        if has_tool_grant(thread_id, tool_name):
+            return BY_TOOL_GRANT
+    except Exception as exc:
+        logger.warning("Tool grant check failed in requires_approval: %s", exc)
+    return None
 
 
 def approval_floor(tool_name: str, hitl_config: dict[str, Any]) -> bool:

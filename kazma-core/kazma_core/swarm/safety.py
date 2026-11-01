@@ -24,8 +24,14 @@ import uuid
 from typing import Any
 
 from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+from kazma_core.safety.unasked import (
+    BY_TASK_GRANT,
+    BY_TOOL_GRANT,
+    BY_YOLO,
+    note_ran_without_asking,
+)
 
-__all__ = ["SafetyMiddleware", "SafetyViolationError", "get_safety", "set_safety"]
+__all__ =["SafetyMiddleware", "SafetyViolationError", "get_safety", "set_safety"]
 
 logger = logging.getLogger(__name__)
 
@@ -391,11 +397,7 @@ class SafetyMiddleware:
             try:
                 from kazma_core.safety.yolo import is_yolo_active
                 if is_yolo_active(tid):
-                    logger.warning(
-                        "[Safety] YOLO mode active for thread=%s — auto-approving: %s",
-                        tid,
-                        tool_name,
-                    )
+                    note_ran_without_asking(tool_name, tid, BY_YOLO)
                     return True
             except Exception:
                 pass
@@ -413,17 +415,13 @@ class SafetyMiddleware:
             # This grants nothing new: every check below is one the other path
             # already trusts. It stops the two from disagreeing about an answer
             # the operator already gave.
-            for _check, _label in (
-                (lambda: _grant_task(tid), "task grant"),
-                (lambda: _grant_tool(tid, tool_name), "tool grant"),
+            for _check, _label, _by in (
+                (lambda: _grant_task(tid), "task grant", BY_TASK_GRANT),
+                (lambda: _grant_tool(tid, tool_name), "tool grant", BY_TOOL_GRANT),
             ):
                 try:
                     if _check():
-                        logger.info(
-                            "[Safety] %s covers %s on thread=%s — already approved "
-                            "by the operator",
-                            _label, tool_name, tid,
-                        )
+                        note_ran_without_asking(tool_name, tid, _by)
                         return True
                 except Exception:
                     # Falls through to asking: the operator is asked again.

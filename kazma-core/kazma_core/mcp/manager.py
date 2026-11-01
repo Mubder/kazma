@@ -2427,24 +2427,21 @@ class UnifiedToolExecutor:
 
                 # This call's approval only (SW-S01): never the work it starts.
                 _hitl_already_approved = claim_call_authority(_hitl_approved_ctx, tool_name)
+                _unasked_by: str | None = None
+                _tid = ""
                 if not _hitl_already_approved:
                     try:
-                        from kazma_core.safety.hitl import get_current_thread_id
-                        from kazma_core.safety.hitl_grants import has_tool_grant
-                        from kazma_core.safety.task_grants import has_task_grant
-                        from kazma_core.safety.yolo import is_yolo_active
+                        from kazma_core.safety.hitl import get_current_thread_id, standing_approval
 
-                        _tid = get_current_thread_id()
+                        _tid = get_current_thread_id() or ""
                         # YOLO, a task grant, and a per-tool grant are
                         # recorded approvals of this call. The graph-authority
                         # flag is not: it is set for the whole tool-worker
                         # turn, including tools the graph never asked about.
                         # The grants are settings reads (audit 2026-10-26 AUD-111).
-                        if _tid and await asyncio.to_thread(
-                            lambda: is_yolo_active(_tid)
-                            or has_task_grant(_tid)
-                            or has_tool_grant(_tid, tool_name)
-                        ):
+                        if _tid:
+                            _unasked_by = await asyncio.to_thread(standing_approval, _tid, tool_name)
+                        if _unasked_by:
                             _hitl_already_approved = True
                     except Exception:
                         logger.debug("[Unified] approval-grant check skipped", exc_info=True)
@@ -2452,6 +2449,11 @@ class UnifiedToolExecutor:
                     self._mcp.get_server_trust(server_name) == "trusted"
                     and not mcp_leaf_is_credential_shaped(tool_name)
                 )
+                if _unasked_by and not _server_trusted and not mcp_safe_allowlisted(tool_name):
+                    # A card would have asked: the standing approval skipped it.
+                    from kazma_core.safety.unasked import note_ran_without_asking
+
+                    note_ran_without_asking(tool_name, _tid, _unasked_by)
                 if not _hitl_already_approved and not _server_trusted:
                     # The server picks the name. A read-shaped name
                     # (``read_env``, ``get_ssh_key``) used to run on a chat

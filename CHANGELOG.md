@@ -19,6 +19,15 @@
   digest's "and 1 more (each is in the log)" pointed at a log you cannot
   read on a phone. A success or info notice is logged as information,
   listed under "Notices" and no longer counted among the problems.
+- The digest now lists what ran without asking: each chat where YOLO was
+  turned on (when, for how long, by whom, and when it was turned off) and
+  the calls that ran without an approval card under YOLO, "Allow tool" or
+  "Approve for task". On 31 October a chat ran with YOLO on for an hour and
+  sent a file nobody was asked about; the digest did not say so. The three
+  places that let a call skip its card (the chat, the swarm and MCP gates)
+  now log it in one line, and the chat no longer stays silent about a call an
+  "Allow tool" grant let through. The call on the card that turned YOLO on is
+  not counted: it was asked.
 
 ## Research skips junk search answers; the Research page lists research first (2026-10-31)
 

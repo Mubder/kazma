@@ -268,7 +268,13 @@ def _apply_scope_grants(
     thread_id: str, approved: bool, scope: str, actor: str,
     pending_tools: list[Any], pending_tool_name: str, requested_tool: str,
 ) -> str:
-    """Apply longer-lived grants only after a durable claim; run off the loop."""
+    """Apply longer-lived grants only after a durable claim; run off the loop.
+
+    The card's own calls then run under the grant just made: they were
+    asked, and are not "ran without asking" (``safety.unasked``).
+    """
+    from kazma_core.safety.unasked import card_answered
+
     if approved and scope == "yolo":
         try:
             from kazma_core.safety.yolo import try_enable_yolo
@@ -279,6 +285,7 @@ def _apply_scope_grants(
         except Exception:
             logger.exception("[HITL] failed to enable YOLO scope")
             return "once"
+        card_answered(thread_id, pending_tools, pending_tool_name)
     elif approved and scope == "tool":
         try:
             from kazma_core.safety.hitl_grants import grant_tool, tools_to_grant
@@ -288,6 +295,7 @@ def _apply_scope_grants(
         except Exception:
             logger.exception("[HITL] failed to apply tool grant")
             return "once"
+        card_answered(thread_id, pending_tools, pending_tool_name)
     return scope
 
 
