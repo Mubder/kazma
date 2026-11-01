@@ -184,14 +184,9 @@ def _resolve_level_with_config(explicit: str | None) -> str:
     """
     if explicit:
         return _resolve_level(explicit)
-    try:
-        from kazma_core.config_store import get_config_store
-
-        cs_val = get_config_store().get("logging.level")
-        if isinstance(cs_val, str) and cs_val.strip().upper() in LOG_LEVELS:
-            return cs_val.strip().upper()
-    except Exception:
-        pass
+    cs_val = _store_get("logging.level")
+    if isinstance(cs_val, str) and cs_val.strip().upper() in LOG_LEVELS:
+        return cs_val.strip().upper()
     return _resolve_level(None)
 
 
@@ -234,11 +229,29 @@ def resolve_log_format(explicit: str | None = None) -> str:
 
 
 def _store_get(key: str) -> Any:
-    """Read a key from ConfigStore, returning None if unavailable/unset."""
+    """A logging setting: the settings store, else the install's YAML.
+
+    The settings store is seeded from kazma.yaml, so the YAML is where a
+    setting stands when the store cannot answer. At a Windows boot Kazma
+    starts before Postgres: the store could not be read when logging was set
+    up, the file format fell back to plain text, and the server wrote plain
+    lines until its next reload -- 31 hours on 2026-10-30/31. The daily
+    digest read JSON lines only and reported "Turns completed: 0 ... No
+    failures, no restarts, no alerts" over that day.
+    """
     try:
         from kazma_core.config_store import get_config_store
 
-        return get_config_store().get(key)
+        value = get_config_store().get(key)
+    except Exception:
+        value = None
+    if value is not None:
+        return value
+    try:
+        from kazma_core.config_loader import install_yaml_section
+
+        *section, name = key.split(".")
+        return install_yaml_section(*section).get(name)
     except Exception:
         return None
 
@@ -391,8 +404,8 @@ def setup_logging(level: str | None = None) -> str:
         ul.propagate = True  # let records flow to root
 
     logging.getLogger(__name__).info(
-        "Logging initialised: level=%s file=%s rotation=daily retention=%dd",
-        effective, log_path, retention_days,
+        "Logging initialised: level=%s format=%s file=%s rotation=daily retention=%dd",
+        effective, "json" if use_json_file else "text", log_path, retention_days,
     )
     # Mark configured AFTER the success log so subsequent calls skip — this
     # also catches the line itself being logged only once.

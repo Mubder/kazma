@@ -60,6 +60,10 @@ DEFAULT_COOLDOWN_S = float(os.environ.get("KAZMA_OPS_ALERT_COOLDOWN_S", "900"))
 # unreadable on a phone at 3am anyway.
 MAX_DETAIL_CHARS = 600
 
+#: Severities that report something done, not something wrong: their log line
+#: is INFO, and the daily digest lists them as notices.
+_NOTICE_SEVERITIES = frozenset({"info", "success"})
+
 
 @dataclass
 class _KeyState:
@@ -694,8 +698,11 @@ def alert(
         send, suppressed = _should_send(key, cooldown)
 
         # Always leave a log line, sent or not: the log is the record, the
-        # alert is only the interrupt.
-        logger.warning(
+        # alert is only the interrupt. A success or an info notice is logged
+        # at INFO: every alert was a WARNING, and the daily digest listed
+        # "Crawl completed" among the problems.
+        logger.log(
+            logging.INFO if severity in _NOTICE_SEVERITIES else logging.WARNING,
             "[ops_alert] %s | %s%s",
             key, title, "" if send else " (throttled)",
         )

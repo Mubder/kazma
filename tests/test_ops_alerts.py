@@ -112,6 +112,21 @@ def test_every_occurrence_is_logged_even_when_throttled(sent, caplog):
     assert sum("throttled" in x for x in lines) == 3
 
 
+def test_a_success_is_logged_as_information_not_a_warning(sent, caplog):
+    """Every alert line was a WARNING, so "Crawl completed" was counted with
+    the problems (the daily digest, 2026-11-01)."""
+    with caplog.at_level("INFO"):
+        for severity in ("success", "info", "warn", "error", "critical"):
+            ops_alerts.alert(f"k.{severity}", "T", severity=severity, cooldown_s=0)
+    levels = {r.message.split(" | ")[0]: r.levelname
+              for r in caplog.records if r.message.startswith("[ops_alert] ")}
+    assert levels == {
+        "[ops_alert] k.success": "INFO", "[ops_alert] k.info": "INFO",
+        "[ops_alert] k.warn": "WARNING", "[ops_alert] k.error": "WARNING",
+        "[ops_alert] k.critical": "WARNING",
+    }
+
+
 # ── message shape ─────────────────────────────────────────────────────
 
 

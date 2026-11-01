@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## The daily digest says what happened (2026-11-01)
+
+- When Windows boots, Kazma can start before Postgres. Kazma then could not
+  read its log-format setting, wrote plain-text lines instead of JSON, and
+  kept that format until its next reload. On 30–31 October that lasted 31
+  hours, and the daily digest reads only JSON lines, so the 31 October digest
+  said "Turns completed: 0 … No failures, no restarts, no alerts" over a day
+  with turns and a failed crawl. Kazma now falls back to kazma.yaml's setting
+  when the settings store cannot answer. The digest reads lines in either
+  format and reports any turn or alert line it cannot read, instead of
+  calling the day quiet.
+- The digest counted an approval nobody answered, which the timeout watchdog
+  closes so the tool does not run, as "denied". It now reports it as
+  "expired unanswered".
+- Alerts are listed by what they said ("Crawl completed", "Research
+  completed") rather than by internal keys. Every alert is named: the
+  digest's "and 1 more (each is in the log)" pointed at a log you cannot
+  read on a phone. A success or info notice is logged as information,
+  listed under "Notices" and no longer counted among the problems.
+
 ## Research skips junk search answers; the Research page lists research first (2026-10-31)
 
 - After a day of runs, the local SearXNG's engines were rate-limited and Bing

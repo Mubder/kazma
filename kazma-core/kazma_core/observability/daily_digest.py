@@ -106,16 +106,30 @@ _CRON_OUTCOMES = {
 # (ops_alerts.alert): "[ops_alert] <key> | <title>[ (throttled)]". The digest
 # read the alerts raised since the process started, and the live install
 # reloads several times a day: an alert from before the last reload was
-# never in a digest.
+# never in a digest. The line's level is the alert's: a success or an info
+# notice is logged at INFO and listed under "Notices", never as a problem.
 _ALERT_MARKER = "[ops_alert] "
 _THROTTLED = " (throttled)"
+#: Markers whose line is always one whole log record.
+_ONE_LINE_RECORDS = (_TURN_MARKER, _ALERT_MARKER)
+#: Lines per alert section; the rest are named on one line. The digest said
+#: "and 1 more (each is in the log)", and a phone holds no log.
+_ALERT_LINES = 12
+
+# The application log's plain line (logging_config's "standard" formatter,
+# local time). The file is JSON when the ``logging.format`` setting says so;
+# a server that set up logging while the settings store could not answer
+# wrote plain lines, and the digest read JSON only: on 2026-10-31 it reported
+# "Turns completed: 0 ... No failures, no restarts, no alerts" over a day of
+# turns and alerts it never read.
+_PLAIN_LINE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[(\w+)\] (\S+): (.*)$")
 
 # How a question in the approval registry ended, in the digest's words.
 _OUTCOME_WORDS = {
     "approve": "approved",
     "deny": "denied",
     "yolo": "approved by YOLO mode",
-    "timeout": "timed out",
+    "timeout": "expired unanswered",
     "orphaned": "left unanswered",
     "waiting": "still waiting",
     "error": "could not resume",
@@ -172,12 +186,45 @@ def _window_files(path: Path, since: float) -> list[Path]:
     return files
 
 
-def _records(locate, since: float, ts_field: str,
-             needles: tuple[str, ...]) -> Iterator[tuple[float, dict]]:
-    """``(time, record)`` for each JSON line in the window holding a needle.
+def _app_line(line: str) -> tuple[float, dict] | None:
+    """``(time, record)`` of one application log line, JSON or plain."""
+    if line.startswith("{"):
+        try:
+            rec = json.loads(line)
+            return datetime.fromisoformat(rec["timestamp"]).timestamp(), rec
+        except (ValueError, KeyError, TypeError):
+            return None
+    m = _PLAIN_LINE.match(line.rstrip("\r\n"))
+    if m is None:
+        return None
+    try:
+        # Naive: the formatter writes local time, and .timestamp() reads it so.
+        ts = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").timestamp()
+    except ValueError:
+        return None
+    return ts, {"level": m.group(2), "logger": m.group(3), "message": m.group(4)}
 
-    *locate* returns the live log's path. A log that cannot be found or read
-    is skipped and said; the digest still goes out.
+
+def _guard_line(line: str) -> tuple[float, dict] | None:
+    """``(time, record)`` of one guard log line (always JSON)."""
+    try:
+        rec = json.loads(line)
+        return datetime.fromisoformat(rec["ts"]).timestamp(), rec
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _records(locate, since: float, parse,
+             needles: tuple[str, ...], unread: Counter | None = None,
+             ) -> Iterator[tuple[float, dict]]:
+    """``(time, record)`` for each line in the window holding a needle.
+
+    *locate* returns the live log's path; *parse* reads one line. A log that
+    cannot be found or read is skipped and said; the digest still goes out.
+    A turn or alert line *parse* cannot read is counted in *unread* (both are
+    always one line, so they are never a traceback's continuation): a log
+    written in a format the digest does not know is reported, not read as a
+    quiet day.
     """
     try:
         path = locate()
@@ -190,13 +237,13 @@ def _records(locate, since: float, ts_field: str,
                 for line in fh:
                     if not any(n in line for n in needles):
                         continue
-                    try:
-                        rec = json.loads(line)
-                        ts = datetime.fromisoformat(rec[ts_field]).timestamp()
-                    except (ValueError, KeyError, TypeError):
+                    parsed = parse(line)
+                    if parsed is None:
+                        if unread is not None and any(n in line for n in _ONE_LINE_RECORDS):
+                            unread[log.name] += 1
                         continue
-                    if ts >= since:
-                        yield ts, rec
+                    if parsed[0] >= since:
+                        yield parsed
         except OSError as exc:
             logger.warning("[digest] could not read %s: %s", log.name, exc)
 
@@ -206,7 +253,7 @@ def _scan_guard_log(since: float) -> tuple[Counter, list[float | None], int]:
     counts: Counter = Counter()
     planned: list[tuple[float, str]] = []
     needles = (*_GUARD_EVENTS, _PAUSE_START, _PAUSE_END, _RELOAD)
-    for ts, rec in _records(_guard_log_path, since, "ts", needles):
+    for ts, rec in _records(_guard_log_path, since, _guard_line, needles):
         event = str(rec.get("event", ""))
         label = _GUARD_EVENTS.get(event)
         if label:
@@ -239,19 +286,19 @@ def _pause_durations(events: list[tuple[float, str]]) -> list[float | None]:
 
 
 def _scan_app_log(
-    since: float,
-) -> tuple[Counter, dict[str, tuple[str, bool]], dict[str, list[int]]]:
+    since: float, unread: Counter | None = None,
+) -> tuple[Counter, dict[str, tuple[str, bool]], dict[str, dict]]:
     """Counted markers; each finished turn, key -> (platform, failed); and
-    each alert key -> [sent, held back].
+    each alert key -> its tally (sent, held back, titles, needs attention).
 
     A turn is counted once by its key: close_turn can run again for a turn
     it closed before a restart.
     """
     counts: Counter = Counter()
     turns: dict[str, tuple[str, bool]] = {}
-    alerts: dict[str, list[int]] = {}
+    alerts: dict[str, dict] = {}
     needles = (*_APP_MARKERS, _TURN_MARKER, _ALERT_MARKER, _MEMORY_ACTION, _CRON_MARKER)
-    for _ts, rec in _records(_app_log_path, since, "timestamp", needles):
+    for _ts, rec in _records(_app_log_path, since, _app_line, needles, unread):
         msg = str(rec.get("message", ""))
         turn = _TURN_LINE.search(msg)
         if turn:
@@ -268,9 +315,19 @@ def _scan_app_log(
                 counts["memory forgets"] += 1
             continue
         if msg.startswith(_ALERT_MARKER):
-            key = msg[len(_ALERT_MARKER):].split(" | ", 1)[0].strip()
-            tally = alerts.setdefault(key, [0, 0])
-            tally[1 if msg.endswith(_THROTTLED) else 0] += 1
+            key, _sep, title = msg[len(_ALERT_MARKER):].partition(" | ")
+            held = title.endswith(_THROTTLED)
+            if held:
+                title = title[: -len(_THROTTLED)]
+            tally = alerts.setdefault(key.strip(), {
+                "sent": 0, "held": 0, "titles": Counter(), "attention": False,
+            })
+            tally["held" if held else "sent"] += 1
+            if title.strip():
+                tally["titles"][title.strip()] += 1
+            # A success or an info notice is logged at INFO (ops_alerts.alert).
+            if str(rec.get("level", "WARNING")).upper() != "INFO":
+                tally["attention"] = True
             continue
         for marker, label in _APP_MARKERS.items():
             if marker in msg:
@@ -301,6 +358,31 @@ def _human_duration(seconds: float) -> str:
     return f"{minutes // 60} h {minutes % 60} min"
 
 
+def _alert_label(key: str, titles: Counter) -> str:
+    """What an alert said, in its own words: its title when every occurrence
+    had the same one, else its key. The digest listed keys alone, and
+    ``acquisition.completed`` (a crawl) beside ``acquisition.done`` (a
+    research run) read as one thing counted twice."""
+    return next(iter(titles)) if len(titles) == 1 else key
+
+
+def _alert_lines(tallies: dict[str, dict]) -> list[str]:
+    """One line per alert, most frequent first; past ``_ALERT_LINES`` the rest
+    are named on one line (never "see the log": the digest is read on a
+    phone)."""
+    ranked = sorted(tallies.items(), key=lambda kv: (-(kv[1]["sent"] + kv[1]["held"]), kv[0]))
+    lines: list[str] = []
+    for key, tally in ranked[:_ALERT_LINES]:
+        held = tally["held"]
+        extra = f" ({count_noun(held, 'repeat')} held back)" if held else ""
+        lines.append(f"  {_alert_label(key, tally['titles'])}: {tally['sent'] + held}{extra}")
+    rest = ranked[_ALERT_LINES:]
+    if rest:
+        named = ", ".join(f"{key} {t['sent'] + t['held']}" for key, t in rest)
+        lines.append(f"  and {len(rest)} more: {named}")
+    return lines
+
+
 def _split(counts: Counter) -> str:
     """Counts as "web 3, telegram 2": largest first, ties by name."""
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
@@ -313,7 +395,8 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     since = (datetime.now(UTC) - timedelta(hours=hours)).timestamp()
     window = f"last {int(hours)}h"
 
-    app, turns, alerts = _scan_app_log(since)
+    unread: Counter = Counter()
+    app, turns, alerts = _scan_app_log(since, unread)
     guard, pauses, reloads = _scan_guard_log(since)
     approvals, approvals_note = _approvals(since)
 
@@ -378,6 +461,7 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     }
     problems["turns that ended in an error"] = failed_turns
     problems["approvals that could not resume"] = approvals.get("error", 0)
+    problems["log lines this digest could not read"] = sum(unread.values())
     for label, attention in sorted({v for v in _CRON_OUTCOMES.values()}):
         if attention:
             problems[label] = app.get(label, 0)
@@ -391,17 +475,15 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
         lines.append("Needs attention:")
         lines += [f"  {k}: {v}" for k, v in problems.items()]
 
-    if alerts:
-        lines.append("")
-        lines.append("Alerts raised:")
-        ranked = sorted(alerts.items(), key=lambda kv: (-sum(kv[1]), kv[0]))
-        for key, (sent, held) in ranked[:6]:
-            extra = f" ({count_noun(held, 'repeat')} held back)" if held else ""
-            lines.append(f"  {key}: {sent + held}{extra}")
-        if len(ranked) > 6:
-            lines.append(f"  and {len(ranked) - 6} more (each is in the log)")
+    raised = {k: t for k, t in alerts.items() if t["attention"]}
+    notices = {k: t for k, t in alerts.items() if not t["attention"]}
+    for heading, group in (("Alerts raised:", raised), ("Notices:", notices)):
+        if group:
+            lines.append("")
+            lines.append(heading)
+            lines += _alert_lines(group)
 
-    if not recovered and not problems and not alerts:
+    if not recovered and not problems and not raised:
         lines.append("")
         lines.append("No failures, no restarts, no alerts.")
 

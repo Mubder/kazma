@@ -632,7 +632,7 @@ def test_the_digest_counts_a_swarm_timeout_apart_from_a_denial() -> None:
     assert gate_outcomes_since(t0) == {"timeout": 1, "deny": 1}
     text = build_digest()
     line = next(line for line in text.splitlines() if "approvals asked" in line)
-    assert "timed out" in line and "denied" in line, line
+    assert "expired unanswered" in line and "denied" in line, line
 
 
 def test_the_separate_swarm_notifier_is_gone() -> None:

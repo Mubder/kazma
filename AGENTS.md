@@ -5323,13 +5323,31 @@ which only the web stream writes. Now:
 - approvals from the gate registry (`hitl_gates.gate_outcomes_since`, one row
   per question, a `superseded` twin not counted), never from log lines: the
   WebSocket logged one more each time a page connected while a question
-  waited. A registry that is off or unreadable is said;
+  waited. A registry that is off or unreadable is said. A question the
+  approval-timeout watchdog settled (`deny` by `hitl_gates.TIMEOUT_ACTOR`,
+  `expired_unanswered`) is "expired unanswered", never a denial: the
+  2026-11-01 digest said "denied 3" over two cards nobody saw in time;
+- lines of either shape the log file is written in (`_app_line`: JSON, or
+  the plain "standard" format in local time), and a turn or alert line it
+  cannot read is "Needs attention: log lines this digest could not read".
+  Kazma set up logging at a Windows boot before Postgres was up, the
+  `logging.format` read failed, and the server wrote plain lines for 31
+  hours (2026-10-30/31): the JSON-only digest said "Turns completed: 0 ...
+  No failures, no restarts, no alerts" over that day. `logging_config`
+  now falls back to the install's kazma.yaml when the store cannot answer
+  (`tests/test_log_format_without_settings_store.py`);
 - reloads (`guard.operator_reload`) and maintenance pauses (paired
   `maintenance.active` -> `maintenance.resumed`, with the longest) are
   "Planned work", never a problem;
 - alerts from the line `alert()` writes for every occurrence
   (`[ops_alert] <key> | <title>`, ` (throttled)` on a repeat held back),
-  never from `alert_state()`, which starts empty at every reload;
+  never from `alert_state()`, which starts empty at every reload. Each
+  reads by its title (its key when the title varies), every one is named
+  (past 12 a section, the rest on one line: never "each is in the log"),
+  and an alert of severity `success` or `info` -- logged at INFO by
+  `alert()` -- is listed under "Notices", not "Alerts raised", and leaves
+  the day quiet. The 2026-11-01 digest listed keys only, "Crawl completed"
+  among the problems, and hid one behind "and 1 more";
 - the day is stamped only when a channel took the digest
   (`_deliver_digest` awaits `ops_alerts._deliver` on the server loop):
   `failed` is tried again in an hour, `no_channel` (nothing takes ops

@@ -39,7 +39,11 @@ async def _decided_card_message(requested_gate: str) -> str | None:
     if not requested_gate:
         return None
     try:
-        from kazma_core.safety.hitl_gates import gate_for_async, gate_registry_enabled
+        from kazma_core.safety.hitl_gates import (
+            expired_unanswered,
+            gate_for_async,
+            gate_registry_enabled,
+        )
 
         if not gate_registry_enabled():
             return None
@@ -51,7 +55,7 @@ async def _decided_card_message(requested_gate: str) -> str | None:
         return None
     tool = gate.tool or "the tool"
     when = _minutes_ago(gate.settled_at or gate.claimed_at)
-    if gate.actor.startswith("watchdog:"):
+    if expired_unanswered(gate.actor):
         return (
             f"⏱ This approval expired {when}: nobody answered in time, so "
             f"{tool} was not run. Send the request again if you still want it."
