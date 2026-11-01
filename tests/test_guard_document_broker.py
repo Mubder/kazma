@@ -443,6 +443,22 @@ class _BrokerRun(GuardRun):
         except (OSError, ValueError):
             return {}
 
+    def broker_record(self, ready=lambda record: True, timeout: float = 30.0) -> dict:
+        """The guard's broker record once *ready* holds.
+
+        The guard logs an event before it writes its state file, and a read
+        while the file is being replaced answers {}: read straight after
+        "broker.ready", the record was missing (a full-suite run, 2026-11-01).
+        """
+        end = time.time() + timeout
+        record: dict = {}
+        while time.time() < end:
+            record = self.state().get("document_broker") or {}
+            if record and ready(record):
+                return record
+            time.sleep(0.2)
+        raise AssertionError(f"the broker record never matched; last read {record}")
+
     def wait_count(self, event: str, n: int, timeout: float = 90.0) -> None:
         end = time.time() + timeout
         while time.time() < end:
@@ -477,14 +493,14 @@ def test_a_killed_broker_is_restarted_by_the_guard(tmp_path):
     port = _free_port()
     with _BrokerRun(tmp_path, port) as g:
         g.wait_for("broker.ready", timeout=60)
-        first = g.state()["document_broker"]["pid"]
+        first = g.broker_record(lambda r: r.get("state") == "running" and r.get("pid"))["pid"]
         if os.name == "nt":
             subprocess.run(["taskkill", "/PID", str(first), "/T", "/F"], capture_output=True, check=False)
         else:
             os.kill(first, 9)
         g.wait_for("broker.exited", timeout=30)
         g.wait_count("broker.ready", 2, timeout=60)
-        second = g.state()["document_broker"]["pid"]
+        second = g.broker_record(lambda r: r.get("state") == "running" and r.get("pid") not in (None, first))["pid"]
         assert second and second != first
         assert g.count("child.spawned") == 1, "killing the broker must not restart Kazma"
 
@@ -540,7 +556,7 @@ def test_a_broker_left_by_a_killed_guard_is_reaped(tmp_path):
     port = _free_port()
     with _BrokerRun(tmp_path, port) as g:
         g.wait_for("broker.ready", timeout=60)
-        orphan = g.state()["document_broker"]["pid"]
+        orphan = g.broker_record(lambda r: r.get("state") == "running" and r.get("pid"))["pid"]
         # The guard alone, hard (Stop-ScheduledTask): its children are left.
         if os.name == "nt":
             subprocess.run(["taskkill", "/PID", str(g.proc.pid), "/F"], capture_output=True, check=False)
@@ -641,6 +657,6 @@ def test_the_real_guard_moves_a_broker_whose_port_is_refused(tmp_path):
     with run as g:
         g.wait_for("broker.ready", timeout=90)
         refused = (tmp_path / "fake_broker.refused_port").read_text(encoding="utf-8")
-        record = g.state()["document_broker"]
+        record = g.broker_record(lambda r: r.get("state") == "running" and r.get("pid"))
         assert g.count("broker.port_moved") == 1 and g.count("broker.restarting") == 0
         assert record["url"] != "tcp://" + refused[len("tcp:"):] and record["state"] == "running"
