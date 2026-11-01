@@ -32,8 +32,28 @@ def search_text(
     if rg:
         hits = _rg(rg, root, pattern, glob=glob, limit=limit)
         if hits is not None:
-            return hits
-    return _python_grep(root, pattern, glob=glob, limit=limit)
+            return _without_kazma_stores(root, hits)
+    return _without_kazma_stores(root, _python_grep(root, pattern, glob=glob, limit=limit))
+
+
+_HIT_PATH = re.compile(r"^(.*?):(\d+):")
+
+
+def _without_kazma_stores(root: Path, hits: list[str]) -> list[str]:
+    """Drop hits in Kazma's own stores and secret files (``.env``,
+    ``restic.pass``): ``--hidden`` reads dot files, and the workspace can be
+    the install folder (audit 2026-11, FA-001)."""
+    from kazma_core.store_registry import is_kazma_store
+
+    kept: list[str] = []
+    for hit in hits:
+        match = _HIT_PATH.match(hit)
+        if match:
+            where = Path(match.group(1))
+            if is_kazma_store(where if where.is_absolute() else root / where):
+                continue
+        kept.append(hit)
+    return kept
 
 
 def _rg(

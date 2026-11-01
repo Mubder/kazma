@@ -91,7 +91,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_EMBED_MODEL` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
 | `KAZMA_EMBED_PROVIDER` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
 | `KAZMA_ENV` | (none) | `kazma_ui.app` | yes |
-| `KAZMA_ENV_FILE` | (none) | `kazma_core.env_files` | yes |
+| `KAZMA_ENV_FILE` | (none) | `kazma_core.env_files`, `kazma_core.store_registry` | yes |
 | `KAZMA_EXPORTS_DIR` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_FETCH_BACKEND` | (none) | `kazma_core.tools.read_url` | yes |
 | `KAZMA_FETCH_DEADLINE_SECONDS` | `"90"` | `kazma_core.tools.read_url` | yes |

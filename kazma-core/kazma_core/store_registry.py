@@ -49,6 +49,8 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,7 +70,9 @@ __all__ = [
     "bundle_store_names",
     "carried_in_bundle",
     "distinctive_store_names",
+    "is_kazma_secret_file",
     "is_kazma_store",
+    "is_secret_file_name",
     "readers_for_store",
     "store_name_for",
     "store_refusal",
@@ -373,6 +377,14 @@ _ALWAYS_PROTECTED = frozenset({"hitl_gates.db", "vault.db"})
 _DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 _DB_SIDECARS = ("-wal", "-shm", "-journal")
 
+#: A copy of a database named after it: ``memory_state.db.pre_relabel``
+#: (the memory repair scripts), ``.pre_reembed`` (a rebuild),
+#: ``research_sessions.db.bak-<date>`` (an operator's copy).
+_DB_COPY_NAME = re.compile(r"\.(?:db|sqlite3?)[.\-_~]")
+
+#: The first 16 bytes of every SQLite database file.
+_SQLITE_HEADER = b"SQLite format 3\x00"
+
 
 # ── what reads what back ─────────────────────────────────────────────────
 
@@ -569,24 +581,195 @@ def _under(path: Path, root: Path) -> bool:
         return False
 
 
+# ── Kazma's secret files ────────────────────────────────────────────────
+#
+# Not databases, but the same rule and the same doors. The install's .env
+# holds the vault key, the database DSN and the provider keys; restic.pass
+# opens every offsite backup; the broker token commands the document worker
+# containers; a migration bundle's meta.env carries the vault key. Until
+# 2026-11-02 only databases were refused, and file_read and file_search
+# (read tier, no card) returned the live install's .env and restic.pass
+# (audit 2026-11, FA-001).
+
+#: Secret files refused by name wherever they are.
+SECRET_FILE_NAMES: frozenset[str] = frozenset(
+    {"restic.pass", "document_broker.token", "meta.env"}
+)
+
+#: An env file with one of these endings is a template (``.env.example``),
+#: never a secret.
+_ENV_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist")
+
+
+def _is_env_file_name(lowered: str) -> bool:
+    if lowered == ".env":
+        return True
+    return lowered.startswith(".env.") and not lowered.endswith(_ENV_TEMPLATE_SUFFIXES)
+
+
+def is_secret_file_name(name: str) -> bool:
+    """True when a bare file name is the name of one of Kazma's secret files.
+
+    For checks that only have text (a shell token, a quoted string in
+    code); :func:`is_kazma_secret_file` decides for a path.
+    """
+    lowered = Path(str(name or "")).name.strip().lower()
+    return lowered in SECRET_FILE_NAMES or _is_env_file_name(lowered)
+
+
+def _install_env_dirs() -> list[Path]:
+    """Folders whose env files are Kazma's own: the home and the install."""
+    dirs: list[Path] = []
+    try:
+        from kazma_core import paths as _paths
+    except ImportError:
+        return dirs
+    for getter in ("user_home", "installed_project_root", "get_project_root"):
+        fn = getattr(_paths, getter, None)
+        if fn is None:
+            continue
+        try:
+            found = fn()
+        except (OSError, RuntimeError, ValueError):
+            continue  # an unresolvable root is skipped, never fatal
+        if found:
+            try:
+                dirs.append(Path(found).expanduser().resolve())
+            except (OSError, RuntimeError, ValueError):
+                continue
+    return dirs
+
+
+def is_kazma_secret_file(path: str | Path) -> bool:
+    """True if *path* is one of Kazma's own secret files.
+
+    By NAME, anywhere: ``restic.pass``, ``document_broker.token`` and a
+    bundle's ``meta.env``. The file ``KAZMA_ENV_FILE`` names. An env file
+    (``.env``, ``.env.local``; never ``.env.example``) directly in Kazma's
+    home, the install folder or the project root, or at any depth under the
+    data dir except the coding sandbox (backups keep copies of ``.env``).
+    A ``.env`` in the user's own project is theirs and stays readable.
+    """
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    name = resolved.name.lower()
+    if name in SECRET_FILE_NAMES:
+        return True
+    explicit = (os.environ.get("KAZMA_ENV_FILE") or "").strip()
+    if explicit:
+        try:
+            if resolved == Path(explicit).expanduser().resolve():
+                return True
+        except (OSError, RuntimeError, ValueError):
+            pass  # an unresolvable KAZMA_ENV_FILE names no file
+    if not _is_env_file_name(name):
+        return False
+    if resolved.parent in _install_env_dirs():
+        return True
+    try:
+        from kazma_core.paths import data_dir
+
+        root = data_dir().resolve()
+    except (ImportError, OSError, RuntimeError):
+        return False
+    return _under(resolved, root) and not _under(resolved, root / "workspace")
+
+
+def kazma_paths_inside(root: str | Path) -> tuple[list[Path], list[Path]]:
+    """Kazma's own folders and secret files inside *root*, for a sandbox to hide.
+
+    A container that mounts a workspace sees everything in it. When the
+    workspace holds the install -- the live install's workspace IS the
+    install folder -- that is the data dir, Kazma's home (``restic.pass``,
+    the broker token, the logs) and the install's ``.env``: the 2026-11
+    functional audit read the live ``.env`` from ``python_exec``'s container
+    at ``/workspace/.env``, on a card whose code never spelled the name.
+
+    Returns ``(folders, files)``, resolved, each existing and strictly inside
+    *root*: the data dir and Kazma's home (a folder inside another is left
+    out, the outer one hides it), and each file directly in *root* or in an
+    install env folder inside it that :func:`is_kazma_store` claims (an env
+    file of the install, a secret file by name, ``vault.db``), plus the file
+    ``KAZMA_ENV_FILE`` names. Symbolic links are left alone: a container
+    cannot follow one out of its mount.
+    """
+    try:
+        base = Path(root).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return [], []
+    found: list[Path] = []
+    try:
+        from kazma_core import paths as _paths
+    except ImportError:
+        _paths = None
+    for getter in ("data_dir", "user_home"):
+        fn = getattr(_paths, getter, None) if _paths is not None else None
+        if fn is None:
+            continue
+        try:
+            folder = Path(fn()).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if folder != base and _under(folder, base) and folder.is_dir():
+            found.append(folder)
+    folders = [
+        f for f in dict.fromkeys(found) if not any(o != f and _under(f, o) for o in found)
+    ]
+
+    def _hidden_by_a_folder(p: Path) -> bool:
+        return any(p == f or _under(p, f) for f in folders)
+
+    files: list[Path] = []
+    scan = [base] + [d for d in _install_env_dirs() if d != base and _under(d, base)]
+    for folder in dict.fromkeys(scan):
+        if _hidden_by_a_folder(folder):
+            continue
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink() or not entry.is_file():
+                    continue
+            except OSError:
+                continue
+            if is_kazma_store(entry):
+                files.append(entry.resolve())
+    explicit = (os.environ.get("KAZMA_ENV_FILE") or "").strip()
+    if explicit:
+        try:
+            named = Path(explicit).expanduser().resolve()
+            if _under(named, base) and named.is_file() and not _hidden_by_a_folder(named):
+                files.append(named)
+        except (OSError, RuntimeError, ValueError):
+            pass  # an unresolvable KAZMA_ENV_FILE names no file
+    return folders, list(dict.fromkeys(files))
+
+
 def is_kazma_store(path: str | Path) -> bool:
-    """True if *path* is one of Kazma's databases (or its WAL/SHM sidecar).
+    """True if *path* is one of Kazma's databases (or its WAL/SHM sidecar),
+    or one of its secret files (:func:`is_kazma_secret_file`).
 
     By LOCATION: any SQLite file under the data dir, except the default
     coding sandbox (``data_dir()/workspace``), whose databases are the
     user's. Matched by suffix rather than by name, so a store added later is
-    covered on the day it is added. By NAME, anywhere: the gate registry and
+    covered on the day it is added; a copy named after a database
+    (``memory_state.db.pre_relabel``) and any file that starts with the
+    SQLite header count too. By NAME, anywhere: the gate registry and
     the vault — a stray copy of either is still the crown jewels.
     """
     try:
         resolved = Path(path).expanduser().resolve()
     except (OSError, RuntimeError, ValueError):
         return False
+    if is_kazma_secret_file(resolved):
+        return True
     name = _strip_sidecar(resolved.name)
     if name in _ALWAYS_PROTECTED:
         return True
-    if not name.endswith(_DB_SUFFIXES):
-        return False
     try:
         from kazma_core.paths import data_dir
 
@@ -594,7 +777,29 @@ def is_kazma_store(path: str | Path) -> bool:
     except (ImportError, OSError, RuntimeError):
         # Cannot classify; the callers' own rules still apply.
         return False
-    return _under(resolved, root) and not _under(resolved, root / "workspace")
+    if not _under(resolved, root) or _under(resolved, root / "workspace"):
+        return False
+    return (
+        name.endswith(_DB_SUFFIXES)
+        or bool(_DB_COPY_NAME.search(name))
+        or _has_sqlite_header(resolved)
+    )
+
+
+def _has_sqlite_header(path: Path) -> bool:
+    """True when *path* is an existing file that starts as a SQLite database.
+
+    A copy of a store is the store whatever it is called: on the live install
+    ``memory_state.db.pre_relabel`` held the whole memory database, and the
+    suffix rule let file_read (read tier, no card) print it (audit 2026-11).
+    """
+    try:
+        if not path.is_file():
+            return False
+        with path.open("rb") as fh:
+            return fh.read(len(_SQLITE_HEADER)) == _SQLITE_HEADER
+    except OSError:
+        return False
 
 
 def store_name_for(path_or_name: str | Path) -> str | None:
@@ -673,6 +878,12 @@ def store_refusal(path_or_name: str | Path, *, door: str) -> str:
     is what sent the model digging through every other door.
     """
     raw = Path(str(path_or_name)).name or str(path_or_name)
+    if is_secret_file_name(raw) or is_kazma_secret_file(path_or_name):
+        return (
+            f"{raw} holds Kazma's own secrets (keys, passwords, tokens); "
+            f"{door} may not open it. Nothing in it is meant for you to read; "
+            "tell the user what you need instead of looking for another way in."
+        )
     key = store_name_for(path_or_name)
     store = STORES.get(key or "") or STORE_FAMILIES.get(key or "")
     what = f" ({store.holds})" if store else ""

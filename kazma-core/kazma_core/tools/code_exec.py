@@ -616,6 +616,54 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
         return await asyncio.to_thread(_run_sync)
 
 
+def _mount_spec(*fields: str) -> str:
+    """One ``--mount`` value. Docker reads it as a CSV record, so a field
+    holding a comma or a quote is quoted whole (a path may hold either)."""
+    out = []
+    for field in fields:
+        if "," in field or '"' in field:
+            field = '"' + field.replace('"', '""') + '"'
+        out.append(field)
+    return ",".join(out)
+
+
+def _workspace_mounts(ws: Path) -> list[str]:
+    """The ``--mount`` arguments that show the workspace read-only, with
+    Kazma's own folders and secret files inside it shown empty.
+
+    The live workspace is the install folder: mounted whole, a snippet read
+    ``/workspace/.env`` (the vault key, the database password), the data
+    folder and ``.kazma`` (2026-11 functional audit). A folder is covered by
+    an empty read-only tmpfs, a file by ``/dev/null``. Raises when the list
+    cannot be worked out; the caller then mounts no workspace.
+    """
+    from pathlib import PurePosixPath
+
+    from kazma_core.store_registry import kazma_paths_inside
+    from kazma_core.workspace.path_policy import sandbox_workspace_target
+
+    host = ws.resolve()
+    ws_path = str(host)
+    # POSIX hosts mount the workspace at its own path so absolute paths
+    # inside a snippet still resolve. A Windows path is not a valid container
+    # path at all, so it lands on /workspace there.
+    target = sandbox_workspace_target(ws_path)
+    folders, files = kazma_paths_inside(host)
+
+    def _inside(path: Path) -> str:
+        return str(PurePosixPath(target) / path.relative_to(host).as_posix())
+
+    args = ["--mount", _mount_spec("type=bind", f"src={ws_path}", f"dst={target}", "ro")]
+    for folder in folders:
+        args += [
+            "--mount",
+            _mount_spec("type=tmpfs", f"dst={_inside(folder)}", "tmpfs-size=4096", "tmpfs-mode=0555"),
+        ]
+    for file in files:
+        args += ["--mount", _mount_spec("type=bind", "src=/dev/null", f"dst={_inside(file)}", "ro")]
+    return args
+
+
 async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
     """Pipe the sandbox runner into a disposable Docker container (network none).
 
@@ -640,21 +688,18 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
     # running it rather than reading it. `--mount` takes comma-separated
     # key=value pairs and handles drive letters.
     mount_args: list[str] = []
-    ws_mount_target = ""
     try:
         ws = await asyncio.to_thread(_fw._get_workspace)
         if ws and ws.exists():
-            ws_path = str(ws.resolve())
-            # POSIX hosts mount the workspace at its own path so absolute paths
-            # inside a snippet still resolve. A Windows path is not a valid
-            # container path at all, so it lands on /workspace there and the
-            # snippet sees it under that name.
-            ws_mount_target = ws_path if os.name != "nt" else "/workspace"
-            mount_args.extend(
-                ["--mount", f"type=bind,src={ws_path},dst={ws_mount_target},ro"]
-            )
+            mount_args = await asyncio.to_thread(_workspace_mounts, ws)
     except Exception:
-        pass
+        # Fail closed: a workspace whose Kazma files cannot be hidden is not
+        # mounted at all, and the snippet runs without it.
+        logger.warning(
+            "[code_exec] Docker jail runs without the workspace: Kazma's own "
+            "files in it could not be hidden",
+            exc_info=True,
+        )
 
     cmd = [
         docker, "run", "--rm", "-i",

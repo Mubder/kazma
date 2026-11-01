@@ -203,8 +203,9 @@ def _resolve_for_read(path: str) -> tuple[Path, str | None]:
 
     p = resolve_tool_path(path)
     access = check_path_access(p, "read")
-    # Agent Skills resources (SKILL.md scripts/references) are readable too.
-    if access.allowed or _is_under_agent_skill_dir(p):
+    # Agent Skills resources (SKILL.md scripts/references) are readable too,
+    # never a Kazma store or secret file placed among them.
+    if access.allowed or (access.via != "store" and _is_under_agent_skill_dir(p)):
         return p, None
     return p, denied_message(path, "read", result=access)
 

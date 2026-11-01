@@ -6632,6 +6632,27 @@ location rule, migration exporter, importer) — the bundle silently left
   (before the approval card) and the card disclosure all ask;
   `store_refusal()` says what the store holds and which tool reads it. A
   path grant cannot open a store, so the file refusal never offers one.
+- **Kazma's secret files and store copies are stores too** (2026-11
+  functional audit, FA-001 and siblings). On live the workspace is the
+  install folder: `file_read(".env")` and `file_search("restic")` (read
+  tier, no card) returned the vault key and restic's password,
+  `file_read` printed `memory_state.db.pre_relabel` (a copy of the memory
+  database), and an approved `python_exec` read `/workspace/.env` in its
+  container. `is_kazma_store` also answers for the install's `.env`
+  family, `restic.pass`, the broker token, any `.env` under the data dir
+  (`is_kazma_secret_file`), a name that continues a database suffix
+  (`.db.bak-...`) and any file under the data dir that starts with the
+  SQLite header. Every tool that resolves a path asks it
+  (`tests/test_kazma_secret_files_refused.py`, a class gate over the
+  tools). The python_exec container shows Kazma's folders (data dir,
+  user home) and secret files inside the workspace empty
+  (`code_exec._workspace_mounts` through
+  `store_registry.kazma_paths_inside`; a list that cannot be worked out
+  mounts no workspace), and the text check before the card reads
+  `/workspace/...` as the workspace (`path_policy.sandbox_workspace_target`).
+  Only `_workspace_mounts` spells a container bind mount
+  (`tests/test_sandbox_hides_kazma_files.py`, each with its negative
+  control, a real Docker run where the image is present).
 - **Drafts carry per-item state.** `used_at` / `used_via` / `used_ref` on the
   item; the row's `kind` is derived (`proposal_posted` only when every item
   is used). Marking requires the posting tool's own `"ok": true`. A startup
