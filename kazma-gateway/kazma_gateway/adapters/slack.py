@@ -35,6 +35,7 @@ import httpx
 
 from kazma_core.background import spawn_background
 from kazma_core.english_count import count_noun
+from kazma_gateway.adapters.slack_parse import is_new_message
 from kazma_gateway.adapters.slack_receive import SLACK_REASONS, drop_reason, event_key, where_of
 from kazma_gateway.gateway import (
     Attachment,
@@ -1165,8 +1166,9 @@ class SlackAdapter(BaseAdapter):
                 messages = data.get("messages", [])
                 # Process in reverse to maintain chronological order
                 for msg in reversed(messages):
-                    # Skip bot messages and subtype messages
-                    if msg.get("bot_id") or msg.get("subtype"):
+                    # Skip bot messages, edits and notices; a shared file
+                    # (subtype file_share) is a new message.
+                    if msg.get("bot_id") or not is_new_message(msg):
                         continue
                     if msg.get("user") == "USLACKBOT":
                         continue
@@ -1204,8 +1206,6 @@ class SlackAdapter(BaseAdapter):
 
         text = msg.get("text", "").strip()
         raw_files = msg.get("files") or []
-        # Polling (conversations.history) rarely includes files inline; Socket
-        # Mode is the primary media path. Still honor any that are present.
         if not text and not raw_files:
             self._note_drop("no_text", event)
             return

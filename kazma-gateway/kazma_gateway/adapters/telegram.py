@@ -621,55 +621,10 @@ class TelegramAdapter(BaseAdapter):
             except Exception:
                 logger.debug("[telegram] group-add announce skipped", exc_info=True)
 
-            # Handle voice messages (async download + transcribe)
-            # and generic media (photo/document/video/animation).
-            msg = self._parse_update(update)
+            # Voice notes (download + transcribe), files and photos, then text.
+            msg = await self._read_message(update, message)
             if msg is None:
-                message = (
-                    update.get("message")
-                    or update.get("channel_post")
-                    or update.get("edited_message")
-                )
-                if message and self.detect_voice_message(message):
-                    voice_result = await self._handle_voice_message(message)
-                    if voice_result is None:
-                        self._note_drop("voice_failed", message)
-                        return
-                    from_user = message.get("from", {})
-                    user_id = from_user.get("id", 0)
-                    chat_id = message.get("chat", {}).get("id", 0)
-                    username = (
-                        from_user.get("username", "")
-                        or from_user.get("first_name", "")
-                        or f"tg_{user_id}"
-                    )
-                    sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
-                    msg = IncomingMessage(
-                        platform="telegram",
-                        sender_id=sender_id,
-                        text=voice_result,
-                        context_metadata={
-                            "chat_id": chat_id,
-                            "user_id": user_id,
-                            "username": username,
-                            "message_id": message.get("message_id", 0),
-                            "chat_type": message.get("chat", {}).get("type", "private"),
-                            "update_id": update.get("update_id", 0),
-                            "voice_transcribed": True,
-                        },
-                    )
-                elif message and self._detect_media_message(message):
-                    # Photo / document / video / animation:
-                    # download and attach instead of dropping.
-                    msg = await self._handle_media_message(message)
-                    if msg is None:
-                        self._note_drop("media_failed", message)
-                        return
-                else:
-                    if message is not None:
-                        # A sticker, a poll, a contact: nothing Kazma reads.
-                        self._note_drop("unsupported", message)
-                    return
+                return
 
             # User whitelist (fail-closed: empty list + allow_all=false = reject all)
             from kazma_core.agent.command_catalog import normalize_telegram_command
@@ -875,6 +830,60 @@ class TelegramAdapter(BaseAdapter):
 
         return parse_text_update(update)
 
+    async def _read_message(
+        self, update: dict[str, Any], message: dict[str, Any] | None
+    ) -> IncomingMessage | None:
+        """The message *update* carries, its voice note or file included.
+
+        A voice note or file is read before the text. Telegram puts the words
+        sent with a file in its ``caption``, and the text parser took a
+        caption for a plain message: a captioned document or photo reached
+        the agent without its file (live 2026-11-01, "Keep this file as
+        reference" sent with a .docx; the agent searched the disk for it and
+        said it never arrived). Records why a message is left, and returns
+        None for it.
+        """
+        from kazma_gateway.adapters.telegram_parse import (
+            is_edit_only,
+            message_metadata,
+            sender_id_of,
+        )
+
+        if message is None:
+            return None
+        if is_edit_only(update):
+            self._note_drop("duplicate", message)
+            return None
+        caption = (message.get("caption") or "").strip()
+        if self.detect_voice_message(message):
+            transcript = await self._handle_voice_message(message)
+            if transcript is not None:
+                meta = message_metadata(update, message)
+                meta["voice_transcribed"] = True
+                return IncomingMessage(
+                    platform="telegram",
+                    sender_id=sender_id_of(meta),
+                    text=f"{caption}\n\n{transcript}" if caption else transcript,
+                    context_metadata=meta,
+                )
+            if not caption:
+                self._note_drop("voice_failed", message)
+                return None
+            # An audio file that could not be transcribed still reaches the
+            # agent as a file, with the words sent with it.
+        if self._detect_media_message(message):
+            msg = await self._handle_media_message(message, update)
+            if msg is None:
+                self._note_drop("media_failed", message)
+            return msg
+        msg = self._parse_update(update)
+        if msg is None:
+            # A sticker, a poll, a contact: nothing Kazma reads.
+            self._note_drop("unsupported", message)
+        elif "voice" in message:
+            msg.text = f"{msg.text}\n\n[A voice note was sent with this message and could not be transcribed.]"
+        return msg
+
     # --- Voice message transcription ---------------------------------
 
     @staticmethod
@@ -961,7 +970,7 @@ class TelegramAdapter(BaseAdapter):
             return None
 
     async def _handle_media_message(
-        self, message: dict[str, Any]
+        self, message: dict[str, Any], update: dict[str, Any] | None = None
     ) -> IncomingMessage | None:
         """Download a media payload and build an :class:`IncomingMessage`.
 
@@ -1006,16 +1015,11 @@ class TelegramAdapter(BaseAdapter):
         if data is None:
             return None
 
-        caption = message.get("caption") or ""
-        from_user = message.get("from", {})
-        user_id = from_user.get("id", 0)
-        chat_id = message.get("chat", {}).get("id", 0)
-        username = (
-            from_user.get("username", "")
-            or from_user.get("first_name", "")
-            or f"tg_{user_id}"
-        )
-        sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
+        from kazma_gateway.adapters.telegram_parse import message_metadata, sender_id_of
+
+        caption = (message.get("caption") or "").strip()
+        meta = message_metadata(update or {}, message)
+        meta["media"] = True
         text = caption or f"[{media_kind}]"
         attachment = Attachment(
             kind=media_kind,
@@ -1026,22 +1030,14 @@ class TelegramAdapter(BaseAdapter):
         )
         logger.info(
             "[telegram] media attached: %s (%s, %d bytes) thread=%s",
-            filename, mime, len(data), chat_id,
+            filename, mime, len(data), meta["chat_id"],
         )
         return IncomingMessage(
             platform="telegram",
-            sender_id=sender_id,
+            sender_id=sender_id_of(meta),
             text=text,
             attachments=[attachment],
-            context_metadata={
-                "chat_id": chat_id,
-                "user_id": user_id,
-                "username": username,
-                "message_id": message.get("message_id", 0),
-                "chat_type": message.get("chat", {}).get("type", "private"),
-                "update_id": message.get("update_id", 0) or 0,
-                "media": True,
-            },
+            context_metadata=meta,
         )
 
     def _live_voice_settings(self) -> dict[str, str | bool]:

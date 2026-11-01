@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kazma_gateway.adapters.slack_parse import is_new_message
 from kazma_gateway.receive_log import COMMON_REASONS
 
 __all__ = ["SLACK_REASONS", "drop_reason", "event_key", "where_of"]
@@ -36,8 +37,7 @@ def drop_reason(event: dict[str, Any] | None) -> str | None:
         return None
     if "bot_id" in event:
         return "from_a_bot"
-    subtype = event.get("subtype", "")
-    if subtype and subtype != "bot_message":
+    if not is_new_message(event):
         return "not_a_new_message"
     if not event.get("channel"):
         return "no_channel"
