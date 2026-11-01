@@ -16,8 +16,9 @@ restarted in it:
 
 * the supervisor's own log — restarts, refusals, orphan reaps, and the
   operator's planned work (reloads, maintenance pauses)
-* the application log — finished turns, alerts (sent and held back) and
-  recovery events, rotated files included
+* the application log — finished turns, alerts (sent and held back),
+  recovery events, YOLO windows and the calls that ran without their
+  approval card, rotated files included
 * the approval registry (``hitl_gates.db``) — the questions asked
 
 Nothing here queries the LLM, a remote database or the network.
@@ -34,6 +35,7 @@ from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from kazma_core.english_count import count_noun
 
@@ -110,8 +112,39 @@ _CRON_OUTCOMES = {
 # notice is logged at INFO and listed under "Notices", never as a problem.
 _ALERT_MARKER = "[ops_alert] "
 _THROTTLED = " (throttled)"
+
+# What ran without its approval card, and the YOLO windows that let it
+# (safety.unasked, safety.yolo). The digest did not say: on 2026-10-31 a chat
+# ran with YOLO on for an hour and sent a file unasked, and the digest listed
+# the day's approvals as if every call had been asked.
+_UNASKED_MARKER = "[HITL] ran without asking:"
+_UNASKED_LINE = re.compile(r"\[HITL\] ran without asking: tool=(\S+) thread=(\S+) by=(\S+)")
+_YOLO_ON = "[SECURITY] YOLO ENABLED"
+_YOLO_ON_LINE = re.compile(
+    r"\[SECURITY\] YOLO ENABLED thread=(\S+) actor=(\S+) ttl=(\S+?)s( \(unified clock\))?$"
+)
+_YOLO_OFF = "[SECURITY] YOLO DISABLED"
+_YOLO_OFF_LINE = re.compile(r"\[SECURITY\] YOLO DISABLED thread=(\S+) actor=(\S+)")
+# Before 2026-11-01 the swarm bus said it in its own words (and counted the
+# card's own call, which ran under the grant the card had just made); the
+# chat graph said nothing for a grant.
+_LEGACY_YOLO = "YOLO mode active for thread="
+_LEGACY_YOLO_LINE = re.compile(r"YOLO mode active for thread=(\S+) \S+ auto-approving: (\S+)")
+#: An old-format YOLO approval this soon after its chat's window opened is
+#: the call on the card that opened it (live: 0.09 s and 0.15 s; the next
+#: call waits for a model reply).
+_LEGACY_CARD_S = 2.0
+_LEGACY_GRANT = " grant covers "
+_LEGACY_GRANT_LINE = re.compile(r"\[Safety\] (task|tool) grant covers (\S+) on thread=(\S+)")
+_UNASKED_NEEDLES = (_UNASKED_MARKER, _YOLO_ON, _YOLO_OFF, _LEGACY_YOLO, _LEGACY_GRANT)
+_UNASKED_WORDS = {
+    "yolo": "under YOLO",
+    "tool_grant": 'under "Allow tool"',
+    "task_grant": 'under "Approve for task"',
+}
+
 #: Markers whose line is always one whole log record.
-_ONE_LINE_RECORDS = (_TURN_MARKER, _ALERT_MARKER)
+_ONE_LINE_RECORDS = (_TURN_MARKER, _ALERT_MARKER, _UNASKED_MARKER, _YOLO_ON)
 #: Lines per alert section; the rest are named on one line. The digest said
 #: "and 1 more (each is in the log)", and a phone holds no log.
 _ALERT_LINES = 12
@@ -285,11 +318,59 @@ def _pause_durations(events: list[tuple[float, str]]) -> list[float | None]:
     return durations
 
 
+def _unasked_chat(chats: dict[str, dict], thread: str, ts: float) -> dict:
+    chat = chats.setdefault(thread, {"first": ts, "windows": [], "calls": {}})
+    chat["first"] = min(chat["first"], ts)
+    return chat
+
+
+def _note_unasked(chats: dict[str, dict], ts: float, msg: str) -> bool:
+    """Read one YOLO or ran-without-asking line into *chats*; False when *msg*
+    is none of them."""
+    m = _UNASKED_LINE.search(msg)
+    if m:
+        tool, thread, by = m.groups()
+        _unasked_chat(chats, thread, ts)["calls"].setdefault(by, Counter())[tool] += 1
+        return True
+    m = _LEGACY_YOLO_LINE.search(msg)
+    if m:
+        thread, tool = m.groups()
+        windows = chats.get(thread, {}).get("windows") or []
+        if windows and 0 <= ts - windows[-1]["on"] <= _LEGACY_CARD_S:
+            return True  # the card's own call, run as the window opened
+        _unasked_chat(chats, thread, ts)["calls"].setdefault("yolo", Counter())[tool] += 1
+        return True
+    m = _LEGACY_GRANT_LINE.search(msg)
+    if m:
+        kind, tool, thread = m.groups()
+        _unasked_chat(chats, thread, ts)["calls"].setdefault(f"{kind}_grant", Counter())[tool] += 1
+        return True
+    m = _YOLO_ON_LINE.search(msg)
+    if m:
+        thread, actor, ttl, unified = m.groups()
+        _unasked_chat(chats, thread, ts)["windows"].append({
+            "on": ts, "actor": actor, "ttl": int(ttl) if ttl.isdigit() else None,
+            "unified": bool(unified), "off": None,
+        })
+        return True
+    m = _YOLO_OFF_LINE.search(msg)
+    if m:
+        # Turning off a chat's YOLO is logged whether or not it was on: an
+        # "off" ends the window this digest saw open, and is nothing alone.
+        windows = chats.get(m.group(1), {}).get("windows") or []
+        if windows and windows[-1]["off"] is None and windows[-1]["on"] <= ts:
+            windows[-1]["off"] = ts
+        return True
+    return False
+
+
 def _scan_app_log(
     since: float, unread: Counter | None = None,
-) -> tuple[Counter, dict[str, tuple[str, bool]], dict[str, dict]]:
-    """Counted markers; each finished turn, key -> (platform, failed); and
-    each alert key -> its tally (sent, held back, titles, needs attention).
+) -> tuple[Counter, dict[str, tuple[str, bool]], dict[str, dict], dict[str, dict]]:
+    """Counted markers; each finished turn, key -> (platform, failed); each
+    alert key -> its tally (sent, held back, titles, needs attention); and
+    each chat in which a call ran without asking or YOLO was turned on ->
+    its YOLO windows and those calls by standing approval.
 
     A turn is counted once by its key: close_turn can run again for a turn
     it closed before a restart.
@@ -297,9 +378,19 @@ def _scan_app_log(
     counts: Counter = Counter()
     turns: dict[str, tuple[str, bool]] = {}
     alerts: dict[str, dict] = {}
-    needles = (*_APP_MARKERS, _TURN_MARKER, _ALERT_MARKER, _MEMORY_ACTION, _CRON_MARKER)
-    for _ts, rec in _records(_app_log_path, since, _app_line, needles, unread):
+    chats: dict[str, dict] = {}
+    needles = (
+        *_APP_MARKERS, _TURN_MARKER, _ALERT_MARKER, _MEMORY_ACTION, _CRON_MARKER,
+        *_UNASKED_NEEDLES,
+    )
+    # The live file is read before the rotated ones: a window's "off" is
+    # matched to its "on" in time order.
+    unasked: list[tuple[float, str]] = []
+    for ts, rec in _records(_app_log_path, since, _app_line, needles, unread):
         msg = str(rec.get("message", ""))
+        if any(n in msg for n in _UNASKED_NEEDLES):
+            unasked.append((ts, msg))
+            continue
         turn = _TURN_LINE.search(msg)
         if turn:
             turns[turn.group(2)] = (turn.group(1), turn.group(3) == "yes")
@@ -332,7 +423,9 @@ def _scan_app_log(
         for marker, label in _APP_MARKERS.items():
             if marker in msg:
                 counts[label] += 1
-    return counts, turns, alerts
+    for ts, msg in sorted(unasked, key=lambda item: item[0]):
+        _note_unasked(chats, ts, msg)
+    return counts, turns, alerts, chats
 
 
 def _approvals(since: float) -> tuple[dict[str, int], str]:
@@ -383,6 +476,52 @@ def _alert_lines(tallies: dict[str, dict]) -> list[str]:
     return lines
 
 
+def _operator_zone() -> tuple[Any, str]:
+    """``(zone, name)`` the digest's times are in: the operator's (Scheduled's
+    ``cron.timezone``, else ``KAZMA_TZ``), else UTC. Never raises: an
+    unreadable setting or an unknown zone is UTC there."""
+    from kazma_core.cron.scheduler import resolve_cron_zone
+
+    return resolve_cron_zone()
+
+
+def _window_text(window: dict, zone: Any) -> str:
+    """One YOLO window: when it opened, for how long, who turned it on."""
+    def at(ts: float) -> str:
+        return datetime.fromtimestamp(ts, zone).strftime("%H:%M")
+
+    ttl = window["ttl"]
+    if ttl is None:
+        length = "with no end time"
+    elif window["unified"]:
+        length = f"for {_human_duration(ttl)} from each message"
+    else:
+        length = f"for {_human_duration(ttl)}"
+    text = f"YOLO on at {at(window['on'])} {length}, by {window['actor']}"
+    if window["off"] is not None:
+        text += f", off at {at(window['off'])}"
+    return text
+
+
+def _unasked_lines(chats: dict[str, dict], zone: Any, zone_name: str) -> list[str]:
+    """The section: every chat where a call ran without its card or YOLO was
+    turned on, oldest first, with what ran under which standing approval."""
+    total = sum(sum(c.values()) for chat in chats.values() for c in chat["calls"].values())
+    lines = [f"Ran without asking: {count_noun(total, 'call')} (times in {zone_name})"]
+    for thread, chat in sorted(chats.items(), key=lambda kv: (kv[1]["first"], kv[0])):
+        lines.append(f"  chat {thread[:8]}:")
+        lines += [f"    {_window_text(w, zone)}" for w in chat["windows"]]
+        calls = chat["calls"]
+        for by, words in _UNASKED_WORDS.items():
+            if calls.get(by):
+                lines.append(f"    {words}: {_split(calls[by])}")
+        for by in sorted(set(calls) - set(_UNASKED_WORDS)):
+            lines.append(f"    under {by}: {_split(calls[by])}")
+        if not any(calls.values()):
+            lines.append("    nothing ran without asking")
+    return lines
+
+
 def _split(counts: Counter) -> str:
     """Counts as "web 3, telegram 2": largest first, ties by name."""
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
@@ -396,7 +535,7 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     window = f"last {int(hours)}h"
 
     unread: Counter = Counter()
-    app, turns, alerts = _scan_app_log(since, unread)
+    app, turns, alerts, unasked = _scan_app_log(since, unread)
     guard, pauses, reloads = _scan_guard_log(since)
     approvals, approvals_note = _approvals(since)
 
@@ -434,6 +573,12 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
             if len(ended) < len(pauses):
                 detail.append(f"{len(pauses) - len(ended)} with no end in the log")
             lines.append(f"  maintenance pauses: {len(pauses)} ({'; '.join(detail)})")
+
+    # What ran without its card: the operator's choice, never a fault, but
+    # the approvals above are not the whole story without it.
+    if unasked:
+        lines.append("")
+        lines += _unasked_lines(unasked, *_operator_zone())
 
     # Recoveries: things that went wrong and were fixed without you.
     recovered = {

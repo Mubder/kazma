@@ -5348,6 +5348,26 @@ which only the web stream writes. Now:
   `alert()` -- is listed under "Notices", not "Alerts raised", and leaves
   the day quiet. The 2026-11-01 digest listed keys only, "Crawl completed"
   among the problems, and hid one behind "and 1 more";
+- what ran without asking, chat by chat ("Ran without asking", times in
+  the operator's zone, `cron.scheduler.resolve_cron_zone`): each YOLO
+  window opened (`[SECURITY] YOLO ENABLED`, its length, who; the
+  `YOLO DISABLED` that ended it) and each call a standing approval let skip
+  its card, by YOLO, "Allow tool" or "Approve for task". Every gate that
+  lets one through says it in ONE line, `safety/unasked.UNASKED_LINE`
+  (`note_ran_without_asking`): the chat graph's split (`hitl.approval_need`,
+  set only for a call its card would have asked about), its YOLO
+  defense-in-depth branch, the swarm bus (`_allowed_without_asking`) and the
+  MCP gate (`hitl.standing_approval`, the one reader of the three); before
+  2026-11-01 a grant on the chat graph and anything on the MCP gate said
+  nothing. The card that grants the approval is answered first and resumed
+  after, so its own calls run under the grant: they were asked
+  (`card_answered`, from the web route's `_apply_scope_grants`, the chat
+  apps' "Approve for task" and `kazma ask`'s "always"; the 2026-10-31 log
+  called that card's `file_write` a YOLO auto-approval). The older bus lines
+  are read too. Gate: `tests/test_digest_ran_without_asking.py` (the
+  writers' own lines through the reader; every function that reads a
+  standing approval says it or is declared, every card grant names its
+  calls, each with the old code as the negative control);
 - the day is stamped only when a channel took the digest
   (`_deliver_digest` awaits `ops_alerts._deliver` on the server loop):
   `failed` is tried again in an hour, `no_channel` (nothing takes ops

@@ -353,6 +353,11 @@ def _grant_asked_tools(thread_id: str, payload: dict[str, Any], *, actor: str) -
             continue
         if result.get("active"):
             granted.append(name)
+    if granted:
+        # The card's own calls run under the grant: they were asked.
+        from kazma_core.safety.unasked import card_answered
+
+        card_answered(thread_id, tools, tool)
     return granted
 
 

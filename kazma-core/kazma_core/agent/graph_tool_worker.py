@@ -616,7 +616,8 @@ async def tool_worker_node(
 
     from langgraph.types import interrupt
 
-    from kazma_core.safety.hitl import requires_approval
+    from kazma_core.safety.hitl import approval_need
+    from kazma_core.safety.unasked import BY_YOLO, note_ran_without_asking
 
     pending = state.get("tool_calls_pending", [])
     if not pending:
@@ -919,13 +920,21 @@ async def tool_worker_node(
         if _hitl_active:
             # The approval floor and the tool grants are settings reads (audit 2026-10-26 AUD-111).
             _needs_card = await asyncio.to_thread(
-                lambda: [requires_approval(tc["name"], hitl_config) for tc in pending]
+                lambda: [approval_need(tc["name"], hitl_config) for tc in pending]
             )
-            for tc, _card in zip(pending, _needs_card):
+            for tc, (_card, _unasked_by) in zip(pending, _needs_card):
                 if _card or _tc_is_git_write(tc):
                     danger_tools.append(tc)
                 else:
                     safe_tools.append(tc)
+                    # A call a standing approval let skip its card says so
+                    # here; the registry's bus check is skipped for it. An
+                    # MCP call is said by the MCP gate, which checks again.
+                    if _unasked_by and not str(tc["name"]).startswith("mcp__"):
+                        note_ran_without_asking(
+                            tc["name"], get_current_thread_id() or str(state.get("thread_id") or ""),
+                            _unasked_by,
+                        )
         else:
             from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
 
@@ -1440,11 +1449,8 @@ async def tool_worker_node(
                 if tc["name"] in ALWAYS_HITL_TOOLS or _tc_is_git_write(tc)
             ]
             if current_thread and not _always and await asyncio.to_thread(is_yolo_active, str(current_thread)):
-                logger.warning(
-                    "[ToolWorker] YOLO active for thread=%s — auto-approving %d danger tool(s)",
-                    current_thread,
-                    len(danger_tools),
-                )
+                for tc in danger_tools:
+                    note_ran_without_asking(tc["name"], str(current_thread), BY_YOLO)
                 approved = True
                 approval = {"approved": True, "yolo": True}
                 approval_mode = "yolo"

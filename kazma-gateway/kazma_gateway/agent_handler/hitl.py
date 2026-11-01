@@ -1188,6 +1188,13 @@ async def _handle_hitl_resume(
                         "[HITL] Task grant activated for thread=%s actor=%s",
                         target_thread, actor,
                     )
+                    # The card's own calls run under it: they were asked.
+                    from kazma_core.safety.unasked import card_answered
+
+                    _card = pending if isinstance(pending, dict) else {}
+                    card_answered(
+                        target_thread, list(_card.get("tools") or []), str(_card.get("tool") or ""),
+                    )
                 except Exception as exc:
                     logger.warning("[HITL] Task grant failed: %s — continuing with single approve", exc)
 

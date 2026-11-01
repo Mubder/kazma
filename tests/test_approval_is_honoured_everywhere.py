@@ -55,7 +55,10 @@ class TestBothGatesHonourTheSameGrants:
                         names.add(func.attr)
             return names
 
-        agent_path = called_names(inspect.getsource(hitl.requires_approval))
+        # The agent path's standing approvals are read in one place since
+        # 2026-11-01 (``requires_approval`` -> ``approval_need`` ->
+        # ``standing_approval``, which names what let a call run unasked).
+        agent_path = called_names(inspect.getsource(hitl.standing_approval))
         # `check` and every SafetyMiddleware method it reaches: the standing
         # grants are read in `_allowed_without_asking`, run in a thread by
         # `_precheck` (Swarm audit SW-S12 moved the settings reads off the
@@ -86,6 +89,7 @@ class TestBothGatesHonourTheSameGrants:
         }
 
         standing = {"is_yolo_active", "has_task_grant", "has_tool_grant"}
+        assert standing <= agent_path, "the agent path's reader moved: re-point this test"
         missing = (standing & agent_path) - swarm_path
         assert not missing, (
             "the MCP/swarm gate ignores standing approvals the agent gate "
