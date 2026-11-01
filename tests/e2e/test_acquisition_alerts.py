@@ -41,7 +41,15 @@ def test_completion_alert_opens_saved_result_and_settings(language, monkeypatch)
                 assert row['dispatch'] == 'failed'
                 assert row['title'] == ('اكتمل البحث' if language == 'ar' else 'Research completed')
                 assert row['callback_id'] == 'link:/research?session=' + session.id
-                page.locator('.system-alerts-banner a[href*="session="]').click()
+                # A finished run is a success: a green toast whose Open button
+                # goes to the saved result, never the yellow attention banner
+                # (87f46a6d; this test still looked for the banner's link).
+                toast = page.locator('.toast-action')
+                toast.wait_for()
+                assert toast.inner_text() == ('فتح' if language == 'ar' else 'Open')
+                assert not page.locator('.system-alerts-banner').is_visible()
+                toast.click()
+                page.wait_for_url('**/research?session=' + session.id)
                 page.wait_for_function("() => document.getElementById('research-detail-output').textContent.includes('Saved fixture result')")
                 assert 'Completion fixture' in page.locator('#research-detail-title').inner_text()
                 # The alert and saved text survive a new document, not merely a toast.
