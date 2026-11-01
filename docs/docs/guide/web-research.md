@@ -159,6 +159,15 @@ the agent makes while answering in a chat is kept too, but in its own group
 below them, **Web searches from chat**: each is the result list of one search
 ("web search from chat · 8 results"), not a research report.
 
+When the agent runs a research in chat and then makes its paper into a PDF or
+Word file (`generate_pdf` / `generate_docx`) in the same reply, that paper is
+kept with the run: a copy goes into the run's folder
+(`research/reports/<run>/final/`), and the page lists the run by the paper's
+title as a **finished paper**, with a PDF button. Opening it shows the paper;
+the working report it was written from (sources, evidence, synthesis) is a
+link in the line above. A document made in a later reply, or in a chat that
+ran no research, is not taken for a research paper.
+
 ### Routing + eval (R4)
 
 | Mechanism | Role |

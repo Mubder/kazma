@@ -263,8 +263,8 @@ def list_research_papers(*, limit: int = 50) -> list[dict[str, Any]]:
                     for it in raw:
                         if isinstance(it, dict) and it.get("report_path"):
                             _add(it)
-            except Exception:
-                pass
+            except (OSError, ValueError):
+                pass  # an unreadable or torn index: the scan below still lists the reports
         reports_root = root / "research" / "reports"
         if not reports_root.is_dir():
             continue
@@ -508,6 +508,12 @@ async def _run_research_pipeline(
     if not topic:
         return "Error: topic is required. Usage: run_research_pipeline(topic=...)"
 
+    # The chat turn that asked for this run ("" outside a chat turn): the
+    # paper the agent writes from it in the same turn is kept with it
+    # (research_final_paper).
+    from kazma_core.safety.commitment.proposals import current_turn
+
+    turn = current_turn()
     depth_l = (depth or "deep").strip().lower()
     is_deep = depth_l in ("deep", "comprehensive", "full", "paper")
     max_sources = max(2, min(15, int(max_sources or (8 if is_deep else 4))))
@@ -976,6 +982,7 @@ async def _run_research_pipeline(
             "created_at": datetime.now(UTC).isoformat(),
             "elapsed_seconds": round(elapsed, 1),
             "kind": "research_paper",
+            "turn": turn or None,
         },
     ))
 

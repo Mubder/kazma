@@ -4513,6 +4513,19 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   "[Chat] <query> · session · done · 1 source", and read as Kazma's research.
   Gates: `tests/test_research_web_searches.py`,
   `tests/js/test_research_web_searches.js` (the old mixed list as control).
+- **A research run's finished paper is kept with it** (2026-10-31,
+  `tools/research_final_paper.py`): a run registered in a chat turn names it
+  (`turn`, `proposals.current_turn()`), and a `generate_pdf`/`generate_docx`
+  that succeeds in the SAME turn copies the document and the Markdown it was
+  made from into the run's folder (`final/paper.{pdf,docx,md}`, replaced by a
+  later call) and names them on the run's entry (`final`). The Research page
+  lists the run by that paper (its title, a PDF button) and opens its text,
+  the working report a link. Never matched by anything but the turn: a
+  document of another turn, or of a chat that ran no research, is no research
+  paper. A failure to keep it is a WARNING; the document is made either way.
+  Gates: `tests/test_research_final_paper.py` (the run and the PDF through
+  the real pipeline and tool; a later turn and an unstamped run as controls),
+  `tests/js/test_research_final_paper.js`.
 - Research pipeline execution uses `web_acquire.research_runtime`: four active
   pipelines and four background sessions in this Python process, with no waiting
   queue. Admit before planning/session creation, freeze workspace/operator and

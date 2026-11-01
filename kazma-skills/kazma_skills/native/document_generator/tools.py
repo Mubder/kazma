@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from kazma_core.agent.tool_refusal import KnownEffectError, RefusedBeforeEffect
 
 #: Resolved via paths so KAZMA_DATA_DIR is honoured.
 DOC_DIR = _data_dir() / "documents"
+
+logger = logging.getLogger(__name__)
 
 
 def _scope() -> dict[str, str]:
@@ -73,6 +76,34 @@ def _not_produced(result: Any, label: str) -> str:
     then = ("the document service is unavailable right now: tell the user and call again in a few minutes"
             if result.retryable else "change the request and call again")
     return f"Error: no {label} was written: {result.message} ({result.code}); {then}."
+
+
+async def _keep_with_research(result: Any, title: str, kind: str, markdown: Any) -> str:
+    """Keep a document made in a turn that ran a research run as that run's
+    finished paper (``research_final_paper``); a line for the tool's answer.
+
+    The document is made either way: a failure here is a WARNING, never the
+    tool's failure.
+    """
+    from kazma_core.safety.commitment.proposals import current_turn
+
+    turn = current_turn()
+    path = getattr(result.data, "export_path", None) if result.ok and result.data else None
+    if not turn or not path:
+        return ""
+    from kazma_core.tools.research_final_paper import keep_final_paper
+
+    try:
+        final = await asyncio.to_thread(
+            keep_final_paper, turn=turn, title=title, document=path, kind=kind, markdown=markdown,
+        )
+    except Exception as exc:  # a store or file failure must not fail the made document
+        logger.warning("[document] %s made, not kept with this turn's research run: %s",
+                       kind.upper(), exc)
+        return ""
+    if not final:
+        return ""
+    return "\n  Research page: kept as the finished paper of this turn's research run."
 
 
 def _output(result: Any, label: str) -> str:
@@ -213,6 +244,7 @@ async def generate_pdf(
     """
     from pathlib import Path as _P
 
+    source_md = None
     if markdown_path:
         # Resolve within the workspace (same ladder as file_read).
         from kazma_core.workspace.binding import resolve_active_root
@@ -225,6 +257,7 @@ async def generate_pdf(
         if not p.is_file():
             raise RefusedBeforeEffect(f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write.")
         md = p.read_text(encoding="utf-8", errors="replace")
+        source_md = p
         # Parse markdown headings into sections (same split as the export endpoints).
         parsed: list[dict[str, str]] = []
         cur_h = "Report"
@@ -269,7 +302,8 @@ async def generate_pdf(
             # The incomplete file is known and named; a new call writes a new
             # file: a correctable error, not an unknown effect.
             raise KnownEffectError(f"{_err} (incomplete file: {_path})")
-    return _output(result, "PDF")
+    answer = _output(result, "PDF")
+    return answer + await _keep_with_research(result, title, "pdf", source_md)
 
 
 async def generate_docx(
@@ -294,6 +328,7 @@ async def generate_docx(
     """
     from pathlib import Path as _P
 
+    source_md = None
     if markdown_path:
         from kazma_core.workspace.binding import resolve_active_root
 
@@ -305,6 +340,7 @@ async def generate_docx(
         if not p.is_file():
             raise RefusedBeforeEffect(f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write.")
         md = p.read_text(encoding="utf-8", errors="replace")
+        source_md = p
         parsed: list[dict[str, str]] = []
         cur_h = "Report"
         cur_b: list[str] = []
@@ -335,7 +371,8 @@ async def generate_docx(
         export_dir=DOC_DIR,
         **_scope(),
     )
-    return _output(result, "DOCX")
+    answer = _output(result, "DOCX")
+    return answer + await _keep_with_research(result, title, "docx", source_md)
 
 
 async def generate_xlsx(

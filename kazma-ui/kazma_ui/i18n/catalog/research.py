@@ -352,6 +352,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "جلسة",
         "en": "session",
     },
+    "research.ui.kind_finished_paper": {
+        "ar": "ورقة مكتملة",
+        "en": "finished paper",
+    },
+    "research.ui.detail_finished_paper": {
+        "ar": "ورقة مكتملة، كُتبت من عملية البحث هذه",
+        "en": "Finished paper, written from this research run",
+    },
+    "research.ui.open_pdf": {
+        "ar": "افتح الورقة (PDF)",
+        "en": "Open the paper (PDF)",
+    },
+    "research.ui.working_report": {
+        "ar": "تقرير العمل (المصادر والأدلة)",
+        "en": "Working report (sources and evidence)",
+    },
     "research.ui.kind_web_search": {
         "ar": "بحث ويب من المحادثة",
         "en": "web search from chat",
