@@ -71,8 +71,8 @@ def tools_to_grant(
 
 
 def one_time_only(pending_tools: Any, pending_tool_name: str = "") -> list[str]:
-    """The always-ask tools (``ALWAYS_HITL_TOOLS``: X writes) a question asks
-    about. They take a one-time approval only: a grant can never skip them
+    """The always-ask tools (``ALWAYS_HITL_TOOLS``: X writes, folder access)
+    a question asks about. They take a one-time approval only: a grant can never skip them
     (``requires_approval`` checks the list first), so "allow for this chat"
     on their card only approved THIS call -- live 2026-10-16 a click on it
     published a post the owner read as "it will still ask me before posting".

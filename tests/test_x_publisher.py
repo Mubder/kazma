@@ -65,7 +65,7 @@ def test_always_hitl_survives_yolo(monkeypatch: pytest.MonkeyPatch) -> None:
         assert requires_approval("x_schedule_post", cfg) is True
         assert requires_approval("x_cancel_scheduled_post", cfg) is True
         assert requires_approval("file_write", cfg) is False  # YOLO skips ordinary danger
-        assert ALWAYS_HITL_TOOLS == frozenset({
+        assert ALWAYS_HITL_TOOLS >= frozenset({
             "x_post",
             "x_delete_post",
             "x_schedule_post",

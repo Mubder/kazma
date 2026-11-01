@@ -409,7 +409,7 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "email_categorize",
     "browser_eval_js",
     "computer_use",
-    # Path grants expand the FS allowlist — always require human approval.
+    # Path grants expand the FS allowlist — also in ALWAYS_HITL_TOOLS.
     "request_path_access",
     # Official X API writes — also in ALWAYS_HITL_TOOLS (YOLO cannot skip).
     "x_post",
@@ -418,15 +418,20 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "x_cancel_scheduled_post",
 )
 
-# Public posts cannot be YOLO-skipped, granted, or run with HITL disabled.
-# X ToU / automation rules require a human to approve each outbound tweet.
-# Scheduling/cancelling a public post is an outbound X write too, so it is
-# gated the same way (approve once at booking).
+# Tools that ask every time: no YOLO window, grant or disabled gate skips
+# them, and their card takes a one-time approval only.
+# Public posts: X ToU / automation rules require a human to approve each
+# outbound tweet. Scheduling/cancelling a public post is an outbound X write
+# too, so it is gated the same way (approve once at booking). The public ones
+# name their action on the card (``safety.public_actions``).
+# A folder-access request widens what every file tool may read or write for
+# the session: on 2026-10-26 a YOLO window let one through with no card.
 ALWAYS_HITL_TOOLS: frozenset[str] = frozenset({
     "x_post",
     "x_delete_post",
     "x_schedule_post",
     "x_cancel_scheduled_post",
+    "request_path_access",
 })
 
 # Backward-compatible alias used throughout the codebase / tests.
@@ -468,13 +473,13 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     auto_deny_on_timeout = hitl.get("auto_deny_on_timeout", True)
 
     # Check YOLO mode for thread ID override
+    yolo_on = False
     tid = get_current_thread_id()
     if tid:
         try:
             from kazma_core.safety.yolo import is_yolo_active
 
-            if is_yolo_active(tid):
-                enabled = False
+            yolo_on = bool(is_yolo_active(tid))
         except Exception as exc:
             logger.warning("YOLO check failed in get_hitl_config: %s", exc)
 
@@ -486,9 +491,7 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
         # SettingsManager uses "safety.hitl_enabled" (flat key)
         cs_enabled = cs.get("safety.hitl_enabled")
         if cs_enabled is not None:
-            # Only override if YOLO hasn't already forced it to False
-            if enabled:
-                enabled = bool(cs_enabled)
+            enabled = bool(cs_enabled)
         cs_timeout = cs.get("safety.approval_timeout")
         if cs_timeout is not None:
             approval_timeout_seconds = int(cs_timeout)
@@ -580,8 +583,12 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception:
         logger.debug("[Safety] HITL/CANONICAL drift check failed", exc_info=True)
 
+    # A YOLO window turns the gate off for this thread. ``yolo`` says the gate
+    # is otherwise on, so an always-ask tool still shows its card there
+    # (``graph_tool_worker``) instead of being refused as a gate that is off.
     return {
-        "enabled": enabled,
+        "enabled": bool(enabled) and not yolo_on,
+        "yolo": bool(enabled) and yolo_on,
         "require_approval_for": require_approval_for,
         "approval_timeout_seconds": approval_timeout_seconds,
         "auto_deny_on_timeout": auto_deny_on_timeout,

@@ -353,8 +353,9 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   (2026-09-25: four `200`s, still paused at the next boot).
 
 **An always-ask tool takes a one-time approval only** (2026-10-16).
-`ALWAYS_HITL_TOOLS` (X writes) are never skipped by YOLO or a grant, so their
-card offers Approve once / Deny only: the interrupt carries `always_ask`
+`ALWAYS_HITL_TOOLS` (X writes, and `request_path_access`) are never skipped
+by YOLO or a grant, so their card offers Approve once / Deny only: the
+interrupt carries `always_ask`
 (`graph_tool_worker`; `yolo_allowed` is no marker -- it is also false wherever
 YOLO is off for the install), every hop to the page passes it (the SSE frame,
 the socket card, the pending-approvals items, the client copies), and the
@@ -366,6 +367,22 @@ never stores one (`hitl_grants.one_time_only`). Live 2026-10-16 an "Allow tool
 the tool -- approved THAT call and published a post the owner read as "it
 will still ask me before posting". Gates: `tests/test_always_ask_one_time_only.py`
 (the route without the refusal as control), `tests/e2e/test_always_ask_one_time_approval.py`.
+
+**A folder-access request always asks** (2026-11-01, the owner's decision):
+on 2026-10-26 a YOLO window let `request_path_access` run with no card (the
+daily digest's "ran without asking" found it), and a path grant widens what
+every file tool may read or write for the session. It is on
+`ALWAYS_HITL_TOOLS` (and `swarm/safety._ALWAYS_HITL_FALLBACK`, the same
+list). It is not public: its card keeps the ordinary header and says it asks
+every time (chat apps: `ASKS_EVERY_TIME`; web: `chat.hitl_tip_always`), and
+`tests/test_public_action_cards.py` declares it in `NOT_PUBLIC`. **A YOLO
+window is not a gate that is off:** `get_hitl_config` gives `enabled: False`
+under YOLO and `yolo: True` when the gate is otherwise on, and the tool worker
+shows an always-ask tool's card there. It refused every always-ask tool under
+YOLO as a disabled gate ("Re-enable safety.hitl.enabled"), X posts too; a gate
+the operator turned off still refuses them. Gate:
+`tests/test_folder_access_always_asks.py` (the old list and the config without
+`yolo` as negative controls).
 
 **A draft is published only after the user has seen it, on a card that says
 it publishes** (2026-10-16, the same incident: "check the metrics" saved a
@@ -379,7 +396,7 @@ stamped with the running turn, or stamped with no turn running
 refusal) and post after the user answers. An unstamped draft (a page, an older
 build) is not judged. The card names the public action
 (`safety/public_actions.PUBLIC_ACTIONS`, catalog `chat.hitl_public_<tool>` and
-`_btn`, chat.js `_PUBLIC_ACTION_LABELS`: one list, held to `ALWAYS_HITL_TOOLS`):
+`_btn`, chat.js `_PUBLIC_ACTION_LABELS`: one list, held to the public ones of `ALWAYS_HITL_TOOLS`):
 "Publish to X — public, can't be undone", the post first and whole, **Post now**
 -- on the chat card (which keeps that title on every pending render,
 `data-pending-title`), the approvals panel and the chat apps, whose keyboards

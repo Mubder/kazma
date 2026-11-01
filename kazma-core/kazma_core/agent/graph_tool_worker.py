@@ -1247,7 +1247,14 @@ async def tool_worker_node(
         # without one (checkpointer-less children, streaming/voice) can
         # never resume the pause. Deny with a clear actionable error
         # instead of minting an unresumable interrupt.
-        if danger_tools and not _hitl_active:
+        #
+        # A YOLO window is not such a gate: the live config says the gate is
+        # off for the thread (``yolo``), the graph still has it, and an
+        # always-ask tool shows its card there (the YOLO re-check below), as
+        # it would without YOLO. It was refused here as a disabled gate,
+        # telling the model to "re-enable safety.hitl.enabled" (2026-11-01).
+        _yolo_window = bool(hitl_config) and bool(hitl_config.get("yolo"))
+        if danger_tools and not (_hitl_active or _yolo_window):
             for tc in danger_tools:
                 results.append(ToolResult(
                     tool_call_id=str(tc.get("id") or ""),

@@ -2,8 +2,9 @@
 
 Live 2026-10-16 an ``x_post`` card read "Approval Required ... Approve once",
 like any other card, and the owner approved it as part of "check the
-metrics". Each always-ask card (``ALWAYS_HITL_TOOLS``: X writes) now says
-what it does in its header ("Publish to X — public, can't be undone"), shows
+metrics". Each public always-ask card (the X writes of
+``ALWAYS_HITL_TOOLS``) now says what it does in its header ("Publish to X —
+public, can't be undone"), shows
 the post first and whole, and its approving button says the action ("Post
 now"). It offers no task/session approval: the web route and the chat apps
 both refuse one. The web card in a browser, EN/AR:
@@ -26,6 +27,13 @@ ROOT = Path(__file__).resolve().parents[1]
 CHAT_JS = ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
 LONG_POST = "Kazma metrics — " + "x" * 260 + " END"
 
+#: Always-ask tools that do not act in public, and why: their card keeps the
+#: ordinary header and says it asks every time.
+NOT_PUBLIC = {
+    "request_path_access": "widens what the file tools may read or write for "
+    "the session; nothing leaves the machine",
+}
+
 
 def _js_table() -> dict[str, tuple[tuple[str, str], tuple[str, str]]]:
     src = CHAT_JS.read_text(encoding="utf-8")
@@ -43,9 +51,10 @@ def test_every_always_ask_tool_has_its_words_everywhere():
 
     CATALOG = merged()
 
-    assert set(PUBLIC_ACTIONS) == set(ALWAYS_HITL_TOOLS)
+    assert set(PUBLIC_ACTIONS) | set(NOT_PUBLIC) == set(ALWAYS_HITL_TOOLS)
+    assert not set(PUBLIC_ACTIONS) & set(NOT_PUBLIC)
     table = _js_table()
-    assert set(table) == set(ALWAYS_HITL_TOOLS)
+    assert set(table) == set(PUBLIC_ACTIONS)
     for tool, (title, button) in PUBLIC_ACTIONS.items():
         (tkey, tfall), (bkey, bfall) = table[tool]
         assert (tkey, bkey) == (f"hitl_public_{tool}", f"hitl_public_{tool}_btn")
@@ -61,7 +70,7 @@ def test_the_chat_page_bridges_the_table():
     template = (ROOT / "kazma-ui" / "kazma_ui" / "templates" / "chat.html").read_text(encoding="utf-8")
     plain_used, _ = used_keys([CHAT_JS.read_text(encoding="utf-8")])
     plain, _ = bridge(template)
-    for tool in ALWAYS_HITL_TOOLS:
+    for tool in PUBLIC_ACTIONS:
         assert f"hitl_public_{tool}" in plain_used and f"hitl_public_{tool}" in plain
         assert f"hitl_public_{tool}_btn" in plain_used and f"hitl_public_{tool}_btn" in plain
     assert "hitl_public_note" in plain
@@ -109,8 +118,8 @@ def test_any_other_card_keeps_its_buttons(platform):
     assert any("task" in label.lower() for label in labels), labels
 
 
-def test_every_always_ask_tool_gets_a_public_card():
-    for tool in ALWAYS_HITL_TOOLS:
+def test_every_public_always_ask_tool_gets_a_public_card():
+    for tool in PUBLIC_ACTIONS:
         out = _prompt("telegram", tool)
         title, button = public_action(tool)
         assert out["text"].startswith(f"📢 {title}"), tool
