@@ -355,7 +355,10 @@
         var searchesPayload = triple[3] || {};
         var papers = papersPayload.papers || [];
         var paperTasks = papers.map(function (p) {
-          var topic = p.topic || p.report_path || 'report';
+          // A run whose paper the agent finished in the same turn is listed
+          // by that paper (research_final_paper): its title, its PDF.
+          var final = (p.final && typeof p.final === 'object') ? p.final : null;
+          var topic = (final && final.title) || p.topic || p.report_path || 'report';
           return {
             id: 'paper:' + (p.id || p.report_path),
             prompt: '[' + i18n('research.ui.paper_tag', 'Paper') + '] ' + topic,
@@ -368,7 +371,8 @@
             created_at: p.created_at,
             completed_at: p.created_at,
             report_path: p.report_path,
-            docx_path: p.docx_path,
+            docx_path: (final && final.docx_path) || p.docx_path,
+            final: final,
             sources: p.sources,
             rubric_score: p.rubric_score,
             metadata: { kind: 'research_paper' },
@@ -579,14 +583,13 @@
           return;
         }
         $('research-detail-title').textContent = (paper.prompt || i18n('research.ui.paper', 'Paper')).slice(0, 100);
-        $('research-detail-meta').innerHTML =
-          '<span>' + esc(i18n('research.ui.detail_paper', 'Pipeline paper')) + '</span> · ' +
-          (paper.sources != null ? '<span>' + esc(i18n('research.ui.detail_sources', 'Sources: {n}', { n: paper.sources })) + '</span> · ' : '') +
-          '<span dir="ltr" translate="no">' + esc(paper.report_path) + '</span>';
+        var final = paper.final || null;
+        $('research-detail-meta').innerHTML = paperDetailMeta(paper);
         var el = $('research-detail-output');
         el.className = 'markdown-body bidi-content';
         el.textContent = i18n('research.ui.loading', 'Loading…');
-        fetch('/api/research/papers/file?path=' + encodeURIComponent(paper.report_path), {
+        var shown = (final && final.md_path) || paper.report_path;
+        fetch('/api/research/papers/file?path=' + encodeURIComponent(shown), {
           credentials: 'same-origin',
         })
           .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
@@ -667,7 +670,8 @@
             }
             return {
               format: fmt,
-              report_path: paper && paper.report_path,
+              // The finished paper when the run has one, else its report.
+              report_path: paper && ((paper.final && paper.final.md_path) || paper.report_path),
               topic: paper && paper.prompt,
             };
           })()
@@ -1072,6 +1076,29 @@
   var listIncomplete = false;
   var archivedIncomplete = false;
 
+  function paperFileUrl(path) {
+    return '/api/research/papers/file?path=' + encodeURIComponent(path);
+  }
+
+  // A finished paper's detail line: what it is, its sources, its PDF, and
+  // the working report (sources and evidence) it was written from.
+  function paperDetailMeta(paper) {
+    var final = paper.final || null;
+    var sources = paper.sources != null
+      ? '<span>' + esc(i18n('research.ui.detail_sources', 'Sources: {n}', { n: paper.sources })) + '</span> · '
+      : '';
+    if (!final) {
+      return '<span>' + esc(i18n('research.ui.detail_paper', 'Pipeline paper')) + '</span> · ' + sources +
+        '<span dir="ltr" translate="no">' + esc(paper.report_path) + '</span>';
+    }
+    return '<span>' + esc(i18n('research.ui.detail_finished_paper', 'Finished paper, written from this research run')) + '</span> · ' +
+      sources +
+      (final.pdf_path ? '<a href="' + esc(paperFileUrl(final.pdf_path)) + '" target="_blank" rel="noopener">' +
+        esc(i18n('research.ui.open_pdf', 'Open the paper (PDF)')) + '</a> · ' : '') +
+      '<a href="' + esc(paperFileUrl(paper.report_path)) + '" target="_blank" rel="noopener">' +
+        esc(i18n('research.ui.working_report', 'Working report (sources and evidence)')) + '</a>';
+  }
+
   function startedAt(t) {
     var n = Date.parse(t.created_at || t.completed_at || '');
     return isNaN(n) ? 0 : n;
@@ -1128,7 +1155,7 @@
         rubricBit +
         ' · ' + esc(timeAgo(t.completed_at || t.created_at));
     } else if (isPaper) {
-      meta = esc(i18n('research.ui.kind_pipeline', 'pipeline')) + ' · ' +
+      meta = esc(t.final ? i18n('research.ui.kind_finished_paper', 'finished paper') : i18n('research.ui.kind_pipeline', 'pipeline')) + ' · ' +
         (t.sources != null ? esc(sourcesText(t.sources)) + ' · ' : '') +
         (t.report_path ? '<span translate="no">' + esc(t.report_path) + '</span> · ' : '') +
         (rubricBit ? rubricBit.replace(/^ · /, '') + ' · ' : '') +
@@ -1141,7 +1168,10 @@
     }
     var actions;
     if (isPaper || (isSession && t.report_path)) {
-      actions = (t.report_path
+      actions = (t.final && t.final.pdf_path
+        ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="' + esc(paperFileUrl(t.final.pdf_path)) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.ui.open_pdf', 'Open the paper (PDF)')) + '">PDF</a>'
+        : '') +
+        (t.report_path
         ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md', 'Open report')) + '">MD</a>'
         : '') +
         (t.docx_path

@@ -26,6 +26,12 @@
   research runs are now listed first, newest first, and the chat's searches
   in their own group below, "Web searches from chat", each "web search from
   chat · 8 results".
+- The paper the agent writes from a research run now shows on the Research
+  page. When Kazma researches a topic and then turns its paper into a PDF or
+  Word file in the same reply, the paper is kept with that research run: the
+  page lists the run by the paper's title, with a PDF button, and opening it
+  shows the paper itself, with the working report (sources and evidence) a
+  link. Before, the page showed only the working report.
 
 ## Research reads PDF sources (2026-10-31)
 

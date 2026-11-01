@@ -90,7 +90,7 @@ BASELINE = {
     # except Exception / except BaseException / bare except, any body
     "blind_except": 3393,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 399,
+    "silent_except": 398,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
