@@ -6,7 +6,19 @@ from typing import Any
 
 from kazma_gateway.gateway import Attachment, IncomingMessage
 
-__all__ = ["parse_message_event"]
+__all__ = ["is_new_message", "parse_message_event"]
+
+#: Message subtypes that are a new message to read. A file shared with or
+#: without words is ``file_share``; any other subtype (an edit, a deletion,
+#: a channel notice) is not new. Every file a person sent on Slack was left as
+#: "not a new message" until 2026-11-01 (the same day a Telegram file sent
+#: with a caption was found never reaching the agent).
+_NEW_MESSAGE_SUBTYPES = frozenset({"", "bot_message", "file_share"})
+
+
+def is_new_message(event: dict[str, Any]) -> bool:
+    """True when the message event's subtype is one Kazma reads."""
+    return (event.get("subtype") or "") in _NEW_MESSAGE_SUBTYPES
 
 
 def parse_message_event(event: dict[str, Any] | None) -> IncomingMessage | None:
@@ -25,8 +37,7 @@ def parse_message_event(event: dict[str, Any] | None) -> IncomingMessage | None:
     if "bot_id" in event:
         return None
 
-    subtype = event.get("subtype", "")
-    if subtype and subtype != "bot_message":
+    if not is_new_message(event):
         return None
 
     channel_id = event.get("channel")

@@ -467,7 +467,8 @@ async def test_telegram_heavy_update_does_not_block_other_chats():
         return "transcribed"
 
     adapter._handle_voice_message = slow_voice
-    adapter.detect_voice_message = lambda message: True
+    # A voice note is read before text: only the first message is one.
+    adapter.detect_voice_message = lambda message: message.get("message_id") == 1
     adapter._parse_update = lambda update: text_msg if update.get("_fast") else None
 
     heavy = {"message": {"chat": {"id": 1}, "message_id": 1, "from": {"id": 1}}}
@@ -510,7 +511,8 @@ async def test_telegram_same_chat_order_preserved():
         return "first (voice)"
 
     adapter._handle_voice_message = slow_voice
-    adapter.detect_voice_message = lambda message: True
+    # A voice note is read before text: only the first message is one.
+    adapter.detect_voice_message = lambda message: message.get("message_id") == 1
     adapter._parse_update = lambda update: second_msg if update.get("_fast") else None
 
     voice = {"message": {"chat": {"id": 5}, "message_id": 1, "from": {"id": 5}}}

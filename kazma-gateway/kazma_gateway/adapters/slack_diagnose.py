@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 
 from kazma_core.english_count import count_noun
+from kazma_gateway.adapters.slack_parse import is_new_message
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.slack_receive import SLACK_REASONS
 from kazma_gateway.connector_test import Checks, command_registration, judge_message, listening, show, when
@@ -84,7 +85,7 @@ def _newest_person(messages: Any) -> dict[str, Any] | None:
     if not isinstance(messages, list):
         return None
     return next(
-        (m for m in messages if m.get("user") and not m.get("bot_id") and not m.get("subtype")), None
+        (m for m in messages if m.get("user") and not m.get("bot_id") and is_new_message(m)), None
     )
 
 
@@ -283,7 +284,7 @@ async def diagnose(
                     ), link)
                     continue
                 person = next((m for m in hist.get("messages") or []
-                               if m.get("user") == user_id and not m.get("subtype")), None)
+                               if m.get("user") == user_id and is_new_message(m)), None)
                 if person is None:
                     add("direct_message", None, (
                         f"User {user_id} has written nothing to this bot in direct messages. "

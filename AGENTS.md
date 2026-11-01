@@ -7225,6 +7225,20 @@ Test on every adapter; Telegram and Slack had the same blind spots.
 - **No chat app shows a markdown table**: `GatewayManager.send` rewrites
   tables outside code fences as lines (`kazma_gateway/chat_tables.py`) for
   Telegram, Discord and Slack alike. `tests/test_chat_tables.py`.
+- **A file sent with words reaches the agent with both** (2026-11-01). Live,
+  a .docx sent on Telegram with the caption "Keep this file as reference"
+  never arrived: Telegram puts a file's words in its `caption`, and the text
+  parser read a captioned message as plain text before the file path ran.
+  `TelegramAdapter._read_message` reads a voice note, then a file or photo,
+  then text; the caption is the file's text, and the voice, file and text
+  paths share `telegram_parse.message_metadata` (the file path had dropped a
+  forum topic's thread). An edit is a `duplicate`, never a new turn. On
+  Slack a shared file is subtype `file_share`, which every path left as "not
+  a new message": `slack_parse.is_new_message` is the one rule, asked by the
+  parser, the receive record, the polling path and the Test. Gate:
+  `tests/test_chat_files_reach_the_agent.py` (the parse-first order and the
+  old subtype rule as negative controls; no Slack module reads `subtype`
+  itself).
 - Gates: `tests/test_discord_receive_and_test.py`,
   `tests/test_telegram_slack_receive_and_test.py` (nothing a connection reads
   unaccounted for, with negative controls; each drop reason at its level;

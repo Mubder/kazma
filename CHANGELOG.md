@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Files sent in Telegram and Slack reach the agent (2026-11-01)
+
+- On Telegram, a file or photo sent with words (a caption) never reached the
+  agent: Kazma read the caption as a plain text message and did not download
+  the file. Sent with "Keep this file as reference", a .docx was answered as
+  if nothing had come, and the agent searched the disk for it. Kazma now
+  reads the file first and passes the caption as the message. A file sent in
+  a forum topic is answered in that topic, a voice note's caption is kept with
+  its transcript, and an audio file that cannot be transcribed still arrives
+  as a file.
+- On Slack, every shared file was left as "not a new message" (Slack marks a
+  message carrying a file `file_share`). Kazma now reads it, on Socket Mode
+  and on the polling path, and the Slack Test counts it as a message.
+
 ## The daily digest says what happened (2026-11-01)
 
 - When Windows boots, Kazma can start before Postgres. Kazma then could not
