@@ -45,14 +45,36 @@ def _guard_log(tmp_path, events, age_hours=1.0):
 
 
 def _app_log(tmp_path, messages, age_hours=1.0, name="kazma.log"):
+    """*messages*: a message (logged at INFO) or a ``(level, message)`` pair."""
     path = tmp_path / name
     ts = (datetime.now(UTC) - timedelta(hours=age_hours)).isoformat()
+    records = [m if isinstance(m, tuple) else ("INFO", m) for m in messages]
     path.write_text(
-        "\n".join(json.dumps({"timestamp": ts, "level": "INFO", "message": m})
-                  for m in messages),
+        "\n".join(json.dumps({"timestamp": ts, "level": level, "message": m})
+                  for level, m in records),
         encoding="utf-8",
     )
     return path
+
+
+def _plain_app_log(tmp_path, records, age_hours=1.0, name="kazma.log"):
+    """The same lines in the file formatter's plain shape (logging_config
+    "standard", local time): what a server wrote when it set up logging
+    while the settings store could not answer (2026-10-30/31)."""
+    path = tmp_path / name
+    when = (datetime.now() - timedelta(hours=age_hours)).strftime("%Y-%m-%d %H:%M:%S")
+    path.write_text(
+        "\n".join(f"{when} [{level}] {logger}: {message}"
+                  for level, logger, message in records) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _alert_lines_of(caplog) -> list[tuple[str, str]]:
+    """The ``[ops_alert]`` lines alert() wrote, with the level it chose."""
+    return [(r.levelname, r.getMessage()) for r in caplog.records
+            if r.getMessage().startswith("[ops_alert] ")]
 
 
 def _guard_log_at(tmp_path, events):
@@ -210,6 +232,26 @@ def test_approvals_are_read_from_the_registry(tmp_path, monkeypatch, gates):
     text = daily_digest.build_digest(hours=24)
     assert "approvals asked: 4 (approved 2, could not resume 1, denied 1)" in text
     assert "approvals that could not resume: 1" in text.split("Needs attention:", 1)[1]
+
+
+def test_an_approval_nobody_answered_is_not_a_denial(tmp_path, monkeypatch, gates):
+    """The approval-timeout watchdog settles a question nobody answered as
+    ``deny`` (so the tool does not run), by the actor ``watchdog:timeout``.
+    The 2026-11-01 digest said "approved 51, denied 3": two of the three
+    were cards nobody saw in time."""
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, [])))
+    row = gates.GateRow
+    for i, (decision, actor) in enumerate([
+        ("approve", "web:admin"), ("deny", "web:admin"),
+        ("deny", gates.TIMEOUT_ACTOR), ("deny", gates.TIMEOUT_ACTOR),
+    ]):
+        gates.register_gate(row(gate_id=f"g{i}", thread_id=f"t{i}", tool="file_write"))
+        gates.claim_gate(f"g{i}", decision, actor)
+        gates.settle_gate(f"g{i}")
+    text = daily_digest.build_digest(hours=24)
+    assert "approvals asked: 4 (expired unanswered 2, approved 1, denied 1)" in text
+    assert gates.gate_outcomes_since(0) == {"approve": 1, "deny": 1, "timeout": 2}
 
 
 def test_a_registry_that_is_off_or_unreadable_is_said(tmp_path, monkeypatch, gates):
@@ -380,18 +422,137 @@ def test_alert_totals_and_held_back_repeats_are_reported(tmp_path, monkeypatch, 
     # so nothing is delivered and no thread starts.
     monkeypatch.delenv("KAZMA_OPS_ALERTS", raising=False)
     monkeypatch.setattr(ops_alerts, "_dispatch", lambda _t: None)
-    caplog.set_level(logging.WARNING, logger="kazma_core.observability.ops_alerts")
+    caplog.set_level(logging.INFO, logger="kazma_core.observability.ops_alerts")
     for _ in range(12):
         ops_alerts.alert("mcp.down", "MCP down", cooldown_s=3600)
     for _ in range(2):  # a title holding the separator
         ops_alerts.alert("backup.restic_snapshot_failed", "A snapshot | was missed")
-    written = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[ops_alert] ")]
+    written = _alert_lines_of(caplog)
     assert len(written) == 14
     monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, written)))
     ops_alerts.reset_alert_state()  # a restart: this process's memory is gone
     text = daily_digest.build_digest(hours=24)
-    assert "Alerts raised:\n  mcp.down: 12 (11 repeats held back)\n" \
-           "  backup.restic_snapshot_failed: 2 (1 repeat held back)" in text
+    assert "Alerts raised:\n  MCP down: 12 (11 repeats held back)\n" \
+           "  A snapshot | was missed: 2 (1 repeat held back)" in text
+    assert "No failures" not in text
+
+
+def _raise_alerts(monkeypatch, caplog, calls) -> list[tuple[str, str]]:
+    """Run the real alert() for each ``(key, title, severity)``; its lines."""
+    monkeypatch.delenv("KAZMA_OPS_ALERTS", raising=False)
+    monkeypatch.setattr(ops_alerts, "_dispatch", lambda *_a: None)
+    caplog.set_level(logging.INFO, logger="kazma_core.observability.ops_alerts")
+    for key, title, severity in calls:
+        ops_alerts.alert(key, title, severity=severity, cooldown_s=0)
+    ops_alerts.reset_alert_state()
+    return _alert_lines_of(caplog)
+
+
+def test_alerts_read_in_their_own_words_and_successes_are_notices(
+        tmp_path, monkeypatch, caplog):
+    """The 2026-11-01 digest listed keys, success beside failure, under
+    "Alerts raised": "acquisition.completed: 2" (a crawl) and
+    "acquisition.done: 1" (a research run) read as one thing counted twice,
+    and as problems. An alert reads by its title; a success or an info
+    notice is listed under "Notices" and leaves a day quiet."""
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
+    written = _raise_alerts(monkeypatch, caplog, [
+        ("acquisition.partial", "Partial results - review missing sources", "warn"),
+        ("acquisition.completed", "Crawl completed", "success"),
+        ("acquisition.completed", "Crawl completed", "success"),
+        ("acquisition.done", "Research completed", "success"),
+        ("acquisition.resumed", "Progress resumed", "info"),
+    ])
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, written)))
+    text = daily_digest.build_digest(hours=24)
+    assert "Alerts raised:\n  Partial results - review missing sources: 1\n" in text
+    assert text.split("Notices:", 1)[1].startswith(
+        "\n  Crawl completed: 2\n  Research completed: 1\n  Progress resumed: 1")
+    assert "acquisition." not in text
+
+    # Notices alone leave the day quiet.
+    quiet = [line for line in written if line[0] == "INFO"]
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, quiet)))
+    text = daily_digest.build_digest(hours=24)
+    assert "Alerts raised" not in text
+    assert "No failures, no restarts, no alerts." in text
+
+
+def test_a_success_line_from_before_the_change_is_still_counted(tmp_path, monkeypatch):
+    """Every alert was a WARNING before successes were logged at INFO: such a
+    line in the window is counted where its level puts it, never dropped."""
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, [
+        ("WARNING", "[ops_alert] acquisition.completed | Crawl completed")])))
+    assert "Alerts raised:\n  Crawl completed: 1" in daily_digest.build_digest(hours=24)
+
+
+def test_an_alert_whose_title_varies_is_named_by_its_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, [
+        ("WARNING", "[ops_alert] mcp.down | MCP server github is down"),
+        ("WARNING", "[ops_alert] mcp.down | MCP server filesystem is down"),
+    ])))
+    assert "Alerts raised:\n  mcp.down: 2" in daily_digest.build_digest(hours=24)
+
+
+def test_every_alert_is_named_none_left_to_the_log(tmp_path, monkeypatch):
+    """"and 1 more (each is in the log)" hid acquisition.stalled from the
+    2026-11-01 digest, which is read on a phone."""
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
+    lines = [("WARNING", f"[ops_alert] k{i:02d} | Title {i:02d}") for i in range(14)]
+    lines.append(lines[0])  # k00 twice: ranked first
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, lines)))
+    text = daily_digest.build_digest(hours=24)
+    assert "  Title 00: 2\n" in text
+    assert "in the log" not in text
+    assert "  and 2 more: k12 1, k13 1" in text
+
+
+def test_a_log_written_in_plain_lines_is_read(tmp_path, monkeypatch):
+    """At a Windows boot Kazma started before Postgres, set up logging while
+    the settings store could not answer, and wrote plain lines for 31 hours
+    (2026-10-30/31). The digest read JSON only, and the 2026-10-31 digest
+    said "Turns completed: 0 ... No failures, no restarts, no alerts" over a
+    day of turns and alerts."""
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_plain_app_log(tmp_path, [
+        ("INFO", "kazma_ui.turn_runtime", _turn_line("p1")),
+        ("INFO", "kazma_ui.turn_runtime", _turn_line("p2", failed="yes")),
+        ("WARNING", "kazma_core.observability.ops_alerts",
+         "[ops_alert] acquisition.failed | Crawl failed - review saved details"),
+        ("INFO", "kazma_core.observability.ops_alerts",
+         "[ops_alert] acquisition.completed | Crawl completed"),
+    ])))
+    text = daily_digest.build_digest(hours=24)
+    assert "Turns completed: 1 (web 1)" in text
+    assert "turns that ended in an error: 1" in text
+    assert "Alerts raised:\n  Crawl failed - review saved details: 1" in text
+    assert "Notices:\n  Crawl completed: 1" in text
+    assert "could not read" not in text
+
+
+def test_a_log_the_digest_cannot_read_is_reported_not_called_quiet(tmp_path, monkeypatch):
+    """Negative control: the JSON-only reader over the same plain log said
+    nothing at all. A reader that cannot read a turn or alert line says so."""
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_plain_app_log(tmp_path, [
+        ("INFO", "kazma_ui.turn_runtime", _turn_line("p1")),
+        ("WARNING", "kazma_core.observability.ops_alerts",
+         "[ops_alert] acquisition.failed | Crawl failed"),
+    ])))
+
+    def json_only(line):
+        try:
+            rec = json.loads(line)
+            return datetime.fromisoformat(rec["timestamp"]).timestamp(), rec
+        except (ValueError, KeyError, TypeError):
+            return None
+
+    monkeypatch.setattr(daily_digest, "_app_line", json_only)
+    text = daily_digest.build_digest(hours=24)
+    assert "Turns completed: 0" in text
+    assert "log lines this digest could not read: 2" in text.split("Needs attention:", 1)[1]
     assert "No failures" not in text
 
 

@@ -157,6 +157,8 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         # 2026-09-01) AND the transcript part, which stayed `pending` until
         # 2026-09-26: the turn reloaded with a dead Approve row and its
         # answer missing (turn 9bdd89fd93cb).
+        from kazma_core.safety.hitl_gates import TIMEOUT_ACTOR
+
         from kazma_ui.hitl_decision import record_gate_decision
 
         # The id the card is keyed by: the checkpoint payload has none, and a
@@ -164,7 +166,7 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         _iid = await record_gate_decision(
             thread_id,
             decision="timeout",
-            actor="watchdog:timeout",
+            actor=TIMEOUT_ACTOR,
             tool=str((_intr_payload or {}).get("tool") or ""),
             payload=dict(_intr_payload or {}),
             interrupt_id=_iid,

@@ -784,25 +784,44 @@ def gate_outcomes_since(since: float) -> dict[str, int]:
     It counted "HITL interrupt" log lines instead, and the WebSocket wrote
     one more each time a page connected while a question waited. A
     ``superseded`` row is the same pause under its second id and is not
-    counted. Keys: ``error`` (the answer's resume failed), ``timeout``, the
-    recorded decision (``approve``, ``deny``, ``orphaned`` ...), else
-    ``waiting``.
+    counted. Keys: ``error`` (the answer's resume failed), ``timeout`` (the
+    row's state, or a question nobody answered that the watchdog settled as
+    ``deny``: :func:`expired_unanswered`), the recorded decision
+    (``approve``, ``deny``, ``orphaned`` ...), else ``waiting``.
     """
     ensure_gate_schema()
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT state, decision FROM hitl_gates "
+            "SELECT state, decision, actor FROM hitl_gates "
             "WHERE created_at >= ? AND state != 'superseded'",
             (since,),
         ).fetchall()
     finally:
         conn.close()
     counts: dict[str, int] = {}
-    for state, decision in rows:
-        outcome = state if state in ("error", "timeout") else (decision or "waiting")
+    for state, decision, actor in rows:
+        if state in ("error", "timeout") or expired_unanswered(actor):
+            outcome = "timeout" if state != "error" else "error"
+        else:
+            outcome = decision or "waiting"
         counts[outcome] = counts.get(outcome, 0) + 1
     return counts
+
+
+#: Who settles a question nobody answered in time (kazma_ui.hitl_timeout).
+#: The registry records it as ``deny`` so the tool does not run; the actor is
+#: what says nobody decided.
+TIMEOUT_ACTOR = "watchdog:timeout"
+
+
+def expired_unanswered(actor: str | None) -> bool:
+    """True when a gate was settled by a watchdog, not by a person.
+
+    The daily digest counted these as denials: "approved 51, denied 3" on
+    2026-11-01, two of the three being questions nobody saw in time.
+    """
+    return str(actor or "").startswith("watchdog:")
 
 
 def pending_gates(tenant_id: str | None = None, *, limit: int = 200) -> list[GateRow]:

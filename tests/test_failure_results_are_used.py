@@ -463,7 +463,8 @@ def _product_sources() -> dict[str, str]:
 REPORTS_ITS_OWN_FAILURE: dict[str, str] = {
     "observability.ops_alerts.alert": (
         "True means only that delivery was requested (False: alerts off, throttled, or it "
-        "raised). alert() logs every occurrence at WARNING ('[ops_alert] key | title'), the "
+        "raised). alert() logs every occurrence ('[ops_alert] key | title'; a problem at "
+        "WARNING, a success or notice at INFO), the "
         "delivery logs 'alert was NOT delivered anywhere', and on_delivery carries the real "
         "outcome to a caller that needs it (§33). Callers raise it from a failure path with "
         "nothing else to do."
