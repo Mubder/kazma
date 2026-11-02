@@ -41,9 +41,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 2026-09-16 F-8). The image advertised malware scanning and did not do it.
 #
 # `|| true`: freshclam needs network, and a mirror hiccup must not fail the
-# build. The entrypoint refreshes signatures at runtime anyway, and
-# `/health/details` reports `malware.available` so the gap is visible rather
-# than silent.
+# build. The entrypoint starts freshclam's daemon, which refreshes them 12
+# times a day as the user Kazma runs as (the folders are handed to it below);
+# readiness reports `malware.available` and the signatures' age, so a gap is
+# visible rather than silent. Until 2026-11 this comment said the entrypoint
+# refreshed them, and it did not: a container scanned with its build day's
+# signatures for as long as it ran (FA-232).
 RUN freshclam --quiet || true
 
 # Copy monorepo
@@ -57,8 +60,8 @@ RUN pip install --no-cache-dir -e ".[rag,postgres,document-platform]"
 # Create non-root user for security (least-privilege)
 RUN groupadd -g 10001 kazma \
     && useradd -r -u 10001 -g kazma -m -d /home/kazma -s /bin/bash kazma \
-    && mkdir -p /app/kazma-data /home/kazma/.kazma/vector_memory \
-    && chown -R kazma:kazma /app /home/kazma \
+    && mkdir -p /app/kazma-data /home/kazma/.kazma/vector_memory /var/lib/clamav /var/log/clamav \
+    && chown -R kazma:kazma /app /home/kazma /var/lib/clamav /var/log/clamav \
     && chmod +x /app/scripts/docker-entrypoint.sh
 
 USER kazma

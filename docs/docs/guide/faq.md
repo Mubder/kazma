@@ -130,7 +130,7 @@ Kazma does not install ClamAV with pip. It runs `clamdscan` when that program is
 
 With `KAZMA_PRODUCTION=1`, fail-closed is on. A missing scanner, a missing virus database, or a scanner error rejects the upload. A queued job is scanned again before it is parsed (today's policy, not the one at upload); when that scan cannot run, the job is held and retried, then dead-lettered — never marked as unsafe content.
 
-**Linux and Docker.** The image installs `clamav` and runs `freshclam`. On a host, install the distro ClamAV package and run `freshclam` once so `clamscan` has signatures.
+**Linux and Docker.** The image installs `clamav`, fetches the signatures when it is built, and its entrypoint starts `freshclam`'s daemon, which refreshes them 12 times a day. On a host, install the distro ClamAV package, run `freshclam` once so `clamscan` has signatures, and keep them current with the distribution's service: `systemctl enable --now clamav-freshclam`.
 
 **Windows.**
 
@@ -145,9 +145,15 @@ To use `clamscan` by itself:
 1. Create a `database` directory you can write, and a `freshclam.conf` next to the copy of `clamscan.exe` you will put on `PATH`. Writing those under `C:\Program Files\ClamAV` needs an elevated shell. A copy under `%LOCALAPPDATA%\ClamAV` does not.
 2. `freshclam.conf` must not contain the sample `Example` line. Set `DatabaseMirror database.clamav.net` and `DatabaseDirectory` to that database folder.
 3. Run `freshclam.exe`. It downloads `main.cvd`, `daily.cvd`, and `bytecode.cvd`.
-4. Put `clamscan.exe` and the DLLs from the install on `PATH`, with the database beside the executable (or a junction to it). Leave `clamdscan.exe` off `PATH`.
+4. Schedule `freshclam.exe` so the signatures stay current. Running it once is not enough: new signatures come out several times a day, and a database more than 7 days old degrades document readiness (`malware_signatures_stale`). As the account Kazma runs as, with the path of the `freshclam.exe` whose `freshclam.conf` you set up:
 
-`clamscan --no-summary` on a small text file should print `OK`. Reload Kazma from a new terminal so the server process inherits the updated `PATH`. Readiness then shows `malware.available` true and `scanner` `clamscan`.
+   ```powershell
+   schtasks /Create /TN "ClamAV freshclam" /SC DAILY /ST 03:30 /TR "C:\Users\<you>\AppData\Local\ClamAV\freshclam.exe" /F
+   ```
+
+5. Put `clamscan.exe` and the DLLs from the install on `PATH`, with the database beside the executable (or a junction to it). Leave `clamdscan.exe` off `PATH`.
+
+`clamscan --no-summary` on a small text file should print `OK`. Reload Kazma from a new terminal so the server process inherits the updated `PATH`. Readiness then shows `malware.available` true and `scanner` `clamscan`, and `malware.signatures` the database's build date and age in days (`stale` past 7). Kazma reads the age on every check, so a `freshclam` run shows there without a restart.
 
 ---
 
