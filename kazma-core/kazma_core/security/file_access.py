@@ -58,13 +58,51 @@ def _windows_sddl(path: Path) -> str | None:
     return lines[-1] if lines else None
 
 
+def _account_name(sid: str) -> str | None:
+    """The account or group a SID names on this machine (``DOMAIN\\name``),
+    or None when Windows does not know it (or this is not Windows).
+
+    The live install's ``.env`` was readable by ``CodexSandboxUsers``, a
+    group another program had added; the report said "another account
+    (S-1-5-21-...-1003)", which nobody can act on (2026-11).
+    """
+    if os.name != "nt" or not sid.startswith("S-"):
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32")
+    advapi32.ConvertStringSidToSidW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.LookupAccountSidW.argtypes = [
+        wintypes.LPCWSTR, ctypes.c_void_p, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+        wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD)]
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    psid = ctypes.c_void_p()
+    if not advapi32.ConvertStringSidToSidW(sid, ctypes.byref(psid)):
+        return None
+    try:
+        name, domain = ctypes.create_unicode_buffer(256), ctypes.create_unicode_buffer(256)
+        name_len, domain_len, use = wintypes.DWORD(256), wintypes.DWORD(256), wintypes.DWORD()
+        if not advapi32.LookupAccountSidW(None, psid, name, ctypes.byref(name_len), domain,
+                                          ctypes.byref(domain_len), ctypes.byref(use)):
+            return None
+        return f"{domain.value}\\{name.value}" if domain.value else name.value or None
+    finally:
+        kernel32.LocalFree(psid)
+
+
 def sddl_readers(sddl: str, owner_sid: str) -> list[str]:
     """Who besides *owner_sid*, SYSTEM and the administrators an ACL lets in."""
     others: list[str] = []
     for kind, _flags, _rights, sid in _ACE.findall(sddl.split("S:", 1)[0]):
         if kind != "A" or sid in _MAY_READ or sid == owner_sid:
             continue
-        others.append(_EVERYONE.get(sid, f"another account ({sid})"))
+        if sid in _EVERYONE:
+            others.append(_EVERYONE[sid])
+            continue
+        name = _account_name(sid)
+        others.append(f"{name} ({sid})" if name else f"another account ({sid})")
     return others
 
 

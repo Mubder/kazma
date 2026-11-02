@@ -145,7 +145,8 @@ def report_exposure() -> list[str]:
             "A service of Kazma's is reachable beyond this machine",
             "; ".join(problems)
             + ". Publish container ports on 127.0.0.1 (the compose files do since 2026-11) "
-            "and give Kazma a database role that is not a superuser.",
+            "and give Kazma a database role that is not a superuser "
+            "(deploy/postgres/kazma_app_role.sql; docs/docs/ops/postgres-and-saas.md).",
             severity="warn",
         )
     return problems

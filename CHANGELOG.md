@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Secret files and the database login (2026-11-03)
+
+- The security report now checks every secret file of the install, not only
+  the restic passphrase: the `.env` (the vault key, the database password),
+  the vault and the document broker's token. It names who else can read
+  each one ("bAlfaris\CodexSandboxUsers") instead of a bare account number.
+- New: `deploy/postgres/kazma_app_role.sql` gives Kazma a database login that
+  is not a superuser, with the steps in the Postgres operations guide
+  ("A database role that is not a superuser"). Tested by running every one
+  of Kazma's Postgres stores, a backup and the restore rehearsal as the new
+  login. The boot warning about a superuser login points to it.
+
 ## Recovery drilled for real, and Arabic and English as equals (2026-11-02)
 
 - A reload with work running now ends cleanly: the server process exits

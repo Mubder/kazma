@@ -771,6 +771,53 @@ def is_kazma_secret_file(path: str | Path) -> bool:
     return _under(resolved, root) and not _under(resolved, root / "workspace")
 
 
+def install_secret_files() -> list[Path]:
+    """Every secret file of this install that exists, resolved, once each.
+
+    For the security report, which checks who else can read them (2026-11:
+    the live ``.env``, ``restic.pass`` and ``vault.db`` were readable by a
+    group another program had granted the install folder; the report looked
+    at ``restic.pass`` only). The env files directly in Kazma's home, the
+    install folder and the project root (never a template), the file
+    ``KAZMA_ENV_FILE`` names, every :data:`SECRET_FILE_NAMES` file in those
+    folders and in the data dir, the broker token the guard hands Kazma
+    (``KAZMA_DOCUMENT_BROKER_TOKEN_FILE``) and the vault. The restic
+    passphrase can live elsewhere (``restic_repo.password_file``); the
+    report adds it.
+    """
+    found: dict[Path, None] = {}
+
+    def _add(candidate: Path) -> None:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            return
+        if resolved.is_file():
+            found.setdefault(resolved, None)
+
+    folders = list(_install_env_dirs())
+    try:
+        from kazma_core import paths as _paths
+
+        folders.append(_paths.data_dir())
+        _add(Path(_paths.vault_db_path()))
+    except (ImportError, OSError, RuntimeError):
+        pass  # no data dir: the env folders are still checked
+    for folder in folders:
+        try:
+            children = list(Path(folder).iterdir())
+        except OSError:
+            continue  # a folder that cannot be listed holds nothing to check
+        for child in children:
+            if is_secret_file_name(child.name):
+                _add(child)
+    for variable in ("KAZMA_ENV_FILE", "KAZMA_DOCUMENT_BROKER_TOKEN_FILE"):
+        named = (os.environ.get(variable) or "").strip()
+        if named:
+            _add(Path(named))
+    return sorted(found)
+
+
 def kazma_paths_inside(root: str | Path) -> tuple[list[Path], list[Path]]:
     """Kazma's own folders and secret files inside *root*, for a sandbox to hide.
 

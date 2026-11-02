@@ -8278,8 +8278,16 @@ findings. Each fix has a gate that fails on the old code.
   name: the image of a recreated container is an id) and `pg_roles`; the
   security report's `check_service_exposure` and a boot WARNING plus the ops
   alert `security.service_exposed`. The compose files publish on loopback.
-  Gates: `tests/test_service_exposure_check.py`,
-  `tests/test_compose_ports_loopback.py`.
+  The way off a superuser login is `deploy/postgres/kazma_app_role.sql`
+  (role `kazma_app`: no superuser, no CREATEROLE, CREATEDB for the restore
+  rehearsal; it owns the database, its schema and every object, each named:
+  Postgres refuses `REASSIGN OWNED BY` the bootstrap superuser), the steps in
+  `docs/docs/ops/postgres-and-saas.md`; the memory mirror keeps its own copy
+  of the address (`memory.backends.state.url`, no fallback to
+  `KAZMA_DATABASE_URL`). Gates: `tests/test_service_exposure_check.py`,
+  `tests/test_compose_ports_loopback.py`, `tests/test_pg_app_role.py` (every
+  store's setup, a dump and the rehearsal as the role, on a database seeded
+  as the superuser; the bare role as the negative control).
 
 ### 55. The functional audit of 2026-11, Stage 2 (the Medium findings)
 
@@ -8511,10 +8519,15 @@ has a gate that fails on the old code.
   `tests/test_swarm_worker_prompt_bounded.py`,
   `tests/test_every_shipped_setting_has_a_rule.py`,
   `tests/test_actions_pinned_by_sha.py`.
-- **Secrets at rest.** The security report checks that the restic password
-  file is readable by its owner only (`check_secret_file_access`,
-  `security/file_access.readable_by_others`, FA-272: live it is readable by a
-  second local account; restricting it is the owner's). The offsite copy
+- **Secrets at rest.** The security report checks that every secret file of
+  the install is readable by its owner only (`check_secret_file_access`,
+  `security/file_access.readable_by_others`, FA-272): the restic password
+  file, the install's `.env` family, the vault and the broker token
+  (`store_registry.install_secret_files`), each other reader named
+  (`file_access._account_name`). It checked `restic.pass` alone until
+  2026-11-03, when the live install folder was found granting read to a
+  group another program had added (`CodexSandboxUsers`), inherited by `.env`
+  and `vault.db` too; removing that grant is the owner's. The offsite copy
   leaves `.env` out, zip and rclone alike (`universal.OFFSITE_LEAVES_OUT`,
   FA-215, the owner's decision). Gates: `tests/test_secret_file_access_check.py`,
   `tests/test_offsite_copy_leaves_env_out.py`.

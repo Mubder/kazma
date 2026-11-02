@@ -708,35 +708,58 @@ class SecurityHardeningRunner:
         )
 
     async def check_secret_file_access(self) -> HardeningCheck:
-        """Only Kazma's account can read the restic passphrase file (2026-11,
-        FA-272): it unlocks every encrypted offsite snapshot."""
+        """Only Kazma's account can read Kazma's secret files: the restic
+        passphrase (2026-11, FA-272: it unlocks every offsite snapshot), and
+        the install's ``.env`` (the vault key, the database password), the
+        vault and the broker token (2026-11: the live ``.env`` was readable
+        by a group another program had granted the install folder, and the
+        check looked at ``restic.pass`` only)."""
         return await asyncio.to_thread(self._secret_files)
 
     def _secret_files(self) -> HardeningCheck:
         from kazma_core.backup.restic_repo import password_file
         from kazma_core.security.file_access import readable_by_others
+        from kazma_core.store_registry import install_secret_files
 
-        path = password_file()
-        readers = readable_by_others(path)
-        if readers is None and not path.is_file():
+        files = install_secret_files()
+        restic = password_file()
+        if restic.is_file() and restic.resolve() not in files:
+            files.append(restic.resolve())
+        if not files:
             return HardeningCheck(name="check_secret_file_access", passed=True, severity="high",
-                                  message="No restic passphrase file on this install",
-                                  recommendation="Keep the passphrase escrowed off this machine")
-        if readers is None:
-            return HardeningCheck(name="check_secret_file_access", passed=False, severity="high",
-                                  message=f"Could not read who may open {path.name}",
-                                  recommendation="Check the file's permissions by hand (icacls / ls -l)")
-        if readers:
+                                  message="No secret file of Kazma's on this install",
+                                  recommendation="Keep secrets in the vault and .env")
+        open_to: dict[Path, list[str]] = {}
+        unreadable: list[Path] = []
+        for path in files:
+            readers = readable_by_others(path)
+            if readers is None:
+                unreadable.append(path)
+            elif readers:
+                open_to[path] = sorted(set(readers))
+        if open_to:
             account = os.environ.get("USERNAME") or "<Kazma's account>"
-            fix = (f'icacls "{path}" /inheritance:r /grant:r "{account}:F"' if os.name == "nt"
-                   else f"chmod 600 {path}")
+            accounts = sorted({who for readers in open_to.values() for who in readers})
+            if os.name == "nt":
+                fix = ("remove their access where it is granted -- often the install folder, "
+                       "whose files inherit it: icacls \"<folder>\" /remove:g \"<account>\" -- "
+                       "or restrict each file: icacls \"<file>\" /inheritance:r /grant:r "
+                       f"\"{account}:F\"")
+            else:
+                fix = "chmod 600 each file"
             return HardeningCheck(
                 name="check_secret_file_access", passed=False, severity="high",
-                message=f"{path.name} can be read by: " + ", ".join(sorted(set(readers))),
-                recommendation=f"Restrict it to Kazma's account: {fix}",
+                message="Kazma's secret files can be read by other accounts: " + "; ".join(
+                    f"{path} ({', '.join(readers)})" for path, readers in open_to.items()),
+                recommendation=f"Keep them to Kazma's account ({', '.join(accounts)} can read them): {fix}",
             )
+        if unreadable:
+            return HardeningCheck(name="check_secret_file_access", passed=False, severity="high",
+                                  message="Could not read who may open: " + ", ".join(p.name for p in unreadable),
+                                  recommendation="Check the files' permissions by hand (icacls / ls -l)")
         return HardeningCheck(name="check_secret_file_access", passed=True, severity="high",
-                              message=f"{path.name} is readable by Kazma's account only",
+                              message=f"{len(files)} secret files, each readable by Kazma's account only: "
+                                      + ", ".join(p.name for p in files),
                               recommendation="Keep it that way")
 
     async def check_permission_escalation(self) -> HardeningCheck:

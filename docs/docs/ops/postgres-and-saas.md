@@ -120,6 +120,57 @@ KAZMA_OIDC_CLIENT_ID=…
 KAZMA_OIDC_CLIENT_SECRET=…
 ```
 
+## A database role that is not a superuser
+
+Kazma needs to own its own tables and nothing more. A superuser login can
+read and change every database on the server and run programs on the
+database host, so every boot warns when Kazma signs in as one
+(`[security] Kazma signs in to Postgres as kazma, a superuser`). The Docker
+setup's `POSTGRES_USER` is the server's first superuser, which is how most
+installs end up that way.
+
+[`deploy/postgres/kazma_app_role.sql`](https://github.com/Mubder/kazma/blob/main/deploy/postgres/kazma_app_role.sql)
+makes the role `kazma_app` (no superuser, may not create roles, may create
+databases for the weekly restore rehearsal's scratch copy) and gives it the
+database, its schema and every table, sequence and function. It runs in one
+transaction and can be run again. Postgres refuses the shorter
+`REASSIGN OWNED BY <the first superuser>`, so the script names each object.
+`tests/test_pg_app_role.py` runs Kazma's own setup of every Postgres store,
+a dump and the restore rehearsal as the new role.
+
+1. Run the script as the superuser, in Kazma's database:
+
+   ```bash
+   docker exec -i kazma-db-win psql -U kazma -d kazma -v ON_ERROR_STOP=1 < deploy/postgres/kazma_app_role.sql
+   ```
+
+   It ends with `COMMIT`. If it stops on `lock timeout`, a long query held a
+   table: run it again when Kazma is idle. Kazma keeps working throughout:
+   it still signs in as the superuser until step 3.
+2. Give the role a password, typed at the prompt so it stays out of your
+   shell history:
+
+   ```bash
+   docker exec -it kazma-db-win psql -U kazma -d kazma -c "\password kazma_app"
+   ```
+
+   Use letters, digits, `-` and `_` only; anything else must be
+   percent-encoded in the address below.
+3. Point Kazma at the role:
+   - `.env`: `KAZMA_DATABASE_URL=postgresql://kazma_app:<password>@127.0.0.1:5433/kazma`
+     (keep your host, port and database name).
+   - If the memory mirror is on (Settings -> Memory -> Memory backends ->
+     Shared state set to Postgres), set its **Postgres DSN** to the same
+     address and press **Save backends**. It keeps its own copy of the
+     address.
+4. Reload: `python scripts/service/kazma_guard.py --reload --when-idle`.
+5. Check: the boot log no longer has the superuser warning, and
+   `/health/ready` answers 200.
+
+To undo, put the old address back in `.env` (and the memory mirror) and
+reload; the superuser can still use every table. Leave the `kazma`
+superuser in place: it is how you administer the server.
+
 ## Backup & disaster recovery
 
 Kazma backs up its own Postgres tables automatically (added after the
