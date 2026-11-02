@@ -77,6 +77,26 @@ def register_delta_queue(thread_id: str, queue: asyncio.Queue[Any]) -> str:
     return tid
 
 
+def _wake_delta_queues() -> None:
+    """At shutdown, wake every stream waiting on its token queue (FA-261)."""
+    from kazma_core.shutdown import SHUTDOWN_WAKE
+
+    for queue in list(_delta_queues.values()):
+        try:
+            queue.put_nowait(SHUTDOWN_WAKE)
+        except asyncio.QueueFull:
+            continue  # a full queue wakes its reader anyway
+
+
+def _install_waker() -> None:
+    from kazma_core.shutdown import add_shutdown_waker
+
+    add_shutdown_waker(_wake_delta_queues)
+
+
+_install_waker()
+
+
 def unregister_delta_queue(thread_id: str) -> None:
     """Drop the token sink for *thread_id* (idempotent)."""
     tid = (thread_id or "").strip()

@@ -1406,8 +1406,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Forget this memory?",
     },
     "memory.console.forget_memory_message": {
-        "ar": "يتوقف Kazma عن تذكّر هذا الجزء من المحادثة والحقائق التي تعلّمها منه، أينما حُفظت نسخة منها. تبقى المحادثة نفسها كما هي. النسخ الاحتياطية التي سبقت هذا تحتفظ به حتى تُستبدل (حتى سنة للنسخ الخارجية).",
-        "en": "Kazma stops remembering this part of the conversation and the facts it learned from it, wherever a copy was kept. The chat itself stays as it is. Backups made before now keep it until they are replaced (up to a year for offsite backups).",
+        "ar": "يتوقف Kazma عن تذكّر هذا الجزء من المحادثة والحقائق التي تعلّمها منه، أينما حُفظت نسخة منها. تبقى المحادثة نفسها كما هي. النسخ الاحتياطية التي سبقت هذا تحتفظ به حتى تُستبدل (حتى سنة للنسخ الخارجية)، وكذلك النسخ التي تحفظها أدوات الإصلاح قبل تعديل قاعدة الذاكرة، حتى تُحذف.",
+        "en": "Kazma stops remembering this part of the conversation and the facts it learned from it, wherever a copy was kept. The chat itself stays as it is. Backups made before now keep it until they are replaced (up to a year for offsite backups), and so do the copies Kazma's repair scripts keep before changing the memory database, until they are removed.",
     },
     "memory.console.forgotten": {
         "ar": "نُسيت",

@@ -64,9 +64,18 @@ def _escape_md(text: str) -> str:
     return result
 
 
+def _telegram_cut(text: str, limit: int) -> int:
+    from kazma_gateway.adapters.telegram_send import telegram_cut
+
+    return telegram_cut(text, limit)
+
+
 def _safe_slice_md(text: str, limit: int = 4096) -> str:
-    """Safely slice markdown text at limit without leaving dangling escape slashes."""
-    sliced = text[:limit]
+    """Safely slice markdown text at limit without leaving dangling escape
+    slashes. The limit is Telegram's own count, UTF-16 units (FA-140)."""
+    from kazma_gateway.adapters.telegram_send import telegram_cut
+
+    sliced = text[:telegram_cut(text, limit)]
     slashes = 0
     for char in reversed(sliced):
         if char == "\\":
@@ -80,7 +89,9 @@ def _safe_slice_md(text: str, limit: int = 4096) -> str:
 
 def _format_operator_card_md(content: str) -> str:
     """MarkdownV2: bold the first line (``[Guard]`` / ``[Ops]`` / ``[System]``)."""
-    lines = (content or "")[:4096].split("\n")
+    from kazma_gateway.adapters.telegram_send import telegram_cut
+
+    lines = (content or "")[:telegram_cut(content or "", 4096)].split("\n")
     out: list[str] = []
     for i, line in enumerate(lines):
         esc = _escape_md(line)
@@ -125,7 +136,11 @@ class TelegramBusAdapter(BusAdapter):
         return self._http
 
     async def _post(self, payload: dict[str, Any], method: str = "sendMessage") -> dict[str, Any] | None:
-        """Send a request to the Telegram API. Returns parsed JSON or None."""
+        """Send a request to the Telegram API. Returns parsed JSON or None.
+        A message or an edit goes out with link previews off (FA-128)."""
+        from kazma_gateway import outbound_flags
+
+        payload = outbound_flags.telegram(dict(payload), method)
         try:
             http = await self._ensure_http()
             resp = await http.post(
@@ -150,7 +165,10 @@ class TelegramBusAdapter(BusAdapter):
                     raw_text = fallback_payload.get("text", "")
                     if isinstance(raw_text, str):
                         # Strip Markdown escape slashes if present
-                        fallback_payload["text"] = re.sub(r"\\([\\_*\[\]()~`>#+\-=|{}.!])", r"\1", raw_text)[:4096]
+                        from kazma_gateway.adapters.telegram_send import telegram_cut
+
+                        plain = re.sub(r"\\([\\_*\[\]()~`>#+\-=|{}.!])", r"\1", raw_text)
+                        fallback_payload["text"] = plain[:telegram_cut(plain, 4096)]
                     fallback_resp = await http.post(
                         f"{_TELEGRAM_API}/bot{self._bot_token}/{method}",
                         json=fallback_payload,
@@ -290,7 +308,7 @@ class TelegramBusAdapter(BusAdapter):
 
         payload: dict[str, Any] = {
             "chat_id": self._chat_id,
-            "text": text[:4096],
+            "text": text[:_telegram_cut(text, 4096)],
             "parse_mode": parse_mode,
         }
 

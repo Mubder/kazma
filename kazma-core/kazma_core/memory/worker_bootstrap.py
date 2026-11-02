@@ -1113,6 +1113,14 @@ def _document_broker() -> None:
     document_broker_sweep()
 
 
+def _malware_signatures() -> None:
+    # Documents (FA-232): an ops alert when the ClamAV signatures intake
+    # scans with are older than ClamAV's own seven days, once a day.
+    from kazma_core.documents.malware import signature_alert_sweep
+
+    signature_alert_sweep()
+
+
 def _run_incident_retention() -> None:
     # Run supervision (kazma_core.runs): an incident nobody answered in a
     # week expires; finished ones are kept 30 days, then purged.
@@ -1139,6 +1147,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("checkpoint retention", _prune_checkpoints),
     ("supervisor watch", _watch_supervisor),
     ("document worker broker", _document_broker),
+    ("malware signatures", _malware_signatures),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),

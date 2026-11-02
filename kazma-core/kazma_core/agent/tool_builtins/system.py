@@ -781,6 +781,9 @@ def register_system_tools(registry: Any) -> None:
     @registry.register(
         description=(
             "Dispatch a research or analysis task to the Swarm engine. "
+            "worker='auto' (the default) lets the swarm pick the registered "
+            "worker best suited to the task, or start one from a template; "
+            "name a worker only when the user asks for it. "
             "The task appears in the Swarm panel (/swarm) with full worker "
             "progress, results, cost, and traceability. Returns a task ID "
             "immediately — use check_swarm_task to retrieve the result when "
@@ -811,61 +814,19 @@ def register_system_tools(registry: Any) -> None:
             raise RefusedBeforeEffect("Error: Swarm engine not initialized. "
                 "Configure swarm workers in kazma.yaml.")
 
-        # Auto-register a default "researcher" worker if none exist, so
-        # dispatch_swarm works out of the box without manual setup.
-        if not engine.worker_names:
-            try:
-                from kazma_core.model_registry import get_model_registry
-                from kazma_core.swarm.config import WorkerCapabilities, WorkerConfig
-
-                reg = get_model_registry()
-                profile = reg.get_active_profile()
-                engine.add_worker(WorkerConfig(
-                    name="researcher",
-                    type="in_process",
-                    model=profile.get("model", ""),
-                    provider=profile.get("provider", ""),
-                    role="researcher",
-                    system_prompt=(
-                        "You are a Researcher worker. Follow the research protocol: "
-                        "≥2 search queries, ≥2 full sources via read_url_to_file, "
-                        "digest long pages, then structured findings with URL citations. "
-                        "For comprehensive papers use run_research_pipeline. "
-                        "Never conclude from search snippets alone."
-                    ),
-                    capabilities=WorkerCapabilities(
-                        role="researcher",
-                        expertise=["research", "analysis", "writing"],
-                        tools=[
-                            "web_search",
-                            "read_url",
-                            "read_url_to_file",
-                            "crawl_site",
-                            "list_research_chunks",
-                            "read_research_chunk",
-                            "summarize_research_file",
-                            "digest_research_file",
-                            "synthesize_from_digests",
-                            "run_research_pipeline",
-                            "file_write",
-                        ],
-                    ),
-                ))
-                logger.info("[dispatch_swarm] Auto-registered 'researcher' worker")
-            except Exception as exc:
-                return (
-                    f"Error: No swarm workers registered and could not "
-                    f"auto-create one: {exc}. Add workers in the Swarm "
-                    f"panel or kazma.yaml."
-                )
-
-        # Resolve "auto" to the first available worker.
-        if worker == "auto":
-            worker = engine.worker_names[0] if engine.worker_names else "researcher"
+        # "auto" is the engine's own route (FA-113): the capability router
+        # picks the best registered worker, else the autoscaler takes an idle
+        # instance of a matching template or spawns one, the catch-all
+        # template taking what nothing matches (AGENTS §14). The tool used to
+        # register a permanent "researcher" when none existed and send every
+        # "auto" task to the alphabetically first worker: a coding task went
+        # to "analyst".
+        auto = (worker or "auto").strip().lower() == "auto"
+        workers = ["auto"] if auto else [worker]
 
         task = SwarmTask(
             prompt=prompt,
-            workers=[worker],
+            workers=workers,
             type=TaskType.DISPATCH,
             context=context,
             timeout=_dispatch_timeout(timeout_seconds),
@@ -898,8 +859,10 @@ def register_system_tools(registry: Any) -> None:
                 pass
 
         _bg_task.add_done_callback(_cleanup_handle)
+        to = ("the worker best suited to it (the swarm routes it, or starts one from a template)"
+              if auto else f"worker '{worker}'")
         return (
-            f"Swarm task dispatched to worker '{worker}' "
+            f"Swarm task dispatched to {to} "
             f"(id: {task.id}). It's visible in the Swarm panel. "
             f"Use check_swarm_task('{task.id}') to get the result."
         )

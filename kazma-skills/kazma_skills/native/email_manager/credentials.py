@@ -53,8 +53,20 @@ def vault_retrieve(name: str) -> str:
         return ""
 
 
+class VaultWriteFailed(RuntimeError):
+    """A secret could not be written to the vault, so a sign-in is not kept.
+
+    Raised by :func:`vault_store` (FA-104): it returned False and almost every
+    caller dropped the answer, so a Gmail, Microsoft or calendar connect, or a
+    token refresh, reported success over a token that was never kept, and the
+    next read found nothing. A RuntimeError, so the account flows' existing
+    ``except RuntimeError`` answers "failed" with its message.
+    """
+
+
 def vault_store(name: str, value: str, category: str = "email") -> bool:
-    """Encrypt and store a secret. Returns False if vault unavailable."""
+    """Encrypt and store a secret. Returns False for an empty value (nothing
+    to keep); raises :class:`VaultWriteFailed` when the vault cannot keep it."""
     if not value:
         return False
     try:
@@ -72,7 +84,11 @@ def vault_store(name: str, value: str, category: str = "email") -> bool:
         return True
     except Exception as exc:
         logger.warning("[email.creds] vault store %s failed: %s", name, exc)
-        return False
+        raise VaultWriteFailed(
+            f"Kazma could not save {name} to its vault ({type(exc).__name__}), so the "
+            "sign-in was not kept. Check that the vault key is set (KAZMA_VAULT_KEY) and "
+            "the data folder is writable, then connect again."
+        ) from exc
 
 
 def cred(env_key: str, vault_key: str = "") -> str:

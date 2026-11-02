@@ -42,6 +42,29 @@ class AcquisitionPolicy:
         return self.mode + ":" + ",".join(sorted(self.providers)) + ":browser=" + self.browser_network
 
 
+#: What a proxy needs besides its settings: the acquisition policy's two
+#: variables (AGENTS.md section 13). Said wherever the proxy is offered
+#: (FA-115: the card and its Test did not, and the Test answered "disabled by
+#: acquisition policy" with no step).
+PROXY_POLICY_STEP = (
+    "Kazma routes scraping through the proxy only when KAZMA_ACQUISITION_MODE="
+    "local_first_with_remote_fallback and KAZMA_ACQUISITION_REMOTE_PROVIDERS includes "
+    "proxy. Set both in .env, then reload Kazma."
+)
+
+
+def proxy_policy_state() -> dict[str, object]:
+    """The live acquisition policy as it bears on the proxy, for the Settings
+    card: ``{mode, providers, proxy_allowed}``, or ``{error, proxy_allowed:
+    False}`` when the variables are invalid. Never raises."""
+    try:
+        policy = acquisition_policy()
+    except AcquisitionPolicyError as exc:
+        return {"error": "policy_invalid", "message": str(exc), "proxy_allowed": False}
+    return {"mode": policy.mode, "providers": sorted(policy.providers),
+            "proxy_allowed": policy.permits("proxy")}
+
+
 def acquisition_policy() -> AcquisitionPolicy:
     """Fail closed on unknown modes/providers; credentials are never consent."""
     snapshot = _job_policy.get()

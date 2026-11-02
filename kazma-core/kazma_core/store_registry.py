@@ -368,7 +368,30 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "*.migrated": DataDirEntry(
         "a legacy file already moved into a store", "legacy",
         reason="its content is in a store the bundle carries"),
+    # The copies Kazma's own repairs take of the memory database before they
+    # change it (FA-254). Each holds memory as it was then, forgotten turns
+    # included: carried, a migration brought back what the owner had
+    # forgotten since (live 2026-11: all three travelled, and an import
+    # restored them). ``REPAIR_COPY_SUFFIXES`` is the list the gate reads.
+    "*.pre_entity_key": DataDirEntry(
+        "the memory database as it was before the entity-key migration", "machine",
+        reason="a repair's undo copy: it holds memories forgotten since"),
+    "*.pre_relabel": DataDirEntry(
+        "the memory database as it was before the provenance relabel", "machine",
+        reason="a repair's undo copy: it holds memories forgotten since"),
+    "*.pre_reopen": DataDirEntry(
+        "the memory database as it was before list entries were reopened", "machine",
+        reason="a repair's undo copy: it holds memories forgotten since"),
+    "*.pre_reembed": DataDirEntry(
+        "the memory database as it was before an embedding rebuild", "machine",
+        reason="a rebuild's undo copy: it holds memories forgotten since"),
 }
+
+#: The suffixes Kazma's repairs give the copy they take before changing a
+#: database (``<db>.pre_<name>``). Every one is declared above;
+#: ``tests/test_repair_copies_stay_home.py`` reads each suffix product code
+#: and the repair scripts write and fails on one missing here.
+REPAIR_COPY_SUFFIXES: tuple[str, ...] = (".pre_entity_key", ".pre_relabel", ".pre_reopen", ".pre_reembed")
 
 #: The names a wrong read or write must never reach, wherever the file sits:
 #: the record of what the operator approved, and the secrets.

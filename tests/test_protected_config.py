@@ -44,6 +44,17 @@ REPO = Path(__file__).resolve().parents[1]
     "long_task.t1", "platform.users",
     # A tenant's copy is the same key (tenant_isolation.tenant_key).
     "tenant.acme.mcp.servers", "tenant.acme.safety.hitl_enabled",
+    # Where secrets and memory go, and who may give Kazma orders (2026-11,
+    # FA-126): each key the audit's reproduction found open.
+    "embedding.provider", "embedding.base_url", "embedding.api_key_env",
+    "memory.backends.state.url", "providers.list", "registry.active_model",
+    "registry.active_provider", "proxy.host", "proxy.provider",
+    "documents.security.remote_parse", "documents.storage_root",
+    "connectors.telegram.allowed_users", "connectors.discord.allowed_users",
+    "connectors.slack.allowed_channels",
+    # ...and by shape, whatever the section.
+    "llm.base_url", "llm.gateway.url", "ui.host", "voice.livekit.url",
+    "voice.stt_base_url", "time_travel.db_path", "memory.embedding.api_key_env",
 ])
 def test_command_and_safety_keys_are_protected(key) -> None:
     assert is_protected_config_key(key) is True
@@ -51,8 +62,7 @@ def test_command_and_safety_keys_are_protected(key) -> None:
 
 @pytest.mark.parametrize("key", [
     "agent.personality", "agent.language", "agent.max_iterations",
-    "connectors.telegram.allowed_users", "connectors.discord.allowed_users",
-    "models.defaults.chat", "", "   ",
+    "agent.environment", "models.defaults.chat", "", "   ",
     # Backup settings that do not move or widen the archive stay writable.
     "backups.pg.retention",
 ])
@@ -117,3 +127,75 @@ def test_the_commitment_resolver_denies_a_hook_write() -> None:
 
     key = "agent.hooks.post_tool"
     assert authorize.is_protected_config_key(key) is True
+
+
+# ── The class (FA-126) ──────────────────────────────────────────────────
+
+#: A settings key's LAST segment that says its value is a destination or a
+#: gate. Written apart from the product's rule on purpose: the gate checks
+#: the rule, it does not reuse it.
+_SHAPE = __import__("re").compile(
+    r"(^|_)(url|urls|base_url|uri|dsn|host|hosts|endpoint|env|allowlist|storage_root|db_path)$|^allowed_"
+)
+_URL_VALUE = __import__("re").compile(r"^(https?|wss?|postgres(ql)?|redis|bolt|neo4j)://")
+
+#: Destination-shaped keys the agent may still write, with why. Empty: every
+#: one is the operator's.
+AGENT_MAY_WRITE: dict[str, str] = {}
+
+
+def _known_setting_keys() -> dict[str, object]:
+    """Every settings key Kazma ships (kazma.yaml) or a Settings control
+    writes, with its shipped value when it has one."""
+    from kazma_core.config_loader import load_merged_yaml
+    from kazma_core.config_store import shipped_settings
+
+    from tests.test_settings_keys_have_readers import _files, expand, written_keys
+
+    keys: dict[str, object] = {k: v for k, v, _c in shipped_settings(load_merged_yaml(REPO / "kazma.yaml"))}
+    for k in expand(written_keys(_files())):
+        keys.setdefault(k.replace("{}", "x"), None)
+    return keys
+
+
+def test_every_destination_key_is_protected() -> None:
+    keys = _known_setting_keys()
+    assert len(keys) > 100  # the enumeration found the settings
+    shaped = sorted(k for k, v in keys.items()
+                    if _SHAPE.search(k.rsplit(".", 1)[-1])
+                    or (isinstance(v, str) and _URL_VALUE.match(v)))
+    assert shaped, "the shape found nothing: the enumeration is broken"
+    open_keys = [k for k in shaped if not is_protected_config_key(k) and k not in AGENT_MAY_WRITE]
+    assert not open_keys, (
+        "keys whose value is a URL, host, variable name or allowlist that the agent may "
+        "write (FA-126); protect them or declare them in AGENT_MAY_WRITE: " + ", ".join(open_keys))
+
+
+def test_the_old_list_left_the_embedders_key_open() -> None:
+    """Negative control: the prefixes before FA-126, with no shape rule."""
+    from kazma_core.settings_validation import base_key
+
+    old = ("safety.", "agent.commitment.", "agent.hooks.", "mcp.", "notifications.lifecycle.",
+           "backups.offsite.", "backups.extra_paths", "security.", "vault.", "yolo.", "kazma_secret")
+
+    def old_protected(key: str) -> bool:
+        k = base_key(key)
+        return any(k == p.rstrip(".") or k.startswith(p) for p in old)
+
+    assert not old_protected("embedding.api_key_env")
+    assert not old_protected("connectors.telegram.allowed_users")
+    assert is_protected_config_key("embedding.api_key_env")
+
+
+def test_the_embedders_key_never_names_kazmas_own_variables(monkeypatch) -> None:
+    """Even a stored value from before (or an owner's typo): the embedder does
+    not send ``KAZMA_VAULT_KEY`` anywhere, and the setting refuses it."""
+    from kazma_core.memory import embedder
+    from kazma_core.settings_validation import SettingRejected, validate_setting
+
+    with pytest.raises(SettingRejected):
+        validate_setting("embedding.api_key_env", "KAZMA_VAULT_KEY")
+    assert validate_setting("embedding.api_key_env", "NVIDIA_API_KEY")[0] == "NVIDIA_API_KEY"
+    assert validate_setting("embedding.api_key_env", "KAZMA_EMBED_API_KEY")[0] == "KAZMA_EMBED_API_KEY"
+    assert embedder.embedding_key_env_allowed("KAZMA_DATABASE_URL") is False
+

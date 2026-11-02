@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from kazma_core.safety.side_effects import OUTBOUND_TARGET_FIELDS as _OUTBOUND_TARGET_FIELDS
 from kazma_core.safety.side_effects import (
     SecurityTier,
     SemanticTier,
@@ -1417,7 +1418,13 @@ def _resolve_send_outbound_act(profile, tool_name, args, *, audit, thread_id, te
             tenant_id=tenant_id, cfg=cfg, source=source,
         )
 
-    target = str(args.get("to") or args.get("target") or args.get("recipient") or "")
+    targets = _outbound_targets(tool_name, args)
+    target = ", ".join(targets)
+    if tool_name in _OUTBOUND_TARGET_FIELDS and not targets and _sends_to_this_conversation(tool_name, args):
+        # A message to the conversation the turn runs in (FA-117): the
+        # operator's own chat, never a third party -- no allowlist applies.
+        logger.info("[commitment] allow outbound %s (this conversation) source=%s", tool_name, source)
+        return EffectDecision("allow", "outbound: to this conversation (HITL applies)", profile, audit)
     allowlist = (get_commitment_config().get("outbound_allowed_targets") or [])
     # Empty allowlist: balanced/autonomous stay HITL-permissive. Strict
     # refuses to send until the operator names at least one target.
@@ -1453,7 +1460,7 @@ def _resolve_send_outbound_act(profile, tool_name, args, *, audit, thread_id, te
         )
         return EffectDecision("allow", "outbound: no target allowlist configured (HITL applies)",
                               profile, audit)
-    if target and target in allowlist:
+    if targets and all(t in allowlist for t in targets):
         logger.info(
             "[commitment] allow outbound %s target=%r (allowlisted) source=%s",
             tool_name, target[:100], source,
@@ -1469,6 +1476,58 @@ def _resolve_send_outbound_act(profile, tool_name, args, *, audit, thread_id, te
     q = (f"target {target!r} is not in the approved allowlist "
          f"({', '.join(allowlist[:5])}). Confirm the target before sending.")
     return EffectDecision("clarify", q, profile, audit, commitment_id=cid, clarify_question=q)
+
+
+def _split_addresses(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        items = [str(v) for v in value]
+    else:
+        items = str(value or "").replace(";", ",").split(",")
+    return [item.strip() for item in items if item and item.strip()]
+
+
+def _outbound_targets(tool_name: str, args: dict[str, Any]) -> list[str]:
+    """The recipients a call names (FA-117): the tool's declared fields
+    (``side_effects.OUTBOUND_TARGET_FIELDS``), every address in each; for a
+    tool with no declaration, the generic ``to``/``target``/``recipient``.
+    A recipient that is the conversation the turn runs in is left out: it is
+    the operator's own chat."""
+    fields = _OUTBOUND_TARGET_FIELDS.get(tool_name)
+    if fields is None:
+        raw = args.get("to") or args.get("target") or args.get("recipient") or ""
+        return _split_addresses(raw)
+    here = _this_conversation()
+    found: list[str] = []
+    for field_name in fields:
+        for address in _split_addresses(args.get(field_name)):
+            if here and address.lower() == here.lower():
+                continue
+            if address not in found:
+                found.append(address)
+    return found
+
+
+def _this_conversation() -> str:
+    try:
+        from kazma_core.tools.send_message import get_current_delivery_target
+
+        return (get_current_delivery_target() or "").strip()
+    except ImportError:
+        return ""
+
+
+def _sends_to_this_conversation(tool_name: str, args: dict[str, Any]) -> bool:
+    """With no recipient left once this conversation's is taken out: a tool
+    with no recipient field always sends here; ``send_approval_request``
+    with none named defaults to this conversation; another tool whose
+    recipients were all this conversation's sends here too."""
+    fields = _OUTBOUND_TARGET_FIELDS.get(tool_name) or ()
+    if not fields:
+        return True
+    named = [a for f in fields for a in _split_addresses(args.get(f))]
+    if not named:
+        return tool_name == "send_approval_request" and bool(_this_conversation())
+    return True  # every named recipient was this conversation (filtered out)
 
 
 def _resolve_config_change_act(profile, tool_name, args, *, audit, thread_id, tenant_id, cfg, source):

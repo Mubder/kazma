@@ -78,9 +78,13 @@ class _DocumentAdapter:
             note = f"OCR page {int(ocr.get('ocr_pages_done', 0))} of {int(ocr['ocr_pages_total'])}"
         if state in (RunState.QUEUED, RunState.RUNNING) and not job.cancel_requested:
             actions: tuple[str, ...] = ("cancel",)
-        elif native in ("dead_letter", "rejected"):
+        elif native == "dead_letter":
             actions = ("retry",)
         else:
+            # A rejected job was refused for what the document IS (malware,
+            # encryption, a policy): retrying it cannot succeed, and the
+            # refusal is the job's own answer on the Documents page -- it
+            # pages nobody (FA-247: it was paged as a failure with a Retry).
             actions = ()
         terminal = state in (RunState.DONE, RunState.FAILED, RunState.CANCELLED)
         return Run(
@@ -95,6 +99,7 @@ class _DocumentAdapter:
             link="/documents?job=" + str(job.id),
             detail=short_title(job.error_message or job.error_code or "", 200) if state == RunState.FAILED else "",
             lineage=f"document:{job.tenant_id}/{job.document_id}",
+            announced_by="the document's refusal on the Documents page" if native == "rejected" else "",
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:

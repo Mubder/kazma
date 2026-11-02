@@ -881,7 +881,7 @@ class LLMProvider:
         try:
             resp = await client.post("/chat/completions", json=payload)
             resp.raise_for_status()
-            data = resp.json()
+            data = self._json_answer(resp)
         except httpx.HTTPStatusError as e:
             # Capture the response body so the user can see WHY the API
             # rejected the request (e.g. invalid model, bad tool schema).
@@ -947,7 +947,7 @@ class LLMProvider:
                         resp = await client.post("/chat/completions", json=payload)
                         if resp.status_code != 429:
                             resp.raise_for_status()
-                            data = resp.json()
+                            data = self._json_answer(resp)
                             # Return the successful response after retry
                             duration_ms = (time.monotonic() - start) * 1000
                             response = self._parse_response(data, duration_ms)
@@ -1082,7 +1082,7 @@ class LLMProvider:
                 try:
                     resp = await client.post("/chat/completions", json=payload)
                     resp.raise_for_status()
-                    data = resp.json()
+                    data = self._json_answer(resp)
                     duration_ms = (time.monotonic() - start) * 1000
                     return self._parse_response(data, duration_ms)
                 except httpx.HTTPStatusError:
@@ -1101,7 +1101,7 @@ class LLMProvider:
                 try:
                     resp = await client.post("/chat/completions", json=payload)
                     resp.raise_for_status()
-                    data = resp.json()
+                    data = self._json_answer(resp)
                 except httpx.HTTPStatusError as retry_err:
                     retry_detail = ""
                     try:
@@ -1138,7 +1138,7 @@ class LLMProvider:
                 try:
                     resp = await client.post("/chat/completions", json=payload)
                     resp.raise_for_status()
-                    data = resp.json()
+                    data = self._json_answer(resp)
                 except httpx.HTTPStatusError as retry_err:
                     retry_detail = ""
                     try:
@@ -1167,7 +1167,7 @@ class LLMProvider:
                 try:
                     resp = await client.post("/chat/completions", json=payload)
                     resp.raise_for_status()
-                    data = resp.json()
+                    data = self._json_answer(resp)
                 except httpx.HTTPStatusError as retry_err:
                     raise LLMError(
                         f"LLM call failed (HTTP {retry_err.response.status_code})",
@@ -1182,7 +1182,7 @@ class LLMProvider:
                 try:
                     resp = await client.post("/chat/completions", json=payload)
                     resp.raise_for_status()
-                    data = resp.json()
+                    data = self._json_answer(resp)
                 except Exception as fallback_error:
                     logger.error("Fallback model also failed: %s", fallback_error)
                     # Classify like the primary path: a transient outage on
@@ -1268,7 +1268,7 @@ class LLMProvider:
                 try:
                     resp = await client.post("/chat/completions", json=payload)
                     resp.raise_for_status()
-                    data = resp.json()
+                    data = self._json_answer(resp)
                 except httpx.HTTPStatusError as exc:
                     sc = exc.response.status_code
                     raise LLMError(
@@ -1285,6 +1285,8 @@ class LLMProvider:
                         f"LLM call failed (network) after event-loop recovery: {exc}",
                         transient=True,
                     ) from exc
+                except LLMError:
+                    raise
                 except Exception as exc:
                     raise LLMError(
                         f"LLM call failed after event-loop recovery: {exc}",
@@ -1324,15 +1326,15 @@ class LLMProvider:
                     json={**payload, "max_tokens": retry_cap},
                 )
                 retry_resp.raise_for_status()
-                retry_data = retry_resp.json()
+                retry_response = self._parse_response(
+                    self._json_answer(retry_resp), (time.monotonic() - start) * 1000
+                )
             except Exception as retry_exc:
                 logger.warning(
                     "[LLMProvider] Truncation retry failed (%s) — keeping truncated response",
                     retry_exc,
                 )
             else:
-                retry_duration = (time.monotonic() - start) * 1000
-                retry_response = self._parse_response(retry_data, retry_duration)
                 if retry_response.finish_reason != "length":
                     logger.info(
                         "[LLMProvider] Truncation retry succeeded (finish_reason=%s)",
@@ -1450,23 +1452,37 @@ class LLMProvider:
         return ""
 
     @staticmethod
-    async def _iter_sse_json(resp: httpx.Response) -> Any:
-        """Yield parsed JSON objects from an SSE ``data:`` stream."""
+    async def _iter_sse_json(resp: httpx.Response, unread: list[str] | None = None) -> Any:
+        """Yield parsed JSON objects from an SSE ``data:`` stream, then
+        :data:`_SSE_DONE` when the stream says ``[DONE]`` (a stream that just
+        stops yields no marker: the caller tells a cut from an end, FA-213).
+
+        Lines that are no stream frame -- a body that is not a stream at all,
+        a ``data:`` line that is not JSON -- go to *unread*, up to
+        ``_UNREAD_MAX`` characters, so the caller can say what came instead
+        (FA-211)."""
+        kept = 0
         async for line in resp.aiter_lines():
             if not line:
                 continue
             stripped = line.strip()
             if not stripped or stripped.startswith(":"):
                 continue
-            if not stripped.startswith("data:"):
-                continue
-            data = stripped[5:].strip()
+            data = stripped[5:].strip() if stripped.startswith("data:") else None
             if data == "[DONE]":
+                yield _SSE_DONE
                 return
-            try:
-                yield json.loads(data)
-            except json.JSONDecodeError:
-                continue
+            if data is not None:
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError:
+                    event = _NOT_JSON  # kept below as text the stream did not explain
+                if event is not _NOT_JSON:
+                    yield event
+                    continue
+            if unread is not None and kept < _UNREAD_MAX:
+                unread.append(line[: _UNREAD_MAX - kept])
+                kept += len(unread[-1])
 
     @staticmethod
     def _accumulate_tool_delta(
@@ -1581,6 +1597,10 @@ class LLMProvider:
             finish_reason = ""
             usage: dict[str, Any] = {}
             model_id = str(body.get("model") or self.config.model)
+            ended = False  # [DONE] seen
+            frames = 0  # JSON stream frames read
+            answered = False  # a frame held a choice
+            unread: list[str] = []  # what was not a stream frame (FA-211)
             async with client.stream("POST", "/chat/completions", json=body) as resp:
                 if resp.status_code >= 400:
                     err_body = ""
@@ -1589,9 +1609,13 @@ class LLMProvider:
                     except Exception:
                         err_body = ""
                     raise _StreamHttpError(resp.status_code, err_body, getattr(resp, "headers", None))
-                async for obj in self._iter_sse_json(resp):
+                async for obj in self._iter_sse_json(resp, unread):
+                    if obj is _SSE_DONE:
+                        ended = True
+                        continue
                     if not isinstance(obj, dict):
                         continue
+                    frames += 1
                     if obj.get("error"):
                         err = obj["error"]
                         msg = err if isinstance(err, str) else str(
@@ -1608,6 +1632,7 @@ class LLMProvider:
                     choices = obj.get("choices") or []
                     if not choices:
                         continue
+                    answered = True
                     choice = choices[0] if isinstance(choices[0], dict) else {}
                     if choice.get("finish_reason"):
                         finish_reason = str(choice["finish_reason"])
@@ -1619,6 +1644,41 @@ class LLMProvider:
                     tcs = delta.get("tool_calls")
                     if isinstance(tcs, list) and tcs:
                         self._accumulate_tool_delta(tool_acc, tcs)
+            if not frames:
+                # Not one stream frame: the body was something else. A whole
+                # JSON answer (a server that does not stream) is the answer;
+                # anything else is named, never read as an empty answer that
+                # became "hit the tool-round limit" (FA-211).
+                text = "\n".join(unread)
+                whole = None
+                if text.strip() and len(text) < _UNREAD_MAX:
+                    try:
+                        whole = json.loads(text)
+                    except json.JSONDecodeError:
+                        whole = None
+                if whole is not None:
+                    response = self._parse_response(whole, (time.monotonic() - start) * 1000)
+                    if response.content:
+                        yield StreamDelta(content=response.content)
+                    yield StreamDelta(response=response)
+                    return
+                raise _unusable_answer(self._describe_endpoint(), _describe_body(text))
+            if not answered and not tool_acc:
+                raise _unusable_answer(
+                    self._describe_endpoint(), "a stream with no choices in it (no answer)"
+                )
+            if not ended and not finish_reason:
+                # Neither [DONE] nor a finish reason: the connection closed
+                # mid-answer (a close-delimited body ends like a whole one).
+                # The fragment was saved as the complete reply, with no
+                # warning (2026-11, FA-213). Transient, so the supervisor asks
+                # again -- without re-streaming what was shown (§29F).
+                raise LLMError(
+                    f"LLM stream ended before the answer did ({len(''.join(content_parts))} "
+                    "characters, no [DONE], no finish reason)",
+                    transient=True,
+                    kind="stream_truncated",
+                )
             duration_ms = (time.monotonic() - start) * 1000
             assembled = self._response_from_stream_acc(
                 content="".join(content_parts),
@@ -1772,16 +1832,38 @@ class LLMProvider:
                 logger.error("[LLMProvider] stream failed: %s", e, exc_info=True)
                 raise LLMError(f"LLM stream failed: {e}", transient=False) from e
 
-    def _parse_response(self, data: dict[str, Any], duration_ms: float) -> LLMResponse:
-        """Parse the OpenAI-format response into an LLMResponse."""
-        choice = data.get("choices", [{}])[0]
-        message = choice.get("message", {})
+    def _json_answer(self, resp: httpx.Response) -> Any:
+        """The provider's answer body as JSON, or :class:`LLMError` naming what
+        it sent instead (FA-211: a 200 whose body was not JSON was raised as
+        "LLM call failed: Expecting value", and on the stream path read as an
+        empty answer, then reported as the step limit)."""
+        try:
+            return resp.json()
+        except ValueError as exc:  # json.JSONDecodeError, and a body not UTF-8
+            raise _unusable_answer(
+                self._describe_endpoint(), _describe_body(_body_text(resp))
+            ) from exc
+
+    def _parse_response(self, data: Any, duration_ms: float) -> LLMResponse:
+        """Parse the OpenAI-format response into an LLMResponse.
+
+        A body with no answer in it -- not an object, an ``error`` instead, no
+        ``choices`` -- raises :class:`LLMError` ``unusable_answer``: read as an
+        empty answer, it became "hit the tool-round limit" (FA-211).
+        """
+        problem = _answer_problem(data)
+        if problem:
+            raise _unusable_answer(self._describe_endpoint(), problem)
+        choice = data["choices"][0]
+        message = choice.get("message") or {}
         finish_reason = choice.get("finish_reason", "")
 
         content = message.get("content", "") or ""
         tool_calls: list[ToolCall] = []
 
-        for tc in message.get("tool_calls", []):
+        for tc in message.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
             func = tc.get("function", {})
             args_raw = func.get("arguments", "{}")
             try:
@@ -1872,7 +1954,7 @@ class LLMProvider:
             client = await self._get_client()
             resp = await client.post("/chat/completions", json=payload)
             resp.raise_for_status()
-            data = resp.json()
+            data = self._json_answer(resp)
             duration_ms = (time.monotonic() - start) * 1000
             return self._parse_response(data, duration_ms)
         except Exception as retry_exc:
@@ -1963,6 +2045,68 @@ class LLMProvider:
             )
 
 
+#: What :meth:`LLMProvider._iter_sse_json` yields for ``data: [DONE]``.
+_SSE_DONE = object()
+
+#: Characters of a body that was no stream kept to name it (and to read a
+#: whole JSON answer from a server that does not stream).
+_UNREAD_MAX = 1_000_000
+
+
+#: A ``data:`` line that is not JSON (``None`` is a JSON value).
+_NOT_JSON = object()
+
+
+def _body_text(resp: httpx.Response) -> str:
+    try:
+        return resp.text
+    except LookupError:  # a charset Python does not know: describe the bytes
+        return repr(resp.content[:120])
+    except httpx.StreamError:  # the body was never read
+        return ""
+
+
+def _describe_body(text: str) -> str:
+    """What a provider sent instead of an answer, for the owner: its kind and
+    its first words (redacted, one line)."""
+    from kazma_core.errors import redact_secrets
+
+    body = (text or "").strip()
+    if not body:
+        return "an empty body"
+    sample = redact_secrets(" ".join(body.split()))[:80]
+    if body[:1] == "<":
+        return f"an HTML page (it began: {sample!r})"
+    return f"text that is not JSON (it began: {sample!r})"
+
+
+def _answer_problem(data: Any) -> str:
+    """Why *data* holds no answer, or ``""`` when it holds one."""
+    if not isinstance(data, dict):
+        return f"JSON that is not an answer ({type(data).__name__})"
+    err = data.get("error")
+    if err:
+        msg = err if isinstance(err, str) else (err.get("message") if isinstance(err, dict) else None) or err
+        return f"an error instead of an answer: {str(msg)[:200]}"
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return "an answer with no choices in it"
+    return ""
+
+
+def _unusable_answer(endpoint: str, answer: str) -> "LLMError":
+    """The provider answered, but not with a model answer. Transient: a proxy
+    error page or an overloaded server passes, and another model may answer
+    (failover)."""
+    logger.warning("[LLMProvider] %s sent %s", endpoint, answer)
+    return LLMError(
+        f"The provider at {endpoint} sent {answer}",
+        transient=True,
+        kind="unusable_answer",
+        answer=answer,
+    )
+
+
 class LLMError(Exception):
     """Raised when an LLM API call fails.
 
@@ -1987,15 +2131,20 @@ class LLMError(Exception):
     * ``"rate_limit_exhausted"`` — 429 after the provider's own bounded
       Retry-After backoff. Still ``transient=True`` (failover may try another
       model) but the supervisor must not re-retry the same provider.
+    * ``"unusable_answer"`` — the provider answered, with something that is
+      no model answer (not JSON, an error, no choices); ``answer`` says what.
+    * ``"stream_truncated"`` — the stream closed before the answer ended.
     """
 
     def __init__(
         self, *args: Any, transient: bool = False, kind: str = "",
-        attempts: int = 0, waited_s: float = 0.0,
+        attempts: int = 0, waited_s: float = 0.0, answer: str = "",
     ) -> None:
         super().__init__(*args)
         self.transient = bool(transient)
         self.kind = str(kind or "")
+        #: For ``unusable_answer``: what the provider sent instead (FA-211).
+        self.answer = str(answer or "")
         #: For ``rate_limit_exhausted``: the requests the provider refused and
         #: the seconds waited between them (0 when not counted).
         self.attempts = int(attempts or 0)

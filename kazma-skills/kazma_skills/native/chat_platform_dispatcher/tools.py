@@ -116,9 +116,12 @@ async def send_message(
     text: str,
     backend: str = "telegram",
 ) -> str:
-    """Send a text message to the current conversation thread.
+    """Send a text message to a chat on Telegram, Discord or Slack.
 
-    Use this to reply to the user. The platform and delivery channel are handled automatically.
+    The chat is the one ``target_id`` names, on ``backend`` (FA-117: this said
+    "the current conversation ... handled automatically", and nothing here
+    reads the conversation). The model's answer already reaches the
+    conversation; this is for messaging another chat.
 
     Args:
         target_id: Platform-prefixed recipient ID.

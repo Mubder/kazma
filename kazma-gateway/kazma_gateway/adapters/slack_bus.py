@@ -101,7 +101,9 @@ class SlackBusAdapter(BusAdapter):
         :meth:`_update_message`, which neutralize broadcasts and mentions the
         way the chat adapter does (Swarm audit SW-S13: a worker's
         "<!channel>" notified the whole channel)."""
-        payload = {**_mention_safe(payload), "channel": self._channel_id}
+        from kazma_gateway import outbound_flags
+
+        payload = outbound_flags.slack({**_mention_safe(payload), "channel": self._channel_id})
         try:
             http = await self._ensure_http()
             resp = await http.post(
@@ -121,7 +123,10 @@ class SlackBusAdapter(BusAdapter):
     async def _update_message(self, ts: str, payload: dict[str, Any]) -> bool:
         """Edit an existing message via chat.update. Whether Slack took it: a
         card left showing its buttons is a WARNING (SW-S15)."""
-        payload = {**_mention_safe(payload), "channel": self._channel_id, "ts": ts}
+        from kazma_gateway import outbound_flags
+
+        payload = outbound_flags.slack({**_mention_safe(payload), "channel": self._channel_id, "ts": ts},
+                                       "chat.update")
         try:
             http = await self._ensure_http()
             resp = await http.post(f"{_SLACK_API}/chat.update", json=payload, headers=self._headers())

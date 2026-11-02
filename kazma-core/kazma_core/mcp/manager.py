@@ -677,6 +677,7 @@ class AsyncMCPManager:
         servers: list[dict[str, Any]],
         *,
         raise_on_error: bool = False,
+        quiet: bool = False,
     ) -> int:
         """Connect to all servers from a config list.
 
@@ -694,6 +695,11 @@ class AsyncMCPManager:
 
         Args:
             servers: List of dicts, each with at least ``name`` and ``transport``.
+            quiet: a probe (Settings' and the MCP page's Test): a failure is
+                the tester's answer -- no ops alert, no recorded connection
+                failure, no workspace binding record (FA-256: a Test of an
+                unsaved server paged the owner that a server's tools were
+                gone).
 
         Returns:
             Total number of tools discovered across all servers.
@@ -754,7 +760,15 @@ class AsyncMCPManager:
                 # URL, query string and all.
                 message = redact_secrets(str(exc) or type(exc).__name__)
                 failed[name] = message
-                logger.error("[MCP] Failed to connect server '%s': %s", name, message)
+                if quiet:
+                    logger.info("[MCP] test of server '%s' failed: %s", name, message)
+                else:
+                    logger.error("[MCP] Failed to connect server '%s': %s", name, message)
+        if quiet:
+            if raise_on_error and failed:
+                details = "; ".join(f"{name}: {message}" for name, message in failed.items())
+                raise MCPBridgeError(f"MCP connection failed: {details}")
+            return total_tools
         self._connection_errors.update(failed)
         # End-of-batch summary (audit M5): per-server errors were already
         # logged at ERROR, but with many servers the operator had to grep the

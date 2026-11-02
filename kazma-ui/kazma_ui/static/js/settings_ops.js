@@ -315,6 +315,17 @@
                 + _t('settings.kb_both_use', 'both use') + ' ' + c.keys;
         },
 
+        /* How a session began, in the page's language (the route answers
+         * the session's recorded origin: login, oidc, auto-cookie). */
+        sessionOrigin(origin) {
+            const key = {
+                login: 'settings.session_login',
+                oidc: 'settings.session_oidc',
+                'auto-cookie': 'settings.session_local',
+            }[origin];
+            return key ? _t(key, origin) : _t('settings.web', 'Web');
+        },
+
         async loadAccount() {
             const [tokens, sessions] = await Promise.all([
                 this._fetch('/api/settings/account/tokens?_=' + Date.now()),

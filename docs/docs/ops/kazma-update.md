@@ -13,6 +13,51 @@ description: Primary operator path to upgrade a git install — stash, reset mai
 installs. Prefer it over a manual `git pull` so local edits, optional extras,
 and CLI health are handled consistently.
 
+## The short version
+
+From the install folder, with the install's own Python
+(`.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere):
+
+```bash
+python -m kazma_cli update
+```
+
+That is the whole update. Then, only when it applies:
+
+| When | Run |
+|---|---|
+| You pulled with `git pull` yourself, or the server reports its packages are behind (`install.requirements_unmet`) | `python -m kazma_cli update --reinstall -y` |
+| Documents run in the container profile | `python scripts/document_worker_image.py build` ([below](#documents-after-an-update)) |
+
+Three things break an install, and the update does none of them:
+
+- **A bare `uv sync`.** uv makes the environment match exactly the extras
+  named on its command line and removes every other package: run without
+  `--extra`, it takes away the optional extras (vector memory, the TUI,
+  OCR, the document platform...) and every package installed from Settings
+  → Packages. The update installs additively (`uv pip install -e
+  ".[your extras]"`) and falls back to `uv sync --inexact` with your extras,
+  never a bare `uv sync`. If you run uv yourself, do the same:
+  `uv sync --inexact --extra rag --extra tui`. If a sync already removed
+  packages, `python -m kazma_cli update --reinstall -y` puts your extras back
+  (it remembers them in `system.installed_extras`).
+- **`kazma update` on Windows.** The update replaces `kazma.exe`, and Windows
+  will not replace a running launcher; started from it, the update refuses
+  and names `python -m kazma_cli update`.
+- **Installing Kazma from PyPI by name.** The Kazma names there are held
+  placeholders with no code; Kazma installs from this repository and its
+  GitHub releases only.
+
+### What versions it installs
+
+The update installs what this build of Kazma declares in `pyproject.toml`
+and keeps any installed version that already satisfies it. It does not move
+every package to its newest release. When a security advisory is fixed, the
+fixed release becomes Kazma's minimum in `pyproject.toml`, so the next
+update installs it; until then the server says at boot which installed
+packages are below what the build requires (see
+[below](#when-the-server-says-its-packages-are-behind)).
+
 ## What it does (git install)
 
 1. **Preflight** — git available, no `.git/index.lock`, branch is `main`/`master`

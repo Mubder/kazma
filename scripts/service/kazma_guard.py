@@ -138,6 +138,9 @@ GRACEFUL_STOP_S = float(os.environ.get("KAZMA_GUARD_GRACEFUL_STOP_S", "60"))
 # A server replaced for failing its health checks may be wedged: a short
 # chance, then the kill.
 UNHEALTHY_STOP_S = min(15.0, GRACEFUL_STOP_S)
+#: What of the graceful stop the server's own stop budget leaves for the
+#: process to exit (KAZMA_SHUTDOWN_BUDGET_S, FA-261).
+SHUTDOWN_MARGIN_S = 10.0
 # A child that never became ready has nothing to save.
 NEVER_READY_STOP_S = min(5.0, GRACEFUL_STOP_S)
 
@@ -1428,6 +1431,10 @@ def spawn(cmd: list[str], cwd: Path, log: GuardLog,
     # ...and where to ask for a reload (Settings' "Restart server" goes
     # through the guard: supervisor_watch.request_guard_reload).
     env["KAZMA_GUARD_RELOAD_FILE"] = str(_reload_path())
+    # ...and the stop's budget: its whole graceful stop, less a margin for
+    # the process to exit (FA-261: each step had its own bound, and their sum
+    # did not fit the 60 s grace).
+    env["KAZMA_SHUTDOWN_BUDGET_S"] = str(max(5.0, GRACEFUL_STOP_S - SHUTDOWN_MARGIN_S))
     # ...and the document worker broker's address, token file and request
     # file (DocumentBroker.server_env), so .env needs nothing for it.
     env.update(extra_env or {})

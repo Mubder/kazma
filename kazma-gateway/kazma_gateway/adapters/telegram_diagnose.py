@@ -49,9 +49,13 @@ _NEVER = "Telegram did not deliver it to Kazma."
 
 async def _call(client: httpx.AsyncClient, token: str, method: str, **params: Any) -> tuple[int, Any]:
     """(status, the JSON body); status 0 when Telegram could not be reached.
-    The URL holds the token: only the method name is ever logged."""
+    The URL holds the token: only the method name is ever logged. A message
+    method goes out with link previews off, like every send (FA-128)."""
+    from kazma_gateway import outbound_flags
+
+    body_out = outbound_flags.telegram(dict(params), method) if params else None
     try:
-        r = await client.post(f"/bot{token}/{method}", json=params or None)
+        r = await client.post(f"/bot{token}/{method}", json=body_out)
     except httpx.HTTPError as exc:
         logger.debug("[telegram.test] %s failed: %s", method, type(exc).__name__)
         return 0, type(exc).__name__

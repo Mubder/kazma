@@ -151,6 +151,26 @@ def friendly_llm_error(
             "provider in Settings > Models/Providers."
         )
 
+    if getattr(exc, "kind", "") == "unusable_answer":
+        # Named for what came (FA-211): read as an empty answer, a provider's
+        # error page was reported as "hit the tool-round limit ... continue".
+        where = f" ({model.strip()})" if model.strip() else ""
+        sent = str(getattr(exc, "answer", "") or "something that is not an answer")
+        return (
+            f"⚠️ The model provider{where} answered, but not with a model answer: it "
+            f"sent {sent}. Kazma asked again and got the same. Send your message "
+            "again in a minute; if it keeps happening, check the provider (or a "
+            "proxy in front of it), or switch provider in Settings > Models/Providers."
+        )
+
+    if getattr(exc, "kind", "") == "stream_truncated":
+        return (
+            "⚠️ The model's answer was cut off before it finished: its connection "
+            "closed mid-answer, and asking again did not get a whole one. Send your "
+            "message again; if it keeps happening, the provider (or a proxy in front "
+            "of it) is closing connections early."
+        )
+
     is_transient = bool(getattr(exc, "transient", False))
     # Inspect the cause chain too — some LLMErrors wrap a network exception.
     cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)

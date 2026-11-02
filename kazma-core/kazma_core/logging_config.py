@@ -55,12 +55,16 @@ safe and cheap).
 
 from __future__ import annotations
 
+import atexit
+import copy
 import json
 import logging
 import logging.config
 import logging.handlers
 import os
+import queue
 import sys
+import threading
 import time as _time
 from datetime import datetime, time, UTC
 from typing import Any
@@ -145,6 +149,10 @@ class StructuredJSONFormatter(logging.Formatter):
         exc_str = None
         if record.exc_info:
             exc_str = self.formatException(record.exc_info)
+        elif record.exc_text:
+            # Rendered where the record was made: the writer thread gets it
+            # without the traceback objects (FA-135).
+            exc_str = record.exc_text
         log_data: dict[str, Any] = {
             "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "level": record.levelname,
@@ -309,9 +317,8 @@ def setup_logging(level: str | None = None) -> str:
     except Exception:
         pass
 
-    kazma_loggers = ("kazma_core", "kazma_ui", "kazma_gateway", "kazma_skills")
     loggers_config: dict[str, Any] = {}
-    for name in kazma_loggers:
+    for name in _KAZMA_LOGGERS:
         loggers_config[name] = {"level": effective, "propagate": True}
     for name in NOISY_LIBS:
         # Cap at WARNING; never let NOISY_LIBS go below WARNING even in DEBUG.
@@ -381,17 +388,10 @@ def setup_logging(level: str | None = None) -> str:
 
     try:
         logging.config.dictConfig(config)
-        # Turn correlation: tag every record with the ContextVar turn id
-        # ("" outside a turn). Attached post-dictConfig so it applies to the
-        # file and console handlers regardless of formatter choice.
-        try:
-            from kazma_core.observability.correlation import TurnIdFilter
-
-            _turn_filter = TurnIdFilter()
-            for handler in logging.getLogger().handlers:
-                handler.addFilter(_turn_filter)
-        except Exception:
-            pass
+        # The file and console handlers write on their own thread; the
+        # caller -- the event loop included -- only hands the record over
+        # (FA-135).
+        _write_behind_a_queue()
     except Exception:
         # Last-resort fallback: basic config so we at least get stderr.
         logging.basicConfig(level=effective)
@@ -412,6 +412,162 @@ def setup_logging(level: str | None = None) -> str:
     _logging_configured = True
     _last_effective_level = effective
     return effective
+
+
+#: Kazma's own loggers, each given the configured level (the libraries keep
+#: theirs, :data:`NOISY_LIBS` at WARNING).
+_KAZMA_LOGGERS = ("kazma_core", "kazma_ui", "kazma_gateway", "kazma_skills")
+#: The handlers ``setup_logging`` installs, by name: they write on the log
+#: writer thread, behind the ``queue`` handler on the root logger.
+_KAZMA_HANDLER_NAMES = ("file", "console")
+
+#: Records waiting for the writer thread. Past this many a record is dropped
+#: and counted -- the writer says how many -- never waited for.
+_QUEUE_MAX = 100_000
+_listener: _LogWriter | None = None
+_written_handlers: tuple[logging.Handler, ...] = ()
+_EXC_FORMATTER = logging.Formatter()
+
+
+class _LogQueueHandler(logging.handlers.QueueHandler):
+    """The root logger's one handler (FA-135): it hands the record to the
+    log writer thread and returns. The file and console handlers ran in the
+    caller's thread, so a slow disk, a full console pipe or a rotation stalled
+    the event loop for every chat. The turn id is read here (``TurnIdFilter``
+    on this handler): the writer thread has no turn bound."""
+
+    def __init__(self, target: queue.Queue) -> None:
+        super().__init__(target)
+        self._dropped = 0
+        self._dropped_lock = threading.Lock()
+
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
+        # The message and any traceback are rendered now, where the record
+        # was made; each formatter downstream still formats the record its
+        # own way (the default prepare() formatted it once for everyone).
+        record = copy.copy(record)
+        record.message = record.getMessage()
+        record.msg = record.message
+        record.args = None
+        if record.exc_info:
+            if not record.exc_text:
+                record.exc_text = _EXC_FORMATTER.formatException(record.exc_info)
+            record.exc_info = None
+        return record
+
+    def enqueue(self, record: logging.LogRecord) -> None:
+        try:
+            self.queue.put_nowait(record)
+        except queue.Full:
+            with self._dropped_lock:
+                self._dropped += 1
+
+    def take_dropped(self) -> int:
+        with self._dropped_lock:
+            dropped, self._dropped = self._dropped, 0
+        return dropped
+
+
+class _LogWriter(logging.handlers.QueueListener):
+    """The log writer thread: the file and console handlers, each at its own
+    level, and a WARNING when records had to be dropped."""
+
+    def __init__(self, target: queue.Queue, handlers: tuple[logging.Handler, ...],
+                 front: _LogQueueHandler) -> None:
+        super().__init__(target, *handlers, respect_handler_level=True)
+        self._front = front
+
+    def handle(self, record: logging.LogRecord) -> None:
+        dropped = self._front.take_dropped()
+        if dropped:
+            super().handle(logging.LogRecord(
+                __name__, logging.WARNING, __file__, 0,
+                "%d log records were dropped: the log writer fell behind", (dropped,), None))
+        super().handle(record)
+
+
+def _write_behind_a_queue() -> None:
+    """Move the file and console handlers off the root logger onto the log
+    writer thread, behind one queue handler (FA-135)."""
+    global _listener, _written_handlers
+    root = logging.getLogger()
+    written = tuple(h for h in root.handlers if h.get_name() in _KAZMA_HANDLER_NAMES)
+    if not written:
+        return
+    target: queue.Queue = queue.Queue(_QUEUE_MAX)
+    front = _LogQueueHandler(target)
+    front.set_name("queue")
+    try:
+        from kazma_core.observability.correlation import TurnIdFilter
+
+        # Turn correlation: the ContextVar turn id ("" outside a turn), read
+        # on the caller's thread.
+        front.addFilter(TurnIdFilter())
+    except ImportError:
+        pass
+    for handler in written:
+        root.removeHandler(handler)
+    root.addHandler(front)
+    _listener = _LogWriter(target, written, front)
+    _listener.start()
+    _written_handlers = written
+    atexit.register(_stop_log_writer)
+
+
+def drain_logs(timeout: float = 2.0) -> bool:
+    """Wait, at most *timeout* seconds, until every record handed over has
+    been written. True when the queue emptied in time."""
+    listener = _listener
+    if listener is None:
+        return True
+    deadline = _time.monotonic() + max(0.0, timeout)
+    while listener.queue.unfinished_tasks:
+        if _time.monotonic() >= deadline:
+            return False
+        _time.sleep(0.01)
+    for handler in _written_handlers:
+        try:
+            handler.flush()
+        except Exception:  # noqa: BLE001 - a broken handler must not stop a shutdown
+            continue
+    return True
+
+
+def _stop_log_writer(timeout: float = 5.0) -> bool:
+    """Write what is queued and stop the writer thread, bounded (at exit)."""
+    global _listener
+    listener = _listener
+    if listener is None or listener._thread is None:
+        return True
+    drained = drain_logs(timeout)
+    listener.enqueue_sentinel()
+    thread = listener._thread
+    thread.join(max(0.1, timeout))
+    if not thread.is_alive():
+        listener._thread = None
+        _listener = None
+    return drained and not thread.is_alive()
+
+
+def apply_level(level: str) -> str:
+    """Apply *level* now: to Kazma's loggers, the root logger and the file and
+    console handlers ``setup_logging`` installed -- the four places the level
+    is set at boot (FA-114: Settings set only the root logger, so the page
+    said "applies immediately" and DEBUG reached the log only after a
+    restart). Returns the level applied."""
+    global _last_effective_level
+    name = str(level or "").strip().upper()
+    if name not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        raise ValueError(f"unknown log level {level!r}")
+    root = logging.getLogger()
+    root.setLevel(name)
+    for logger_name in _KAZMA_LOGGERS:
+        logging.getLogger(logger_name).setLevel(name)
+    for handler in (*root.handlers, *_written_handlers):
+        if handler.get_name() in _KAZMA_HANDLER_NAMES:
+            handler.setLevel(name)
+    _last_effective_level = name
+    return name
 
 
 def is_debug() -> bool:

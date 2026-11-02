@@ -993,6 +993,50 @@ class DocumentJobRepository:
             raise RuntimeError("lease renewal succeeded but job was not found")
         return _job(row)
 
+    def release_leases(self, owners: list[str]) -> int:
+        """Give back the jobs *owners* hold, for a graceful stop (FA-264):
+        each goes to ``retry_wait`` due now, on the attempt it had -- the
+        claim's count is returned, event ``released_for_shutdown``. A reload
+        is not the job's failure: every lease that expired counted an attempt,
+        and three deploys during one long OCR job dead-lettered it. A job with
+        a cancel requested ends cancelled, as lease recovery ends it."""
+        held = [_required(o, "owner") for o in owners]
+        if not held:
+            return 0
+        marks = ",".join("?" for _ in held)
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                rows = self._conn.execute(
+                    f"""
+                    SELECT * FROM document_jobs
+                    WHERE state IN ('validating', 'parsing', 'ocr_running',
+                                    'normalizing', 'indexing', 'verifying')
+                      AND lease_owner IN ({marks})
+                    ORDER BY created_at, id
+                    """,
+                    held,
+                ).fetchall()
+                now = _timestamp(_as_utc(self._clock()))
+                for row in rows:
+                    cancelled = bool(row["cancel_requested"])
+                    self._transition_locked(
+                        row,
+                        target=DocumentJobState.CANCELLED if cancelled else DocumentJobState.RETRY_WAIT,
+                        stage=row["stage"],
+                        event_type="cancelled" if cancelled else "released_for_shutdown",
+                        error_code=None,
+                        error_message=None,
+                        retry_at=None if cancelled else now,
+                        cancel_requested=cancelled,
+                        attempt_delta=0 if cancelled else -1,
+                    )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._rollback_if_needed()
+                raise
+        return len(rows)
+
     def recover_expired_leases(self, *, tenant_id: str | None = None) -> int:
         """Move expired active jobs to retry/dead-letter/cancelled exactly once."""
         tenant = _required(tenant_id, "tenant_id") if tenant_id is not None else None
@@ -1288,6 +1332,7 @@ class DocumentJobRepository:
         error_message: str | None,
         retry_at: str | None = None,
         cancel_requested: bool | None = None,
+        attempt_delta: int = 0,
     ) -> sqlite3.Row:
         source = DocumentJobState(row["state"])
         self._validate_transition(source, target)
@@ -1306,7 +1351,7 @@ class DocumentJobRepository:
             SET state = ?, stage = ?, retry_at = ?,
                 lease_owner = ?, lease_expires_at = ?, heartbeat_at = ?,
                 cancel_requested = ?, error_code = ?, error_message = ?,
-                row_version = ?, updated_at = ?
+                row_version = ?, updated_at = ?, attempt = MAX(0, attempt + ?)
             WHERE tenant_id = ? AND id = ? AND state = ? AND row_version = ?
             """,
             (
@@ -1321,6 +1366,7 @@ class DocumentJobRepository:
                 error_message,
                 next_version,
                 now,
+                int(attempt_delta),
                 row["tenant_id"],
                 row["id"],
                 source.value,

@@ -175,8 +175,8 @@ def _vault_key(alias: str, field: str) -> str:
 def _vault_put(alias: str, field: str, value: str) -> None:
     from kazma_skills.native.email_manager.credentials import vault_store
 
-    if value and not vault_store(_vault_key(alias, field), value, category="email"):
-        raise RuntimeError(f"the vault did not keep {field} for account {alias}")
+    if value:
+        vault_store(_vault_key(alias, field), value, category="email")  # raises VaultWriteFailed
 
 
 def account_secret(alias: str, field: str) -> str:

@@ -22,6 +22,9 @@ _SENSITIVE_KEY_FRAGMENTS = (
     "api_key", "apikey", "token", "secret", "password", "passphrase",
     "passwd", "credential", "private_key", "authorization", "webhook",
     "pat", "bearer",
+    # An S3 access key id (backups.offsite.s3.access_key): GET /api/settings
+    # returned it in the clear beside its masked secret (2026-11, FA-206).
+    "access_key", "access_key_id",
 )
 
 

@@ -649,6 +649,44 @@ class PostgresDocumentJobRepository:
                 raise
         return _row_to_record(updated)
 
+    def release_leases(self, owners: list[str]) -> int:
+        """Give back the jobs *owners* hold, for a graceful stop, on the
+        attempt they had (FA-264; the SQLite store's rule)."""
+        held = [_required(o, "owner") for o in owners]
+        if not held:
+            return 0
+        now = self._clock()
+        with self._pool.connection() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT * FROM document_jobs
+                        WHERE state IN ('validating','parsing','ocr_running','normalizing','indexing','verifying')
+                          AND lease_owner = ANY(%s)
+                        ORDER BY created_at, id
+                        FOR UPDATE
+                        """,
+                        (held,),
+                    )
+                    rows = cur.fetchall()
+                    for row in rows:
+                        cancelled = bool(row["cancel_requested"])
+                        self._apply_transition(
+                            cur, row, target="cancelled" if cancelled else "retry_wait",
+                            stage=row["stage"],
+                            event_type="cancelled" if cancelled else "released_for_shutdown",
+                            error_code=None, error_message=None,
+                            retry_at=None if cancelled else now,
+                            cancel_requested=cancelled, now=now,
+                            attempt_delta=0 if cancelled else -1,
+                        )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return len(rows)
+
     def recover_expired_leases(self, *, tenant_id: str | None = None) -> int:
         tenant = _required(tenant_id, "tenant_id") if tenant_id is not None else None
         now = self._clock()
@@ -943,18 +981,23 @@ class PostgresDocumentJobRepository:
         now: datetime,
         retry_at: datetime | None = None,
         cancel_requested: bool | None = None,
+        attempt_delta: int = 0,
     ) -> None:
         source = DocumentJobState(row["state"])
         self._validate(source, DocumentJobState(target))
         next_version = int(row["row_version"]) + 1
         clear_lease = target not in _ACTIVE_STATE_VALUES
         next_cancel = bool(cancel_requested) if cancel_requested is not None else bool(row["cancel_requested"])
+        # The row version is compared below, so the attempt read with the row
+        # is still the stored one; computed here, the statement is plain SQL.
+        next_attempt = max(0, int(row["attempt"] or 0) + int(attempt_delta))
         cur.execute(
             """
             UPDATE document_jobs
             SET state = %s, stage = %s, retry_at = %s, lease_owner = %s,
                 lease_expires_at = %s, heartbeat_at = %s, cancel_requested = %s,
-                error_code = %s, error_message = %s, row_version = %s, updated_at = %s
+                error_code = %s, error_message = %s, row_version = %s, updated_at = %s,
+                attempt = %s
             WHERE tenant_id = %s AND id = %s AND state = %s AND row_version = %s
             """,
             (
@@ -962,7 +1005,7 @@ class PostgresDocumentJobRepository:
                 None if clear_lease else row["lease_owner"],
                 None if clear_lease else row["lease_expires_at"],
                 None if clear_lease else row["heartbeat_at"],
-                next_cancel, error_code, error_message, next_version, now,
+                next_cancel, error_code, error_message, next_version, now, next_attempt,
                 row["tenant_id"], row["id"], source.value, int(row["row_version"]),
             ),
         )

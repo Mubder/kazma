@@ -115,6 +115,10 @@ _SENSITIVE_LAST_SEGMENTS = frozenset({
     # sat plaintext in settings.db/Postgres even with KAZMA_VAULT_KEY set.
     "app_private_key",
     "app_private_key_path",
+    # An S3 access key id (backups.offsite.s3.access_key): stored plaintext,
+    # it went out in every settings export and backup (2026-11, FA-206).
+    "access_key",
+    "access_key_id",
 })
 
 # Audit M3: locator-shaped values (user:password@host live in the URL) whose
@@ -549,6 +553,16 @@ _HITL_NESTED_TO_FLAT: dict[str, str] = {
     "safety.hitl.approval_timeout_seconds": "safety.approval_timeout",
     "safety.hitl.auto_deny_on_timeout": "safety.auto_deny_on_timeout",
     "safety.hitl.require_approval_for": "safety.require_approval_for",
+}
+
+
+#: Keys a Settings control wrote that nothing read, and the key that is read
+#: (FA-125: Non-Stop's "Per-Tool Timeout" saved to ``agent.nonstop.watchdog.
+#: tool_timeout_seconds``; the tool worker reads ``agent.tool_timeout_seconds``).
+#: At boot a stored old value is copied once, unless the new key holds one,
+#: and the old row is deleted.
+_MOVED_KEYS: dict[str, str] = {
+    "agent.nonstop.watchdog.tool_timeout_seconds": "agent.tool_timeout_seconds",
 }
 
 
@@ -1549,19 +1563,51 @@ class ConfigStore(_ChangeNotices):
             if vault is not None:
                 try:
                     vname = _vault_secret_name(key)
-                    # Skip the store + DB write when the vault already has this
-                    # exact value (prevents the 3-second flood loop when the
-                    # workspace page polls /api/github/status).
-                    if _store_config_secret(vault, vname, val):
-                        ref = _vault_ref_for_key(key)
-                        self._write_db_value(key, ref, category="security")
-                        logger.info(
-                            "[ConfigStore] Migrated sensitive key %s into vault", key
-                        )
+                    # The vault write is skipped when it already holds this exact
+                    # value. The ROW is rewritten either way: it holds plaintext,
+                    # which is why this branch runs. Writing the pointer only on
+                    # a vault change left a row whose secret reached the vault
+                    # before its pointer did plaintext for good -- the GitHub App
+                    # key, in every pg_dump since July (2026-11, FA-271). Once
+                    # the pointer is written, reads resolve it and never come
+                    # here again (the old flood loop was this branch re-running).
+                    _store_config_secret(vault, vname, val)
+                    self._write_db_value(key, _vault_ref_for_key(key), category="security")
+                    logger.info("[ConfigStore] Moved sensitive key %s into the vault", key)
                     return val
                 except Exception as exc:
                     logger.debug("[ConfigStore] Vault migrate skip for %s: %s", key, exc)
         return val
+
+    def move_plaintext_secrets(self) -> tuple[list[str], list[str]]:
+        """Move every secret the store holds as plaintext into the vault,
+        leaving its pointer: ``(moved, left)``. Boot runs it (FA-271).
+
+        The lazy migration moves a row when it is read; a secret nothing reads
+        stayed plaintext in the settings table, so in every Postgres dump and
+        offsite copy. Blocking: async callers use a thread.
+        """
+        if _try_get_vault() is None:
+            return [], []
+        moved: list[str] = []
+        left: list[str] = []
+        for rows in self.get_all().values():
+            for key, val in rows.items():
+                if not (isinstance(val, str) and val and not val.startswith(_VAULT_REF_PREFIX)
+                        and not is_masked_secret_placeholder(val) and _is_sensitive_config_value(key, val)):
+                    continue
+                with self._lock:
+                    self._invalidate_key(key)  # read the row, not a cached copy
+                self.get(key)
+                raw = self._stored_raw(key)
+                (moved if isinstance(raw, str) and raw.startswith(_VAULT_REF_PREFIX) else left).append(key)
+        if moved:
+            logger.info("[ConfigStore] moved %d plaintext secret(s) into the vault: %s",
+                        len(moved), ", ".join(sorted(moved)))
+        if left:
+            logger.warning("[ConfigStore] %d secret(s) are still stored as plaintext: %s",
+                           len(left), ", ".join(sorted(left)))
+        return moved, left
 
     def _write_db_value(self, key: str, value: Any, category: str = "general") -> None:
         """Low-level row write under the store lock (pointer updates after vault store).
@@ -2737,7 +2783,24 @@ class ConfigStore(_ChangeNotices):
             )
             seeded = self.batch_set(new_items)
         self.scrub_nested_hitl_fossils()
+        self.move_renamed_keys()
         return seeded
+
+    def move_renamed_keys(self) -> list[str]:
+        """Copy each stored key of :data:`_MOVED_KEYS` to the key that is
+        read (unless that one holds a value), then delete it. Idempotent: an
+        old row is gone after its first boot. Returns the new keys written."""
+        moved: list[str] = []
+        for old, new in _MOVED_KEYS.items():
+            raw = self._db_get_raw(old)
+            if raw is _MISSING:
+                continue
+            if self._db_get_raw(new) is _MISSING:
+                self.set(new, raw, category=new.split(".")[0])
+                moved.append(new)
+                logger.info("[ConfigStore] %s moved to %s (the key that is read)", old, new)
+            self.delete(old)
+        return moved
 
     def apply_retired_defaults(self, shipped: dict[str, Any]) -> list[str]:
         """Replace a stored copy of a retired shipped default with today's

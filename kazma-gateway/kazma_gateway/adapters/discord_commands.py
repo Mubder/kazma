@@ -186,6 +186,9 @@ async def send(adapter: Any, outbound: OutboundMessage) -> bool:
                 payload["flags"] = 64
             if chunk_index == 0 and outbound.context_metadata.get("components"):
                 payload["components"] = outbound.context_metadata["components"]
+            from kazma_gateway import outbound_flags
+
+            payload = outbound_flags.discord(payload)  # no embeds (FA-128)
             try:
                 response = await (
                     adapter._http.post(base, json=payload)

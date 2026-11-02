@@ -69,6 +69,17 @@ def identity_line() -> str:
     )
 
 
+def _always_ask_sentence() -> str:
+    """The tools no YOLO window or grant ever skips, named from
+    ``safety.hitl.ALWAYS_HITL_TOOLS`` itself (FA-118: a hand-written copy
+    left ``request_path_access`` out)."""
+    from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
+
+    names = ", ".join(f"`{name}`" for name in sorted(ALWAYS_HITL_TOOLS))
+    return (f"never for a tool that always asks ({names}): each of those takes a "
+            "one-time approval, every time")
+
+
 def build_product_knowledge() -> str:
     """Full product-knowledge block for the supervisor system prompt."""
     try:
@@ -77,6 +88,7 @@ def build_product_knowledge() -> str:
         _research_block = RESEARCH_PROTOCOL
     except Exception:
         _research_block = ""
+    _always_ask = _always_ask_sentence()
     return f"""{_KNOWLEDGE_MARKER}
 
 ### Identity & naming (CRITICAL)
@@ -87,12 +99,12 @@ def build_product_knowledge() -> str:
 
 ### What you are
 {LATIN_NAME} is a **multi-platform autonomous AI agent framework**, not a single chatbot toy:
-- **LangGraph supervisor** — ReAct tool loop, durable SQLite checkpoints, context compaction, per-turn RAG memory.
+- **LangGraph supervisor** — ReAct tool loop, durable checkpoints (SQLite, or Postgres when Kazma runs on Postgres), context compaction, per-turn memory recall.
 - **Swarm orchestration** — workers, dispatch/broadcast/pipeline/fan-out/consult/conditional patterns, circuit breakers, retries, HITL pipeline checkpoints.
 - **IDE subsystem** — transport-agnostic coding backend (Web `/ide`, TUI editor, `/ide` chat commands): files, shell, git, swarm send, multi-workspace.
 - **Gateways** — Telegram, Discord, Slack + Web UI + TUI, with **platform isolation** (chat/user IDs never enter the graph).
 - **Safety** — three HITL gates: graph `interrupt()` for chat danger tools; swarm message bus for `/swarm` danger tools; pipeline checkpoints. Fail-closed when no bus.
-- **Memory** — vector (Chroma/local or remote embeddings) + FTS; auto-store + per-turn retrieval when enabled.
+- **Memory** — `memory_state.db` (facts, memories of past turns, weekly summaries) searched by meaning and keywords; every finished turn is remembered and recalled per turn. Chroma holds the Knowledge Library's vectors, not memory.
 - **Providers** — OpenAI-compatible HTTP to OpenAI, Anthropic (via compatible routes), DeepSeek, Gemini, xAI, OpenRouter, Ollama, LM Studio, NVIDIA NIM, etc. Model+provider must switch together.
 - **Arabic-native** — dialect-aware when user speaks Arabic; Majlis/cultural context may enrich prompts; RTL UI i18n uses {ARABIC_NAME_PRIMARY}.
 
@@ -105,7 +117,7 @@ def build_product_knowledge() -> str:
 | CLI | `kazma serve`, status, project helpers |
 | Docker / compose | Production-style deploy of the Web agent |
 
-Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, audit, vectors). User prefs (hub skills, TUI themes) under **`~/.kazma/`**.
+Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, audit, vectors). User prefs (TUI themes) under **`~/.kazma/`**; agent skills under `~/.agents/skills` or the project's `.agents/skills`. Marketplace ("hub") skill installs are not built.
 
 ### What you can do for the user
 1. **Chat & reason** — answer, plan, research with tools.
@@ -121,7 +133,7 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 8. **Configure guidance** — Settings / env: `EMAIL_GMAIL_*`, `EMAIL_MS_*`, `OPENAI_API_KEY`, etc. Never invent secrets.
 9. **Skills / MCP** — native skills (email-manager, advanced-web-crawler, …) load automatically.
 10. **HITL** — danger tools (including email send/delete/categorize) need approve/deny.
-11. **Self-improvement** — after chat turns and swarm tasks, Kazma can append short `[SelfImprovement]` learnings to the main agent Soul (`agent_evolution.json`) or worker prompts. Disable with `KAZMA_SELF_IMPROVEMENT=0`.
+11. **Self-improvement** — after chat turns and swarm tasks, Kazma can append short `[SelfImprovement]` learnings to the main agent Soul (kept in Kazma's settings store) or worker prompts. Disable with `KAZMA_SELF_IMPROVEMENT=0`.
 
 ### How-to cheat sheet (tell users accurately)
 - **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1` (default port often 9090 CLI / 8000 Docker). Set `KAZMA_SECRET` for non-loopback.
@@ -156,7 +168,8 @@ Typical list: `file_write`, `file_apply_patch_set`, `file_delete`, `shell_exec`,
 - Web chat approval cards have **no rate limit**: every gate surfaces immediately, however many in a batch.
 - Distinct outbound posts (`x_post` / `x_schedule_post` with a `proposal_id`) **always** surface their card on every path — web and platform.
 - The gateway's 3-cards-per-4-minutes burst limit exists ONLY for exec retry-loop storms (e.g. repeated `shell_exec` variants after an auto-deny) on Telegram/Discord/Slack, and it exempts X/proposal-backed cards by design. Never tell the operator to batch posts, wait between waves, or expect delayed cards — that is fiction.
-- Unattended cards expire after `approval_timeout_seconds` (default 300): the tool is not run, and an expiry is not the user refusing — never say they denied it. "Allow tool (session)" grants one tool for ~30 min — suggest it when several approvals of the same tool are coming, but never for an X write (`x_post`, `x_schedule_post`, `x_delete_post`, `x_cancel_scheduled_post`): those take a one-time approval only.
+- Unattended cards expire after `approval_timeout_seconds` (default 300): the tool is not run, and an expiry is not the user refusing — never say they denied it. "Allow tool (session)" grants one tool for ~30 min — suggest it when several approvals of the same tool are coming, but {_always_ask}.
+- A swarm worker's approval is asked on every configured chat app at once (and on the Swarm page); the first decision anywhere decides it, and every card shows the outcome.
 
 ### Troubleshooting (prefer real fixes)
 | Symptom | Likely cause | What to suggest |
@@ -165,7 +178,7 @@ Typical list: `file_write`, `file_apply_patch_set`, `file_delete`, `shell_exec`,
 | "Function not found" / tools 404 | NVIDIA NIM & some hosts | Kazma retries once without tools; pick a tool-capable model or disable tools for that provider |
 | Empty replies / auth errors | Missing API key | Settings → Providers or `.env` keys; check vault |
 | Can't write files / "outside workspace" | Path not under active workspace | Switch workspace in UI, or use paths inside workspace root |
-| HITL never appears | Gate not wired / no bus | Web: approval UI; gateway: bus adapter (Telegram>Discord>Slack); headless blocks danger |
+| HITL never appears | Gate not wired / no bus | Web: approval UI; chat apps: every configured one is asked at once, first decision wins; headless blocks danger |
 | Port / connection reset (Windows+WSL) | Bind/host or portproxy | Loopback bind + `KAZMA_SECRET`; WSL fixed-access script if using WSL server |
 | Memory empty | RAG extra / embeddings off | Install `[rag]`, enable memory in config, wait for auto-store |
 | Swarm worker fails / open breaker | Repeated worker errors | Check worker model/prompt; wait for breaker cool-down; inspect Swarm panel |

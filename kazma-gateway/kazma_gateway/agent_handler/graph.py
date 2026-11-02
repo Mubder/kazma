@@ -286,6 +286,23 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
 
 
 
+def _rewind_memory_note(memory: Any, what: str) -> str:
+    """The rest of a /undo or /edit reply: what happened to memory (FA-102).
+
+    It said "and what Kazma remembered from it" whatever the rewind's answer,
+    and a locked memory database journaled nothing."""
+    answer = memory if isinstance(memory, dict) else {}
+    if answer.get("ok"):
+        return f", and forgot what Kazma remembered from {what}."
+    if answer.get("error") == "chat required":  # no chat to rewind in memory
+        return "."
+    if answer.get("pending"):
+        return (f". Memory could not be updated yet: Kazma will forget what it remembered "
+                f"from {what} within a few minutes.")
+    return (f". Kazma could not take back what it remembered from {what}: forget it on the "
+            "Memory page if it matters.")
+
+
 def _turn_tool_names(messages: list) -> list[str]:
     """The tools the running turn called: after its last user message."""
     start = 0
@@ -2003,13 +2020,26 @@ def create_graph_handler(
                 # instead of showing literal ** markers (which legacy Markdown
                 # parse_mode would 400-reject and strip to plain text).
                 tg_text, tg_ctx = _prepare_tg_outbound(msg, assistant_text, ctx)
-                await manager.send(
+                delivered = await manager.send(
                     OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),
                         text=tg_text,
                         context_metadata=tg_ctx,
                     )
                 )
+                if delivered is False:
+                    # Part of the answer did not arrive (FA-140: Telegram
+                    # refused a chunk over its limit, and the user saw half an
+                    # answer with nothing to say so). The whole answer is saved.
+                    logger.warning("[agent-handler] the reply to %s did not fully reach %s; "
+                                   "it is saved in the chat", sender, msg.platform)
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=("⚠️ لم يصل جزء من ردّي هنا؛ الرد كاملاً محفوظ في هذه المحادثة على الويب (/sessions). "
+                              "(Part of my reply did not arrive here; the whole answer is saved in this "
+                              "chat on the web: /sessions.)"),
+                        context_metadata=dict(ctx),
+                    ))
 
             except Exception as inv_exc:
                 logger.exception("[agent-handler] Graph invocation failed for %s", sender)
@@ -2186,15 +2216,15 @@ def create_graph_handler(
                 # The undone answer leaves memory too (Memory audit M09).
                 from kazma_core.memory.forget import rewind_memory
 
-                await rewind_memory(thread_id, before, messages,
-                                    tenant_id=str(snap.values.get("tenant_id") or "default"))
+                memory = await rewind_memory(thread_id, before, messages,
+                                             tenant_id=str(snap.values.get("tenant_id") or "default"))
             return (
-                "✅ Removed last assistant response, and what Kazma remembered from it. "
-                "You can continue the conversation."
+                "✅ Removed last assistant response" + _rewind_memory_note(memory, "it")
+                + " You can continue the conversation."
             )
         except Exception as exc:
             logger.warning("[agent-handler] /undo failed: %s", exc, exc_info=True)
-            return f"⚠️ Could not undo: {exc}"
+            return "⚠️ Could not undo the last response: the chat could not be changed. Try again."
 
     def _extract_edit_command(text: str | None) -> str | None:
         """Extract corrected text from ``/edit …``, or empty string if bare ``/edit``."""
@@ -2247,18 +2277,19 @@ def create_graph_handler(
                 from kazma_core.memory.consolidator import user_turn_index
                 from kazma_core.memory.forget import rewind_memory
 
-                await rewind_memory(thread_id, before, messages,
-                                    tenant_id=str(snap.values.get("tenant_id") or "default"),
-                                    from_turn=max(1, user_turn_index(messages[: edited + 1])))
+                memory = await rewind_memory(
+                    thread_id, before, messages,
+                    tenant_id=str(snap.values.get("tenant_id") or "default"),
+                    from_turn=max(1, user_turn_index(messages[: edited + 1])))
             logger.info("[agent-handler] /edit thread=%s len=%d", thread_id, len(corrected_text))
             return (
                 corrected_text,
-                "✅ Replaced last response, and forgot what Kazma remembered from the old one. "
-                "You can continue the conversation.",
+                "✅ Replaced last response" + _rewind_memory_note(memory, "the old one")
+                + " You can continue the conversation.",
             )
         except Exception as exc:
             logger.warning("[agent-handler] /edit failed: %s", exc, exc_info=True)
-            return corrected_text, f"⚠️ Could not edit: {exc}"
+            return corrected_text, "⚠️ Could not edit the last response: the chat could not be changed. Try again."
 
     # ── /replay <step> + /fork <step>: Time-travel restore + branch ──
     #

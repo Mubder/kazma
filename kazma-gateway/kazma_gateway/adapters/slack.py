@@ -433,11 +433,14 @@ class SlackAdapter(BaseAdapter):
         attachments_sent = True
         
         for chunk_idx, chunk in enumerate(chunks):
-            payload: dict[str, Any] = {
+            from kazma_gateway import outbound_flags
+
+            # No unfurling: Slack would fetch any link the model wrote (FA-128).
+            payload: dict[str, Any] = outbound_flags.slack({
                 "channel": channel_id,
                 "text": chunk,
                 "mrkdwn": True,
-            }
+            })
             if thread_ts:
                 payload["thread_ts"] = thread_ts
             # Only attach blocks on the first chunk

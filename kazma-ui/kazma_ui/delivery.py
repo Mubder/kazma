@@ -272,6 +272,27 @@ class TurnJournal:
         self._last_activity.pop(thread_id, None)
 
 
+#: How long one frame may take to reach every watching socket. A healthy
+#: send returns once the frame is in the transport's buffer; one past this is
+#: a socket whose reader stopped (FA-136).
+_SOCKET_SEND_BOUND_S = 0.75
+
+
+def _retrieve_quietly(task: asyncio.Future[Any]) -> None:
+    if not task.cancelled():
+        task.exception()
+
+
+async def _close_quietly(socket: Any) -> None:
+    """Close a dropped socket, bounded: its close can be as stuck as its send."""
+    from kazma_core.bounded_cancel import wait_for_bounded
+
+    try:
+        await wait_for_bounded(socket.close(code=1011), 2.0, what="closing a stuck socket")
+    except Exception:  # already closed, or stuck: it is out of the registry either way
+        logger.debug("[Delivery] dropped socket did not close cleanly", exc_info=True)
+
+
 class TurnBroker:
     """Journal + fan-out choke point for all chat turn events.
 
@@ -355,15 +376,19 @@ class TurnBroker:
                     cancelled = True
             stamped = self._journal.append(thread_id, frame)
             with self._lock:
-                sockets = list(self._sockets.get(thread_id, {}).values())
+                sockets = list(self._sockets.get(thread_id, {}).items())
                 queues = list(self._subscribers.get(thread_id, []))
-            delivered = await self._fan_out_sockets(sockets, stamped)
+            # The SSE queues first, then the sockets, each send bounded
+            # (FA-136): one tab whose socket stopped reading held this lock in
+            # an unbounded send, ahead of the SSE queue -- every frame of the
+            # thread, for every viewer, waited on it.
             dropped = 0
             for queue in queues:
                 try:
                     queue.put_nowait(stamped)
                 except asyncio.QueueFull:
                     dropped += 1
+            delivered = await self._fan_out_sockets(thread_id, sockets, stamped)
             if dropped:
                 logger.warning(
                     "[Delivery] subscriber queue full for thread=%s — %d event(s) dropped",
@@ -401,15 +426,34 @@ class TurnBroker:
         except Exception:
             logger.debug("[Delivery] push notification failed", exc_info=True)
 
-    async def _fan_out_sockets(self, sockets: list[Any], frame: dict[str, Any]) -> int:
-        """Send *frame* to every socket; isolate failures. Returns delivered count."""
+    async def _fan_out_sockets(
+        self, thread_id: str, sockets: list[tuple[str, Any]], frame: dict[str, Any],
+    ) -> int:
+        """Send *frame* to every socket at once, waiting at most
+        ``_SOCKET_SEND_BOUND_S`` in all; isolate failures. A socket that has
+        not taken the frame by then is dropped and closed: its tab reconnects
+        and resumes from its cursor (the journal holds the frame). Returns the
+        delivered count."""
+        if not sockets:
+            return 0
+        sends = {asyncio.ensure_future(socket.send_json(frame)): (conn_id, socket)
+                 for conn_id, socket in sockets}
+        done, slow = await asyncio.wait(sends, timeout=_SOCKET_SEND_BOUND_S)
         delivered = 0
-        for socket in sockets:
-            try:
-                await socket.send_json(frame)
+        for task in done:
+            if task.cancelled() or task.exception() is not None:
+                logger.debug("[Delivery] socket send failed — skipping", exc_info=task.exception()
+                             if not task.cancelled() else None)
+            else:
                 delivered += 1
-            except Exception:
-                logger.debug("[Delivery] socket send failed — skipping", exc_info=True)
+        for task in slow:
+            conn_id, socket = sends[task]
+            logger.warning("[Delivery] a socket on thread=%s took no frame in %.2f s; dropped (it "
+                           "resumes from its cursor when it reconnects)", thread_id[:12], _SOCKET_SEND_BOUND_S)
+            self.unregister_socket(thread_id, conn_id)
+            task.cancel()
+            task.add_done_callback(_retrieve_quietly)
+            spawn_background(_close_quietly(socket), name="delivery-drop-socket")
         return delivered
 
     def _emit_lock_for(self, thread_id: str) -> asyncio.Lock:
@@ -493,6 +537,33 @@ class TurnBroker:
 
 _broker: TurnBroker | None = None
 _broker_lock = threading.Lock()
+
+
+def _wake_attached_streams() -> None:
+    """At shutdown, wake every stream attached to a thread (FA-261): one
+    left open for a pending approval waited its 10 s idle tick, and uvicorn
+    then spent its graceful window on it and cancelled it with a traceback."""
+    from kazma_core.shutdown import SHUTDOWN_WAKE
+
+    broker = _broker
+    if broker is None:
+        return
+    with broker._lock:
+        queues = [q for qs in broker._subscribers.values() for q in qs]
+    for queue in queues:
+        try:
+            queue.put_nowait(SHUTDOWN_WAKE)
+        except asyncio.QueueFull:
+            continue  # a full queue wakes its reader anyway
+
+
+def _install_waker() -> None:
+    from kazma_core.shutdown import add_shutdown_waker
+
+    add_shutdown_waker(_wake_attached_streams)
+
+
+_install_waker()
 
 
 def get_turn_broker() -> TurnBroker:

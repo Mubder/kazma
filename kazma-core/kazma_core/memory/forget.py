@@ -28,6 +28,7 @@ from it, and the past-chats search leaves the chat out.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import logging
@@ -365,12 +366,13 @@ def _forget_turn(
     # Every copy of the turn still held: the live write and turn reconcile use
     # different keys of the chat, and a legacy restore may hold another.
     alive = conn.execute("SELECT 1 FROM episodes WHERE id = ? AND tier != ?", (eid, FORGOTTEN_TIER)).fetchone()
+    before = _TAKEN_BEFORE.get()
     copies = [
         str(r["id"])
         for r in conn.execute(
             f"SELECT id, user_text FROM episodes WHERE tenant_id = ? AND turn_number = ? "
-            f"AND tier != ? AND session_id IN ({marks})",
-            (owner, turn, FORGOTTEN_TIER, *keys),
+            f"AND tier != ? AND session_id IN ({marks}) AND created_at <= ?",
+            (owner, turn, FORGOTTEN_TIER, *keys, before if before is not None else float("inf")),
         ).fetchall()
         if sha and question_sha(r["user_text"]) == sha
     ] if keys else []
@@ -606,6 +608,14 @@ def _tombstone(
     )
 
 
+#: While a journaled rewind is applied: only memories made before it (its
+#: time). Applied late -- the memory database was locked when the rewind ran
+#: -- the chat may have gone on, and its new turns reuse the rewound turn
+#: numbers; a positional lookup without this bound would forget them (FA-102).
+_TAKEN_BEFORE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "kazma_forget_taken_before", default=None)
+
+
 def _forget_turn_facts(
     conn: sqlite3.Connection, *, tenant_id: str, keys: list[str], turn: int, now: float
 ) -> list[str]:
@@ -615,11 +625,14 @@ def _forget_turn_facts(
     if not keys or turn <= 0:
         return []
     marks = ",".join("?" for _ in keys)
-    rows = conn.execute(
-        f"SELECT id, tenant_id, invalidated_at, valid_until, metadata_json FROM beliefs "
-        f"WHERE tenant_id = ? AND source_turn = ? AND source_session IN ({marks})",
-        (tenant_id, turn, *keys),
-    ).fetchall()
+    sql = (f"SELECT id, tenant_id, invalidated_at, valid_until, metadata_json FROM beliefs "
+           f"WHERE tenant_id = ? AND source_turn = ? AND source_session IN ({marks})")
+    params: list[Any] = [tenant_id, turn, *keys]
+    before = _TAKEN_BEFORE.get()
+    if before is not None:
+        sql += " AND ingested_at <= ?"
+        params.append(before)
+    rows = conn.execute(sql, params).fetchall()
     return _forget_fact_rows(conn, rows, now=now)
 
 
@@ -711,6 +724,10 @@ def _forget_archived_facts(
     if tenant_id is not None:
         sql += " AND tenant_id = ?"
         params.append(tenant_id)
+    before = _TAKEN_BEFORE.get()
+    if before is not None:
+        sql += " AND CAST(json_extract(original_belief_json, '$.ingested_at') AS REAL) <= ?"
+        params.append(before)
     changed: list[str] = []
     for r in conn.execute(sql, params).fetchall():
         try:
@@ -1313,54 +1330,104 @@ def _forget_rewound_turns(
     keys = chat_keys(thread_id) or ([thread_id] if thread_id else [])
     if not keys or from_turn < 1:
         return {"ok": False, "error": "chat required"}
-    conn = _open()
+    # The questions of the rewound turns, as memory records them.
+    questions: dict[int, str] = {}
+    seen = 0
+    for i, m in enumerate(old_messages or []):
+        r = m.get("role") if isinstance(m, dict) else getattr(m, "type", "")
+        if r in ("user", "human"):
+            seen += 1
+            if seen >= from_turn:
+                questions[seen] = question_sha(extract_turn_texts(list(old_messages)[: i + 1])[0])
+    # Journaled BEFORE the memory database is opened (FA-102): it opened the
+    # database first, so a locked one journaled nothing, the maintenance pass
+    # had nothing to apply, and /undo said memory was cleared. Raises when
+    # the journal cannot write: a rewind that starts without its entry is one
+    # a restore undoes.
+    seq = forget_journal.append(
+        "rewind", tenant_id=tenant_id or "default", session_key=thread_id, turn_number=from_turn,
+        detail=json.dumps({str(t): s for t, s in questions.items()}),
+    )
+    entry = forget_journal.Entry(seq, time.time(), "rewind", tenant_id or "default", thread_id, from_turn,
+                                 "", "", "", json.dumps({str(t): s for t, s in questions.items()}))
+    try:
+        conn = _open()
+    except (sqlite3.Error, OSError):
+        logger.warning("[forget] the memory database is not available for the rewind of %s; it is "
+                       "journaled (entry %d) and the maintenance pass applies it", thread_id, seq,
+                       exc_info=True)
+        return {"ok": False, "pending": True}
+    try:
+        turns = replay_rewind(conn, entry)
+        forget_journal.mark_applied(conn, seq)
+        conn.commit()
+        if turns:
+            logger.info("[forget] rewind of %s took back %d turn(s) from memory", thread_id, turns)
+        return {"ok": True, "turns": turns}
+    except (sqlite3.Error, OSError):
+        if conn.in_transaction:
+            conn.rollback()
+        logger.warning("[forget] the rewind of %s could not finish; it is journaled (entry %d) and "
+                       "the maintenance pass applies it", thread_id, seq, exc_info=True)
+        return {"ok": False, "pending": True}
+    finally:
+        conn.close()
+
+
+def replay_rewind(conn: sqlite3.Connection, entry: Any) -> int:
+    """Apply a journaled rewind to *conn*: every memory of the chat's turns
+    from ``entry.turn_number`` on that was made before the rewind
+    (``entry.at``), under every key and tenant that holds them, and the ledger
+    rows of the old questions (``entry.detail``). Idempotent; the caller marks
+    the entry applied. Returns the turns taken back."""
+    from kazma_core.memory import forget_journal
+
+    keys = chat_keys(entry.session_key) or ([entry.session_key] if entry.session_key else [])
+    from_turn = int(entry.turn_number or 0)
+    if not keys or from_turn < 1:
+        return 0
+    try:
+        questions = {int(k): str(v) for k, v in (json.loads(entry.detail or "{}") or {}).items()}
+    except (TypeError, ValueError):
+        questions = {}
+    before = float(entry.at)
+    token = _TAKEN_BEFORE.set(before)
     try:
         marks = ",".join("?" for _ in keys)
-        tenants = {tenant_id or "default"} | {
+        tenants = {entry.tenant_id or "default"} | {
             str(r[0] or "default") for r in conn.execute(
-                f"SELECT DISTINCT tenant_id FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ?",
-                (*keys, int(from_turn)),
+                f"SELECT DISTINCT tenant_id FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ? "
+                "AND created_at <= ?",
+                (*keys, from_turn, before),
             )
         }
-        # The questions of the rewound turns, as memory records them.
-        questions: dict[int, str] = {}
-        seen = 0
-        for i, m in enumerate(old_messages or []):
-            r = m.get("role") if isinstance(m, dict) else getattr(m, "type", "")
-            if r in ("user", "human"):
-                seen += 1
-                if seen >= from_turn:
-                    questions[seen] = extract_turn_texts(list(old_messages)[: i + 1])[0]
         stored = {int(r[0]) for r in conn.execute(
-            f"SELECT DISTINCT turn_number FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ?",
-            (*keys, int(from_turn)),
+            f"SELECT DISTINCT turn_number FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ? "
+            "AND created_at <= ?",
+            (*keys, from_turn, before),
         )}
         stored |= {int(r[0]) for r in conn.execute(
-            f"SELECT DISTINCT source_turn FROM beliefs WHERE source_session IN ({marks}) AND source_turn >= ?",
-            (*keys, int(from_turn)),
+            f"SELECT DISTINCT source_turn FROM beliefs WHERE source_session IN ({marks}) AND source_turn >= ? "
+            "AND ingested_at <= ?",
+            (*keys, from_turn, before),
         )}
         turns = 0
         for turn in sorted(stored | set(questions)):
             for owner in sorted(tenants):
-                sha = question_sha(questions.get(turn)) if turn in questions else ""
-                seq = forget_journal.append("turn", tenant_id=owner, session_key=thread_id, turn_number=turn,
-                                            question_sha=sha)
+                sha = questions.get(turn, "")
                 for (eid,) in conn.execute(
                     f"SELECT id FROM episodes WHERE tenant_id = ? AND session_id IN ({marks}) "
-                    "AND turn_number = ? AND tier != ?",
-                    (owner, *keys, turn, FORGOTTEN_TIER),
+                    "AND turn_number = ? AND tier != ? AND created_at <= ?",
+                    (owner, *keys, turn, FORGOTTEN_TIER, before),
                 ).fetchall():
                     forget_episode(str(eid), tenant_id=owner, conn=conn, journal=False, by="rewind")
-                entry = forget_journal.Entry(seq, time.time(), "turn", owner, thread_id, turn, sha, "", "")
-                replay_turn(conn, entry)
-                forget_journal.mark_applied(conn, seq)
+                replay_turn(conn, forget_journal.Entry(entry.seq, before, "turn", owner, entry.session_key,
+                                                       turn, sha, "", ""))
                 conn.commit()
             turns += 1
-        if turns:
-            logger.info("[forget] rewind of %s took back %d turn(s) from memory", thread_id, turns)
-        return {"ok": True, "turns": turns}
+        return turns
     finally:
-        conn.close()
+        _TAKEN_BEFORE.reset(token)
 
 
 async def rewind_memory(
@@ -1379,9 +1446,10 @@ async def rewind_memory(
         return await asyncio.to_thread(_forget_rewound_turns, thread_id, list(old_messages or []),
                                        from_turn=turn, tenant_id=tenant_id or "default")
     except (sqlite3.Error, OSError, RuntimeError, ValueError, TypeError):
-        logger.warning("[forget] the rewind of %s could not take its turns back from memory; "
-                       "the maintenance pass applies the journal", thread_id, exc_info=True)
-        return {"ok": False}
+        # The journal itself could not be written: nothing will apply it.
+        logger.warning("[forget] the rewind of %s could not be journaled; its turns stay in "
+                       "memory until they are forgotten", thread_id, exc_info=True)
+        return {"ok": False, "pending": False}
 
 
 def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, int]:
@@ -1500,4 +1568,8 @@ def _chat_notes(
     if tenant_id is not None:
         sql += " AND tenant_id = ?"
         params.append(tenant_id)
+    before = _TAKEN_BEFORE.get()
+    if before is not None:
+        sql += " AND created_at <= ?"
+        params.append(before)
     return [str(r[0]) for r in conn.execute(sql, params).fetchall()]

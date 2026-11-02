@@ -2628,6 +2628,16 @@ class DocumentIngestionService:
         if not isolation.get("ready"):
             problems.append("document_worker_isolation_unavailable")
         try:
+            from .malware import signature_problem
+
+            # Signatures too old, or of no known age (FA-232): a scanner
+            # that has quietly stopped learning is not a working control.
+            signature = signature_problem(data["malware"])
+        except (KeyError, TypeError, AttributeError):
+            signature = None
+        if signature:
+            problems.append(signature)
+        try:
             stranded = int(self.admissions.snapshot().get("stranded", 0))
         except store_errors():
             stranded = 0  # the admission store's own outage is reported elsewhere

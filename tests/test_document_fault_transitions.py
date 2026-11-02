@@ -301,11 +301,15 @@ async def test_a_store_error_while_recording_an_outcome_does_not_end_the_worker(
             assert stuck.lease_owner and stuck.lease_owner.startswith(worker.owner)
         finally:
             await worker.stop()
-        # The unrecorded job resumes once its lease expires.
+        # The unrecorded job was given back by the graceful stop, on the
+        # attempt it had (FA-264: it used to wait for its lease to expire,
+        # and that expiry spent an attempt); it resumes from there.
+        given_back = _job(svc, first)
+        assert given_back.state is DocumentJobState.RETRY_WAIT and given_back.lease_owner is None
         clock = _Clock()
         clock.now += timedelta(hours=1)
         monkeypatch.setattr(svc.jobs, "_clock", clock)
-        assert svc.jobs.recover_expired_leases(tenant_id="t") == 1
+        assert svc.jobs.recover_expired_leases(tenant_id="t") == 0
         clock.advance()
         await _process_one(svc, owner="after")
         assert _job(svc, first).state is DocumentJobState.READY
@@ -359,7 +363,10 @@ async def test_a_shutdown_during_a_stuck_stage_is_bounded_and_the_job_resumes(tm
         started = time.monotonic()
         await asyncio.wait_for(worker.stop(), timeout=20)
         assert time.monotonic() - started < 10  # grace 0.5 s + cancel grace + slack
-        assert _job(svc, result).state is DocumentJobState.PARSING  # left leased, not lost
+        # Given back on the attempt it had, not lost (FA-264: it was left
+        # leased, and the lease's expiry spent an attempt).
+        given_back = _job(svc, result)
+        assert given_back.state is DocumentJobState.RETRY_WAIT and given_back.attempt == 0
     finally:
         release.set()
         await asyncio.sleep(0.2)

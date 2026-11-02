@@ -753,7 +753,10 @@ class TestStreamingGraphAutoDeny:
         assert kwargs["hitl_config"]["enabled"] is True
         assert kwargs["hitl_config"]["auto_deny"] is True
 
-    def test_streaming_hitl_disabled_stays_none(self):
+    def test_streaming_hitl_disabled_still_wires_the_gate(self):
+        """A gate off at build still gets its config (FA-147): the tool
+        worker reads the live switch per call, so turning HITL on after the
+        graph was built gates the next call. ``None`` left it off for good."""
         from unittest.mock import patch
 
         from kazma_core.agent_runner import KazmaAgent
@@ -770,7 +773,8 @@ class TestStreamingGraphAutoDeny:
             ),
         ):
             KazmaAgent.get_streaming_graph(agent)
-        assert build.call_args.kwargs["hitl_config"] is None
+        wired = build.call_args.kwargs["hitl_config"]
+        assert wired is not None and wired["enabled"] is False and wired["auto_deny"] is True
 
 
 class _InvokeMockGraph:

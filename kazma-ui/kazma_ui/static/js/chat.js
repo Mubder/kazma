@@ -672,6 +672,21 @@
   /** The socket's way in for the journal frames above (agentStore). Same
    *  rules as the stream: a replayed pending gate is history, and a gate
    *  this page already claimed is not asked again. True when handled. */
+  /** A stream Kazma closed because it is restarting (FA-262): the turn did
+   *  not end, so the partial answer stays as it is (never taken for the
+   *  whole one), the notice says what is true, and the chat reconciles with
+   *  the stored reply once Kazma is back. Returns whether *data* was one. */
+  function applyShutdownNotice(data) {
+    if (!data || !data.stopped_for_shutdown) return false;
+    var notice = data.notice || window.kazmaT('chat.restarting_notice',
+      'Kazma is restarting. The full answer will appear in this chat when it is back.');
+    try {
+      if (typeof window.showToast === 'function') window.showToast(notice, 'info', 8000);
+    } catch (eToast) { /* the notice must never break the stream's end */ }
+    setTimeout(function() { _resyncDelivery('restarting'); }, 15000);
+    return true;
+  }
+
   function applyJournalFrame(type, data) {
     data = data || {};
     switch (String(type || '')) {
@@ -3284,6 +3299,9 @@
         // the partial paint for now and reconcile with server truth —
         // this used to sit on "CoT + small text" until a manual refresh.
         var truncated = !data;
+        // A stream closed by a restart (FA-262) is not an ended turn: the
+        // empty-terminal watchdog below must not take it for one.
+        if (applyShutdownNotice(data)) interrupted = true;
         _ingestFrameGateViews(data);
         try {
         // Terminal frame is SoT — ALWAYS replace-paint, even when plan
@@ -8708,6 +8726,7 @@
     // thing that builds a card.
     _hitlApproval: ingestHitlApproval,
     applyJournalFrame: applyJournalFrame,
+    applyShutdownNotice: applyShutdownNotice,
     ingestGateViews: _ingestFrameGateViews,
     hasLiveGate: hasLiveGate,
     markApprovalTimedOut: markApprovalTimedOut,

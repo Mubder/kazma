@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter
 from kazma_core.exceptions import sanitize_error
-from kazma_core.shutdown import is_shutting_down
+from kazma_core.shutdown import SHUTDOWN_WAKE, is_shutting_down
 
 logger = logging.getLogger(__name__)
 
@@ -592,8 +592,13 @@ async def _stream_langgraph_events(
     # to insert a paragraph break BETWEEN LLM invocations of one turn.
     _first_token_of_model_call = False
     interrupted = False
+    # The server began shutting down while this stream ran (FA-262).
+    _stopped_for_shutdown = False
     thread_id = tid or ""
     _snapshot_info: dict[str, Any] | None = None  # last snapshot_id/iteration from graph state
+    # The model that answered, from the turn's checkpoint (``last_model``,
+    # the supervisor's: the failover model when one answered). FA-210.
+    _answered_by = ""
     # Incremental durable presentation state (plan §8). Before this the pump
     # had no write inside the token loop, so a restart mid-turn lost the
     # partial answer, every tool row and every reasoning note — and tool
@@ -963,9 +968,12 @@ async def _stream_langgraph_events(
                             # uvicorn's graceful shutdown completes inside its
                             # timeout instead of hard-cancelling us (which logs
                             # a noisy CancelledError traceback).
+                            _stopped_for_shutdown = True
                             break
                         try:
                             event = await asyncio.wait_for(_event_queue.get(), timeout=10.0)
+                            if event is SHUTDOWN_WAKE:
+                                continue  # the check above closes the stream
                         except TimeoutError:
                             # No event in 10s — hold the HTTP body AND journal
                             # a heartbeat so every surface (live card, journal
@@ -1227,6 +1235,26 @@ async def _stream_langgraph_events(
                         mark_turn_orphaned(thread_id)
                     pass
 
+            if _stopped_for_shutdown:
+                # The turn did not end: Kazma is restarting under it (FA-262).
+                # The post-stream reading below took the checkpoint's next
+                # step for a pause ("paused mid-turn (no approval card could
+                # be built)") or sent the partial text as the finished answer.
+                # Say what is true, mark the frame, and leave the turn to its
+                # own ending: no reply is saved from here, nothing is judged.
+                from kazma_ui.i18n import current_language
+                from kazma_ui.i18n import t as _t_sd
+
+                logger.info("[SSE] thread=%s stream closed for shutdown (%d chars streamed); the turn "
+                            "ends on its own", thread_id[:12], len(content_acc or ""))
+                yield await emit_j("done", {
+                    "content": "",
+                    "stopped_for_shutdown": True,
+                    "notice": _t_sd("chat.restarting_notice", current_language()),
+                    "interrupted": False,
+                })
+                return
+
             # Stream crashed mid-turn (or failed immediately) — surface a
             # sanitized error frame BEFORE any fallback text so the client
             # shows the failure instead of a silent blank turn. The raw
@@ -1274,6 +1302,9 @@ async def _stream_langgraph_events(
                 _snap_next = getattr(snapshot, "next", None) or ()
                 try:
                     vals = getattr(snapshot, "values", None) or {}
+                    _lm = vals.get("last_model") if isinstance(vals, dict) else None
+                    if isinstance(_lm, str) and _lm.strip():
+                        _answered_by = _lm.strip()
                     msgs = vals.get("messages") if isinstance(vals, dict) else None
                     ckpt_text = _last_assistant_text(msgs or [])
                     if ckpt_text and not _snap_next:
@@ -1485,15 +1516,22 @@ async def _stream_langgraph_events(
             # Self-improvement learns from the finished turn in close_turn,
             # which reads the terminal state and the forget ledger (FA-212).
 
-            _done_model = ""
-            try:
-                from kazma_core.model_registry import get_model_registry
+            # The model that answered, not the active one (FA-210: a turn a
+            # failover or a pinned model answered showed the active model live,
+            # and another on reload). The active profile only when the
+            # checkpoint names none (a turn with no model call).
+            _done_model = _answered_by
+            if not _done_model:
+                try:
+                    from kazma_core.model_registry import get_model_registry
 
-                _done_model = str(
-                    get_model_registry().get_active_profile().get("model") or ""
-                )
-            except Exception:
-                pass
+                    # The registry reads settings: off the loop (AUD-111).
+                    _profile = await asyncio.to_thread(
+                        lambda: get_model_registry().get_active_profile()
+                    )
+                    _done_model = str(_profile.get("model") or "")
+                except Exception:
+                    logger.debug("[SSE] active model unknown for the done frame", exc_info=True)
             # Enriched done + turn_complete (content+model) for reliable delivery
             # Cumulative session totals mirror the WS turn_complete keys so both
             # transports render identical badge values (AC#3) and a page refresh
@@ -1755,10 +1793,17 @@ async def _sse_attach_stream(
 
         idle_ticks = 0
         while True:
+            if is_shutting_down():
+                # Kazma is restarting: the page re-attaches when it is back
+                # (FA-261: this stream, open for a pending approval, held
+                # uvicorn's whole graceful window).
+                return
             try:
                 frame = await asyncio.wait_for(
                     queue.get(), timeout=_ATTACH_IDLE_TIMEOUT_S
                 )
+                if frame is SHUTDOWN_WAKE:
+                    continue
             except TimeoutError:
                 idle_ticks += 1
                 yield ": keepalive\n\n"

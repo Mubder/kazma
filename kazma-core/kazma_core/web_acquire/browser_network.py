@@ -264,10 +264,11 @@ class BrowserNetwork:
     async def aclose(self):
         self.closed = True
         pending = list(self.tasks)
-        for task in pending:
-            task.cancel()
         if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+            # Bounded (FA-137): gather waited on every handler without one.
+            from kazma_core.bounded_cancel import cancel_all_and_wait
+
+            await cancel_all_and_wait(pending, what="browser request handler(s)", timeout=5.0)
         # Detach can wait indefinitely while a navigation is still paused.
         # Some event tasks may have been cancelled before their first step, so
         # failing requests only inside _handle is insufficient. Close the owned

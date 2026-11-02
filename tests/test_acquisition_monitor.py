@@ -18,10 +18,13 @@ def fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor, '_LAUNCHED_AT', None)
     monkeypatch.setattr(monitor, 'time', SimpleNamespace(time=lambda: 1000))
     monkeypatch.setenv('KAZMA_ACQUISITION_MODE', 'local_only')
+    # ``stored`` None: a snapshot that does not say which runs are stored
+    # (the monitor before deleted runs were settled).
     rows = SimpleNamespace(jobs=[], balances=[], allowance=dict(recent=[], days={}, jobs={}), sent=[],
-                           left_to_agent=set())
+                           left_to_agent=set(), stored=None)
     monkeypatch.setattr(monitor, '_collect',
-                        lambda: copy.deepcopy((rows.jobs, rows.balances, rows.allowance, rows.left_to_agent)))
+                        lambda: copy.deepcopy((rows.jobs, rows.balances, rows.allowance, rows.left_to_agent,
+                                               rows.stored)))
     monkeypatch.setattr(ops_alerts, 'alert', lambda *args, **kwargs: rows.sent.append((args, kwargs)) or True)
     rows.store = store
     yield rows
@@ -462,7 +465,8 @@ def test_the_real_collect_names_the_runs_it_leaves_to_the_agent(fixture, monkeyp
                                   max_pages=5, max_depth=1, path_prefix=''), kind='research_crawl')
     kb = crawl_jobs.start('kb-library', 'https://docs.fixture.example/',
                           dict(mode='local_only', robots=False, max_pages=1, scope='tree', delay_ms=0))
-    jobs, _, _, left_to_agent = _REAL_COLLECT()
+    jobs, _, _, left_to_agent, stored = _REAL_COLLECT()
+    assert {'job:' + crawl.job_id, 'job:' + kb.job_id} <= stored
     assert left_to_agent == {'job:' + crawl.job_id}
     assert 'job:' + kb.job_id not in left_to_agent
 
@@ -549,3 +553,55 @@ def test_a_crawl_that_stored_nothing_is_a_warning_not_a_success(fixture, monkeyp
     shown = monitor.recent_alerts()[0]
     assert shown['severity'] == 'WARNING' and 'stored nothing' in shown['title']
     assert fixture.sent[-1][1]['severity'] == 'warn'
+
+
+# ── 2026-11-02: an alert for a run that is no longer stored leaves the bell ──
+
+
+def _failed_session_alerts(fixture, *identities):
+    fixture.jobs = [job(identity=i) for i in identities]
+    monitor.tick(now=1000)
+    fixture.jobs = [job('error', 1001, i) for i in identities]
+    assert [r['condition'] for r in monitor.tick(now=1002)] == ['error'] * len(identities)
+
+
+def test_an_alert_for_a_deleted_session_leaves_the_bell(fixture):
+    """Live 2026-11-02: "Research failed -- Sources: 0" stayed in the bell for
+    a test session deleted after the functional audit, and "View run and
+    results" answered "Session not found"."""
+    _failed_session_alerts(fixture, 'gone', 'kept')
+    fixture.jobs = [job('error', 1001, 'kept')]  # 'gone' was deleted
+    fixture.stored = {'session:kept'}
+    sent = len(fixture.sent)
+    monitor.tick(now=1010)
+    shown = {a['callback_id'] for a in monitor.recent_alerts()}
+    assert 'link:/research?session=gone' not in shown
+    assert 'link:/research?session=kept' in shown
+    assert len(fixture.sent) == sent  # settling raises nothing
+    assert 'session:gone' not in {r['key'] for r in events() if not r['resolved']}
+
+
+def test_negative_control_without_the_stored_runs_the_alert_stays(fixture):
+    """The monitor before the rule: nothing said which runs are stored."""
+    _failed_session_alerts(fixture, 'gone')
+    fixture.jobs = []
+    fixture.stored = None
+    monitor.tick(now=1010)
+    assert 'link:/research?session=gone' in {a['callback_id'] for a in monitor.recent_alerts()}
+
+
+def test_a_session_deleted_through_the_research_store_settles_its_alert(fixture, monkeypatch, tmp_path):
+    """The real collector, after the Research page's own delete."""
+    from kazma_core.tools import research_session
+
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    monkeypatch.setattr(monitor, '_collect', _REAL_COLLECT)
+    session = research_session.create_session('A run that fails', depth='brief')
+    monitor.tick(now=1000)
+    research_session.update_session(session.id, status='error', stage='search', sources=0)
+    raised = monitor.tick(now=1001)
+    assert [r['key'] for r in raised] == ['session:' + session.id]
+    assert 'link:/research?session=' + session.id in {a['callback_id'] for a in monitor.recent_alerts()}
+    assert research_session.delete_session(session.id) is True
+    monitor.tick(now=1010)
+    assert 'link:/research?session=' + session.id not in {a['callback_id'] for a in monitor.recent_alerts()}

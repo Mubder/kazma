@@ -648,6 +648,36 @@ and then dead-lettered -- an outage is never recorded as unsafe content. Under
 document is accepted unscanned. See
 [Document security](../security/document-security.md).
 
+### Keep the signatures current
+
+ClamAV is only as good as its signatures. The probe reads their build date
+from `clamscan --version` (`malware.signatures`: `built`, `age_days`,
+`stale`). Signatures older than 7 days -- ClamAV's own threshold -- or of no
+known age degrade readiness (`malware_signatures_stale`,
+`malware_signatures_unknown`), and the maintenance sweep raises the ops alert
+`documents.malware_signatures` once a day while it lasts. Uploads are still
+scanned: the alert says the control has stopped learning, not that it is off.
+
+Schedule `freshclam` (it downloads the new signatures, several a day):
+
+- Windows: a Task Scheduler task running `freshclam.exe` every 4 hours, as
+  the account Kazma runs as (the database is under that account's ClamAV
+  folder), for example
+  `schtasks /Create /TN "ClamAV freshclam" /SC HOURLY /MO 4 /TR "\"C:\Program Files\ClamAV\freshclam.exe\""`.
+- Linux: the distribution's `clamav-freshclam` service
+  (`systemctl enable --now clamav-freshclam`).
+
+### What each scan costs
+
+Without a `clamd`, every scan runs `clamscan`, which loads the whole
+signature database first: 6.5-7 s for any upload on the live install
+(readiness: `malware.per_scan_load: true`). Kazma uses `clamdscan` only when a
+`clamd` answers its ping (`malware.daemon: true`); the daemon keeps the
+signatures loaded (about 1 GB of memory) and a scan takes well under a
+second. Run `clamd` as a service of the machine to trade that memory for the
+wait; `clamdscan` on the PATH with no daemon answering is never used (it
+cannot scan).
+
 ---
 
 ## Backup
@@ -856,7 +886,9 @@ Always read `GET /api/documents/ops/readiness`:
   "multi_replica": true,
   "degraded_reasons": [],
   "policy": { "mode": "live", "restart_required": false, "pending_restart": {} },
-  "malware": { "available": true, "scanner": "clamdscan", "mode": "auto", "fail_closed": false },
+  "malware": { "available": true, "scanner": "clamscan", "daemon": false, "per_scan_load": true,
+               "signatures": { "built": "2026-11-02T03:27:06", "age_days": 0.4, "stale": false },
+               "mode": "auto", "fail_closed": false },
   "worker_isolation": { "mode": "process", "ready": true, "hostile_document_profile": "unqualified" },
   "stranded_intake_reservations": 0,
   "accepting_durable_writes": true

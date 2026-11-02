@@ -76,6 +76,21 @@ class ToolEffectProfile:
     registered: bool = True            # False → inferred fail-closed profile
 
 
+#: Where each tool that sends a message to someone names its recipients
+#: (FA-117): the send_outbound resolver checks exactly these arguments against
+#: ``agent.commitment.outbound_allowed_targets``, every address in each. An
+#: empty tuple: the tool sends to the conversation the turn runs in only.
+#: ``tests/test_outbound_targets_declared.py`` finds every registered tool
+#: that takes a recipient or sends a message and fails on one missing here.
+OUTBOUND_TARGET_FIELDS: dict[str, tuple[str, ...]] = {
+    "email_send": ("to", "cc"),
+    "dispatch_notification": ("recipient_id",),
+    "send_approval_request": ("recipient_id",),
+    "send_message": ("target_id",),
+    "send_file": (),
+}
+
+
 # ── explicit profiles (effect, semantic_tier, act, required_slots) ──────────
 # security_tier is derived from CANONICAL/TOOL_TIERS for parity (see below).
 _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] = {
@@ -189,15 +204,19 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     # misc
     "sqlite_query": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "current_datetime": (EffectKind.READ, SemanticTier.NONE, None, ()),
-    "send_message": (EffectKind.NONE, SemanticTier.NONE, None, ()),
-    # Operator-directed messaging: outbound, but ungated on purpose.
-    # send_approval_request asks the operator a question in a chat app; it
-    # is NOT a HITL card (no buttons, no `hitl approve` line, bound to no
-    # interrupt: audit 2026-10-26 AUD-060), and decides nothing. Both
-    # deliver to the operator, never to a third party, so the gate that
-    # every other OUTBOUND tool carries would protect nobody here.
-    "send_approval_request": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),
-    "dispatch_notification": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),
+    # Chat-app messages (FA-117). Each names its recipient (``target_id`` /
+    # ``recipient_id``: any chat the bot can reach, not only the operator's),
+    # so each is send_outbound and the outbound allowlist checks that field
+    # (OUTBOUND_TARGET_FIELDS). They were audit-only (act None) "because
+    # they reach only the operator": the arguments say otherwise, and an
+    # allowlist set in Settings → Safety covered only email.
+    # send_approval_request asks a question in a chat app; it is NOT a HITL
+    # card (no buttons, no `hitl approve` line, bound to no interrupt: audit
+    # 2026-10-26 AUD-060), and decides nothing.
+    "send_message": (EffectKind.OUTBOUND, SemanticTier.HIGH, "send_outbound", ("target_id",)),
+    "send_approval_request": (EffectKind.OUTBOUND, SemanticTier.HIGH, "send_outbound", ()),
+    "dispatch_notification": (EffectKind.OUTBOUND, SemanticTier.HIGH, "send_outbound",
+                              ("recipient_id",)),
     "context_info": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "update_scratchpad": (EffectKind.NONE, SemanticTier.NONE, None, ()),
     # Durable draft persistence (context-integrity S1-3) — effect-free from

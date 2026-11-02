@@ -1912,6 +1912,16 @@ class KazmaAppBuilder:
 
             spawn_background(_aio.to_thread(report_exposure), name="service-exposure")
 
+            # ── Secrets stored as plaintext move into the vault ──────
+            # The lazy migration moves a row only when it is read (FA-271:
+            # the GitHub App key stayed plaintext in every pg_dump).
+            def _move_plaintext_secrets() -> None:
+                mover = getattr(self.config_store, "move_plaintext_secrets", None)
+                if callable(mover):
+                    mover()
+
+            spawn_background(_aio.to_thread(_move_plaintext_secrets), name="plaintext-secrets")
+
             # ── The document worker broker the guard runs ───────────
             # Tell the guard now whether documents need it (it then starts
             # while the rest of Kazma boots), and again whenever the profile
@@ -1969,12 +1979,13 @@ class KazmaAppBuilder:
                 # snapshot went stale after a Settings change, so graphs
                 # recompiled on model switch silently kept the old gate until
                 # a process restart (deep-audit 2026-08-19, finding #13).
+                # The config whatever its state (2026-11, FA-147): the worker
+                # re-reads the policy live when the graph holds one; None
+                # meant "never gate" until the next restart or model switch.
                 try:
                     _hitl = get_hitl_config(self.config.raw)
-                    if not _hitl.get("enabled", True):
-                        _hitl = None
                 except Exception:  # noqa: BLE001
-                    _hitl = None
+                    _hitl = {"enabled": True}  # the worker reads it live; unreadable is on
                 recompiled = build_supervisor_graph(
                     llm=self.agent.llm,
                     system_prompt=self.agent.system_prompt,
@@ -2404,8 +2415,9 @@ class KazmaAppBuilder:
         # bounded chance to finish before the loop closes (audit F-07).
         try:
             from kazma_core.background import drain_background
+            from kazma_core.shutdown import step_bound
 
-            await drain_background(timeout=10.0)
+            await drain_background(timeout=step_bound(10.0))
         except Exception as e:
             logger.warning("[app] background drain failed: %s", e)
 
@@ -2459,12 +2471,15 @@ class KazmaAppBuilder:
                 # mistake was made here first and caught by
                 # tests/test_document_worker.py::
                 # test_stop_is_bounded_even_when_a_task_ignores_cancellation.
+                from kazma_core.shutdown import step_bound
+
                 _stop_t = asyncio.ensure_future(documents.stop_workers())
-                _, _pending = await asyncio.wait([_stop_t], timeout=45.0)
+                _doc_bound = step_bound(45.0)
+                _, _pending = await asyncio.wait([_stop_t], timeout=_doc_bound)
                 if _pending:
                     logger.warning(
-                        "[Documents] stop_workers exceeded 45s — abandoning. "
-                        "In-flight jobs resume on next boot via lease recovery."
+                        "[Documents] stop_workers exceeded %.0fs — abandoning. "
+                        "In-flight jobs resume on next boot via lease recovery.", _doc_bound,
                     )
                 documents.close()
                 try:
@@ -2483,11 +2498,14 @@ class KazmaAppBuilder:
                 # Bounded, same reasoning as stop_workers above. This drains
                 # in-flight belief extraction / entity merges, which are
                 # genuinely worth awaiting — but not worth hanging for.
+                from kazma_core.shutdown import step_bound
+
                 _mem_t = asyncio.ensure_future(stop_memory_worker())
-                _, _mem_pending = await asyncio.wait([_mem_t], timeout=30.0)
+                _mem_bound = step_bound(30.0)
+                _, _mem_pending = await asyncio.wait([_mem_t], timeout=_mem_bound)
                 if _mem_pending:
                     logger.warning(
-                        "[Memory] stop_memory_worker exceeded 30s — abandoning."
+                        "[Memory] stop_memory_worker exceeded %.0fs — abandoning.", _mem_bound
                     )
             except Exception:  # noqa: BLE001
                 pass
@@ -2524,7 +2542,15 @@ class KazmaAppBuilder:
                 # audit SW-E04), then cancel any other handle left.
                 stop_runs = getattr(engine, "stop_all_runs", None)
                 if callable(stop_runs):
-                    stopped = await stop_runs()
+                    from kazma_core.shutdown import step_bound
+
+                    _runs_t = asyncio.ensure_future(stop_runs())
+                    _, _runs_pending = await asyncio.wait([_runs_t], timeout=step_bound(20.0))
+                    stopped = _runs_t.result() if _runs_t.done() and not _runs_t.cancelled() \
+                        and _runs_t.exception() is None else 0
+                    if _runs_pending:
+                        logger.warning("[app] swarm runs still stopping past the stop budget; "
+                                       "each is held unknown at the next start")
                     if stopped:
                         logger.info("[app] stopped %d running swarm task(s) for shutdown", stopped)
                 handles = getattr(engine, "_task_handles", None) or {}
@@ -2551,8 +2577,17 @@ class KazmaAppBuilder:
         # 3) Shut down the agent (closes MCP processes, LLM clients)
         if self.agent is not None:
             try:
-                await self.agent.shutdown()
-                logger.info("[app] Agent shut down cleanly")
+                from kazma_core.shutdown import step_bound
+
+                _agent_t = asyncio.ensure_future(self.agent.shutdown())
+                _, _agent_pending = await asyncio.wait([_agent_t], timeout=step_bound(15.0))
+                if _agent_pending:
+                    logger.warning("[app] agent shutdown (MCP servers, clients) past the stop "
+                                   "budget; left to the process exit")
+                elif _agent_t.exception() is not None:
+                    raise _agent_t.exception()
+                else:
+                    logger.info("[app] Agent shut down cleanly")
             except Exception as e:
                 logger.warning("[app] Error during agent shutdown: %s", e)
 
@@ -2718,10 +2753,17 @@ class KazmaAppBuilder:
                 # very hang this is bounding (see
                 # kazma_core/documents/worker.py::DocumentWorker.stop).
                 # Shield is kept so Ctrl+C does not interrupt teardown midway.
+                # The ceiling is what is left of the stop's budget (FA-261):
+                # uvicorn's graceful wait already spent some of it.
+                from kazma_core.shutdown import signal_shutdown as _start_stop_clock
+                from kazma_core.shutdown import step_bound as _step_bound
+
+                _start_stop_clock()
+                _ceiling = _step_bound(_SHUTDOWN_CEILING_SECONDS)
                 _sd = asyncio.ensure_future(asyncio.shield(builder._on_shutdown()))
                 try:
                     _sd_done, _sd_pending = await asyncio.wait(
-                        [_sd], timeout=_SHUTDOWN_CEILING_SECONDS
+                        [_sd], timeout=_ceiling
                     )
                     if _sd_pending:
                         logger.error(
@@ -2730,7 +2772,7 @@ class KazmaAppBuilder:
                             "_on_shutdown is awaiting without a bound — check "
                             "the most recent teardown log line for where it "
                             "stopped.",
-                            _SHUTDOWN_CEILING_SECONDS,
+                            _ceiling,
                         )
                     else:
                         exc = _sd.exception()
@@ -2771,24 +2813,17 @@ class KazmaAppBuilder:
         @self.app.exception_handler(Exception)
         async def catch_all(request: Request, exc: Any) -> Any:
             """Unified catch-all — returns JSON for API routes, HTML for pages."""
-            # Log full traceback server-side; never expose internals to clients.
-            logger.exception("[app] Unhandled exception on %s %s", request.method, request.url.path)
+            from kazma_core.errors import safe_error
+
+            # One log line with the traceback and the id the client is given;
+            # never the exception's type or text to the client: the API path
+            # returned both, a database address included (2026-11, FA-222).
+            logger.warning("[app] Unhandled exception on %s %s", request.method, request.url.path)
+            info = safe_error(exc)
             path = request.url.path
             # API routes get JSON errors; page routes get HTML error page
             if path.startswith("/api/") or request.headers.get("accept", "").startswith("application/json"):
-                try:
-                    from kazma_core.swarm.middleware import GracefulErrorFallback as _gef
-                    return JSONResponse(
-                        status_code=500,
-                        content=_gef.to_json_error(exc),
-                    )
-                except Exception as _e:
-                    logger.debug("[app] Fallback error handler itself failed: %s", _e)
-                    is_prod = os.environ.get("KAZMA_ENV") == "production"
-                    return JSONResponse(
-                        status_code=500,
-                        content={"error": "Internal server error", "detail": "" if is_prod else str(exc)},
-                    )
+                return JSONResponse(status_code=500, content={"error": info})
             return self.templates.TemplateResponse(
                 request,
                 "error.html",

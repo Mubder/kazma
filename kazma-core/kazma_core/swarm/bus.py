@@ -35,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 # Approval timeout: how long to wait before auto-rejecting.
 _DEFAULT_APPROVAL_TIMEOUT = 300.0  # seconds
-_MAX_BUS_MESSAGE_LEN = 4096       # Telegram message limit
 
 
 # ── Data models ────────────────────────────────────────────────────────────

@@ -221,6 +221,14 @@ def _assemble(
 ) -> str:
     """One logical reading of the line: each cluster read as a left-to-right
     run (``False``) or as Arabic-context numbers (``True``)."""
+    return "".join(g.text for g in _logical_glyphs(glyphs, kinds, base, clusters, arabic_numbers))
+
+
+def _logical_glyphs(
+    glyphs: Sequence[Glyph], kinds: Sequence[str], base: str,
+    clusters: Sequence[tuple[int, int]], arabic_numbers: Sequence[bool],
+) -> list[Glyph]:
+    """The glyphs of :func:`_assemble`'s reading, in logical order."""
     n = len(glyphs)
     run_kind: list[str | None] = [k if k in {"R", "L"} else None for k in kinds]
     for (first, last), as_arabic in zip(clusters, arabic_numbers, strict=True):
@@ -247,22 +255,54 @@ def _assemble(
         else:
             runs.append((str(kind), [glyph]))
 
-    def text(run: tuple[str, list[Glyph]]) -> str:
+    def order(run: tuple[str, list[Glyph]]) -> list[Glyph]:
         kind, members = run
-        return "".join(g.text for g in (reversed(members) if kind == "R" else members))
+        return list(reversed(members)) if kind == "R" else list(members)
 
     if base == "R":
-        return "".join(text(run) for run in reversed(runs))
-    out: list[str] = []
+        return [g for run in reversed(runs) for g in order(run)]
+    out: list[Glyph] = []
     island: list[tuple[str, list[Glyph]]] = []
     for run in [*runs, ("L", [])]:
         if run[0] in {"R", "A"}:
             island.append(run)
             continue
-        out.extend(text(member) for member in reversed(island))
+        for member in reversed(island):
+            out.extend(order(member))
         island = []
-        out.append(text(run))
-    return "".join(out)
+        out.extend(order(run))
+    return out
+
+
+def _strong_beside(seq: Sequence[Glyph], first: int, last: int) -> set[int]:
+    """The letter glyph on each side of ``seq[first..last]``, across spaces
+    only (a full stop or a comma between them ends a sentence or a clause:
+    the number is not beside that word), as ``id``s."""
+    near: set[int] = set()
+    for step, start in ((-1, first - 1), (1, last + 1)):
+        i = start
+        while 0 <= i < len(seq) and not seq[i].text.strip():
+            i += step
+        if 0 <= i < len(seq) and _bidi(seq[i].text) in {"R", "L"}:
+            near.add(id(seq[i]))
+    return near
+
+
+def _kept_neighbours(
+    line: Sequence[Glyph], clusters: Sequence[tuple[int, int]], logical: Sequence[Glyph],
+) -> int:
+    """How many of the words drawn beside each number are beside it in the
+    *logical* reading too: a number stays with the words it was typed with
+    (FA-230)."""
+    at = {id(g): i for i, g in enumerate(logical)}
+    kept = 0
+    for first, last in clusters:
+        places = [at[id(line[i])] for i in range(first, last + 1) if id(line[i]) in at]
+        if not places:
+            continue
+        drawn = _strong_beside(line, first, last)
+        kept += len(drawn & _strong_beside(logical, min(places), max(places)))
+    return kept
 
 
 def _canonical(text: str) -> str:
@@ -336,14 +376,24 @@ def logical_line(glyphs: Sequence[Glyph], *, base: str | None = None) -> str:
         return first
     drawn = _drawn(line)
     choices = sorted(itertools.product((False, True), repeat=len(clusters)), key=sum)
+    best: tuple[int, str] | None = None
     for choice in choices:
-        candidate = first if not any(choice) else _assemble(line, kinds, base, clusters, choice)
+        glyph_order = _logical_glyphs(line, kinds, base, clusters, choice)
+        candidate = "".join(g.text for g in glyph_order)
         shown = visual_order(candidate, base)
         if shown is None:
             return first  # no bidi algorithm here: the left-to-right reading
-        if _canonical(shown) == drawn:
-            return candidate
-    return first
+        if _canonical(shown) != drawn:
+            continue
+        # Several readings can draw the same line: "... في عام 2026." in a
+        # left-to-right paragraph draws as "2026 عام في ...", and so does the
+        # year moved to the front. Keep the one whose numbers stay beside the
+        # words they are drawn beside; on a tie, the fewest Arabic-context
+        # numbers, as before (FA-230: the year came back first).
+        score = _kept_neighbours(line, clusters, glyph_order)
+        if best is None or score > best[0]:
+            best = (score, candidate)
+    return best[1] if best is not None else first
 
 
 def text_margins(lines: Sequence[Sequence[Glyph]]) -> tuple[float, float] | None:

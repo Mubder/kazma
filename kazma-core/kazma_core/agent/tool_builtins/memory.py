@@ -53,7 +53,7 @@ def _chat_of_call() -> tuple[str, int]:
     return thread, user_turn_index(get_current_session_messages() or [])
 
 
-def _agent_write(*texts: str) -> tuple[str | None, str]:
+def _agent_write(*texts: str, value: str | None = None) -> tuple[str | None, str]:
     """``(refusal, extraction method)`` for a memory tool's write (Memory
     audit M03, ``memory.provenance``).
 
@@ -61,8 +61,8 @@ def _agent_write(*texts: str) -> tuple[str | None, str]:
     the user's own later correction -- for whatever the model chose to store,
     a fetched page or an email included, and screened nothing. A write is
     refused when it reads as an instruction; it is the user's own only when
-    their latest message asks to remember and holds the words, else
-    ``agent_asserted``."""
+    their latest message asks to remember and holds the stored *value* (a
+    fact's object; the text itself for a note), else ``agent_asserted``."""
     from kazma_core.memory.provenance import agent_write_source, latest_user_message, screen_agent_text
     from kazma_core.tools.export_session import get_current_session_messages
 
@@ -70,7 +70,8 @@ def _agent_write(*texts: str) -> tuple[str | None, str]:
     if refusal:
         return f"Not stored: {refusal}.", ""
     latest = latest_user_message(get_current_session_messages() or [])
-    return None, agent_write_source(" ".join(t for t in texts if t), latest)
+    judged = value if value is not None else " ".join(t for t in texts if t)
+    return None, agent_write_source(judged, latest)
 
 
 #: What a memory tool answers when its write would replace the user's own fact.
@@ -458,7 +459,7 @@ def register_memory_tools(registry: Any) -> None:
         thread, turn = _chat_of_call()
         if _chat_kept_out(thread, get_current_tenant_id()):
             return _KEPT_OUT
-        refusal, method = _agent_write(sub, pred, object_)
+        refusal, method = _agent_write(sub, pred, object_, value=object_)
         if refusal:
             raise RefusedBeforeEffect(refusal)
         try:

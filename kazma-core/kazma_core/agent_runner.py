@@ -898,20 +898,21 @@ class KazmaAgent:
 
         # Thread the same HITL config as the run path so danger tools
         # interrupt() on the SSE/streaming graph too (VAL-ARCH-002).
+        # The config whatever its state (2026-11, FA-147): the tool worker
+        # reads the policy live whenever the graph holds one, so a gate turned
+        # on after this build applies at the next call. None meant "this graph
+        # never gates" until a restart.
         streaming_hitl = get_hitl_config(self.config.raw)
-        if not streaming_hitl.get("enabled", True):
-            streaming_hitl = None
-        else:
-            # The streaming graph is cached WITHOUT a checkpointer: this
-            # method is sync (called from sync app-builder closures), so it
-            # cannot await the AsyncSqliteSaver construction that
-            # _ensure_graph performs. Its live consumers — the voice WS
-            # getter and the boot-window _graph_holder (replaced post-startup
-            # by app.py's checkpointed recompile) — therefore can never
-            # resume an interrupt() pause via /api/approve. Force auto_deny
-            # (audit F2/H1): danger tools deny with a clear message instead
-            # of minting an unresumable interrupt that kills the turn.
-            streaming_hitl = {**streaming_hitl, "auto_deny": True}
+        # The streaming graph is cached WITHOUT a checkpointer: this
+        # method is sync (called from sync app-builder closures), so it
+        # cannot await the AsyncSqliteSaver construction that
+        # _ensure_graph performs. Its live consumers — the voice WS
+        # getter and the boot-window _graph_holder (replaced post-startup
+        # by app.py's checkpointed recompile) — therefore can never
+        # resume an interrupt() pause via /api/approve. Force auto_deny
+        # (audit F2/H1): danger tools deny with a clear message instead
+        # of minting an unresumable interrupt that kills the turn.
+        streaming_hitl = {**streaming_hitl, "auto_deny": True}
 
         # Ensure the snapshot recorder exists BEFORE building/caching the
         # streaming graph. app.py calls get_streaming_graph() at startup
@@ -1242,8 +1243,10 @@ class KazmaAgent:
         # effect immediately — previously the stale client (base_url/creds)
         # was reused for failover until process restart (audit finding).
         from kazma_core.agent.graph_supervisor import reset_failover_cache
+        from kazma_core.agent.resilient_chat import reset_failover_cache as reset_worker_failover
 
         reset_failover_cache()
+        reset_worker_failover()  # the swarm's and research's (FA-106)
         _synced_model = (
             getattr(getattr(self.llm, "config", None), "model", None)
             or getattr(self.llm, "model", None)

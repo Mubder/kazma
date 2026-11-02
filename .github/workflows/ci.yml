@@ -467,6 +467,12 @@ jobs:
         run: python -m pytest tests/e2e/test_turn_notes_route.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: First token (Kazma's own share of the time before it)
+        # The 2026-11 functional audit measured p50 5.3 s to the first token;
+        # most was the model, and what Kazma adds is held here (FA-277).
+        run: python -m pytest tests/e2e/test_first_token_latency.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Upload browser evidence
         # always(): the run that FAILED is the run whose trace is worth
         # having. On a green run this carries the four-gate recording,

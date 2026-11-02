@@ -72,18 +72,35 @@ def may_overrule(existing: str | None, incoming: str, *, same_turn: bool = False
 
 
 def _holds(message: str, text: str) -> bool:
+    """Whether *message* holds ``_HELD_SHARE`` of *text*'s content words. A
+    hyphenated word counts as held when its parts are ("AUDIT-2611" in the
+    message holds ``audit`` and ``2611``, and the reverse)."""
     from kazma_core.memory.query_terms import content_terms
 
     wanted = content_terms(text)
     if not wanted:
         return False
-    present = set(content_terms(message))
-    return sum(1 for w in wanted if w in present) / len(wanted) >= _HELD_SHARE
+    terms = content_terms(message)
+    present = set(terms)
+    for term in terms:
+        present.update(part for part in term.split("-") if len(part) >= 2)
+
+    def held(word: str) -> bool:
+        parts = [p for p in word.split("-") if p]
+        return word in present or (len(parts) > 1 and all(p in present for p in parts))
+
+    return sum(1 for w in wanted if held(w)) / len(wanted) >= _HELD_SHARE
 
 
 def agent_write_source(text: str, latest_user_message: str | None) -> str:
     """``user_explicit`` when the user's latest message asks to remember and
-    holds the words being stored; else ``agent_asserted``."""
+    holds the VALUE being stored; else ``agent_asserted``.
+
+    *text* is the value -- a fact's object, a note's text -- never the
+    subject and predicate the model named it with (FA-228: the model names a
+    fact in English, ``audit_2611_test_codeword``, so an Arabic "remember
+    this" never held those words and the user's own fact was stored as the
+    model's)."""
     from kazma_core.memory.remember_request import is_remember_request
 
     message = latest_user_message or ""

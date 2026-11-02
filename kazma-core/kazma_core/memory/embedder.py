@@ -255,6 +255,10 @@ class LocalSentenceTransformerEmbedder:
     with ``KAZMA_EMBED_ALLOW_DOWNLOAD=1``).
     """
 
+    #: Encodings worth running at once: the model runs on the CPU, and more
+    #: in parallel only share it (recall's embedding slots, FA-276).
+    concurrency = 2
+
     def __init__(
         self,
         model_name: str = DEFAULT_MODEL,
@@ -371,6 +375,9 @@ class OpenAICompatibleEmbedder:
 
     Includes a small in-memory cache so identical queries aren't re-embedded.
     """
+
+    #: A remote endpoint serves several requests at once (recall's slots).
+    concurrency = 8
 
     def __init__(
         self,
@@ -552,6 +559,13 @@ def _read_embedding_config() -> dict[str, Any]:
     # api_key: read from the env var named in config (api_key_env), then
     # common aliases (NVIDIA NIM / OpenAI). Never inline the key in yaml.
     api_key_env = cfg.get("api_key_env", "KAZMA_EMBED_API_KEY")
+    if api_key_env and not embedding_key_env_allowed(str(api_key_env)):
+        # Kazma's own variables (the vault key, the database URL...) are
+        # never sent to an embedding endpoint (FA-126).
+        logger.warning("[embedder] embedding.api_key_env names %s, one of Kazma's own variables; "
+                       "it is not sent. Name the variable that holds the embedding key.",
+                       api_key_env)
+        api_key_env = ""
     api_key = os.environ.get(str(api_key_env), "") if api_key_env else ""
     if not api_key:
         for _alias in ("KAZMA_EMBED_API_KEY", "NVIDIA_API_KEY", "NGC_API_KEY", "OPENAI_API_KEY"):
@@ -569,6 +583,22 @@ def _read_embedding_config() -> dict[str, Any]:
             "api_key_env": api_key_env,
         }
     )
+
+
+#: The setting naming the variable that holds the embedding key (FA-126).
+API_KEY_ENV_KEY = "embedding.api_key_env"
+
+#: The one Kazma variable that may name the embedding key.
+_EMBED_KEY_ENV = "KAZMA_EMBED_API_KEY"
+
+
+def embedding_key_env_allowed(name: str) -> bool:
+    """Whether ``embedding.api_key_env`` may name *name*: a variable name, and
+    not one of Kazma's own (``KAZMA_*``, but the embedding key's own)."""
+    name = (name or "").strip()
+    if not name or not name.replace("_", "").isalnum():
+        return False
+    return name == _EMBED_KEY_ENV or not name.upper().startswith("KAZMA_")
 
 
 def get_embedding_config() -> dict[str, Any]:

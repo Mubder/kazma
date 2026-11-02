@@ -120,17 +120,45 @@ _QUERY_MEMO: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Context
 #: How long a recall waits for the question's embedding (``memory.v2.
 #: recall_deadline_s``). Past it, recall answers from keywords and says so.
 _DEFAULT_DEADLINE_S = 5.0
-#: Embeddings a recall may have in flight at once: one that hangs past its
-#: deadline keeps its slot until it returns, so a hung embedder cannot pile up
-#: threads; with none free, recall goes on with keywords at once.
-_EMBED_SLOTS = threading.BoundedSemaphore(2)
+#: Embeddings recalls may have in flight at once, per embedder kind: one that
+#: hangs past its deadline keeps its slot until it returns, so a hung embedder
+#: cannot pile up threads. A local model on the CPU gains nothing from more
+#: than two at once; a remote endpoint serves more (``Embedder.concurrency``).
+_DEFAULT_EMBED_SLOTS = 2
+_EMBED_SLOTS: dict[int, threading.BoundedSemaphore] = {}
+_EMBED_SLOTS_LOCK = threading.Lock()
+
+
+class _NoEmbeddingSlot(TimeoutError):
+    """Every slot stayed busy until the recall's deadline: other recalls were
+    embedding, not this embedder failing."""
+
+
+def _slots_for(embedder: Any) -> threading.BoundedSemaphore:
+    size = getattr(embedder, "concurrency", None)
+    size = size if isinstance(size, int) and size > 0 else _DEFAULT_EMBED_SLOTS
+    with _EMBED_SLOTS_LOCK:
+        slots = _EMBED_SLOTS.get(size)
+        if slots is None:
+            slots = _EMBED_SLOTS[size] = threading.BoundedSemaphore(size)
+        return slots
 
 
 def _embed_within(embedder: Any, text: str, timeout: float) -> Any:
     """``embedder.encode(text)`` in a daemon thread, waited on for *timeout*
-    seconds; raises TimeoutError past it (the call finishes on its own)."""
-    if timeout <= 0 or not _EMBED_SLOTS.acquire(blocking=False):
+    seconds in all -- the wait for a free slot included; raises
+    :class:`_NoEmbeddingSlot` when no slot freed in time and TimeoutError when
+    the embedding itself ran past it (the call finishes on its own).
+
+    Recall waits for a slot until its own deadline (FA-276): it gave up at
+    once when two other recalls were embedding, so a third concurrent recall
+    lost meaning search under ordinary load (2026-11 functional audit)."""
+    if timeout <= 0:
         raise TimeoutError
+    deadline = time.monotonic() + timeout
+    slots = _slots_for(embedder)
+    if not slots.acquire(timeout=timeout):
+        raise _NoEmbeddingSlot
     box: dict[str, Any] = {}
 
     def run() -> None:
@@ -139,11 +167,11 @@ def _embed_within(embedder: Any, text: str, timeout: float) -> Any:
         except Exception as exc:  # noqa: BLE001 - handed to the caller below
             box["error"] = exc
         finally:
-            _EMBED_SLOTS.release()
+            slots.release()
 
     worker = threading.Thread(target=run, name="kazma-recall-embed", daemon=True)
     worker.start()
-    worker.join(timeout)
+    worker.join(max(0.0, deadline - time.monotonic()))
     if worker.is_alive():
         raise TimeoutError
     if "error" in box:
@@ -775,6 +803,12 @@ def _encode_query(query: str) -> list[float] | None:
             remaining = memo["deadline"] - time.monotonic()
             try:
                 qvec = _embed_within(embedder, query, remaining)
+            except _NoEmbeddingSlot:
+                memo["vectors"][query] = None
+                memo["degraded"] = "the embedder was busy with other recalls until the recall deadline"
+                logger.warning("[recall] no embedding slot freed within the %.1f s deadline "
+                               "(other recalls were embedding): keyword search only", _recall_deadline_s())
+                return None
             except TimeoutError:
                 memo["vectors"][query] = None
                 memo["degraded"] = "the embedder did not answer within the recall deadline"

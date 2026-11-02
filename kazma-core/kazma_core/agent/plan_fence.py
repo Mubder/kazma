@@ -261,25 +261,32 @@ def _is_graph_nudge(text: str) -> bool:
     return t.startswith("[KAZMA_") or t == AUTO_CONTINUE_PROMPT
 
 
-def tools_ran_this_turn(messages: list[dict[str, Any]] | None) -> bool:
-    """True when a tool result sits after the user's last real message.
+def running_turn(messages: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """The messages after the user's last real message: the running turn.
 
     The execute nudges are user-role messages too (``[KAZMA_...]`` and the
     auto-continue prompt), and they are not where the turn began: counting
     one as the boundary would make a turn that already acted look untouched.
     """
-    for m in reversed(list(messages or [])):
-        if not isinstance(m, dict):
+    msgs = list(messages or [])
+    for i in range(len(msgs) - 1, -1, -1):
+        m = msgs[i]
+        if not isinstance(m, dict) or (m.get("role") or m.get("type")) not in ("user", "human"):
             continue
-        role = m.get("role") or m.get("type")
-        if role in ("tool", "function"):
-            return True
-        if role in ("user", "human"):
-            content = m.get("content")
-            if isinstance(content, str) and _is_graph_nudge(content):
-                continue
-            return False
-    return False
+        content = m.get("content")
+        if isinstance(content, str) and _is_graph_nudge(content):
+            continue
+        return msgs[i + 1:]
+    return msgs
+
+
+def tools_ran_this_turn(messages: list[dict[str, Any]] | None) -> bool:
+    """True when a tool result sits after the user's last real message
+    (:func:`running_turn`)."""
+    return any(
+        isinstance(m, dict) and (m.get("role") or m.get("type")) in ("tool", "function")
+        for m in running_turn(messages)
+    )
 
 
 def should_execute_plan_only_hop(

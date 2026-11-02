@@ -22,6 +22,7 @@ __all__ = [
     "resolve_chat_id",
     "send_chunks_with_retry",
     "strip_telegram_html",
+    "telegram_cut",
 ]
 
 TELEGRAM_MAX_MESSAGE_LEN = 4096
@@ -34,6 +35,27 @@ _BLOCKQUOTE_TAG_RE = re.compile(
     re.IGNORECASE,
 )
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _telegram_units(text: str) -> int:
+    """The length Telegram's 4096 limit counts: UTF-16 code units (FA-140).
+    A character outside the Basic Multilingual Plane -- most emoji -- is two;
+    ``len()`` counts it once, and a reply with emoji came out over the limit
+    and lost its second half."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def telegram_cut(text: str, limit: int) -> int:
+    """The longest prefix of *text* (an index into it) that is at most
+    *limit* UTF-16 units; never splits a character."""
+    if _telegram_units(text) <= limit:
+        return len(text)
+    units = 0
+    for index, char in enumerate(text):
+        units += 2 if ord(char) > 0xFFFF else 1
+        if units > limit:
+            return index
+    return len(text)
 
 
 def resolve_chat_id(
@@ -87,7 +109,7 @@ def chunk_html_message(text: str, max_len: int = TELEGRAM_MAX_MESSAGE_LEN) -> li
     """
     if not text:
         return [""]
-    if len(text) <= max_len:
+    if _telegram_units(text) <= max_len:
         return [text]
 
     chunks: list[str] = []
@@ -97,21 +119,21 @@ def chunk_html_message(text: str, max_len: int = TELEGRAM_MAX_MESSAGE_LEN) -> li
     body_limit = max(256, max_len - close_reserve)
 
     while remaining:
-        if len(remaining) <= max_len:
+        if _telegram_units(remaining) <= max_len:
             chunks.append(remaining)
             break
 
-        window = remaining[:body_limit]
-        split_at = _find_html_split(window, body_limit)
+        window = remaining[:telegram_cut(remaining, body_limit)]
+        split_at = _find_html_split(window, len(window))
 
         # Never cut inside an HTML tag
         last_lt = window[:split_at].rfind("<")
         last_gt = window[:split_at].rfind(">")
         if last_lt > last_gt:
-            split_at = last_lt if last_lt > 0 else body_limit
+            split_at = last_lt if last_lt > 0 else len(window)
 
         if split_at <= 0:
-            split_at = body_limit
+            split_at = len(window)
 
         part = remaining[:split_at]
         rest = remaining[split_at:]
@@ -130,8 +152,8 @@ def chunk_html_message(text: str, max_len: int = TELEGRAM_MAX_MESSAGE_LEN) -> li
             rest = ("<blockquote>" * depth) + rest
 
         # Hard safety: never emit over Telegram's limit
-        if len(part) > max_len:
-            part = part[:max_len]
+        if _telegram_units(part) > max_len:
+            part = part[:telegram_cut(part, max_len)]
 
         chunks.append(part)
         remaining = rest
@@ -155,7 +177,27 @@ def chunk_message(
         return []
     if parse_mode and str(parse_mode).upper() == "HTML":
         return chunk_html_message(text, max_len=max_len)
-    return [text[i : i + max_len] for i in range(0, len(text), max_len)]
+    chunks: list[str] = []
+    rest = text
+    while rest:
+        cut = max(1, telegram_cut(rest, max_len))
+        chunks.append(rest[:cut])
+        rest = rest[cut:]
+    return chunks
+
+
+def _too_long(response: Any) -> bool:
+    """Telegram's answer to a message over its limit."""
+    try:
+        return "too long" in str(response.json().get("description", "")).lower()
+    except (ValueError, AttributeError):  # not JSON, or not an object: not this answer
+        return False
+
+
+def _halves(text: str, parse_mode: str | None) -> list[str]:
+    """*text* split in two by Telegram's own count, for a "too long" answer."""
+    half = max(1, _telegram_units(text) // 2 + 1)
+    return chunk_message(text, max_len=half, parse_mode=parse_mode)
 
 
 async def send_chunks_with_retry(
@@ -175,9 +217,16 @@ async def send_chunks_with_retry(
     Returns True if every chunk was accepted by Telegram.
     """
     all_sent = True
-    for chunk_idx, chunk in enumerate(chunks):
-        is_last = chunk_idx == len(chunks) - 1
-        payload: dict[str, Any] = {"chat_id": chat_id, "text": chunk}
+    pending = list(chunks)
+    chunk_idx = 0
+    while chunk_idx < len(pending):
+        chunk = pending[chunk_idx]
+        is_last = chunk_idx == len(pending) - 1
+        from kazma_gateway import outbound_flags
+
+        # Link previews off: the platform would fetch any link the model
+        # wrote, from its own servers, the moment the message lands (FA-128).
+        payload: dict[str, Any] = outbound_flags.telegram({"chat_id": chat_id, "text": chunk})
         if parse_mode:
             payload["parse_mode"] = parse_mode
         if is_last and reply_markup:
@@ -190,6 +239,7 @@ async def send_chunks_with_retry(
 
         parse_mode_fallback_done = False
         chunk_sent = False
+        split_again = False
 
         for attempt in range(max_retries):
             try:
@@ -227,6 +277,18 @@ async def send_chunks_with_retry(
                 break
 
             except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 400 and _too_long(exc.response):
+                    # Over Telegram's limit after all: split this chunk in two
+                    # and send the halves in its place -- resending the same
+                    # text is refused again (FA-140).
+                    halves = _halves(str(payload.get("text") or ""),
+                                     payload.get("parse_mode"))
+                    if len(halves) > 1:
+                        logger.warning("[telegram] a chunk was too long for Telegram; sent in %d parts",
+                                       len(halves))
+                        pending[chunk_idx:chunk_idx + 1] = halves
+                        split_again = True
+                        break
                 if (
                     exc.response.status_code == 400
                     and "parse_mode" in payload
@@ -258,8 +320,11 @@ async def send_chunks_with_retry(
                 chunk_sent = False
                 break
 
+        if split_again:
+            continue  # the same index now holds the first half
         if not chunk_sent:
             all_sent = False
             break
+        chunk_idx += 1
 
     return all_sent

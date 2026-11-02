@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from kazma_skills.native.email_manager.credentials import vault_store
+from kazma_skills.native.email_manager.credentials import VaultWriteFailed, vault_store
 from kazma_skills.native.email_manager.oauth_common import (
     authorize_redirect,
     new_state,
@@ -267,6 +267,15 @@ async def _probe_drive_api(client: httpx.AsyncClient, access: str) -> tuple[bool
 
 
 async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
+    """Finish the Gmail sign-in; a vault that cannot keep it is a failed
+    sign-in, said as one (FA-104), never "connected"."""
+    try:
+        return await _finish_gmail_oauth(code, state)
+    except VaultWriteFailed as exc:
+        return {"ok": False, "code": "vault_unavailable", "error": str(exc)}
+
+
+async def _finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
     """Exchange code for tokens; store only if Gmail API scopes work."""
     meta = pop_state(state)
     if not meta or meta.get("provider") != "gmail":
@@ -389,6 +398,8 @@ async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
                     calendar_reason or "missing",
                     category="calendar",
                 )
+        except VaultWriteFailed:
+            raise  # the sign-in cannot be kept: never a soft calendar miss
         except Exception as exc:
             logger.debug("[email.oauth] calendar probe: %s", exc)
             calendar_ok, calendar_reason = False, str(exc)

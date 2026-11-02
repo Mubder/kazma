@@ -153,7 +153,10 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
                     for chunk in chunks:
                         chunk_ok = False
                         # HTML enables real Telegram Quote (<blockquote>) + bold headings
-                        payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
+                        from kazma_gateway import outbound_flags
+
+                        # Link previews off (FA-128): a worker's text is what it read.
+                        payload = outbound_flags.telegram({"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"})
                         resp = await client.post(
                             f"https://api.telegram.org/bot{token}/sendMessage",
                             json=payload,
@@ -168,10 +171,10 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
                                 desc or "unknown",
                             )
                             # Strip tags so raw <b>/<blockquote> never reach the user
-                            payload_plain = {
+                            payload_plain = outbound_flags.telegram({
                                 "chat_id": chat_id,
                                 "text": strip_telegram_html(chunk),
-                            }
+                            })
                             resp_plain = await client.post(
                                 f"https://api.telegram.org/bot{token}/sendMessage",
                                 json=payload_plain,

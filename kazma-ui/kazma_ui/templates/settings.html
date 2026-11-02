@@ -202,6 +202,8 @@
                                                 <span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-muted);font-size:0.65rem;padding:2px 8px;border-radius:999px"
                                                       x-show="(selectedHubProvider().selected_models || []).length"
                                                       x-text="t('settings.hub.selected_n').replace('{n}', (selectedHubProvider().selected_models || []).length)" x-cloak></span>
+                                                <span class="badge" data-discovery-stale style="background:rgba(245,158,11,0.15);color:var(--warning,#f59e0b);font-size:0.65rem;padding:2px 8px;border-radius:999px"
+                                                      x-show="hubDiscoveryStale[selectedHubProvider().name]" x-cloak>{{ t('settings.hub.discovered_cached') }}</span>
                                             </div>
                                             <div style="display:flex;align-items:center;gap:4px">
                                                 <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(selectedHubProvider().name)" x-text="t('settings.all_none')"></button>
@@ -1140,15 +1142,18 @@
                     </label>
                 </div>
             </div>
+            <!-- Every tool call's bound, Non-Stop on or off (agent.tool_timeout_seconds, FA-125). -->
+            <div class="form-row two-col-grid">
+                <div class="form-group">
+                    <label>{{ t('settings.nonstop_tool_timeout') }}</label>
+                    <input type="number" class="form-input" data-setting="agent.tool_timeout_seconds" x-model.number="nonstop.tool_timeout_seconds" min="0" max="3600">
+                </div>
+            </div>
             <div x-show="nonstop.enabled" x-cloak>
                 <div class="form-row two-col-grid">
                     <div class="form-group">
                         <label>{{ t('settings.nonstop_stall') }}</label>
                         <input type="number" class="form-input" x-model.number="nonstop.stall_threshold_seconds" min="10" max="3600">
-                    </div>
-                    <div class="form-group">
-                        <label>{{ t('settings.nonstop_tool_timeout') }}</label>
-                        <input type="number" class="form-input" x-model.number="nonstop.tool_timeout_seconds" min="0" max="3600">
                     </div>
                 </div>
                 <div class="form-row two-col-grid">
@@ -1883,7 +1888,7 @@
               </div>
               <template x-for="s in sessions" :key="s.id || s.platform">
                 <div class="account-list-row account-sessions-row">
-                  <span class="account-list-name" x-text="s.platform || t('settings.web')"></span>
+                  <span class="account-list-name" x-text="sessionOrigin(s.platform)"></span>
                   <span class="account-list-meta" x-text="window.KazmaFormat ? KazmaFormat.dateTime(s.started_at) : ''"></span>
                   <span class="account-list-actions">
                     <span class="badge badge-stdio" x-show="s.current" x-cloak>{{ t('settings.current') }}</span>
@@ -2172,6 +2177,12 @@
                 <span class="ki" data-icon="info" aria-hidden="true"></span>
                 {{ t('settings.proxy_hint') }}
             </div>
+            <!-- The acquisition policy decides whether the proxy is used (FA-115). -->
+            <div x-show="proxyPolicy" x-cloak data-proxy-policy style="margin-bottom:12px;font-size:0.8rem;"
+                 :style="proxyPolicy && proxyPolicy.proxy_allowed ? 'color:var(--success)' : 'color:var(--warning,#f59e0b)'">
+                <span x-show="proxyPolicy && proxyPolicy.proxy_allowed" x-cloak>{{ t('settings.proxy_policy_on') }}</span>
+                <span x-show="proxyPolicy && !proxyPolicy.proxy_allowed" x-cloak>{{ t('settings.proxy_policy_off') }}</span>
+            </div>
             <div class="form-group">
                 <label>{{ t('settings.proxy_provider') }}</label>
                 <select class="form-select" x-model="proxy.provider">
@@ -2222,7 +2233,7 @@
                     </label>
                 </label>
             </div>
-            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'" x-cloak><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span translate="no" x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error || t('settings.sys.proxy_test_failed'))"></span></span></div>
+            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'" x-cloak><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span translate="no" x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error === 'proxy_not_allowed' ? t('settings.proxy_policy_off') : (proxyTestResult?.message || proxyTestResult?.error || t('settings.sys.proxy_test_failed')))"></span></span></div>
             <div style="display:flex;gap:8px;">
                 <button class="btn btn-primary" @click="saveProxy()">{{ t('settings.proxy_save') }}</button>
                 <button class="btn btn-secondary" @click="testProxy()" :disabled="proxyTesting">{{ t('settings.proxy_test') }}</button>

@@ -105,6 +105,18 @@ def _is_production() -> bool:
     )
 
 
+def _vault_refused(exc: Exception) -> JSONResponse | None:
+    """A sign-in the vault could not keep, said as such (FA-104): 503 with
+    the reason, never the generic internal error."""
+    from kazma_skills.native.email_manager.credentials import VaultWriteFailed
+
+    if isinstance(exc, VaultWriteFailed):
+        logger.warning("[email_api] %s", exc)
+        return JSONResponse({"ok": False, "error": "vault_unavailable", "message": str(exc)},
+                            status_code=503)
+    return None
+
+
 def _safe_error(exc: Exception, status: int = 500) -> JSONResponse:
     """Sanitized error response — full detail is logged server-side only.
 
@@ -113,6 +125,9 @@ def _safe_error(exc: Exception, status: int = 500) -> JSONResponse:
     canonical ``KAZMA_PRODUCTION`` flag (the global catch-all in app.py uses
     ``KAZMA_ENV``, a narrower one-off).
     """
+    refused = _vault_refused(exc)
+    if refused is not None:
+        return refused
     logger.exception("[email_api] %s", exc)
     return JSONResponse(
         {

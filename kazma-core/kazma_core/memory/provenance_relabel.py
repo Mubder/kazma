@@ -179,8 +179,8 @@ def _classify_tool_facts(
         if str(fact["id"]) in named:
             out["kept"].append({**entry, "why": "an operator action on the Memory page named it"})
             continue
-        stored = str(note["user_text"] or "") if note is not None else " ".join(
-            str(fact[k] or "") for k in ("subject", "predicate", "object"))
+        # The value, as the memory tools judge it (FA-228): never the names.
+        stored = str(note["user_text"] or "") if note is not None else str(fact["object"] or "")
         question = _turn_question(conn, tenant, session, int(turn), keys_of) if session and turn is not None else ""
         if question and agent_write_source(stored, question) == USER_EXPLICIT:
             out["kept"].append({**entry, "why": "the turn asked to remember these words"})

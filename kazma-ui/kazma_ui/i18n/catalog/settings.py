@@ -237,8 +237,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Backend:",
     },
     "settings.backup_desc": {
-        "ar": "ينسخ احتياطياً كل بيانات كاظمه: كل قواعد البيانات، سجل المحادثات، المعتقدات، المتجهات، الإعدادات، المستندات، مساحة العمل، و Postgres.",
-        "en": "Backs up ALL Kazma data: every database, chat history, beliefs, vectors, settings, documents, workspace, and Postgres. Runs automatically every 24h. Use this button to run it now.",
+        "ar": "ينسخ بيانات كاظمه احتياطياً كل 6 ساعات: كل قواعد بيانات كاظمه، سجل المحادثات، الذاكرة، الإعدادات، المستندات ومساحة العمل. لقاعدة Postgres نسخة خاصة بها على الجدول نفسه، ويسجّل النسخ الاحتياطي إن كانت حديثة. متجهات البحث لا تُنسخ، فكاظمه يعيد بناءها. استخدم هذا الزر لتشغيله الآن.",
+        "en": "Backs up Kazma's data every 6 hours: every Kazma database, chat history, memory, settings, documents and the workspace. Postgres gets its own dump on the same schedule, and the backup records whether it is fresh. Search vectors are not copied: Kazma rebuilds them. Use this button to run it now.",
     },
     "settings.backup_done": {
         "ar": "اكتمل:",
@@ -1701,8 +1701,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Exit IP",
     },
     "settings.proxy_hint": {
-        "ar": "إضافة اختيارية. عند التفعيل، يمر كشط الويب عبر هذا البروكسي لمقاومة حظر IP. اتركه معطلاً للجلب المباشر.",
-        "en": "Opt-in addon. When enabled, web scraping routes through this proxy for resilience to IP blocks. Leave disabled for direct fetching.",
+        "ar": "إضافة اختيارية لمقاومة حظر IP. يمر كشط الويب عبر هذا البروكسي فقط عندما يضبط ملف ‎.env ‎KAZMA_ACQUISITION_MODE=local_first_with_remote_fallback ويحتوي ‎KAZMA_ACQUISITION_REMOTE_PROVIDERS على proxy، ثم يُعاد تحميل Kazma. اتركه معطلاً للجلب المباشر.",
+        "en": "Opt-in addon for resilience to IP blocks. Web scraping routes through this proxy only when .env sets KAZMA_ACQUISITION_MODE=local_first_with_remote_fallback and KAZMA_ACQUISITION_REMOTE_PROVIDERS includes proxy, then Kazma is reloaded. Leave disabled for direct fetching.",
+    },
+    "settings.proxy_policy_on": {
+        "ar": "سياسة الجلب تسمح بالبروكسي: يستخدمه Kazma عند تفعيله.",
+        "en": "The acquisition policy allows the proxy: Kazma uses it when enabled.",
+    },
+    "settings.proxy_policy_off": {
+        "ar": "لا يستخدم Kazma هذا البروكسي الآن: اضبط ‎KAZMA_ACQUISITION_MODE=local_first_with_remote_fallback وأضف proxy إلى ‎KAZMA_ACQUISITION_REMOTE_PROVIDERS في ‎.env، ثم أعد تحميل Kazma.",
+        "en": "Kazma does not use this proxy now: set KAZMA_ACQUISITION_MODE=local_first_with_remote_fallback and add proxy to KAZMA_ACQUISITION_REMOTE_PROVIDERS in .env, then reload Kazma.",
     },
     "settings.proxy_host": {
         "ar": "المضيف",
@@ -2499,8 +2507,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Outbound allowed targets",
     },
     "settings.outbound_allowed_targets_hint": {
-        "ar": "فارغ = مسموح (HITL يتولى الأمر). قائمة مفصولة بفواصل تقيّد البريد والقنوات قبل الإرسال.",
-        "en": "Empty = permissive (HITL still applies). A comma-separated list restricts email/channel targets before send.",
+        "ar": "فارغ = مسموح (تبقى الموافقة كما هي). قائمة مفصولة بفواصل بالعناوين والمحادثات (مثل owner@example.com أو telegram:12345) التي يرسل إليها كاظمه دون سؤال إضافي: البريد (إلى ونسخة) ورسائل تيليجرام وديسكورد وسلاك. أي مستلم آخر يسألك عنه أولاً. الرد في المحادثة الحالية لا يخضع لها.",
+        "en": "Empty = permissive (approvals still apply). A comma-separated list of the addresses and chats (e.g. owner@example.com or telegram:12345) Kazma may send to without asking again: email (To and Cc) and Telegram, Discord and Slack messages. Any other recipient is asked about first. Replies in the conversation you are in are not held by it.",
     },
     "settings.shortcut_updated": {
         "ar": "حُدّث اختصار \"{action}\"",
@@ -2569,6 +2577,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.current_password_incorrect": {
         "ar": "كلمة المرور الحالية غير صحيحة",
         "en": "The current password is not correct",
+    },
+    "settings.session_login": {
+        "ar": "تسجيل دخول",
+        "en": "Sign-in",
+    },
+    "settings.session_oidc": {
+        "ar": "تسجيل دخول موحّد",
+        "en": "Single sign-on",
+    },
+    "settings.session_local": {
+        "ar": "هذا الجهاز (وصول محلي)",
+        "en": "This computer (local access)",
     },
     "settings.signed_in_at": {
         "ar": "وقت تسجيل الدخول",
@@ -4851,6 +4871,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.hub.connection_test_succeeded": {
         "ar": "نجح اختبار الاتصال",
         "en": "Connection test succeeded",
+    },
+    "settings.hub.discover_failed_reason": {
+        "ar": "فشل الاكتشاف: {reason}.",
+        "en": "Discovery failed: {reason}.",
+    },
+    "settings.hub.discover_cached_note": {
+        "ar": "القائمة المعروضة من اكتشاف سابق.",
+        "en": "The list shown is from an earlier discovery.",
+    },
+    "settings.hub.discovered_cached": {
+        "ar": "من اكتشاف سابق",
+        "en": "From an earlier discovery",
+    },
+    "settings.hub.discover_reason.http": {
+        "ar": "ردّ المزوّد برمز HTTP {status}",
+        "en": "the provider answered HTTP {status}",
+    },
+    "settings.hub.discover_reason.not_found": {
+        "ar": "لم يُعثر على المزوّد",
+        "en": "the provider was not found",
+    },
+    "settings.hub.discover_reason.no_base_url": {
+        "ar": "ليس للمزوّد عنوان أساسي",
+        "en": "the provider has no base URL",
+    },
+    "settings.hub.discover_reason.blocked_url": {
+        "ar": "لا يرسل Kazma طلبات إلى ذلك العنوان",
+        "en": "Kazma does not send requests to that address",
+    },
+    "settings.hub.discover_reason.unreachable": {
+        "ar": "تعذّر الوصول إلى المزوّد",
+        "en": "the provider could not be reached",
+    },
+    "settings.hub.discover_reason.bad_answer": {
+        "ar": "لم يكن ردّ المزوّد قائمة نماذج",
+        "en": "the provider's answer was not a list of models",
     },
     "settings.hub.discover_failed": {
         "ar": "فشل الاكتشاف: ",

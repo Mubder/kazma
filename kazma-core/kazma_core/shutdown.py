@@ -15,12 +15,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
+import time
+from collections.abc import Callable
 
 __all__ = [
+    "SHUTDOWN_WAKE",
+    "add_shutdown_waker",
     "is_shutting_down",
     "reset_shutdown",
     "signal_shutdown",
+    "step_bound",
+    "uvicorn_graceful_s",
     "wait_for_shutdown",
     "install_shutdown_signal_hooks",
     "uninstall_shutdown_signal_hooks",
@@ -29,6 +36,80 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 _shutdown_event: asyncio.Event | None = None
+#: When the shutdown began (``time.monotonic``), for :func:`_shutdown_time_left`.
+_shutdown_started: float | None = None
+
+# ── One deadline for the whole stop (FA-261) ───────────────────────────
+# A reload with work running took 58-60 s of the guard's 60 s grace, and one
+# drill ended in a kill and a page: the stop was a sum of fixed per-step
+# bounds (uvicorn 15 s, background drain 10 s, documents up to 45 s, memory up
+# to 30 s, a 120 s ceiling) with no total that fits the guard. The guard hands
+# the server its budget (``KAZMA_SHUTDOWN_BUDGET_S``: its grace less a margin);
+# every stop step takes ``step_bound(its own bound)``, never more than is left.
+
+#: Without a guard (a server run by hand): the guard's default grace (60 s)
+#: less the margin it keeps.
+_DEFAULT_BUDGET_S = 50.0
+
+
+def _shutdown_budget_s() -> float:
+    """Seconds the whole stop may take (``KAZMA_SHUTDOWN_BUDGET_S``)."""
+    raw = (os.environ.get("KAZMA_SHUTDOWN_BUDGET_S") or "").strip()
+    try:
+        value = float(raw) if raw else _DEFAULT_BUDGET_S
+    except ValueError:
+        value = _DEFAULT_BUDGET_S
+    return min(600.0, max(5.0, value))
+
+
+def _shutdown_time_left() -> float:
+    """Seconds of the stop's budget not yet spent (the whole budget before
+    the shutdown began)."""
+    if _shutdown_started is None:
+        return _shutdown_budget_s()
+    return max(0.0, _shutdown_budget_s() - (time.monotonic() - _shutdown_started))
+
+
+def step_bound(own: float) -> float:
+    """A stop step's bound: its own, or what is left of the stop's, whichever
+    is smaller."""
+    return max(0.0, min(float(own), _shutdown_time_left()))
+
+
+def uvicorn_graceful_s() -> int:
+    """uvicorn's graceful wait for open connections: a fifth of the stop's
+    budget, 3 to 10 s. It was 15 s on its own, spent before the app's own
+    stop began (FA-261); streams close on the shutdown flag at once now, so
+    this is a cap, not a wait."""
+    return max(3, int(min(10.0, _shutdown_budget_s() / 5)))
+
+
+#: Put in a waiting stream's queue when the shutdown begins, so it wakes and
+#: closes now instead of at its next 10 s keepalive (uvicorn waited its whole
+#: graceful window on such streams, FA-261).
+SHUTDOWN_WAKE = object()
+
+_wakers: list[Callable[[], None]] = []
+
+
+def add_shutdown_waker(waker: Callable[[], None]) -> Callable[[], None]:
+    """Run *waker* (on the event loop) when the shutdown begins; returns the
+    call that removes it."""
+    _wakers.append(waker)
+
+    def remove() -> None:
+        if waker in _wakers:
+            _wakers.remove(waker)
+
+    return remove
+
+
+def _run_wakers() -> None:
+    for waker in list(_wakers):
+        try:
+            waker()
+        except Exception:  # one waker's failure must not keep another stream open
+            logger.debug("[shutdown] a waker failed", exc_info=True)
 
 
 def _get_event() -> asyncio.Event:
@@ -48,16 +129,31 @@ def is_shutting_down() -> bool:
 
 
 def signal_shutdown() -> None:
-    """Signal all loops to stop. Called once during app shutdown."""
+    """Signal all loops to stop, start the stop's clock, and wake the streams
+    waiting on a queue. Idempotent."""
+    global _shutdown_started
     event = _get_event()
     if not event.is_set():
         logger.info("Shutdown signal sent — terminating all streams")
+        _shutdown_started = time.monotonic()
         event.set()
+        # The wakers touch asyncio queues: on the loop, never inside a signal
+        # handler that interrupted it mid-statement.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            loop.call_soon_threadsafe(_run_wakers)
+        else:
+            _run_wakers()
 
 
 def reset_shutdown() -> None:
     """Reset the shutdown signal (for testing or restart)."""
+    global _shutdown_started
     _get_event().clear()
+    _shutdown_started = None
 
 
 async def wait_for_shutdown(timeout: float | None = None) -> None:

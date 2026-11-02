@@ -62,6 +62,7 @@ _LOOP_BREAK_MIN_ITERATION = 6
 # provider time to recover before it is tried again.
 _failover_clients: dict[str, Any] = {}
 _failover_cooldowns: dict[str, float] = {}
+_failover_built_for: int | None = None  # the registry generation (FA-106)
 
 
 def reset_failover_cache() -> None:
@@ -73,8 +74,21 @@ def reset_failover_cache() -> None:
     through a module alias broke silently when the graph was split
     (2026-08-25 to 2026-09-30, ``tests/test_failover_cache_reset.py``).
     """
+    global _failover_built_for
     _failover_clients.clear()
     _failover_cooldowns.clear()
+    _failover_built_for = None
+
+
+def _follow_registry(registry: Any) -> None:
+    """Drop the failover cache when the providers changed since it was built
+    (FA-106): a save in Settings reaches the next failover, whatever path
+    made it."""
+    global _failover_built_for
+    generation = getattr(registry, "generation", None)
+    if isinstance(generation, int) and generation != _failover_built_for:
+        reset_failover_cache()
+        _failover_built_for = generation
 
 
 _KNOWLEDGE_NOTE = '<kazma:data source="knowledge"'
@@ -1655,6 +1669,7 @@ async def supervisor_node(
                 registry = get_model_registry()
             except Exception:
                 return None
+            _follow_registry(registry)
             now = time.monotonic()
             for fb_model in ns.failover.chain:
                 if not fb_model or fb_model == routed_model:

@@ -159,3 +159,54 @@ def test_every_declaration_resolves_to_an_adapter(kind):
     assert callable(getattr(adapter, "act", None))
     spec = KINDS[kind]
     assert spec.label and spec.label_ar and spec.source
+
+
+def _document_job(state: str, *, error: str = "") -> object:
+    """A document job row as the queue returns it (the fields the adapter reads)."""
+    from types import SimpleNamespace
+
+    from kazma_core.documents.models import DocumentJobState
+
+    stamp = "2026-11-02T08:00:00+00:00"
+    return SimpleNamespace(
+        id="job-1", tenant_id="t", document_id="doc-1", state=DocumentJobState(state),
+        stage="validating", lease_owner=None, lease_expires_at=None, heartbeat_at=stamp,
+        updated_at=stamp, created_at=stamp, retry_at=None, cancel_requested=False,
+        version=3, error_message=error, error_code="malware_detected" if error else None)
+
+
+def _quiet(run) -> str:
+    from kazma_core.runs.contract import judge
+    from kazma_core.runs.supervisor import _quiet_reason
+
+    verdict = judge(run, KINDS[run.kind], run.ended_at + 60)
+    return _quiet_reason(run, str(verdict.value), watch_started=run.ended_at - 600)
+
+
+def test_a_rejected_document_offers_no_retry_and_pages_nobody():
+    """FA-247: a document refused for what it is (malware, encryption, a
+    policy) was a paged failure with a Retry that could only be refused again.
+    It is a terminal state with the reason, no Retry, and no message."""
+    from kazma_core.runs.adapters.documents import ADAPTER
+
+    run = ADAPTER._run(_document_job("rejected", error="Malware signature found: Eicar-Test"),
+                       "invoice.pdf", None, now=0.0)
+    assert run.state == RunState.FAILED and run.actions == ()
+    assert "Eicar" in run.detail, "the refusal's reason is the run's detail"
+    assert _quiet(run).startswith("announced by"), "a policy refusal pages nobody"
+    # A job that ran out of attempts is still a failure the owner can retry.
+    dead = ADAPTER._run(_document_job("dead_letter", error="Worker lease expired"), "scan.pdf", None, now=0.0)
+    assert dead.actions == ("retry",) and _quiet(dead) == ""
+
+
+def test_the_old_rule_paged_a_rejected_document_with_a_retry():
+    """Negative control: the adapter before FA-247 offered Retry for
+    ``rejected`` like ``dead_letter`` and set no announcement, so the
+    supervisor's quiet rule had no reason to keep it quiet."""
+    import dataclasses
+
+    from kazma_core.runs.adapters.documents import ADAPTER
+
+    run = ADAPTER._run(_document_job("rejected", error="Encrypted PDF"), "locked.pdf", None, now=0.0)
+    old = dataclasses.replace(run, actions=("retry",), announced_by="")
+    assert old.actions == ("retry",) and _quiet(old) == ""

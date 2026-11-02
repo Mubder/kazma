@@ -339,11 +339,61 @@ def _product_files() -> list[Path]:
     return files
 
 
-def unbounded_cancel_waits(source: str, rel: str) -> list[str]:
-    """Every ``X.cancel()`` followed by ``await X``, and every
-    ``asyncio.wait_for(<task>)``, in *source*."""
+def _own_nodes(func: ast.AST) -> list[ast.AST]:
+    """*func*'s nodes, not those of the functions defined inside it."""
+    out: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(func))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        out.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def later_unbounded_waits(source: str, rel: str) -> list[str]:
+    """``X.cancel()`` and, ANYWHERE later in the same function, ``await X``,
+    or a ``gather`` / an ``asyncio.wait`` with no timeout over the collection
+    the cancel's loop ran on (FA-137: the gate read only the two statements
+    after a cancel, so ``stop()`` -- cancel inside ``async with``, await after
+    it -- and cancel-then-gather passed)."""
     tree = ast.parse(source)
     found: list[str] = []
+    for func in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        nodes = _own_nodes(func)
+        loops = [n for n in nodes if isinstance(n, (ast.For, ast.AsyncFor))]
+        awaits = [n for n in nodes if isinstance(n, ast.Await)]
+        cancels = [n for n in nodes if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                   and n.func.attr == "cancel" and not n.args]
+        for call in cancels:
+            target = ast.unparse(call.func.value)
+            colls = {ast.unparse(loop.iter) for loop in loops if ast.unparse(loop.target) == target
+                     and loop.lineno <= call.lineno <= (loop.end_lineno or loop.lineno)}
+            for aw in awaits:
+                if aw.lineno <= call.lineno:
+                    continue
+                value = aw.value
+                fn = ast.unparse(value.func) if isinstance(value, ast.Call) else ""
+                if ast.unparse(value) == target:
+                    found.append(f"{rel}:{call.lineno} {target}.cancel() then await {target}")
+                elif fn in ("asyncio.gather", "gather") and (
+                        {ast.unparse(a.value) for a in value.args if isinstance(a, ast.Starred)}
+                        & (colls | {target})):
+                    found.append(f"{rel}:{call.lineno} {target}.cancel() then gather")
+                elif (fn in ("asyncio.wait", "wait") and value.args
+                        and not any(k.arg == "timeout" for k in value.keywords)
+                        and ast.unparse(value.args[0]) in colls):
+                    found.append(f"{rel}:{call.lineno} {target}.cancel() then wait with no timeout")
+    return found
+
+
+def unbounded_cancel_waits(source: str, rel: str) -> list[str]:
+    """Every ``X.cancel()`` followed by ``await X`` (anywhere later in its
+    function), every cancel-then-gather, and every
+    ``asyncio.wait_for(<task>)``, in *source*."""
+    tree = ast.parse(source)
+    found: list[str] = list(later_unbounded_waits(source, rel))
     for node in ast.walk(tree):
         for field in ("body", "orelse", "finalbody", "handlers"):
             block = getattr(node, field, None)
@@ -357,8 +407,9 @@ def unbounded_cancel_waits(source: str, rel: str) -> list[str]:
                 target = ast.unparse(st.value.func.value)
                 pattern = re.compile(r"\bawait\s+" + re.escape(target) + r"(?![\w.(\[])")
                 for nxt in block[i + 1:i + 3]:
-                    if pattern.search(ast.unparse(nxt)):
-                        found.append(f"{rel}:{st.lineno} {target}.cancel() then await {target}")
+                    line = f"{rel}:{st.lineno} {target}.cancel() then await {target}"
+                    if pattern.search(ast.unparse(nxt)) and line not in found:
+                        found.append(line)
         if (isinstance(node, ast.Call) and ast.unparse(node.func) in ("asyncio.wait_for", "wait_for")
                 and node.args and isinstance(node.args[0], (ast.Name, ast.Attribute))):
             arg = ast.unparse(node.args[0])
@@ -492,3 +543,96 @@ def test_every_declared_wait_for_is_still_there():
     for (rel, arg), why in DECLARED_WAIT_FOR.items():
         assert why
         assert f"wait_for({arg}" in (ROOT / rel).read_text(encoding="utf-8"), (rel, arg)
+
+
+# ── FA-137: the wider shapes, and the sites they found ─────────────────────
+
+
+def test_the_widened_gate_finds_the_three_old_sites_and_a_gather():
+    """Negative control: the sites the two-statement window missed."""
+    planted = '''
+async def stop(self):
+    if self._task:
+        async with self._no_alert_pass():
+            self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+
+async def cancel_utterance(tasks):
+    for task in tasks:
+        if task is not None and not task.done():
+            task.cancel()
+    for task in tasks:
+        if task is not None:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+async def aclose(self):
+    pending = list(self.tasks)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+async def fine(self, pending):
+    for task in pending:
+        task.cancel()
+    await asyncio.wait(pending, timeout=5.0)
+'''
+    found = later_unbounded_waits(planted, "planted.py")
+    assert len(found) == 3, found
+    assert any("self._task.cancel() then await self._task" in f for f in found)
+    assert any("task.cancel() then await task" in f for f in found)
+    assert any("task.cancel() then gather" in f for f in found)
+
+
+@pytest.mark.asyncio
+async def test_a_group_of_absorbing_tasks_ends_within_the_bound():
+    from kazma_core.bounded_cancel import cancel_all_and_wait
+
+    release = asyncio.Event()
+    stuck = [asyncio.create_task(_swallow_cancels(release)) for _ in range(3)]
+    once = asyncio.create_task(_swallow_cancels(release, swallow=1))
+    await asyncio.sleep(0)
+    start = time.monotonic()
+    left = await cancel_all_and_wait([*stuck, once], what="stand-ins", timeout=0.8)
+    assert left == 3 and time.monotonic() - start < 2.5
+    assert once.cancelled()
+    release.set()
+    await asyncio.gather(*stuck)
+
+
+@pytest.mark.asyncio
+async def test_cron_stop_ends_within_its_bound_when_the_loop_absorbs_its_cancel(monkeypatch):
+    """The cron poll loop absorbs its cancel: ``stop()`` returns anyway."""
+    import kazma_core.bounded_cancel as bc
+    from kazma_core.cron.scheduler import CronScheduler
+
+    release = asyncio.Event()
+    sched = CronScheduler.__new__(CronScheduler)
+    sched._running = True
+    sched._task = asyncio.create_task(_swallow_cancels(release))
+    sched._exec_tasks = set()
+    sched._drain_seconds = 0.1
+    await asyncio.sleep(0)
+
+    class _NoPass:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *a):
+            return False
+
+    sched._no_alert_pass = lambda: _NoPass()
+    real = bc.cancel_and_wait
+    monkeypatch.setattr(bc, "cancel_and_wait", lambda task, *, what, timeout=5.0: real(task, what=what, timeout=0.5))
+    start = time.monotonic()
+    await asyncio.wait_for(sched.stop(), timeout=4.0)
+    assert time.monotonic() - start < 3.0
+    release.set()
+    await sched._task
+
