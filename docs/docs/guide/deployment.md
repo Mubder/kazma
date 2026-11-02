@@ -43,6 +43,7 @@ The live file is `Dockerfile` at the repo root — do not copy-paste a snapshot 
 Live file: `docker-compose.yml`. Accurate facts (do not restore the old `8000:8000` / `/root/.kazma` snapshot):
 
 - Host port **9090** → container **8000** (`HOST_PORT` to override) so bookmarks match `kazma serve`.
+- Every published port is on **127.0.0.1** by default. Put a TLS reverse proxy on the same host in front of Kazma. To publish on another address, set `PUBLISH_HOST` (Kazma) or `SEARXNG_PUBLISH_HOST` (SearXNG), for example to `0.0.0.0`, on purpose. A port written without an address (`"5433:5432"`) is reachable from the whole network; `tests/test_compose_ports_loopback.py` refuses one in a shipped compose file.
 - Volumes: `kazma_data` → `/app/kazma-data`; `kazma_vectors` → `/home/kazma/.kazma/vector_memory` (the `kazma` user home, not `/root`).
 - `KAZMA_VECTOR_PATH=/home/kazma/.kazma/vector_memory` is set in compose.
 - Health check: `curl -f http://localhost:8000/health/ready` every 30 s, **300 s** start period (cold start loads embeddings + MCP).

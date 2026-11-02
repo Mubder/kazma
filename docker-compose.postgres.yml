@@ -30,7 +30,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "${HOST_PORT:-9090}:8000"
+      - "${PUBLISH_HOST:-127.0.0.1}:${HOST_PORT:-9090}:8000"
     volumes:
       - kazma_data:/app/kazma-data
       - kazma_vectors:/home/kazma/.kazma/vector_memory
