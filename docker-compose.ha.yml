@@ -72,7 +72,7 @@ services:
     image: nginx:1.27-alpine
     container_name: kazma-nginx
     ports:
-      - "${HOST_PORT:-9090}:80"
+      - "${PUBLISH_HOST:-127.0.0.1}:${HOST_PORT:-9090}:80"
     volumes:
       - ./deploy/nginx-ha.conf:/etc/nginx/nginx.conf:ro
     depends_on:

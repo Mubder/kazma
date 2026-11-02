@@ -4,6 +4,12 @@
 # Map host 9090 → container 8000 so local bookmarks match `kazma serve`.
 # Override: HOST_PORT=8000 docker compose up
 #
+# Every port is published on 127.0.0.1 only: put a reverse proxy (TLS) in
+# front of Kazma, on the same host. To publish on other addresses, set
+# PUBLISH_HOST / SEARXNG_PUBLISH_HOST (for example 0.0.0.0) on purpose.
+# A port published without an address is reachable from the whole network;
+# the 2026-11 functional audit (FA-218) found the database that way.
+#
 # Production checklist (set in .env):
 #   KAZMA_SECRET=<strong random>
 #   KAZMA_VAULT_KEY=<fernet key>
@@ -15,7 +21,7 @@ services:
     build: .
     container_name: kazma
     ports:
-      - "${HOST_PORT:-9090}:8000"
+      - "${PUBLISH_HOST:-127.0.0.1}:${HOST_PORT:-9090}:8000"
     volumes:
       - kazma_data:/app/kazma-data
       # Match Dockerfile USER kazma home (not /root/...)
@@ -61,7 +67,7 @@ services:
     image: docker.io/searxng/searxng:latest
     container_name: kazma-searxng
     ports:
-      - "${SEARXNG_HOST_PORT:-8088}:8080"
+      - "${SEARXNG_PUBLISH_HOST:-127.0.0.1}:${SEARXNG_HOST_PORT:-8088}:8080"
     volumes:
       - ./deploy/searxng:/etc/searxng:rw
     environment:

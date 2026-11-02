@@ -15,7 +15,7 @@ marker are handed to pytest, so an unrelated module with an optional import
 cannot fail the job at collection.
 
 The bar for adding the marker is unchanged: run the test against a real,
-throwaway Postgres first (docker run --rm -p 55432:5432 postgres:16) and see
+throwaway Postgres first (docker run --rm -p 127.0.0.1:55432:5432 postgres:16) and see
 it pass. A SQLite-shaped assertion that cannot hold on Postgres is not a
 Postgres failure, and a job that is red on day one gets ignored.
 """
