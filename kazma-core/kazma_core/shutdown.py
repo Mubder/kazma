@@ -23,6 +23,8 @@ from collections.abc import Callable
 __all__ = [
     "SHUTDOWN_WAKE",
     "add_shutdown_waker",
+    "add_stop_listener",
+    "stop_time_left",
     "is_shutting_down",
     "reset_shutdown",
     "signal_shutdown",
@@ -71,6 +73,12 @@ def _shutdown_time_left() -> float:
     return max(0.0, _shutdown_budget_s() - (time.monotonic() - _shutdown_started))
 
 
+def stop_time_left() -> float:
+    """Seconds of the stop's budget not yet spent (the whole budget before
+    the stop began)."""
+    return _shutdown_time_left()
+
+
 def step_bound(own: float) -> float:
     """A stop step's bound: its own, or what is left of the stop's, whichever
     is smaller."""
@@ -103,6 +111,28 @@ def add_shutdown_waker(waker: Callable[[], None]) -> Callable[[], None]:
             _wakers.remove(waker)
 
     return remove
+
+
+#: Called in the thread that begins the stop -- a signal handler, often --
+#: the moment it begins, never through the event loop (a stuck loop is what
+#: a listener may be there for). Each must be quick and thread-safe.
+_stop_listeners: list[Callable[[], None]] = []
+
+
+def add_stop_listener(listener: Callable[[], None]) -> None:
+    """Call *listener* (synchronously, once) when the stop begins."""
+    if listener not in _stop_listeners:
+        _stop_listeners.append(listener)
+
+
+def _run_stop_listeners() -> None:
+    for listener in list(_stop_listeners):
+        try:
+            listener()
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError):
+            # One listener's failure must not stop the stop (a thread that
+            # cannot start is a RuntimeError).
+            logger.warning("[shutdown] a stop listener failed", exc_info=True)
 
 
 def _run_wakers() -> None:
@@ -138,6 +168,7 @@ def signal_shutdown() -> None:
         logger.info("Shutdown signal sent — terminating all streams")
         _shutdown_started = time.monotonic()
         event.set()
+        _run_stop_listeners()
         # The wakers touch asyncio queues: on the loop, never inside a signal
         # handler that interrupted it mid-statement.
         try:

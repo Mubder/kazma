@@ -411,6 +411,13 @@ def _forget_turn(
         remirror_episode_by_id(conn, one)
     remote = [_delete_remote_vector(conn, one, owner) for one in gone]
     remote += _after_facts(conn, owner=owner, changed=facts, keys=keys, turn=turn)
+    # A lesson the turn taught leaves every later prompt too (roadmap theme
+    # 5): after the commit (a settings write, never under the memory write
+    # lock, §15 D2), before the entry is marked applied, so a failure here is
+    # run again by the next pass.
+    from kazma_core.skills.self_improvement import forget_lessons_from
+
+    lessons = forget_lessons_from(keys, turn)
     # Applied only once EVERY step ran: a step that raises after the commit
     # above leaves the entry pending, and the next pass runs them all again.
     forget_journal.mark_applied(conn, seq)
@@ -420,6 +427,7 @@ def _forget_turn(
         "episode_id": eid,
         "copies": len(ids),
         "facts_forgotten": len(facts),
+        "lessons_removed": lessons,
         "summaries_emptied": len(summaries),
         "chat_keys": keys,
         "remote_vector_deleted": all(remote),
@@ -1246,11 +1254,11 @@ def forget_chat(
             ).fetchall()
         ]
         facts = 0
+        lessons = 0
         for eid in ids:
-            facts += int(
-                forget_episode(eid, tenant_id=caller, conn=conn, purge_index=False, journal=False)
-                .get("facts_forgotten") or 0
-            )
+            one = forget_episode(eid, tenant_id=caller, conn=conn, purge_index=False, journal=False)
+            facts += int(one.get("facts_forgotten") or 0)
+            lessons += int(one.get("lessons_removed") or 0)
         # What the agent noted during the chat in turns that left no memory of
         # their own, and every fact naming the chat whatever its turn.
         owner = None if caller == "default" else caller
@@ -1281,6 +1289,11 @@ def forget_chat(
             for note in notes:
                 _delete_remote_vector(conn, note, note_tenants.get(note, caller))
         _after_facts(conn, owner=owner, changed=chat_facts, keys=keys, turn=None)
+        # Every lesson the chat taught, a turn with no memory of its own
+        # included (roadmap theme 5); before the entry is marked applied.
+        from kazma_core.skills.self_improvement import forget_lessons_from
+
+        lessons += forget_lessons_from(keys, None)
         from kazma_core.memory import forget_journal
 
         forget_journal.mark_applied(conn, seq)
@@ -1289,7 +1302,7 @@ def forget_chat(
         snapshots = _forget_snapshots(keys, turn=None)
         return {"ok": True, "forgotten": len(ids) + len(notes),
                 "facts_forgotten": facts + len(chat_facts), "chat_keys": keys,
-                "snapshots_deleted": snapshots}
+                "lessons_removed": lessons, "snapshots_deleted": snapshots}
     finally:
         if own:
             conn.close()

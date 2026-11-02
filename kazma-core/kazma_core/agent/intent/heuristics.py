@@ -23,7 +23,11 @@ _FORMAT_TOKENS = re.compile(
     r"|\.pdf\b|\.docx\b|\.xlsx\b|\.pptx\b"
     r"|\bms\s*word\b|\bword\s+doc\b|\bword\s+document\b|\bto\s+word\b"
     r"|\bexcel\b|\bspreadsheet\b"
-    r"|ال?مستند|ال?وثيقة|ملف\s+pdf",
+    # (?:ال)? -- the article whole: "ال?" made only its ل optional, so a bare
+    # مستند or وثيقة never matched (roadmap theme 6, 2026-11). And the names
+    # the formats go by in Arabic, as English has "word document" and "excel".
+    r"|(?:ال)?مستند|(?:ال)?وثيقة|ملف\s+pdf"
+    r"|(?<![\w])(?:وورد|[اإأ]كسل|با?وربوينت|بي\s*دي\s*[اإ]ف)(?![\w])",
     re.IGNORECASE,
 )
 
@@ -37,12 +41,20 @@ _FORMAT_MAP = {
     "word document": "docx", "to word": "docx",
     "excel": "xlsx", "spreadsheet": "xlsx",
     "مستند": "docx", "المستند": "docx", "وثيقة": "docx", "الوثيقة": "docx", "ملف pdf": "pdf",
+    "وورد": "docx", "اكسل": "xlsx", "إكسل": "xlsx", "أكسل": "xlsx",
+    "بوربوينت": "pptx", "باوربوينت": "pptx",
 }
 
 _GENERATE_VERBS = re.compile(
     r"\b(reproduce|recreat\w*|create|generat\w*|make|convert|export|"
-    r"write|draft|produc\w*)\b"
-    r"|أنشئ|اصنع|أعد|أعيد|حول|صدر|أنجز|أكمل|استمر|تابع",
+    r"write|draft|produc\w*|prepar\w*)\b"
+    r"|أنشئ|اصنع|أعد|أعيد|حول|صدر|أنجز|أكمل|استمر|تابع"
+    # What English says with make / write / prepare, in the words a Gulf
+    # (and Levantine, Egyptian) speaker uses (roadmap theme 6, 2026-11):
+    # "سو لي تقرير PDF" was general chat while "Make a PDF report" was a
+    # document request. Whole words: a bare سو must not match inside سوق.
+    r"|(?<![\w])(?:سوّ?ي?(?:لي)?|سوو|[اأ]كتب(?:ي|لي)?|جهّ?ز(?:ي|لي)?|حضّ?ر(?:ي|لي)?"
+    r"|[اإ]عمل(?:ي|لي)?|طلّع(?:ي|لي)?|طلع\s*لي)(?![\w])",
     re.IGNORECASE,
 )
 
@@ -112,12 +124,29 @@ _REMIND_RE = re.compile(
 )
 
 
-def _extract_format(text: str) -> str:
-    m = _FORMAT_TOKENS.search(text)
-    if not m:
-        return ""
-    token = m.group(0).lower().strip()
+#: Words that say "a document" without naming its format: a format named
+#: anywhere in the message wins over them ("مستند PDF" is a PDF; in English
+#: the format comes first, in Arabic it follows the noun).
+_GENERIC_DOCUMENT_TOKENS = frozenset({"مستند", "المستند", "وثيقة", "الوثيقة"})
+
+
+def _format_of(token: str) -> str:
+    if re.fullmatch(r"بي\s*دي\s*[اإ]ف", token):
+        return "pdf"
     return _FORMAT_MAP.get(token, "")
+
+
+def _extract_format(text: str) -> str:
+    generic = ""
+    for m in _FORMAT_TOKENS.finditer(text):
+        token = m.group(0).lower().strip()
+        found = _format_of(token)
+        if not found:
+            continue
+        if token not in _GENERIC_DOCUMENT_TOKENS:
+            return found
+        generic = generic or found
+    return generic
 
 
 def _extract_delivery(text: str) -> str:

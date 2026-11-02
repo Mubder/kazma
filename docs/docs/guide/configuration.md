@@ -464,7 +464,7 @@ Full product guide: [Document Intelligence](document-intelligence). Ops:
 | `KAZMA_TOOL_TIMEOUT_SECONDS` | Per-tool execution timeout in seconds (default `120`). | `agent/graph_builder.py` |
 | `KAZMA_HUB_DB` | Hub SQLite registry path. | `hub/cli.py:109` |
 | `KAZMA_HUB_URL` | Hub API base (default `https://hub.kazma.ai`). | `hub/cli.py:115` |
-| `KAZMA_PORT` | Server port override (default `8000`). | `gateway.py:36` |
+| `KAZMA_PORT` | The server's port (default `9090`): `serve.py` (what the guard runs), `kazma serve` and `kazma gateway`. | `serve.py`, `kazma_cli/gateway.py` |
 | `HF_HUB_DISABLE_SYMLINKS_WARNING` / `HF_HUB_DISABLE_TELEMETRY` | Silence HuggingFace telemetry (set by CLI). | `main.py:9-10` |
 
 > **No dedicated per-provider env vars** for DeepSeek/Anthropic/xAI/Groq/Gemini are read by `kazma_core`. Key those providers through the ConfigStore provider list or `kazma.yaml`.

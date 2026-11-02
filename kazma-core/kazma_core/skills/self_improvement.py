@@ -16,7 +16,7 @@ import asyncio
 import logging
 import re
 import threading
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -711,6 +711,72 @@ def forget_text(text: str) -> int:
             _save_agent_evolution(data)
     if removed:
         logger.info("[SelfImprovement] forgot %d lesson(s) holding the text the user forgot", removed)
+    return removed
+
+
+def forget_lessons_from(chat_keys: Any, turn: int | None = None) -> int:
+    """Take back every main-agent lesson learned from the chat (any of its
+    *chat_keys*) -- from one *turn*, or the whole chat when *turn* is None --
+    from the Soul injected into every prompt and from its history. Returns
+    how many lessons left the Soul.
+
+    Roadmap theme 5 (2026-11): a lesson records the chat and turn it came from
+    (``apply_agent_mutation``'s ``source``), and nothing read it back, so a
+    turn the user forgot kept teaching every later prompt. A lesson another
+    turn also taught (the same text, a history entry of its own) stays.
+    The Soul keeps the 12 newest lessons and its history the 40 newest
+    entries, so every lesson in the Soul still has its source there.
+    """
+    keys = {str(k) for k in (chat_keys or ()) if k}
+    if not keys:
+        return 0
+
+    def came_from_it(entry: Any) -> bool:
+        src = entry.get("source") if isinstance(entry, dict) else None
+        if not isinstance(src, dict) or str(src.get("chat") or "") not in keys:
+            return False
+        if turn is None:
+            return True
+        try:
+            return int(src.get("turn") or 0) == int(turn)
+        except (TypeError, ValueError):
+            return False
+
+    removed = 0
+    changed = False
+    with _agent_evo_lock:
+        _migrate_legacy_evolution_if_present()
+        data = _load_agent_evolution()
+        for entry in (data.get("agents") or {}).values():
+            hist = list(entry.get("history") or [])
+            gone = [h for h in hist if came_from_it(h)]
+            if not gone:
+                continue
+            kept_hist = [h for h in hist if not came_from_it(h)]
+            base, lessons = _lessons(str(entry.get("soul") or ""))
+            # One copy per forgotten source, never below what the remaining
+            # sources taught: the Soul holds a lesson two turns taught twice.
+            remaining = Counter(str(h.get("delta") or "") for h in kept_hist)
+            in_soul = Counter(lessons)
+            to_drop = Counter({
+                text: min(n, max(0, in_soul[text] - remaining[text]))
+                for text, n in Counter(str(h.get("delta") or "") for h in gone).items()
+            })
+            kept = []
+            for lesson in lessons:  # the oldest copies go first
+                if to_drop[lesson] > 0:
+                    to_drop[lesson] -= 1
+                    continue
+                kept.append(lesson)
+            removed += len(lessons) - len(kept)
+            entry["soul"] = _render(base, kept)
+            entry["history"] = kept_hist
+            changed = True
+        if changed:
+            _save_agent_evolution(data)
+    if removed:
+        logger.info("[SelfImprovement] took back %d lesson(s) learned from a forgotten %s",
+                    removed, "chat" if turn is None else "turn")
     return removed
 
 

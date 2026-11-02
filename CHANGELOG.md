@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## Recovery drilled for real, and Arabic and English as equals (2026-11-02)
+
+- A reload with work running now ends cleanly: the server process exits
+  as soon as its own shutdown is done. Before, it could hang until the
+  guard killed it at 60 s, and the owner was paged for a reload they had
+  asked for. A document job's OCR process stops when the job is handed back
+  for the restart, instead of running on to its last page. The chat tab
+  that sent a turn is now told "Kazma is restarting" instead of keeping a
+  cut-off answer with no word.
+- Restoring a backup of an install that does not use Postgres no longer
+  reports the restore as failed.
+- `KAZMA_PORT` sets the server's port, as the documentation said it did.
+  Log lines with characters the console cannot show (an arrow, Arabic text)
+  are written escaped instead of failing.
+- New CI job "Recovery drills": a backup sent to a real restic repository,
+  restored and recalled; a real Postgres stopped under Kazma; and the real
+  guard reloading the real server with a chat turn and an OCR job running.
+  A skipped drill fails the job.
+- Arabic and English get the same treatment:
+  - "ذكرني بكرة الساعة 9 الصبح" sets the reminder for nine, like "remind me
+    tomorrow at 9am" (Arabic words for tomorrow, the day after, next week
+    and next month were not understood).
+  - "سو لي تقرير PDF" is a document request, like "Make a PDF report"; so is
+    a bare "مستند", and the Arabic names of Word, Excel and PowerPoint.
+  - The words that approve a plan match in both languages.
+  - Messages such as "this chat's budget is spent" come back in the
+    language you wrote in, not always in Arabic.
+- Forgetting a conversation, or one turn of it, also removes the lessons
+  Kazma learned from it.
+- Kazma checks its installed packages against published security advisories
+  once a day and tells you about a new one, with the fixed version and the
+  command to update. Packages below what this version needs stay in the
+  daily digest until they are updated.
+
 ## The functional audit's Low findings fixed (2026-11-02)
 
 - Results are reported as they are: a reply the transcript refused, a task

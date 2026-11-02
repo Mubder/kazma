@@ -12,7 +12,9 @@ upload's ``ok`` was dropped (AUD-077). Each was fixed where it was found;
 this is the class gate.
 
 **Scope.** The functions are the ones that answer for a backup, a migration,
-a send or a delivery: every module-level function and method defined in
+a send or a delivery, and since 2026-11 (roadmap theme 1) for a write to the
+vault, the chat store or the swarm store: every module-level function and
+method defined in
 ``SCOPE`` whose return annotation is ``bool`` or ``tuple[bool, ...]``, or
 that returns a dict literal with an ``"ok"`` key or a call with an ``ok=``
 keyword.
@@ -76,7 +78,28 @@ SCOPE = (
     # The update (FA-101, 2026-11 functional audit): its stash restore said
     # False on a conflict and the update reported success over the markers.
     "kazma-cli/kazma_cli/update.py",
+    # Roadmap theme 1 (2026-11): every write that answers whether it worked --
+    # the vault (FA-104: a token the vault refused, a sign-in that "worked"),
+    # the chat store (FA-108: a reply "persisted" over a refused save) and the
+    # swarm store (FA-109: a task counted recovered over a refused write).
+    "kazma-core/kazma_core/security/vault.py",
+    "kazma-ui/kazma_ui/session_manager.py",
+    "kazma-ui/kazma_ui/reply_sink.py",
+    "kazma-ui/kazma_ui/turn_runtime.py",
+    "kazma-core/kazma_core/swarm/task_store.py",
 )
+
+#: Functions in scope whose bool is not "it worked": it reports what was
+#: there, and a failure raises. Each with why.
+NOT_AN_ANSWER: dict[tuple[str, str], str] = {
+    ("kazma_core.security.vault", "SecretVault.delete"): (
+        "True when a secret was there to delete; deleting one that is not there is not a "
+        "failure, and a refused write raises (refuse_write) as a database error does"
+    ),
+    ("kazma_core.swarm.task_store", "TaskStore.delete_task"): (
+        "True when a task row was there to delete; a database error raises"
+    ),
+}
 
 _THREAD_RUNNERS = {"to_thread"}  # asyncio.to_thread(f, ...)
 _EXECUTOR_RUNNERS = {"run_in_executor"}  # loop.run_in_executor(None, f, ...)
@@ -189,10 +212,13 @@ def build_index(sources: dict[str, str]) -> Index:
             continue
         for node in mod.tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _answers(node):
-                answering.add((mod.name, node.name))
+                if (mod.name, node.name) not in NOT_AN_ANSWER:
+                    answering.add((mod.name, node.name))
             elif isinstance(node, ast.ClassDef):
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and _answers(item):
+                        if (mod.name, f"{node.name}.{item.name}") in NOT_AN_ANSWER:
+                            continue
                         answering.add((mod.name, f"{node.name}.{item.name}"))
                         answering_methods.add(item.name)
     return Index(modules, scoped, answering, classes_by_name, answering_methods)
@@ -481,6 +507,24 @@ REPORTS_ITS_OWN_FAILURE: dict[str, str] = {
         "them and resets the tree out of the conflict (FA-101); every call but the success "
         "path's is on a path where the update already returns False, and the success path "
         "reads it (EDITS_NOT_RESTORED, exit status 3)"
+    ),
+    "reply_sink.upsert_reply": (
+        "its False is 'nothing written': no session or turn id, or no text and no bubble "
+        "asked for; a store failure logs a WARNING and raises the 'reply was NOT saved' ops "
+        "alert itself (error), so a caller has nothing to add"
+    ),
+    "turn_runtime.persist_reply": (
+        "logs 'Reply NOT persisted' at WARNING for a write the store refused and alerts "
+        "('reply.persist_failed') on a store failure (FA-108); its callers are partial "
+        "flushes and closers whose next write or the checkpoint carries the reply"
+    ),
+    "turn_runtime.close_turn": (
+        "a False is persist_reply's (reported there) or 'no session for the thread' / a "
+        "projection that raised, each logged at WARNING inside close_turn"
+    ),
+    "turn_runtime.close_aborted_turn": (
+        "answers persist_reply's result, reported there; an abort has no other route for "
+        "the note"
     ),
     "backup.restic_repo.alert_read_only_remote": (
         "answers whether it raised the alert, and logs a WARNING when it could not; _run "

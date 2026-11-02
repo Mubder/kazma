@@ -529,6 +529,48 @@ def _split(counts: Counter) -> str:
     return ", ".join(f"{name} {n}" for name, n in ranked)
 
 
+#: Open advisories named one by one; past this, the rest are counted.
+_ADVISORIES_SHOWN = 10
+
+
+def _package_lines() -> list[str]:
+    """Every unmet requirement and open dependency advisory, in every digest
+    until it is fixed (roadmap theme 12). The boot check alerts once per boot
+    and the advisory check once per advisory, and a cooldown or one missed
+    message let them drop out of sight; the digest keeps them in front of
+    the owner. A store that cannot be read is said, never taken for none."""
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.install_requirements import last_requirements_check
+    from kazma_core.security.advisory_watch import open_advisories
+
+    lines: list[str] = []
+    try:
+        check = last_requirements_check()
+    except store_errors():  # said in the digest, never a silent "none"
+        logger.debug("[digest] the requirements check could not be read", exc_info=True)
+        check = {}
+        lines.append("  the last requirements check could not be read")
+    unmet = [str(u) for u in check.get("unmet") or ()]
+    if unmet:
+        lines.append(f"  {count_noun(len(unmet), 'installed package')} older than this build requires:")
+        lines += [f"    {u}" for u in unmet]
+        if check.get("fix"):
+            lines.append(f"    {check['fix']}")
+    try:
+        advisories = open_advisories()
+    except store_errors():
+        logger.debug("[digest] the advisory check could not be read", exc_info=True)
+        advisories = []
+        lines.append("  the last dependency advisory check could not be read")
+    if advisories:
+        lines.append(f"  {count_noun(len(advisories), 'dependency advisory', 'dependency advisories')} still open:")
+        for item in advisories[:_ADVISORIES_SHOWN]:
+            lines.append(f"    {item.get('package')} {item.get('version')}: {item.get('id')} -- {item.get('fix', '')}")
+        if len(advisories) > _ADVISORIES_SHOWN:
+            lines.append(f"    and {len(advisories) - _ADVISORIES_SHOWN} more (the security report lists them)")
+    return lines
+
+
 def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     """Render the digest. A log or the approval registry that cannot be read
     is skipped and said, so a usable digest goes out regardless."""
@@ -616,10 +658,12 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
 
     problems.update(digest_problems())
     problems = {k: v for k, v in problems.items() if v}
-    if problems:
+    packages = _package_lines()
+    if problems or packages:
         lines.append("")
         lines.append("Needs attention:")
         lines += [f"  {k}: {v}" for k, v in problems.items()]
+        lines += packages
 
     raised = {k: t for k, t in alerts.items() if t["attention"]}
     notices = {k: t for k, t in alerts.items() if not t["attention"]}
@@ -629,7 +673,7 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
             lines.append(heading)
             lines += _alert_lines(group)
 
-    if not recovered and not problems and not raised:
+    if not recovered and not problems and not packages and not raised:
         lines.append("")
         lines.append("No failures, no restarts, no alerts.")
 

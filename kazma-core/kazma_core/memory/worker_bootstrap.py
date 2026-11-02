@@ -1188,6 +1188,14 @@ def _malware_signatures() -> None:
     signature_alert_sweep()
 
 
+def _dependency_advisories() -> None:
+    # Roadmap theme 11 (after FA-258): once a day, OSV asked about every
+    # installed version; a new advisory is told in one ops alert.
+    from kazma_core.security.advisory_watch import advisory_sweep
+
+    advisory_sweep()
+
+
 def _run_incident_retention() -> None:
     # Run supervision (kazma_core.runs): an incident nobody answered in a
     # week expires; finished ones are kept 30 days, then purged.
@@ -1220,6 +1228,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("supervisor watch", _watch_supervisor),
     ("document worker broker", _document_broker),
     ("malware signatures", _malware_signatures),
+    ("dependency advisories", _dependency_advisories),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),

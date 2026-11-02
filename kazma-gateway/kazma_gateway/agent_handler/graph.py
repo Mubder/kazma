@@ -10,6 +10,7 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from kazma_core import language_lock
 from kazma_gateway.gateway import Attachment, IncomingMessage, OutboundMessage, SessionStore
 from kazma_gateway.telegram_format import md_to_tg_html
 from kazma_gateway.slash_commands import changes_global_config, is_slash_command, resolve_slash_command
@@ -869,7 +870,10 @@ def create_graph_handler(
             if not ctx:
                 ctx = msg.context_metadata
             budget_text, budget_ctx = _prepare_tg_outbound(
-                msg, "⚠️ ميزانية الجلسة انتهت. (Budget exceeded)", ctx
+                msg,
+                language_lock.in_their_language(msg.text, "⚠️ This chat's budget is spent.",
+                                  "⚠️ ميزانية الجلسة انتهت."),
+                ctx,
             )
             await manager.send(
                 OutboundMessage(
@@ -2038,9 +2042,12 @@ def create_graph_handler(
                                    "it is saved in the chat", sender, msg.platform)
                     await manager.send(OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),
-                        text=("⚠️ لم يصل جزء من ردّي هنا؛ الرد كاملاً محفوظ في هذه المحادثة على الويب (/sessions). "
-                              "(Part of my reply did not arrive here; the whole answer is saved in this "
-                              "chat on the web: /sessions.)"),
+                        text=language_lock.in_their_language(
+                            msg.text,
+                            "⚠️ Part of my reply did not arrive here; the whole answer is saved in "
+                            "this chat on the web (/sessions).",
+                            "⚠️ لم يصل جزء من ردّي هنا؛ الرد كاملاً محفوظ في هذه المحادثة على الويب (/sessions).",
+                        ),
                         context_metadata=dict(ctx),
                     ))
 
@@ -2049,7 +2056,10 @@ def create_graph_handler(
                 # Use msg.context_metadata directly instead of re-accessing
                 # the store (which may be the source of the original exception)
                 ctx = msg.context_metadata
-                err_msg = "⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)"
+                err_msg = language_lock.in_their_language(
+                    msg.text, "⚠️ Something went wrong while handling your message.",
+                    "⚠️ حدث خطأ أثناء معالجة رسالتك.",
+                )
                 # LangGraph tool-loop cap — salvage partial work + guide recovery
                 _exc_name = type(inv_exc).__name__
                 _exc_s = str(inv_exc or "")
@@ -2154,14 +2164,14 @@ def create_graph_handler(
                             logger.debug(
                                 "[agent-handler] recursion budget counter failed", exc_info=True
                             )
-                        err_msg = (
-                            "⚠️ توقفت المهمة بعد حلقات أدوات كثيرة (حد التكرار).\n"
-                            "⚠️ Turn stopped: tool loop hit the recursion limit "
-                            "before finishing.\n"
+                        err_msg = language_lock.in_their_language(
+                            msg.text,
+                            "⚠️ Turn stopped: tool loop hit the recursion limit before finishing.\n"
                             "Reply with the *remaining* steps only so we continue "
-                            "without re-doing graph cleanup."
-                            + long_hint
-                        )
+                            "without re-doing graph cleanup.",
+                            "⚠️ توقفت المهمة بعد حلقات أدوات كثيرة (حد التكرار).\n"
+                            "أرسل *الخطوات المتبقية* فقط لنكمل بدون إعادة ما تم.",
+                        ) + long_hint
                 err_text, err_ctx = _prepare_tg_outbound(msg, err_msg, ctx)
                 await manager.send(
                     OutboundMessage(

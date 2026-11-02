@@ -277,7 +277,9 @@ EXTERNAL_STORES: tuple[MemoryStore, ...] = (
         "self-improvement lessons (settings self_improvement.agent_evolution)", "external", "forget",
         "derived_text",
         forget="forget_mentions removes every lesson holding the text, from the Soul and its history "
-               "(self_improvement.forget_text); since 2026-10-19 a lesson no longer quotes the task",
+               "(self_improvement.forget_text); since 2026-10-19 a lesson no longer quotes the task; "
+               "since 2026-11 forgetting a turn or a chat takes back the lessons it taught "
+               "(self_improvement.forget_lessons_from, by the source each lesson records)",
         export="", excluded="the agent's own guidance, not the user's memory",
     ),
     MemoryStore(

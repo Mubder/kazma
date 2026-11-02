@@ -168,7 +168,9 @@ def test_a_rendered_arabic_pdf_reads_back_in_order(tmp_path, case_id):
         assert "الاصطناعي" in text and "في" in text
         assert "2026-09-30" in text and "30-09-2026" not in text
         # The producer maps the tanween to "/": dropped, never read as text.
-        assert "ريالا في" in text and "/" not in text
+        # A LibreOffice that draws the mark itself (seen 2026-11-02 on the
+        # development machine) is read with it, as the source has it.
+        assert ("ريالا في" in text or "ريالاً في" in text) and "/" not in text
         table = next(b.text for p in ir.pages for b in p.blocks if str(b.block_type) == "table")
         assert table.splitlines()[0] == "المنطقة | الوحدات | الإيراد"  # right-to-left columns
         # The row in column order, words apart. Re-pointed 2026-10-18: a

@@ -312,6 +312,83 @@ jobs:
           # DSN, and this job would silently prove nothing (audit F-7).
           KAZMA_TEST_ALLOW_REAL_DB: "1"
 
+  recovery-drills:
+    name: Recovery drills (real restic, a real Postgres stopped)
+    runs-on: ubuntu-latest
+    # Roadmap theme 2 (2026-11): every recovery the docs promise is drilled
+    # with the real thing. These tests skip where restic or a throwaway
+    # Postgres container is missing -- which is every other job -- so they
+    # run here, and a skip FAILS this job: a drill that does not run proves
+    # nothing (the restic drill found every SQLite restore ending FAILED).
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install deps, restic and Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y restic tesseract-ocr tesseract-ocr-eng
+          restic version
+          tesseract --version
+          pip install -e ".[test,postgres,document,ocr,document-platform]"
+      - name: Start a throwaway Postgres the drill may stop
+        run: |
+          docker run -d --name kazma-drill-pg -e POSTGRES_USER=kazma -e POSTGRES_PASSWORD=kazma \
+            -e POSTGRES_DB=kazma_drill -p 5433:5432 postgres:16
+          for i in $(seq 1 30); do docker exec kazma-drill-pg pg_isready -U kazma && break; sleep 2; done
+      - name: Backup and restore drills (GATE, no skips)
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_drill_restic_restore_recall.py tests/test_drill_restic_lock_handling.py \
+            tests/test_restic_repo.py -v -rs --timeout=600 -p no:cacheprovider | tee "$RUNNER_TEMP/restic.log"
+          if grep -Eq "[0-9]+ skipped" "$RUNNER_TEMP/restic.log"; then
+            echo "::error::a restic drill was skipped"; exit 1
+          fi
+      - name: A database outage is ridden out (GATE, no skips)
+        run: |
+          set -o pipefail
+          python -m pytest "tests/test_pg_outage_ridden_out.py::test_a_real_postgres_outage_is_ridden_out" \
+            -v -rs --timeout=300 -p no:cacheprovider | tee "$RUNNER_TEMP/outage.log"
+          if grep -Eq "[0-9]+ skipped" "$RUNNER_TEMP/outage.log"; then
+            echo "::error::the Postgres outage drill was skipped"; exit 1
+          fi
+        env:
+          KAZMA_DB_BACKEND: postgres
+          KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5433/kazma_drill
+          KAZMA_TEST_ALLOW_REAL_DB: "1"
+          KAZMA_DB_CONTAINER: kazma-drill-pg
+          KAZMA_TEST_PG_OUTAGE_CONTAINER: kazma-drill-pg
+      - name: Memory restore drill on Postgres (GATE, no skips)
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_memory_restore_drill_pg.py -v -rs --timeout=600 -p no:cacheprovider \
+            | tee "$RUNNER_TEMP/memory-pg.log"
+          if grep -Eq "[0-9]+ skipped" "$RUNNER_TEMP/memory-pg.log"; then
+            echo "::error::the Postgres memory restore drill was skipped"; exit 1
+          fi
+        env:
+          KAZMA_DB_BACKEND: postgres
+          KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5433/kazma_drill
+          KAZMA_TEST_ALLOW_REAL_DB: "1"
+          KAZMA_DB_CONTAINER: kazma-drill-pg
+      - name: A graceful reload with a turn and an OCR job running (GATE, no skips)
+        # The real guard over the real serve.py in a private install; a hard
+        # kill is the negative control. Its first run found three defects
+        # (the attached tab never told of the restart, the OCR process left
+        # running, the process not ending after its own shutdown).
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_drill_graceful_reload.py -v -rs --timeout=900 -p no:cacheprovider | tee "$RUNNER_TEMP/reload.log"
+          if grep -Eq "[0-9]+ skipped" "$RUNNER_TEMP/reload.log"; then
+            echo "::error::the reload drill was skipped"; exit 1
+          fi
+        env:
+          KAZMA_TEST_RELOAD_DRILL: "1"
+      - name: Remove the throwaway Postgres
+        if: always()
+        run: docker rm -f kazma-drill-pg || true
+
   unified-turn-lifecycle:
     name: Unified turn lifecycle (GATE)
     runs-on: ubuntu-latest

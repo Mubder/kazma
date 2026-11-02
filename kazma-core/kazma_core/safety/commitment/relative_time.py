@@ -128,8 +128,20 @@ _RE_N_UNITS_EN = re.compile(
 )
 # bare calendar relatives
 _RE_CALENDAR_EN = re.compile(
-    r"\b(tomorrow|next\s+week|next\s+month|in\s+a\s+week|in\s+a\s+day)\b",
+    r"\b((?:the\s+)?day\s+after\s+tomorrow|tomorrow|next\s+week|next\s+month|in\s+a\s+week|in\s+a\s+day)\b",
     re.IGNORECASE,
+)
+# The same calendar relatives in Arabic, MSA and Gulf (roadmap theme 6,
+# 2026-11): "بكرة الساعة 9 الصبح" found no time expression at all and asked
+# when, while "tomorrow at 9am" fired at nine -- the resolver's docstring
+# named the Arabic as handled. An optional و ("and") may lead.
+_RE_CALENDAR_AR = re.compile(
+    r"(?<![\w])و?("
+    r"بعد\s+(?:بكرة|بكره|باجر|باچر|غد|الغد)"
+    r"|بكرة|بكره|باجر|باچر|غدا|غداً|غدًا"
+    r"|ال[أاإ]سبوع\s+(?:الجاي|الياي|القادم|المقبل)"
+    r"|الشهر\s+(?:الجاي|الياي|القادم|المقبل)"
+    r")(?![\w])"
 )
 # Scheduler-native compact shorthand: "5m", "24h", "1386m" (mirrors
 # the scheduler's relative delays, cron.timing.resolve_timing). Without this the commitment
@@ -735,12 +747,28 @@ def parse_time_expressions(
     # --- bare calendar relatives (tomorrow, next week) ---
     for m in _RE_CALENDAR_EN.finditer(norm):
         word = m.group(1).lower()
-        if "tomorrow" in word or "a day" in word:
+        if "after tomorrow" in word:
+            lead = timedelta(days=2)
+        elif "tomorrow" in word or "a day" in word:
             lead = timedelta(days=1)
         elif "week" in word:
             lead = timedelta(weeks=1)
         else:
             lead = timedelta(days=30)
+        exprs.append(TimeExpression(
+            phrase=m.group(0), kind="calendar",
+            lead=lead, direction="after",
+        ))
+    for m in _RE_CALENDAR_AR.finditer(norm):
+        word = m.group(1)
+        if word.startswith("بعد"):
+            lead = timedelta(days=2)
+        elif "سبوع" in word:
+            lead = timedelta(weeks=1)
+        elif word.startswith("الشهر"):
+            lead = timedelta(days=30)
+        else:
+            lead = timedelta(days=1)
         exprs.append(TimeExpression(
             phrase=m.group(0), kind="calendar",
             lead=lead, direction="after",

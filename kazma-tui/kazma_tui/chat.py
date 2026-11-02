@@ -1394,15 +1394,18 @@ class ChatPanel(Vertical):
 
     @staticmethod
     def _get_system_prompt() -> str:
-        """Load the system prompt from kazma.yaml or ConfigStore.
+        """The system prompt the agent runs with: Settings' ``agent.system_prompt``,
+        else the install's kazma.yaml (``agent_runner.load_config``'s order).
 
         Unused by the live chat path (TUI posts to the supervisor).
-        Kept for /context and export helpers.
+        Kept for /context and export helpers. It read the top-level
+        ``system_prompt`` row, which no agent reads: on the live install an
+        817-character prompt from months before (2026-11, roadmap theme 4).
         """
         try:
             from kazma_core.config_store import get_config_store
             cs = get_config_store()
-            prompt = cs.get("system_prompt")
+            prompt = cs.get("agent.system_prompt")
             if prompt:
                 return str(prompt)
         except Exception as exc:

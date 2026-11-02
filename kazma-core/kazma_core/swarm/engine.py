@@ -2350,12 +2350,19 @@ class SwarmEngine:
         if self._task_store is None:
             return
         try:
-            await asyncio.to_thread(self._task_store.persist_task, task)
+            written = await asyncio.to_thread(self._task_store.persist_task, task)
         except Exception:
             # The step runs: the row is RUNNING (its admission), so a crash in
             # it is still held as unknown at the next start; only which step
             # it stopped in is lost (SQ04: was a WARNING, never counted).
             logger.warning("[SwarmEngine] could not journal step %d of '%s'", step, task.id, exc_info=True)
+            record_swarm_failure("step_journal")
+            return
+        if not written:
+            # Refused by the transition table (roadmap theme 1): a newer run
+            # owns the row, or it is finished. Said, not taken for journaled.
+            logger.warning("[SwarmEngine] the store refused the journal of step %d of '%s' "
+                           "(a newer run owns its row, or it is finished)", step, task.id)
             record_swarm_failure("step_journal")
 
     async def _resume(
