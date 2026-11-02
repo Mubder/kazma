@@ -2305,6 +2305,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "كانت هذه الخطوة أكبر من أن تُحفظ كاملة: يمكن قراءتها، لا استعادتها ولا التفريع منها.",
         "en": "This step was too large to keep whole: it can be read, not restored or forked.",
     },
+    "replay.refused_memory_ledger": {
+        "ar": "تعذّر نسخ ما تُبقيه هذه المحادثة خارج الذاكرة إلى الفرع، فلم يُنشأ شيء. سجل الخادم يذكر السبب.",
+        "en": "What this chat keeps out of memory could not be copied to the fork, so nothing was forked. The server log says why.",
+    },
     "replay.fork_open": {
         "ar": "افتح المحادثة الجديدة",
         "en": "Open the new chat",

@@ -30,6 +30,11 @@ def test_backend_default_sqlite(monkeypatch):
 def test_task_store_sqlite_roundtrip(tmp_path, monkeypatch):
     monkeypatch.delenv("KAZMA_DATABASE_URL", raising=False)
     monkeypatch.delenv("KAZMA_DB_BACKEND", raising=False)
+    # The store's own round trip: the tenant filter list_tasks applies reads
+    # the settings store, which the Postgres suite's process holds on the
+    # Postgres it just removed from the environment (tenancy has its own
+    # tests: tests/test_swarm_route_roles.py, tests/test_tenant_isolation*).
+    monkeypatch.setenv("KAZMA_TENANT_FILTER", "0")
     db = tmp_path / "swarm.db"
     store = TaskStore(db_path=str(db))
     assert store._pg is False

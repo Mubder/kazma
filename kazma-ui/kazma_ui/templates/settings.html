@@ -1110,18 +1110,6 @@
                     <label>{{ t('settings.max_context_tokens') }}</label>
                     <input type="number" class="form-input" x-model.number="context.max_context_tokens" min="1024" max="1000000">
                 </div>
-                <div class="form-group">
-                    <label>{{ t('settings.strategy') }}</label>
-                    <select class="form-select" x-model="context.context_strategy">
-                        <option value="sliding_window">{{ t('settings.sliding_window') }}</option>
-                        <option value="summarize">{{ t('settings.summarize_old') }}</option>
-                        <option value="truncate">{{ t('settings.truncate_oldest') }}</option>
-                    </select>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>{{ t('settings.summarization_threshold') }} <span x-text="context.summarization_threshold"></span></label>
-                <input type="range" class="form-range" x-model.number="context.summarization_threshold" min="0.5" max="0.95" step="0.05">
             </div>
             <button class="btn btn-primary" @click="saveContext()">{{ t('settings.save_context') }}</button>
         </div>
@@ -1782,25 +1770,6 @@
             </div>
         </div>
 
-        <div class="settings-group">
-            <h3>{{ t('settings.layout') }}</h3>
-            <div class="form-group">
-                <label>{{ t('settings.sidebar_position') }}</label>
-                <select class="form-select" x-model="appearance.sidebar_position" style="width:200px">
-                    <option value="left">{{ t('settings.left') }}</option>
-                    <option value="right">{{ t('settings.right') }}</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="settings-group">
-            <h3>{{ t('settings.custom_css') }}</h3>
-            <div class="form-group">
-                <label>{{ t('settings.inject_custom_css') }}</label>
-                <textarea class="form-textarea" x-model="appearance.custom_css" rows="4" style="font-family:var(--font-mono)" translate="no" placeholder="/* Custom overrides */"></textarea>
-            </div>
-        </div>
-
         <button class="btn btn-primary" @click="saveAppearance()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_appearance') }}'"></button>
     </div>
 
@@ -1909,13 +1878,13 @@
             <div class="account-list-table account-sessions-table" x-show="sessions.length > 0" x-cloak>
               <div class="account-list-head account-sessions-head">
                 <span>{{ t('dashboard.col_platform') }}</span>
-                <span>{{ t('settings.last_active') }}</span>
+                <span>{{ t('settings.signed_in_at') }}</span>
                 <span></span>
               </div>
               <template x-for="s in sessions" :key="s.id || s.platform">
                 <div class="account-list-row account-sessions-row">
                   <span class="account-list-name" x-text="s.platform || t('settings.web')"></span>
-                  <span class="account-list-meta" x-text="s.last_active || ''"></span>
+                  <span class="account-list-meta" x-text="window.KazmaFormat ? KazmaFormat.dateTime(s.started_at) : ''"></span>
                   <span class="account-list-actions">
                     <span class="badge badge-stdio" x-show="s.current" x-cloak>{{ t('settings.current') }}</span>
                   </span>

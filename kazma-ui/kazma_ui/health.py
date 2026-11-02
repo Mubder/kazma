@@ -429,6 +429,16 @@ async def readiness(request: Request):
         return await _readiness(runtime=runtime, required=required)
 
 
+#: The thread each component's check is running in, while it runs (FA-259).
+#: A thread cannot be cancelled: a check past its cap keeps running, and
+#: every later probe used to start another beside it. During a database
+#: outage each probe left ten to twelve threads waiting on the pool, the
+#: shared worker threads filled, and the probe itself could not answer. One
+#: check per component at a time: a probe that finds one still running waits
+#: for that one, up to its own cap.
+_running_checks: dict[str, asyncio.Future[Any]] = {}
+
+
 async def _offloaded_check(check: Any, component: str, timeout_s: float) -> dict[str, Any]:
     """Run a check that can reach a database or the network off the loop, capped.
 
@@ -436,14 +446,26 @@ async def _offloaded_check(check: Any, component: str, timeout_s: float) -> dict
     freezes every stream while it waits -- then fails, and gets Kazma killed.
     Timing out is an answer: the component did not respond in time.
     """
-    try:
-        return await asyncio.wait_for(asyncio.to_thread(check), timeout=timeout_s)
-    except TimeoutError:
-        return {
-            "status": "failed",
-            "component": component,
-            "error": f"timed out ({timeout_s:.0f}s)",
-        }
+    loop = asyncio.get_running_loop()
+    running = _running_checks.get(component)
+    if running is None or running.done() or running.get_loop() is not loop:
+        running = asyncio.ensure_future(asyncio.to_thread(check))
+        running.add_done_callback(_retrieve_check)
+        _running_checks[component] = running
+    done, _ = await asyncio.wait({running}, timeout=timeout_s)
+    if running in done:
+        return running.result()
+    return {
+        "status": "failed",
+        "component": component,
+        "error": f"timed out ({timeout_s:.0f}s)",
+    }
+
+
+def _retrieve_check(task: asyncio.Future[Any]) -> None:
+    """Read a check's outcome so one nobody awaited is never reported unretrieved."""
+    if not task.cancelled():
+        task.exception()
 
 
 def _check_chat_runtime(runtime: Any) -> dict[str, Any]:

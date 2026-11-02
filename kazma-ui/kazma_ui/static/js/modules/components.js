@@ -35,6 +35,20 @@ function _setMeta(name, content) {
     el.setAttribute('content', content);
 }
 
+/* The owner's accent colour on <html> (Settings > Appearance). Every page
+ * applies it; it was applied only when the Settings page itself loaded. */
+export function applyAccentColor(hex) {
+    if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const root = document.documentElement;
+    root.style.setProperty('--accent', hex);
+    root.style.setProperty('--accent-rgb', r + ', ' + g + ', ' + b);
+    root.style.setProperty('--accent-subtle', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.12)');
+    root.style.setProperty('--accent-glow', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.28)');
+}
+
 export function kazmaApp() {
     return {
         theme: 'dark',
@@ -67,6 +81,7 @@ export function kazmaApp() {
                 .then(r => r.json())
                 .then(d => {
                     if (d && d.font_size) this.fontSize = d.font_size;
+                    if (d && d.accent_color_chosen) applyAccentColor(d.accent_color);
                     // 'auto' resolves to the OS preference (SSR guessed dark;
                     // correct it here so an Auto user on a Light OS doesn't
                     // see a one-frame dark flash stay). light/dark apply as-is.

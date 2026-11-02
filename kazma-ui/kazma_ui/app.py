@@ -263,13 +263,17 @@ class KazmaAppBuilder:
         self._adopt_process_environment()
 
         from kazma_core.agent import KazmaAgent, load_config
+        from kazma_core.config_availability import wait_for_settings_store
         from kazma_core.config_store import ConfigStore, get_config_store, set_config_store
         from kazma_core.model_registry import ModelRegistry, initialize_model_registry
         from kazma_core.service_container import get_container
 
         # Abort before vault migration, worker wiring or automation can use
-        # defaults from a failed settings backend. The guard retries boot.
-        get_config_store()
+        # defaults from a failed settings backend -- but wait for a database
+        # that is away first (FA-259): a boot during an outage gave up after
+        # five pool attempts and exited, and the guard's growing wait between
+        # boots kept Kazma down 4.5 min after a 12-min outage had ended.
+        wait_for_settings_store(get_config_store)
 
         # Ensure KAZMA_SECRET is configured
         import sys
@@ -1900,6 +1904,13 @@ class KazmaAppBuilder:
             from kazma_core.install_requirements import report_unmet_requirements
 
             spawn_background(_aio.to_thread(report_unmet_requirements), name="install-requirements")
+
+            # ── A service of Kazma's reachable beyond this machine ───
+            # A database published on every interface, or signed in to as
+            # a superuser (FA-218). Said once at boot, in the background.
+            from kazma_core.security.service_exposure import report_exposure
+
+            spawn_background(_aio.to_thread(report_exposure), name="service-exposure")
 
             # ── The document worker broker the guard runs ───────────
             # Tell the guard now whether documents need it (it then starts

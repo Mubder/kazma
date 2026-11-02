@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 from kazma_core.config_store import get_config_store
 
-__all__ = ["SelfImprovementSkill", "forget_text", "get_self_improvement"]
+__all__ = ["SelfImprovementSkill", "forget_text", "get_self_improvement", "learn_from_finished_turn"]
 
 logger = logging.getLogger(__name__)
 
@@ -49,44 +52,70 @@ def _llm_for_delta() -> Any:
     return client
 
 
-def _cap_evolution_prompt(base_prompt: str, new_delta: str) -> str:
-    """Append a SelfImprovement delta, bounded by max chars/blocks.
+#: What the analyzer wrote when no Meta-Refiner answered, until 2026-11 (FA-212).
+#: They say nothing, and in the Soul's twelve blocks six of them evicted half
+#: of the owner's lessons during a provider outage; read past and dropped.
+_TEMPLATE_LESSONS = (
+    re.compile(r"^\d+/\d+ stages failed\.$"),
+    re.compile(r"^Task successfully completed \(\d+% rate\)\.$"),
+)
 
-    Splits *base_prompt* into the original Soul text and any previously
-    accumulated ``[SelfImprovement]`` blocks, appends *new_delta*, then
-    keeps only the most recent blocks that fit within
-    ``_MAX_SYSTEM_PROMPT_CHARS`` and ``_MAX_EVOLUTION_BLOCKS`` so the
-    system prompt cannot grow without bound across pipeline runs.
+
+def _is_template(lesson: str) -> bool:
+    return any(p.match(lesson.strip()) for p in _TEMPLATE_LESSONS)
+
+
+def _lessons(text: str) -> tuple[str, list[str]]:
+    """``(the Soul's own text, [lesson, ...])``: each lesson whole, without its
+    separator and marker, the template lines left out.
+
+    The old cap rebuilt the blocks with the separator their split had kept,
+    so every write added a blank line to each older lesson."""
+    soul, _, rest = (text or "").partition(_EVOLUTION_MARKER)
+    lessons = [b.strip() for b in rest.split(_EVOLUTION_MARKER) if b.strip()]
+    return soul.rstrip(), [lesson for lesson in lessons if not _is_template(lesson)]
+
+
+def _render(soul: str, lessons: list[str]) -> str:
+    return soul + "".join(f"\n\n{_EVOLUTION_MARKER} {lesson}" for lesson in lessons)
+
+
+def _lesson_of(delta: str) -> str:
+    """The lesson a delta carries: its text, one block (a marker inside it
+    would split it in two when read back)."""
+    return (delta or "").replace(_EVOLUTION_MARKER, " ").strip()
+
+
+def _lesson_fits(delta: str) -> bool:
+    """A lesson Kazma keeps: something to say, whole within the cap. A lesson
+    too long is refused, never cut: half a lesson in every prompt says
+    something else (FA-212)."""
+    lesson = _lesson_of(delta)
+    return bool(lesson) and len(lesson) <= _MAX_DELTA_CHARS and not _is_template(lesson)
+
+
+def _cap_evolution_prompt(base_prompt: str, new_delta: str) -> str:
+    """The Soul *base_prompt* with the lesson *new_delta* added, bounded.
+
+    Keeps the newest whole lessons within ``_MAX_EVOLUTION_BLOCKS`` and
+    ``_MAX_SYSTEM_PROMPT_CHARS``, so the prompt cannot grow without bound. A
+    delta that is not a lesson Kazma keeps (``_lesson_fits``) adds nothing.
     """
-    if not new_delta:
-        return base_prompt
-    soul, _, rest = base_prompt.partition(_EVOLUTION_MARKER)
-    soul = soul.rstrip()
-    existing = [
-        f"\n\n{_EVOLUTION_MARKER}{blk}"
-        for blk in rest.split(_EVOLUTION_MARKER)
-        if blk.strip()
-    ]
-    delta = new_delta.strip()
-    if _EVOLUTION_MARKER not in delta:
-        delta = f"{_EVOLUTION_MARKER} {delta}"
-    if not delta.startswith("\n\n"):
-        delta = "\n\n" + delta
-    # Truncate a single runaway delta so it cannot exceed the cap alone.
-    if len(delta) > _MAX_DELTA_CHARS:
-        delta = delta[:_MAX_DELTA_CHARS].rstrip() + "…"
-    blocks = existing + [delta]
+    soul, lessons = _lessons(base_prompt)
+    if _lesson_fits(new_delta):
+        lessons.append(_lesson_of(new_delta))
     kept: list[str] = []
     total = len(soul)
-    for blk in reversed(blocks):
+    for lesson in reversed(lessons):
+        size = len(_EVOLUTION_MARKER) + len(lesson) + 3
         if len(kept) >= _MAX_EVOLUTION_BLOCKS:
             break
-        if total + len(blk) > _MAX_SYSTEM_PROMPT_CHARS and kept:
+        if total + size > _MAX_SYSTEM_PROMPT_CHARS and kept:
             break
-        kept.append(blk)
-        total += len(blk)
+        kept.append(lesson)
+        total += size
     kept.reverse()
-    return soul + "".join(kept)
+    return _render(soul, kept)
 
 
 class SelfImprovementSkill:
@@ -229,16 +258,19 @@ Output ONLY the delta text, no preamble."""
                 # No quote of the task: a lesson joins every later prompt, and
                 # "Task context: '<the user's message>'" put the user's own
                 # words there for good, out of Forget's reach (live 2026-10-19).
-                delta = f"\n\n[SelfImprovement] {response.content}"
+                delta = f"\n\n[SelfImprovement] {response.content or ''}"
+                if not _lesson_fits(delta):
+                    return {"action": "skip", "delta": "",
+                            "reason": "refiner answered no lesson that fits"}
                 reason = f"LLM-generated reinforcement from {len(stages)} stages ({rate:.0%} rate)"
                 logger.info("[SelfImprovement] %s SUCCESS — %s", worker_name, reason)
                 return {"action": "mutate", "delta": delta, "reason": reason}
         except Exception as exc:
             logger.warning("[SelfImprovement] LLM delta failed: %s", exc)
 
-        # Fallback: minimal template (static text — not injection-derived)
-        delta = f"\n\n[SelfImprovement] Task successfully completed ({rate:.0%} rate)."
-        return {"action": "mutate", "delta": delta, "reason": f"Template fallback — {len(stages)} stages"}
+        # No refiner, no lesson: a template line said nothing and took a
+        # place among the twelve in every later prompt (FA-212).
+        return {"action": "skip", "delta": "", "reason": "refiner unavailable"}
 
     # ── Failure analysis ────────────────────────────────────────────────
 
@@ -317,15 +349,18 @@ Output ONLY the delta text, no preamble."""
                 # No quote of the task: a lesson joins every later prompt, and
                 # "Task context: '<the user's message>'" put the user's own
                 # words there for good, out of Forget's reach (live 2026-10-19).
-                delta = f"\n\n[SelfImprovement] {response.content}"
+                delta = f"\n\n[SelfImprovement] {response.content or ''}"
+                if not _lesson_fits(delta):
+                    return {"action": "skip", "delta": "",
+                            "reason": "refiner answered no lesson that fits"}
                 reason = f"LLM-generated correction from {failed_count} failures"
                 logger.warning("[SelfImprovement] %s FAILURE — %s", worker_name, reason)
                 return {"action": "mutate", "delta": delta, "reason": reason}
         except Exception as exc:
             logger.warning("[SelfImprovement] LLM delta failed: %s", exc)
 
-        delta = f"\n\n[SelfImprovement] {failed_count}/{len(stages)} stages failed."
-        return {"action": "mutate", "delta": delta, "reason": f"Template fallback — {failed_count} failures"}
+        # No refiner, no lesson (FA-212): see _analyze_success.
+        return {"action": "skip", "delta": "", "reason": "refiner unavailable"}
 
     # ── Apply mutation ──────────────────────────────────────────────────
 
@@ -364,6 +399,10 @@ Output ONLY the delta text, no preamble."""
                 "[SelfImprovement] Delta for '%s' REJECTED at apply (injection marker) — dropped",
                 worker_name,
             )
+            return False
+        if not _lesson_fits(delta):
+            logger.warning("[SelfImprovement] Delta for '%s' not applied: no lesson that fits whole",
+                           worker_name)
             return False
         # Same soul-confirm gate as apply_agent_mutation (mint + hold if needed).
         if await asyncio.to_thread(_soul_requires_confirm):
@@ -592,12 +631,6 @@ _DEFAULT_AGENT_ID = "supervisor"
 _AGENT_EVO_KEY = "self_improvement.agent_evolution"
 _agent_evo_lock = __import__("threading").Lock()
 
-# Strong references to fire-and-forget chat-SI tasks (audit H3): without a
-# retained reference, CPython may GC the task mid-execution. Entries are
-# removed by add_done_callback when the task completes.
-_si_tasks: set[Any] = set()
-
-
 def _agent_evolution_path() -> Path:
     """Legacy JSON path — only used for one-time migration to ConfigStore."""
     from kazma_core.paths import data_dir
@@ -647,9 +680,6 @@ def _save_agent_evolution(data: dict[str, Any]) -> None:
     get_config_store().set(_AGENT_EVO_KEY, data)
 
 
-_LESSON_MARK = "\n\n[SelfImprovement]"
-
-
 def forget_text(text: str) -> int:
     """Remove every main-agent lesson that holds *text* (any case), from the
     Soul injected into every prompt and from its history. Returns how many.
@@ -668,15 +698,14 @@ def forget_text(text: str) -> int:
         _migrate_legacy_evolution_if_present()
         data = _load_agent_evolution()
         for entry in (data.get("agents") or {}).values():
-            soul = str(entry.get("soul") or "")
-            base, *lessons = soul.split(_LESSON_MARK)
+            base, lessons = _lessons(str(entry.get("soul") or ""))
             kept = [b for b in lessons if needle not in b.casefold()]
             hist = list(entry.get("history") or [])
             kept_hist = [h for h in hist if needle not in str(h.get("delta") or "").casefold()]
             if len(kept) == len(lessons) and len(kept_hist) == len(hist):
                 continue
             removed += (len(lessons) - len(kept)) + (len(hist) - len(kept_hist))
-            entry["soul"] = base + "".join(_LESSON_MARK + b for b in kept)
+            entry["soul"] = _render(base, kept)
             entry["history"] = kept_hist
         if removed:
             _save_agent_evolution(data)
@@ -705,8 +734,9 @@ def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID) -> str:
         _migrate_legacy_evolution_if_present()
         data = _load_agent_evolution()
         entry = (data.get("agents") or {}).get(agent_id) or {}
-        block = str(entry.get("soul") or "").strip()
-        return block
+        # Read through the parser: a Soul written before 2026-11 carries the
+        # template lines and runs of blank lines (FA-212).
+        return _render(*_lessons(str(entry.get("soul") or ""))).strip()
 
 
 def _soul_requires_confirm() -> bool:
@@ -782,8 +812,14 @@ def mint_soul_commitment(delta: str, *, agent_id: str | None = None,
         return None
 
 
-def apply_agent_mutation(agent_id: str, delta: str, *, commitment_id: str | None = None) -> bool:
-    """Cap and persist a Soul delta for the main (or named) agent)."""
+def apply_agent_mutation(
+    agent_id: str, delta: str, *, commitment_id: str | None = None,
+    source: dict[str, Any] | None = None,
+) -> bool:
+    """Cap and persist a Soul delta for the main (or named) agent.
+
+    *source* names the chat turn the lesson came from (``chat``, ``turn``),
+    kept in its history entry."""
     if not delta or not self_improvement_enabled():
         return False
     # Defense-in-depth injection guard (audit C1): the creation-time check in
@@ -796,6 +832,10 @@ def apply_agent_mutation(agent_id: str, delta: str, *, commitment_id: str | None
             "[SelfImprovement] Agent '%s' delta REJECTED at apply (injection marker) — dropped",
             agent_id,
         )
+        return False
+    if not _lesson_fits(delta):
+        logger.warning("[SelfImprovement] Agent '%s' delta not applied: no lesson that fits whole",
+                       agent_id)
         return False
     # Commitment Layer Phase 7 (§R2.5): behavior mutation is a critical act.
     # When soul_requires_confirm is ON the delta applies ONLY once a
@@ -829,7 +869,8 @@ def apply_agent_mutation(agent_id: str, delta: str, *, commitment_id: str | None
         hist.append(
             {
                 "ts": _time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "delta": delta[:_MAX_DELTA_CHARS],
+                "delta": _lesson_of(delta),
+                **({"source": dict(source)} if source else {}),
             }
         )
         entry["history"] = hist[-40:]
@@ -851,13 +892,18 @@ async def analyze_and_apply_chat_turn(
     error: str = "",
     output_snippet: str = "",
     agent_id: str = _DEFAULT_AGENT_ID,
+    source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run Meta-Refiner for a main-agent chat turn and persist Soul delta.
 
-    Call after Web SSE / gateway turns (not HITL pauses). Skips empty turns.
+    Reached through :func:`learn_from_finished_turn`. A turn that failed
+    teaches nothing (FA-212): its "lesson" was the failure's own text -- a
+    fault server's echo -- or, with the refiner down too, a template line.
     """
     if not self_improvement_enabled():
         return {"action": "skip", "reason": "disabled"}
+    if not success:
+        return {"action": "skip", "reason": "turn failed"}
     msg = (user_message or "").strip()
     if len(msg) < 2:
         return {"action": "skip", "reason": "empty user message"}
@@ -893,49 +939,88 @@ async def analyze_and_apply_chat_turn(
     # (returns None) when the flag is off → apply_agent_mutation ignores it.
     # Both write the settings store (a database on Postgres): off the loop.
     cid = await asyncio.to_thread(mint_soul_commitment, delta, agent_id=agent_id)
-    ok = await asyncio.to_thread(apply_agent_mutation, agent_id, delta, commitment_id=cid)
+    ok = await asyncio.to_thread(apply_agent_mutation, agent_id, delta, commitment_id=cid,
+                                 source=source)
     analysis["applied"] = ok
     analysis["agent_id"] = agent_id
     return analysis
 
 
-def schedule_chat_self_improvement(
-    *,
-    user_message: str,
-    success: bool,
-    error: str = "",
-    output_snippet: str = "",
-    agent_id: str = _DEFAULT_AGENT_ID,
-) -> None:
-    """Fire-and-forget SI after a chat turn (does not block the response)."""
+#: Turns already handed to the Meta-Refiner by this process: close_turn runs
+#: after every settlement of a turn, and a turn teaches once.
+_learned: OrderedDict[tuple[str, int, str], None] = OrderedDict()
+_learned_lock = threading.Lock()
+_LEARNED_MAX = 4096
+
+
+def learn_from_finished_turn(values: dict[str, Any] | None, *, thread_id: str = "") -> bool:
+    """Hand a finished chat turn to the Meta-Refiner. True when it was scheduled.
+
+    Called by ``kazma_ui.turn_runtime.close_turn`` alone, beside the memory
+    hand-off, with the graph's terminal state: every transport closes its
+    turns there. A lesson joins every later prompt, so a turn teaches only
+    what memory would keep (FA-212):
+
+    * not a failed turn (``turn_failed``): its lesson was the failure's text;
+    * only the turn ``respond_node`` finalized (``_post_turn_memory`` naming
+      this turn, as ``consolidator.remember_turn`` reads it);
+    * not a turn the forget ledger keeps out, nor a chat kept out of memory
+      (asked off the loop, before the refiner is called).
+
+    The web stream and the gateway each scheduled it themselves from the
+    reply's text (a "⚠️" prefix, an empty answer) and never asked the
+    ledger. Never raises.
+    """
     if not self_improvement_enabled():
-        return
-    import asyncio
+        return False
+    values = values if isinstance(values, dict) else {}
+    if values.get("turn_failed"):
+        return False
+    post = values.get("_post_turn_memory")
+    if not isinstance(post, dict):
+        return False
+    from kazma_core.memory.consolidator import extract_turn_texts, user_turn_index
 
-    async def _run() -> None:
-        try:
-            await analyze_and_apply_chat_turn(
-                user_message=user_message,
-                success=success,
-                error=error,
-                output_snippet=output_snippet,
-                agent_id=agent_id,
-            )
-        except Exception as exc:
-            logger.debug("[SelfImprovement] chat SI failed: %s", exc)
-
+    messages = list(values.get("messages") or [])
+    turn = user_turn_index(messages)
     try:
-        loop = asyncio.get_running_loop()
-        # Retain a strong reference to the task so CPython doesn't garbage-
-        # collect it mid-execution (the loop only holds a weak ref). The
-        # done-callback discards it once complete to avoid a leak. This is
-        # the same idiom SwarmEngine uses for task-handle retention.
-        task = loop.create_task(_run())
-        _si_tasks.add(task)
-        task.add_done_callback(_si_tasks.discard)
-    except RuntimeError:
-        # No running loop (sync context) — best-effort skip
-        logger.debug("[SelfImprovement] no event loop for chat SI")
+        if int(post.get("turn") or 0) != turn:
+            return False
+    except (TypeError, ValueError):
+        return False
+    session = str(post.get("session_id") or thread_id or "")
+    question, answer = extract_turn_texts(messages)
+    if not session or not question.strip() or not answer.strip():
+        return False
+    key = (session, turn, question[:512])
+    with _learned_lock:
+        if key in _learned:
+            return False
+        _learned[key] = None
+        while len(_learned) > _LEARNED_MAX:
+            _learned.popitem(last=False)
+    from kazma_core.background import spawn_background
+
+    spawn_background(
+        _learn_from_turn(question, answer, session=session, turn=turn,
+                         tenant_id=str(post.get("tenant_id") or "default")),
+        name=f"self-improvement:{session[:12]}",
+    )
+    return True
+
+
+async def _learn_from_turn(
+    question: str, answer: str, *, session: str, turn: int, tenant_id: str,
+) -> dict[str, Any]:
+    from kazma_core.memory.forget import turn_kept_out
+
+    if await asyncio.to_thread(turn_kept_out, session, turn, question, tenant_id=tenant_id):
+        logger.info("[SelfImprovement] no lesson from %s turn %d: kept out of memory", session[:12], turn)
+        return {"action": "skip", "reason": "kept out of memory"}
+    return await analyze_and_apply_chat_turn(
+        user_message=question, success=True, output_snippet=answer[:600],
+        source={"chat": session, "turn": turn},
+    )
 
 
 def get_self_improvement() -> SelfImprovementSkill:

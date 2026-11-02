@@ -820,6 +820,26 @@ def is_sensitive_path(path: str) -> bool:
     return False
 
 
+#: The probes the guard, an orchestrator or a monitor polls (FA-259). They
+#: need no cookie and no tenant, and must answer while the database is away:
+#: the middlewares' settings reads go to the shared worker threads, which an
+#: outage fills with reads waiting on the pool, so a probe that waited for
+#: one got no answer in the guard's 10 s and Kazma was killed over a
+#: two-minute Postgres outage. Exact paths only; ``/health/details`` and
+#: ``/health/activity`` are not probes.
+HEALTH_PROBE_PATHS: frozenset[str] = frozenset({
+    "/health",
+    "/health/live",
+    "/health/ready",
+    "/health/deep",
+})
+
+
+def _is_health_probe(path: str) -> bool:
+    """True for a health probe, which the middlewares pass straight through."""
+    return path in HEALTH_PROBE_PATHS
+
+
 def is_always_open(path: str) -> bool:
     """Return *True* for read-only/page/redirect routes that bypass auth.
 
@@ -1320,6 +1340,13 @@ def create_auth_middleware(
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         path = request.url.path
+        # A probe passes before any settings read (FA-259): it is always
+        # open, and the only thing below it could get is a cookie. The
+        # undeclared-proxy detector still sees it (request and environment
+        # only, no store).
+        if _is_health_probe(path):
+            _note_forwarded_headers(request)
+            return await call_next(request)
         expected = static_secret if static_secret is not None else await aget_kazma_secret()
 
         # 0. Public demo mode: KAZMA_DEMO_MODE bypasses the secret gate so a
@@ -1507,6 +1534,15 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        # A probe runs in the install's own tenant with no settings read
+        # (FA-259): the read below waits for a worker thread, and during a
+        # database outage every one is waiting on the pool.
+        if _is_health_probe(request.url.path):
+            token = set_current_tenant_id("default")
+            try:
+                return await call_next(request)
+            finally:
+                reset_current_tenant_id(token)
         # A settings read (platform.users) behind two wrappers: off the loop,
         # as the auth middleware does for the same question (AUD-007). On the
         # loop it ran for every request, static files and the guard's

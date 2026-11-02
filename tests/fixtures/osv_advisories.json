@@ -1,0 +1,354 @@
+{
+ "recorded": "2026-11-02",
+ "source": "OSV, for the versions the live install ran that day (scripts/record_osv_advisories.py)",
+ "advisories": [
+  {
+   "package": "accelerate",
+   "version": "1.14.0",
+   "vuln_id": "GHSA-4j2p-28q2-5m79",
+   "fixed_version": null
+  },
+  {
+   "package": "brotli",
+   "version": "1.2.0",
+   "vuln_id": "GHSA-9v8h-qqgm-4m35",
+   "fixed_version": "1.2.1"
+  },
+  {
+   "package": "chromadb",
+   "version": "1.5.9",
+   "vuln_id": "GHSA-2wm9-hf6c-p5cr",
+   "fixed_version": null
+  },
+  {
+   "package": "chromadb",
+   "version": "1.5.9",
+   "vuln_id": "GHSA-36p7-vc44-83pf",
+   "fixed_version": null
+  },
+  {
+   "package": "chromadb",
+   "version": "1.5.9",
+   "vuln_id": "GHSA-f4j7-r4q5-qw2c",
+   "fixed_version": null
+  },
+  {
+   "package": "chromadb",
+   "version": "1.5.9",
+   "vuln_id": "GHSA-xph7-9rjv-w5fr",
+   "fixed_version": null
+  },
+  {
+   "package": "dnspython",
+   "version": "2.8.0",
+   "vuln_id": "GHSA-45c3-73f7-pv4m",
+   "fixed_version": "2.9.0"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-567q-5qvw-pf92",
+   "fixed_version": "4.2.1"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-69hj-f68j-2879",
+   "fixed_version": "4.2.1"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-8mx5-7m5m-r77g",
+   "fixed_version": "4.2.1"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-9vhv-jxww-xfm5",
+   "fixed_version": "4.2.1"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-cwqr-hh33-gh44",
+   "fixed_version": "4.2.1"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-fq56-3cx3-fjxp",
+   "fixed_version": "4.2.1"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-j8f7-rjxc-mr56",
+   "fixed_version": "4.0.9"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-rfpc-qcw5-3pc4",
+   "fixed_version": "4.2.1"
+  },
+  {
+   "package": "filelock",
+   "version": "3.29.4",
+   "vuln_id": "GHSA-v4x8-3wr5-3wq8",
+   "fixed_version": "4.2.1"
+  },
+  {
+   "package": "msgpack",
+   "version": "1.2.1",
+   "vuln_id": "GHSA-j586-36cw-2gc2",
+   "fixed_version": "1.2.3"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-22hg-r758-rrw9",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-24rc-8hj2-v98c",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-254f-3936-288h",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-27h8-gf7j-v5hc",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-332p-7hrc-92wf",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-3j72-p6qg-6xp7",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-4558-3h8r-v8xp",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-462x-pgg6-55fp",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-4rm8-3hmm-39fg",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-4rr5-89j8-mwwm",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-58r4-6rv3-gfh8",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-5x8w-8jj5-q52h",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-5xm2-6676-qcp9",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-654x-cwwv-5j9c",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-65qm-jvmh-6pqg",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-74r2-7ff9-mjj2",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-78g4-xqwv-q3g8",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-7mwm-ghpf-9vrm",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-8g5g-8vmr-9782",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-9v9v-9qvf-h2hj",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-c6hw-5grf-ff96",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-cp9v-662q-vvx9",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-f2g6-542v-9j58",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-fc9g-5qg7-mf45",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-g4qv-2jxx-769h",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-g7cr-3p24-7wf7",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-g842-9rc4-69pw",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-gg2r-wvfm-q9rx",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-j4m9-6w36-pw47",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-jg86-v3jv-hrpm",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-mrfp-p49p-3hf2",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-p4wg-p73j-c528",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-p8hx-v2p6-rp84",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-pchr-8j38-3x4p",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-q45j-58j2-45rg",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-rfgq-q3w2-pmv2",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-v9pv-5gc8-w2m6",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-vx6w-vv9f-6gvg",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-w889-685w-c8fh",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-xgh8-jp6q-p5x8",
+   "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pillow",
+   "version": "12.3.0",
+   "vuln_id": "GHSA-xvh5-g6gv-559v",
+   "fixed_version": "13.0.0"
+  }
+ ]
+}

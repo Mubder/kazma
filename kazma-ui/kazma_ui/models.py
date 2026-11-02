@@ -284,8 +284,6 @@ class ContextSettingsUpdate(BaseModel):
     """Update context window settings."""
 
     max_context_tokens: int = 1_000_000  # token_counter.DEFAULT_CONTEXT_WINDOW
-    context_strategy: str = "sliding_window"
-    summarization_threshold: float = 0.8
 
 
 # ── Skill Models ──────────────────────────────────────────────────────
@@ -306,8 +304,6 @@ class AppearanceUpdate(BaseModel):
     theme: str | None = None
     accent_color: str | None = None
     font_size: int | None = None
-    sidebar_position: str | None = None
-    custom_css: str | None = None
 
 
 # ── Shortcut Models ───────────────────────────────────────────────────

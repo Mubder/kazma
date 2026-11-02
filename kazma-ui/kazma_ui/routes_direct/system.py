@@ -540,6 +540,7 @@ def register_system_routes(self: Any) -> None:
             "pymongo": "MongoDB driver for database_client skill",
             "fakeredis": "In-memory Redis stub for tests",
             "httpx": "HTTP client (also listed in test extra for completeness)",
+            "edge-tts": "The default read-aloud voice (Microsoft Edge text-to-speech)",
             "pre-commit": "Git hooks for import + static gates",
             "pytest-timeout": "Per-test timeout for CI",
             "tree-sitter": "Parser runtime for the codebase index",
@@ -575,7 +576,7 @@ def register_system_routes(self: Any) -> None:
             "click", "rich", "google-cloud-aiplatform", "python-dotenv",
             "arabic-reshaper", "python-bidi", "reportlab", "python-docx",
             "openpyxl", "pypdf", "pdfplumber", "python-pptx",
-            "packaging", "urllib3", "anyio", "pyasn1",
+            "packaging", "urllib3", "anyio", "pyasn1", "edge-tts",
             # Workspace packages (editable hatch install is one dist: kazma)
             "kazma", "kazma-core", "kazma-ui", "kazma-gateway", "kazma-cli",
             "kazma-tui", "kazma-skills",

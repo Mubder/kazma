@@ -209,6 +209,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "store; loading an install's .env could redirect recovery to live data"
     ),
     "kazma-core/kazma_core/documents/parser_worker.py": "sandboxed: parses untrusted documents with a scrubbed environment",
+    "scripts/record_osv_advisories.py": (
+        "lists another interpreter's packages and asks OSV: no setting, key or store "
+        "is read, and an install's .env has nothing it needs"
+    ),
     "scripts/crawl_corpus.py": (
         "records and replays the crawl corpus in a private temporary data folder on SQLite; "
         "an install's .env would point it at that install's database and settings"

@@ -135,3 +135,75 @@ async def test_the_monitor_says_nothing_of_a_crawl_about_to_resume(journal, libr
     assert crawl_jobs.claim_auto_resume(job_id) is True  # resumed, or refused: shown again
     assert crawl_jobs.claim_auto_resume(job_id) is False
     assert "job:" + job_id in {job["key"] for job in monitor._collect()[0]}
+
+
+async def _stopped_gracefully_mid_crawl(journal, library, monkeypatch, *, shutting_down: bool):
+    """A crawl running in the server's background is cancelled by the drain.
+
+    The functional audit's drills (FA-263): a graceful reload cancelled the
+    crawl, its own clean-up finished the row ``interrupted`` with no
+    ``interrupted_by``, and nothing resumed it -- every deploy during a crawl
+    stranded it until the owner pressed Resume.
+    """
+    from kazma_core import background, shutdown
+    from kazma_core.bounded_cancel import cancel_and_wait
+    from kazma_core.stores import knowledge_ingest as ki
+    from kazma_ui import kb_api
+
+    release = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def fetch(url, **kwargs):
+        entered.set()
+        await release.wait()
+        return FetchResult(ok=True, url=url, final_url=url, text="# Page\n\n" + "useful words " * 40, http_status=200)
+
+    monkeypatch.setattr(ki, "_web_fetch_text", fetch)
+    kb_api.create_kb_router()
+    job, *_ = await ki._prepare_ingest_site("docs", SEED, job_id="j-reload")
+    await crawl_jobs.call(job.update, lambda row: row.update(kind="site"))
+    await crawl_jobs.call(job.finish, "interrupted")  # stopped once by its owner
+    answer = await kb_api._RESUME_ROUTE["resume"]("j-reload")  # and resumed by them
+    assert answer.get("ok"), answer
+    await asyncio.wait_for(entered.wait(), 10)
+    task = next(t for t in background.background_tasks() if t.get_name() == "kb-crawl:j-reload")
+    if shutting_down:
+        shutdown.signal_shutdown()
+    try:
+        await cancel_and_wait(task, what="the crawl", timeout=10)
+    finally:
+        shutdown.reset_shutdown()
+    release.set()
+    return crawl_jobs.inspect_jobs("j-reload")
+
+
+@pytest.mark.asyncio
+async def test_a_crawl_a_graceful_reload_cut_off_resumes_at_the_next_start(journal, library, monkeypatch):
+    from kazma_ui import kb_api
+
+    row = await _stopped_gracefully_mid_crawl(journal, library, monkeypatch, shutting_down=True)
+    assert row["status"] == "interrupted" and row["interrupted_by"] == "process_ended"
+    assert await kb_api.resume_interrupted_crawls() == ["j-reload"]
+    assert (await _settled("j-reload"))["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_a_crawl_cancelled_outside_a_shutdown_waits_for_the_owner(journal, library, monkeypatch):
+    """Control: the same cancel with no shutdown is the owner's stop."""
+    from kazma_ui import kb_api
+
+    row = await _stopped_gracefully_mid_crawl(journal, library, monkeypatch, shutting_down=False)
+    assert row["status"] == "interrupted" and row.get("interrupted_by") is None
+    assert await kb_api.resume_interrupted_crawls() == []
+
+
+@pytest.mark.asyncio
+async def test_the_old_clean_up_stranded_it(journal, library, monkeypatch):
+    """Negative control: the old finish (no shutdown check) left a reload's
+    crawl looking stopped by its owner."""
+    from kazma_ui import kb_api
+
+    monkeypatch.setattr(crawl_jobs, "_process_is_ending", lambda: False)
+    row = await _stopped_gracefully_mid_crawl(journal, library, monkeypatch, shutting_down=True)
+    assert row.get("interrupted_by") is None
+    assert await kb_api.resume_interrupted_crawls() == []

@@ -539,7 +539,8 @@ def _backup_one_db(src: Path, dest: Path) -> bool:
 _FAILURES_LISTED = 20
 
 
-def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | None = None) -> int:
+def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | None = None,
+                     skip: frozenset[Path] = frozenset()) -> int:
     """Copy a directory tree file-by-file, skipping files that vanish mid-copy.
 
     LibreOffice conversion runs leave ephemeral cache files (.bin under
@@ -554,6 +555,10 @@ def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | Non
     path and error) for the manifest and the gap alert (audit 2026-10-26
     AUD-021: they were logged at DEBUG and the backup said ``ok``, so a
     locked document blob was missing from every backup without a word).
+
+    *skip* holds files the backup takes another way: a database nested in an
+    asset folder, copied consistently into ``dbs/``, and its sidecars
+    (FA-267: it was copied a second time here, raw, with a live ``-wal``).
     """
     if failures is None:
         failures = []
@@ -562,13 +567,15 @@ def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | Non
     for item in sorted(src.iterdir()):
         if _should_exclude(item.name):
             continue
+        if skip and item.resolve() in skip:
+            continue
         target = dest / item.name
         try:
             if item.is_symlink():
                 continue  # don't follow symlinks
             if item.is_dir():
                 nested: list[dict[str, str]] = []
-                count += _robust_copytree(item, target, nested)
+                count += _robust_copytree(item, target, nested, skip)
                 failures.extend(
                     {"path": f"{item.name}/{row['path']}", "error": row["error"]} for row in nested
                 )
@@ -605,6 +612,13 @@ def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
 
     copied: list[dict[str, Any]] = []
     rebuilt = _rebuilt_dirs()
+    # The databases ``dbs/`` holds, nested ones included, and what sits
+    # beside them: never copied a second time, raw (FA-267).
+    held = frozenset(
+        Path(str(db.resolve()) + suffix)
+        for db in selectable_databases(src)
+        for suffix in ("", "-wal", "-shm", "-journal")
+    )
     # What the registry keeps out (the server's held writer lock: copying it
     # failed with "Permission denied" at every backup, 2026-10-15).
     kept_out = {name for name, entry in DATA_DIR_ENTRIES.items() if not entry.backed_up}
@@ -622,7 +636,7 @@ def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
         try:
             if item.is_dir():
                 failures: list[dict[str, str]] = []
-                count = _robust_copytree(item, target, failures)
+                count = _robust_copytree(item, target, failures, held)
                 row: dict[str, Any] = {"path": rel, "type": "dir", "files": count}
                 if failures:
                     row["failed"] = len(failures)

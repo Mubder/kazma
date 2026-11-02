@@ -135,6 +135,22 @@ def friendly_llm_error(
             "credentials for that provider."
         )
 
+    if getattr(exc, "kind", "") == "rate_limit_exhausted":
+        # Said from what was tried (FA-214): "lost the connection" sent the
+        # owner looking at the network over a provider that answered 429.
+        attempts = int(getattr(exc, "attempts", 0) or 0)
+        waited = float(getattr(exc, "waited_s", 0.0) or 0.0)
+        where = f" ({model.strip()})" if model.strip() else ""
+        tried = (
+            f" It refused {attempts} requests in a row, over {waited:.0f} seconds of waiting."
+            if attempts > 1 else " It refused the request."
+        )
+        return (
+            f"⚠️ The model provider{where} is limiting how often Kazma may call it "
+            f"(HTTP 429).{tried} Send your message again in a minute, or switch "
+            "provider in Settings > Models/Providers."
+        )
+
     is_transient = bool(getattr(exc, "transient", False))
     # Inspect the cause chain too — some LLMErrors wrap a network exception.
     cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)

@@ -46,8 +46,9 @@ tools:
   find_free_slots:
     arabic_name: "إيجاد وقت فارغ"
     description: >
-      Find free time slots of a given duration within a date range, excluding
-      existing busy events. account= picks another connected account's calendar (a name or address from email_accounts; empty = the main calendar).
+      Find free time slots of a given duration on one day: its working day,
+      09:00 to 17:00 in the operator's time zone, around every event that
+      overlaps it (all-day and multi-day events included). account= picks another connected account's calendar (a name or address from email_accounts; empty = the main calendar).
     category: calendar
     prompt_chain:
       - "ابحث عن أوقات فارغة بالمدة المعطاة"

@@ -34,6 +34,7 @@ import os
 import traceback
 import uuid
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,14 @@ def _import(tmp_path, monkeypatch, restore):
     data = tmp_path / "kazma-data"
     data.mkdir(exist_ok=True)
     monkeypatch.setattr("kazma_core.paths.data_dir", lambda: data)
+    # A SQLite target through and through: the import writes the bundle's
+    # settings into the target's store (FA-255), which the Postgres suite's
+    # environment would otherwise make a Postgres one.
+    monkeypatch.setenv("KAZMA_DB_BACKEND", "sqlite")
+    monkeypatch.delenv("KAZMA_DATABASE_URL", raising=False)
+    from kazma_core.config_store import reset_config_store
+
+    reset_config_store()
     monkeypatch.setattr(importer, "_restore_document_store", restore)
     monkeypatch.setattr(importer, "_live_server_detected", lambda: (False, ""))
     from unittest.mock import patch
@@ -195,6 +204,17 @@ def _sqlite_catalog_beside_postgres_queue(dsn: str, root: str, dest: str) -> dic
         svc.close()
 
 
+def _holds_a_catalog(path: Path) -> bool:
+    """The local fallback file holds the document tables (on a Postgres
+    catalog it may be a file the SQLite queue's setup left with none)."""
+    import sqlite3
+
+    if not path.exists():
+        return False
+    with closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)) as conn:
+        return conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'document_blobs'").fetchone() is not None
+
+
 def _export_postgres_catalog(dsn: str, root: str, staging: str) -> dict:
     _bootstrap(dsn, "postgres")
     from kazma_core.documents.ingestion import set_ingestion_service
@@ -214,7 +234,8 @@ def _export_postgres_catalog(dsn: str, root: str, staging: str) -> dict:
     from kazma_core.documents.backup import _read_references
 
     local = Path(root, "documents.db")
-    local_catalog = sum(map(len, _read_references(local))) if local.exists() else 0
+    local_catalog = (sum(map(len, _read_references(local, snapshot=False)))
+                     if _holds_a_catalog(local) else 0)
     manifest = Manifest()
     _export_document_store(Path(staging), manifest, lambda *_: None)
     files = sorted(str(p.relative_to(staging)).replace("\\", "/")

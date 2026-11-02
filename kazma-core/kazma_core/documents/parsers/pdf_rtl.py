@@ -181,6 +181,11 @@ def _attach_mark(mark: Glyph, lines: list[_Line]) -> None:
         best[1].text += mark.text
 
 
+#: How far outside a block's box a glyph's baseline may lie and still be the
+#: block's (rounding between a text map's origins and its boxes).
+_BASELINE_SLACK = 0.05
+
+
 def _with_word_gaps(glyphs: list[Glyph]) -> list[Glyph]:
     out = [glyphs[0]]
     for prev, cur in zip(glyphs, glyphs[1:]):
@@ -307,7 +312,9 @@ def logical_line(glyphs: Sequence[Glyph], *, base: str | None = None) -> str:
     if not glyphs:
         return ""
     if not any(_bidi(g.text) == "R" for g in glyphs):
-        drawn = "".join(g.text for g in glyphs)
+        # Word gaps on a left-to-right line too (FA-004): a producer that
+        # draws no space glyph between cells read "Q1" / "120" as "Q1120".
+        drawn = "".join(g.text for g in _with_word_gaps(list(glyphs)))
         if base == "R" and not any(_bidi(ch) == "L" for ch in drawn):
             # Numbers alone in a right-to-left paragraph (a table cell
             # "43 – 46"): each number reads left to right, the numbers run
@@ -376,7 +383,11 @@ def text_in_rect(
     x0, y0, x1, y1 = (float(v) for v in rect[:4])
     selected = []
     for line in lines:
-        inside = [g for g in line if x0 <= g.cx <= x1 and y0 - 0.5 * g.size <= g.y <= y1 + 0.5 * g.size]
+        # A glyph belongs to the block whose box holds its baseline. Half a
+        # font size of slack above took the line over a block into it: the
+        # title read twice once a page had any Arabic (FA-004).
+        inside = [g for g in line if x0 <= g.cx <= x1 and y0 - _BASELINE_SLACK * g.size <= g.y
+                  <= y1 + _BASELINE_SLACK * g.size]
         if inside:
             selected.append(inside)
     if margins is not None:

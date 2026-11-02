@@ -72,10 +72,17 @@ def _cmd_export(args: list[str]) -> None:
     def progress(msg: str) -> None:
         print(f"    {msg}")
 
+    from kazma_core.migration.exporter import ExportRefused
+
     try:
         from kazma_core.migration import export_bundle
 
         written = export_bundle(out_path, include_assets=include_assets, progress=progress)
+    except ExportRefused as exc:
+        # Not an error in Kazma: the export was run where no install is
+        # (FA-252). The message names the folder and what to do.
+        print(f"\n  [REFUSED] {exc}\n")
+        sys.exit(1)
     except Exception as exc:
         print(f"\n  [ERROR] export failed: {exc}\n")
         logger.exception("[migrate:export]")

@@ -36,6 +36,10 @@ def _offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(dependency_scanner, "audit_installed", nothing_installed)
     monkeypatch.setattr("kazma_core.install_requirements.unmet_requirements", lambda root=None: [])
+    # No docker ps and no database here: the exposure check reads recorded
+    # answers in tests/test_service_exposure_check.py.
+    monkeypatch.setattr("kazma_core.security.service_exposure._docker_rows", lambda: [])
+    monkeypatch.setattr("kazma_core.security.service_exposure._role_answer", lambda: None)
     from kazma_core.safety import hitl_gates
 
     hitl_gates.set_db_path_for_tests(str(tmp_path / "gates.db"))
@@ -72,7 +76,7 @@ def test_every_check_runs_and_is_counted(tmp_path: Path) -> None:
     runner = SecurityHardeningRunner(tmp_path)
     report = asyncio.run(runner.run_all_checks())
     assert [c.name for c in report.checks] == SecurityHardeningRunner.CHECKS
-    assert report.total == 8 and report.passed + report.failed == 8
+    assert report.total == len(SecurityHardeningRunner.CHECKS) == report.passed + report.failed
     assert report.critical_failures <= report.failed
     markdown = runner.generate_report()
     assert "## Check Results" in markdown and "check_permission_escalation" in markdown
@@ -88,7 +92,7 @@ def test_a_check_that_cannot_run_is_a_failure_not_a_missing_report(
     report = asyncio.run(SecurityHardeningRunner(tmp_path).run_all_checks())
     audit = next(c for c in report.checks if c.name == "check_audit_logging")
     assert audit.passed is False and "the registry is on fire" in audit.message
-    assert report.total == 8
+    assert report.total == len(SecurityHardeningRunner.CHECKS)
 
 
 def test_an_unknown_check_is_refused(tmp_path: Path) -> None:

@@ -703,18 +703,41 @@ class _CrawlJob:
         data['message'] = data['message'][:2000]
         self.update(lambda row: row.update(progress=data))
 
-    def finish(self, status):
+    def finish(self, status, *, interrupted_by=None):
+        """End the job with *status*.
+
+        An interruption while the process shuts down is the process's end,
+        not the owner's Stop: it is recorded ``interrupted_by:
+        process_ended``, as recovery records one whose owner died, so a
+        Knowledge crawl resumes at the next start (``auto_resume_due``).
+        Every caller that ends a cancelled crawl comes here -- the ingest's
+        own clean-up, the route's -- and both finished a reload's crawl as
+        if its owner had stopped it: every deploy during a crawl stranded it
+        until Resume (FA-263).
+        """
+        if interrupted_by is None and status == 'interrupted' and _process_is_ending():
+            interrupted_by = 'process_ended'
+
         def change(row):
             _settle_discovery_unknown(row)
             for page in row['pages']:
                 if page['status'] == 'running':
                     page.update(status='ambiguous', error='Crawl interrupted during acquisition/indexing; automatic replay refused.')
             row.update(status=status, owner=None)
+            if interrupted_by is not None:
+                row['interrupted_by'] = interrupted_by
         try:
             self.update(change)
         finally:
             with _ACTIVE_LOCK:
                 _ACTIVE.discard(self.token)
+
+
+def _process_is_ending():
+    """True once the server began its shutdown (``kazma_core.shutdown``)."""
+    from kazma_core.shutdown import is_shutting_down
+
+    return is_shutting_down()
 
 
 #: Pages a report lists, newest last: a crawl holds at most 1,000.

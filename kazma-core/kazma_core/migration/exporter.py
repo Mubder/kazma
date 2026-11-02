@@ -58,7 +58,31 @@ from kazma_core.migration.path_rewrite import PathMap
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["export_bundle"]
+__all__ = ["ExportRefused", "export_bundle"]
+
+
+class ExportRefused(RuntimeError):
+    """The data folder an export would read holds no Kazma installation."""
+
+
+def _installation_problem(data_dir: Path, backend: str) -> str | None:
+    """Why *data_dir* is not an installation to export, or None when it is.
+
+    An install holds at least one of the stores ``store_registry`` declares
+    (a vault, a settings store, memory, ...) in its data folder; on
+    Postgres too, where the vault, memory and Knowledge are still files
+    there. Run from the wrong folder, the export made an empty
+    ``kazma-data`` there, read it, and wrote a 1 KB bundle reported as
+    written -- one an owner may move and then delete the source of (FA-252).
+    """
+    if not data_dir.is_dir():
+        return f"There is no Kazma data folder at {data_dir}."
+    from kazma_core.store_registry import STORES
+
+    if any((data_dir / name).is_file() for name in STORES):
+        return None
+    return (f"{data_dir} holds no Kazma installation: none of Kazma's stores is there "
+            f"(settings backend {backend}).")
 
 # SQLite data files to copy as-is when they exist on disk (WAL-safe copy).
 # Path is the kazma_core.paths resolver function name; archive name is the
@@ -102,6 +126,9 @@ _DATA_DIR_DBS = _data_dir_dbs()
 # workspaces.db containing ONLY the workspaces table.
 _WORKSPACES_BUNDLE_NAME = "workspaces.db"
 
+#: The settings rows, whole, as stored (FA-255); ``importer`` reads the same name.
+_SETTINGS_ROWS = "settings_rows.json"
+
 #: Never copied out of a carried folder: Python's caches, and the packages a
 #: project installs again from its own lock file.
 _SKIP_INSIDE = frozenset({"__pycache__", "node_modules"})
@@ -125,15 +152,25 @@ def export_bundle(
         The Path to the written bundle.
     """
     out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     _log = lambda msg: (logger.info("[migrate:export] %s", msg), progress(msg) if progress else None)  # noqa: E731
 
     from kazma_core import paths
-    from kazma_core.config_store import get_config_store
     from kazma_core.db.backend import is_postgres
 
-    data_dir = paths.data_dir()
+    # Before anything that resolves a store path: importing the settings
+    # store makes the data folder (its default path is computed at import).
+    data_dir = paths.data_dir(create=False)
     source_backend = "postgres" if is_postgres() else "sqlite"
+    problem = _installation_problem(data_dir, source_backend)
+    if problem:
+        raise ExportRefused(
+            f"{problem} Run `kazma migrate export` from the install's folder, or set "
+            "KAZMA_DATA_DIR to its kazma-data folder. Nothing was written."
+        )
+    _log(f"Source: data folder {data_dir}, settings backend {source_backend}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    from kazma_core.config_store import get_config_store
     manifest = Manifest(
         bundle_version=BUNDLE_VERSION,
         source_os=f"{platform.system()} {platform.release()}",
@@ -162,6 +199,22 @@ def export_bundle(
         (staging / "config.yaml").write_text(config_yaml, encoding="utf-8")
     except Exception as exc:
         logger.warning("[migrate:export] config export failed: %s", exc)
+    # 1b. The settings ROWS, each whole, as stored (vault pointers, never
+    #     plaintext). config.yaml merges every row into one nested document
+    #     and the import flattened it back one row per leaf: a revoked grant
+    #     or a signed-out session lived on in its leaves (FA-255). The
+    #     importer writes these rows, by class, and reads config.yaml only
+    #     from an older bundle.
+    _log("Exporting settings rows…")
+    try:
+        import json as _json
+
+        rows = [{"key": key, "value": value, "category": category}
+                for category, values in (get_config_store().get_all() or {}).items()
+                for key, value in (values or {}).items()]
+        (staging / _SETTINGS_ROWS).write_text(_json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("[migrate:export] settings rows export failed: %s", exc)
 
     # 2. workspaces.db — dedicated file holding ONLY the workspaces table,
     #    so path-rewrite has one clean target.

@@ -483,17 +483,12 @@ def import_bundle(
                 "before overwrite."
             )
 
-    # 7. Restore config (config.yaml → ConfigStore.import_yaml).
-    config_path = staging / "config.yaml"
-    if config_path.exists():
-        _log("Importing config.yaml into ConfigStore…")
-        try:
-            from kazma_core.config_store import get_config_store
-
-            n = get_config_store().import_yaml(config_path.read_text(encoding="utf-8"))
-            _log(f"  imported {n} config keys")
-        except Exception as exc:
-            report.warn(f"config import failed: {exc}")
+    # 7. Restore the settings. Never as leaves (FA-255): config.yaml merges
+    # every row into one document, and its import flattened that back one
+    # row per leaf, on top of the whole rows a Postgres dump had restored --
+    # so a revoked "Allow tool" grant or a signed-out session lived on in its
+    # leaves (``get`` rebuilds a missing row from its children).
+    _restore_settings(staging, bundle, report, _log)
 
     if not _guard_restored_x(swapped, report):
         _log("  X restore guard failed — rolling back installed SQLite files")
@@ -571,6 +566,91 @@ def import_bundle(
     if report.backup_path:
         _log(f"  pre-import backup: {report.backup_path}")
     return report
+
+
+#: The settings rows, whole, as the exporter wrote them (FA-255).
+_SETTINGS_ROWS = "settings_rows.json"
+
+#: Never carried to another install, whatever their class: a browser's
+#: sign-in belongs to the browser and the machine it signed in to.
+_NEVER_CARRIED = ("web_session.",)
+
+
+def _carried_in_migration(key: str) -> bool:
+    """Whether a settings row travels in a migration (FA-255).
+
+    ``settings_restore``'s classes decide, as they decide a Settings restore:
+    a setting and what Kazma learned travel; the install's own credentials
+    travel too (the owner's account, the platform users, the sign-in secret,
+    MCP sign-ins: a moved install keeps its identity, which a Settings
+    restore on the same install never needs to bring back); runtime state --
+    standing approvals, folder grants, long-task records, the acquisition
+    journals, boot stamps -- and browser sessions never do.
+    """
+    from kazma_core.settings_restore import RUNTIME, classify
+
+    if key.startswith(_NEVER_CARRIED):
+        return False
+    return classify(key) != RUNTIME
+
+
+def _restore_settings(staging: Path, bundle: Any, report: ImportReport,
+                      log: Callable[[str], object]) -> None:
+    """Write the bundle's settings into the target store, by class, whole.
+
+    A bundle with a Postgres dump had its settings restored as whole rows by
+    ``pg_restore``: nothing is written over them. Otherwise the rows the
+    exporter wrote (``settings_rows.json``) are written whole, each the
+    store's own row; an older bundle has only ``config.yaml``, imported
+    without the rows that must not travel.
+    """
+    if bundle.has_file("data/postgres.dump"):
+        log("Settings came with the Postgres dump, whole; config.yaml is not imported over them.")
+        return
+    from kazma_core.config_store import get_config_store
+
+    rows_path = staging / _SETTINGS_ROWS
+    try:
+        if rows_path.exists():
+            import json
+
+            rows = json.loads(rows_path.read_text(encoding="utf-8"))
+            items = [(str(r["key"]), r["value"], str(r.get("category") or "general"))
+                     for r in rows if isinstance(r, dict) and _carried_in_migration(str(r.get("key", "")))]
+            n = get_config_store().batch_set(items)
+            left = len(rows) - len(items)
+            log(f"  restored {n} settings row(s); {left} row(s) of runtime state and sessions stayed behind")
+            return
+        config_path = staging / "config.yaml"
+        if config_path.exists():
+            import yaml
+
+            log("Importing config.yaml (an older bundle) into ConfigStore…")
+            try:
+                data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            except yaml.YAMLError as exc:
+                raise ValueError(f"config.yaml is not readable YAML: {exc}") from exc
+            items = _carried_leaves(data)
+            n = get_config_store().batch_set(items)
+            log(f"  imported {n} config keys")
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        # An error, not a warning: the target would run without the source's
+        # settings, and the report said the import worked.
+        report.error(f"settings import failed: {exc}")
+
+
+def _carried_leaves(data: Any, prefix: str = "") -> list[tuple[str, Any, str]]:
+    """``import_yaml``'s flattening, without the leaves that must not travel."""
+    items: list[tuple[str, Any, str]] = []
+    if not isinstance(data, dict):
+        return items
+    for key, value in data.items():
+        full = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            items.extend(_carried_leaves(value, full))
+        elif _carried_in_migration(full):
+            items.append((full, value, prefix.split(".")[0] if prefix else "general"))
+    return items
 
 
 def _restore_data_dir_files(

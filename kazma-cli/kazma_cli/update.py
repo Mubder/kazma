@@ -126,6 +126,11 @@ _RELEASE_DOWNLOAD_PREFIX = f"https://github.com/{_GITHUB_REPO}/releases/download
 _MAX_WHEEL_BYTES = 256 * 1024 * 1024
 _STASH_MSG_PREFIX = "kazma-update-"
 
+#: ``do_git_update``'s answer when the code was updated but the operator's
+#: local edits could not be put back on it (a conflict): they are in the
+#: stash, and the command says so with an exit status of its own (FA-101).
+EDITS_NOT_RESTORED = "edits_not_restored"
+
 # ── Supply-chain safety for the operator upgrade path ────────────────────
 # ``kazma update`` hard-resets to ``origin/main`` and then executes the
 # freshly-pulled installer (``_reinstall_via_subprocess``). To prevent an
@@ -1430,14 +1435,27 @@ def _restore_stash(cwd: str, stash_message: str | None = None) -> bool:
             console.print(f"[dim]{out[:500]}[/dim]")
         return True
 
+    # A pop that conflicts leaves conflict markers in the tree, and the next
+    # boot reads them (FA-101). The stash entry is kept on a conflict, so the
+    # edits are safe there: the tree goes back to the commit it was updated
+    # to, and the operator is told which stash holds them.
+    reset = _run_cmd(["git", "reset", "--hard", "HEAD"], cwd=cwd)
     console.print(
-        "[yellow]Could not auto-apply all local changes (likely a conflict).[/yellow]\n"
-        "Your edits are still safe in the git stash.\n"
+        "[yellow]Your local changes were NOT reapplied: they conflict with the update.[/yellow]\n"
+        f"They are kept in the git stash{f' ({ref})' if ref else ''}"
+        f"{f', message {stash_message!r}' if stash_message else ''}; the checkout is the "
+        "updated code, without them.\n"
         "  List:   [cyan]git stash list[/cyan]\n"
-        "  Apply:  [cyan]git stash pop[/cyan]\n"
+        "  Apply:  [cyan]git stash pop[/cyan]  (and resolve the conflict)\n"
         "  Drop:   [cyan]git stash drop[/cyan]  (only after you copied what you need)\n"
         f"[dim]{out[:600]}[/dim]"
     )
+    if reset.returncode != 0:
+        console.print(
+            "[red]Could not clear the conflict from the checkout:[/red] "
+            f"{(reset.stderr or reset.stdout or '').strip()[:300]}\n"
+            "  Run [cyan]git reset --hard HEAD[/cyan] before starting Kazma."
+        )
     return False
 
 
@@ -1477,9 +1495,21 @@ def _fresh_version_report(cwd: str) -> tuple[str, str]:
     return (get_current_version(), head)
 
 
+def _unmerged_paths(cwd: str) -> list[str]:
+    """Files git holds in a conflict: a tree a boot must not read."""
+    result = _run_cmd(["git", "diff", "--name-only", "--diff-filter=U"], cwd=cwd)
+    return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+
 def _postflight_ok(cwd: str) -> bool:
-    """True when HEAD matches origin/main and CLI imports."""
+    """True when HEAD matches origin/main, no file is in a conflict, and the CLI imports."""
     ok = True
+    unmerged = _unmerged_paths(cwd)
+    if unmerged:
+        console.print(
+            "[red]Postflight: files are in a conflict:[/red] " + ", ".join(unmerged[:8])
+        )
+        ok = False
     if not _heads_match_origin_main(cwd):
         console.print(
             f"[yellow]Postflight: HEAD ({get_git_commit('HEAD')}) "
@@ -1658,7 +1688,7 @@ class _ServerHold:
         pause = self.guard.read_pause() if self.guard is not None else None
         return pause if isinstance(pause, dict) else None
 
-    def acquire(self) -> bool:
+    def stop_for_update(self) -> bool:
         """Make the packages replaceable. False -- the reason printed, nothing
         changed -- when the update must not run."""
         running = _is_server_running(self.port)
@@ -1712,7 +1742,7 @@ class _ServerHold:
         )
         return False
 
-    def release(self, ok: bool) -> bool:
+    def resume_after_update(self, ok: bool) -> bool:
         """After the install: start Kazma again after a good one, keep it
         stopped after a failed one. True when nothing more is needed."""
         if self.guard is None:
@@ -1793,13 +1823,13 @@ def _install_held(command: str, install: Callable[[], bool]) -> str:
     held. ``"not_back"``: installed, but Kazma did not come back (printed).
     """
     hold = _ServerHold(command)
-    if not hold.acquire():
+    if not hold.stop_for_update():
         return "refused"
     ok = False
     try:
         ok = bool(install())
     finally:
-        back = hold.release(ok)
+        back = hold.resume_after_update(ok)
     if not ok:
         return "failed"
     return "done" if back else "not_back"
@@ -1828,7 +1858,7 @@ def do_git_update(
     *,
     sync_main: bool = False,
     accept_discard_local_commits: bool = False,
-) -> bool:
+) -> bool | str:
     """Primary operator update: preflight → stash → reset main → restore → reinstall.
 
     Safety rules:
@@ -1862,6 +1892,7 @@ def do_git_update(
 
     cwd = str(git_root)
     stash_msg: str | None = None
+    edits_restored = True
     from_commit = get_git_commit("HEAD")
 
     # Crash-recovery (audit): _write_update_state records the phase at every
@@ -1994,7 +2025,7 @@ def do_git_update(
 
         if stash_msg:
             _write_update_state(cwd, phase="restoring_stash")
-            _restore_stash(cwd, stash_msg)
+            edits_restored = _restore_stash(cwd, stash_msg)
 
     except FileNotFoundError:
         console.print("[red]git not found. Is Git installed and on PATH?[/red]")
@@ -2014,7 +2045,7 @@ def do_git_update(
     # under it, as a deploy's pull does, and a refusal here (a turn still
     # running at the deadline) puts the checkout back.
     hold = _ServerHold(command)
-    if not hold.acquire():
+    if not hold.stop_for_update():
         console.print(f"[yellow]Putting the checkout back at {from_commit}…[/yellow]")
         _roll_back_checkout(cwd, from_commit, stash_msg)
         _clear_update_state(cwd)
@@ -2023,13 +2054,15 @@ def do_git_update(
     try:
         ok = _reinstall_after_reset(cwd, from_commit, stash_msg)
     finally:
-        back = hold.release(ok)
+        back = hold.resume_after_update(ok)
     if not ok and not hold.held:
         console.print(
             "Repair the packages with:\n"
             f"  [cyan]{_update_command('--reinstall', '-y')}[/cyan]",
             soft_wrap=True,
         )
+    if ok and back and not edits_restored:
+        return EDITS_NOT_RESTORED
     return ok and back
 
 
@@ -2324,10 +2357,21 @@ def _run_git_check_and_update(
             console.print("Update cancelled.")
             return
 
-    if do_git_update(
+    outcome = do_git_update(
         sync_main=sync_main,
         accept_discard_local_commits=accept_discard_local_commits,
-    ):
+    )
+    if outcome == EDITS_NOT_RESTORED:
+        new_version, new_commit = _fresh_version_report(cwd)
+        console.print()
+        console.print(
+            "[yellow]Updated, but your local edits were NOT reapplied (see above): "
+            "they are in the git stash.[/yellow]"
+        )
+        console.print(f"  Version: v{new_version}")
+        console.print(f"  HEAD:    {new_commit}")
+        sys.exit(3)
+    if outcome:
         new_version, new_commit = _fresh_version_report(cwd)
         console.print()
         console.print("[green]Update complete![/green]")

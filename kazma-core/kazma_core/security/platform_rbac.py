@@ -34,6 +34,7 @@ __all__ = [
     "list_users",
     "require_role",
     "role_allows",
+    "set_local_password",
     "valid_tenant_id",
 ]
 
@@ -384,6 +385,26 @@ def authenticate_local_user(username: str, password: str) -> PlatformUser | None
                 meta=dict(u.get("meta") or {}),
             )
     return None
+
+
+def set_local_password(username: str, password: str) -> bool:
+    """Set a local user's password, nothing else about them. False when there
+    is no such user.
+
+    Settings -> Account -> Change password wrote ``account.password_hash``,
+    which sign-in never reads (sign-in checks this store): the old password
+    kept working (2026-11 functional audit). The caller checks the current
+    password first (:func:`authenticate_local_user`)."""
+    if len(password or "") < 8:
+        raise ValueError("Password must be at least 8 characters")
+    users = _load_users_from_store()
+    for u in users:
+        if str(u.get("username", "")).lower() == (username or "").lower():
+            u["password_hash"] = _hash_password(password)
+            _save_users_to_store(users)
+            logger.warning("[platform_rbac] password changed username=%s", username)
+            return True
+    return False
 
 
 def multi_user_enabled() -> bool:

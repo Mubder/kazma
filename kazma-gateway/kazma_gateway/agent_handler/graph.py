@@ -1978,26 +1978,8 @@ def create_graph_handler(
                     msg.platform,
                 )
 
-                # Kazma-wide self-improvement (background)
-                try:
-                    from kazma_core.skills.self_improvement import (
-                        schedule_chat_self_improvement,
-                    )
-
-                    empty = not (assistant_text or "").strip() or assistant_text.startswith(
-                        "(No response"
-                    )
-                    schedule_chat_self_improvement(
-                        user_message=(msg.text or "").strip() or "(gateway turn)",
-                        success=not empty,
-                        error="" if not empty else assistant_text[:400],
-                        output_snippet=(assistant_text or "")[:600],
-                    )
-                except Exception:
-                    logger.debug(
-                        "[agent-handler] chat SI schedule skipped",
-                        exc_info=True,
-                    )
+                # Self-improvement learns from the finished turn in
+                # close_turn (run_agent_turn closes it), FA-212.
 
                 # run_agent_turn already closes and persists this terminal
                 # reply, including post-turn memory. A second close can mint
@@ -2318,6 +2300,10 @@ def create_graph_handler(
         ),
         "store_unavailable": "⚠️ The saved steps could not be read (the server log says why).",
         "owner_unavailable": "⚠️ The new chat's owner could not be recorded, so nothing was forked.",
+        "memory_ledger_unavailable": (
+            "⚠️ What this chat keeps out of memory could not be copied to the fork, "
+            "so nothing was forked."
+        ),
     }
 
     def _refusal_text(refused: Any) -> str:

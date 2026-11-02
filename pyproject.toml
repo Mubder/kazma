@@ -24,6 +24,9 @@ dependencies = [
     # packages meet this build's minimums (kazma_core.install_requirements).
     "packaging>=26.3",
     "httpx>=0.27.0",
+    # The default text-to-speech provider (voice.tts_provider = edgetts). 7.3.1
+    # speaks the protocol Microsoft serves now: 7.2.8 is refused (FA-248).
+    "edge-tts>=7.3.1",
     "cryptography>=50.0.0",
     "PyJWT>=2.15.0",
     "jinja2>=3.1.0",
@@ -82,6 +85,11 @@ dev = [
     # `pre-commit install`; until you do, the hooks never fire.
     "pre-commit>=4.7.0",
     "virtualenv>=21.15.0",  # security floor (see the base list): pre-commit brings it
+    # Security floors (see the base list) for what locust and pre-commit bring
+    # in: OSV advisories fixed in these releases (tests/test_dependency_floors.py).
+    "brotli>=1.2.1",
+    "msgpack>=1.2.3",
+    "filelock>=4.2.1",
 ]
 test = [
     "sqlglot==30.25.0",
@@ -117,6 +125,7 @@ rag = [
     "oauthlib>=4.0.0",
     "aiohttp>=3.14.5",
     "setuptools>=84.2.1",
+    "filelock>=4.2.1",
 ]
 observability = [
     "prometheus-client>=0.26.0",
@@ -152,7 +161,7 @@ document = [
 ocr = [
     "pytesseract>=0.3.10",
     "pdf2image>=1.17.0",
-    "pillow>=10.0.0",
+    "pillow>=13.0.0",  # security floor: OSV advisories fixed in 13.0.0
     "onnxruntime>=1.31.1",
     "opencv-python-headless>=4.12.0.88",
     "pyclipper>=1.4.0",
@@ -178,6 +187,7 @@ docling = [
     "torch>=2.13.0",
     "transformers>=5.21.0",
     "setuptools>=84.2.1",
+    "filelock>=4.2.1",
 ]
 # Codebase index (tree-sitter languages; regex fallback always works)
 index = [
@@ -204,6 +214,7 @@ database = [
     "psycopg[binary]>=3.3.6",
     "pymysql>=1.2.3",
     "pymongo>=4.18.3",
+    "dnspython>=2.9.0",  # security floor (see the base list): pymongo brings it
 ]
 # Convenience meta-extra — installs everything at once.
 # Usage: pip install -e ".[all]"  or  uv sync --all-extras

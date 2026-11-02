@@ -7,6 +7,7 @@
 
 import { registerStores } from './modules/stores.js';
 import {
+    applyAccentColor,
     kazmaApp,
     sidebarComponent,
     sidebarModel,
@@ -25,6 +26,7 @@ import { startBuildWatch } from './modules/build_watch.js';
 
 // ── Preserve legacy globals consumed by templates + classic scripts ──
 window.kazmaApp = kazmaApp;
+window.kazmaApplyAccentColor = applyAccentColor;
 window.sidebarComponent = sidebarComponent;
 window.sidebarModel = sidebarModel;
 window.systemAlertsBanner = systemAlertsBanner;

@@ -78,6 +78,15 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     "kazma-core/kazma_core/safety/hitl_grants.py::clear_grants": ("hitl_grant.",),
     "kazma-core/kazma_core/safety/yolo.py::purge_expired_yolo": ("yolo.",),
     "kazma-core/kazma_core/security/web_sessions.py::purge_expired_sessions": ("web_session.",),
+    # Ends a person's other sessions after a password change (Settings ->
+    # Account): deletes web_session.<hash> rows.
+    "kazma-core/kazma_core/security/web_sessions.py::revoke_user_sessions": ("web_session.",),
+    # A migration import writes the bundle's rows, keys as stored, only those
+    # migration carries (FA-255: never RUNTIME, never a web session).
+    "kazma-core/kazma_core/migration/importer.py::_restore_settings": (
+        "every key settings_restore classes as a setting, credential or learned data; "
+        "RUNTIME keys and web_session. rows are refused (importer._carried_in_migration)"
+    ),
     "kazma-core/kazma_core/swarm/reliability.py::_release_probe_lease": ("swarm.breaker.",),
     "kazma-core/kazma_core/swarm/reliability.py::_try_acquire_probe_lease": ("swarm.breaker.",),
     "kazma-core/kazma_core/swarm/reliability.py::forget_shared": ("swarm.breaker.",),

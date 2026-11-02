@@ -186,6 +186,19 @@ def forgotten_in_chat(tenant_id: str, keys: Iterable[str]) -> tuple[bool, set[tu
         conn.close()
 
 
+def turn_kept_out(session_key: str, turn: int, question: str | None, *, tenant_id: str) -> bool:
+    """True when the ledger keeps this turn out of memory -- the turn, or its
+    whole chat -- on a connection of its own (:func:`refuses_write` for the
+    readers outside the memory writers: the self-improvement hand-off).
+    Raises when the ledger cannot be read: the caller learns nothing."""
+    conn = _open()
+    try:
+        return refuses_write(conn, tenant_id=tenant_id, session_id=session_key,
+                             turn_number=int(turn or 0), user_text=question)
+    finally:
+        conn.close()
+
+
 def chat_remembered(key: str, *, tenant_id: str, conn: sqlite3.Connection | None = None) -> bool:
     """False when the user keeps the chat *key* out of memory."""
     own = conn is None
@@ -1044,6 +1057,55 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
 #: The shortest text :func:`forget_mentions` takes: shorter matches half the
 #: memory store ("ok", "the").
 MENTION_MIN_CHARS = 4
+
+
+def inherit_ledger(source_key: str, new_key: str) -> dict[str, Any]:
+    """Give the chat *new_key*, a fork of *source_key*, the source's ledger:
+    its whole-chat keep-out and each turn it forgot, for the tenants they were
+    written for, under every key of the new chat.
+
+    A fork's transcript holds the source's turns under the same turn numbers,
+    and turn reconcile and the live writer ask the ledger by the chat they
+    write for. Without these rows a fork of a chat kept out of memory was
+    remembered, and a turn the user forgot came back as the fork's (FA-246).
+    Every row is journaled first (``keep_out`` / ``turn``), so a restored
+    memory database gets it too. Raises when it cannot: the fork is refused.
+    """
+    from kazma_core.memory import forget_journal
+
+    source = chat_keys(source_key) or [source_key]
+    targets = chat_keys(new_key) or [new_key]
+    conn = _open()
+    try:
+        marks = ",".join("?" for _ in source)
+        rows = _ledger_rows(
+            conn,
+            "SELECT DISTINCT tenant_id, turn_number, question_sha FROM memory_forgotten "
+            f"WHERE session_key IN ({marks}) ORDER BY tenant_id, turn_number, question_sha",
+            source,
+        )
+        whole = turns = 0
+        now = time.time()
+        for tenant, turn, sha in rows:
+            tid, turn, sha = str(tenant or "default"), int(turn or 0), str(sha or "")
+            if turn == 0 and not sha:
+                seq = forget_journal.append("keep_out", tenant_id=tid, session_key=new_key)
+                whole += 1
+            else:
+                seq = forget_journal.append("turn", tenant_id=tid, session_key=new_key,
+                                            turn_number=turn, question_sha=sha)
+                turns += 1
+            conn.executemany(
+                "INSERT OR IGNORE INTO memory_forgotten "
+                "(tenant_id, session_key, turn_number, question_sha, episode_id, forgotten_at) "
+                "VALUES (?, ?, ?, ?, NULL, ?)",
+                [(tid, k, turn, sha, now) for k in targets],
+            )
+            forget_journal.mark_applied(conn, seq)
+        conn.commit()
+        return {"chat_kept_out": whole > 0, "turns": turns}
+    finally:
+        conn.close()
 
 
 def keep_turn_out(session_key: str, turn: int, question: str, *, tenant_id: str) -> bool:

@@ -67,7 +67,7 @@ def test_the_switch_is_read_from_the_saved_setting(registry):
 def test_the_old_key_was_written_and_never_read(registry, monkeypatch):
     """Negative control: with the switch module out of the picture (the
     registry as it was), the saved "off" changes nothing."""
-    monkeypatch.setattr(switches, "load_switches", lambda: frozenset())
+    monkeypatch.setattr(switches, "is_skill_enabled", lambda skill_id: True)
     get_config_store().set(switches._skill_key("native:browser_automation"), False, category="skills")
     try:
         assert "browser_extract_text" in _names(registry)

@@ -168,6 +168,18 @@ class VerifyReport:
         self.warnings.append(msg)
 
 
+def _holds_settings_rows(zf: zipfile.ZipFile, arc_files: set[str]) -> bool:
+    """True when the bundle's ``settings_rows.json`` (FA-255) holds a row: an
+    install whose only store is its settings carries them there, not in data/."""
+    if "settings_rows.json" not in arc_files:
+        return False
+    try:
+        rows = json.loads(zf.read("settings_rows.json").decode("utf-8"))
+    except (KeyError, ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(rows, list) and bool(rows)
+
+
 class KazmaBundle:
     """Read-side handle over a written bundle (.zip on disk).
 
@@ -225,6 +237,20 @@ class KazmaBundle:
                         report.add_error(f"missing required file: {required}")
                 if "data" not in names and not any(n.startswith("data/") for n in names):
                     report.add_warning("bundle has no data/ files (empty export?)")
+                # A bundle of an install holds one of its stores, or its
+                # Postgres dump. An export run where no install was carried
+                # only the workspaces table it writes itself, and verify
+                # called it valid (FA-252).
+                stores = {n for n in arc_files if n.startswith("data/") and n.endswith(".db")}
+                stores.discard("data/workspaces.db")
+                documents = any(n.startswith("document-store/") for n in arc_files)
+                if (not stores and not documents and "data/postgres.dump" not in arc_files
+                        and not _holds_settings_rows(zf, arc_files)):
+                    report.add_error(
+                        "bundle holds no store of an installation (no vault, memory or other "
+                        "database, no document store, no Postgres dump): it was exported from a "
+                        "folder with no install"
+                    )
 
                 # Manifest ↔ archive cross-check, BOTH directions. Previously
                 # only manifest→archive was checked, so a rogue member slipped

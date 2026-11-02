@@ -191,11 +191,19 @@ class TestChatStream:
         provider._http.post.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_429_is_transient(self) -> None:
+    async def test_429_is_transient(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """After the bounded Retry-After backoff (FA-214), still transient."""
+        import kazma_core.llm_provider as lp
+
+        async def no_wait(*a, **k):
+            return None
+
+        monkeypatch.setattr(lp.asyncio, "sleep", no_wait)
         provider = _provider_with_stream([], status=429, body=b"rate limited")
         with pytest.raises(LLMError) as ei:
             _ = [d async for d in provider.chat_stream([{"role": "user", "content": "x"}])]
         assert ei.value.transient is True
+        assert ei.value.kind == "rate_limit_exhausted" and ei.value.attempts == 4
 
     @pytest.mark.asyncio
     async def test_kill_switch_uses_chat(self, monkeypatch: pytest.MonkeyPatch) -> None:

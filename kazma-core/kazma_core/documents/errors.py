@@ -57,7 +57,12 @@ def infrastructure_errors() -> tuple[type[BaseException], ...]:
     """
     import sqlite3
 
-    errs: list[type[BaseException]] = [OSError, sqlite3.Error]
+    from kazma_core.config_availability import ConfigStoreUnavailableError
+
+    # The settings store answers a Postgres outage with
+    # ConfigStoreUnavailableError (FA-259), where a pool timeout -- an
+    # OperationalError -- used to surface.
+    errs: list[type[BaseException]] = [OSError, sqlite3.Error, ConfigStoreUnavailableError]
     try:
         import psycopg
 

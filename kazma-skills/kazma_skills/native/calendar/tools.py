@@ -163,7 +163,8 @@ async def find_free_slots(
     provider: str = "auto",
     account: str = "",
 ) -> str:
-    """Find free slots of ``duration_minutes`` on ``date`` (YYYY-MM-DD or ISO)."""
+    """Find free slots of ``duration_minutes`` on ``date`` (YYYY-MM-DD or ISO):
+    its working day in the operator's zone (``backends.base.free_slots``)."""
     if not date or not date.strip():
         return "Error: date (YYYY-MM-DD) is required."
     from kazma_skills.native.calendar.router import (

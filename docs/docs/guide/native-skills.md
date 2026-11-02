@@ -78,7 +78,7 @@ export GOOGLE_CALENDAR_TOKEN=ya29...
 | `create_event` | Create an event (summary, start, end, location, description) |
 | `update_event` | Update an event by id |
 | `delete_event` | Delete an event by id |
-| `find_free_slots` | Find free slots of a given duration on a date |
+| `find_free_slots` | Find free slots of a given duration on a date: its working day (09:00 to 17:00) in your time zone, around every event that overlaps it, all-day and multi-day events included |
 
 Use `provider="auto"` (default) to pick the first credentialed backend, or
 `provider="google"` / `"outlook"` to pin one.
