@@ -194,6 +194,8 @@ Grouped by class. One gate per class where a class exists. Each finding's own re
 
 Every Stage 2 item below is implemented with its gate and negative control (AGENTS.md §55 names each one). FA-267 landed with Stage 1 (`tests/test_restore_layout.py`). FA-277's Stage 2 half is the benchmark (`tests/e2e/test_first_token_latency.py`: Kazma's own share of the first token, measured p50 0.05 s); the model and reasoning choice stays the owner's (Stage 0). FA-233 takes the plan's second option: readiness says each scan pays the signature load when no clamd answers, and Kazma uses `clamdscan` only when one does; running clamd (about 1 GB of memory) is the owner's choice. FA-124's remote translation is an environment opt-in (`KAZMA_TRANSLATION_REMOTE=mymemory`), off by default.
 
+FA-232 follow-up (2026-11-02, after the deploy): the new check read the live install's signatures as 41 days old. `freshclam` had run once, at setup, and nothing scheduled it; the owner ran it and scheduled it daily, and readiness went back to ready without a restart. The Docker image had the same gap: its Dockerfile said the entrypoint refreshed the signatures, and nothing did. The entrypoint now starts `freshclam --daemon --checks=12` as Kazma's user (`tests/test_container_signatures_refresh.py`, the old entrypoint as the control; a real Debian run as uid 10001 checked in a throwaway container), and the FAQ, quickstart and document operations guide say to schedule it.
+
 ### Secrets and error text (§26D, §26F)
 
 | ID | Fix | Gate (negative control) | Effort |

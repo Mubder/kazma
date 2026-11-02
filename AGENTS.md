@@ -8324,11 +8324,19 @@ has a gate that fails on the old code.
   `researcher` (FA-113); research storage is sized with admission and checked
   in it (FA-266, §24B); readiness reports the malware signatures' age and
   degrades past 7 days, the sweep "malware signatures" alerts, and
-  `clamdscan` is used only when a clamd answers (FA-232/233). Gates:
+  `clamdscan` is used only when a clamd answers (FA-232/233). Something must
+  refresh them: the container's entrypoint starts `freshclam --daemon
+  --checks=12` as the user Kazma runs as (the image hands it
+  `/var/lib/clamav` and `/var/log/clamav`), and a freshclam that cannot start
+  is said and Kazma starts anyway; the Dockerfile had claimed the entrypoint
+  did it, and nothing did. A host schedules `freshclam` itself (the live
+  install had run it once, at setup: 41 days old when the check first read
+  it). Gates:
   `tests/test_run_kinds_declared.py`, `tests/test_repair_copies_stay_home.py`,
   `tests/test_dispatch_swarm_routes_auto.py`,
   `tests/test_research_storage_sized_with_admission.py`,
-  `tests/test_malware_signatures_and_scan_cost.py`.
+  `tests/test_malware_signatures_and_scan_cost.py`,
+  `tests/test_container_signatures_refresh.py`.
 - **What Kazma says about itself, and what it sends.** The backup text says
   every 6 hours and what it holds (FA-116). Every tool that messages someone
   declares its recipients (`side_effects.OUTBOUND_TARGET_FIELDS`) and the

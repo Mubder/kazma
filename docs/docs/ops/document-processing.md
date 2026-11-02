@@ -658,14 +658,29 @@ known age degrade readiness (`malware_signatures_stale`,
 `documents.malware_signatures` once a day while it lasts. Uploads are still
 scanned: the alert says the control has stopped learning, not that it is off.
 
-Schedule `freshclam` (it downloads the new signatures, several a day):
+Running `freshclam` once at setup is not enough: new signatures come out
+several times a day, and a database nobody refreshes passes the 7 days in a
+week. The live install had run it once, at setup, and was 41 days old when
+this check first read it (2026-11-02). Schedule it:
 
-- Windows: a Task Scheduler task running `freshclam.exe` every 4 hours, as
-  the account Kazma runs as (the database is under that account's ClamAV
-  folder), for example
-  `schtasks /Create /TN "ClamAV freshclam" /SC HOURLY /MO 4 /TR "\"C:\Program Files\ClamAV\freshclam.exe\""`.
+- Windows: a Task Scheduler task running the `freshclam.exe` whose
+  `freshclam.conf` writes the database `clamscan` reads -- under
+  `%LOCALAPPDATA%\ClamAV` for the copy the
+  [FAQ](../guide/faq.md#how-do-i-enable-malware-scanning) sets up, under
+  `C:\Program Files\ClamAV` for the installer's own -- as the account Kazma
+  runs as, at least daily, for example
+  `schtasks /Create /TN "ClamAV freshclam" /SC DAILY /ST 03:30 /TR "<path to freshclam.exe>" /F`.
 - Linux: the distribution's `clamav-freshclam` service
   (`systemctl enable --now clamav-freshclam`).
+- Docker: nothing to do. The image fetches the signatures when it is built,
+  and its entrypoint (`scripts/docker-entrypoint.sh`) starts `freshclam`'s
+  daemon, which checks 12 times a day as the user Kazma runs as. A
+  `freshclam` that cannot start is said on the container's output, and Kazma
+  starts anyway.
+
+To check: the Documents readiness (`malware.signatures.age_days` and
+`status`) after a `freshclam` run. Kazma reads the age on every check, so it
+changes without a restart.
 
 ### What each scan costs
 

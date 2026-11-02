@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Malware signatures stay current (2026-11-02)
+
+- The Docker image now refreshes ClamAV's signatures while it runs: its
+  entrypoint starts `freshclam`'s daemon, which checks 12 times a day. Until
+  now a container scanned with the signatures of the day its image was
+  built, although the Dockerfile said otherwise.
+- The setup guides (FAQ, quickstart, document operations) now say to
+  schedule `freshclam` on Windows and Linux hosts, and how to check the
+  signatures' age. Running it once at setup is not enough: signatures more
+  than 7 days old degrade document readiness.
+
 ## The functional audit's Medium findings fixed (2026-11-02)
 
 - A provider that answers with something that is not a model answer, or a
