@@ -273,6 +273,30 @@ _logging_configured: bool = False
 _last_effective_level: str = "INFO"
 
 
+def _console_never_raises() -> None:
+    """A console that cannot encode a character writes it escaped, never raises.
+
+    The console handler writes to stdout. When stdout is a file or a pipe on
+    Windows its encoding is the locale's (cp1252), and every line holding a
+    character outside it -- an arrow, Arabic text, an emoji -- raised in the
+    handler: a "--- Logging error ---" traceback on stderr per line, and the
+    line lost from the console (found by the reload drill, roadmap theme 2,
+    2026-11: a server started with its output to a file). The file handler
+    writes UTF-8 and is not affected.
+    """
+    stream = sys.stdout
+    encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "").replace("_", "")
+    if encoding in ("utf8", "utf8sig"):
+        return
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(errors="backslashreplace")
+    except (ValueError, OSError, AttributeError, TypeError):
+        pass  # a stream that cannot change keeps its rule
+
+
 def setup_logging(level: str | None = None) -> str:
     """Configure root + library logging. Idempotent.
 
@@ -386,6 +410,7 @@ def setup_logging(level: str | None = None) -> str:
         "loggers": loggers_config,
     }
 
+    _console_never_raises()
     try:
         logging.config.dictConfig(config)
         # The file and console handlers write on their own thread; the

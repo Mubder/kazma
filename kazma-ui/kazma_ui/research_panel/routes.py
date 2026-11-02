@@ -199,10 +199,17 @@ def _set_archived(task_id: str, archived: bool) -> JSONResponse:
 
     if store is not None:
         try:
-            store.persist_task(task)
+            written = store.persist_task(task)
         except Exception as exc:
             logger.exception("[research] archive persist failed")
             return JSONResponse({"error": safe_error(exc)}, status_code=500)
+        if not written:
+            # The store refused the write (roadmap theme 1): it answered
+            # {"ok": true} over an archive flag that was never recorded.
+            return JSONResponse(
+                {"ok": False, "error": "The task's record could not be changed", "code": "not_recorded"},
+                status_code=409,
+            )
     else:
         return JSONResponse({"error": "store unavailable"}, status_code=503)
 

@@ -175,13 +175,58 @@ def written_keys(files: list[str]) -> dict[str, set[str]]:
     return keys
 
 
+#: The TUI writes settings too (roadmap theme 4): its Settings panel from
+#: tables of controls, its chat's ``/config`` through ``/api/settings/single``.
+TUI_WRITERS = ("kazma-tui/kazma_tui/settings_panel.py", "kazma-tui/kazma_tui/chat.py")
+#: Files whose reads of a key do not make its control effective: they only
+#: show it back (the Settings writers, the TUI's Settings panel).
+NOT_READERS = (*WRITERS, "kazma-tui/kazma_tui/settings_panel.py")
+
+
+def tui_written_keys() -> dict[str, set[str]]:
+    """The keys the TUI writes: a control table's key (a class-level list of
+    tuples), the panel's ``_persist_setting(<key>)`` (a literal or a module
+    constant), and a request payload naming its ``"key"``."""
+    keys: dict[str, set[str]] = {}
+
+    def add(key: str | None, f: str) -> None:
+        if key and KEYISH.match(key) and not NOT_SETTINGS.search(key):
+            keys.setdefault(key, set()).add(f)
+
+    for f in TUI_WRITERS:
+        tree = ast.parse((REPO / f).read_text(encoding="utf-8"))
+        consts = {
+            target.id: node.value.value
+            for node in tree.body if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+            for target in node.targets if isinstance(target, ast.Name)
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                for item in node.body:
+                    if isinstance(item, ast.Assign) and isinstance(item.value, (ast.List, ast.Tuple)):
+                        for row in item.value.elts:
+                            if isinstance(row, ast.Tuple):
+                                for cell in row.elts:
+                                    add(_template(cell), f)
+            elif (isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "_persist_setting"
+                  and node.args):
+                arg = node.args[0]
+                add(_template(arg) or (consts.get(arg.id) if isinstance(arg, ast.Name) else None), f)
+            elif isinstance(node, ast.Dict):
+                for k, v in zip(node.keys, node.values):
+                    if k is not None and _template(k) == "key":
+                        add(_template(v), f)
+    return keys
+
+
 def reader_index(files: list[str]) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     """``(literals per file, categories read per file)`` of product modules
-    other than the Settings writers."""
+    other than the Settings writers and the TUI's Settings panel."""
     lits: dict[str, set[str]] = {}
     cats: dict[str, set[str]] = {}
     for f in files:
-        if not PRODUCT.match(f) or f in WRITERS:
+        if not PRODUCT.match(f) or f in NOT_READERS:
             continue
         source = (REPO / f).read_text(encoding="utf-8")
         try:
@@ -221,6 +266,8 @@ def test_every_key_a_settings_control_writes_is_read():
     files = _files()
     keys = expand(written_keys(files))
     assert len(keys) > 60  # the enumeration found the writers
+    for key, src in tui_written_keys().items():
+        keys.setdefault(key, set()).update(src)
     assert not [k for k in keys if k.endswith(".{}") and k.count(".") == 1], (
         "a section written field by field from the request needs EXPANSIONS")
     lits, cats = reader_index(files)
@@ -250,3 +297,19 @@ def test_the_tools_switch_was_a_dead_control():
                if f != "kazma-core/kazma_core/skills/switches.py"}
     without["kazma-core/kazma_core/skills/switches.py"] = set()
     assert "tools.{}.enabled" in unread({"tools.{}.enabled": {"x"}}, without, cats)
+
+
+def test_the_tui_writes_are_read_by_the_gate():
+    """The TUI's tables and payloads are enumerated (roadmap theme 4): a key
+    the panel writes from a table, one through a module constant, and one the
+    chat's /config sends by name."""
+    keys = tui_written_keys()
+    assert len(keys) >= 15
+    assert {"memory.enabled", "memory.v2.recall_ttl_days", "memory.tenant_mode"} <= set(keys)
+
+
+def test_negative_control_a_dead_tui_toggle_is_found():
+    """A TUI table key no product module reads is reported."""
+    lits, cats = reader_index(_files())
+    assert unread({"memory.v2.no_such_switch": {"kazma-tui/kazma_tui/settings_panel.py"}},
+                  lits, cats) == ["memory.v2.no_such_switch"]

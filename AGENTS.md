@@ -1341,7 +1341,7 @@ scheduler needs a case there.
   default 30, 0 keeps all —, pipeline log retention, swarm approval rows,
   run incident retention (§52), checkpoint retention (§41), the supervisor
   watch (§39), the document worker broker (§19 E1), malware signatures
-  (§19 E), forget convergence (§15I), memory vector repair, memory recovery,
+  (§19 E), dependency advisories (§57), forget convergence (§15I), memory vector repair, memory recovery,
   retired knowledge promotions and memory turn reconcile (§15F), memory
   mirror sync (§15K), weekly topic summaries (§15J), entity count repair
   (§15L) and knowledge vector repair (§24F, last), run by ONE isolated
@@ -8546,6 +8546,103 @@ has a gate that fails on the old code.
   `file_write` landed in it. The seed takes `KAZMA_WORKSPACE` first, and the
   root conftest pins it to a temp folder. Gate:
   `tests/test_install_data_shield.py` (no variable as the control).
+
+### 57. The weak-spot roadmap of 2026-11 (`docs/plans/FUNCTIONAL_AUDIT_2026-11_REMEDIATION.md`)
+
+The audit's findings clustered into twelve themes; each theme is a standard
+held by a class gate, beyond the single findings. Themes 3, 8 and 9 were met
+by Stages 1-3; theme 7's remaining part (the model, its reasoning, the tool
+count) and theme 10 (GitHub Actions billing) are the owner's.
+
+- **A result that says whether it worked is read where it is returned**
+  (theme 1). `tests/test_failure_results_are_used.py` covers the vault, the
+  chat store, the swarm task store and the updater too; a call that returns
+  nothing worth reading is in `NOT_AN_ANSWER`. Fixed when it widened: a
+  pipeline checkpoint's approve, reject and timeout wrote their task with
+  the answer dropped, as did the step journal (`SwarmEngine._journal_step`)
+  and a Research session's archive (now 409 `not_recorded`). Gate:
+  `tests/test_refused_task_writes_are_said.py`.
+- **Recovery is drilled with the real thing, in CI** (theme 2). The job
+  `Recovery drills` runs, with a skip failing it: a universal backup sent to
+  a real restic repository, restored by `restore.restore_files` into a
+  scratch folder, and recalled (`tests/test_drill_restic_restore_recall.py`;
+  the generation before the memory as the control); a throwaway Postgres
+  stopped under a real settings store; the memory restore drill on
+  Postgres; and the REAL guard reloading the REAL `serve.py` in a private
+  install with a web turn streaming and an OCR job running
+  (`tests/test_drill_graceful_reload.py`, `KAZMA_TEST_RELOAD_DRILL=1`; a hard
+  kill as the control: the job's next attempt). The drills found four
+  defects, each with its own gate:
+  - a SQLite install's restore ended FAILED for want of a Postgres dump its
+    manifest says it never had (`restore._postgres_not_used`);
+  - the tab that sent a turn reads it through the journal-attached tail,
+    which returned the moment the stop began, before the producer's
+    `done(stopped_for_shutdown)`: FA-262's frame never reached the page.
+    The tail passes on what is queued and sends the same frame itself
+    (`_streaming._end_attach_for_shutdown`, one payload
+    `_shutdown_done_payload`); a paused turn still ends quietly. Gate:
+    `tests/test_attached_stream_told_of_restart.py` (the early return as the
+    control);
+  - a stopping document worker set its stage's event, but the sandbox polls
+    the `documents.cancellation` signal, which only `run_cancellable` bound:
+    the OCR process ran on to its last page after the job was given back.
+    Every stage now runs under `cancellation.call_with_cancel`. Gate:
+    `tests/test_document_stage_stop_ends_its_worker.py` (a real sandboxed
+    process; the unbound call as the control);
+  - the server did not end after its own shutdown: uvicorn re-raised the
+    stop signal through the C runtime's default action, and interpreter exit
+    joins executor threads. `serve.py` calls
+    `process_exit.prepare_server_exit` (SIGBREAK/SIGTERM come back as
+    KeyboardInterrupt; a stop listener, `shutdown.add_stop_listener`, arms a
+    deadline at the stop's budget plus `EXIT_MARGIN_S`) and leaves through
+    `process_exit.exit_after_shutdown`, which runs the `atexit` handlers
+    first, bounded (the procedural recorder's drain, the vector store's
+    release: a bare `os._exit` skips them). Gate:
+    `tests/test_server_exit_after_stop.py` (real processes; each piece
+    removed as its control, a bare `os._exit` among them). `serve.py` reads `KAZMA_PORT` now (documented,
+    never read: the drill could not run beside a live server). The console
+    log handler escapes what stdout cannot encode
+    (`logging_config._console_never_raises`;
+    `tests/test_console_log_never_raises.py`).
+  A Knowledge crawl in flight is not drilled: its seed must be public, so a
+  drill would need the internet; its reload is held by
+  `tests/test_crawl_auto_resume.py`.
+- **Every setting has a reader, the TUI's too** (theme 4).
+  `tests/test_settings_keys_have_readers.py` reads the TUI's writers
+  (`TUI_WRITERS`); its dead toggles are gone and its chat reads the system
+  prompt the web reads (`agent.system_prompt` first).
+- **Forgetting a turn takes back the lessons it taught** (theme 5).
+  `self_improvement.forget_lessons_from(chat_keys, turn)`, called by
+  `forget._forget_turn` (after its commit, before the journal entry is
+  marked applied) and by `forget_chat`; a lesson another turn also taught
+  stays. Gate: `tests/test_forget_takes_back_lessons.py` (the forget without
+  the call as the control).
+- **Arabic and English as equals** (theme 6). `tests/test_paired_languages.py`
+  runs each path that decides by language once per language, through the
+  real function, and compares the answers; every product module with Arabic
+  in its code is paired there or declared with why (`DECLARED`). Its first
+  run found: Arabic calendar words unparsed ("بكرة الساعة 9 الصبح" asked
+  when; `relative_time._RE_CALENDAR_AR`, and "the day after tomorrow" in
+  English); Gulf document requests unrecognised and a bare "مستند" never
+  matching (`intent.heuristics`: the verbs, the formats' Arabic names, a
+  named format beating the generic word); plan approval words that did not
+  mirror (`plan_mode._APPROVE_RE`); and fixed replies in Arabic whatever the
+  user wrote -- the supervisor's budget message and four chat-app replies
+  -- now `language_lock.in_their_language`.
+- **A dependency advisory reaches the owner the day it is published**
+  (theme 11). The maintenance sweep "dependency advisories"
+  (`security/advisory_watch.advisory_sweep`) asks OSV about the installed
+  versions once a day (`audit_installed`; an hour's retry after a failure,
+  which raises nothing) and raises `security.advisories_new` once per new
+  advisory, naming the package, the fixed version and the update command;
+  reviewed advisories stay quiet. What is still open is kept in the RUNTIME
+  key `system.security.advisories` (`open_advisories`).
+- **An unmet requirement stays in front of the owner** (theme 12). The boot
+  check records its result (`install_requirements.REQUIREMENTS_KEY`,
+  `last_requirements_check`; a check that finds none clears it), and the
+  daily digest lists each unmet requirement and open advisory under "Needs
+  attention" until it is gone. Gate for 11 and 12:
+  `tests/test_dependency_notices_reach_the_owner.py`.
 
 ## UI Conventions (Web)
 

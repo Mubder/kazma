@@ -89,12 +89,12 @@ class SettingsPanel(VerticalScroll):
         ("Consolidator use LLM", "memory.consolidation.use_llm", True),
         ("V2 cognitive stack (use_new_stack)", "memory.v2.use_new_stack", False),
         ("V2 skip LLM if heuristic extracted", "memory.v2.skip_llm_if_heuristic_extracted", False),
-        ("Enable auto-summarization", "context.auto_summarize", True),
         ("Enable cost breaker", "cost.breaker_enabled", True),
-        ("Enable tracing", "tracing.enabled", False),
-        ("Enable cron", "cron.enabled", False),
         ("HITL approval (danger tools)", "safety.hitl_enabled", True),
     ]
+    # Removed 2026-11 (roadmap theme 4, tests/test_settings_keys_have_readers.py):
+    # "auto-summarization", "tracing" and "cron" switches wrote keys nothing
+    # read -- the scheduler always runs and tracing has no on/off setting.
 
     # V2 numeric tunables: (label, configstore key, type, default)
     V2_NUMERIC = [

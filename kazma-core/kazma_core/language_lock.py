@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["detect_user_language", "language_lock_message"]
+__all__ = ["detect_user_language", "in_their_language", "language_lock_message"]
 
 _ARABIC_RE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
@@ -64,6 +64,23 @@ def detect_user_language(text: str) -> str:
     if ar > 0:
         return "ar"
     return "en"
+
+
+def in_their_language(user_text: str | None, english: str, arabic: str) -> str:
+    """One of Kazma's fixed replies in the language of the message it answers.
+
+    Arabic for an Arabic message, English for an English one, both (Arabic
+    first) when the message does not say -- a photo, a code, a mix. Fixed
+    replies were Arabic only, or Arabic with English in brackets, wherever
+    they were written (roadmap theme 6, 2026-11): an English-speaking owner
+    whose chat ran out of budget was told so in Arabic.
+    """
+    lang = detect_user_language(user_text or "")
+    if lang == "ar":
+        return arabic
+    if lang == "en":
+        return english
+    return f"{arabic}\n{english}"
 
 
 def language_lock_message(user_text: str) -> str:

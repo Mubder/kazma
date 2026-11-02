@@ -36,12 +36,16 @@ _OFF = frozenset({"off", "disable", "0"})
 _ON = frozenset({"on", "enable", "1"})
 _STATUS = frozenset({"status", "?", "info", "help", ""})
 
+# The two languages' lists mirror each other (roadmap theme 6, 2026-11):
+# "موافق" approved a plan while "approved" did not, and "proceed" did while
+# "كمّل" did not.
 _APPROVE_RE = re.compile(
     r"(?is)^\s*(?:/"
     r"?plan\s+(?:go|execute|approve|run)|"
-    r"proceed|continue|go\s*ahead|do\s+it|"
+    r"proceed|continue|go\s*ahead|do\s+it|approved|agreed|"
     r"approve(?:\s+the\s+plan)?|execute(?:\s+the\s+plan)?|"
-    r"يلا|نفّذ|نفذ|نفذ الخطة|موافق)\s*[.!]?\s*$"
+    r"يلا|نفّذ|نفذ|نفّذ الخطة|نفذ الخطة|موافق|كمّل|كمل|اكمل|أكمل|تابع|"
+    r"سوّها|سوها|سويها|اعتمد(?:\s+الخطة)?)\s*[.!]?\s*$"
 )
 
 PLAN_MODE_NOTE = (

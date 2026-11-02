@@ -15,6 +15,7 @@ from typing import Protocol
 from . import telemetry
 from kazma_core.db.pg_helpers import store_errors
 
+from .cancellation import call_with_cancel
 from .errors import DocumentParseError, infrastructure_errors, storage_full
 from .jobs import (
     DocumentJobRecord,
@@ -371,8 +372,11 @@ class DocumentWorker:
                         "handler_missing",
                         f"No document handler is configured for stage {current.state.value}",
                     )
+                # The stage's own stop signal is its worker runs' too: a
+                # stop, a lost lease or a cancel ends the OCR process now,
+                # not at its last page (roadmap theme 2).
                 result = await asyncio.to_thread(
-                    handler, current, StageContext(cancellation)
+                    call_with_cancel, cancellation, handler, current, StageContext(cancellation)
                 )
                 if not isinstance(result, StageResult):
                     raise PermanentDocumentError(

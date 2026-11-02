@@ -50,6 +50,25 @@ def _attach_frame_is_terminal(frame: dict[str, Any]) -> bool:
             return False
     return True
 
+
+def _shutdown_done_payload(turn_id: str = "") -> dict[str, Any]:
+    """The ``done`` a stream ends with when Kazma restarts under its turn
+    (FA-262): no content, ``stopped_for_shutdown``, the notice in the page's
+    language. One payload for the turn's own stream and for every tab
+    attached to it."""
+    from kazma_ui.i18n import current_language
+    from kazma_ui.i18n import t as _t
+
+    payload: dict[str, Any] = {
+        "content": "",
+        "stopped_for_shutdown": True,
+        "notice": _t("chat.restarting_notice", current_language()),
+        "interrupted": False,
+    }
+    if turn_id:
+        payload["turn_id"] = turn_id
+    return payload
+
 #: Threads sitting on a graph interrupt. Attach must not close just because
 #: the pump task finished — the graph is paused, not over.
 _paused_threads: set[str] = set()
@@ -1247,17 +1266,9 @@ async def _stream_langgraph_events(
                 # be built)") or sent the partial text as the finished answer.
                 # Say what is true, mark the frame, and leave the turn to its
                 # own ending: no reply is saved from here, nothing is judged.
-                from kazma_ui.i18n import current_language
-                from kazma_ui.i18n import t as _t_sd
-
                 logger.info("[SSE] thread=%s stream closed for shutdown (%d chars streamed); the turn "
                             "ends on its own", thread_id[:12], len(content_acc or ""))
-                yield await emit_j("done", {
-                    "content": "",
-                    "stopped_for_shutdown": True,
-                    "notice": _t_sd("chat.restarting_notice", current_language()),
-                    "interrupted": False,
-                })
+                yield await emit_j("done", _shutdown_done_payload())
                 return
 
             # Stream crashed mid-turn (or failed immediately) — surface a
@@ -1728,6 +1739,54 @@ async def _journal_fast_path(thread_id: str, event: str, data: dict[str, Any]) -
             logger.debug("[SSE] fast-path journal failed event=%s", event, exc_info=True)
     return _sse_frame(event, data)
 
+def _frame_turn(frame: dict[str, Any]) -> str:
+    """The turn a journaled frame names (``data.turn_id``), or ''."""
+    data = frame.get("data") if isinstance(frame, dict) else None
+    return str((data or {}).get("turn_id") or "") if isinstance(data, dict) else ""
+
+
+#: How long an attached tab waits, once Kazma begins to stop, for the turn's
+#: own ``done`` to come through the journal: the producer sends it at its next
+#: event or wake (milliseconds), well inside uvicorn's graceful window (3 s
+#: at least, ``shutdown.uvicorn_graceful_s``).
+_SHUTDOWN_DRAIN_S = 1.5
+
+
+async def _end_attach_for_shutdown(
+    queue: Any, thread_id: str, last_yielded: int, turn_id: str = "",
+) -> AsyncGenerator[str, None]:
+    """The end of an attached stream when Kazma begins to stop.
+
+    A running turn's frames already journaled are passed on, and the turn's
+    own ``done(stopped_for_shutdown)`` with them when it arrives in time; if
+    it does not, the same frame is sent from here. A paused turn (an
+    approval waiting) or no live turn ends quietly, as before: the page
+    re-attaches when Kazma is back, and the approval comes back with it.
+    """
+    if not is_turn_running(thread_id) or is_thread_paused(thread_id):
+        return
+    deadline = time.monotonic() + _SHUTDOWN_DRAIN_S
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        try:
+            frame = await asyncio.wait_for(queue.get(), timeout=left)
+        except TimeoutError:
+            break
+        if frame is SHUTDOWN_WAKE:
+            continue
+        seq = int(frame.get("seq") or 0)
+        if seq <= last_yielded:
+            continue
+        last_yielded = seq
+        turn_id = _frame_turn(frame) or turn_id
+        yield _frame_from_journaled(frame, replay=False)
+        if _attach_frame_is_terminal(frame):
+            return
+    yield _sse_frame("done", _shutdown_done_payload(turn_id))
+
+
 async def _sse_attach_stream(
     thread_id: str,
     session_id: str,
@@ -1757,6 +1816,7 @@ async def _sse_attach_stream(
     broker = get_turn_broker()
     queue = broker.subscribe(thread_id)
     last_yielded = int(after_seq or 0)
+    turn_id = ""  # the turn the frames passed on name (theme 2)
     try:
         frames, gap, head = broker.resume(thread_id, after_seq)
         running = is_turn_running(thread_id)
@@ -1790,6 +1850,7 @@ async def _sse_attach_stream(
                 # reconnect, this turn's own opening frames for a sender.
                 yield _frame_from_journaled(frame, replay=replay_is_history)
                 last_yielded = max(last_yielded, int(frame.get("seq") or 0))
+                turn_id = _frame_turn(frame) or turn_id
         if not running and not is_thread_paused(thread_id):
             # Nothing live to attach to — replay covered everything missed.
             # A HITL pause is not "nothing": the graph is parked and approve
@@ -1801,7 +1862,15 @@ async def _sse_attach_stream(
             if is_shutting_down():
                 # Kazma is restarting: the page re-attaches when it is back
                 # (FA-261: this stream, open for a pending approval, held
-                # uvicorn's whole graceful window).
+                # uvicorn's whole graceful window). A RUNNING turn's tab is
+                # told so, as the turn's own stream tells it (FA-262): the
+                # sender reads its turn through this tail, and returning
+                # here dropped the producer's ``done`` -- the page was left
+                # with a cut answer and no word of the restart (roadmap
+                # theme 2, found by the reload drill). Frames already queued
+                # go first; a terminal one among them ends it.
+                async for chunk in _end_attach_for_shutdown(queue, thread_id, last_yielded, turn_id):
+                    yield chunk
                 return
             try:
                 frame = await asyncio.wait_for(
@@ -1828,6 +1897,7 @@ async def _sse_attach_stream(
             if seq <= last_yielded:
                 continue  # emitted during the replay window — already served
             last_yielded = seq
+            turn_id = _frame_turn(frame) or turn_id
             # Emitted while this client was attached: live, and a pending
             # approval in it must paint as one.
             yield _frame_from_journaled(frame, replay=False)

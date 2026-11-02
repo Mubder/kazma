@@ -87,7 +87,7 @@ scale), `KAZMA_TEST_REAL_SCANS_MANIFEST` (real-scan measurements).
 | Variable | Default | Prod required? | Purpose |
 |----------|---------|----------------|---------|
 | `KAZMA_HOST` | `127.0.0.1` | Set deliberately | Bind address. Non-loopback **requires** `KAZMA_SECRET`. |
-| `KAZMA_PORT` / serve arg | `9090` (CLI) | No | HTTP port (`kazma serve [port]`). Docker images may differ — check compose. |
+| `KAZMA_PORT` / serve arg | `9090` | No | HTTP port: `serve.py` (what the guard runs; it ignored the variable until 2026-11) and `kazma serve [port]`. Docker images may differ — check compose. |
 | `KAZMA_SECRET` | generated on loopback | **Yes** on public bind | Auth shared secret / session material. Known-bad default **refused**. |
 | `KAZMA_PRODUCTION` | unset | **Yes** for prod | Enables vault-required, workspace root, code_exec policy, YOLO hard-block, etc. |
 | `KAZMA_PUBLIC_URL` | unset | Recommended behind proxy | Public origin for OAuth/OIDC redirects. |

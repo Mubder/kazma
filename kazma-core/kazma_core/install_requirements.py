@@ -30,12 +30,19 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
-__all__ = ["UnmetRequirement", "report_unmet_requirements", "unmet_requirements"]
+__all__ = [
+    "REQUIREMENTS_KEY",
+    "UnmetRequirement",
+    "last_requirements_check",
+    "report_unmet_requirements",
+    "unmet_requirements",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -191,18 +198,51 @@ def _install_python(root: Path | None) -> str:
     return f'"{exe}"' if " " in exe else exe
 
 
+#: The boot check's last result, kept so the daily digest names every unmet
+#: requirement until an update clears it (roadmap theme 12): the alert speaks
+#: once per boot and its cooldown let it drop out of sight.
+REQUIREMENTS_KEY = "system.install.requirements"
+
+
+def _record_check(unmet: list[UnmetRequirement], fix: str) -> None:
+    """Keep what the check found, an empty list included (that clears it)."""
+    import time
+
+    from kazma_core.config_store import get_config_store
+    from kazma_core.db.pg_helpers import store_errors
+
+    try:
+        get_config_store().set(
+            REQUIREMENTS_KEY,
+            {"checked_at": time.time(), "unmet": [u.describe() for u in unmet], "fix": fix if unmet else ""},
+            category="system",
+        )
+    except store_errors():
+        logger.warning("[install] could not keep the requirements check for the digest", exc_info=True)
+
+
+def last_requirements_check() -> dict[str, Any]:
+    """What the last boot check found: ``unmet`` (descriptions) and ``fix``."""
+    from kazma_core.config_store import get_config_store
+
+    raw = get_config_store().get(REQUIREMENTS_KEY)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
 def report_unmet_requirements(project_root: Path | None = None) -> list[UnmetRequirement]:
     """Say at boot when the environment is behind this build; returns the list.
 
     A WARNING with every package, and the ops alert
     ``install.requirements_unmet`` (warn): the owner learns that a deploy
     needs ``kazma update`` from the page, not from a feature that breaks.
+    The result is kept (:data:`REQUIREMENTS_KEY`) for the daily digest.
     """
     unmet = unmet_requirements(project_root)
+    fix = _update_instructions(project_root) if unmet else ""
+    _record_check(unmet, fix)
     if not unmet:
         return unmet
     detail = "; ".join(u.describe() for u in unmet)
-    fix = _update_instructions(project_root)
     logger.warning(
         "[install] %d installed package(s) are older than this build requires: %s. %s",
         len(unmet), detail, fix,

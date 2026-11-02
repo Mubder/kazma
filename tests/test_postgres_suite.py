@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -46,7 +47,9 @@ def _suite():
 
 
 def _postgres_job(ci_text: str) -> str:
-    return ci_text.split("\n  postgres:\n", 1)[1].split("\n  unified-turn-lifecycle:", 1)[0]
+    """The Postgres job's text, up to the next job (whichever it is)."""
+    rest = ci_text.split("\n  postgres:\n", 1)[1]
+    return re.split(r"\n  [a-z0-9][a-z0-9_-]*:\n", rest, maxsplit=1)[0]
 
 
 def test_the_ci_job_runs_the_marked_suite():

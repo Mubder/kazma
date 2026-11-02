@@ -144,7 +144,9 @@ def test_streamer_persists_before_announcing_completion():
     # did NOT end, and saves nothing. Every other ``done`` announces the end.
     shutdown = src.index("if _stopped_for_shutdown:")
     shutdown_end = src.index("return", src.index('emit_j("done"', shutdown))
-    assert '"stopped_for_shutdown": True' in src[shutdown:shutdown_end]
+    assert "_shutdown_done_payload()" in src[shutdown:shutdown_end]
+    payload = inspect.getsource(sse_chat._streaming._shutdown_done_payload)
+    assert '"stopped_for_shutdown": True' in payload
     done_at = [i for i in _occurrences(src, 'emit_j("done"') if not shutdown < i < shutdown_end]
     assert done_at, "the streamer must announce the end of the turn"
     assert all(persist_at < at for at in done_at), (

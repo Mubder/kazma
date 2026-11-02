@@ -29,7 +29,7 @@ from typing import Any, TypeVar
 
 from .errors import DocumentSandboxError
 
-__all__ = ["WorkerCancelled", "cancel_requested", "run_cancellable"]
+__all__ = ["WorkerCancelled", "call_with_cancel", "cancel_requested", "run_cancellable"]
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,22 @@ def cancel_requested() -> bool:
 
     event = _CANCEL.get()
     return event is not None and event.is_set()
+
+
+def call_with_cancel(event: threading.Event, fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    """Run *fn* (in this thread) with *event* as its worker runs' cancel signal.
+
+    For a caller that owns its own stop signal -- a durable job stage, whose
+    event the document worker sets when it stops, loses the lease or the job
+    is cancelled. The stage's event was never the sandbox's: a reload gave
+    the job back while its OCR process ran on to its last page, and the
+    server's exit waited for it (roadmap theme 2, found by the reload drill).
+    """
+    token = _CANCEL.set(event)
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        _CANCEL.reset(token)
 
 
 async def run_cancellable(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:

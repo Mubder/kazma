@@ -324,6 +324,9 @@ async def supervisor_node(
     # ── Cost breaker gate ──────────────────────────────────────────
     if cost_breaker.should_halt():
         logger.warning("[Supervisor] Cost breaker tripped — forcing respond")
+        from kazma_core.agent.turn_input import extract_latest_user_text
+        from kazma_core.language_lock import in_their_language
+
         return {
             **breaker_reset,
             **_mission_carry,
@@ -332,7 +335,13 @@ async def supervisor_node(
             + [
                 {
                     "role": "assistant",
-                    "content": "⚠️ ميزانية الجلسة انتهت. أعد التشغيل أو اتصل بالمسؤول.",
+                    # In the user's language (roadmap theme 6): it was Arabic
+                    # whatever they wrote.
+                    "content": in_their_language(
+                        extract_latest_user_text(messages, image_marker=False),
+                        "⚠️ This session's budget is spent. Restart it or contact the administrator.",
+                        "⚠️ ميزانية الجلسة انتهت. أعد التشغيل أو اتصل بالمسؤول.",
+                    ),
                 }
             ],
         }

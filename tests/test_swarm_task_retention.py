@@ -146,6 +146,7 @@ def test_the_maintenance_cadence_carries_the_retention_sweep():
         "run incident retention",
         "checkpoint retention",
         "supervisor watch", "document worker broker", "malware signatures",
+        "dependency advisories",
         "forget convergence", "memory vector repair", "memory recovery", "retired knowledge promotions",
         "memory turn reconcile",
         "memory mirror sync", "memory topic summaries", "entity count repair",

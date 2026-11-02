@@ -303,6 +303,12 @@ def restore_files(
         _force_rmtree(pg_staging)
         res.add("postgres dump", bool(dumps),
                 dumps[0].name if dumps else (err[:200] or "not found"))
+    elif _postgres_not_used(root):
+        # A SQLite install has no Postgres to dump (the backup's manifest
+        # says so, ``universal._pg_dump_state``): no dump is the right
+        # answer, and every restore of one used to end FAILED on it
+        # (roadmap theme 2, found by the restic drill).
+        res.add("postgres dump", True, "not used by this install")
     else:
         res.add("postgres dump", False,
                 "no Postgres dump in this repository -- the database cannot "
@@ -322,6 +328,20 @@ def restore_files(
     # in a line the firing ledger can count.
     logger.info("[restore] %s", res.summary())
     return res
+
+
+def _postgres_not_used(root: Path) -> bool:
+    """The backup's own manifest says the install did not use Postgres.
+
+    Only a recorded ``skipped`` counts: a manifest without the record (an
+    older backup) or one that cannot be read leaves a missing dump a failure.
+    """
+    try:
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    pg = manifest.get("postgres") if isinstance(manifest, dict) else None
+    return isinstance(pg, dict) and bool(pg.get("skipped"))
 
 
 def _force_rmtree(path: Path) -> None:

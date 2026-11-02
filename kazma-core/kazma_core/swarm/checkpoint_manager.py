@@ -217,7 +217,15 @@ class CheckpointManager:
             self._persist(task)
         elif self._task_store is not None:
             try:
-                self._task_store.persist_task(task)
+                # A refused write (roadmap theme 1): the row is finished, or a
+                # newer run owns it; the pause is not on record for a restart.
+                if not self._task_store.persist_task(task):
+                    logger.warning(
+                        "[CheckpointManager] the store refused the paused state of '%s' "
+                        "(its row is finished or a newer run owns it); a restart will not "
+                        "offer this checkpoint", task.id,
+                    )
+                    record_swarm_failure("task_write")
             except Exception:
                 logger.exception(
                     "[CheckpointManager] failed to persist paused task '%s'", task.id

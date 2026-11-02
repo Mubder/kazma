@@ -26,6 +26,24 @@ def _is_loopback(host: str) -> bool:
     return host.strip().lower() in _LOOPBACK
 
 
+def _port() -> int:
+    """The listen port: ``KAZMA_PORT`` (after .env), else 9090.
+
+    The docs and .env.example named KAZMA_PORT as the port, and this launcher
+    -- the one the guard runs -- bound 9090 whatever it said (roadmap theme 2,
+    2026-11: the reload drill could not run a second server beside a live one).
+    """
+    raw = (os.environ.get("KAZMA_PORT") or "").strip() or "9090"
+    try:
+        port = int(raw)
+    except ValueError:
+        port = 0
+    if not 1 <= port <= 65535:
+        print(f"\n  KAZMA_PORT={raw!r} is not a port (1-65535).\n", file=sys.stderr)
+        sys.exit(2)
+    return port
+
+
 def _bootstrap_bind_and_secret() -> str:
     """Resolve host + secret. Never invent a well-known default secret."""
     # .env first, so it decides the bind host, the secret, the exposure check
@@ -97,8 +115,16 @@ def _note_proxies() -> None:
 
 
 host = _bootstrap_bind_and_secret()
+port = _port()
 
 try:
+    # The stop ends in Python and within its budget (roadmap theme 2): the
+    # stop signals come back as KeyboardInterrupt, and a deadline is armed
+    # when the stop begins. See kazma_core.process_exit.
+    from kazma_core.process_exit import prepare_server_exit
+
+    prepare_server_exit()
+
     # In-process uvicorn so Windows gets SelectorEventLoop via
     # uvicorn_loop_factory. `python -m uvicorn` (the old subprocess path)
     # hardcodes ProactorEventLoop on Windows in 0.36+, which makes
@@ -117,7 +143,7 @@ try:
         "app": app_factory,
         "factory": True,
         "host": host,
-        "port": 9090,
+        "port": port,
         # The app applies forwarded headers itself (see _note_proxies).
         "proxy_headers": False,
         "ws_ping_interval": 20.0,
@@ -129,7 +155,7 @@ try:
     if loop_factory is not None:
         config_kwargs["loop"] = loop_factory
 
-    print(f"Open http://127.0.0.1:9090 in your browser (bound host={host})")
+    print(f"Open http://127.0.0.1:{port} in your browser (bound host={host})")
     print("Press Ctrl+C to stop\n")
     uvicorn.run(**config_kwargs)
 
@@ -151,3 +177,11 @@ except Exception:
     from kazma_core.process_exit import exit_after_fatal_error
 
     exit_after_fatal_error(1)
+
+# The app's shutdown has run (uvicorn returned, or the stop came back as
+# KeyboardInterrupt): leave without joining threads -- interpreter exit
+# waited on an executor thread holding a worker process, and the guard
+# killed a graceful reload (roadmap theme 2).
+from kazma_core.process_exit import exit_after_shutdown  # noqa: E402
+
+exit_after_shutdown(0)

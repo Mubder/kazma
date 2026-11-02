@@ -8,8 +8,9 @@ description: How main is protected, which checks it requires, and why no bot wri
 # Protecting `main`
 
 **State since 2026-09-27:** `main` is protected by the ruleset
-`KazmaLatestRule` (section 2): every check in section 1 must pass (all 21
-since 2026-10-15), force pushes and deletion are blocked, and the repository
+`KazmaLatestRule` (section 2): every check in section 1 must pass (21
+since 2026-10-15; the recovery drills check, added to CI on 2026-11-02,
+joins the ruleset when the owner adds it), force pushes and deletion are blocked, and the repository
 admin may bypass. Only the
 owner (and the agent working with the owner's credentials) pushes to `main`;
 no workflow writes to it (section 3). Before that day `main` had no protection
@@ -37,6 +38,7 @@ checks for `.github/workflows/ci.yml`:
 | `Lint (Ruff)` | advisory findings reported; the step itself must pass |
 | `Security Scan` | bandit HIGH gate over product, `tests/`, `scripts/` |
 | `Shipped wheel and locked dependencies` | the wheel builds and its pins resolve |
+| `Recovery drills (real restic, a real Postgres stopped)` | a backup restored by real restic recalls its memory (a SQLite install's restore passes), a throwaway Postgres stopped and started under a real settings store, the memory restore drill on Postgres, and the real guard reloading the real server with a chat turn and an OCR job running (a hard kill as the control); a skip fails the job |
 | `Temporal recovery drill` | real Temporal protocol and workflow sandbox, including acknowledgement loss |
 | `Runtime hardening (ubuntu-latest, Python 3.11)` | recovery, workspace isolation, approvals and review |
 | `Runtime hardening (ubuntu-latest, Python 3.12)` | the same acceptance set on Python 3.12 |
@@ -47,7 +49,9 @@ checks for `.github/workflows/ci.yml`:
 | `Runtime hardening (windows-latest, Python 3.13)` | the same Windows acceptance set on Python 3.13 |
 | `Runtime hardening (windows-latest, Python 3.14)` | the same Windows acceptance set on Python 3.14 |
 
-The ruleset requires all 21. The nine recovery and compatibility checks were
+The ruleset requires the other 21. The recovery drills check was added to CI
+on 2026-11-02 (roadmap theme 2) and joins the ruleset when the owner adds it
+(section 2). The nine recovery and compatibility checks were
 added to CI on 2026-10-05, then to the ruleset. The document worker check was
 the last one added to the ruleset, on 2026-10-15, with the owner's approval
 (`gh api -X PUT`, section 2). Only that approval changed the setting; this
