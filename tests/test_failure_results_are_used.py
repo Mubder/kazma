@@ -73,6 +73,9 @@ SCOPE = (
     "kazma-gateway/kazma_gateway/adapters/*.py",
     "kazma-gateway/kazma_gateway/agent_handler/swarm_output.py",
     "kazma-gateway/kazma_gateway/agent_handler/swarm_dispatch.py",
+    # The update (FA-101, 2026-11 functional audit): its stash restore said
+    # False on a conflict and the update reported success over the markers.
+    "kazma-cli/kazma_cli/update.py",
 )
 
 _THREAD_RUNNERS = {"to_thread"}  # asyncio.to_thread(f, ...)
@@ -472,6 +475,12 @@ REPORTS_ITS_OWN_FAILURE: dict[str, str] = {
     "backup.restic_repo.alert_missing_password": (
         "answers whether it raised the alert, and logs a WARNING when it could not; the "
         "snapshot it reports is skipped by the caller, whose own result says so"
+    ),
+    "update._restore_stash": (
+        "a False prints that the local edits were NOT reapplied, names the stash that keeps "
+        "them and resets the tree out of the conflict (FA-101); every call but the success "
+        "path's is on a path where the update already returns False, and the success path "
+        "reads it (EDITS_NOT_RESTORED, exit status 3)"
     ),
     "backup.restic_repo.alert_read_only_remote": (
         "answers whether it raised the alert, and logs a WARNING when it could not; _run "

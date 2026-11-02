@@ -927,6 +927,13 @@ them into every future system prompt. Two invariants must hold:
 - Swarm *worker* deltas live on `WorkerRegistry` (`WorkerEntry.system_prompt`),
   not here.
 
+**A2. A turn teaches only what memory would keep** (2026-11, FA-212).
+`close_turn` is the one hand-off (`learn_from_finished_turn`, beside the
+memory hand-off): never a failed turn, a turn or chat the forget ledger keeps
+out, a refiner that could not answer (no template line), or a lesson longer
+than `_MAX_DELTA_CHARS` (refused, never cut). The cap keeps whole lessons
+(`_lessons` / `_render`). Gate: `tests/test_lessons_only_from_kept_turns.py`.
+
 **B. Every injected Soul delta MUST go through the prompt fence.**
 - `kazma_core/safety/prompt_fence.py` provides `is_override_delta()` (rejects
   injection markers like "ignore prior instructions") and
@@ -7358,6 +7365,10 @@ problem was its database. Each layer now holds on its own:
   restarts only a server that does not answer, one that says only a restart
   clears its failure (`restart_required`: the volatile settings store), or
   one not ready for `KAZMA_GUARD_DEPENDENCY_OUTAGE_S`.
+- **No settings statement holds the store's lock while it waits on the
+  database, and the probes always answer** (2026-11, FA-259: a 2-minute
+  outage still got Kazma killed, a 12-minute one kept it down 15 minutes).
+  See §54.
 
 ### 45. The full audit's fixes (2026-09-30, `docs/audits/AUDIT_FULL_2026-09-30.md`)
 
@@ -8116,6 +8127,109 @@ test that fails on the old code.
   asks its sinks from a thread when a loop runs. The LLM provider reads its
   egress target in a thread and changes the client on the loop.
 
+### 54. The functional audit of 2026-11, Stage 1 (`docs/audits/AUDIT_FUNCTIONAL_LIVE_2026-11.md`)
+
+The live install used like an owner, end to end (128 findings; plan
+`docs/plans/FUNCTIONAL_AUDIT_2026-11_REMEDIATION.md`). Stage 1 is the High
+findings. Each fix has a gate that fails on the old code.
+
+- **A database outage is ridden out** (FA-259, §44 extended). On Postgres a
+  settings statement runs OUTSIDE `ConfigStore._lock` (`_statement_lock`:
+  reads take no lock, writes `_pg_write_lock`; the cache is touched under
+  `_lock`, a write bumps `_write_epoch` so a read that raced it does not cache
+  the old value). A refused connection marks the store down for
+  `_PG_OUTAGE_HOLD_S` (5 s): calls fail at once (`ConfigStoreUnavailableError`)
+  and a read answers from the cache, one caller probes (`_pg_access`). The
+  probes (`/health`, `/health/live`, `/health/ready`, `/health/deep`) skip the
+  auth and tenant middleware (`auth.HEALTH_PROBE_PATHS`), readiness runs one
+  thread per check (`health._offloaded_check`: a check still running is
+  awaited, never started twice), and boot waits for the settings store up to
+  `config_availability.BOOT_WAIT_S` (13 min, `wait_for_settings_store`).
+  Documents and the swarm count the outage as an outage
+  (`documents/errors.infrastructure_errors`, `engine._store_error_passes`).
+  Gate: `tests/test_pg_outage_ridden_out.py` (the old lock scope as the
+  control; a real Postgres stop with `KAZMA_TEST_PG_OUTAGE_CONTAINER`).
+- **A crawl a reload cut off resumes** (FA-263): a crawl that ends
+  `interrupted` while Kazma shuts down says `interrupted_by: process_ended`
+  (`crawl_jobs.Job.finish`, `_process_is_ending`), the mark
+  `resume_interrupted_crawls` acts on. Gate: `tests/test_crawl_auto_resume.py`.
+- **The documented restore restores** (FA-267/268/269/270). A restic restore
+  is assembled into a data folder Kazma reads (`backup/restore.py`
+  `_flatten_into_data_dir`: `assets/` first, `dbs/` over it, sidecars
+  removed), checked by a child that resolves every store through
+  `kazma_core.paths` (`_check_layout`), its databases opened `immutable=1`;
+  the Postgres dump lands in `pg/`. The universal backup no longer copies a
+  live database a second time into `assets/` (`_copy_assets`' `held` set).
+  The CLI names the passphrase file. Gate: `tests/test_restore_layout.py`
+  (the old assembly and copier as controls).
+- **A migration export is of an install, and an import revives no revoked
+  state** (FA-252, FA-255). `export_bundle` refuses a folder that holds no
+  store of an install (`ExportRefused`, before the settings store is opened;
+  `paths.data_dir(create=False)`) and `verify` refuses a bundle with none;
+  settings travel as whole rows (`settings_rows.json`) and the import writes
+  only what `settings_restore` classes as carried (never RUNTIME: grants,
+  long tasks, cursors; never a web session). Gates:
+  `tests/test_migrate_export_needs_an_install.py`,
+  `tests/test_migration_carries_no_revoked_state.py`.
+- **`kazma update` reads its stash restore** (FA-101): a pop that conflicts
+  resets the tree to the updated code, names the stash and exits 3
+  (`EDITS_NOT_RESTORED`); the postflight refuses unmerged paths. Gate:
+  `tests/test_update_reads_its_stash_restore.py` (real git).
+- **A fork keeps what its chat keeps out of memory** (FA-246):
+  `forget.inherit_ledger` copies the source's ledger rows (whole-chat
+  keep-out, each kept-out turn) under the fork's keys, journaled, before the
+  fork is written; a ledger that cannot be copied refuses the fork (503
+  `memory_ledger_unavailable`). Gate: `tests/test_fork_keeps_the_ledger.py`.
+- **A lesson comes only from a turn memory would keep** (FA-212, §11): the
+  one hand-off is `close_turn` (`learn_from_finished_turn`); no lesson from a
+  failed turn, a turn or chat kept out of memory, a refiner that could not
+  answer (no template line), or a lesson that does not fit whole. Gate:
+  `tests/test_lessons_only_from_kept_turns.py`.
+- **A streaming 429 waits and retries** (FA-214): the stream path honours
+  `Retry-After` with the blocking path's bounded schedule
+  (`_RATE_LIMIT_RETRIES`, `_rate_limit_wait`); `LLMError` carries `attempts`
+  and `waited_s`, and `friendly_llm_error` words a rate limit from them, not
+  as a lost connection. Gate: `tests/test_stream_rate_limit.py`.
+- **A Settings control changes something** (FA-250). Settings > Tools'
+  switch is real (`skills/switches`: `switched_off_reason` for a skill or a
+  tool, `offered` applied by the supervisor to every model call -- the graph
+  holds the list it was built with -- and the registry refuses the call).
+  Class gate `tests/test_settings_keys_have_readers.py`: every key the
+  Settings writers write has a reader outside the Settings page (the rules
+  and `DECLARED` readers are in its docstring); a section written field by
+  field is checked field by field (`EXPANSIONS`). It found: Change password
+  wrote a hash sign-in never reads (the route now changes the platform user
+  sign-in checks, `platform_rbac.set_local_password`, and ends the user's
+  other sessions; a `KAZMA_SECRET` session is told the secret is in `.env`);
+  the session list read a key nothing wrote (now `web_sessions.list_sessions`);
+  the context strategy and threshold, the sidebar position and custom CSS
+  were read by nothing (removed); the accent colour applied on the Settings
+  page only (now every page). The logging, safety and proxy writers take
+  only their fields. Gates: `tests/test_tool_switch_is_real.py`,
+  `tests/test_settings_account_is_real.py`.
+- **Kazma reads its own Arabic-page PDF** (FA-004, §19H): a block takes the
+  glyphs whose baseline is inside it (`pdf_rtl._BASELINE_SLACK`, 0.05 of a
+  size; half a size took the line above), and a left-to-right line keeps its
+  word gaps. Gate: `tests/test_document_pdf_ltr_blocks_on_arabic_pages.py`.
+- **The free-slot search is the operator's day** (FA-112, §34): one finder,
+  `calendar/backends/base.free_slots`, in the scheduler's zone, around every
+  event that overlaps the working day (multi-day, all-day, overnight); the
+  backends only list events. Gate: `tests/test_calendar_free_slots.py`.
+- **Every advisory has a floor at its fix** (FA-258, §50):
+  `tests/test_dependency_floors.py` holds pyproject to a recorded OSV answer
+  (`tests/fixtures/osv_advisories.json`, refreshed with
+  `scripts/record_osv_advisories.py --python <live python> --write`). A
+  default provider's imports are base dependencies with floors (FA-248:
+  `edge-tts>=7.3.1`), and a failed voice reply on Telegram is a WARNING.
+  Gate: `tests/test_default_voice_providers_declared.py`.
+- **Kazma notices its services reachable beyond the machine** (FA-218):
+  `security/service_exposure.py` reads `docker ps` (Kazma's containers by
+  name: the image of a recreated container is an id) and `pg_roles`; the
+  security report's `check_service_exposure` and a boot WARNING plus the ops
+  alert `security.service_exposed`. The compose files publish on loopback.
+  Gates: `tests/test_service_exposure_check.py`,
+  `tests/test_compose_ports_loopback.py`.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
@@ -8522,6 +8636,13 @@ separate explicit global restriction still wins.
 heartbeat. With no guard running, `--reload` starts the `KazmaAgent` task and
 the new guard clears the old server with its own rights, so a reload never
 needs an elevated shell.
+
+**A deploy whose pull changed `pyproject.toml` runs the update before the
+reload** (2026-11, FA-258: live ran 26 packages below the build's floors
+because a pull installs nothing): `<live python> -m kazma_cli update
+--reinstall -y` (it pauses the guard when idle, installs, resumes; §50). A
+pull that changed document code also rebuilds the worker image:
+`<live python> scripts/document_worker_image.py build` (§19 E1).
 
 `--reload` also picks up a tool added to PATH while Kazma ran (§38). A
 new *guard* (its own code, or other OS-level variables) still needs the

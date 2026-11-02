@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## The functional audit's High findings fixed (2026-11-02)
+
+- A short database outage no longer gets Kazma restarted. Settings reads no
+  longer hold a lock while they wait for Postgres, the health probes always
+  answer, and a starting Kazma waits for the database instead of failing.
+- A web crawl cut off by a reload resumes after it, as the Knowledge page
+  promises.
+- The documented backup restore now gives back a data folder Kazma can run on,
+  and says where the passphrase is.
+- A migration export run in a folder with no Kazma install is refused instead
+  of producing an empty bundle that verify passed. An import no longer brings
+  back approvals, long tasks or sign-in sessions the owner had ended.
+- `kazma update` says when your local edits could not be put back after an
+  update, instead of reporting success over a file with conflict markers.
+- A fork of a chat you keep out of memory stays out of memory, and so does a
+  turn you asked to forget.
+- Kazma no longer learns "lessons" from failed turns, from chats kept out of
+  memory, or from its own fallback text, and a lesson is never cut in half.
+- One "rate limited" answer from the model provider no longer ends the turn:
+  Kazma waits as the provider asks and tries again, and when it gives up it
+  says how many times it was refused.
+- Settings > Tools' switch now takes a tool away from the model. Settings >
+  Account > Change password now changes the password you sign in with, and
+  ends your other sessions; Active sessions lists your real sessions. Four
+  controls that changed nothing (context strategy, summarization threshold,
+  sidebar position, custom CSS) are gone, and the accent colour applies on
+  every page.
+- Kazma reads the PDFs it makes from bilingual documents correctly: no title
+  read twice, no table row glued into one number.
+- The free-slot search looks at your working day in your time zone, and counts
+  all-day and multi-day events as busy.
+- Dependency floors now cover every published advisory with a fix, and the
+  read-aloud voice uses an edge-tts release Microsoft accepts. A failed voice
+  reply on Telegram is logged instead of failing silently.
+- The security report and a boot check now flag a database, Neo4j or SearXNG
+  port reachable from the network, and a database role that is a superuser.
+
 ## Files sent in Telegram and Slack reach the agent (2026-11-01)
 
 - On Telegram, a file or photo sent with words (a caption) never reached the

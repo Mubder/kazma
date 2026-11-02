@@ -2562,6 +2562,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يجب ألا تقل كلمة المرور عن 8 أحرف",
         "en": "Password must be at least 8 characters",
     },
+    "settings.password_is_sign_in_secret": {
+        "ar": "دخلت بسرّ تسجيل الدخول. هو KAZMA_SECRET في ملف .env للتثبيت؛ غيّره هناك.",
+        "en": "You signed in with the sign-in secret. It is KAZMA_SECRET in the install's .env file; change it there.",
+    },
+    "settings.current_password_incorrect": {
+        "ar": "كلمة المرور الحالية غير صحيحة",
+        "en": "The current password is not correct",
+    },
+    "settings.signed_in_at": {
+        "ar": "وقت تسجيل الدخول",
+        "en": "Signed in",
+    },
     "settings.password_changed": {
         "ar": "غُيّرت كلمة المرور",
         "en": "Password changed",

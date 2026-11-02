@@ -420,6 +420,19 @@ async def fork_thread(
             if not await asyncio.to_thread(record_thread_owner, new_id, owner):
                 raise RewindRefused("owner_unavailable", "The new chat's owner could not be recorded.",
                                     status=503)
+        # Before anything of the fork is written: its transcript holds the
+        # source's turns, and a chat kept out of memory, or a turn the user
+        # forgot, stays out in the fork too (FA-246).
+        from kazma_core.memory.forget import inherit_ledger
+
+        try:
+            inherited = await asyncio.to_thread(inherit_ledger, thread_id, new_id)
+        except (sqlite3.Error, OSError) as exc:
+            logger.warning("[rewind] fork of %s refused: its memory ledger could not be copied (%s)",
+                           thread_id[:12], type(exc).__name__, exc_info=True)
+            raise RewindRefused("memory_ledger_unavailable",
+                                "What this chat keeps out of memory could not be copied to the fork.",
+                                status=503) from exc
         async with thread_mutation(new_id):
             payload = await apply_snapshot_to_thread(graph, record.get_state(), new_id)
     if lang is None:
@@ -433,7 +446,8 @@ async def fork_thread(
         _save_fork_chat, new_id, title, messages,
     )
     _metric("fork", "ok")
-    await _audit("fork", "ok", detail={"turn_index": record.turn_index, "chat_saved": chat_saved}, **audit)
+    await _audit("fork", "ok", detail={"turn_index": record.turn_index, "chat_saved": chat_saved,
+                                       "memory_ledger": inherited}, **audit)
     logger.info("[rewind] %s forked %s step %s into %s", surface, thread_id[:12], snapshot_id[:12], new_id)
     return {
         "ok": True,

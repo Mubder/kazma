@@ -1135,9 +1135,13 @@ def test_a_migration_carries_the_data_dir_and_keeps_the_targets_own(tmp_path):
 
     out = _run(
         f"""
-        import json, zipfile
+        import json, sqlite3, zipfile
+        from kazma_core.paths import data_dir
         from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
         WorkerRegistry().register(WorkerEntry(name="carried-worker", expertise=["research"]))
+        # An installation holds a store; the exporter refuses a folder with
+        # none (FA-252).
+        c = sqlite3.connect(str(data_dir() / "agent_artifacts.db")); c.execute("CREATE TABLE t (v)"); c.commit(); c.close()
         from kazma_core.migration.exporter import export_bundle
         full = zipfile.ZipFile(export_bundle({str(bundle)!r})).namelist()
         thin = zipfile.ZipFile(export_bundle({str(lean)!r}, include_assets=False)).namelist()

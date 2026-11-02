@@ -207,15 +207,7 @@
         },
 
         _applyAccentColor(hex) {
-            if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
-            const r = parseInt(hex.slice(1, 3), 16);
-            const g = parseInt(hex.slice(3, 5), 16);
-            const b = parseInt(hex.slice(5, 7), 16);
-            const root = document.documentElement;
-            root.style.setProperty('--accent', hex);
-            root.style.setProperty('--accent-rgb', r + ', ' + g + ', ' + b);
-            root.style.setProperty('--accent-subtle', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.12)');
-            root.style.setProperty('--accent-glow', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.28)');
+            if (typeof window.kazmaApplyAccentColor === 'function') window.kazmaApplyAccentColor(hex);
         },
 
         captureShortcut(action, event) {
@@ -463,8 +455,16 @@
                 if (resp.ok) {
                     showToast(_t('settings.password_changed', 'Password changed'), 'success');
                     this.passwordForm = { old_password: '', new_password: '', confirm_password: '' };
+                    this.loadAccount();
                 } else {
-                    showToast(data.error || _t('settings.failed', 'Failed'), 'error');
+                    // The route answers a code; the words are the page's.
+                    const words = {
+                        sign_in_secret: _t('settings.password_is_sign_in_secret',
+                            "You signed in with the sign-in secret. It is KAZMA_SECRET in the install's .env file; change it there."),
+                        current_password_incorrect: _t('settings.current_password_incorrect', 'The current password is not correct'),
+                        password_too_short: _t('settings.password_min', 'Password must be at least 8 characters'),
+                    };
+                    showToast(words[data.error] || _t('settings.failed', 'Failed'), 'error');
                 }
             } catch (e) {
                 showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');

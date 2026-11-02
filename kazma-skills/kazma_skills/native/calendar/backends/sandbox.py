@@ -7,7 +7,7 @@ fallback when no calendar account is connected.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from kazma_skills.native.calendar.backends.base import CalendarBackend  # noqa: F401
@@ -89,26 +89,10 @@ class SandboxBackend:
     async def find_free_slots(
         self, date: str, duration_minutes: int = 30
     ) -> list[dict[str, str]]:
-        day = _parse_iso(date + "T09:00:00+00:00" if len(date) == 10 else date)
-        day_end = day + timedelta(hours=8)  # 9am–5pm window
-        busy = sorted(
-            [e for e in self._events if day.date() == e["_start"].date()],
-            key=lambda e: e["_start"],
-        )
-        slots: list[dict[str, str]] = []
-        cursor = day
-        delta = timedelta(minutes=duration_minutes)
-        for e in busy:
-            if cursor + delta <= e["_start"]:
-                slots.append({
-                    "start": cursor.isoformat(),
-                    "end": (cursor + delta).isoformat(),
-                })
-            cursor = max(cursor, e["_end"])
-        while cursor + delta <= day_end:
-            slots.append({
-                "start": cursor.isoformat(),
-                "end": (cursor + delta).isoformat(),
-            })
-            cursor += delta
-        return slots[:10]
+        import asyncio
+
+        from kazma_skills.native.calendar.backends.base import free_slots, operator_zone
+
+        zone = await asyncio.to_thread(operator_zone)
+        events = [{"start": e["_start"].isoformat(), "end": e["_end"].isoformat()} for e in self._events]
+        return free_slots(events, day=date, duration_minutes=duration_minutes, zone=zone)

@@ -68,7 +68,7 @@
         soulPending: [],
         // The shipped window (token_counter.DEFAULT_CONTEXT_WINDOW): Save sends
         // the whole form, so a failed load must not write a smaller window.
-        context: { max_context_tokens: 1000000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
+        context: { max_context_tokens: 1000000 },
         nonstop: {
             enabled: false,
             stall_threshold_seconds: 180,
@@ -312,7 +312,7 @@
         skillFilter: '',
 
         // ── Appearance Tab ──
-        appearance: { theme: 'dark', accent_color: '#3b82f6', font_size: 14, sidebar_position: 'left', custom_css: '' },
+        appearance: { theme: 'dark', accent_color: '#3b82f6', font_size: 14 },
 
         // ── Shortcuts Tab ──
         shortcuts: {},

@@ -68,6 +68,16 @@ DEFAULT_SHORTCUTS: dict[str, str] = {
 
 # ── Default appearance ────────────────────────────────────────────────
 
+#: The logging settings Kazma reads (``logging_config``): the page saves
+#: these and nothing else.
+_LOGGING_FIELDS = ("level", "format", "retention_days")
+#: The safety and proxy fields the Settings page saves. Their writers took any
+#: key from the request and wrote ``safety.<key>`` / ``proxy.<key>``: a request
+#: could write a key nothing reads, or one the page never offers.
+_SAFETY_FIELDS = ("hitl_enabled", "require_approval_for", "approval_timeout", "auto_deny_on_timeout")
+_PROXY_FIELDS = ("provider", "network", "host", "port", "username", "password", "session_sticky",
+                 "country")
+
 DEFAULT_APPEARANCE: dict[str, Any] = {
     # "light" is the safe default; the frontend makes this server-stored
     # value authoritative on load so a user's choice persists across
@@ -76,8 +86,6 @@ DEFAULT_APPEARANCE: dict[str, Any] = {
     "theme": "light",
     "accent_color": "#5e6ad2",
     "font_size": 14,
-    "sidebar_position": "left",
-    "custom_css": "",
 }
 
 # ── Default model per task ────────────────────────────────────────────
@@ -466,7 +474,8 @@ class SettingsManager:
                 category="agent",
             )
         for key, value in payload.items():
-            self._cs.set(f"safety.{key}", value, category="safety")
+            if key in _SAFETY_FIELDS:
+                self._cs.set(f"safety.{key}", value, category="safety")
 
     # ══════════════════════════════════════════════════════════════════
     # LOGGING
@@ -495,6 +504,8 @@ class SettingsManager:
         """
         allowed_levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
         for key, value in data.items():
+            if key not in _LOGGING_FIELDS:
+                continue  # a field logging_config does not read
             if key == "level" and isinstance(value, str):
                 value = value.strip().upper()
                 if value not in allowed_levels:
@@ -554,6 +565,8 @@ class SettingsManager:
         # Collect validated items and write them atomically (AGENTS.md §8).
         items: list[tuple[str, Any, str]] = []
         for key, value in data.items():
+            if key not in _PROXY_FIELDS:
+                continue
             if key == "provider" and isinstance(value, str):
                 value = value.strip().lower()
                 if value not in ("none", "anyip"):
@@ -695,8 +708,6 @@ class SettingsManager:
         """Get context window settings."""
         return {
             "max_context_tokens": self._cs.get("context.max_context_tokens", DEFAULT_CONTEXT_WINDOW),
-            "context_strategy": self._cs.get("context.context_strategy", "sliding_window"),
-            "summarization_threshold": self._cs.get("context.summarization_threshold", 0.8),
         }
 
     # ── Non-Stop & Self-Healing (agent.nonstop.*) ─────────────────────
@@ -801,10 +812,6 @@ class SettingsManager:
         items: list[tuple[str, Any, str]] = []
         if "max_context_tokens" in data:
             items.append(("context.max_context_tokens", data["max_context_tokens"], "context"))
-        if "context_strategy" in data:
-            items.append(("context.context_strategy", data["context_strategy"], "context"))
-        if "summarization_threshold" in data:
-            items.append(("context.summarization_threshold", data["summarization_threshold"], "context"))
         if items:
             self._cs.batch_set(items)
 
@@ -833,18 +840,24 @@ class SettingsManager:
     # ══════════════════════════════════════════════════════════════════
 
     def get_appearance(self) -> dict[str, Any]:
-        """Get appearance settings."""
+        """Get appearance settings. ``accent_color_chosen``: the owner picked
+        the accent (every page applies it then; the default is the theme's)."""
         result = dict(DEFAULT_APPEARANCE)
-        for key in result:
+        result["accent_color_chosen"] = False
+        for key in DEFAULT_APPEARANCE:
             val = self._cs.get(f"appearance.{key}", None)
             if val is not None:
                 result[key] = val
+                if key == "accent_color":
+                    result["accent_color_chosen"] = True
         return result
 
     def save_appearance(self, data: dict[str, Any]) -> None:
-        """Update appearance settings."""
+        """Update appearance settings: the fields every page applies
+        (``DEFAULT_APPEARANCE``). Anything else is not saved -- the page's
+        sidebar position and custom CSS were, and took effect nowhere."""
         for key, value in data.items():
-            if value is not None:
+            if key in DEFAULT_APPEARANCE and value is not None:
                 self._cs.set(f"appearance.{key}", value, category="appearance")
 
     # ══════════════════════════════════════════════════════════════════
@@ -889,45 +902,6 @@ class SettingsManager:
     # ACCOUNT
     # ══════════════════════════════════════════════════════════════════
 
-    def get_account_info(self) -> dict[str, Any]:
-        """Get account info."""
-        return {
-            "username": self._cs.get("account.username", "admin"),
-            "created_at": self._cs.get("account.created_at", ""),
-        }
-
-    def change_password(self, old_password: str, new_password: str) -> dict[str, Any]:
-        """Validate and update password using PBKDF2-SHA256 with salt."""
-        stored_hash = self._cs.get("account.password_hash", "")
-        if stored_hash:
-            import hashlib
-            import hmac as _hmac
-            # Support both legacy SHA-256 and new PBKDF2 format
-            if stored_hash.startswith("pbkdf2:"):
-                # New format: pbkdf2:iterations:salt:hash
-                parts = stored_hash.split(":")
-                iterations = int(parts[1])
-                salt = bytes.fromhex(parts[2])
-                expected = bytes.fromhex(parts[3])
-                derived = hashlib.pbkdf2_hmac("sha256", old_password.encode(), salt, iterations)
-                if not _hmac.compare_digest(derived, expected):
-                    return {"error": "Current password is incorrect"}
-            else:
-                # Legacy SHA-256 — verify then migrate
-                import hashlib
-                old_hash = hashlib.sha256(old_password.encode()).hexdigest()
-                if not _hmac.compare_digest(old_hash, stored_hash):
-                    return {"error": "Current password is incorrect"}
-        if len(new_password) < 8:
-            return {"error": "Password must be at least 8 characters"}
-        # PBKDF2-SHA256 with random 16-byte salt, 600k iterations
-        import hashlib
-        salt = secrets.token_bytes(16)
-        iterations = 600_000
-        derived = hashlib.pbkdf2_hmac("sha256", new_password.encode(), salt, iterations)
-        new_hash = f"pbkdf2:{iterations}:{salt.hex()}:{derived.hex()}"
-        self._cs.set("account.password_hash", new_hash, category="account")
-        return {"status": "ok"}
 
     def get_api_tokens(self) -> list[dict[str, Any]]:
         """List API tokens (metadata only; raw secret is never stored)."""
@@ -978,15 +952,6 @@ class SettingsManager:
         self._cs.set("account.tokens", kept, category="account")
         return True
 
-    def get_sessions(self) -> list[dict[str, Any]]:
-        """List active sessions."""
-        sessions = self._cs.get("account.sessions", [])
-        if isinstance(sessions, str):
-            try:
-                sessions = json.loads(sessions)
-            except (json.JSONDecodeError, TypeError):
-                sessions = []
-        return sessions if isinstance(sessions, list) else []
 
     # ══════════════════════════════════════════════════════════════════
     # TOOLS
@@ -995,6 +960,8 @@ class SettingsManager:
     def get_tool_registry(self) -> list[dict[str, Any]]:
         """Get all registered tools with metadata."""
         tools: list[dict[str, Any]] = []
+        from kazma_core.skills.switches import tool_key
+
         # Try to get from the local tool registry
         try:
             from kazma_core.agent.tool_registry import LocalToolRegistry
@@ -1005,7 +972,7 @@ class SettingsManager:
                     "name": tool["name"],
                     "description": tool.get("description", ""),
                     "category": tool.get("category", "general"),
-                    "enabled": self._cs.get(f"tools.{tool['name']}.enabled", True),
+                    "enabled": self._cs.get(tool_key(tool["name"]), True),
                     "parameters": tool_obj.input_schema if tool_obj else {},
                 }
                 tools.append(entry)
@@ -1014,8 +981,11 @@ class SettingsManager:
         return tools
 
     def toggle_tool(self, tool_name: str, enabled: bool) -> None:
-        """Enable/disable a tool."""
-        self._cs.set(f"tools.{tool_name}.enabled", enabled, category="tools")
+        """Switch a tool on or off: offered and run, or neither, from the next
+        model call (``kazma_core.skills.switches``, FA-250)."""
+        from kazma_core.skills.switches import set_tool_enabled
+
+        set_tool_enabled(tool_name, bool(enabled), store=self._cs)
 
     async def test_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Run a tool with test arguments."""
@@ -1027,14 +997,6 @@ class SettingsManager:
         except Exception as e:
             return {"content": f"Error: {e}", "is_error": True}
 
-    def get_tool_config(self, tool_name: str) -> dict[str, Any]:
-        """Get tool-specific settings."""
-        return self._cs.get(f"tools.{tool_name}.config", {})
-
-    def save_tool_config(self, tool_name: str, data: dict[str, Any]) -> None:
-        """Update tool settings."""
-        for key, value in data.items():
-            self._cs.set(f"tools.{tool_name}.config.{key}", value, category="tools")
 
     # ══════════════════════════════════════════════════════════════════
     # SYSTEM

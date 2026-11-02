@@ -18,7 +18,9 @@ __all__ = [
     "SESSION_COOKIE",
     "SESSION_KEY_PREFIX",
     "create_session",
+    "list_sessions",
     "revoke_session",
+    "revoke_user_sessions",
     "validate_session",
     "use_opaque_sessions",
     "purge_expired_sessions",
@@ -238,3 +240,68 @@ def revoke_session(session_id: str | None) -> None:
     _cache_evict(key, revoked=True)  # tombstone first: no racing reader re-seeds it
     get_config_store().delete(key)
     logger.info("[web_sessions] revoked session")
+
+
+def _live_records() -> list[tuple[str, dict[str, Any]]]:
+    """Every unexpired ``web_session.*`` record: ``(key, payload)``."""
+    from kazma_core.config_store import get_config_store
+
+    now = time.time()
+    out: list[tuple[str, dict[str, Any]]] = []
+    for key, payload in get_config_store().get_category("auth").items():
+        if not str(key).startswith(SESSION_KEY_PREFIX) or not isinstance(payload, dict):
+            continue
+        try:
+            if float(payload.get("expires_at") or 0) <= now:
+                continue
+        except (TypeError, ValueError):
+            continue
+        out.append((str(key), payload))
+    return out
+
+
+def _belongs_to(payload: dict[str, Any], *, user_id: str, username: str) -> bool:
+    if user_id:
+        return str(payload.get("user_id") or "") == user_id
+    return bool(username) and str(payload.get("username") or "") == username
+
+
+def list_sessions(*, user_id: str = "", username: str = "", current: str | None = None) -> list[dict[str, Any]]:
+    """The live web sessions of one signed-in person, newest first: when each
+    began and ends, and which is *current* (the raw cookie value).
+
+    Settings -> Account listed ``account.sessions``, a key nothing wrote, so
+    it always said "no active sessions" (2026-11 functional audit). Never the
+    session id itself: ``id`` is the start of its hash."""
+    mine = f"{SESSION_KEY_PREFIX}{_hash(str(current).strip())}" if current else ""
+    rows = [
+        {
+            "id": key[len(SESSION_KEY_PREFIX):][:12],
+            "platform": str(payload.get("actor") or "web"),
+            "started_at": float(payload.get("created_at") or 0),
+            "expires_at": float(payload.get("expires_at") or 0),
+            "current": key == mine,
+        }
+        for key, payload in _live_records()
+        if _belongs_to(payload, user_id=user_id, username=username)
+    ]
+    return sorted(rows, key=lambda r: r["started_at"], reverse=True)
+
+
+def revoke_user_sessions(*, user_id: str = "", username: str = "", keep: str | None = None) -> int:
+    """End every live session of one person but *keep* (the raw cookie value
+    of the session asking): after a password change the old one must not
+    stay signed in elsewhere. Returns how many were ended."""
+    from kazma_core.config_store import get_config_store
+
+    kept = f"{SESSION_KEY_PREFIX}{_hash(str(keep).strip())}" if keep else ""
+    ended = 0
+    for key, payload in _live_records():
+        if key == kept or not _belongs_to(payload, user_id=user_id, username=username):
+            continue
+        _cache_evict(key, revoked=True)
+        get_config_store().delete(key)
+        ended += 1
+    if ended:
+        logger.info("[web_sessions] ended %d other session(s) of one user", ended)
+    return ended

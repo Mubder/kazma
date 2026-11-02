@@ -81,7 +81,7 @@ def test_concurrent_services_keep_each_jobs_identity_on_postgres(pg_backend, tmp
     a, b = _job(first, tenants[0], "alice"), _job(second, tenants[1], "bob")
     barrier = threading.Barrier(2)
 
-    def parse(job, *, force_ocr):
+    def parse(job, *, force_ocr, context=None):
         barrier.wait(timeout=10)
         salvage._record_egress("mock-no-upload", tmp_path, 21)
         barrier.wait(timeout=10)
@@ -131,7 +131,7 @@ def test_an_unavailable_postgres_audit_refuses_the_upload(pg_backend, tmp_path, 
     svc.audit = DocumentAuditStore(PostgresDocumentRepository(own_pool, tenant_quota_bytes=1024 ** 3))
     own_pool.close()
 
-    def parse(job, *, force_ocr):
+    def parse(job, *, force_ocr, context=None):
         with pytest.raises(RuntimeError, match="audit could not be persisted"):
             salvage.try_remote_parse(path, _ir("", 0))
 
@@ -163,7 +163,7 @@ def test_live_revocation_through_the_settings_store_stops_the_next_upload(pg_bac
     path = tmp_path / "x.pdf"
     path.write_bytes(b"inert")
 
-    def parse(job, *, force_ocr):
+    def parse(job, *, force_ocr, context=None):
         assert salvage.try_remote_parse(path, _ir("", 0)) is None
 
     monkeypatch.setattr(svc, "_parse_to_manifest_impl", parse)

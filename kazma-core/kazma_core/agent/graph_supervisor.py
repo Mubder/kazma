@@ -953,6 +953,12 @@ async def supervisor_node(
         tool_definitions,
         list(intent_patch.get("hard_constraints") or []),
     )
+    # The graph holds the list it was built with: a tool or skill switched
+    # off since is left out of THIS call (FA-250). In a thread: a store's
+    # first read of the switches is a settings read.
+    from kazma_core.skills.switches import offered
+
+    effective_tool_definitions = await asyncio.to_thread(offered, effective_tool_definitions)
     # Ledger clarify-lock: an unresolved continuation must cost a QUESTION,
     # not an action — with zero tools available the only sensible reply is
     # the clarifying question the ledger block demands.

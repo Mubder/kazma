@@ -25,7 +25,7 @@ import os
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,7 +36,12 @@ if TYPE_CHECKING:
 
 import yaml
 
-from kazma_core.config_availability import ConfigStoreUnavailableError, durable_settings_write
+from kazma_core.config_availability import (
+    ConfigStoreUnavailableError,
+    _storage_failures,
+    _storage_unavailable,
+    durable_settings_write,
+)
 from kazma_core.diagnostic_scope import refuse_write, writes_suppressed
 from kazma_core.security.url_credentials import (
     mask_urls_in_text,
@@ -529,6 +534,11 @@ def _mark_stale_settings_table(db_path: Any, *, live: bool) -> None:
 
 
 _MISSING = object()
+# ``get``'s database half answers this when the CACHE says the key has no
+# value anywhere (database and YAML): the caller returns its default without
+# reading YAML again. ``_ABSENT`` is "not in the cache at all".
+_CACHED_MISSING = object()
+_ABSENT = object()
 
 # YAML flattens to ``safety.hitl.approval_timeout_seconds``; Settings and
 # ``get_hitl_config`` read the flat ``safety.approval_timeout``. The Aug 13
@@ -1069,6 +1079,26 @@ class ConfigStore(_ChangeNotices):
         # Safe because this lock only guards short critical sections over an
         # in-process cache and a sqlite handle; nothing ever waits on it.
         self._lock = threading.RLock()
+        # Postgres only (FA-259, 2026-11-02). The pool is thread-safe, so a
+        # Postgres statement never runs under ``self._lock``: with the
+        # database away a statement waits the pool's checkout timeout (5 s),
+        # and while one held that lock EVERY settings read in the process
+        # queued behind it, one per 5 s -- the worker threads filled, the
+        # guard's readiness probe got no answer, and a two-minute outage got
+        # Kazma killed. Local writers still take turns, on this lock of
+        # their own (a read-modify-write must not interleave with another
+        # in this process); readers take none. The cache stays under
+        # ``self._lock``, held only while it is touched.
+        self._pg_write_lock = threading.RLock()
+        # Bumped by every cache invalidation: a read that ran while a write
+        # landed does not cache what it read (it may be the value before).
+        self._write_epoch = 0
+        # A Postgres outage seen by a statement: until ``_pg_down_until``
+        # statements fail at once (reads answer from the cache), then one
+        # caller at a time tries the database again (``_pg_probe``).
+        self._pg_down = False
+        self._pg_down_until = 0.0
+        self._pg_probe = threading.RLock()
         self._yaml_cache: dict[str, Any] | None = None
         self._cache: dict[str, Any] = {}
         # Cache write timestamps (audit M-P2): the read cache had no TTL, so
@@ -1109,6 +1139,67 @@ class ConfigStore(_ChangeNotices):
             if pool is not None:
                 self._pg = pool
         return self._pg
+
+    #: How long a Postgres outage is held after a statement found the
+    #: database away: statements in it fail at once (a read answers from the
+    #: cache when it can), then one caller tries again (FA-259).
+    _PG_OUTAGE_HOLD_S = 5.0
+
+    def _statement_lock(self, *, write: bool) -> Any:
+        """The lock a statement runs under.
+
+        SQLite: ``self._lock``, which covers the native handle for as long
+        as the statement is live (§8). Postgres: a write takes
+        ``self._pg_write_lock``, a read none; see ``__init__``.
+        """
+        if not self._use_postgres():
+            return self._lock
+        return self._pg_write_lock if write else contextlib.nullcontext()
+
+    @contextmanager
+    def _pg_access(self) -> Iterator[None]:
+        """Run Postgres statements, failing at once during a known outage.
+
+        A failure that means the database is away (``_storage_unavailable``:
+        a pool timeout, a refused or dropped connection) marks an outage and
+        is raised as ``ConfigStoreUnavailableError``; any other error is
+        raised as it is. During an outage only the caller that holds
+        ``_pg_probe`` reaches the database; the rest are refused at once
+        instead of each waiting the pool's checkout timeout.
+        """
+        probing = False
+        if self._pg_down:
+            if time.monotonic() < self._pg_down_until or not self._pg_probe.acquire(blocking=False):
+                raise ConfigStoreUnavailableError()
+            probing = True
+        try:
+            yield
+        except ConfigStoreUnavailableError:
+            self._mark_pg_down(None)
+            raise
+        except _storage_failures() as exc:
+            if _storage_unavailable(exc):
+                self._mark_pg_down(exc)
+                raise ConfigStoreUnavailableError() from exc
+            raise
+        else:
+            if self._pg_down:
+                self._pg_down = False
+                logger.warning("[ConfigStore] Postgres answers again; settings reads and writes reach it")
+        finally:
+            if probing:
+                self._pg_probe.release()
+
+    def _mark_pg_down(self, exc: BaseException | None) -> None:
+        self._pg_down_until = time.monotonic() + self._PG_OUTAGE_HOLD_S
+        if not self._pg_down:
+            self._pg_down = True
+            logger.warning(
+                "[ConfigStore] Postgres is not answering (%s): settings reads answer from the "
+                "cache or fail at once and writes fail at once, while one caller every %g s "
+                "tries the database again",
+                type(exc).__name__ if exc is not None else "unavailable", self._PG_OUTAGE_HOLD_S,
+            )
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._use_postgres():
@@ -1485,7 +1576,7 @@ class ConfigStore(_ChangeNotices):
         refuse_write("config", key)
         now = datetime.now(UTC).isoformat()
         if self._use_postgres():
-            with self._lock:
+            with self._statement_lock(write=True), self._pg_access():
                 pool = self._pg_pool()
                 if pool is None:
                     raise RuntimeError("Postgres pool unavailable")
@@ -1503,6 +1594,7 @@ class ConfigStore(_ChangeNotices):
                             (key, json.dumps(value), category, now),
                         )
                     pg_conn.commit()
+            with self._lock:
                 self._invalidate_key(key)
             return
         with self._lock:
@@ -1640,6 +1732,26 @@ class ConfigStore(_ChangeNotices):
         which is indistinguishable from "no secret here". The blanking guard
         below has to tell those apart, so it reads what is actually stored.
         """
+        if self._use_postgres():
+            with self._lock:
+                if key in self._cache and self._cache_fresh(key):
+                    cached = self._cache[key]
+                    return None if cached is _MISSING else cached
+            # No store lock across the statement (FA-259). A failure is
+            # raised, never answered with None: None means "no secret
+            # stored", and the empty-write guard would then let a blank
+            # value through over a secret it could not read.
+            with self._pg_access():
+                pool = self._pg_pool()
+                if pool is None:
+                    return None
+                row = pool.execute_one(
+                    "SELECT value FROM kazma_settings WHERE key = %s", (key,)
+                )
+            if row is None:
+                return None
+            value = row["value"]
+            return json.loads(value) if isinstance(value, str) else value
         try:
             with self._lock:
                 if key in self._cache and self._cache_fresh(key):
@@ -1649,17 +1761,6 @@ class ConfigStore(_ChangeNotices):
                 # BEFORE batch_set takes its transaction lock. Keep the live
                 # statement protected too: another prepare/write/close could
                 # otherwise use the same sqlite handle and statement cache.
-                if self._use_postgres():
-                    pool = self._pg_pool()
-                    if pool is None:
-                        return None
-                    row = pool.execute_one(
-                        "SELECT value FROM kazma_settings WHERE key = %s", (key,)
-                    )
-                    if row is None:
-                        return None
-                    value = row["value"]
-                    return json.loads(value) if isinstance(value, str) else value
                 conn = self._get_conn()
                 row = conn.execute(
                     "SELECT value FROM settings WHERE key = ?", (key,)
@@ -1783,6 +1884,7 @@ class ConfigStore(_ChangeNotices):
         """
         self._cache.clear()
         self._cache_at.clear()
+        self._write_epoch += 1
 
     def _invalidate_key(self, key: str) -> None:
         """Drop what a write to *key* can change in the read cache (lock held).
@@ -1793,6 +1895,7 @@ class ConfigStore(_ChangeNotices):
         anywhere (the heartbeat, a session stamp) sent the next read of every
         setting back to the database, often from the event loop (2026-10-01).
         """
+        self._write_epoch += 1
         parts = key.split(".")
         affected = {".".join(parts[:i]) for i in range(1, len(parts) + 1)}
         below = key + "."
@@ -1820,15 +1923,20 @@ class ConfigStore(_ChangeNotices):
         if not prefix or prefix.endswith("."):
             raise ValueError("A nonempty settings prefix is required")
         below = prefix + "."
-        with self._lock:
-            if self._use_postgres():
+        pg_rows: list[Any] | None = None
+        if self._use_postgres():
+            # The statement runs under no store lock (FA-259).
+            with self._pg_access():
                 pool = self._pg_pool()
                 if pool is None:
                     raise ConfigStoreUnavailableError()
-                rows = pool.execute(
+                pg_rows = pool.execute(
                     "SELECT key, value FROM kazma_settings WHERE key = %s OR substr(key, 1, %s) = %s ORDER BY key",
                     (prefix, len(below), below),
                 )
+        with self._lock:
+            if pg_rows is not None:
+                rows = pg_rows
             else:
                 rows = self._get_conn().execute(
                     "SELECT key, value FROM settings WHERE key = ? OR substr(key, 1, ?) = ? ORDER BY key",
@@ -1852,6 +1960,69 @@ class ConfigStore(_ChangeNotices):
             target[parts[-1]] = yaml_value
             return SettingsSnapshot(prefix, values, yaml_data)
 
+    def _sqlite_get_raw(self, key: str) -> Any:
+        """``get``'s database half on SQLite: the cache, else the row, else its children.
+
+        Returns the raw value, ``_MISSING`` (fall back to YAML) or
+        ``_CACHED_MISSING`` (the cache says no value anywhere). The statement
+        runs under ``self._lock`` (§8: it covers the native handle).
+        """
+        with self._lock:
+            if key in self._cache and self._cache_fresh(key):
+                cached = self._cache[key]
+                return _CACHED_MISSING if cached is _MISSING else cached
+            conn = self._get_conn()
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+            if row is not None:
+                raw = json.loads(row["value"])
+                self._cache_put(key, raw)
+                return raw
+            # Re-merge flattened children (e.g. from import_yaml round-trip).
+            merged = self._collect_prefixed(conn, key)
+            if merged:
+                self._cache_put(key, merged)
+                return merged
+            return _MISSING
+
+    def _pg_get_raw(self, key: str) -> Any:
+        """``get``'s database half on Postgres, with no store lock across the statement.
+
+        Same answers as :meth:`_sqlite_get_raw`. The cache is read and written
+        under ``self._lock``; the statement runs outside it (FA-259). A value
+        read while a write landed is returned but not cached (the epoch
+        moved: it may be the value from before). During an outage a cached
+        value is answered whatever its age -- the last value read beats an
+        error -- and with none the outage is raised.
+        """
+        with self._lock:
+            cached = self._cache.get(key, _ABSENT)
+            if cached is not _ABSENT and self._cache_fresh(key):
+                return _CACHED_MISSING if cached is _MISSING else cached
+            epoch = self._write_epoch
+        try:
+            with self._pg_access():
+                pool = self._pg_pool()
+                if pool is None:
+                    return _MISSING
+                row = pool.execute_one(
+                    "SELECT value FROM kazma_settings WHERE key = %s",
+                    (key,),
+                )
+                if row is not None:
+                    raw = json.loads(row["value"]) if isinstance(row["value"], str) else row["value"]
+                else:
+                    merged = self._collect_prefixed_pg(pool, key)
+                    raw = merged if merged else _MISSING
+        except ConfigStoreUnavailableError:
+            if cached is not _ABSENT:
+                return _CACHED_MISSING if cached is _MISSING else cached
+            raise
+        if raw is not _MISSING:
+            with self._lock:
+                if self._write_epoch == epoch:
+                    self._cache_put(key, raw)
+        return raw
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get a setting. DB overrides YAML.
 
@@ -1864,48 +2035,14 @@ class ConfigStore(_ChangeNotices):
         Sensitive values may be stored as ``vault://…`` pointers; this method
         decrypts them when the vault is enabled.
         """
-        with self._lock:
-            if key in self._cache and self._cache_fresh(key):
-                cached = self._cache[key]
-                if cached is _MISSING:
-                    return default
-                # Cache may hold vault refs or plaintext; resolve outside lock
-                raw = cached
-            else:
-                raw = _MISSING
-                if self._use_postgres():
-                    pool = self._pg_pool()
-                    if pool is None:
-                        raw = _MISSING
-                    else:
-                        row = pool.execute_one(
-                            "SELECT value FROM kazma_settings WHERE key = %s",
-                            (key,),
-                        )
-                        if row is not None:
-                            raw = json.loads(row["value"]) if isinstance(row["value"], str) else row["value"]
-                            self._cache_put(key, raw)
-                        else:
-                            merged = self._collect_prefixed_pg(pool, key)
-                            if merged:
-                                self._cache_put(key, merged)
-                                raw = merged
-                            else:
-                                raw = _MISSING
-                else:
-                    conn = self._get_conn()
-                    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-                    if row is not None:
-                        raw = json.loads(row["value"])
-                        self._cache_put(key, raw)
-                    else:
-                        # Re-merge flattened children (e.g. from import_yaml round-trip).
-                        merged = self._collect_prefixed(conn, key)
-                        if merged:
-                            self._cache_put(key, merged)
-                            raw = merged
-                        else:
-                            raw = _MISSING
+        if self._use_postgres():
+            raw = self._pg_get_raw(key)
+            if raw is _CACHED_MISSING:
+                return default
+        else:
+            raw = self._sqlite_get_raw(key)
+            if raw is _CACHED_MISSING:
+                return default
 
         if raw is not _MISSING:
             resolved = self._resolve_vault_value(key, raw)
@@ -1954,26 +2091,28 @@ class ConfigStore(_ChangeNotices):
             logger.debug("Setting skip (%s): %s (category=%s)", to_store.reason, key, category)
             return
         now = datetime.now(UTC).isoformat()
-        with self._lock:
+        with self._statement_lock(write=True):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    raise RuntimeError("Postgres pool unavailable")
-                with pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            INSERT INTO kazma_settings (key, value, category, updated_at)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (key) DO UPDATE SET
-                              value = EXCLUDED.value,
-                              category = EXCLUDED.category,
-                              updated_at = EXCLUDED.updated_at
-                            """,
-                            (key, json.dumps(to_store), category, now),
-                        )
-                    conn.commit()
-                self._invalidate_key(key)
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        raise RuntimeError("Postgres pool unavailable")
+                    with pool.connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                """
+                                INSERT INTO kazma_settings (key, value, category, updated_at)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (key) DO UPDATE SET
+                                  value = EXCLUDED.value,
+                                  category = EXCLUDED.category,
+                                  updated_at = EXCLUDED.updated_at
+                                """,
+                                (key, json.dumps(to_store), category, now),
+                            )
+                        conn.commit()
+                with self._lock:
+                    self._invalidate_key(key)
             else:
                 conn = self._get_conn()
                 try:
@@ -2030,70 +2169,72 @@ class ConfigStore(_ChangeNotices):
             to_store["expires_at"] = now_sec + ttl
 
         now_iso = datetime.now(UTC).isoformat()
-        with self._lock:
+        with self._statement_lock(write=True):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    raise RuntimeError("Postgres pool unavailable")
-                with pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "SELECT value, updated_at FROM kazma_settings WHERE key = %s FOR UPDATE",
-                            (key,),
-                        )
-                        row = cur.fetchone()
-                        if row is not None:
-                            # The pool is opened with row_factory=dict_row, so
-                            # rows are MAPPINGS. `row[0]` raises KeyError: 0 on
-                            # every Postgres install; the neighbouring SQLite
-                            # branch below indexes positionally and is correct
-                            # there, which is how the two drifted apart.
-                            existing_val = row["value"]
-                            if isinstance(existing_val, str):
-                                try:
-                                    existing_val = json.loads(existing_val)
-                                except Exception:
-                                    pass
-                            is_expired = False
-                            if isinstance(existing_val, dict):
-                                exp = float(existing_val.get("expires_at") or 0.0)
-                                holder = str(existing_val.get("holder") or "")
-                                if exp <= now_sec or not holder:
-                                    is_expired = True
-                            elif ttl is not None:
-                                try:
-                                    up_at = datetime.fromisoformat(
-                                        str(row["updated_at"])
-                                    ).timestamp()
-                                    if (now_sec - up_at) >= ttl:
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        raise RuntimeError("Postgres pool unavailable")
+                    with pool.connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT value, updated_at FROM kazma_settings WHERE key = %s FOR UPDATE",
+                                (key,),
+                            )
+                            row = cur.fetchone()
+                            if row is not None:
+                                # The pool is opened with row_factory=dict_row, so
+                                # rows are MAPPINGS. `row[0]` raises KeyError: 0 on
+                                # every Postgres install; the neighbouring SQLite
+                                # branch below indexes positionally and is correct
+                                # there, which is how the two drifted apart.
+                                existing_val = row["value"]
+                                if isinstance(existing_val, str):
+                                    try:
+                                        existing_val = json.loads(existing_val)
+                                    except Exception:
+                                        pass
+                                is_expired = False
+                                if isinstance(existing_val, dict):
+                                    exp = float(existing_val.get("expires_at") or 0.0)
+                                    holder = str(existing_val.get("holder") or "")
+                                    if exp <= now_sec or not holder:
                                         is_expired = True
-                                except Exception:
-                                    pass
-                            if not is_expired:
-                                return False
+                                elif ttl is not None:
+                                    try:
+                                        up_at = datetime.fromisoformat(
+                                            str(row["updated_at"])
+                                        ).timestamp()
+                                        if (now_sec - up_at) >= ttl:
+                                            is_expired = True
+                                    except Exception:
+                                        pass
+                                if not is_expired:
+                                    return False
 
-                        if row is None:
-                            # FOR UPDATE cannot lock an absent row. A competing
-                            # insert must retain its value and be our winner.
-                            cur.execute(
-                                """INSERT INTO kazma_settings (key, value, category, updated_at)
-                                   VALUES (%s, %s, %s, %s)
-                                   ON CONFLICT (key) DO NOTHING RETURNING key""",
-                                (key, json.dumps(to_store), category, now_iso),
-                            )
-                            acquired = cur.fetchone() is not None
-                        else:
-                            # The expired row is locked by this transaction.
-                            cur.execute(
-                                """UPDATE kazma_settings
-                                   SET value = %s, category = %s, updated_at = %s
-                                   WHERE key = %s""",
-                                (json.dumps(to_store), category, now_iso, key),
-                            )
-                            acquired = True
-                    conn.commit()
+                            if row is None:
+                                # FOR UPDATE cannot lock an absent row. A competing
+                                # insert must retain its value and be our winner.
+                                cur.execute(
+                                    """INSERT INTO kazma_settings (key, value, category, updated_at)
+                                       VALUES (%s, %s, %s, %s)
+                                       ON CONFLICT (key) DO NOTHING RETURNING key""",
+                                    (key, json.dumps(to_store), category, now_iso),
+                                )
+                                acquired = cur.fetchone() is not None
+                            else:
+                                # The expired row is locked by this transaction.
+                                cur.execute(
+                                    """UPDATE kazma_settings
+                                       SET value = %s, category = %s, updated_at = %s
+                                       WHERE key = %s""",
+                                    (json.dumps(to_store), category, now_iso, key),
+                                )
+                                acquired = True
+                        conn.commit()
                 if acquired:
-                    self._invalidate_key(key)
+                    with self._lock:
+                        self._invalidate_key(key)
                 return acquired
             else:
                 conn = self._get_conn()
@@ -2153,54 +2294,56 @@ class ConfigStore(_ChangeNotices):
         """
         refuse_write("config", key)
         now_iso = datetime.now(UTC).isoformat()
-        with self._lock:
+        with self._statement_lock(write=True):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    raise RuntimeError("Postgres pool unavailable")
-                with pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "SELECT value FROM kazma_settings WHERE key = %s FOR UPDATE",
-                            (key,),
-                        )
-                        row = cur.fetchone()
-                        curr = None
-                        # dict_row again — see the note in the lock path above.
-                        # This one is the sharper failure: atomic_update is the
-                        # chokepoint every read-modify-write passes through, so
-                        # `row[0]` meant KeyError: 0 on EVERY such update
-                        # against Postgres.
-                        if row is not None and row["value"]:
-                            _raw = row["value"]
-                            try:
-                                curr = json.loads(_raw) if isinstance(_raw, str) else _raw
-                            except Exception:
-                                curr = _raw
-                        new_val = updater(curr)
-                        to_store = self._prepare_value_for_storage(key, new_val)
-                        if self._refused_the_write(key, new_val, to_store):
-                            return curr
-                        # Serialize EXACTLY like set() (audit M-P3): a plain
-                        # string used to be stored unquoted here while get()
-                        # unconditionally json.loads — a string-valued key
-                        # mutated through atomic_update crashed every later
-                        # read with JSONDecodeError.
-                        val_str = json.dumps(to_store)
-                        cur.execute(
-                            """
-                            INSERT INTO kazma_settings (key, value, category, updated_at)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (key) DO UPDATE SET
-                              value = EXCLUDED.value,
-                              category = EXCLUDED.category,
-                              updated_at = EXCLUDED.updated_at
-                            """,
-                            (key, val_str, category, now_iso),
-                        )
-                    conn.commit()
-                self._invalidate_key(key)
-                self._cache_put(key, new_val)
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        raise RuntimeError("Postgres pool unavailable")
+                    with pool.connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT value FROM kazma_settings WHERE key = %s FOR UPDATE",
+                                (key,),
+                            )
+                            row = cur.fetchone()
+                            curr = None
+                            # dict_row again — see the note in the lock path above.
+                            # This one is the sharper failure: atomic_update is the
+                            # chokepoint every read-modify-write passes through, so
+                            # `row[0]` meant KeyError: 0 on EVERY such update
+                            # against Postgres.
+                            if row is not None and row["value"]:
+                                _raw = row["value"]
+                                try:
+                                    curr = json.loads(_raw) if isinstance(_raw, str) else _raw
+                                except Exception:
+                                    curr = _raw
+                            new_val = updater(curr)
+                            to_store = self._prepare_value_for_storage(key, new_val)
+                            if self._refused_the_write(key, new_val, to_store):
+                                return curr
+                            # Serialize EXACTLY like set() (audit M-P3): a plain
+                            # string used to be stored unquoted here while get()
+                            # unconditionally json.loads — a string-valued key
+                            # mutated through atomic_update crashed every later
+                            # read with JSONDecodeError.
+                            val_str = json.dumps(to_store)
+                            cur.execute(
+                                """
+                                INSERT INTO kazma_settings (key, value, category, updated_at)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (key) DO UPDATE SET
+                                  value = EXCLUDED.value,
+                                  category = EXCLUDED.category,
+                                  updated_at = EXCLUDED.updated_at
+                                """,
+                                (key, val_str, category, now_iso),
+                            )
+                        conn.commit()
+                with self._lock:
+                    self._invalidate_key(key)
+                    self._cache_put(key, new_val)
                 return new_val
             else:
                 conn = self._get_conn()
@@ -2273,42 +2416,44 @@ class ConfigStore(_ChangeNotices):
                                for key, value, _category in prepared)):
                 raise ValueError("A conditional batch must advance its nonnegative integer revision.")
         now = datetime.now(UTC).isoformat()
-        with self._lock:
+        with self._statement_lock(write=True):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    raise RuntimeError("Postgres pool unavailable")
-                with pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        if expected is not None:
-                            # Materialize the initial revision so two first saves
-                            # also contend on the same row. The connection context
-                            # rolls this back together with the batch on conflict.
-                            cur.execute(
-                                "INSERT INTO kazma_settings (key, value, category, updated_at) "
-                                "VALUES (%s, %s, %s, %s) ON CONFLICT (key) DO NOTHING",
-                                (revision_key, "0", "general", now),
-                            )
-                            cur.execute("SELECT value FROM kazma_settings WHERE key = %s FOR UPDATE", (revision_key,))
-                            current = cur.fetchone()["value"]
-                            current = json.loads(current) if isinstance(current, str) else current
-                            if type(current) is not int or current != revision:
-                                raise ConfigRevisionConflict("Settings changed. Reload and review before saving.")
-                        for key, value, category in prepared:
-                            cur.execute(
-                                """
-                                INSERT INTO kazma_settings (key, value, category, updated_at)
-                                VALUES (%s, %s, %s, %s)
-                                ON CONFLICT (key) DO UPDATE SET
-                                  value = EXCLUDED.value,
-                                  category = EXCLUDED.category,
-                                  updated_at = EXCLUDED.updated_at
-                                """,
-                                (key, json.dumps(value), category, now),
-                            )
-                    conn.commit()
-                for key, _value, _category in prepared:
-                    self._invalidate_key(key)
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        raise RuntimeError("Postgres pool unavailable")
+                    with pool.connection() as conn:
+                        with conn.cursor() as cur:
+                            if expected is not None:
+                                # Materialize the initial revision so two first saves
+                                # also contend on the same row. The connection context
+                                # rolls this back together with the batch on conflict.
+                                cur.execute(
+                                    "INSERT INTO kazma_settings (key, value, category, updated_at) "
+                                    "VALUES (%s, %s, %s, %s) ON CONFLICT (key) DO NOTHING",
+                                    (revision_key, "0", "general", now),
+                                )
+                                cur.execute("SELECT value FROM kazma_settings WHERE key = %s FOR UPDATE", (revision_key,))
+                                current = cur.fetchone()["value"]
+                                current = json.loads(current) if isinstance(current, str) else current
+                                if type(current) is not int or current != revision:
+                                    raise ConfigRevisionConflict("Settings changed. Reload and review before saving.")
+                            for key, value, category in prepared:
+                                cur.execute(
+                                    """
+                                    INSERT INTO kazma_settings (key, value, category, updated_at)
+                                    VALUES (%s, %s, %s, %s)
+                                    ON CONFLICT (key) DO UPDATE SET
+                                      value = EXCLUDED.value,
+                                      category = EXCLUDED.category,
+                                      updated_at = EXCLUDED.updated_at
+                                    """,
+                                    (key, json.dumps(value), category, now),
+                                )
+                        conn.commit()
+                with self._lock:
+                    for key, _value, _category in prepared:
+                        self._invalidate_key(key)
             else:
                 conn = self._get_conn()
                 try:
@@ -2365,15 +2510,16 @@ class ConfigStore(_ChangeNotices):
 
     def get_category(self, category: str) -> dict[str, Any]:
         """Get all settings in a category from DB."""
-        with self._lock:
+        with self._statement_lock(write=False):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    raise RuntimeError("Postgres pool unavailable; settings category cannot be read")
-                rows = pool.execute(
-                    "SELECT key, value FROM kazma_settings WHERE category = %s",
-                    (category,),
-                )
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        raise RuntimeError("Postgres pool unavailable; settings category cannot be read")
+                    rows = pool.execute(
+                        "SELECT key, value FROM kazma_settings WHERE category = %s",
+                        (category,),
+                    )
                 out: dict[str, Any] = {}
                 for row in rows:
                     val = row["value"]
@@ -2385,14 +2531,15 @@ class ConfigStore(_ChangeNotices):
 
     def get_all(self) -> dict[str, dict[str, Any]]:
         """Get all settings grouped by category."""
-        with self._lock:
+        with self._statement_lock(write=False):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    return {}
-                rows = pool.execute(
-                    "SELECT key, value, category FROM kazma_settings ORDER BY category, key"
-                )
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        return {}
+                    rows = pool.execute(
+                        "SELECT key, value, category FROM kazma_settings ORDER BY category, key"
+                    )
                 result_pg: dict[str, dict[str, Any]] = {}
                 for row in rows:
                     cat = row["category"] or "general"
@@ -2439,18 +2586,20 @@ class ConfigStore(_ChangeNotices):
         """
         refuse_write("config", key)
         deleted = False
-        with self._lock:
+        with self._statement_lock(write=True):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    return False
-                with pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("DELETE FROM kazma_settings WHERE key = %s", (key,))
-                        deleted = cur.rowcount > 0
-                    conn.commit()
-                if deleted:
-                    self._invalidate_key(key)
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        return False
+                    with pool.connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("DELETE FROM kazma_settings WHERE key = %s", (key,))
+                            deleted = cur.rowcount > 0
+                        conn.commit()
+                with self._lock:
+                    if deleted:
+                        self._invalidate_key(key)
             else:
                 conn = self._get_conn()
                 try:
@@ -2558,12 +2707,13 @@ class ConfigStore(_ChangeNotices):
             })
 
         # Find which keys are NOT already in the active backend.
-        with self._lock:
+        with self._statement_lock(write=False):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    raise RuntimeError("Postgres pool unavailable")
-                rows = pool.execute("SELECT key FROM kazma_settings")
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        raise RuntimeError("Postgres pool unavailable")
+                    rows = pool.execute("SELECT key FROM kazma_settings")
                 existing_keys = {row["key"] for row in rows}
                 backend_label = "Postgres"
             else:
@@ -2632,15 +2782,16 @@ class ConfigStore(_ChangeNotices):
 
     def _db_get_raw(self, key: str) -> Any:
         """Value stored in the DB only — no YAML fallback. ``_MISSING`` if absent."""
-        with self._lock:
+        with self._statement_lock(write=False):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    return _MISSING
-                row = pool.execute_one(
-                    "SELECT value FROM kazma_settings WHERE key = %s",
-                    (key,),
-                )
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        return _MISSING
+                    row = pool.execute_one(
+                        "SELECT value FROM kazma_settings WHERE key = %s",
+                        (key,),
+                    )
                 if row is None:
                     return _MISSING
                 raw = row["value"]
@@ -2686,17 +2837,19 @@ class ConfigStore(_ChangeNotices):
     def reset_all(self) -> int:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""
         refuse_write("config", "<every setting>")
-        with self._lock:
+        with self._statement_lock(write=True):
             if self._use_postgres():
-                pool = self._pg_pool()
-                if pool is None:
-                    raise RuntimeError("Postgres pool unavailable")
-                with pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("DELETE FROM kazma_settings")
-                        deleted = cur.rowcount
-                    conn.commit()
-                self._clear_cache()
+                with self._pg_access():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        raise RuntimeError("Postgres pool unavailable")
+                    with pool.connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("DELETE FROM kazma_settings")
+                            deleted = cur.rowcount
+                        conn.commit()
+                with self._lock:
+                    self._clear_cache()
                 return int(deleted or 0)
             conn = self._get_conn()
             try:

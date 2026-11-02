@@ -46,13 +46,14 @@ class TestCapEvolutionPrompt:
             out = _cap_evolution_prompt(out, f"\n\n[SelfImprovement] {('y' * 500)}")
         assert len(out) <= _MAX_SYSTEM_PROMPT_CHARS + len(base) + _MAX_DELTA_CHARS
 
-    def test_runaway_single_delta_truncated(self) -> None:
+    def test_runaway_single_delta_refused_not_cut(self) -> None:
+        """Re-pointed for FA-212 (2026-11): a lesson past the per-lesson cap is
+        refused whole -- half a lesson in every prompt says something else."""
         base = "Soul."
         huge = "\n\n[SelfImprovement] " + ("x" * 9000)
         out = _cap_evolution_prompt(base, huge)
-        # The single delta is truncated to the per-delta cap.
-        assert len(out) < _MAX_DELTA_CHARS + len(base) + 20
-        assert "[SelfImprovement]" in out
+        assert out == base
+        assert "[SelfImprovement]" not in out
 
     def test_no_marker_delta_wrapped(self) -> None:
         base = "Soul."
@@ -62,6 +63,18 @@ class TestCapEvolutionPrompt:
     def test_empty_delta_noop(self) -> None:
         base = "Soul.\n\n[SelfImprovement] keep me"
         assert _cap_evolution_prompt(base, "") == base
+
+
+class _Refiner:
+    """A Meta-Refiner that answers one lesson (no lesson without one, FA-212)."""
+
+    def __init__(self, lesson: str) -> None:
+        self.lesson = lesson
+
+    async def chat(self, messages):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(content=self.lesson)
 
 
 class TestSelfImprovementErrorStatus:
@@ -88,8 +101,8 @@ class TestSelfImprovementErrorStatus:
                 side_effect=RuntimeError("no memory"),
             ),
             patch(
-                "kazma_core.model_registry.get_model_registry",
-                side_effect=RuntimeError("no registry in unit test"),
+                "kazma_core.skills.self_improvement._llm_for_delta",
+                return_value=_Refiner("Check the input before retrying."),
             ),
         ):
             result = await si.analyze(
@@ -100,9 +113,8 @@ class TestSelfImprovementErrorStatus:
         assert result.get("action") == "mutate", result
         assert result.get("delta")
         assert "No failed stages" not in (result.get("reason") or "")
-        assert "boom" in (result.get("delta") or "") or "failed" in (
-            result.get("reason") or ""
-        ).lower() or "Template" in (result.get("reason") or "")
+        # The failure analysis ran: a correction from the failed stage.
+        assert "correction from 1 failures" in (result.get("reason") or "")
 
     @pytest.mark.asyncio
     async def test_success_path_still_mutates(self) -> None:
@@ -123,8 +135,8 @@ class TestSelfImprovementErrorStatus:
                 side_effect=RuntimeError("no memory"),
             ),
             patch(
-                "kazma_core.model_registry.get_model_registry",
-                side_effect=RuntimeError("no registry"),
+                "kazma_core.skills.self_improvement._llm_for_delta",
+                return_value=_Refiner("Keep the summary short."),
             ),
         ):
             result = await si.analyze(

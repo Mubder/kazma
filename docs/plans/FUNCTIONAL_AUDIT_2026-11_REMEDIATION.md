@@ -45,6 +45,10 @@ These need the owner's hands or the owner's call. None of them is code in this r
 
 They were deployed on 2026-11-02 (live build `73eee4b6`) and checked on live, with every door refusing.
 
+### Stage 1 status (2026-11-02)
+
+Every Stage 1 item below is implemented with its gate and negative control (AGENTS.md §54 names each one), and FA-218's compose half shipped in `2b6ab511`. The class gates: `tests/test_settings_keys_have_readers.py` (dead Settings controls; it also found the Account password and session list, and four controls read by nothing), `tests/test_dependency_floors.py` (advisory floors) and `tests/test_default_voice_providers_declared.py` (a default provider's imports). FA-125 (Non-Stop per-tool timeout) stays in Stage 2: its key is read into `NonStopConfig`, and the field is what nothing uses.
+
 ### Recovery: an outage, a restart or a restore leaves Kazma wrong
 
 Class gate for this group: **every recovery path the docs promise has a drill in the test suite that runs the real thing** (a real Postgres outage, a real restore, a real export from the wrong folder), with the old code as the negative control. The drills join the `@pytest.mark.postgres` job where they need Postgres.

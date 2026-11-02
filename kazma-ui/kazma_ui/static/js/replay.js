@@ -60,6 +60,7 @@
     if (code === 'not_found') return tx('replay.refused_not_found', 'This step no longer exists. Reload the list.');
     if (code === 'snapshot_truncated') return tx('replay.refused_truncated', 'This step was too large to keep whole: it can be read, not restored or forked.');
     if (code === 'store_unavailable') return tx('replay.store_unavailable', 'The saved steps could not be read. The server log says why.');
+    if (code === 'memory_ledger_unavailable') return tx('replay.refused_memory_ledger', 'What this chat keeps out of memory could not be copied to the fork, so nothing was forked. The server log says why.');
     return tx('replay.load_error', 'Could not load the steps (HTTP {status}).', { status: status });
   }
   function emptyState(html) {

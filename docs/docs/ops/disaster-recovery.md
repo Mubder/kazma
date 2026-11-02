@@ -69,7 +69,7 @@ repositories**:
 
 | Repository | Location | Credential |
 |---|---|---|
-| Local | `kazma-data/backups/restic` | passphrase at `~/.kazma/restic.pass` |
+| Local | `kazma-data/backups/restic` | passphrase at `<install>/.kazma/restic.pass` (see below) |
 | Offsite (recommended) | `s3:https://<account>.r2.cloudflarestorage.com/<bucket>` (or B2) | append-only host key (`PutObject`/`GetObject`/`ListBucket` + `DeleteObject` on `locks/*` only) |
 | Offsite (legacy) | `rclone:<remote>/restic` | rclone OAuth — **do not use Google Drive / a service account**. Service accounts have no Drive quota; `rclone:` write probes can look healthy while every upload 403s. |
 
@@ -248,8 +248,17 @@ The target must be **empty** — a restore over an existing tree interleaves
 two states into one that looks plausible and is neither.
 
 You get an install layout: `.env`, `kazma.yaml`, `kazma-data/`,
-`neo4j_graph.jsonl`, and the paired Postgres dump under `pg/`. Every
-restored SQLite database is integrity-checked before it reports success.
+`neo4j_graph.jsonl`, and the paired Postgres dump under `pg/`. The backup's
+`dbs/` and `assets/` are laid out AS the data dir: `kazma-data/settings.db`,
+`kazma-data/vault.db`, `kazma-data/attachments/` and so on, where Kazma reads
+them. A database that sat in an asset folder is taken from the consistent
+copy in `dbs/`, never the raw one, with no `-wal`/`-shm` beside it. Every
+restored SQLite database is integrity-checked (read `immutable`, so the
+check adds no file), and the last step asks Kazma itself, pointed at the
+restored `kazma-data/`, where each store lives: a store the backup lists
+that is not there fails the restore. Until 2026-11-02 the restore copied
+`dbs/` and `assets/` in as two folders, one level below every path Kazma
+reads, and reported success (FA-268).
 
 ### Step 3 — load the databases
 

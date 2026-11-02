@@ -167,31 +167,16 @@ class GoogleCalendarBackend:
     async def find_free_slots(
         self, date: str, duration_minutes: int = 30
     ) -> list[dict[str, str]]:
-        from datetime import timedelta
+        import asyncio
 
-        from kazma_skills.native.calendar.backends.sandbox import _parse_iso
+        from kazma_skills.native.calendar.backends.base import free_slots, operator_zone, workday
 
-        day = _parse_iso(date + "T09:00:00+00:00" if len(date) == 10 else date)
-        day_end = day + timedelta(hours=8)
-        events = await self.list_events(day.isoformat(), day_end.isoformat(), max_results=50)
-        busy = []
-        for e in events:
-            s = _parse_iso(e["start"])
-            en = _parse_iso(e["end"])
-            if s.date() == day.date():
-                busy.append((s, en))
-        busy.sort()
-        slots: list[dict[str, str]] = []
-        cursor = day
-        delta = timedelta(minutes=duration_minutes)
-        for s, en in busy:
-            if cursor + delta <= s:
-                slots.append({"start": cursor.isoformat(), "end": (cursor + delta).isoformat()})
-            cursor = max(cursor, en)
-        while cursor + delta <= day_end:
-            slots.append({"start": cursor.isoformat(), "end": (cursor + delta).isoformat()})
-            cursor += delta
-        return slots[:10]
+        zone = await asyncio.to_thread(operator_zone)
+        start, end = workday(date, zone)
+        # Every event overlapping the working day: the provider's window
+        # query returns those that began before it too (FA-112).
+        events = await self.list_events(start.isoformat(), end.isoformat(), max_results=100)
+        return free_slots(events, day=date, duration_minutes=duration_minutes, zone=zone)
 
     @staticmethod
     def _norm(e: dict[str, Any]) -> dict[str, Any]:

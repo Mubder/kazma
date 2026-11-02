@@ -724,8 +724,6 @@ class ChatPanel(Vertical):
         try:
             ctx = await self._api("GET", "/api/settings/agent/context") or {}
             window = int(ctx.get("max_context_tokens") or 128_000)
-            threshold = float(ctx.get("summarization_threshold") or 0.8)
-            strategy = str(ctx.get("context_strategy") or "sliding_window")
             msgs: list[dict[str, Any]] = []
             tokens = 0
             if self._session_id:
@@ -741,8 +739,6 @@ class ChatPanel(Vertical):
                 f"  [{bar}]",
                 f"  Messages:      {len(msgs)}"
                 + (f"  #{sid[-8:]}" if sid else "  (no season yet)"),
-                f"  Strategy:      {strategy}",
-                f"  Compact at:    {threshold:.0%} of window",
                 "  Totals are billed session usage from /api/chat/sessions, "
                 "not this TUI process's local buffer.",
             ]

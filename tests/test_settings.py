@@ -242,7 +242,9 @@ class TestSettingsManager:
         """Context settings have expected keys."""
         ctx = sm.get_context_settings()
         assert "max_context_tokens" in ctx
-        assert "context_strategy" in ctx
+        # The strategy and threshold were saved and read by nothing (FA-250's
+        # dead-control gate): the page no longer offers them.
+        assert "context_strategy" not in ctx
 
     def test_save_context_settings(self, sm):
         """Saving context settings persists."""
@@ -371,11 +373,6 @@ class TestSettingsManager:
 
     # ── Account ──
 
-    def test_account_info(self, sm):
-        """Account info has expected keys."""
-        info = sm.get_account_info()
-        assert "username" in info
-
     def test_create_and_revoke_token(self, sm):
         """Creating and revoking API tokens works."""
         result = sm.create_api_token("test-token")
@@ -388,15 +385,8 @@ class TestSettingsManager:
         found = [t for t in tokens if t["id"] == result["id"]]
         assert len(found) == 0
 
-    def test_change_password(self, sm):
-        """Password change works with valid new password."""
-        result = sm.change_password("any-old", "new-secure-pw-123")
-        assert result.get("status") == "ok"
-
-    def test_change_password_short(self, sm):
-        """Password change rejects short passwords."""
-        result = sm.change_password("any-old", "short")
-        assert "error" in result
+    # Changing the password: tests/test_settings_account_is_real.py (the route
+    # changes the platform user sign-in checks).
 
 
 # ══════════════════════════════════════════════════════════════════════

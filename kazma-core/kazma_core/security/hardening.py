@@ -223,6 +223,7 @@ class SecurityHardeningRunner:
         "check_encrypted_communications",
         "check_audit_logging",
         "check_permission_escalation",
+        "check_service_exposure",
     ]
 
     def __init__(self, project_root: str | Path | None = None) -> None:
@@ -674,6 +675,35 @@ class SecurityHardeningRunner:
             severity="high",
             message=f"Approval decisions are recorded ({decisions} in hitl_gates.db)",
             recommendation="Keep KAZMA_GATE_REGISTRY on",
+        )
+
+    async def check_service_exposure(self) -> HardeningCheck:
+        """Kazma's database, Neo4j and SearXNG are not published beyond this
+        machine, and Kazma's database role is not a superuser (FA-218)."""
+        return await asyncio.to_thread(self._exposure)
+
+    def _exposure(self) -> HardeningCheck:
+        from kazma_core.security.service_exposure import exposure_problems
+
+        problems, unchecked = exposure_problems()
+        note = f" (not checked: {'; '.join(unchecked)})" if unchecked else ""
+        if problems:
+            return HardeningCheck(
+                name="check_service_exposure",
+                passed=False,
+                severity="critical",
+                message=f"{len(problems)} service exposure(s): " + "; ".join(problems) + note,
+                recommendation=(
+                    "Publish container ports on 127.0.0.1 (\"127.0.0.1:5433:5432\"; the compose "
+                    "files do), and sign Kazma in with a database role that is not a superuser."
+                ),
+            )
+        return HardeningCheck(
+            name="check_service_exposure",
+            passed=True,
+            severity="critical",
+            message="No service of Kazma's is published beyond this machine" + note,
+            recommendation="Keep container ports on 127.0.0.1",
         )
 
     async def check_permission_escalation(self) -> HardeningCheck:

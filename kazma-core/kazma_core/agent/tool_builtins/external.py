@@ -566,9 +566,12 @@ def register_external_tools(registry: Any) -> None:
         logger.error("Failed to load native skills: %s", e, exc_info=True)
     # Read the Skills page's switches now, while the agent is built, so the
     # first model call does not do it (kazma_core.skills.switches).
-    from kazma_core.skills.switches import load_switches
+    from kazma_core.skills.switches import load_switches, load_tool_switches
 
     switched_off = load_switches()
     if switched_off:
         logger.info("Skills switched off on the Skills page: %s", ", ".join(sorted(switched_off)))
+    tools_off = load_tool_switches()
+    if tools_off:
+        logger.info("Tools switched off on Settings > Tools: %s", ", ".join(sorted(tools_off)))
     logger.info("Registered %d built-in tools", len(registry._tools))

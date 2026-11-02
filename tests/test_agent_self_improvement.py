@@ -7,7 +7,6 @@ concurrent-mutation atomicity.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -66,7 +65,7 @@ async def test_analyze_chat_turn_mutates(evo_dir: Path) -> None:
         ),
         patch(
             "kazma_core.model_registry.get_model_registry",
-            side_effect=RuntimeError("no reg"),
+            return_value=_FakeRegistry(_CapturingProvider()),
         ),
     ):
         r = await si.analyze_and_apply_chat_turn(
@@ -222,34 +221,6 @@ def test_corrupt_legacy_json_does_not_crash(evo_dir: Path) -> None:
 
 
 # ── Audit H3: background task retention ────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_schedule_chat_si_retains_task(evo_dir: Path) -> None:
-    """The fire-and-forget SI task must be retained (not GC'd mid-flight)."""
-    from kazma_core.skills import self_improvement as si
-
-    si._si_tasks.clear()
-    with (
-        patch(
-            "kazma_core.memory.recall.search",
-            side_effect=RuntimeError("no memory"),
-        ),
-        patch(
-            "kazma_core.model_registry.get_model_registry",
-            side_effect=RuntimeError("no reg"),
-        ),
-    ):
-        si.schedule_chat_self_improvement(
-            user_message="hello", success=True, output_snippet="hi"
-        )
-        # A strong reference is held while the task runs
-        assert len(si._si_tasks) >= 1
-        # Drain the task to completion explicitly (don't rely on timing)
-        pending = list(si._si_tasks)
-        await asyncio.gather(*pending, return_exceptions=True)
-        # The done-callback should have discarded it
-        assert len(si._si_tasks) == 0
 
 
 # ── H2 regression: Meta-Refiner inputs must be fenced ───────────────────

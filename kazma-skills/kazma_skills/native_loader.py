@@ -121,6 +121,9 @@ class NativeSkillLoader:
                 # The Skills page's id for this skill: its switch applies to
                 # every tool the skill registers (kazma_core.skills.switches).
                 local_tool.skill_id = f"native:{skill_dir.name}"
+                from kazma_core.skills.switches import note_skill_tool
+
+                note_skill_tool(tool_name, local_tool.skill_id)
                 # Attach custom fields for UI rendering & localized system prompt building
                 local_tool.arabic_name = tool_info.get("arabic_name", tool_name)
                 local_tool.prompt_chain = tool_info.get("prompt_chain", [])

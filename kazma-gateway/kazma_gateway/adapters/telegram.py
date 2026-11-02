@@ -1163,8 +1163,16 @@ class TelegramAdapter(BaseAdapter):
             audio = await self.synthesize_reply(clean)
             if audio:
                 await self.send_voice_reply(chat_id, audio, reply_to=reply_to)
+            else:
+                # The text reply went out; its voice did not. Said where the
+                # owner looks (FA-248: Microsoft refused the default provider
+                # for weeks and this said nothing above DEBUG).
+                from kazma_core.voice.tts import get_last_error
+
+                logger.warning("[telegram] voice reply not sent (the text was): %s",
+                               get_last_error() or "the TTS provider returned no audio")
         except Exception:
-            logger.debug("[telegram] TTS reply failed (non-critical)")
+            logger.warning("[telegram] voice reply failed (the text reply was sent)", exc_info=True)
 
     async def _handle_voice_message(self, message: dict[str, Any]) -> str | None:
         """Full voice pipeline: detect -> download -> transcribe -> return text."""

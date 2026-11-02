@@ -456,13 +456,12 @@ class LocalToolRegistry:
         ``T | null``). Tools with free-form ``dict`` parameters stay
         unstrict so local / Anthropic / Gemini endpoints do not 400.
         """
-        from kazma_core.skills.switches import load_switches
+        from kazma_core.skills.switches import switched_off_reason
 
-        switched_off = load_switches()
         definitions: list[dict[str, Any]] = []
         for tool in self._tools.values():
-            if tool.skill_id and tool.skill_id in switched_off:
-                continue  # switched off on the Skills page
+            if switched_off_reason(tool.name, tool.skill_id):
+                continue  # switched off: its skill on Skills, or itself on Settings > Tools
             definitions.append(
                 {
                     "type": "function",
@@ -528,16 +527,10 @@ class LocalToolRegistry:
                 "content": f"Tool '{tool_name}' not found. Available: {list(self._tools.keys())}",
                 "is_error": True,
             }
-        from kazma_core.skills.switches import is_skill_enabled
+        from kazma_core.skills.switches import switched_off_reason
 
-        if not is_skill_enabled(tool.skill_id):
-            return {
-                "content": (
-                    f"Tool '{tool_name}' belongs to a skill that is switched off "
-                    f"({tool.skill_id}). The operator can switch it on in Skills."
-                ),
-                "is_error": True,
-            }
+        if (refusal := switched_off_reason(tool_name, tool.skill_id)) is not None:
+            return {"content": refusal, "is_error": True}
 
         # Closed schema: drop invented keys; JSON null on defaulted params
         # becomes "omitted" so Python defaults still apply (OpenAI strict).

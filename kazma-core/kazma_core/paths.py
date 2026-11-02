@@ -135,17 +135,21 @@ def pin_project_root(root: Path | str) -> Path:
     return _project_root
 
 
-def data_dir() -> Path:
+def data_dir(*, create: bool = True) -> Path:
     """The project data directory (``kazma-data/``). Created if missing.
 
     Override with ``KAZMA_DATA_DIR`` for relocatable production layouts.
+    ``create=False`` only answers where it is: a command that reads an
+    install (``kazma migrate export``) must not make an empty one where it
+    looked and then read that (FA-252).
     """
     env = (os.environ.get("KAZMA_DATA_DIR") or "").strip()
     if env:
         d = Path(env).expanduser().resolve()
     else:
         d = get_project_root() / "kazma-data"
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 

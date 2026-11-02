@@ -58,10 +58,10 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CUA_PLANNER` | `"1"` | `kazma_core.tools.computer_use_planners` | yes |
 | `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DATABASE_URL` | (none) | `kazma_core.db.backend`, `kazma_core.memory.backends` | yes |
-| `KAZMA_DATA_DIR` | (none) | `kazma_core.config_store`, `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
+| `KAZMA_DATA_DIR` | (none) | `kazma_core.backup.restore`, `kazma_core.config_store`, `kazma_core.memory.backfill_v2` +1 | yes |
 | `KAZMA_DB_BACKEND` | (none) | `kazma_core.db.backend` | yes |
 | `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
-| `KAZMA_DB_CONTAINER` | `""` | `kazma_core.migration.pg_bridge` | yes |
+| `KAZMA_DB_CONTAINER` | `""` | `kazma_core.migration.pg_bridge`, `kazma_core.security.service_exposure` | yes |
 | `KAZMA_DB_INTERNAL_PORT` | `"5432"` | `kazma_core.migration.pg_bridge` | yes |
 | `KAZMA_DEMO_MODE` | `""` | `kazma_core.memory.belief_extractor`, `kazma_core.memory.health`, `kazma_core.security.boot_guard` +5 | yes |
 | `KAZMA_DETACHED_TTL_S` | `"300"` | `kazma_ui.active_turns` | yes |

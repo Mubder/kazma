@@ -136,6 +136,17 @@ def cost_from_usage(
     )
 
 
+#: Waits after a 429 before the request is given up: each waits the
+#: provider's Retry-After times 1.5 to the power of its place (FA-214: the
+#: stream path had none, and one 429 ended the turn).
+_RATE_LIMIT_RETRIES = 3
+
+
+def _rate_limit_wait(headers: Any, retry: int) -> float:
+    """How long to wait before retry number *retry* (0-based) after a 429."""
+    return retry_after_seconds(headers) * (1.5 ** retry)
+
+
 def retry_after_seconds(headers: Any, default: float = 30.0) -> float:
     """Parse a Retry-After header, clamped to [1.0, 60.0] seconds.
 
@@ -927,8 +938,11 @@ class LLMProvider:
                 )
 
                 # Exponential backoff (max 3 retries)
-                for retry_attempt in range(3):
-                    await asyncio.sleep(retry_after * (1.5 ** retry_attempt))
+                _waited = 0.0
+                for retry_attempt in range(_RATE_LIMIT_RETRIES):
+                    _wait = retry_after * (1.5 ** retry_attempt)
+                    await asyncio.sleep(_wait)
+                    _waited += _wait
                     try:
                         resp = await client.post("/chat/completions", json=payload)
                         if resp.status_code != 429:
@@ -968,9 +982,12 @@ class LLMProvider:
                     # did bounded exponential backoff here) — re-retrying would
                     # amplify load against an already-rate-limited provider.
                     raise LLMError(
-                        f"LLM rate-limited after 3 retries: {detail[:300]}",
+                        f"LLM rate-limited: {_RATE_LIMIT_RETRIES + 1} attempts over "
+                        f"{_waited:.0f}s: {detail[:300]}",
                         transient=True,
                         kind="rate_limit_exhausted",
+                        attempts=_RATE_LIMIT_RETRIES + 1,
+                        waited_s=_waited,
                     ) from e
 
             # ── Context-window overflow ─────────────────────────────────
@@ -1552,10 +1569,11 @@ class LLMProvider:
         start = time.monotonic()
 
         class _StreamHttpError(Exception):
-            def __init__(self, status_code: int, detail: str) -> None:
+            def __init__(self, status_code: int, detail: str, headers: Any = None) -> None:
                 super().__init__(detail)
                 self.status_code = status_code
                 self.detail = detail
+                self.headers = headers
 
         async def _run_stream(body: dict[str, Any]) -> Any:
             content_parts: list[str] = []
@@ -1570,7 +1588,7 @@ class LLMProvider:
                         err_body = (await resp.aread()).decode("utf-8", errors="replace")
                     except Exception:
                         err_body = ""
-                    raise _StreamHttpError(resp.status_code, err_body)
+                    raise _StreamHttpError(resp.status_code, err_body, getattr(resp, "headers", None))
                 async for obj in self._iter_sse_json(resp):
                     if not isinstance(obj, dict):
                         continue
@@ -1619,111 +1637,140 @@ class LLMProvider:
         # The authoritative full text reaches the client via the final
         # response delta + turn_complete (replace semantics).
         _emitted_any = False
-        try:
-            async for delta in _run_stream(payload):
-                if delta.content:
-                    _emitted_any = True
-                yield delta
-            return
-        except _StreamHttpError as e:
-            detail = e.detail or ""
-            status_code = e.status_code
-            detail_lower = detail.lower()
-            logger.warning(
-                "[LLMProvider] stream HTTP %s: %s",
-                status_code,
-                detail[:300],
-            )
-
-            # Unknown field `stream_options` — retry stream without it.
-            if (
-                status_code in (400, 422)
-                and "stream_options" in detail_lower
-                and "stream_options" in payload
-            ):
-                payload.pop("stream_options", None)
-                try:
-                    async for delta in _run_stream(payload):
-                        yield delta
-                    return
-                except Exception as retry_exc:
-                    logger.warning(
-                        "[LLMProvider] stream retry without stream_options failed: %s",
-                        retry_exc,
-                    )
-
-            # 4xx (except 429): fall back to blocking chat() which already
-            # classifies 404-function, context overflow, schema errors.
-            if status_code != 429 and status_code < 500:
-                logger.info(
-                    "[LLMProvider] streaming rejected (HTTP %s) — falling back to chat()",
-                    status_code,
-                )
-                resp = await self.chat(
-                    messages, tools, max_tokens, temperature, model, response_format
-                )
-                if resp.content and not _emitted_any:
-                    yield StreamDelta(content=resp.content)
-                yield StreamDelta(response=resp)
+        _rate_retries = 0
+        _rate_waited = 0.0
+        while True:
+            try:
+                async for delta in _run_stream(payload):
+                    if delta.content:
+                        _emitted_any = True
+                    yield delta
                 return
+            except _StreamHttpError as e:
+                detail = e.detail or ""
+                status_code = e.status_code
+                # A 429 answers before any token: wait what the provider asks
+                # and try again, as the blocking path does (FA-214: one 429
+                # ended the turn, and the supervisor does not retry a
+                # rate_limit_exhausted error on the same provider).
+                if (
+                    status_code == 429
+                    and not _emitted_any
+                    and not _is_balance_exhausted(detail)
+                    and _rate_retries < _RATE_LIMIT_RETRIES
+                ):
+                    _wait = _rate_limit_wait(e.headers, _rate_retries)
+                    _rate_retries += 1
+                    logger.warning(
+                        "[LLMProvider] stream rate limited (429): retry %d/%d in %.1fs",
+                        _rate_retries, _RATE_LIMIT_RETRIES, _wait,
+                    )
+                    await asyncio.sleep(_wait)
+                    _rate_waited += _wait
+                    continue
+                detail_lower = detail.lower()
+                logger.warning(
+                    "[LLMProvider] stream HTTP %s: %s",
+                    status_code,
+                    detail[:300],
+                )
 
-            # An empty balance is permanent, whatever status it arrives under
-            # (Z.AI sends 429). transient=True here is what made the turn
-            # retry and then tell the operator to send the message again —
-            # advice that cannot ever work (2026-09-16).
-            if _is_balance_exhausted(detail):
-                raise LLMError(
-                    f"The {self._describe_endpoint()} account has no credit left "
-                    f"(model {payload.get('model') or '<unset>'!r}). This will not "
-                    f"clear by retrying — top up that provider, or switch to "
-                    f"another in Settings → Providers. Provider said: "
-                    f"{detail[:200]}",
-                    transient=False,
-                ) from e
-
-            kind = "rate_limit_exhausted" if status_code == 429 else ""
-            raise LLMError(
-                f"LLM stream failed (HTTP {status_code}): {detail[:300]}",
-                transient=True,
-                kind=kind,
-            ) from e
-        except LLMError:
-            raise
-        except (
-            httpx.ConnectError,
-            httpx.TimeoutException,
-            httpx.ReadError,
-            httpx.RemoteProtocolError,
-        ) as e:
-            if self._via_gateway:
-                try:
-                    from kazma_core.llm_gateway import get_litellm_gateway
-
-                    if (await asyncio.to_thread(get_litellm_gateway)).fallback_direct:
-                        logger.warning(
-                            "LiteLLM stream failed (%s) — falling back to blocking chat()",
-                            type(e).__name__,
-                        )
-                        resp = await self.chat(
-                            messages, tools, max_tokens, temperature, model, response_format
-                        )
-                        # S3-2: never re-yield content on top of partials the
-                        # dead stream already emitted (duplicated-prefix bug).
-                        if resp.content and not _emitted_any:
-                            yield StreamDelta(content=resp.content)
-                        yield StreamDelta(response=resp)
+                # Unknown field `stream_options` — retry stream without it.
+                if (
+                    status_code in (400, 422)
+                    and "stream_options" in detail_lower
+                    and "stream_options" in payload
+                ):
+                    payload.pop("stream_options", None)
+                    try:
+                        async for delta in _run_stream(payload):
+                            yield delta
                         return
-                except LLMError:
-                    raise
-                except Exception:
-                    logger.debug("LiteLLM stream direct fallback failed", exc_info=True)
-            raise LLMError(
-                f"LLM stream failed (network): {e}",
-                transient=True,
-            ) from e
-        except Exception as e:
-            logger.error("[LLMProvider] stream failed: %s", e, exc_info=True)
-            raise LLMError(f"LLM stream failed: {e}", transient=False) from e
+                    except Exception as retry_exc:
+                        logger.warning(
+                            "[LLMProvider] stream retry without stream_options failed: %s",
+                            retry_exc,
+                        )
+
+                # 4xx (except 429): fall back to blocking chat() which already
+                # classifies 404-function, context overflow, schema errors.
+                if status_code != 429 and status_code < 500:
+                    logger.info(
+                        "[LLMProvider] streaming rejected (HTTP %s) — falling back to chat()",
+                        status_code,
+                    )
+                    resp = await self.chat(
+                        messages, tools, max_tokens, temperature, model, response_format
+                    )
+                    if resp.content and not _emitted_any:
+                        yield StreamDelta(content=resp.content)
+                    yield StreamDelta(response=resp)
+                    return
+
+                # An empty balance is permanent, whatever status it arrives under
+                # (Z.AI sends 429). transient=True here is what made the turn
+                # retry and then tell the operator to send the message again —
+                # advice that cannot ever work (2026-09-16).
+                if _is_balance_exhausted(detail):
+                    raise LLMError(
+                        f"The {self._describe_endpoint()} account has no credit left "
+                        f"(model {payload.get('model') or '<unset>'!r}). This will not "
+                        f"clear by retrying — top up that provider, or switch to "
+                        f"another in Settings → Providers. Provider said: "
+                        f"{detail[:200]}",
+                        transient=False,
+                    ) from e
+
+                if status_code == 429:
+                    raise LLMError(
+                        f"LLM rate-limited: {_rate_retries + 1} attempts over "
+                        f"{_rate_waited:.0f}s: {detail[:300]}",
+                        transient=True,
+                        kind="rate_limit_exhausted",
+                        attempts=_rate_retries + 1,
+                        waited_s=_rate_waited,
+                    ) from e
+                raise LLMError(
+                    f"LLM stream failed (HTTP {status_code}): {detail[:300]}",
+                    transient=True,
+                ) from e
+            except LLMError:
+                raise
+            except (
+                httpx.ConnectError,
+                httpx.TimeoutException,
+                httpx.ReadError,
+                httpx.RemoteProtocolError,
+            ) as e:
+                if self._via_gateway:
+                    try:
+                        from kazma_core.llm_gateway import get_litellm_gateway
+
+                        if (await asyncio.to_thread(get_litellm_gateway)).fallback_direct:
+                            logger.warning(
+                                "LiteLLM stream failed (%s) — falling back to blocking chat()",
+                                type(e).__name__,
+                            )
+                            resp = await self.chat(
+                                messages, tools, max_tokens, temperature, model, response_format
+                            )
+                            # S3-2: never re-yield content on top of partials the
+                            # dead stream already emitted (duplicated-prefix bug).
+                            if resp.content and not _emitted_any:
+                                yield StreamDelta(content=resp.content)
+                            yield StreamDelta(response=resp)
+                            return
+                    except LLMError:
+                        raise
+                    except Exception:
+                        logger.debug("LiteLLM stream direct fallback failed", exc_info=True)
+                raise LLMError(
+                    f"LLM stream failed (network): {e}",
+                    transient=True,
+                ) from e
+            except Exception as e:
+                logger.error("[LLMProvider] stream failed: %s", e, exc_info=True)
+                raise LLMError(f"LLM stream failed: {e}", transient=False) from e
 
     def _parse_response(self, data: dict[str, Any], duration_ms: float) -> LLMResponse:
         """Parse the OpenAI-format response into an LLMResponse."""
@@ -1942,7 +1989,14 @@ class LLMError(Exception):
       model) but the supervisor must not re-retry the same provider.
     """
 
-    def __init__(self, *args: Any, transient: bool = False, kind: str = "") -> None:
+    def __init__(
+        self, *args: Any, transient: bool = False, kind: str = "",
+        attempts: int = 0, waited_s: float = 0.0,
+    ) -> None:
         super().__init__(*args)
         self.transient = bool(transient)
         self.kind = str(kind or "")
+        #: For ``rate_limit_exhausted``: the requests the provider refused and
+        #: the seconds waited between them (0 when not counted).
+        self.attempts = int(attempts or 0)
+        self.waited_s = float(waited_s or 0.0)

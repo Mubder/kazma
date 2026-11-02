@@ -685,7 +685,7 @@ Kill-switch: `KAZMA_SELF_IMPROVEMENT=0` (checked live). Every injected delta is 
 
 ```mermaid
 flowchart LR
-    T[Task or chat turn completes] --> SI[analyze / schedule_chat_self_improvement]
+    T[Task or chat turn completes] --> SI[analyze / learn_from_finished_turn]
     SI --> A{analyze}
     A -->|success| S[Meta-Refiner: reinforce]
     A -->|failure/timeout/error| F[Meta-Refiner: correct]
@@ -705,9 +705,9 @@ flowchart LR
 
 ### 11.2b How it works (chat)
 
-1. After Web SSE `done` (not interrupted) or gateway graph completion, `schedule_chat_self_improvement` runs in the background.
-2. Outcome: success unless empty/⚠️/error-looking reply.
-3. Delta is capped and stored under agent id `supervisor` in ConfigStore.
+1. When a chat turn finishes (not paused), `close_turn` hands its terminal state to `learn_from_finished_turn`, which runs in the background. Every transport closes its turns there.
+2. A turn teaches only what memory would keep. A turn that failed (`turn_failed`) teaches nothing, and neither does a turn or chat the forget ledger keeps out of memory ("Don't remember this chat"). When the Meta-Refiner cannot answer, nothing is written.
+3. The lesson is stored under agent id `supervisor` in ConfigStore, with the chat and turn it came from in its history entry. The cap keeps the newest whole lessons (12 blocks, 8000 characters). A lesson longer than 1000 characters is refused, never cut.
 4. Next turn: `agent_runner`, `sse_chat/`, and gateway `graph.py` inject the Soul block as a **fenced** system message (no graph rebuild required).
 
 ### 11.3 Status tracking

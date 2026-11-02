@@ -255,20 +255,20 @@ def restore_files(
         return res
     res.add("locate backup", True, str(root))
 
-    # Assemble the install layout.
+    # Assemble the install layout: the backup's ``dbs/`` and ``assets/`` are
+    # the data dir's CONTENTS (FA-268). They were copied in as two folders,
+    # one level below every path Kazma reads, and a Kazma started on the
+    # restore found none of its stores -- with every step reported ok.
     try:
         data_dir = dest / "kazma-data"
         data_dir.mkdir(parents=True, exist_ok=True)
-        moved = []
-        for name, into in (("dbs", data_dir), ("assets", data_dir),
-                           ("research", dest), (".env", dest),
-                           ("kazma.yaml", dest),
-                           ("manifest.json", dest),
-                           ("neo4j_graph.jsonl", dest)):
+        restored_dbs = _flatten_into_data_dir(root, data_dir)
+        moved = ["dbs", "assets"] if restored_dbs or (root / "assets").is_dir() else []
+        for name in ("research", ".env", "kazma.yaml", "manifest.json", "neo4j_graph.jsonl"):
             src = root / name
             if not src.exists():
                 continue
-            tgt = into / name
+            tgt = dest / name
             if src.is_dir():
                 shutil.copytree(src, tgt, dirs_exist_ok=True)
             else:
@@ -287,11 +287,20 @@ def restore_files(
             "" if (dest / "kazma.yaml").is_file()
             else "no kazma.yaml -- restored install boots with no tools")
 
-    # Postgres dump, restored beside the files rather than loaded.
+    # Postgres dump, restored beside the files rather than loaded. Through a
+    # staging folder of its own: restic rebuilds the source's absolute path
+    # with its original permissions, and a ``pg/C/Users/...`` left in the
+    # target could not be deleted without icacls (FA-270).
     if point.pg_snapshot_id:
-        pg_dir = dest / "pg"
-        ok, err = _restic_restore(repo, password, point.pg_snapshot_id, pg_dir)
-        dumps = list(pg_dir.rglob("pg_shared_*.dump")) if ok else []
+        pg_staging = dest / ".restic-pg-staging"
+        ok, err = _restic_restore(repo, password, point.pg_snapshot_id, pg_staging)
+        dumps = sorted(pg_staging.rglob("pg_shared_*.dump")) if ok else []
+        if dumps:
+            pg_dir = dest / "pg"
+            pg_dir.mkdir(exist_ok=True)
+            for dump in dumps:
+                shutil.copy2(dump, pg_dir / dump.name)
+        _force_rmtree(pg_staging)
         res.add("postgres dump", bool(dumps),
                 dumps[0].name if dumps else (err[:200] or "not found"))
     else:
@@ -299,7 +308,8 @@ def restore_files(
                 "no Postgres dump in this repository -- the database cannot "
                 "be recovered from it")
 
-    res.add(*_verify_databases(data_dir / "dbs"))
+    res.add(*_verify_databases(data_dir, restored_dbs))
+    res.add(*_check_layout(dest, data_dir))
 
     # shutil.rmtree leaves read-only and briefly-locked files behind on
     # Windows, which stranded ~950 MB of duplicate data inside the restore
@@ -362,7 +372,63 @@ def _force_rmtree(path: Path) -> None:
         logger.debug("[restore] staging cleanup failed", exc_info=True)
 
 
-def _verify_databases(dbs: Path) -> tuple[str, bool, str]:
+#: What sits beside a SQLite file while a writer has it open. A raw copy of
+#: one taken from a live data dir does not belong to the consistent copy the
+#: backup's ``dbs/`` holds: opened beside it, SQLite would replay it.
+_SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
+
+
+def _posix(path: Path) -> str:
+    return path.as_posix()
+
+
+def _flatten_into_data_dir(root: Path, data_dir: Path) -> list[str]:
+    """Lay a backup's ``assets/`` and ``dbs/`` out as the data dir's children.
+
+    ``assets/`` first, then ``dbs/`` over it: a database nested in an asset
+    folder is in both, raw in ``assets/`` and copied consistently in
+    ``dbs/`` (FA-267), and the consistent one wins, with no sidecar of the
+    raw one left beside it. Returns the databases restored from ``dbs/``,
+    relative to the data dir.
+    """
+    dbs = root / "dbs"
+    from_dbs = sorted(_posix(f.relative_to(dbs)) for f in dbs.rglob("*.db")) if dbs.is_dir() else []
+    held = set(from_dbs)
+    assets = root / "assets"
+    if assets.is_dir():
+        for child in sorted(assets.iterdir()):
+            if child.is_dir():
+                shutil.copytree(child, data_dir / child.name, dirs_exist_ok=True,
+                                ignore=_raw_copies_of(held, assets))
+            else:
+                shutil.copy2(child, data_dir / child.name)
+    for rel in from_dbs:
+        target = data_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(dbs / rel, target)
+        for suffix in _SQLITE_SIDECARS:
+            Path(str(target) + suffix).unlink(missing_ok=True)
+    return from_dbs
+
+
+def _raw_copies_of(held: set[str], assets: Path):
+    """``copytree``'s ignore: an asset's database that ``dbs/`` holds, and its sidecars."""
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        here = Path(directory)
+        skipped = set()
+        for name in names:
+            base = name
+            for suffix in _SQLITE_SIDECARS:
+                if name.endswith(suffix):
+                    base = name[: -len(suffix)]
+                    break
+            if _posix((here / base).relative_to(assets)) in held:
+                skipped.add(name)
+        return skipped
+    return ignore
+
+
+def _verify_databases(data_dir: Path, restored: list[str]) -> tuple[str, bool, str]:
     """Open every restored SQLite file and integrity-check it.
 
     Done here rather than deferred to the drill: the drill reads a BACKUP
@@ -370,16 +436,20 @@ def _verify_databases(dbs: Path) -> tuple[str, bool, str]:
     the operator to run it against a restored install was advice that could
     not work. Proof belongs in the restore, not in a follow-up command
     somebody has to remember.
+
+    Read ``immutable=1``: ``mode=ro`` on a WAL database creates its ``-wal``
+    and ``-shm`` beside it (FA-270), files the backup did not hold.
     """
     import sqlite3
 
-    if not dbs.is_dir():
-        return ("databases readable", False, "no dbs/ directory restored")
+    if not restored:
+        return ("databases readable", False, "no databases restored")
     checked = 0
     bad: list[str] = []
-    for f in sorted(dbs.rglob("*.db")):
+    for rel in restored:
+        f = data_dir / rel
         try:
-            conn = sqlite3.connect(f"file:{f}?mode=ro", uri=True)
+            conn = sqlite3.connect(f"{f.resolve().as_uri()}?immutable=1", uri=True)
             try:
                 row = conn.execute("PRAGMA integrity_check").fetchone()
             finally:
@@ -389,12 +459,77 @@ def _verify_databases(dbs: Path) -> tuple[str, bool, str]:
             checked += 1
         except Exception as exc:  # noqa: BLE001
             bad.append(f"{f.name} ({str(exc)[:40]})")
-    if not checked:
-        return ("databases readable", False, "no databases found")
     if bad:
         return ("databases readable", False,
                 f"{len(bad)} of {checked} failed: {', '.join(bad[:4])}")
     return ("databases readable", True, f"{checked} databases pass integrity_check")
+
+
+#: The stores ``kazma_core.paths`` places, by the function a Kazma started
+#: on the restore would ask (FA-268): the layout is checked by its reader.
+_STORE_PATH_FUNCTIONS = (
+    "settings_db", "vault_db_path", "primary_memory_db", "memory_ops_db",
+    "memory_forget_journal_db", "checkpoints_db", "knowledge_db",
+    "swarm_tasks_db", "audit_db", "rbac_db",
+)
+
+_ASK_KAZMA = (
+    "import json, sys\n"
+    "from kazma_core import paths\n"
+    "names = sys.argv[1].split(',')\n"
+    "print(json.dumps({'data_dir': str(paths.data_dir()), "
+    "'stores': {n: str(getattr(paths, n)()) for n in names}}))\n"
+)
+
+
+def _check_layout(dest: Path, data_dir: Path) -> tuple[str, bool, str]:
+    """Ask Kazma, pinned to the restored data dir, where each store lives.
+
+    A child process with no ``KAZMA_*`` variable but ``KAZMA_DATA_DIR``
+    resolves every store path; each store the backup's manifest lists must
+    be a file there. The restore used to report every step ok over a layout
+    no reader looked in.
+    """
+    import json
+    import subprocess
+    import sys
+
+    from kazma_core.security.child_env import tool_child_env
+
+    try:
+        manifest = json.loads((dest / "manifest.json").read_text(encoding="utf-8"))
+        listed = {_posix(Path(str(item.get("path", ""))))
+                  for item in (manifest.get("databases") or {}).get("items") or []
+                  if isinstance(item, dict) and not item.get("error")}
+    except (OSError, ValueError):
+        return ("layout readable by Kazma", False, "no readable manifest.json restored")
+    env = tool_child_env()
+    env["KAZMA_DATA_DIR"] = str(data_dir)
+    try:
+        out = subprocess.run([sys.executable, "-c", _ASK_KAZMA, ",".join(_STORE_PATH_FUNCTIONS)],
+                             env=env, capture_output=True, text=True, timeout=120, check=True).stdout
+        seen = json.loads(out.strip().splitlines()[-1])
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError) as exc:
+        return ("layout readable by Kazma", False, f"could not ask Kazma: {str(exc)[:120]}")
+    if Path(seen["data_dir"]).resolve() != data_dir.resolve():
+        return ("layout readable by Kazma", False, f"Kazma reads {seen['data_dir']}, not {data_dir}")
+    missing = []
+    found = 0
+    for path in seen["stores"].values():
+        try:
+            rel = _posix(Path(path).resolve().relative_to(data_dir.resolve()))
+        except ValueError:
+            continue  # a store outside the data dir is not the restore's
+        if Path(path).is_file():
+            found += 1
+        elif rel in listed:
+            missing.append(rel)
+    if missing:
+        return ("layout readable by Kazma", False,
+                f"{len(missing)} store(s) not where Kazma reads: {', '.join(missing[:4])}")
+    if listed and not found:
+        return ("layout readable by Kazma", False, "Kazma finds none of the backup's stores")
+    return ("layout readable by Kazma", True, f"{found} store(s) where Kazma reads them")
 
 
 def _next_steps(res: RestoreResult) -> str:
@@ -446,12 +581,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    from kazma_core.backup.restic_repo import ensure_password, repo_paths
+    from kazma_core.backup.restic_repo import ensure_password, password_file, repo_paths
 
     password, _ = ensure_password()
     if not password:
+        # The file restic_repo reads, not a place written here (FA-269: this
+        # named the legacy ~/.kazma, the install's .kazma is the one used).
         print("No restic passphrase. Set KAZMA_RESTIC_PASSWORD or create "
-              "~/.kazma/restic.pass")
+              f"{password_file()}")
         return 2
     repo = args.repo or repo_paths()["local"]
 

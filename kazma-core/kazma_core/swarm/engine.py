@@ -145,6 +145,8 @@ def _store_error_passes(exc: BaseException) -> bool:
         return True
     if type(exc).__name__ in ("OperationalError", "InterfaceError", "PoolTimeout"):
         return True  # psycopg's and psycopg_pool's, without importing them
+    if type(exc).__name__ == "ConfigStoreUnavailableError":
+        return True  # the settings store's outage (FA-259): a pool timeout before
     return isinstance(exc, RuntimeError) and "pool unavailable" in str(exc).lower()
 
 

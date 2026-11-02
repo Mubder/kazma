@@ -1342,12 +1342,34 @@ class SettingsRouterBuilder:
 
         @router.put("/api/settings/account/password")
         def api_change_password(req: PasswordChange, request: Request) -> Response:
-            """Change account password."""
+            """Change the signed-in local user's password -- the one sign-in
+            checks (the platform user store) -- and end their other sessions.
+
+            It wrote ``account.password_hash``, which sign-in never read: the
+            old password kept working (2026-11 functional audit). A session
+            from the sign-in secret has no password here: that secret is
+            ``KAZMA_SECRET`` in the install's ``.env`` (409 ``sign_in_secret``).
+            """
             from fastapi.responses import JSONResponse
-            result = _get_sm().change_password(req.old_password, req.new_password)
-            if result.get("error"):
-                return JSONResponse(result, status_code=400)
-            return JSONResponse(result)
+
+            from kazma_core.security import platform_rbac, web_sessions
+            from kazma_ui.auth import get_request_principal
+
+            principal = get_request_principal(request) or {}
+            username = str(principal.get("username") or "")
+            user = platform_rbac.get_user(username) if principal.get("source") == "session" else None
+            if user is None:
+                return JSONResponse({"error": "sign_in_secret"}, status_code=409)
+            if len(req.new_password or "") < 8:
+                return JSONResponse({"error": "password_too_short"}, status_code=400)
+            if platform_rbac.authenticate_local_user(user.username, req.old_password) is None:
+                return JSONResponse({"error": "current_password_incorrect"}, status_code=400)
+            platform_rbac.set_local_password(user.username, req.new_password)
+            ended = web_sessions.revoke_user_sessions(
+                user_id=user.user_id, username=user.username,
+                keep=request.cookies.get(web_sessions.SESSION_COOKIE),
+            )
+            return JSONResponse({"status": "ok", "other_sessions_ended": ended})
 
         @router.get("/api/settings/account/tokens")
         def api_get_tokens() -> list[dict[str, Any]]:
@@ -1370,9 +1392,20 @@ class SettingsRouterBuilder:
             return {"status": "ok", "removed": True, "id": token_id}
 
         @router.get("/api/settings/account/sessions")
-        def api_get_sessions() -> list[dict[str, Any]]:
-            """List active sessions."""
-            return _get_sm().get_sessions()
+        def api_get_sessions(request: Request) -> list[dict[str, Any]]:
+            """The signed-in person's live web sessions (the session store),
+            this one marked ``current``."""
+            from kazma_core.security import web_sessions
+            from kazma_ui.auth import get_request_principal
+
+            principal = get_request_principal(request) or {}
+            if principal.get("source") != "session":
+                return []
+            return web_sessions.list_sessions(
+                user_id=str(principal.get("user_id") or ""),
+                username=str(principal.get("username") or ""),
+                current=request.cookies.get(web_sessions.SESSION_COOKIE),
+            )
 
         @router.get("/api/settings/tools")
         def api_get_tools(request: Request) -> list[dict[str, Any]]:

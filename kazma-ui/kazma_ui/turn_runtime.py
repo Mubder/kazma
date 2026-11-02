@@ -243,6 +243,23 @@ def _remember_finished_turn(snap: Any, thread_id: str) -> None:
         )
 
 
+def _learn_from_finished_turn(snap: Any, thread_id: str) -> None:
+    """Hand a finished turn to self-improvement -- the one call site
+    (``self_improvement.learn_from_finished_turn``, FA-212): it reads the
+    terminal state, so a failed turn or one kept out of memory teaches
+    nothing. A lesson problem never stops the reply from being saved."""
+    try:
+        from kazma_core.skills.self_improvement import learn_from_finished_turn
+
+        learn_from_finished_turn(getattr(snap, "values", None) or {}, thread_id=thread_id)
+    except (TypeError, ValueError, KeyError, AttributeError, RuntimeError, ImportError):
+        logger.warning(
+            "[turn] finished turn not handed to self-improvement thread=%s",
+            (thread_id or "")[:12],
+            exc_info=True,
+        )
+
+
 #: Finished turns already logged by this process: close_turn runs after every
 #: settlement of a turn (the stream's end, a disconnect, a late settle).
 _finished_logged: OrderedDict[str, None] = OrderedDict()
@@ -421,6 +438,7 @@ async def close_turn(
 
         if snap is not None and not paused and not interrupted:
             _remember_finished_turn(snap, thread_id)
+            _learn_from_finished_turn(snap, thread_id)
             _note_finished_turn(snap, thread_id)
 
         from kazma_ui.reply_sink import resolve_reply_text, resolve_reply_turn
