@@ -167,7 +167,12 @@ async def finish_ms_browser_oauth(code: str, state: str) -> dict[str, Any]:
         }
     from kazma_skills.native.email_manager.oauth_ms import store_microsoft_tokens
 
-    address = store_microsoft_tokens(payload, cid)
+    from kazma_skills.native.email_manager.credentials import VaultWriteFailed
+
+    try:
+        address = store_microsoft_tokens(payload, cid)
+    except VaultWriteFailed as exc:  # never "connected" over a token not kept (FA-104)
+        return {"ok": False, "purpose": "mail", "code": "vault_unavailable", "error": str(exc)}
     logger.info("[email.oauth] Microsoft Graph browser OAuth tokens stored")
     return {
         "ok": True,

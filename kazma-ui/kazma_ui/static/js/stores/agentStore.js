@@ -929,6 +929,14 @@ function registerAgentStore() {
               try { chatGv.ingestGateViews(data); } catch (e) { /* never break the socket */ }
             }
           }
+          // A stream Kazma closed for its restart: the turn did not end
+          // (FA-262). Its notice, and no content to take for the answer.
+          if (data && data.stopped_for_shutdown && !isReplay) {
+            const chatSd = this._chat();
+            if (chatSd && typeof chatSd.applyShutdownNotice === 'function') {
+              try { chatSd.applyShutdownNotice(data); } catch (e) { /* never break the socket */ }
+            }
+          }
           if (finalText) {
             this._applyTurnEvent({
               type: 'done',

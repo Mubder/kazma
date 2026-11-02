@@ -105,7 +105,9 @@ class DiscordBusAdapter(BusAdapter):
         :meth:`_patch_message`, which neutralize mentions the way the chat
         adapter does (Swarm audit SW-S13: a worker's "@everyone" pinged the
         channel)."""
-        payload = _mention_safe(payload)
+        from kazma_gateway import outbound_flags
+
+        payload = outbound_flags.discord(_mention_safe(payload))
         try:
             http = await self._ensure_http()
             resp = await http.post(f"/channels/{self._channel_id}/messages", json=payload)
@@ -121,7 +123,9 @@ class DiscordBusAdapter(BusAdapter):
         """Edit an existing message (e.g. to show APPROVED/REJECTED). Whether
         Discord took the edit: a card left showing its buttons is a WARNING
         (SW-S15)."""
-        payload = _mention_safe(payload)
+        from kazma_gateway import outbound_flags
+
+        payload = outbound_flags.discord(_mention_safe(payload))
         try:
             http = await self._ensure_http()
             resp = await http.patch(

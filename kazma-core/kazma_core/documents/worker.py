@@ -216,6 +216,15 @@ class DocumentWorker:
         tasks = list(self._tasks)
         if not tasks:
             return
+        # The jobs these loops hold go back now, on the attempt they had, and
+        # their stages are stopped (FA-264, FA-261): a graceful stop is not the
+        # job's failure, and waiting up to the grace for an OCR stage ran a
+        # reload past the guard's 60 s. The stage's result after this is
+        # refused by the store (the lease is gone): the job runs again from
+        # the start of its stage at the next boot.
+        if await self._release_leases():
+            for task in tasks:
+                task.cancel()
         try:
             # ``asyncio.wait``, NOT ``asyncio.wait_for``, in BOTH phases.
             #
@@ -250,6 +259,32 @@ class DocumentWorker:
                     )
         finally:
             self._tasks.clear()
+
+    async def _release_leases(self) -> int:
+        """Give back the jobs this worker's loops hold; how many. Bounded:
+        the store's call runs in a thread, which a stop does not wait past
+        ``_CANCEL_GRACE_SECONDS``."""
+        release = getattr(self._repository, "release_leases", None)
+        if release is None:
+            return 0
+        owners = [f"{self._owner}:{index}" for index in range(self._concurrency)]
+        task = asyncio.ensure_future(asyncio.to_thread(release, owners))
+        done, _ = await asyncio.wait({task}, timeout=_CANCEL_GRACE_SECONDS)
+        if not done:
+            logger.warning("[documents.worker] releasing leases did not finish in %.1fs; the "
+                           "jobs resume when their leases expire", _CANCEL_GRACE_SECONDS)
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+            return 0
+        try:
+            released = int(task.result())
+        except store_errors() as exc:
+            logger.warning("[documents.worker] leases not released (%s); the jobs resume when "
+                           "their leases expire", type(exc).__name__)
+            return 0
+        if released:
+            logger.info("[documents.worker] gave back %d job(s) for the restart, on the same "
+                        "attempt", released)
+        return released
 
     async def _worker_loop(self, index: int) -> None:
         owner = f"{self._owner}:{index}"

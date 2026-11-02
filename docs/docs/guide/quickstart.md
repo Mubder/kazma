@@ -89,6 +89,11 @@ pip install -e ".[rag,dev,tui]"
 # pip install -e ".[all]"
 ```
 
+`uv sync` here is for a **first install** into a fresh environment. On an
+installed Kazma, update with `python -m kazma_cli update` instead: a bare
+`uv sync` removes every package outside the extras it names
+([Kazma update](../ops/kazma-update#the-short-version)).
+
 Optional extras (only install the ones you need; Settings → Packages can add them later):
 
 | Extra | Packages | Enables |

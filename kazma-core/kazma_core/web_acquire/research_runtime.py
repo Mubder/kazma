@@ -23,6 +23,11 @@ async def _frozen(root_resolver):
     except AcquisitionPolicyError as exc:
         raise AcquisitionError(FetchErrorCode.POLICY, str(exc)) from exc
     root = await call(root_resolver)
+    # Storage is part of the same admission (FA-266): a run refused for
+    # retained reports is refused here, before a session row or a plan.
+    from kazma_core.web_acquire.artifact_storage import admit
+
+    await admit(root)
     async with workspace_path_scope(root):
         with policy_scope(policy), crawl_policy(purpose='research') as robots:
             robots.enforce()

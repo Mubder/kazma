@@ -457,36 +457,32 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             logger.exception("Skill toggle failed for %s", req.skill_id)
             return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)
 
-    @router.post("/api/skills/validate")
-    async def api_validate_skill(request: Request) -> dict[str, Any]:
-        """Validate a local skill directory."""
-        body = await request.json()
-        skill_path = body.get("path", "")
-        if not skill_path:
-            return {"error": "No path provided"}
+    @router.post("/api/skills/validate", response_model=None)
+    async def api_validate_skill(request: Request) -> dict[str, Any] | JSONResponse:
+        """Check one skill the way Kazma loads it (FA-249): by name,
+        ``native:<folder>`` or a folder inside Kazma's skill folders.
+
+        It ran the retired hub validator on a path read against the server's
+        working directory: every skill the install had failed or was refused,
+        a missing folder scored 70/100, and the refusals came back 200 with a
+        field the page did not show. A refusal is a 4xx with a code now.
+        """
+        from kazma_core.agent_skills.checkup import SkillNotFound, check_skill
 
         try:
-            from pathlib import Path
-
-            from kazma_core.hub.validator import SkillValidator
-
-            # Restrict to skills directory to prevent path traversal
-            skills_root = Path("skills").resolve()
-            candidate = Path(skill_path).resolve()
-            try:
-                candidate.relative_to(skills_root)
-            except ValueError:
-                return {"error": "Path must be within the skills directory"}
-
-            validator = SkillValidator()
-            result = await validator.validate(candidate)
-            return {
-                "passed": result.passed,
-                "score": result.score,
-                "errors": result.errors,
-                "warnings": result.warnings,
-            }
-        except Exception:
-            return {"error": "Internal error"}
+            body = await request.json()
+        except ValueError:
+            body = None
+        ref = str((body or {}).get("path") or (body or {}).get("name") or "").strip() \
+            if isinstance(body, dict) else ""
+        if not ref:
+            return JSONResponse({"ok": False, "error": "no_skill"}, status_code=400)
+        try:
+            # Discovery walks the skill folders and reads files: off the loop.
+            return {"ok": True, **await asyncio.to_thread(check_skill, ref)}
+        except SkillNotFound:
+            return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+        except ValueError:
+            return JSONResponse({"ok": False, "error": "outside_skill_folders"}, status_code=400)
 
     return router

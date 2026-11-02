@@ -942,11 +942,40 @@
             this.hubTestingProvider = null;
         },
 
+        /** The page's words for a failed discovery's code (FA-107). */
+        discoveryReason(code) {
+            var c = String(code || '');
+            var m = /^http_(\d+)$/.exec(c);
+            if (m) return _k('settings.hub.discover_reason.http', 'the provider answered HTTP {status}', { status: m[1] });
+            var known = { not_found: 'the provider was not found', no_base_url: 'the provider has no base URL',
+                blocked_url: 'Kazma does not send requests to that address',
+                unreachable: 'the provider could not be reached',
+                bad_answer: "the provider's answer was not a list of models" };
+            if (known[c]) return _k('settings.hub.discover_reason.' + c, known[c]);
+            return _k('settings.hub.discover_reason.unreachable', known.unreachable);
+        },
+
         async discoverHubProvider(name) {
             this.hubDiscoveringProvider = name;
             try {
                 const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/discover`, { method: 'POST' });
-                const data = await resp.json();
+                let data = null;
+                try { data = await resp.json(); } catch (_) { data = null; }
+                if (!resp.ok || !data || data.ok === false) {
+                    // A failure is a failure (FA-107): the route answered the
+                    // earlier list and this said "Found 2 models".
+                    var code = (data && data.error) || ('http_' + resp.status);
+                    var msg = _k('settings.hub.discover_failed_reason', 'Discovery failed: {reason}.',
+                        { reason: this.discoveryReason(code) });
+                    if (data && Array.isArray(data.cached) && data.cached.length) {
+                        msg += ' ' + _k('settings.hub.discover_cached_note', 'The list shown is from an earlier discovery.');
+                    }
+                    showToast(msg, 'error');
+                    this.hubDiscoveryStale = Object.assign({}, this.hubDiscoveryStale, { [name]: true });
+                    this.hubDiscoveringProvider = null;
+                    return;
+                }
+                this.hubDiscoveryStale = Object.assign({}, this.hubDiscoveryStale, { [name]: false });
                 const count = data.count || 0;
                 const speech = data.speech_omitted || 0;
                 // Counts in their plural forms, in the page's language

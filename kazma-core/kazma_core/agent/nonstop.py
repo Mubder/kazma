@@ -9,17 +9,18 @@ Settings tree (ConfigStore flat dotted keys / YAML ``agent.nonstop``):
 
     enabled                         master toggle (default False)
     watchdog.stall_threshold_seconds
-    watchdog.tool_timeout_seconds     (also read by graph_builder)
     healing.max_recovery_attempts
     healing.backoff_base_seconds
     healing.backoff_coefficient
     healing.backoff_max_seconds
     failover.enabled
     failover.chain                    list[str] of model ids
-    failover.trigger_threshold        consecutive transient failures before failover
     failover.cooldown_seconds         before the primary model is tried again
-    context.emergency_compact_threshold
     ledger.enabled                    per-LLM-call SQLite ledger
+
+The per-tool time limit is ``agent.tool_timeout_seconds`` (read by
+``graph_helpers``, shown beside these on Settings). A ``watchdog`` copy of it
+and two other fields here were read by nothing (FA-125, 2026-11).
 """
 
 from __future__ import annotations
@@ -36,7 +37,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WatchdogConfig:
     stall_threshold_seconds: float = 180.0
-    tool_timeout_seconds: float = 120.0
 
 
 @dataclass
@@ -51,13 +51,7 @@ class HealingConfig:
 class FailoverConfig:
     enabled: bool = False
     chain: list[str] = field(default_factory=list)
-    trigger_threshold: int = 2
     cooldown_seconds: float = 300.0
-
-
-@dataclass
-class ContextRecoveryConfig:
-    emergency_compact_threshold: float = 0.92
 
 
 @dataclass
@@ -66,7 +60,6 @@ class NonStopConfig:
     watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
     healing: HealingConfig = field(default_factory=HealingConfig)
     failover: FailoverConfig = field(default_factory=FailoverConfig)
-    context: ContextRecoveryConfig = field(default_factory=ContextRecoveryConfig)
     ledger_enabled: bool = True
 
 
@@ -131,10 +124,6 @@ def get_nonstop_config(raw_config: dict[str, Any] | None = None) -> NonStopConfi
             y(["watchdog", "stall_threshold_seconds"], cfg.watchdog.stall_threshold_seconds),
             cfg.watchdog.stall_threshold_seconds,
         )
-        cfg.watchdog.tool_timeout_seconds = _as_float(
-            y(["watchdog", "tool_timeout_seconds"], cfg.watchdog.tool_timeout_seconds),
-            cfg.watchdog.tool_timeout_seconds,
-        )
         cfg.healing.max_recovery_attempts = _as_int(
             y(["healing", "max_recovery_attempts"], cfg.healing.max_recovery_attempts),
             cfg.healing.max_recovery_attempts,
@@ -155,17 +144,9 @@ def get_nonstop_config(raw_config: dict[str, Any] | None = None) -> NonStopConfi
             y(["failover", "enabled"], cfg.failover.enabled), cfg.failover.enabled
         )
         cfg.failover.chain = _as_str_list(y(["failover", "chain"], cfg.failover.chain))
-        cfg.failover.trigger_threshold = _as_int(
-            y(["failover", "trigger_threshold"], cfg.failover.trigger_threshold),
-            cfg.failover.trigger_threshold,
-        )
         cfg.failover.cooldown_seconds = _as_float(
             y(["failover", "cooldown_seconds"], cfg.failover.cooldown_seconds),
             cfg.failover.cooldown_seconds,
-        )
-        cfg.context.emergency_compact_threshold = _as_float(
-            y(["context", "emergency_compact_threshold"], cfg.context.emergency_compact_threshold),
-            cfg.context.emergency_compact_threshold,
         )
         cfg.ledger_enabled = _as_bool(y(["ledger", "enabled"], cfg.ledger_enabled), cfg.ledger_enabled)
 
@@ -183,9 +164,6 @@ def get_nonstop_config(raw_config: dict[str, Any] | None = None) -> NonStopConfi
             cfg.watchdog.stall_threshold_seconds = c(
                 "watchdog.stall_threshold_seconds", cfg.watchdog.stall_threshold_seconds, _as_float
             )
-            cfg.watchdog.tool_timeout_seconds = c(
-                "watchdog.tool_timeout_seconds", cfg.watchdog.tool_timeout_seconds, _as_float
-            )
             cfg.healing.max_recovery_attempts = c(
                 "healing.max_recovery_attempts", cfg.healing.max_recovery_attempts, _as_int
             )
@@ -202,16 +180,8 @@ def get_nonstop_config(raw_config: dict[str, Any] | None = None) -> NonStopConfi
             chain_val = cs.get("agent.nonstop.failover.chain")
             if chain_val is not None:
                 cfg.failover.chain = _as_str_list(chain_val)
-            cfg.failover.trigger_threshold = c(
-                "failover.trigger_threshold", cfg.failover.trigger_threshold, _as_int
-            )
             cfg.failover.cooldown_seconds = c(
                 "failover.cooldown_seconds", cfg.failover.cooldown_seconds, _as_float
-            )
-            cfg.context.emergency_compact_threshold = c(
-                "context.emergency_compact_threshold",
-                cfg.context.emergency_compact_threshold,
-                _as_float,
             )
             cfg.ledger_enabled = c("ledger.enabled", cfg.ledger_enabled, _as_bool)
         except Exception as exc:  # ConfigStore unavailable → YAML/defaults only

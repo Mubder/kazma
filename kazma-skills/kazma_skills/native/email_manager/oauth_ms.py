@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from kazma_skills.native.email_manager.credentials import vault_store
+from kazma_skills.native.email_manager.credentials import VaultWriteFailed, vault_store
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,11 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
             "email": address,
             "message": "Outlook Calendar connected.",
         }
-    address = store_microsoft_tokens(payload, client_id)
+    try:
+        address = store_microsoft_tokens(payload, client_id)
+    except VaultWriteFailed as exc:
+        return {"ok": False, "status": "failed", "purpose": "mail",
+                "code": "vault_unavailable", "error": str(exc)}
     logger.info("[email.oauth] Microsoft Graph tokens stored (vault + env)")
     return {
         "ok": True,
@@ -217,6 +221,8 @@ def store_microsoft_tokens(payload: dict[str, Any], client_id: str) -> str:
         from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
 
         persist_microsoft_tokens(access, refresh, scope_str, address)
+    except VaultWriteFailed:
+        raise  # the sign-in cannot be kept (FA-104)
     except Exception:
         logger.debug("[email.oauth] calendar token copy skipped", exc_info=True)
     return address

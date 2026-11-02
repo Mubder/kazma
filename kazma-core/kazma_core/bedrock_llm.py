@@ -437,12 +437,11 @@ class BedrockProvider(LLMProvider):
                     emitted_any = True
                 yield item
         finally:
-            if not worker.done():
-                worker.cancel()
-            try:
-                await worker
-            except (asyncio.CancelledError, Exception):
-                pass
+            # Bounded (FA-137's gate): an unbounded await on the stream worker
+            # after cancelling it.
+            from kazma_core.bounded_cancel import cancel_and_wait
+
+            await cancel_and_wait(worker, what="the Bedrock stream worker", timeout=5.0)
 
     async def close(self) -> None:
         # boto3 clients hold no asyncio resources.

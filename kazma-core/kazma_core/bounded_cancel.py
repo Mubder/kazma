@@ -33,7 +33,7 @@ from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["cancel_and_wait", "wait_for_bounded", "wait_then_cancel"]
+__all__ = ["cancel_all_and_wait", "cancel_and_wait", "wait_for_bounded", "wait_then_cancel"]
 
 _T = TypeVar("_T")
 
@@ -72,6 +72,41 @@ async def cancel_and_wait(task: asyncio.Future[Any] | None, *, what: str, timeou
                 task.cancel()
     _retrieve(task, what)
     return True
+
+
+async def cancel_all_and_wait(
+    tasks: list[asyncio.Future[Any]], *, what: str, timeout: float = 5.0,
+) -> int:
+    """:func:`cancel_and_wait` for a group, at once: cancel every task, wait
+    at most *timeout* seconds in all for them to end (re-delivering the
+    cancel), retrieve each outcome. Returns how many are still running,
+    logged at WARNING with *what*. ``cancel(); gather(*tasks)`` waited for
+    every one without a bound (FA-137)."""
+    pending = [t for t in tasks if t is not None]
+    for task in pending:
+        if not task.done():
+            task.cancel()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    while True:
+        running = [t for t in pending if not t.done()]
+        remaining = deadline - loop.time()
+        if not running or remaining <= 0:
+            break
+        await asyncio.wait(running, timeout=min(remaining, _REDELIVER_S))
+        for task in running:
+            if not task.done():
+                task.cancel()
+    still = [t for t in pending if not t.done()]
+    for task in pending:
+        if task.done():
+            _retrieve(task, what)
+        else:
+            task.add_done_callback(lambda done: _retrieve(done, what))
+    if still:
+        logger.warning("[cancel] %d %s still running %.0f s after they were cancelled; left running",
+                       len(still), what, timeout)
+    return len(still)
 
 
 async def wait_then_cancel(

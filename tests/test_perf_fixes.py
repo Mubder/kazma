@@ -436,15 +436,26 @@ class TestErrorHandlersNoLeak:
             "app.py error handlers must not pass str(exc) as detail"
         )
 
-    def test_error_handlers_log_full_exception(self) -> None:
-        """Verify the source code of app.py uses logger.exception for errors."""
+    def test_error_handlers_log_full_exception(self, caplog) -> None:
+        """The catch-all logs the full traceback: it hands the exception to
+        ``safe_error`` (which logs it with ``exc_info`` under the id the
+        client is given, FA-222) and never passes ``log=False``."""
+        import logging
+
+        from kazma_core.errors import safe_error
+
         app_py = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "app.py"
         content = app_py.read_text(encoding="utf-8")
+        catch_all = content.split("async def catch_all(", 1)[1].split("def create_app(", 1)[0]
+        assert "safe_error(exc)" in catch_all and "log=False" not in catch_all
 
-        # The 500 and catch_all handlers should use logger.exception
-        assert "logger.exception" in content, (
-            "app.py error handlers must use logger.exception for full traceback"
-        )
+        try:
+            raise RuntimeError("boom")
+        except RuntimeError as exc:
+            with caplog.at_level(logging.ERROR, logger="kazma_core.errors"):
+                info = safe_error(exc)
+        logged = [r for r in caplog.records if r.name == "kazma_core.errors" and info.ref in r.getMessage()]
+        assert logged and logged[0].exc_info is not None, "the traceback must be logged"
 
 
 # ═══════════════════════════════════════════════════════════════════

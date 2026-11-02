@@ -139,10 +139,25 @@ def test_streamer_persists_before_announcing_completion():
     assert "await asyncio.to_thread(" in src[max(0, persist_at - 60):persist_at], (
         "the reply's write must be awaited, or done can overtake it"
     )
-    done_at = src.index('emit_j("done"')
-    assert persist_at < done_at, (
+    # A stream Kazma closes because it is restarting ends with a ``done``
+    # flagged ``stopped_for_shutdown`` (FA-262): it tells the client the turn
+    # did NOT end, and saves nothing. Every other ``done`` announces the end.
+    shutdown = src.index("if _stopped_for_shutdown:")
+    shutdown_end = src.index("return", src.index('emit_j("done"', shutdown))
+    assert '"stopped_for_shutdown": True' in src[shutdown:shutdown_end]
+    done_at = [i for i in _occurrences(src, 'emit_j("done"') if not shutdown < i < shutdown_end]
+    assert done_at, "the streamer must announce the end of the turn"
+    assert all(persist_at < at for at in done_at), (
         "the reply must be stored before the client is told the turn is over"
     )
+
+
+def _occurrences(text: str, needle: str) -> list[int]:
+    found, at = [], text.find(needle)
+    while at != -1:
+        found.append(at)
+        at = text.find(needle, at + 1)
+    return found
 
 
 # ── 3. The sink's own invariants ──────────────────────────────────────

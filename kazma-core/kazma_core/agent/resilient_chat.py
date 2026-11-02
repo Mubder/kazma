@@ -22,14 +22,35 @@ import logging
 import time
 from typing import Any
 
-__all__ = ["resilient_chat"]
+__all__ = ["reset_failover_cache", "resilient_chat"]
 
 logger = logging.getLogger(__name__)
 
 # Failover client cache + cooldowns for non-graph paths (the graph keeps its
-# own in graph_builder; keyed identically by model id).
+# own in graph_supervisor; keyed identically by model id). Good for one
+# registry generation (FA-106): a provider's new key or base URL reaches the
+# next failover, not the next restart.
 _clients: dict[str, Any] = {}
 _cooldowns: dict[str, float] = {}
+_built_for: int | None = None
+
+
+def reset_failover_cache() -> None:
+    """Forget the cached failover clients and cooldowns (a model or provider
+    changed). ``KazmaAgent.sync_active_model`` calls it beside the graph's."""
+    global _built_for
+    _clients.clear()
+    _cooldowns.clear()
+    _built_for = None
+
+
+def _follow(registry: Any) -> None:
+    """Drop the cache when the registry changed since it was built."""
+    global _built_for
+    generation = getattr(registry, "generation", None)
+    if isinstance(generation, int) and generation != _built_for:
+        reset_failover_cache()
+        _built_for = generation
 
 
 def _retryable() -> tuple[type[Exception], ...]:
@@ -244,6 +265,8 @@ async def resilient_chat(
             registry = get_model_registry() if frozen_failover is None else None
         except Exception:
             registry = None
+        if registry is not None:
+            _follow(registry)
         if registry is not None or frozen_failover is not None:
             now = time.monotonic()
             for fb_model in chain:

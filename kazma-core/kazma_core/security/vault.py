@@ -110,6 +110,9 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # MCP servers' keys, tokens and passwords (kazma_core/mcp/secrets.py):
     # the manager connects every server at boot, with no tenant bound.
     ("cfg:mcp.servers.", "newest"),
+    # Offsite backup credentials (S3 access key; the NAS passwords are stored
+    # global by the route already): the backup sync reads them with no tenant.
+    ("cfg:backups.offsite.", "newest"),
 )
 
 
@@ -856,34 +859,60 @@ def retrieve_with_tenant_ladder(name: str) -> str:
 
 _vault: SecretVault | None = None
 _vault_init_attempted = False
+#: Held while the vault is built (PBKDF2, 600,000 rounds): a second caller
+#: waits for the one being built instead of reading "no vault" (FA-103).
+_vault_lock = threading.Lock()
+#: When a build that failed for another reason than a missing key may be
+#: tried again, and how long the next wait is.
+_vault_retry_at = 0.0
+_vault_retry_wait = 0.0
+_VAULT_RETRY_FIRST_S = 5.0
+_VAULT_RETRY_MAX_S = 300.0
 
 
 def get_vault() -> SecretVault | None:
     """Return the shared SecretVault singleton.
 
-    Returns None if KAZMA_VAULT_KEY is not set (vault disabled).
-    Once attempted, does not retry — avoids repeated PBKDF2 on every call.
+    Returns None if KAZMA_VAULT_KEY is not set or invalid (vault disabled):
+    that is decided once. Built under a lock (double-checked): a caller that
+    arrived while the first was still deriving the key got None, and ConfigStore
+    then kept the secret it was saving in plaintext (FA-103). A build that
+    fails for another reason (a locked or unreadable vault.db) is tried again
+    after a wait that doubles from 5 s to 5 minutes -- one transient failure
+    left the process without a vault until a restart.
     """
-    global _vault, _vault_init_attempted
+    global _vault, _vault_init_attempted, _vault_retry_at, _vault_retry_wait
     if _vault_init_attempted:
         return _vault
-    _vault_init_attempted = True
-    try:
-        _vault = SecretVault()
-    except ValueError:
-        logger.debug("[Vault] KAZMA_VAULT_KEY not set — vault disabled")
-    except Exception as exc:
-        logger.warning("[Vault] Init failed: %s", exc)
-    return _vault
+    with _vault_lock:
+        if _vault_init_attempted:
+            return _vault
+        if time.monotonic() < _vault_retry_at:
+            return None
+        try:
+            _vault = SecretVault()
+        except ValueError:
+            logger.debug("[Vault] KAZMA_VAULT_KEY not set — vault disabled")
+        except Exception as exc:
+            _vault_retry_wait = min(max(_VAULT_RETRY_FIRST_S, _vault_retry_wait * 2), _VAULT_RETRY_MAX_S)
+            _vault_retry_at = time.monotonic() + _vault_retry_wait
+            logger.warning("[Vault] Init failed (%s): %s -- trying again in %.0f s",
+                           type(exc).__name__, exc, _vault_retry_wait)
+            return None
+        _vault_init_attempted = True
+        _vault_retry_at = _vault_retry_wait = 0.0
+        return _vault
 
 
 def reset_vault() -> None:
     """Reset the singleton (for tests). Closes the existing connection first."""
-    global _vault, _vault_init_attempted
-    if _vault is not None:
-        _vault.close()
-    _vault = None
-    _vault_init_attempted = False
+    global _vault, _vault_init_attempted, _vault_retry_at, _vault_retry_wait
+    with _vault_lock:
+        if _vault is not None:
+            _vault.close()
+        _vault = None
+        _vault_init_attempted = False
+        _vault_retry_at = _vault_retry_wait = 0.0
 
 
 def consolidate_install_scoped_secrets() -> list[str]:

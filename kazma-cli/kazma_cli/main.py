@@ -291,6 +291,7 @@ def _run_serve(port: int) -> None:
     # "cannot use the ProactorEventLoop" on every async connection). On
     # non-Windows, uvicorn_loop_factory() returns None (uvicorn default).
     from kazma_core.eventloop import uvicorn_loop_factory
+    from kazma_core.shutdown import uvicorn_graceful_s
 
     try:
         # Turn Delivery V2 (KD-7): pin server-side WS protocol pings — see
@@ -302,7 +303,7 @@ def _run_serve(port: int) -> None:
         # hides the TCP peer from the undeclared-proxy check.
         uvicorn.run(app, host=host, port=port, log_level="info",
                     ws_ping_interval=20.0, ws_ping_timeout=20.0,
-                    timeout_graceful_shutdown=15, loop=uvicorn_loop_factory(),
+                    timeout_graceful_shutdown=uvicorn_graceful_s(), loop=uvicorn_loop_factory(),
                     proxy_headers=False)
     except OSError as exc:
         # Windows: port often "busy" via WSL/Docker portproxy (svchost), not another Kazma.

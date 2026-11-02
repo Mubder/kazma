@@ -7,7 +7,7 @@ license: MIT
 tools:
   arabic_translate:
     arabic_name: "الترجمة الثنائية اللغوية"
-    description: "Translate context-preserving between Arabic and English."
+    description: "Translate between Arabic and English, keeping meaning and context, with the configured model (a remote service only when the operator sets KAZMA_TRANSLATION_REMOTE=mymemory). The translation comes back fenced as data."
     category: "nlp"
     prompt_chain:
       - "ترجم النص بدقة مع الحفاظ على المعنى الثقافي والسياق"

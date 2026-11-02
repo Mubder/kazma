@@ -131,15 +131,12 @@ async def handle_voice_websocket(
         tts_cancel.set()
         processing = False
         tasks = [utterance_task, resume_slot.get("task")]
-        for task in tasks:
-            if task is not None and not task.done():
-                task.cancel()
-        for task in tasks:
-            if task is not None:
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+        # Bounded, and a cancel of THIS coroutine propagates (FA-137): the
+        # wait had no bound, and its except swallowed the caller's own cancel.
+        from kazma_core.bounded_cancel import cancel_all_and_wait
+
+        await cancel_all_and_wait([t for t in tasks if t is not None],
+                                  what="voice utterance task(s)", timeout=5.0)
         utterance_task = None
         resume_slot["task"] = None
 

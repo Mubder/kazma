@@ -177,10 +177,25 @@ function skillsApp() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ path: this.validatePath })
                 });
-                this.validateResult = await resp.json();
+                var data = null;
+                try { data = await resp.json(); } catch (_) { data = null; }
+                if (!resp.ok || !data || data.ok === false) {
+                    // A refusal says which (FA-249): it came back 200 with a
+                    // field this tab did not show, and the tab stayed empty.
+                    var code = (data && data.error) || 'failed';
+                    this.validateResult = { passed: false, refused: true,
+                        errors: [_k('skills.validate_refused.' + code, _k('skills.validate_refused.failed', 'The check could not run.'))] };
+                    return;
+                }
+                this.validateResult = data;
             } catch (e) {
-                this.validateResult = { passed: false, errors: [e.message] };
+                this.validateResult = { passed: false, refused: true,
+                    errors: [_k('skills.validate_refused.failed', 'The check could not run.')] };
             }
+        },
+
+        validateStateLabel(state) {
+            return _k('skills.validate_state.' + String(state || 'unusable'), String(state || ''));
         }
     };
 }

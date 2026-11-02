@@ -494,7 +494,9 @@ class SettingsRouterBuilder:
                     "password_set": _vault_has("backups.offsite.ftp.password"),
                 },
                 "s3": {
-                    "access_key": str(store.get("backups.offsite.s3.access_key") or ""),
+                    # Masked like every credential (FA-206): the access key id
+                    # was answered in the clear.
+                    "access_key": "***" if store.get("backups.offsite.s3.access_key") else "",
                     "bucket": str(store.get("backups.offsite.s3.bucket") or ""),
                     "endpoint": str(store.get("backups.offsite.s3.endpoint") or ""),
                     "region": str(store.get("backups.offsite.s3.region") or "us-east-1"),
@@ -575,7 +577,9 @@ class SettingsRouterBuilder:
 
             # S3 credentials (secret to vault)
             s3_key = str(req.get("s3_access_key") or "").strip()
-            if s3_key:
+            from kazma_core.config_store import is_masked_secret_placeholder
+
+            if s3_key and not is_masked_secret_placeholder(s3_key):  # the mask shown: keep it
                 store.set("backups.offsite.s3.access_key", s3_key, category="backups")
             s3_bucket = str(req.get("s3_bucket") or "").strip()
             if s3_bucket:

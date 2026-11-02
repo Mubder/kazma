@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**280** variables are read by the product code; **280** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**281** variables are read by the product code; **281** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -90,7 +90,6 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_EMBED_FLEET` | `""` | `kazma_core.memory.embedder` | yes |
 | `KAZMA_EMBED_MODEL` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
 | `KAZMA_EMBED_PROVIDER` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
-| `KAZMA_ENV` | (none) | `kazma_ui.app` | yes |
 | `KAZMA_ENV_FILE` | (none) | `kazma_core.env_files`, `kazma_core.store_registry` | yes |
 | `KAZMA_EXPORTS_DIR` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_FETCH_BACKEND` | (none) | `kazma_core.tools.read_url` | yes |
@@ -246,6 +245,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_SHELL_ALLOW_ARCHIVE` | (none) | `kazma_core.safety.post_hitl` | yes |
 | `KAZMA_SHELL_ALLOW_MUTATE` | (none) | `kazma_core.safety.post_hitl` | yes |
 | `KAZMA_SHELL_STRICT` | (none) | `kazma_core.safety.post_hitl` | yes |
+| `KAZMA_SHUTDOWN_BUDGET_S` | (none) | `kazma_core.shutdown` | yes |
 | `KAZMA_SILENCE_WINDOW` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_SILERO_VAD` | `""` | `kazma_core.voice.mode` | yes |
 | `KAZMA_SKILLS_HOME` | (none) | `kazma_core.agent_skills.discovery` | yes |
@@ -267,6 +267,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS` | `"200000"` | `kazma_core.agent.graph_helpers` | yes |
 | `KAZMA_TOOL_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.graph_helpers` | yes |
 | `KAZMA_TRANSCRIPT_RECALL` | (none) | `kazma_core.memory.transcript_recall` | yes |
+| `KAZMA_TRANSLATION_REMOTE` | `""` | `kazma_skills.native.arabic_bilingual_nlp.tools` | yes |
 | `KAZMA_TRUSTED_PROXIES` | `""` | `kazma_core.security.boot_guard`, `kazma_ui.auth` | yes |
 | `KAZMA_TRUST_LAN` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_TURN_DURABLE_CHARS` | `"600"` | `kazma_ui.sse_chat._streaming` | yes |

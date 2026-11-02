@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import threading
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -123,6 +124,34 @@ def reset_model_registry() -> None:
     _registry = None
 
 
+# ── Model discovery's answer ─────────────────────────────────────────
+
+
+@dataclass
+class DiscoveryResult:
+    """What asking a provider for its models found (FA-107).
+
+    ``ok`` False: the provider could not be asked or did not answer with a
+    list; ``error`` is a stable code (``not_found``, ``no_base_url``,
+    ``blocked_url``, ``unreachable``, ``http_<status>``, ``bad_answer``) the
+    page words in its language, ``detail`` an English sentence, and
+    ``cached`` the list an earlier discovery found -- never presented as
+    found now. ``source`` is ``provider``, or ``built_in`` where the provider
+    has no models endpoint (Vertex AI).
+    """
+
+    ok: bool
+    models: list[str] = field(default_factory=list)
+    error: str = ""
+    detail: str = ""
+    cached: list[str] = field(default_factory=list)
+    source: str = "provider"
+
+    @classmethod
+    def failed(cls, error: str, detail: str, *, cached: list[str] | None = None) -> DiscoveryResult:
+        return cls(False, [], error, detail, list(cached or []))
+
+
 # ── ModelRegistry ────────────────────────────────────────────────────
 
 
@@ -153,6 +182,20 @@ class ModelRegistry:
         # interleave the provider auto-correction path. RLock because some
         # methods (e.g. set_active_* -> get_active_profile) re-enter.
         self._lock = threading.RLock()
+        # Bumped by every change to the providers or the active profile. A
+        # cache of clients built here (the failover caches) is good only for
+        # the generation it was built at (FA-106: resilient_chat kept a
+        # provider's old key and base URL until a restart).
+        self._generation = 0
+
+    @property
+    def generation(self) -> int:
+        """Counts the changes to the providers and the active profile."""
+        return self._generation
+
+    def _config_changed(self) -> None:
+        with self._lock:
+            self._generation += 1
 
     def _track(self, client: LLMProvider, provider: str = "") -> LLMProvider:
         """Register a built client for shutdown cleanup, returning it unchanged."""
@@ -398,6 +441,7 @@ class ModelRegistry:
 
             # Invalidate cached client
             self._clients.pop(clean_provider, None)
+            self._config_changed()
 
             return self.get_active_profile()
 
@@ -440,6 +484,7 @@ class ModelRegistry:
 
             # Invalidate ALL cached clients so they rebuild with correct URL+model
             self._clients.clear()
+            self._config_changed()
 
     # ── LLM client management ──────────────────────────────────────
 
@@ -729,19 +774,33 @@ class ModelRegistry:
     # ── Model discovery ────────────────────────────────────────────
 
     async def discover_models(self, provider_name: str) -> list[str]:
-        """Hit the provider's ``/models`` endpoint and return model IDs.
+        """The provider's models from its ``/models`` endpoint, or ``[]`` when
+        it could not be asked (:meth:`discover` says why)."""
+        return (await self.discover(provider_name)).models
+
+    async def discover(self, provider_name: str) -> DiscoveryResult:
+        """Hit the provider's ``/models`` endpoint: its model IDs, or why not.
+
+        A failure is a failure (FA-107): it returned the list cached from an
+        earlier discovery, and Settings said "Found 2 models" over a provider
+        that could not be reached. The earlier list is still there, as
+        ``cached``, for the page to show labelled as such.
 
         Results are cached in ``self._discovered_models``.
         """
         clean_name = (provider_name or "").strip()
         if not clean_name:
-            return []
+            return DiscoveryResult.failed("not_found", "No provider was named.")
+        cached = list(self._discovered_models.get(clean_name, []))
+
+        def failed(code: str, detail: str) -> DiscoveryResult:
+            return DiscoveryResult.failed(code, detail, cached=cached)
 
         # The provider list is settings and vault reads (audit 2026-10-26 AUD-111).
         provider_entry = await asyncio.to_thread(self.get_provider, clean_name)
         if not provider_entry:
             logger.warning("discover_models: provider %r not found", clean_name)
-            return []
+            return failed("not_found", f"There is no provider named {clean_name!r}.")
 
         base_url = str(provider_entry.get("base_url", ""))
         api_key = str(provider_entry.get("api_key", ""))
@@ -774,15 +833,24 @@ class ModelRegistry:
                                     await asyncio.to_thread(
                                         self._prune_stale_selected_models, clean_name, self._discovered_models[clean_name]
                                     )
-                                    return self._discovered_models[clean_name]
+                                    return DiscoveryResult(True, list(self._discovered_models[clean_name]))
+                            problem = f"Google answered HTTP {resp.status_code}."
                     except Exception as exc:
                         logger.warning("discover_models: Google AI Studio dynamic discovery failed: %s", exc)
+                        problem = f"Google could not be reached ({type(exc).__name__})."
+                    # A key that was refused, or no answer: never the built-in
+                    # list in its place, named as found (FA-107).
+                    from kazma_core.providers import GEMINI_MODELS
 
+                    return DiscoveryResult.failed(
+                        "unreachable", problem, cached=cached or list(GEMINI_MODELS))
+
+                # Vertex AI has no /models endpoint: the built-in list is the answer.
                 from kazma_core.providers import GEMINI_MODELS
                 self._discovered_models[clean_name] = list(GEMINI_MODELS)
-                return self._discovered_models[clean_name]
+                return DiscoveryResult(True, list(GEMINI_MODELS), source="built_in")
             logger.warning("discover_models: no base_url for %r", clean_name)
-            return []
+            return failed("no_base_url", "The provider has no base URL.")
 
         # Resolve the models endpoint
         preset = PROVIDER_PRESETS.get(clean_name, {})
@@ -813,11 +881,11 @@ class ModelRegistry:
             await asyncio.to_thread(validate_url, url, block_unresolved=True, allow_private=_loopback)
         except SSRFError as exc:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
-            return []
+            return failed("blocked_url", "Kazma does not send requests to that address.")
         except Exception as _e:
             logger.debug("discover_models SSRF guard issue: %s", _e)
             logger.warning("discover_models: SSRF validation unavailable — blocking request for safety")
-            return []
+            return failed("blocked_url", "The address could not be checked, so it was not asked.")
 
         # Build auth headers per the provider's auth style. Non-Bearer
         # vendors (Anthropic ``x-api-key``, Azure ``api-key``) use their own
@@ -837,8 +905,15 @@ class ModelRegistry:
         try:
             async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
                 resp = await client.get(url, headers=headers)
-                resp.raise_for_status()
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    logger.error("discover_models failed for %r: HTTP %s", clean_name, status)
+                    return failed(f"http_{status}", f"The provider answered HTTP {status}.")
                 data = resp.json()
+            if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+                return failed("bad_answer", "The provider's answer was not a list of models.")
 
             model_ids: list[str] = []
             for item in data.get("data", []):
@@ -852,11 +927,14 @@ class ModelRegistry:
             model_ids = sorted(set(model_ids))
             self._discovered_models[clean_name] = model_ids
             await asyncio.to_thread(self._prune_stale_selected_models, clean_name, model_ids)  # audit 2026-10-26 AUD-111
-            return model_ids
+            return DiscoveryResult(True, list(model_ids))
 
-        except Exception as exc:
+        except ValueError as exc:  # a body that is not JSON
+            logger.error("discover_models failed for %r: %s", clean_name, type(exc).__name__)
+            return failed("bad_answer", "The provider's answer was not JSON.")
+        except Exception as exc:  # no answer: network, TLS, a client that failed
             logger.error("discover_models failed for %r: %s", clean_name, exc)
-            return self._discovered_models.get(clean_name, [])
+            return failed("unreachable", f"The provider could not be reached ({type(exc).__name__}).")
 
     def _prune_stale_selected_models(self, provider_name: str, discovered_ids: list[str]) -> None:
         """Prune any models in selected_models that are no longer discovered or manual."""
@@ -1506,6 +1584,7 @@ class ModelRegistry:
         from kazma_core.model_registry_store import save_providers
 
         save_providers(self._config_store, providers)
+        self._config_changed()
 
     def _default_provider_entries(self) -> list[dict[str, Any]]:
         from kazma_core.model_registry_store import default_provider_entries

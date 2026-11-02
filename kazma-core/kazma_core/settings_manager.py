@@ -109,6 +109,14 @@ from kazma_core.settings_mcp import MCPSettingsService  # re-export
 __all__ = ["DEFAULT_APPEARANCE", "DEFAULT_MODEL_DEFAULTS", "DEFAULT_SHORTCUTS", "SettingsManager"]
 
 
+def _effective_tool_timeout() -> float:
+    """The per-tool bound the tool worker applies (``agent.tool_timeout_seconds``,
+    else ``KAZMA_TOOL_TIMEOUT_SECONDS``, else 120)."""
+    from kazma_core.agent.graph_helpers import _configured_tool_timeout
+
+    return _configured_tool_timeout()
+
+
 class SettingsManager:
     """Comprehensive settings manager wrapping ConfigStore."""
 
@@ -499,8 +507,9 @@ class SettingsManager:
     def save_logging_settings(self, data: dict[str, Any]) -> None:
         """Update logging settings.
 
-        Persists to ConfigStore. The level can hot-apply; rotation/retention
-        changes require a server restart (handlers are set at boot).
+        Persists to ConfigStore. The level applies now (``logging_config.
+        apply_level``); rotation/retention changes require a server restart
+        (handlers are set at boot).
         """
         allowed_levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
         for key, value in data.items():
@@ -522,17 +531,15 @@ class SettingsManager:
                 value = "json" if value.strip().lower() == "json" else "text"
             self._cs.set(f"logging.{key}", value, category="logging")
 
-        # Hot-apply the level if possible (mutate existing loggers/handlers —
-        # safe, unlike handler reconfiguration). Rotation changes are deferred
-        # to next boot.
-        try:
-            level_name = data.get("level")
-            if isinstance(level_name, str) and level_name.strip().upper() in allowed_levels:
-                import logging as _logging
+        # The level applies now, everywhere boot set it: Kazma's loggers, the
+        # root and its file and console handlers (FA-114: the root alone was
+        # set, so DEBUG reached the log only after a restart). Rotation
+        # changes are deferred to the next boot.
+        level_name = data.get("level")
+        if isinstance(level_name, str) and level_name.strip().upper() in allowed_levels:
+            from kazma_core.logging_config import apply_level
 
-                _logging.getLogger().setLevel(level_name.strip().upper())
-        except Exception:
-            pass
+            apply_level(level_name)
 
     # ══════════════════════════════════════════════════════════════════
     # PROXY PROVIDER (opt-in scraping resilience addon)
@@ -541,14 +548,23 @@ class SettingsManager:
     def get_proxy_settings(self) -> dict[str, Any]:
         """Get proxy provider config (opt-in scraping proxy).
 
-        ``password`` is vault-encrypted at rest; ``get()`` decrypts it here.
+        ``password`` is vault-encrypted at rest and answered masked: ``****``
+        when one is stored, ``""`` when not -- the route returned it decrypted
+        (2026-11, FA-129). A ``****`` posted back keeps the stored one.
         """
+        from kazma_core.security.config_mask import MASK
+
+        from kazma_core.web_acquire.policy import proxy_policy_state
+
+        stored = self._cs.get("proxy.password", "")
         return {
+            # Whether the acquisition policy lets Kazma use it at all (FA-115).
+            "policy": proxy_policy_state(),
             "provider": self._cs.get("proxy.provider", "none"),
             "host": self._cs.get("proxy.host", "portal.anyip.io"),
             "port": self._cs.get("proxy.port", "1080"),
             "username": self._cs.get("proxy.username", ""),
-            "password": self._cs.get("proxy.password", ""),
+            "password": MASK if stored else "",
             "network": self._cs.get("proxy.network", "mixed"),
             "country": self._cs.get("proxy.country", ""),
             "session_sticky": self._cs.get("proxy.session_sticky", False),
@@ -561,12 +577,16 @@ class SettingsManager:
         rule). Provider changes take effect live (no restart) because the
         registry re-reads ``proxy.provider`` on each call.
         """
+        from kazma_core.config_store import is_masked_secret_placeholder
+
         allowed_networks = ("residential", "mobile", "mixed")
         # Collect validated items and write them atomically (AGENTS.md §8).
         items: list[tuple[str, Any, str]] = []
         for key, value in data.items():
             if key not in _PROXY_FIELDS:
                 continue
+            if key == "password" and is_masked_secret_placeholder(value):
+                continue  # the mask the page was shown: keep the stored password
             if key == "provider" and isinstance(value, str):
                 value = value.strip().lower()
                 if value not in ("none", "anyip"):
@@ -597,8 +617,22 @@ class SettingsManager:
         from kazma_core.web_acquire.policy import acquisition_policy
         from kazma_core.web_acquire.result import AcquisitionError
 
-        if not acquisition_policy().permits('proxy'):
-            return {'success': False, 'error': 'Proxy testing is disabled by acquisition policy.'}
+        from kazma_core.web_acquire.policy import (
+            PROXY_POLICY_STEP,
+            AcquisitionPolicyError,
+            proxy_policy_state,
+        )
+
+        try:
+            allowed = acquisition_policy().permits('proxy')
+        except AcquisitionPolicyError as exc:
+            return {'success': False, 'error': 'policy_invalid', 'message': str(exc),
+                    'policy': proxy_policy_state()}
+        if not allowed:
+            # The one step that changes it (FA-115): "disabled by acquisition
+            # policy" said nothing about which variables decide.
+            return {'success': False, 'error': 'proxy_not_allowed', 'message': PROXY_POLICY_STEP,
+                    'policy': proxy_policy_state()}
         try:
             proxy_url = await asyncio.to_thread(get_active_proxy_url)
         except AcquisitionError as exc:
@@ -711,6 +745,7 @@ class SettingsManager:
         }
 
     # ── Non-Stop & Self-Healing (agent.nonstop.*) ─────────────────────
+    # (and the per-tool bound, agent.tool_timeout_seconds, shown with them)
 
     def get_nonstop_settings(self) -> dict[str, Any]:
         """Get the non-stop / self-healing settings (agent.nonstop.* keys).
@@ -726,9 +761,9 @@ class SettingsManager:
             "stall_threshold_seconds": self._cs.get(
                 "agent.nonstop.watchdog.stall_threshold_seconds", d.watchdog.stall_threshold_seconds
             ),
-            "tool_timeout_seconds": self._cs.get(
-                "agent.nonstop.watchdog.tool_timeout_seconds", d.watchdog.tool_timeout_seconds
-            ),
+            # The bound every tool call gets (graph_helpers), Non-Stop on or
+            # off; it was saved to a Non-Stop key nothing read (FA-125).
+            "tool_timeout_seconds": _effective_tool_timeout(),
             "max_recovery_attempts": self._cs.get(
                 "agent.nonstop.healing.max_recovery_attempts", d.healing.max_recovery_attempts
             ),
@@ -766,7 +801,7 @@ class SettingsManager:
             v = float(data["tool_timeout_seconds"])
             if v != 0 and (v < 5 or v > 3600):
                 raise ValueError("Tool timeout must be 0 (disabled) or between 5 and 3600 seconds.")
-            items.append(("agent.nonstop.watchdog.tool_timeout_seconds", v, "agent"))
+            items.append(("agent.tool_timeout_seconds", v, "agent"))
         if "max_recovery_attempts" in data:
             v = int(data["max_recovery_attempts"])
             if v < 0 or v > 10:

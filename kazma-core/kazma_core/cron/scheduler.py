@@ -434,13 +434,16 @@ class CronScheduler:
         if self._task:
             async with self._no_alert_pass():
                 self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+            # Bounded (FA-137): a cancel the poll loop absorbed waited out a
+            # whole poll interval, inside the guard's 60 s graceful stop.
+            from kazma_core.bounded_cancel import cancel_and_wait
+
+            await cancel_and_wait(self._task, what="the cron poll loop", timeout=5.0)
         pending = [t for t in self._exec_tasks if not t.done()]
         if pending:
-            _done, still = await asyncio.wait(pending, timeout=self._drain_seconds)
+            from kazma_core.shutdown import step_bound
+
+            _done, still = await asyncio.wait(pending, timeout=step_bound(self._drain_seconds))
             if still:
                 logger.warning(
                     "[CronScheduler] %d fire(s) still running after %.0fs; stopping them -- "

@@ -190,6 +190,10 @@ Class gate: **every advisory OSV knows for an installed package has a floor at o
 
 Grouped by class. One gate per class where a class exists. Each finding's own repro is in the evidence files.
 
+### Stage 2 status (2026-11-02)
+
+Every Stage 2 item below is implemented with its gate and negative control (AGENTS.md §55 names each one). FA-267 landed with Stage 1 (`tests/test_restore_layout.py`). FA-277's Stage 2 half is the benchmark (`tests/e2e/test_first_token_latency.py`: Kazma's own share of the first token, measured p50 0.05 s); the model and reasoning choice stays the owner's (Stage 0). FA-233 takes the plan's second option: readiness says each scan pays the signature load when no clamd answers, and Kazma uses `clamdscan` only when one does; running clamd (about 1 GB of memory) is the owner's choice. FA-124's remote translation is an environment opt-in (`KAZMA_TRANSLATION_REMOTE=mymemory`), off by default.
+
 ### Secrets and error text (§26D, §26F)
 
 | ID | Fix | Gate (negative control) | Effort |
@@ -348,7 +352,7 @@ Compact, each with its fix, its gate and the effort. Each gate's negative contro
 
 ## Weak-spot roadmap
 
-The 128 findings cluster into ten themes. Each theme below is the standard Kazma should hold, and the work to get there beyond the single findings above.
+The 128 findings cluster into ten themes; the two after them came from the owner's questions on 2026-11-02 (why no dependency notice ever arrived). Each theme below is the standard Kazma should hold, and the work to get there beyond the single findings above.
 
 | # | Theme | Standard | Findings it would have caught | Work | Effort |
 |---|---|---|---|---|---|
@@ -362,3 +366,5 @@ The 128 findings cluster into ten themes. Each theme below is the standard Kazma
 | 8 | Log and file I/O off the loop | No log write, file read or sleep blocks the event loop. | FA-135, 139, 136, 137 | The `QueueHandler` logging; the async-tool I/O gate; bounded socket sends in the broker. | M |
 | 9 | Append-only stores are bounded | Every store has a declared retention or a reason, and the sweep enforces it. | FA-141, 142, 145, 146, 203, 204 | `store_registry` requires a retention for every store; one sweep entry each. | M |
 | 10 | CI is the first line again | Every push runs the full gate set on Linux and the Postgres job. GitHub Actions has been locked by billing since 2026-10-14. | Every finding a Linux or Postgres run would have shown first | The owner restores Actions billing; then a one-off run of every job on `main`, with the red ones fixed before Stage 1 lands. | XS (owner) |
+| 11 | A dependency advisory reaches the owner the day it is published | An advisory against an installed package is told within a day, with the fixed version and the command, whether or not a commit has raised the floor yet. The boot check (`install.requirements_unmet`) speaks only at a start and only once a commit raises a floor: the owner, using Kazma daily, never saw a notice (2026-11-02). | FA-258 | A daily maintenance sweep asks OSV about the installed versions (the report's own `audit_installed`, off the loop, bounded, quiet when OSV cannot answer) and raises one ops alert per new advisory naming the package, the fixed version and `python -m kazma_cli update --reinstall -y`; reviewed advisories (`REVIEWED_ADVISORIES`) stay quiet. Gate: a recorded OSV answer with a new advisory alerts once, a repeat does not, OSV down raises nothing. | M |
+| 12 | An unmet requirement stays in front of the owner until it is fixed | The daily digest names every unmet requirement ("Needs attention") until an update clears it; an alert's cooldown never hides it for good. | FA-258 | The digest reads the boot check's last result (stored, not only alerted) and lists each package with the command; cleared by the next boot that finds none. Gate: an unmet requirement appears in every digest until cleared; the old digest as control. | S |

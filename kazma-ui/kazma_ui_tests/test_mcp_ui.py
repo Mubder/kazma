@@ -98,8 +98,9 @@ async def test_test_config_uses_streamable_http_manager(mcp_router) -> None:
     captured = []
 
     class FakeManager:
-        async def connect_from_config(self, configs, *, raise_on_error=False):
+        async def connect_from_config(self, configs, *, raise_on_error=False, quiet=False):
             captured.extend(configs)
+            assert quiet is True  # a Test pages nobody (FA-256)
             return 3
 
         def get_all_tool_schemas(self):

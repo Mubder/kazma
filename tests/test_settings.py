@@ -999,10 +999,12 @@ class TestUnifiedProvidersRouterAPI:
             "base_url": "http://localhost:99999/v1",
         })
         resp = client.post("/api/providers/discover-unified/discover")
-        assert resp.status_code == 200
+        # Nothing can answer there: a failure, said as one (FA-107), never
+        # an earlier list counted as found.
+        assert resp.status_code == 502
         data = resp.json()
-        assert "models" in data
-        assert "count" in data
+        assert data["ok"] is False and data["error"] and data["count"] == 0
+        assert data["cached"] == []
 
     def test_model_profiles_crud(self, client):
         """GET/POST/DELETE /api/models/profiles handles saved profiles."""

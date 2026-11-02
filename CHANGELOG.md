@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## The functional audit's Medium findings fixed (2026-11-02)
+
+- A provider that answers with something that is not a model answer, or a
+  stream that stops before its answer does, is reported as what happened and
+  tried again, never saved as a reply. A turn that ends without an answer
+  says why (the step limit, an output cut, a broken answer) and lists only
+  what this turn ran. The reply names the model that actually answered, and
+  the failover models follow a provider change without a restart. Model
+  discovery says why it failed.
+- Settings never shows a stored secret: the S3 access key and the proxy
+  password are masked, and an unexpected error shows a code, not its text.
+  Secrets kept as plain text move into the vault.
+- Settings controls do what they say: the per-tool timeout, the log level
+  (now, not after a restart), Skills' Validate, and the proxy card, which
+  names the policy that decides whether the proxy is used. The agent can no
+  longer change where secrets, memory or providers point.
+- A reload is quicker and kinder: one stop budget fits inside the guard's 60
+  seconds, a chat streaming during a reload says Kazma is restarting, a
+  document job survives the reload on the same attempt, and a crashed server
+  exits at once.
+- Arabic and English as equals: an Arabic research question gets an Arabic
+  report, "remember this" works the same in both languages, and Kazma's PDF
+  reader keeps numbers beside their Arabic words.
+- Telegram replies with emoji are no longer cut in half; if part of a reply
+  does not arrive, the chat says so. No chat app previews links in Kazma's
+  messages any more, so a link the model writes is never fetched by the
+  platform.
+- The outbound allowlist (Settings → Safety) now covers Telegram, Discord and
+  Slack messages as well as email (To and Cc).
+- Translation uses your configured model; the MyMemory service is used only
+  when you opt in with `KAZMA_TRANSLATION_REMOTE=mymemory`.
+- Documents: readiness says how old the malware signatures are (and alerts
+  past 7 days) and what each scan costs; a document refused by policy is no
+  longer paged as a failure with a Retry.
+- Research: a run is refused at admission, before it starts, when settled
+  reports have outgrown their share, instead of failing after it began. The
+  agent's swarm dispatch routes "auto" tasks to the best worker.
+- Logging no longer blocks the event loop on a slow disk.
+- Migration bundles no longer carry the memory repair copies, which hold
+  memories forgotten since.
+- A research or crawl alert for a run that no longer exists (a session you
+  deleted) leaves the bell instead of linking to "Session not found".
+- The README and the update guide say exactly how to update Kazma: one
+  command, the two cases that need a second one, and what breaks an
+  install (a bare `uv sync` removes the optional extras).
+
 ## The functional audit's High findings fixed (2026-11-02)
 
 - A short database outage no longer gets Kazma restarted. Settings reads no

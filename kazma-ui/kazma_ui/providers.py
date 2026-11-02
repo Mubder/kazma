@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.errors import safe_error
 from kazma_core.model_registry import get_model_registry
@@ -642,21 +643,33 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             logger.error("Provider test failed for %r (%s)", name, type(exc).__name__)
             return {"success": False, "error": "Provider test failed unexpectedly"}
 
-    @router.post("/api/providers/{name}/discover")
-    async def discover_provider_models(name: str) -> dict[str, Any]:
-        """Discover models available for a provider and persist them."""
-        registry = get_model_registry()
-        models = await registry.discover_models(name)
-        await asyncio.to_thread(registry.serialize)  # persist discovered models to ConfigStore
+    @router.post("/api/providers/{name}/discover", response_model=None)
+    async def discover_provider_models(name: str) -> dict[str, Any] | JSONResponse:
+        """Discover models available for a provider and persist them.
+
+        A provider that could not be asked answers 502 ``{ok: false, error,
+        detail, cached}`` (FA-107): it answered with the list an earlier
+        discovery had found, and the page said "Found 2 models".
+        """
         from kazma_core.models.modality import chat_models, speech_models
 
-        chat = chat_models(models)
-        omitted = speech_models(models)
+        registry = get_model_registry()
+        found = await registry.discover(name)
+        if not found.ok:
+            return JSONResponse(status_code=502, content={
+                "ok": False, "name": name, "error": found.error, "detail": found.detail,
+                "cached": chat_models(found.cached), "count": 0,
+            })
+        await asyncio.to_thread(registry.serialize)  # persist discovered models to ConfigStore
+        chat = chat_models(found.models)
+        omitted = speech_models(found.models)
         return {
+            "ok": True,
             "name": name,
             "models": chat,
             "count": len(chat),
             "speech_omitted": len(omitted),
+            "source": found.source,
         }
 
     @router.delete("/api/providers/{name}/models/{model_id:path}")

@@ -181,8 +181,17 @@ class MicrosoftGraphBackend:
             keep_refreshed_microsoft_mail(
                 used_refresh, self.access_token, self.refresh_token, address=address
             )
-        except Exception:
+        except Exception as exc:
+            # This request goes on with the tokens in memory; the owner is
+            # told the rotated grant was not kept (FA-104), before the next
+            # start reads the old one.
             logger.warning("[graph] refreshed tokens were not kept", exc_info=True)
+            from kazma_core.observability.ops_alerts import alert
+
+            alert("email.token_not_kept", "Microsoft mail: a refreshed sign-in was not saved",
+                  f"Kazma refreshed the Microsoft mail sign-in but could not keep the new tokens "
+                  f"({type(exc).__name__}). Mail works until Kazma restarts; if it then asks you "
+                  "to sign in, connect Microsoft again in Settings > Email.", severity="warn")
 
     def _folder_path(self, folder: str) -> str:
         key = (folder or "INBOX").strip().lower()

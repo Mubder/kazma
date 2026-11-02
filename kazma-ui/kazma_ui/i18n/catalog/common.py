@@ -771,6 +771,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مدمج في Kazma — أوقفه بالمفتاح",
         "en": "Built in — switch it off instead",
     },
+    "skills.validate_refused.no_skill": {
+        "ar": "اكتب اسم مهارة أو مسار مجلدها.",
+        "en": "Type a skill's name or its folder.",
+    },
+    "skills.validate_refused.not_found": {
+        "ar": "لا توجد مهارة بهذا الاسم، ولا مجلد مهارة بهذا المسار في مجلدات المهارات.",
+        "en": "No skill by that name, and no skill folder at that path in the skill folders.",
+    },
+    "skills.validate_refused.outside_skill_folders": {
+        "ar": "هذا المجلد خارج مجلدات المهارات التي يقرأها Kazma.",
+        "en": "That folder is outside the skill folders Kazma reads.",
+    },
+    "skills.validate_refused.failed": {
+        "ar": "تعذّر إجراء الفحص.",
+        "en": "The check could not run.",
+    },
+    "skills.validate_state.verified": {
+        "ar": "موثّقة: يفعّلها Kazma",
+        "en": "Verified: Kazma activates it",
+    },
+    "skills.validate_state.unsigned": {
+        "ar": "غير موقّعة: يفعّلها Kazma مع تحذير",
+        "en": "Unsigned: Kazma activates it with a warning",
+    },
+    "skills.validate_state.refused": {
+        "ar": "مرفوضة: لن يفعّلها Kazma",
+        "en": "Refused: Kazma will not activate it",
+    },
+    "skills.validate_state.built_in": {
+        "ar": "مهارة مدمجة",
+        "en": "A built-in skill",
+    },
+    "skills.validate_state.unusable": {
+        "ar": "غير صالحة: لا يقرؤها Kazma",
+        "en": "Unusable: Kazma cannot read it",
+    },
     "skills.validate_btn": {
         "ar": "تحقق",
         "en": "Validate",
@@ -788,12 +824,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "PASSED",
     },
     "skills.validate_path": {
-        "ar": "مسار مجلد المهارة",
-        "en": "Skill Directory Path",
+        "ar": "اسم المهارة أو مسار مجلدها",
+        "en": "Skill name or folder",
     },
     "skills.validate_path_ph": {
-        "ar": "/مسار/المهارة",
-        "en": "/path/to/skill",
+        "ar": "my-skill أو ‎~/.agents/skills/my-skill",
+        "en": "my-skill or ~/.agents/skills/my-skill",
     },
     "voice.audio_format": {
         "ar": "صيغة الصوت",
@@ -1310,10 +1346,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "skills.cert_basic": {
         "ar": "أساسية",
         "en": "basic",
-    },
-    "skills.score": {
-        "ar": "الدرجة: {n}/100",
-        "en": "Score: {n}/100",
     },
     "skills.integrity_verified": {
         "ar": "التوقيع موثّق",

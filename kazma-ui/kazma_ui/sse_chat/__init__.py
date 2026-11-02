@@ -34,7 +34,9 @@ code to one another).
                      (/long, /plan, /yolo)
   error              content (the request or the turn failed)
   done               content, tokens, cost, duration_ms, interrupted, empty,
-                     model, turn_id, session_tokens, session_cost, gate_views
+                     model, turn_id, session_tokens, session_cost, gate_views;
+                     stopped_for_shutdown, notice (Kazma is restarting: the
+                     turn did not end, content is empty)
   turn_complete      the same data, right after done
   snapshot           snapshot_id, iteration, model (Time Travel saved a step)
   user_message       content, turn_id, client_msg_id, session_id, ts

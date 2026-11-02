@@ -402,7 +402,8 @@ full backups (seven), the offsite backups (up to twelve monthly), the
 memory export written every six hours, the copy kept before an embedding
 rebuild, the copies the operator's repair scripts keep before they change the
 database (`memory_state.db.pre_entity_key`, `memory_state.db.pre_relabel`,
-`memory_state.db.pre_reopen`, until removed), and space the database has
+`memory_state.db.pre_reopen`, until removed; a migration never carries
+them), and space the database has
 freed but not yet reused. Kazma's lessons for itself are reached only by
 "forget everything that mentions ..."; lessons written before 2026-10-19
 could quote the message they came from. The

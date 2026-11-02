@@ -46,6 +46,11 @@ pip install -e ".[rag,dev,tui]"
 # or: uv sync --extra rag --extra dev --extra tui
 ```
 
+`uv sync` here is for a **first install** into a fresh environment. On an
+installed Kazma, update with `python -m kazma_cli update` instead: a bare
+`uv sync` removes every package outside the extras it names
+([Kazma update](../ops/kazma-update#the-short-version)).
+
 ## Activate the git hooks
 
 `pre-commit` comes with the `dev` extra, but the hooks do nothing until you

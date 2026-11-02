@@ -881,10 +881,19 @@ class DiscordAdapter(BaseAdapter):
         chunks = chunk_message(sanitize_outbound(outbound.text or ""))
         all_sent = True
         for chunk in chunks:
+            # Set only on a 2xx (FA-105): a chunk still rate-limited when the
+            # retries ran out was counted sent, and a reminder Discord never
+            # took was acknowledged by the cron outbox.
+            chunk_sent = False
+            limited = False
             for attempt in range(_SEND_MAX_RETRIES):
+                limited = False
                 try:
                     await self._rate_limiter.acquire()
-                    payload: dict[str, Any] = {"content": chunk}
+                    from kazma_gateway import outbound_flags
+
+                    # No embeds: Discord would fetch any link the model wrote (FA-128).
+                    payload: dict[str, Any] = outbound_flags.discord({"content": chunk})
                     # Attach interactive components on the first chunk only
                     comps = outbound.context_metadata.get("components")
                     if comps and chunk is chunks[0]:
@@ -895,6 +904,9 @@ class DiscordAdapter(BaseAdapter):
                     )
 
                     if resp.status_code == 429:
+                        limited = True
+                        if attempt + 1 >= _SEND_MAX_RETRIES:
+                            break  # no wait after the last try
                         body = resp.json()
                         retry_after = body.get("retry_after", _SEND_BASE_DELAY * (2**attempt))
                         jitter = random.uniform(0.5, 1.5)
@@ -909,15 +921,20 @@ class DiscordAdapter(BaseAdapter):
                         continue
 
                     resp.raise_for_status()
+                    chunk_sent = True
                     break  # success — move to next chunk
                 except httpx.HTTPStatusError as exc:
                     logger.error("[discord] HTTP %d on send to %s: %s", exc.response.status_code, channel_id, exc.response.text[:200])
-                    all_sent = False
                     break
                 except Exception as exc:
                     logger.error("[discord] Send failed: %s: %s", type(exc).__name__, str(exc)[:200])
-                    all_sent = False
                     break
+            if not chunk_sent:
+                if limited:
+                    logger.error("[discord] still rate-limited after %d tries: %s not sent",
+                                 _SEND_MAX_RETRIES, channel_id)
+                all_sent = False
+                break  # the rest would arrive without this part, or meet the same limit
 
         if all_sent:
             logger.debug("[discord] Sent to channel %s: %.80s", channel_id, outbound.text)

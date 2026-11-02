@@ -8,6 +8,10 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "chat.restarting_notice": {
+        "ar": "يُعاد تشغيل Kazma. سيظهر الرد كاملًا في هذه المحادثة عند عودته.",
+        "en": "Kazma is restarting. The full answer will appear in this chat when it is back.",
+    },
     "chat.actions": {
         "ar": "إجراءات",
         "en": "Actions",

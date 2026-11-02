@@ -885,6 +885,9 @@ def test_dns_gate_catches_the_redirect_hop_shape():
 # names one; a call in an async body must go through asyncio.to_thread.
 
 _LOOP_STALL_HELPERS = frozenset({
+    # The malware probe runs ``clamdscan --ping`` and ``clamscan --version``
+    # (FA-232/FA-233), and the sweep that alerts on stale signatures.
+    "probe_malware_scanner", "signature_alert_sweep", "malware_blocks_intake",
     # Run supervision (kazma_core.runs): the incident store's transactions
     # (SQLite, BEGIN IMMEDIATE), the bell's read of it, the runbooks' settings
     # read, the memory queue's retry and the document queue's listing.
@@ -2734,6 +2737,14 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
         "memory_purge_empty_entities": False,
         "memory_store": False,
     },
+    # A translation of text the model chose -- a fetched page, a memory --
+    # by the model or (opted into) a remote service (FA-124: returned raw).
+    "kazma-skills/kazma_skills/native/arabic_bilingual_nlp/tools.py": {
+        "arabic_translate": True,
+        # Our own conversions of the date and text the call names.
+        "hijri_convert": False,
+        "insert_diacritics": False,
+    },
 }
 
 
@@ -2811,7 +2822,7 @@ SECURITY_ENV_MARKERS = (
 #: kill-switch among them. A switch is here when some value of it turns a
 #: protection off or widens who or what is trusted.
 SECURITY_ENV_NAMES = (
-    "KAZMA_ACQUISITION_MODE", "KAZMA_ACQUISITION_REMOTE_PROVIDERS",
+    "KAZMA_ACQUISITION_MODE", "KAZMA_ACQUISITION_REMOTE_PROVIDERS", "KAZMA_TRANSLATION_REMOTE",
     "KAZMA_WS_ORIGIN_CHECK", "KAZMA_WS_EXTRA_ORIGINS", "KAZMA_OPAQUE_SESSIONS",
     "KAZMA_RATE_LIMIT_ENABLED", "KAZMA_TENANT_FILTER", "KAZMA_SESSION_OPEN_TAKEOVER",
     "KAZMA_MCP_INHERIT_ENV", "KAZMA_ALLOW_PRIVATE_LLM",

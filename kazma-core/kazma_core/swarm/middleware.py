@@ -1,10 +1,7 @@
-"""Swarm middleware — tool output truncation + graceful error handling.
+"""Swarm middleware — tool output truncation.
 
 TruncationMiddleware: caps tool outputs at ``max_tokens`` characters
 with a ``[...truncated N chars]`` indicator.
-
-GracefulErrorFallback: wraps tool execution so a single broken tool
-never crashes the entire pipeline — returns a structured error ToolResult.
 """
 
 from __future__ import annotations
@@ -13,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["GracefulErrorFallback", "MAX_TOKENS", "ToolOutput", "TruncationMiddleware"]
+__all__ = ["MAX_TOKENS", "ToolOutput", "TruncationMiddleware"]
 
 logger = logging.getLogger(__name__)
 
@@ -58,36 +55,3 @@ class TruncationMiddleware:
             original_length=original_len,
         )
 
-
-class GracefulErrorFallback:
-    """Wraps tool execution so a broken tool never crashes the pipeline.
-
-    Usage in SwarmEngine or worker dispatch:
-        try:
-            result = await tool.execute(...)
-        except Exception:
-            result = GracefulErrorFallback.tool_error(tool_name, exc)
-    """
-
-    @staticmethod
-    def tool_error(tool_name: str, exc: Exception) -> ToolOutput:
-        """Return a structured error ToolOutput that won't crash the pipeline."""
-        logger.warning("[GracefulError] Tool '%s' failed: %s", tool_name, exc)
-        return ToolOutput(
-            tool_name=tool_name,
-            success=False,
-            output="",
-            error=f"{type(exc).__name__}: {exc!s}"[:500],
-        )
-
-    @staticmethod
-    def to_json_error(exc: Exception) -> dict[str, Any]:
-        """Serialize an exception into a human-readable JSON error state."""
-        return {
-            "success": False,
-            "error": {
-                "type": type(exc).__name__,
-                "message": str(exc)[:500],
-                "recoverable": isinstance(exc, (ValueError, KeyError, TimeoutError)),
-            },
-        }

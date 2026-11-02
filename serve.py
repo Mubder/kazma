@@ -104,6 +104,7 @@ try:
     # hardcodes ProactorEventLoop on Windows in 0.36+, which makes
     # AsyncPostgresSaver fail and silently fall back to SQLite.
     from kazma_core.eventloop import set_windows_selector_policy, uvicorn_loop_factory
+    from kazma_core.shutdown import uvicorn_graceful_s
 
     set_windows_selector_policy()
 
@@ -121,7 +122,9 @@ try:
         "proxy_headers": False,
         "ws_ping_interval": 20.0,
         "ws_ping_timeout": 20.0,
-        "timeout_graceful_shutdown": 15,
+        # Part of the one stop budget the guard hands down (FA-261): streams
+        # close on the shutdown flag at once now, so this is a cap, not a wait.
+        "timeout_graceful_shutdown": uvicorn_graceful_s(),
     }
     if loop_factory is not None:
         config_kwargs["loop"] = loop_factory
@@ -142,4 +145,9 @@ except Exception:
     # on 2026-09-25 and there was no way to tell why.
     print("❌ Kazma stopped on an error:", file=sys.stderr)
     traceback.print_exc()
-    sys.exit(1)
+    # Now, without joining threads: sys.exit waited on aiosqlite and anyio
+    # threads that never finish once the loop is gone, and the server stayed
+    # up and silent until the guard killed it (FA-138).
+    from kazma_core.process_exit import exit_after_fatal_error
+
+    exit_after_fatal_error(1)

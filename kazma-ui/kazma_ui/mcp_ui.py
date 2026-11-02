@@ -77,6 +77,92 @@ def _read_client_stderr(client: Any) -> str:
         return ""
 
 
+#: What a Test of a server can fail with that is the server's own answer --
+#: a command not found, a process that exits, a closed port, a handshake
+#: that times out or is not JSON. Said as it is (FA-245): every one answered
+#: "internal_error (ref: ...)", and the page could not say which.
+def _expected_test_failures() -> tuple[type[BaseException], ...]:
+    import httpx
+
+    from kazma_core.mcp.manager import MCPBridgeError
+    from kazma_core.mcp_client import MCPError
+
+    return (MCPError, MCPBridgeError, OSError, TimeoutError, asyncio.TimeoutError, ValueError, httpx.HTTPError)
+
+
+def _test_failure(name: str, exc: BaseException, stderr: str) -> dict[str, Any]:
+    from kazma_core.errors import validation_error
+
+    if isinstance(exc, _expected_test_failures()):
+        reason = validation_error(exc)
+        logger.warning("[mcp_api] test of %s failed: %s", name, reason)
+        return {"success": False, "error": reason, "stderr": stderr}
+    return {"success": False, "error": safe_error(exc), "stderr": stderr}
+
+
+async def _probe_server(server_cfg: dict[str, Any], name: str) -> dict[str, Any]:
+    """Connect to *server_cfg* once, list its tools, disconnect: the one Test
+    behind Settings' Test of a saved server and the Add Server modal's.
+
+    stdio and SSE go through ``MCPClient`` (stderr diagnostics);
+    streamable HTTP through a throwaway ``AsyncMCPManager`` in ``quiet``
+    mode -- no ops alert, no recorded failure (FA-256: a Test of an unsaved
+    server paged the owner that a server's tools were gone).
+    """
+    from kazma_core.mcp_client import MCPClient, MCPServerConfig
+
+    label = str(server_cfg.get("name") or name)
+    transport = server_cfg.get("transport", "stdio")
+    if transport in ("stdio", "sse"):
+        client = MCPClient()
+        try:
+            config = MCPServerConfig(
+                name=label,
+                transport=transport,
+                command=server_cfg.get("command", []),
+                url=server_cfg.get("url", ""),
+                env=server_cfg.get("env", {}),
+                working_dir=server_cfg.get("working_dir"),
+                auth=server_cfg.get("auth", {}),
+                trust=server_cfg.get("trust", "approval_required"),
+            )
+            await client.connect(config)
+            tools = await client.list_tools()
+            stderr_text = _read_client_stderr(client)
+            await client.disconnect()
+            return {
+                "success": True,
+                "tool_count": len(tools),
+                "tools": [t.get("name", "") for t in tools[:10]],
+                "stderr": stderr_text,
+            }
+        except Exception as e:
+            stderr_text = _read_client_stderr(client)
+            try:
+                await client.disconnect()
+            except Exception:
+                logger.debug("[mcp_api] test client disconnect failed", exc_info=True)
+            return _test_failure(label, e, stderr_text)
+
+    # HTTP-based transports: the same manager path Start uses, quietly.
+    from kazma_core.mcp.manager import AsyncMCPManager
+
+    manager = AsyncMCPManager()
+    try:
+        count = await manager.connect_from_config([dict(server_cfg)], raise_on_error=True, quiet=True)
+        tools = manager.get_all_tool_schemas()
+        return {
+            "success": True,
+            "tool_count": count,
+            "tools": [t.get("name", "") for t in tools[:10]],
+            "stderr": "",
+        }
+    except Exception as e:
+        return _test_failure(label, e, "")
+    finally:
+        await manager.shutdown()
+
+
 def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRouter:
     """Create the MCP management router."""
 
@@ -235,8 +321,6 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         UI can surface *why* a 0-tools server failed (a long-standing
         "saved silently, no idea why" complaint — surfaced now).
         """
-        from kazma_core.mcp_client import MCPClient, MCPServerConfig
-
         servers = await asyncio.to_thread(agent.get_mcp_servers_config)
         server_cfg = None
         for s in servers:
@@ -259,58 +343,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         except Exception as exc:
             logger.debug("[mcp_api] workspace interpolation skipped for %s: %s", name, exc)
 
-        transport = server_cfg.get("transport", "stdio")
-
-        # stdio / sse: use MCPClient (stderr diagnostics for stdio).
-        # streamable_http: MCPClient doesn't support it, so test via the
-        # same AsyncMCPManager path Start uses.
-        if transport in ("stdio", "sse"):
-            client = MCPClient()
-            try:
-                config = MCPServerConfig(
-                    name=server_cfg.get("name", name),
-                    transport=transport,
-                    command=server_cfg.get("command", []),
-                    url=server_cfg.get("url", ""),
-                    env=server_cfg.get("env", {}),
-                    working_dir=server_cfg.get("working_dir"),
-                    auth=server_cfg.get("auth", {}),
-                    trust=server_cfg.get("trust", "approval_required"),
-                )
-                await client.connect(config)
-                tools = await client.list_tools()
-                stderr_text = _read_client_stderr(client)
-                await client.disconnect()
-                return {
-                    "success": True,
-                    "tool_count": len(tools),
-                    "tools": [t.get("name", "") for t in tools[:10]],
-                    "stderr": stderr_text,
-                }
-            except Exception as e:
-                stderr_text = _read_client_stderr(client)
-                try:
-                    await client.disconnect()
-                except Exception:
-                    pass
-                return {"success": False, "error": safe_error(e), "stderr": stderr_text}
-
-        # HTTP-based transports: test via the same manager path Start uses.
-        try:
-            from kazma_core.mcp.manager import AsyncMCPManager
-
-            manager = AsyncMCPManager()
-            count = await manager.connect_from_config([dict(server_cfg)], raise_on_error=True)
-            tools = manager.get_all_tool_schemas()
-            await manager.shutdown()
-            return {
-                "success": True,
-                "tool_count": count,
-                "tools": [t.get("name", "") for t in tools[:10]],
-                "stderr": "",
-            }
-        except Exception as e:
-            return {"success": False, "error": safe_error(e), "stderr": ""}
+        return await _probe_server(server_cfg, name)
 
     @router.post("/api/mcp/test-config")
     async def api_test_config(server_cfg: dict[str, Any] = None) -> dict[str, Any]:
@@ -323,8 +356,6 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         client-side) plus missing-binary / bad-API-key / 0-tools cases
         BEFORE the broken entry is written to ``kazma.yaml``.
         """
-        from kazma_core.mcp_client import MCPClient, MCPServerConfig
-
         if not server_cfg:
             return {"success": False, "error": "Missing server config"}
 
@@ -341,56 +372,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         except Exception as exc:
             logger.debug("[mcp_api] workspace interpolation skipped for test-config: %s", exc)
 
-        transport = server_cfg.get("transport", "stdio")
-
-        # MCPClient handles stdio (stderr diagnostics) and SSE. It does NOT
-        # support streamable_http, which the AsyncMCPManager already implements.
-        if transport in ("stdio", "sse"):
-            client = MCPClient()
-            try:
-                config = MCPServerConfig(
-                    name=server_cfg.get("name", "test"),
-                    transport=transport,
-                    command=server_cfg.get("command", []),
-                    url=server_cfg.get("url", ""),
-                    env=server_cfg.get("env", {}),
-                    working_dir=server_cfg.get("working_dir"),
-                    auth=server_cfg.get("auth", {}),
-                    trust=server_cfg.get("trust", "approval_required"),
-                )
-                await client.connect(config)
-                tools = await client.list_tools()
-                stderr_text = _read_client_stderr(client)
-                await client.disconnect()
-                return {
-                    "success": True,
-                    "tool_count": len(tools),
-                    "tools": [t.get("name", "") for t in tools[:10]],
-                    "stderr": stderr_text,
-                }
-            except Exception as e:
-                stderr_text = _read_client_stderr(client)
-                try:
-                    await client.disconnect()
-                except Exception:
-                    pass
-                return {"success": False, "error": safe_error(e), "stderr": stderr_text}
-
-        try:
-            from kazma_core.mcp.manager import AsyncMCPManager
-
-            manager = AsyncMCPManager()
-            count = await manager.connect_from_config([dict(server_cfg)], raise_on_error=True)
-            tools = manager.get_all_tool_schemas()
-            await manager.shutdown()
-            return {
-                "success": True,
-                "tool_count": count,
-                "tools": [t.get("name", "") for t in tools[:10]],
-                "stderr": "",
-            }
-        except Exception as e:
-            return {"success": False, "error": safe_error(e), "stderr": ""}
+        return await _probe_server(server_cfg, "test")
 
     @router.get("/api/mcp/servers/{name}/tools")
     async def api_server_tools(name: str) -> list[dict[str, str]]:

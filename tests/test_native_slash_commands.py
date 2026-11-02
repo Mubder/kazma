@@ -118,7 +118,8 @@ async def test_discord_defer_deduplicate_and_complete_private_reply():
     assert adapter._http.patch.call_args.args[0].endswith("/messages/@original")
     assert adapter._http.patch.call_args.kwargs["json"]["content"] == "result"
     assert await adapter.send(outgoing)
-    assert adapter._http.post.call_args.kwargs["json"]["flags"] == 64
+    # Private (64) and no link preview (4, SUPPRESS_EMBEDS: FA-128).
+    assert adapter._http.post.call_args.kwargs["json"]["flags"] == 64 | 4
     outgoing.context_metadata["components"] = [{"type": 1, "components": []}]
     assert await adapter.send(outgoing)
     assert adapter._http.post.call_args.kwargs["json"]["components"] == outgoing.context_metadata["components"]
@@ -175,7 +176,8 @@ async def test_discord_private_component_keeps_followup_private_or_drops(valid):
         OutboundMessage(target_id="discord:C", text="private result", context_metadata=incoming.context_metadata)
     )
     assert adapter._http.post.call_args.args[0].startswith("/webhooks/")
-    assert adapter._http.post.call_args.kwargs["json"]["flags"] == 64
+    # Private (64) and no link preview (4, SUPPRESS_EMBEDS: FA-128).
+    assert adapter._http.post.call_args.kwargs["json"]["flags"] == 64 | 4
 
 
 @pytest.mark.asyncio

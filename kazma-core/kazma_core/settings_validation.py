@@ -164,6 +164,20 @@ def _ocr_engine(value: Any) -> Any:
         raise SettingRejected(f"The OCR engine is one of: {', '.join(OCR_ENGINES)}.") from None
 
 
+def _embedding_key_env(value: Any) -> str:
+    """A variable's name, and not one of Kazma's own (FA-126): the embedder
+    sends that variable's value to the embedding endpoint."""
+    from kazma_core.memory.embedder import API_KEY_ENV_KEY, embedding_key_env_allowed
+
+    name = str(value or "").strip()
+    if name and not embedding_key_env_allowed(name):
+        raise SettingRejected(
+            f"{API_KEY_ENV_KEY} must name the variable that holds the embedding key, "
+            "not one of Kazma's own KAZMA_ variables."
+        )
+    return name
+
+
 @functools.cache
 def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     """key -> (normalize, category the key is stored under or None).
@@ -177,10 +191,12 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.documents.config import OCR_ENGINE_KEY
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
+    from kazma_core.memory.embedder import API_KEY_ENV_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
     return {
+        API_KEY_ENV_KEY: (_embedding_key_env, "embedding"),
         OCR_ENGINE_KEY: (_ocr_engine, "documents"),
         "cron.timezone": (_timezone, None),
         # The scheduler's bounds (Scheduled audit SCH-E06, E14, S05).

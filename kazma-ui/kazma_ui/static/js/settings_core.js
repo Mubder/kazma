@@ -149,6 +149,8 @@
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
         proxyTesting: false,
+        /** The acquisition policy as it bears on the proxy (FA-115). */
+        proxyPolicy: null,
 
         // ── Embedder Tab ──
         embedder: { provider: 'local', model: 'BAAI/bge-m3', dim: 1024, base_url: '', api_key_env: 'KAZMA_EMBED_API_KEY', _preset: 'BAAI/bge-m3' },
@@ -295,6 +297,8 @@
         hubTestingProvider: null,
         hubTestingConnector: null,
         hubDiscoveringProvider: null,
+        /** Providers whose last discovery failed: their list is an earlier one (FA-107). */
+        hubDiscoveryStale: {},
         /** Per-provider filter text for the discovered-models panel */
         modelSearch: {},
         hubTestResult: null,

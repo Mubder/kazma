@@ -93,7 +93,9 @@ _AGENT_RUN_KINDS = frozenset({'research_crawl', 'research_pipeline'})
 
 def _collect():
     """Fresh local reads only. Session and pipeline rows describe ONE run.
-    The last item is the keys of the jobs left to the agent that ran them."""
+    The fourth item is the keys of the jobs left to the agent that ran them;
+    the fifth, the key of every run still stored (a deleted session or an
+    evicted crawl is not among them)."""
     from kazma_core.tools import research_session
     from kazma_core.web_acquire import accounting, crawl_jobs, credits
 
@@ -116,7 +118,9 @@ def _collect():
             result_available=bool(s['report_path'] or s['has_summary']), kind='research'))
     crawl_jobs.recover()
     left_to_agent = set()
+    stored = {'session:' + s['id'] for s in sessions}
     for row in crawl_jobs._read()[1].values():
+        stored.add('job:' + row['job_id'])
         if row['job_id'] in linked:
             continue
         if row.get('kind') == 'canary':
@@ -154,7 +158,7 @@ def _collect():
             # The library a crawl fills: its next successful run settles
             # this one's warnings. Notes are the limits and exclusions.
             subject=None if research else row['library_id'], notes=list(row.get('notes', []))))
-    return jobs, credits.snapshot(), accounting._read_evidence(), left_to_agent
+    return jobs, credits.snapshot(), accounting._read_evidence(), left_to_agent, stored
 
 
 def _identity(key):
@@ -304,7 +308,7 @@ def tick(*, now=None):
     cfg = settings()
     if not cfg['enabled']:
         return []
-    jobs, balances, allowance, left_to_agent = _collect()
+    jobs, balances, allowance, left_to_agent, stored = _collect()
     emitted = []
 
     def change(state):
@@ -343,6 +347,15 @@ def tick(*, now=None):
         for old in state['events']:
             if old['key'] in left_to_agent and not old['resolved']:
                 old['resolved'] = True
+        # An alert for a run that is no longer stored -- a session the owner
+        # deleted, a crawl evicted from the journal -- links to "Session not
+        # found". It stayed in the bell for 30 days (live 2026-11-02: "Research
+        # failed" for a test session deleted after the functional audit).
+        if stored is not None:
+            for old in state['events']:
+                if (not old['resolved'] and str(old['key']).startswith(('session:', 'job:'))
+                        and old['key'] not in stored):
+                    old['resolved'] = True
         # Keep active warnings even when a burst of results ages out old history.
         active = [r for r in state['events'] if r['condition'] == 'stalled' and not r['resolved']
                   and r['key'] in retained]

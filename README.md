@@ -16,7 +16,7 @@
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%E2%80%93%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 to 3.14"></a>
-    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-18%2C621-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-18%2C915-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="https://kazma.ai/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection measured"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
@@ -36,7 +36,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~746K LOC** (593K Python code + 45K JS) | **18,621 tests** (1,397 test files) | **4,458+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~753K LOC** (599K Python code + 45K JS) | **18,915 tests** (1,436 test files) | **4,459+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
@@ -134,16 +134,40 @@ what is missing. See [Gateways and platforms](https://kazma.ai/docs/gateways-and
 
 ### Updating
 
-From the install folder, with the virtual environment active:
+One command, from the install folder, with the install's own Python
+(`.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere, or
+`python` with the virtual environment active):
 
 ```bash
 python -m kazma_cli update
 ```
 
-It pulls `main`, reinstalls the packages and, on a supervised install, stops
-and restarts the server for you. On Windows, run it this way rather than
-`kazma update`: a running `kazma.exe` cannot replace itself. See
-[Kazma update](https://kazma.ai/docs/ops/kazma-update/).
+It pulls `main` (your local edits are set aside and put back), installs the
+package versions the new code requires and keeps your optional extras. On an
+install the guard supervises, it waits until no chat is running, stops the
+server, installs, and starts it again. Add `-y` to skip its question.
+
+Then, only when it applies:
+
+| When | Run |
+|---|---|
+| You pulled with `git pull` yourself, or Kazma says its packages are behind (alert `install.requirements_unmet`) | `python -m kazma_cli update --reinstall -y` (packages only, no git) |
+| Documents run in the container profile (Settings → Documents) | `python scripts/document_worker_image.py build` |
+
+Avoid these; each one breaks an install:
+
+- **A bare `uv sync`** on an installed Kazma. It makes the environment match
+  the extras you name and removes every other package, the optional extras
+  among them. The update never runs it. If you use uv by hand, name your
+  extras and add `--inexact`: `uv sync --inexact --extra rag --extra tui`.
+- **`kazma update` on Windows.** A running `kazma.exe` cannot replace itself;
+  it refuses and names the command above.
+- **Installing Kazma from PyPI by name.** The Kazma names there are
+  placeholders with no code; Kazma installs from this repository.
+
+The update installs the versions Kazma's own `pyproject.toml` asks for (its
+minimums rise when a security fix ships). It does not upgrade every package
+to its newest release. See [Kazma update](https://kazma.ai/docs/ops/kazma-update/).
 
 <details>
 <summary><b>Running as a service (the guard)</b></summary>

@@ -74,19 +74,22 @@ class TestSafeRotation:
         pre_handlers = list(root.handlers)
         setup_logging(level="INFO")
         added = [h for h in root.handlers if h not in pre_handlers]
+        # The file handler writes on the log writer thread, behind the root
+        # logger's queue handler (FA-135).
         file_handlers = [
-            h for h in root.handlers if isinstance(h, SafeTimedRotatingFileHandler)
+            h for h in _lc._written_handlers if isinstance(h, SafeTimedRotatingFileHandler)
         ]
         assert file_handlers, "setup_logging must attach the Safe rotation handler"
-        logging.getLogger("kazma_core.test_rotation").info("canary")
-        for h in file_handlers:
-            h.flush()
-        assert "canary" in (tmp_path / "t.log").read_text(encoding="utf-8")
-        for h in file_handlers:
-            h.close()
-            root.removeHandler(h)
-        # Drop any console handlers this call added too, so a later test's
-        # guard-reset doesn't accumulate duplicates on root.
-        for h in added:
-            if h not in pre_handlers and h in root.handlers:
-                root.removeHandler(h)
+        try:
+            logging.getLogger("kazma_core.test_rotation").info("canary")
+            assert _lc.drain_logs(5.0)
+            assert "canary" in (tmp_path / "t.log").read_text(encoding="utf-8")
+        finally:
+            _lc._stop_log_writer(5.0)
+            for h in file_handlers:
+                h.close()
+            # Drop the queue handler this call added, so a later test's
+            # guard-reset doesn't accumulate handlers on root.
+            for h in added:
+                if h not in pre_handlers and h in root.handlers:
+                    root.removeHandler(h)

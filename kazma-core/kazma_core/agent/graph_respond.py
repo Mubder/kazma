@@ -15,6 +15,7 @@ from kazma_core.agent.plan_fence import (
     is_plan_only,
     normalize_plan_fence,
     rewrite_terminal_assistant_message,
+    running_turn,
 )
 from kazma_core.agent.source_grounding import with_source_grounding
 from kazma_core.agent.state import SupervisorState
@@ -53,6 +54,88 @@ async def _ledger_synthesis_call(
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _what_ran(state: SupervisorState, messages: list[dict[str, Any]]) -> str:
+    """One sentence on the tools of the RUNNING turn: which ran, which were
+    refused before running (FA-211: the fallback listed every tool call the
+    model had ever asked for in the chat, and said "used tools (file_write)"
+    over a cut-off call that never ran)."""
+    from kazma_core.agent.tool_loop_breaker import ToolOutcome, classify_tool_result
+
+    names: dict[str, str] = {}
+    turn = running_turn(messages)
+    for m in turn:
+        for tc in (m.get("tool_calls") or []) if isinstance(m, dict) else []:
+            if isinstance(tc, dict):
+                names[str(tc.get("id") or "")] = str(
+                    (tc.get("function") or {}).get("name") or tc.get("name") or "tool"
+                )
+    recorded = state.get("tool_results") or {}
+    ran: list[str] = []
+    refused: list[str] = []
+    for m in turn:
+        if not isinstance(m, dict) or m.get("role") not in ("tool", "function"):
+            continue
+        call_id = str(m.get("tool_call_id") or "")
+        result = dict(recorded.get(call_id) or {})
+        result.setdefault("content", m.get("content") or "")
+        name = str(result.get("name") or m.get("name") or names.get(call_id) or "tool")
+        result["name"] = name
+        outcome = classify_tool_result(result)
+        not_run = (ToolOutcome.POLICY, ToolOutcome.USER_DENY, ToolOutcome.TERMINAL)
+        (refused if outcome in not_run else ran).append(name)
+    parts = []
+    if ran:
+        parts.append(f"This turn ran: {', '.join(sorted(set(ran))[:12])}.")
+    else:
+        parts.append("No tool ran this turn.")
+    if refused:
+        parts.append(f"Not run (refused or declined): {', '.join(sorted(set(refused))[:12])}.")
+    return " ".join(parts)
+
+
+def _stop_cause(state: SupervisorState, *, max_hit: bool, junk_final: bool) -> tuple[str, str]:
+    """Why the turn ended without a finished answer, and what the user can do.
+
+    Said from what happened (FA-211): every ending was "the tool-round limit"
+    / "the step limit", and "Send continue" re-ran a provider's failure.
+    """
+    if max_hit:
+        steps = int(state.get("max_iterations", 15) or 15)
+        return (
+            f"I reached this turn's step limit ({steps} steps)",
+            "Send **continue** to carry on, or a narrower request.",
+        )
+    if state.get("_last_finish_reason") == "length":
+        return (
+            "the model's answer was cut off by its output limit",
+            "Ask for a shorter answer, or for the work in smaller pieces.",
+        )
+    if junk_final:
+        return (
+            "the model's last answer was not usable text (tool markup or an unfinished stub)",
+            "Send **continue**, or ask again.",
+        )
+    return (
+        "the model ended without a written answer",
+        "Send **continue**, or ask again.",
+    )
+
+
+def _partial_notice(
+    state: SupervisorState,
+    messages: list[dict[str, Any]],
+    *,
+    max_hit: bool,
+    junk_final: bool,
+    summary: str,
+) -> str:
+    """The one wording of a turn that ended without a finished answer."""
+    cause, remedy = _stop_cause(state, max_hit=max_hit, junk_final=junk_final)
+    summary = f", and {summary}" if summary else ""
+    return f"⚠️ Partial result: {cause}{summary}. {_what_ran(state, messages)} {remedy}"
+
 
 async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any]:
     """Respond node — finalizes the turn.
@@ -235,70 +318,39 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                         "[Respond] Synthesis still unusable (%d chars) — fallback notice",
                         len(_content),
                     )
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": (
-                                "⚠️ Partial result: I finished tools but could not "
-                                "produce a clean final report (model returned tool "
-                                "markup instead of text). Send **continue** or a "
-                                "narrower request (e.g. list entities / invalidate X)."
-                            ),
-                        }
-                    )
+                    messages.append({"role": "assistant", "content": _partial_notice(
+                        state, messages, max_hit=_max_hit, junk_final=_junk_final,
+                        summary="the final summary came back as tool markup instead of text",
+                    )})
                 else:
                     logger.warning(
                         "[Respond] Synthesis returned empty content "
-                        "(last_role=%s messages=%d) — generating action summary fallback",
+                        "(last_role=%s messages=%d) — partial-result notice",
                         _last_role,
                         len(messages),
                     )
-                    tools_used = [
-                        tc.get("function", {}).get("name") or tc.get("name", "tool")
-                        for m in messages if isinstance(m, dict) and m.get("tool_calls")
-                        for tc in (m.get("tool_calls") or []) if isinstance(tc, dict)
-                    ]
-                    tool_summary_str = (
-                        f" used tools ({', '.join(sorted(set(tools_used)))})"
-                        if tools_used
-                        else " hit the tool-round limit"
-                    )
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": (
-                                f"⚠️ Partial result:{tool_summary_str}. "
-                                "I could not finish a full report before the step limit. "
-                                "Send **continue** or a narrower request to finish."
-                            ),
-                        }
-                    )
+                    messages.append({"role": "assistant", "content": _partial_notice(
+                        state, messages, max_hit=_max_hit, junk_final=_junk_final,
+                        summary="asking for a final summary got an empty answer",
+                    )})
             except Exception as exc:
                 logger.warning("[Respond] Could not synthesize final answer: %s", exc)
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": (
-                            "⚠️ Turn stopped at the tool-round limit. "
-                            "Send **continue** with a shorter goal so I can finish."
-                        ),
-                    }
-                )
+                from kazma_core.retry import friendly_llm_error
+
+                failed = friendly_llm_error(exc).removeprefix("⚠️").strip()
+                messages.append({"role": "assistant", "content": _partial_notice(
+                    state, messages, max_hit=_max_hit, junk_final=_junk_final,
+                    summary=f"the final summary could not be written ({failed})",
+                )})
         else:
             logger.warning(
-                "[Respond] Max iterations with no LLM bound "
+                "[Respond] No usable answer and no LLM bound "
                 "(last_role=%s) — injecting recovery notice",
                 _last_role,
             )
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": (
-                        "⚠️ Turn stopped at the tool-round limit without a written "
-                        "answer. Please send another message to continue."
-                    ),
-                }
-            )
+            messages.append({"role": "assistant", "content": _partial_notice(
+                state, messages, max_hit=_max_hit, junk_final=_junk_final, summary="",
+            )})
 
     # ── Final empty-answer safety net ───────────────────────────────
     # After synthesis (or if synthesis was skipped), ensure the user never
@@ -306,18 +358,6 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     # "no written answer" line.
     _final_for_user = await asyncio.to_thread(_final_assistant_text_after_tools, messages)
     if not _final_for_user or is_unusable_assistant_content(_final_for_user):
-        tools_used = [
-            tc.get("function", {}).get("name") or tc.get("name", "tool")
-            for m in messages
-            if isinstance(m, dict) and m.get("tool_calls")
-            for tc in (m.get("tool_calls") or [])
-            if isinstance(tc, dict)
-        ]
-        tool_note = (
-            f" Tools used: {', '.join(sorted(set(tools_used))[:12])}."
-            if tools_used
-            else ""
-        )
         logger.warning(
             "[Respond] Still no usable final text after synthesis path "
             "(iteration=%d messages=%d last_role=%s force=%s) — terminal fallback",
@@ -326,17 +366,10 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             _last_role,
             _force_synth,
         )
-        messages.append(
-            {
-                "role": "assistant",
-                "content": (
-                    "⚠️ Partial result: I could not produce a clean final answer "
-                    f"this turn.{tool_note} "
-                    "Send **continue** or a narrower request "
-                    "(e.g. `list memory entities` / `invalidate belief …`)."
-                ),
-            }
-        )
+        messages.append({"role": "assistant", "content": _partial_notice(
+            state, messages, max_hit=_max_hit, junk_final=_junk_final,
+            summary="no clean final answer could be written",
+        )})
 
     # Un-glue ```plan fences on the terminal assistant message so Telegram /
     # SSE / WS / session reload never hide the answer inside an unclosed

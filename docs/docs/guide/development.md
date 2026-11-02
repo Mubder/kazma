@@ -85,6 +85,11 @@ uv sync --extra rag --extra dev --extra tui
 # uv sync --all-extras
 ```
 
+`uv sync` here is for a **first install** into a fresh environment. On an
+installed Kazma, update with `python -m kazma_cli update` instead: a bare
+`uv sync` removes every package outside the extras it names
+([Kazma update](../ops/kazma-update#the-short-version)).
+
 ---
 
 ## 3. Code style & conventions

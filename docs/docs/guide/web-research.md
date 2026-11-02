@@ -550,8 +550,11 @@ even though they are excluded from completion monitoring. An install already
 over the bound refuses new background sessions with a visible capacity error.
 Review/export saved results before deliberately deleting settled history;
 archiving alone does not release the row allowance. No automatic deletion is
-performed to admit new work. Pipeline report retention has a separate 2GiB allowance
-(512MiB reserved per active run); deleting a journal row does not reset it.
+performed to admit new work. Pipeline report retention has a separate 3GiB allowance:
+512MiB reserved for each of the four runs research admits at once, plus 1GiB for
+settled reports. A new run is refused at admission (no session row) only when the
+settled reports have outgrown that share, and the refusal says so; deleting a
+journal row does not reset it.
 Existing files are never automatically deleted. Explicit-key/local model and
 fallback clients are frozen; ambient AWS/Google ADC routes are refused for
 durable research until their credentials can be captured.

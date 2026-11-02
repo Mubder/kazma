@@ -499,6 +499,7 @@
                         country: data.country || '',
                         session_sticky: !!data.session_sticky,
                     };
+                    this.proxyPolicy = data.policy || null;
                 }
             } catch (e) { /* keep defaults */ }
             this.proxyTestResult = null;

@@ -701,12 +701,14 @@ class TelegramAdapter(BaseAdapter):
                 if chat_id:
                     try:
                         http = self._ensure_http()
+                        from kazma_gateway import outbound_flags
+
                         await http.post(
                             "/sendMessage",
-                            json={
+                            json=outbound_flags.telegram({
                                 "chat_id": chat_id,
                                 "text": "⚠️ Busy — message dropped, please resend.",
-                            },
+                            }),
                         )
                     except Exception:
                         logger.error(
@@ -1194,12 +1196,14 @@ class TelegramAdapter(BaseAdapter):
             if chat_id:
                 try:
                     if self._http is not None:
+                        from kazma_gateway import outbound_flags
+
                         await self._http.post(
                             "/sendMessage",
-                            json={
+                            json=outbound_flags.telegram({
                                 "chat_id": chat_id,
                                 "text": "Voice received but transcription is unavailable. Please configure an STT provider (openai/groq) or type your message.",
-                            },
+                            }),
                         )
                 except Exception:
                     logger.debug("[telegram] Failed to send voice fallback message")
@@ -1270,9 +1274,11 @@ class TelegramAdapter(BaseAdapter):
         )
         try:
             if self._http is not None:
+                from kazma_gateway import outbound_flags
+
                 await self._http.post(
                     "/sendMessage",
-                    json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                    json=outbound_flags.telegram({"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}),
                 )
                 logger.info(
                     "[telegram] Announced group chat id %s on join", chat_id
@@ -1505,14 +1511,16 @@ class TelegramAdapter(BaseAdapter):
             if chat_id and message_id:
                 try:
                     self._http = self._ensure_http()
+                    from kazma_gateway import outbound_flags
+
                     await self._http.post(
                         "/editMessageText",
-                        json={
+                        json=outbound_flags.telegram({
                             "chat_id": chat_id,
                             "message_id": message_id,
                             "text": "[⏳ Installing package... please wait]",
                             "reply_markup": {"inline_keyboard": []},
-                        },
+                        }, "editMessageText"),
                     )
                 except Exception as exc:
                     logger.warning("[telegram] Failed to edit alert card: %s", exc)
@@ -1544,14 +1552,16 @@ class TelegramAdapter(BaseAdapter):
             if chat_id and message_id:
                 try:
                     self._http = self._ensure_http()
+                    from kazma_gateway import outbound_flags
+
                     await self._http.post(
                         "/editMessageText",
-                        json={
+                        json=outbound_flags.telegram({
                             "chat_id": chat_id,
                             "message_id": message_id,
                             "text": "⏳ Installing ML dependencies in the background...",
                             "reply_markup": {"inline_keyboard": []}
-                        }
+                        }, "editMessageText")
                     )
                 except Exception as exc:
                     logger.warning("[telegram] Failed to edit alert card: %s", exc)

@@ -143,7 +143,7 @@ def test_the_maintenance_cadence_carries_the_retention_sweep():
         "commitment GC cycle", "artifact GC", "gate TTL sweep", "ended YOLO windows",
         "task queue purge", "swarm task retention", "swarm approval rows", "run incident retention",
         "checkpoint retention",
-        "supervisor watch", "document worker broker",
+        "supervisor watch", "document worker broker", "malware signatures",
         "forget convergence", "memory vector repair", "memory recovery", "retired knowledge promotions",
         "memory turn reconcile",
         "memory mirror sync", "memory topic summaries", "entity count repair",

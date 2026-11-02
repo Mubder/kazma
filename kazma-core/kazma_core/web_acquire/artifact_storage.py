@@ -1,4 +1,16 @@
-"""Retained research storage admission independent of crawl journal eviction."""
+"""Retained research storage admission independent of crawl journal eviction.
+
+The allowance is sized with research admission (FA-266): every run admitted
+(``resources.research_capacity``, ``_ACTIVE_RUNS``) reserves
+``_RESERVATION`` while it runs, and settled reports have their own declared
+share, so ``_LIMIT = _ACTIVE_RUNS x _RESERVATION + _SETTLED_SHARE``. Admission
+(``admit``, called by ``research_runtime`` before a session row or a plan
+exists) refuses only when settled reports have outgrown their share; a run it
+admits always finds its reservation. The 2026-11 audit: 2 GiB held exactly
+four reservations, so with one byte of settled reports the fourth admitted
+run failed after its session row existed, telling the owner to delete reports
+that were not the cause.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -8,8 +20,13 @@ import stat as stat_types
 import sys
 from pathlib import Path
 
-_LIMIT = 2 * 1024**3
 _RESERVATION = 512 * 1024**2
+#: Research pipelines admitted at once (``resources._RESEARCH``; a gate holds
+#: them equal).
+_ACTIVE_RUNS = 4
+#: What settled reports may hold beside the running reservations.
+_SETTLED_SHARE = 1024**3
+_LIMIT = _ACTIVE_RUNS * _RESERVATION + _SETTLED_SHARE
 
 if __name__ != '__main__':
     from kazma_core.web_acquire.resources import _CapacityPool
@@ -87,37 +104,108 @@ def _inventory(owner, root):
         raise AcquisitionError(FetchErrorCode.STORAGE, 'Bounded research inventory failed; new work refused. Inspect retained reports, links and storage limits.') from exc
 
 
+def _live(row, jobs):
+    """A reservation whose run is still running in a live process."""
+    from kazma_core.web_acquire.crawl_jobs import _alive
+
+    if not row.get('active') or not _alive(row['owner']):
+        return False
+    current = jobs[1].get(row.get('job_id'))
+    return current is not None and current['status'] == 'running' and current['claim'] == row['claim']
+
+
+def _recount(table, root, rows, jobs):
+    """Replace every row of *root* that no running job holds with what the
+    inventory measured (a finished or abandoned run's reservation becomes its
+    folder's real size; a removed folder leaves the table -- never a file)."""
+    for identity, row in list(table.items()):
+        if row['root'] == str(root):
+            if _live(row, jobs):
+                continue
+            if identity not in rows:
+                del table[identity]  # only already removed reports; never delete files
+    for identity, row in rows.items():
+        previous = table.get(identity)
+        if not previous or not _live(previous, jobs):
+            table[identity] = dict(row, active=False)
+        else:
+            previous['bytes'] = max(previous['bytes'], row['bytes'])
+
+
+def _mib(value: int) -> str:
+    return f"{value / 1024**2:,.0f} MiB"
+
+
+def _split(table, jobs):
+    """(settled bytes, running reservations' bytes, running count)."""
+    settled = running_bytes = running = 0
+    for row in table.values():
+        if _live(row, jobs):
+            running += 1
+            running_bytes += row['bytes']
+        else:
+            settled += row['bytes']
+    return settled, running_bytes, running
+
+
+async def admit(root):
+    """Research admission's storage answer (FA-266), before any session row,
+    plan or search: re-measure the reports of this workspace (and of any
+    other with an abandoned reservation), then refuse only when settled
+    reports have outgrown their share -- the running reservations always fit
+    beside it. The refusal says which is which."""
+    from kazma_core.web_acquire import crawl_jobs
+    from kazma_core.web_acquire.crawl_jobs import call
+
+    def stale_roots():
+        from kazma_core import config_store
+        rows = config_store.get_config_store().get_category('acquisition_artifacts').get('acquisition.artifacts', {})
+        if not isinstance(rows, dict):
+            return set()
+        jobs = crawl_jobs._read()
+        return {row['root'] for row in rows.values() if row.get('active') and not _live(row, jobs)}
+
+    roots = {str(root)} | await call(stale_roots)
+    measured = {}
+    for each in sorted(roots):
+        measured[each] = await _OWNERS.call(lambda owner, each=each: _inventory(owner, Path(each)))
+    verdict = {}
+
+    def change(table):
+        jobs = crawl_jobs._read()
+        for each, rows in measured.items():
+            _recount(table, each, rows, jobs)
+        verdict['settled'], verdict['running_bytes'], verdict['running'] = _split(table, jobs)
+
+    await call(mutate, 'artifacts', change, entries=256)
+    share = _LIMIT - _ACTIVE_RUNS * _RESERVATION
+    if verdict['settled'] > share:
+        raise AcquisitionError(FetchErrorCode.LIMIT, (
+            f"Retained research storage allowance exhausted: settled reports hold {_mib(verdict['settled'])} "
+            f"of their {_mib(max(share, 0))} share ({verdict['running']} running research job(s) keep "
+            f"{_mib(verdict['running_bytes'])} reserved apart). Remove settled reports on the Research page "
+            "before starting more research."))
+
+
 async def reserve(job, root, directory):
-    from kazma_core.web_acquire.crawl_jobs import call, _alive
+    from kazma_core.web_acquire.crawl_jobs import call
     rows = await _OWNERS.call(lambda owner: _inventory(owner, root))
     key = _identity(directory)
     from kazma_core.web_acquire import crawl_jobs
-    def live(row, jobs):
-        if not row.get('active') or not _alive(row['owner']):
-            return False
-        current = jobs[1].get(row.get('job_id'))
-        return current is not None and current['status'] == 'running' and current['claim'] == row['claim']
     def change(table):
         jobs = crawl_jobs._read()
-        for identity, row in list(table.items()):
-            if row['root'] == str(root):
-                if live(row, jobs):
-                    continue
-                if identity not in rows:
-                    del table[identity]  # only already removed reports; never delete files
-        for identity, row in rows.items():
-            previous = table.get(identity)
-            if not previous or not live(previous, jobs):
-                table[identity] = dict(row, active=False)
-            else:
-                previous['bytes'] = max(previous['bytes'], row['bytes'])
+        _recount(table, root, rows, jobs)
         import psutil
         previous = table.get(key)
-        if previous and live(previous, jobs) and previous.get('claim') != job.token:
+        if previous and _live(previous, jobs) and previous.get('claim') != job.token:
             raise AcquisitionError(FetchErrorCode.LIMIT, 'Research output has another live storage owner.')
         used = sum(row['bytes'] for identity, row in table.items() if identity != key)
         if used + _RESERVATION > _LIMIT:
-            raise AcquisitionError(FetchErrorCode.LIMIT, 'Retained research storage allowance exhausted (2GiB); remove settled reports before starting more work.')
+            settled, running_bytes, running = _split({k: v for k, v in table.items() if k != key}, jobs)
+            raise AcquisitionError(FetchErrorCode.LIMIT, (
+                f"Retained research storage allowance exhausted ({_mib(_LIMIT)}): settled reports hold "
+                f"{_mib(settled)} and {running} running research job(s) reserve {_mib(running_bytes)}; "
+                f"this job needs {_mib(_RESERVATION)}. Remove settled reports before starting more work."))
         table[key] = dict(path=str(directory), root=str(root), bytes=_RESERVATION,
             active=True, claim=job.token, job_id=job.job_id, owner=[os.getpid(), psutil.Process().create_time()])
     await call(mutate, 'artifacts', change, entries=256)
@@ -141,9 +229,19 @@ def snapshot():
     rows = data.get('acquisition.artifacts', {})
     if not isinstance(rows, dict) or len(rows) > 256:
         raise AcquisitionError(FetchErrorCode.STORAGE, 'Invalid retained research storage registry.')
-    return dict(scope='research reports across encountered workspaces', retained_directories=sum(Path(row['path']).name != 'index.json' for row in rows.values()),
+    out = dict(scope='research reports across encountered workspaces', retained_directories=sum(Path(row['path']).name != 'index.json' for row in rows.values()),
         reserved_bytes=sum(row['bytes'] for row in rows.values()), limit_bytes=_LIMIT,
-        per_active_job_bytes=_RESERVATION, inventory_resources=_POOL.snapshot())
+        per_active_job_bytes=_RESERVATION, settled_share_bytes=_LIMIT - _ACTIVE_RUNS * _RESERVATION,
+        inventory_resources=_POOL.snapshot())
+    # Settled reports and running reservations apart (FA-266): the total read
+    # as "1.5 GB of reports" while nothing ran -- three abandoned reservations.
+    try:
+        from kazma_core.web_acquire import crawl_jobs
+        settled, running_bytes, running = _split(rows, crawl_jobs._read())
+        out.update(settled_bytes=settled, running_reserved_bytes=running_bytes, running_jobs=running)
+    except (AcquisitionError, OSError, KeyError, TypeError, ValueError):
+        out.update(settled_bytes=None, running_reserved_bytes=None, running_jobs=None)
+    return out
 
 
 if __name__ == '__main__':

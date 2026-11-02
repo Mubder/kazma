@@ -163,7 +163,10 @@
             </div>
             <div x-show="validateResult" x-cloak class="validation-result">
                 <div :class="validateResult?.passed ? 'text-success' : 'text-error'" x-text="validateResult?.passed ? t('skills.validate_passed') : t('skills.validate_failed')"></div>
-                <div x-text="t('skills.score').replace('{n}', validateResult?.score || 0)"></div>
+                <div x-show="validateResult && !validateResult.refused">
+                    <span x-text="validateStateLabel(validateResult?.state)"></span>
+                    <span translate="no" class="text-muted" x-text="validateResult?.name || ''"></span>
+                </div>
                 <template x-if="validateResult?.errors?.length">
                     <ul class="error-list">
                         <template x-for="err in validateResult.errors" :key="err">

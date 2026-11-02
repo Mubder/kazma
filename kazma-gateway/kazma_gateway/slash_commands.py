@@ -191,7 +191,10 @@ def changes_global_config(text: str) -> bool:
     if head == "/ide":
         return sub == "repo" and (arg in ("switch", "clone") or "/" in arg)
     if head == "/swarm":
-        return sub == "config" and arg in ("group", "clear")
+        # Every /swarm config word writes the global routing (group, disable,
+        # clear); showing it takes none. The hand list missed `disable`
+        # (2026-11, FA-153).
+        return sub == "config" and bool(arg)
     if head == "/runs":
         # Acting on a run (cancel, retry, close, dismiss, diagnose) -- an
         # incident card's button arrives as "/runs act <incident> <action>".

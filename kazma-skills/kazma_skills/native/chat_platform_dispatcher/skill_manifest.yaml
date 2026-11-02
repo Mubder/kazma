@@ -19,8 +19,8 @@ tools:
       - "اسأل المشغّل في المحادثة أن يراجع أمراً؛ الرسالة سؤال ولا توافق على شيء"
   send_message:
     arabic_name: "إرسال رسالة"
-    description: "Send a text message to the current conversation thread. Use this to reply to the user. The platform and delivery channel are handled automatically."
+    description: "Send a text message to a chat on Telegram, Discord or Slack, named by target_id (for example 'telegram:12345') and backend. Your answer already reaches this conversation: use this only to message another chat the user asked you to."
     category: "communication"
     prompt_chain:
-      - "أرسل رسالة نصية إلى المستخدم أو القناة الحالية"
+      - "أرسل رسالة نصية إلى محادثة في تيليجرام أو ديسكورد أو سلاك يحددها target_id؛ ردّك يصل إلى هذه المحادثة دون هذه الأداة"
 

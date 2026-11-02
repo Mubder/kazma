@@ -99,9 +99,12 @@ def _severed_by_truncation(tc: PendingToolCall, truncated: bool) -> bool:
     return truncated and (not args or set(args) <= {"raw", "_malformed"})
 
 
+_SEVERED_MARK = "Your previous response was TRUNCATED by the output token"
+
+
 def _severed_call_message(name: str) -> str:
     return (
-        f"Error: Your previous response was TRUNCATED by the output token "
+        f"Error: {_SEVERED_MARK} "
         f"limit (max_tokens), which severed the '{name}' arguments "
         f"mid-JSON -- the tool was NOT executed, and no approval was asked. "
         f"Do NOT retry the same large call. Instead, write the file in "
@@ -111,6 +114,36 @@ def _severed_call_message(name: str) -> str:
         f"output limit; if you still see this, the content is simply too "
         f"large for one response."
     )
+
+
+def _severed_again(state: SupervisorState, refused: list[ToolResult]) -> str:
+    """The tool whose arguments the output limit cut off a second time in the
+    running turn, or ``""``.
+
+    The model is told each time to write in smaller pieces; live 2026-11-01
+    (functional audit C11) it sent the same cut-off ``file_write`` seven times
+    in a row, 0.3 s apart, before the turn ended "used tools (file_write)" over
+    a call that never ran. The second time is the turn's end (FA-211).
+    """
+    from kazma_core.agent.plan_fence import running_turn
+
+    now = {str(r.get("name") or "") for r in refused if _SEVERED_MARK in str(r.get("content") or "")}
+    if not now:
+        return ""
+    turn = running_turn(state.get("messages") or [])
+    names = {
+        str(tc.get("id") or ""): str((tc.get("function") or {}).get("name") or tc.get("name") or "")
+        for m in turn if isinstance(m, dict)
+        for tc in (m.get("tool_calls") or []) if isinstance(tc, dict)
+    }
+    before = {
+        names.get(str(m.get("tool_call_id") or ""), "")
+        for m in turn
+        if isinstance(m, dict) and m.get("role") in ("tool", "function")
+        and _SEVERED_MARK in str(m.get("content") or "")
+    }
+    again = sorted(now & before)
+    return again[0] if again else ""
 
 
 async def _refuse_unrunnable_calls(
@@ -856,6 +889,16 @@ async def tool_worker_node(
     try:
         pending, preflight_refused = await _refuse_unrunnable_calls(
             pending, truncated=state.get("_last_finish_reason") == "length")
+        _cut_twice = _severed_again(state, preflight_refused)
+        if _cut_twice:
+            state["turn_failed"] = True
+            state["error_message"] = (
+                f"⚠️ The model's '{_cut_twice}' call was cut off by its output limit "
+                "twice in a row this turn, so it never ran. Ask for the work in "
+                "smaller pieces, or raise the model's output limit (max tokens) in "
+                "Settings > Models/Providers."
+            )
+            logger.warning("[ToolWorker] %s cut off twice by max_tokens — ending the turn", _cut_twice)
         # The gate loads constraint beliefs (SQLite) and authorizes each
         # semantic call against the settings and the stores: off the loop
         # (audit 2026-10-26 AUD-111). Its clarify card is LangGraph's
