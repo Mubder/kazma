@@ -56,6 +56,21 @@ def get_build_info() -> dict[str, Any]:
     return dict(_BUILD_INFO)
 
 
+def _check_failure(what: str, exc: BaseException) -> str:
+    """The ``error`` a health answer shows for a failed check (FA-131).
+
+    The probes answer without sign-in, so they never carry the exception's
+    text -- a DSN's host, a path, a key in a URL. They carry its type and
+    :func:`~kazma_core.errors.safe_error`'s stable code and reference, and the
+    exception is logged under that reference.
+    """
+    from kazma_core.errors import safe_error
+
+    info = safe_error(exc, log=False)
+    logger.error("%s (ref: %s): %s: %s", what, info.ref, type(exc).__name__, exc)
+    return f"{type(exc).__name__}: {info}"
+
+
 def check_config_store() -> dict[str, Any]:
     """Check ConfigStore connectivity AND durability.
 
@@ -85,8 +100,8 @@ def check_config_store() -> dict[str, Any]:
         _ = store.get("health.check", "ok")
         return {"status": "ok", "component": "config_store"}
     except Exception as e:
-        logger.error("ConfigStore health check failed: %s", e)
-        return {"status": "failed", "component": "config_store", "error": str(e)}
+        err = _check_failure("ConfigStore health check failed", e)
+        return {"status": "failed", "component": "config_store", "error": err}
 
 
 def check_swarm_engine() -> dict[str, Any]:
@@ -312,8 +327,8 @@ def check_agent_runner() -> dict[str, Any]:
             }
         return {"status": "ok", "component": "agent_runner"}
     except Exception as e:
-        logger.error("AgentRunner health check failed: %s", e)
-        return {"status": "failed", "component": "agent_runner", "error": str(e)}
+        err = _check_failure("AgentRunner health check failed", e)
+        return {"status": "failed", "component": "agent_runner", "error": err}
 
 
 def check_database() -> dict[str, Any]:
@@ -344,8 +359,8 @@ def check_database() -> dict[str, Any]:
             }
         return {"status": "ok", "component": "database", "backend": backend}
     except Exception as e:
-        logger.error("Database health check failed: %s", e)
-        return {"status": "failed", "component": "database", "error": str(e)}
+        err = _check_failure("Database health check failed", e)
+        return {"status": "failed", "component": "database", "error": err}
 
 
 @router.get("/health/live")
@@ -764,11 +779,11 @@ def _check_config_roundtrip() -> dict[str, Any]:
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
     except Exception as e:
-        logger.error("[health.deep] config roundtrip failed: %s", e)
+        err = _check_failure("[health.deep] config roundtrip failed", e)
         return {
             "status": "failed",
             "component": "config_roundtrip",
-            "error": f"{type(e).__name__}: {e}"[:300],
+            "error": err,
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
 
@@ -811,11 +826,11 @@ async def _check_memory_recall() -> dict[str, Any]:
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
     except Exception as e:
-        logger.error("[health.deep] memory recall failed: %s", e)
+        err = _check_failure("[health.deep] memory recall failed", e)
         return {
             "status": "failed",
             "component": "memory_recall",
-            "error": f"{type(e).__name__}: {e}"[:300],
+            "error": err,
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
 
@@ -842,11 +857,11 @@ def _check_workspace_binding() -> dict[str, Any]:
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
     except Exception as e:
-        logger.error("[health.deep] workspace binding failed: %s", e)
+        err = _check_failure("[health.deep] workspace binding failed", e)
         return {
             "status": "failed",
             "component": "workspace_binding",
-            "error": f"{type(e).__name__}: {e}"[:300],
+            "error": err,
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
 
@@ -869,11 +884,11 @@ def _check_research_stack() -> dict[str, Any]:
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
     except Exception as e:
-        logger.error("[health.deep] research readiness failed: %s", e)
+        err = _check_failure("[health.deep] research readiness failed", e)
         return {
             "status": "failed",
             "component": "research_stack",
-            "error": f"{type(e).__name__}: {e}"[:300],
+            "error": err,
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
 
@@ -911,11 +926,11 @@ def _check_brain_imports() -> dict[str, Any]:
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
     except Exception as e:
-        logger.error("[health.deep] brain import check failed: %s", e)
+        err = _check_failure("[health.deep] brain import check failed", e)
         return {
             "status": "failed",
             "component": "brain_imports",
-            "error": f"{type(e).__name__}: {e}"[:300],
+            "error": err,
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
 

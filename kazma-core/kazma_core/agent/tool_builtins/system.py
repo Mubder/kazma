@@ -967,14 +967,9 @@ def register_system_tools(registry: Any) -> None:
         return f"Task {task_id} status: {status_str} (no result yet)."
 
     # ── Code execution tool ───────────────────────────────────
-    @registry.register(
-        description=(
-            "Execute Python code in a sandboxed subprocess. Returns stdout + stderr. "
-            "Max 30s timeout, 512MB memory, isolated mode (no site-packages). "
-            "Use for calculations, data processing, prototyping."
-        ),
-        category="code",
-    )
+    from kazma_core.tools.code_exec import PYTHON_EXEC_DESCRIPTION
+
+    @registry.register(description=PYTHON_EXEC_DESCRIPTION, category="code")
     async def python_exec(code: str, timeout: int = 30) -> str:
         from kazma_core.tools.code_exec import python_exec as _exec
 

@@ -1036,10 +1036,10 @@ class TestCrossFlowEdgeCases:
                 "pattern": "dispatch",
             },
         )
-        assert resp.status_code == 200
+        # Nothing was dispatched, so it is not a 200 (2026-11, FA-236).
+        assert resp.status_code == 404
         data = resp.json()
-        # Should have the worker in missing list
-        assert "nonexistent" in data.get("missing", [])
+        assert "nonexistent" in data["missing"] and data["dispatched"] == []
 
     def test_task_history_pagination(self, tmp_path):
         """Task history supports pagination."""

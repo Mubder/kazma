@@ -50,6 +50,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from kazma_core.atomic_files import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -258,10 +259,10 @@ def perform_pg_document_backup(
             "checksums": checksums,
             "missing_at_backup": missing,
         }
-        (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_text(out / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
         verification = verify_pg_document_backup(out)
         manifest["verification"] = verification
-        (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_text(out / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
         out.rename(final)
         out = final
         logger.info(

@@ -159,9 +159,9 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
 
     # Clear the per-turn file-read dedup cache (turn boundary — audit 2026-08-15)
     try:
-        from kazma_core.tools.file_read import clear_turn_read_cache
+        from kazma_core.tools.file_read import clear_read_cache
 
-        clear_turn_read_cache()
+        clear_read_cache()
     except Exception:
         pass
 

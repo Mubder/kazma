@@ -456,20 +456,23 @@ def register_tasks_routes(
             dispatched = ["auto"]
             missing = [n for n in worker_names if str(n).lower() != "auto"]
         if not dispatched:
-            # All named workers were missing. Surface the missing list as a
-            # non-error warning (HTTP 200) so callers can read `missing` without
-            # treating a "no workers matched" dispatch as a hard failure — the
-            # task was understood, it just had no takers (matches the
-            # ("ok","warning") contract other dispatch paths return).
+            # All named workers were missing: nothing was recorded or run. It
+            # answered 200 "warning", so a script, the CLI and the page each
+            # read a dispatch that dispatched nothing as one that worked
+            # (2026-11, FA-236). `missing` still names them.
             return JSONResponse(
                 {
-                    "status": "warning",
-                    "message": "None of the specified workers are registered",
+                    "status": "error",
+                    "code": "workers_not_registered",
+                    "message": (
+                        "None of the specified workers are registered: "
+                        f"{', '.join(missing)}. Nothing was recorded or run."
+                    ),
                     "missing": missing,
                     "dispatched": [],
                     "results": [],
                 },
-                status_code=200,
+                status_code=404,
             )
         results: list[dict[str, Any]] = []
         task_result: Any | None = None

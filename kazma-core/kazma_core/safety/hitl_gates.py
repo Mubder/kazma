@@ -310,6 +310,15 @@ class GateEvents:
                 pass
 
     def publish(self, event: str, row: GateRow) -> None:
+        # Every transition of every mechanism publishes here, once: the gate
+        # counter is recorded here, not by the web path's bridge, which saw
+        # the chat's gates only (2026-11, FA-257).
+        try:
+            from kazma_core.metrics import record_hitl_gate
+
+            record_hitl_gate(row.state, row.mechanism)
+        except (ImportError, ValueError):  # a metric must never fail a transition
+            logger.debug("[HitlGates] gate metric not recorded", exc_info=True)
         with self._lock:
             subs = list(self._subs)
         for fn in subs:
@@ -892,6 +901,32 @@ def expire_due_gates(now: float | None = None) -> list[GateRow]:
     if expired:
         logger.info("[HitlGates] expired %d gate(s) to timeout", len(expired))
     return expired
+
+
+#: How long a decided gate is kept (2026-11, FA-141): the registry kept every
+#: question ever asked. A live gate (pending, claimed, resuming) is never
+#: removed; the daily digest and the weekly report read the last week.
+DECIDED_RETENTION_DAYS = 90
+#: Rows removed in one pass, so one pass never holds the file for long.
+_PRUNE_BATCH = 5000
+
+
+def prune_decided_gates(now: float | None = None, *, days: int = DECIDED_RETENTION_DAYS) -> int:
+    """Remove decided gates past *days*; how many were removed."""
+    ensure_gate_schema()
+    cutoff = (now if now is not None else time.time()) - days * 86400
+    conn = _connect()
+    try:
+        with conn:
+            cur = conn.execute(
+                "DELETE FROM hitl_gates WHERE gate_id IN (SELECT gate_id FROM hitl_gates "
+                f"WHERE state NOT IN ({','.join('?' * len(LIVE_STATES))}) "
+                "AND COALESCE(settled_at, claimed_at, created_at) < ? LIMIT ?)",
+                (*LIVE_STATES, cutoff, _PRUNE_BATCH),
+            )
+            return int(cur.rowcount or 0)
+    finally:
+        conn.close()
 
 
 # ── async wrappers (§23 — the server loop must never block) ────────────────

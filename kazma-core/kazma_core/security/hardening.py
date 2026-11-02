@@ -224,6 +224,7 @@ class SecurityHardeningRunner:
         "check_audit_logging",
         "check_permission_escalation",
         "check_service_exposure",
+        "check_secret_file_access",
     ]
 
     def __init__(self, project_root: str | Path | None = None) -> None:
@@ -705,6 +706,38 @@ class SecurityHardeningRunner:
             message="No service of Kazma's is published beyond this machine" + note,
             recommendation="Keep container ports on 127.0.0.1",
         )
+
+    async def check_secret_file_access(self) -> HardeningCheck:
+        """Only Kazma's account can read the restic passphrase file (2026-11,
+        FA-272): it unlocks every encrypted offsite snapshot."""
+        return await asyncio.to_thread(self._secret_files)
+
+    def _secret_files(self) -> HardeningCheck:
+        from kazma_core.backup.restic_repo import password_file
+        from kazma_core.security.file_access import readable_by_others
+
+        path = password_file()
+        readers = readable_by_others(path)
+        if readers is None and not path.is_file():
+            return HardeningCheck(name="check_secret_file_access", passed=True, severity="high",
+                                  message="No restic passphrase file on this install",
+                                  recommendation="Keep the passphrase escrowed off this machine")
+        if readers is None:
+            return HardeningCheck(name="check_secret_file_access", passed=False, severity="high",
+                                  message=f"Could not read who may open {path.name}",
+                                  recommendation="Check the file's permissions by hand (icacls / ls -l)")
+        if readers:
+            account = os.environ.get("USERNAME") or "<Kazma's account>"
+            fix = (f'icacls "{path}" /inheritance:r /grant:r "{account}:F"' if os.name == "nt"
+                   else f"chmod 600 {path}")
+            return HardeningCheck(
+                name="check_secret_file_access", passed=False, severity="high",
+                message=f"{path.name} can be read by: " + ", ".join(sorted(set(readers))),
+                recommendation=f"Restrict it to Kazma's account: {fix}",
+            )
+        return HardeningCheck(name="check_secret_file_access", passed=True, severity="high",
+                              message=f"{path.name} is readable by Kazma's account only",
+                              recommendation="Keep it that way")
 
     async def check_permission_escalation(self) -> HardeningCheck:
         """Calls in product code that run a shell or evaluate code."""

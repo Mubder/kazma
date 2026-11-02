@@ -180,7 +180,6 @@ async def gate_pending_from_payload(
     if not registry_on():
         return
     try:
-        from kazma_core.metrics import record_hitl_gate
         from kazma_core.safety.hitl_gates import GateRow, register_gate_async
 
         thread_id = str(payload.get("thread_id") or "")
@@ -209,8 +208,9 @@ async def gate_pending_from_payload(
         # stamped on this frame) is only the new ask — not inflight leftovers.
         if thread_id:
             await settle_thread_gates(thread_id)
-        created = await register_gate_async(row)
-        record_hitl_gate(created.state, mechanism)
+        # The transition counter is recorded by the registry itself
+        # (GateEvents.publish), once per real transition (FA-257).
+        await register_gate_async(row)
     except Exception:
         logger.warning("[GateBridge] register failed (user action unaffected)", exc_info=True)
         _mismatch("register")
@@ -234,10 +234,7 @@ async def gate_claimed(
             raise RuntimeError("Durable approval recording is disabled")
         return ""
     try:
-        from kazma_core.metrics import (
-            record_hitl_gate,
-            record_hitl_gate_reconciled,
-        )
+        from kazma_core.metrics import record_hitl_gate_reconciled
         from kazma_core.safety.hitl_gates import (
             GateRow,
             TransitionConflict,
@@ -268,7 +265,6 @@ async def gate_claimed(
                 claimed = await claim_gate_async(row.gate_id, decision, actor, allow_reclaim=False)
             else:
                 claimed = await claim_gate_async(row.gate_id, decision, actor)
-            record_hitl_gate(claimed.state, claimed.mechanism)
             return claimed.gate_id
         except TransitionConflict as tc:
             # The endpoint verified a real pending interrupt but the
@@ -297,7 +293,6 @@ async def gate_resuming(interrupt_id: str, *, strict: bool = False) -> None:
             raise RuntimeError("Durable approval recording is unavailable")
         return
     try:
-        from kazma_core.metrics import record_hitl_gate
         from kazma_core.safety.hitl_gates import (
             TransitionConflict,
             gate_for_async,
@@ -311,8 +306,7 @@ async def gate_resuming(interrupt_id: str, *, strict: bool = False) -> None:
                 raise RuntimeError("Approval claim was not persisted")
             return
         try:
-            r = await mark_resuming_async(row.gate_id)
-            record_hitl_gate(r.state, r.mechanism)
+            await mark_resuming_async(row.gate_id)
         except TransitionConflict:
             _mismatch("resuming")
             if strict:
@@ -346,7 +340,6 @@ async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
         logger.debug("[GateBridge] unpause on abort skipped", exc_info=True)
     if registry_on():
         try:
-            from kazma_core.metrics import record_hitl_gate
             from kazma_core.safety.hitl_gates import (
                 TransitionConflict,
                 live_gates_async,
@@ -355,8 +348,7 @@ async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
 
             for row in await live_gates_async(thread_id):
                 try:
-                    settled = await settle_gate_async(row.gate_id, "aborted")
-                    record_hitl_gate(settled.state, settled.mechanism)
+                    await settle_gate_async(row.gate_id, "aborted")
                 except TransitionConflict:
                     _mismatch("abort_settle")
         except Exception:
@@ -414,7 +406,6 @@ async def settle_thread_gates(thread_id: str, *, outcome: str = "") -> None:
     if not registry_on() or not thread_id:
         return
     try:
-        from kazma_core.metrics import record_hitl_gate
         from kazma_core.safety.hitl_gates import (
             TransitionConflict,
             live_gates_async,
@@ -424,8 +415,7 @@ async def settle_thread_gates(thread_id: str, *, outcome: str = "") -> None:
         for row in await live_gates_async(thread_id):
             if row.state in ("claimed", "resuming"):
                 try:
-                    s = await settle_gate_async(row.gate_id, outcome)
-                    record_hitl_gate(s.state, s.mechanism)
+                    await settle_gate_async(row.gate_id, outcome)
                 except TransitionConflict:
                     _mismatch("settle")
     except Exception:

@@ -656,6 +656,11 @@ _RECONSOLIDATION_INTERVAL_HOURS = 24
 _COMMITMENT_GC_INTERVAL_MINUTES = 15
 
 
+#: The two enqueueing cadences' last-run stamps (2026-11, FA-149).
+_MACRO_SLEEP_CADENCE_KEY = "system.cadence.macro_sleep"
+_RECONSOLIDATION_CADENCE_KEY = "system.cadence.reconsolidation"
+
+
 def _distinct_tenants() -> list[str]:
     """Return all tenant IDs that have episodes in memory_state.db.
 
@@ -700,21 +705,26 @@ def _start_macro_sleep_scheduler() -> None:
         return
 
     async def _loop() -> None:
+        from kazma_core.observability.cadence import seconds_until_due, stamp_run
+        from kazma_core.shutdown import sleep_or_shutdown
 
-        # Run once shortly after boot (skip the full interval for the first sweep)
-        await asyncio.sleep(60)
+        interval = _MACRO_SLEEP_INTERVAL_HOURS * 3600
         while True:
+            # Counted from the last run, never from boot (2026-11, FA-149): it
+            # ran 60 s after every boot, several times a day on the live install.
+            wait = await asyncio.to_thread(seconds_until_due, _MACRO_SLEEP_CADENCE_KEY, interval, settle_s=60)
+            if await sleep_or_shutdown(wait):
+                return
             try:
                 # Fan out over all active tenants so decay/promotion/archival
-                # runs for every tenant, not just "default". In single-user
-                # (shared) mode _distinct_tenants() returns ["default"] —
-                # unchanged from the old hardcoded behavior.
-                for tenant in _distinct_tenants():
+                # runs for every tenant, not just "default". The tenant list
+                # is a database read: off the loop (FA-150).
+                for tenant in await asyncio.to_thread(_distinct_tenants):
                     await asyncio.to_thread(_enqueue_checked, "macro_sleep", {"tenant_id": tenant, "live_config": True})
+                await asyncio.to_thread(stamp_run, _MACRO_SLEEP_CADENCE_KEY)
                 logger.debug("[memory_worker] enqueued periodic macro_sleep")
             except Exception:
                 logger.debug("[memory_worker] macro_sleep enqueue failed", exc_info=True)
-            await asyncio.sleep(_MACRO_SLEEP_INTERVAL_HOURS * 3600)
 
     try:
         _t = loop.create_task(_loop())
@@ -752,7 +762,10 @@ def _start_backup_export_scheduler() -> None:
         # First sweep shortly after boot (skip the full day-long wait), then
         # repeat once per day. The body only enqueues; the durable worker
         # drains the actual backup/export work on its own loop.
-        await asyncio.sleep(120)
+        from kazma_core.shutdown import sleep_or_shutdown
+
+        if await sleep_or_shutdown(120):
+            return
         if _backup_ran_recently():
             # Skip the boot sweep when a backup is already fresh.
             #
@@ -780,7 +793,8 @@ def _start_backup_export_scheduler() -> None:
                     )
             except (OSError, RuntimeError, ValueError):
                 logger.warning("[memory_worker] pg dump freshness check failed", exc_info=True)
-            await asyncio.sleep(await asyncio.to_thread(_seconds_until_backup_due))
+            if await sleep_or_shutdown(await asyncio.to_thread(_seconds_until_backup_due)):
+                return
         while True:
             try:
                 from kazma_core.db.pg_backup import pg_backup_enabled
@@ -806,12 +820,13 @@ def _start_backup_export_scheduler() -> None:
                 await asyncio.to_thread(_enqueue_checked, "connector_health", {})
                 # Export per-tenant so each tenant's beliefs/graph land in
                 # their own file (not overwritten by "default").
-                for tenant in _distinct_tenants():
+                for tenant in await asyncio.to_thread(_distinct_tenants):
                     await asyncio.to_thread(_enqueue_checked, "nightly_export", {"tenant_id": tenant})
                 logger.debug("[memory_worker] enqueued nightly backup + export")
             except Exception:
                 logger.debug("[memory_worker] backup/export enqueue failed", exc_info=True)
-            await asyncio.sleep(_BACKUP_EXPORT_INTERVAL_HOURS * 3600)
+            if await sleep_or_shutdown(_BACKUP_EXPORT_INTERVAL_HOURS * 3600):
+                return
 
     try:
         _t = loop.create_task(_loop())
@@ -844,7 +859,10 @@ def _start_session_purge_scheduler() -> None:
         return
 
     async def _loop() -> None:
-        await asyncio.sleep(120)  # first sweep shortly after boot
+        from kazma_core.shutdown import sleep_or_shutdown
+
+        if await sleep_or_shutdown(120):  # first sweep shortly after boot
+            return
         while True:
             try:
                 from kazma_core.security.web_sessions import purge_expired_sessions
@@ -852,7 +870,8 @@ def _start_session_purge_scheduler() -> None:
                 await asyncio.to_thread(purge_expired_sessions)
             except Exception:
                 logger.debug("[memory_worker] session purge failed", exc_info=True)
-            await asyncio.sleep(_SESSION_PURGE_INTERVAL_MINUTES * 60)
+            if await sleep_or_shutdown(_SESSION_PURGE_INTERVAL_MINUTES * 60):
+                return
 
     try:
         _t = loop.create_task(_loop())
@@ -897,6 +916,43 @@ def _expire_gates() -> None:
             logger.info("[memory_worker] gate TTL sweep: %d expired", len(expired))
 
 
+def _prune_decided_gates() -> None:
+    # Append-only store retention (2026-11, FA-141): decided approval gates.
+    from kazma_core.safety.hitl_gates import gate_registry_enabled, prune_decided_gates
+
+    if gate_registry_enabled():
+        removed = prune_decided_gates()
+        if removed:
+            logger.info("[memory_worker] gate retention: %d decided gate(s) removed", removed)
+
+
+def _prune_tool_receipts() -> None:
+    # Append-only store retention (FA-141): completed tool receipts only.
+    from kazma_core.agent.effect_journal import prune_completed_receipts
+
+    removed = prune_completed_receipts()
+    if removed:
+        logger.info("[memory_worker] receipt retention: %d completed receipt(s) removed", removed)
+
+
+def _prune_task_ledgers() -> None:
+    # Append-only store retention (FA-141): done and superseded ledgers.
+    from kazma_core.agent.task_ledger import FINISHED_RETENTION_DAYS, get_ledger_store
+
+    removed = get_ledger_store().prune_finished(days=FINISHED_RETENTION_DAYS)
+    if removed:
+        logger.info("[memory_worker] task ledger retention: %d finished ledger(s) removed", removed)
+
+
+def _prune_model_calls() -> None:
+    # Append-only store retention (FA-141): the model-call ledger.
+    from kazma_core.observability.llm_ledger import prune_old_calls
+
+    removed = prune_old_calls()
+    if removed:
+        logger.info("[memory_worker] model-call retention: %d row(s) removed", removed)
+
+
 def _purge_task_queue() -> None:
     # Memory task queue retention (audit M2): terminal rows older than 7 days.
     from kazma_core.memory.task_queue import purge_completed_tasks
@@ -912,6 +968,17 @@ def _prune_swarm_tasks() -> None:
     from kazma_core.swarm.task_store import prune_finished_tasks
 
     prune_finished_tasks()
+
+
+def _prune_pipeline_logs() -> None:
+    # Append-only store retention (FA-141): swarm pipeline telemetry, with
+    # the swarm task retention's days.
+    from kazma_core.swarm.memory.pipeline_logger import prune_pipeline_logs
+    from kazma_core.swarm.task_store import task_retention_days
+
+    removed = prune_pipeline_logs(days=task_retention_days())
+    if removed:
+        logger.info("[memory_worker] pipeline log retention: %d row(s) removed", removed)
 
 
 def _purge_swarm_approvals() -> None:
@@ -1139,9 +1206,14 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("commitment GC cycle", _gc_commitments),
     ("artifact GC", _gc_artifacts),
     ("gate TTL sweep", _expire_gates),
+    ("gate retention", _prune_decided_gates),
+    ("tool receipt retention", _prune_tool_receipts),
+    ("task ledger retention", _prune_task_ledgers),
+    ("model-call retention", _prune_model_calls),
     ("ended YOLO windows", _purge_ended_yolo),
     ("task queue purge", _purge_task_queue),
     ("swarm task retention", _prune_swarm_tasks),
+    ("pipeline log retention", _prune_pipeline_logs),
     ("swarm approval rows", _purge_swarm_approvals),
     ("run incident retention", _run_incident_retention),
     ("checkpoint retention", _prune_checkpoints),
@@ -1252,11 +1324,15 @@ def _start_commitment_gc_scheduler() -> None:
         # The forget journal at once: a memory database restored from an
         # older copy must not show forgotten turns until the first sweep
         # (Memory audit M10). The rest shortly after boot.
+        from kazma_core.shutdown import sleep_or_shutdown
+
         await _run_sweeps((("forget convergence at boot", _converge_forgets),))
-        await asyncio.sleep(90)  # first sweep shortly after boot
+        if await sleep_or_shutdown(90):  # first sweep shortly after boot
+            return
         while True:
             await _run_maintenance_sweeps()
-            await asyncio.sleep(_COMMITMENT_GC_INTERVAL_MINUTES * 60)
+            if await sleep_or_shutdown(_COMMITMENT_GC_INTERVAL_MINUTES * 60):
+                return
 
     try:
         _t = loop.create_task(_loop())
@@ -1281,23 +1357,30 @@ def _start_reconsolidation_scheduler() -> None:
         return
 
     async def _loop() -> None:
-        # Offset first run from backup (180s) so they don't stampede disk
-        await asyncio.sleep(180)
+        from kazma_core.observability.cadence import seconds_until_due, stamp_run
+        from kazma_core.shutdown import sleep_or_shutdown
+
+        interval = _RECONSOLIDATION_INTERVAL_HOURS * 3600
         while True:
+            # Counted from the last run (FA-149); 180 s after boot when due,
+            # offset from the backup so they don't stampede the disk.
+            wait = await asyncio.to_thread(seconds_until_due, _RECONSOLIDATION_CADENCE_KEY, interval, settle_s=180)
+            if await sleep_or_shutdown(wait):
+                return
             try:
-                # Fan dedup/re-embed over all active tenants.
-                for tenant in _distinct_tenants():
+                # Fan dedup/re-embed over all active tenants (off the loop: FA-150).
+                for tenant in await asyncio.to_thread(_distinct_tenants):
                     await asyncio.to_thread(
                         _enqueue_checked,
                         "global_reconsolidation",
                         {"tenant_id": tenant, "max_merges": 50, "reembed_limit": 100},
                     )
+                await asyncio.to_thread(stamp_run, _RECONSOLIDATION_CADENCE_KEY)
                 logger.debug("[memory_worker] enqueued global_reconsolidation")
             except Exception:
                 logger.debug(
                     "[memory_worker] reconsolidation enqueue failed", exc_info=True
                 )
-            await asyncio.sleep(_RECONSOLIDATION_INTERVAL_HOURS * 3600)
 
     try:
         _t = loop.create_task(_loop())

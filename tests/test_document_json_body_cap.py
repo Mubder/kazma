@@ -78,7 +78,7 @@ def _too_big() -> bytes:
 @pytest.mark.asyncio
 async def test_a_declared_length_past_the_cap_is_refused_unread(monkeypatch):
     status, payload, read = await _call(_app(monkeypatch), "/api/documents/search", _too_big())
-    assert status == 413 and payload["detail"]["code"] == "request_too_large"
+    assert status == 413 and payload["code"] == "request_too_large"
     assert read == 0
 
 
@@ -113,7 +113,7 @@ async def test_a_body_route_reads_everything_first():
 ], ids=["malformed", "not-an-object", "too-deep"])
 async def test_bad_json_is_a_422_never_a_crash(monkeypatch, body, code):
     status, payload, _read = await _call(_app(monkeypatch), "/api/documents/search", body)
-    assert status == 422 and payload["detail"]["code"] == code
+    assert status == 422 and payload["code"] == code
 
 
 @pytest.mark.asyncio
@@ -160,7 +160,7 @@ def test_the_gate_sees_a_route_reading_request_json():
 @pytest.mark.asyncio
 async def test_the_delete_route_refuses_a_large_body_unread(monkeypatch):
     status, payload, read = await _call(_app(monkeypatch), "/api/documents/d1/delete", _too_big())
-    assert status == 413 and payload["detail"]["code"] == "request_too_large"
+    assert status == 413 and payload["code"] == "request_too_large"
     assert read == 0
 
 

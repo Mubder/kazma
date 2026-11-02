@@ -322,7 +322,7 @@ async def _download_github_zip(
                 last_err = exc
                 continue
         else:
-            shutil.rmtree(tmp, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, tmp, ignore_errors=True)
             raise RuntimeError(
                 f"Could not download {owner}/{repo}"
                 + (f" (last error: {last_err})" if last_err else "")
@@ -479,7 +479,7 @@ async def install_from_github(
         )
     finally:
         if cleanup is not None:
-            shutil.rmtree(cleanup, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, cleanup, ignore_errors=True)
 
 
 def install_from_source(

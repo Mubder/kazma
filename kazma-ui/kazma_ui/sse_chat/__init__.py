@@ -17,7 +17,7 @@ code to one another).
                      (first frame of a turn's stream; not journaled)
   token              content (a piece of the answer, appended)
   tool_call          tool_name, tool_call_id, inputs
-  tool_result        tool_name, tool_call_id, result
+  tool_result        tool_name, tool_call_id, result, state
   memory_explain     query, empty, detail, beliefs, episodes,
                      weekly_summaries, knowledge, summary
   turn_heartbeat     phase, current, detail, step, elapsed_s
@@ -60,6 +60,7 @@ from kazma_core.exceptions import sanitize_error
 
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.thread_ownership import resolve_caller_thread
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +325,10 @@ def create_sse_chat_router(
     async def bind_chat_session(request: Request) -> JSONResponse:
         """Register an empty browser shell before its telemetry subscription."""
         try:
-            body = await request.json()
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        try:
             sid = body.get("session_id") if isinstance(body, dict) else None
             if not isinstance(sid, str) or not sid.strip() or len(sid) > 200:
                 return JSONResponse({"error": "Invalid session id"}, status_code=400)
@@ -355,16 +359,9 @@ def create_sse_chat_router(
         """
         # ── Parse request ──────────────────────────────────────────
         try:
-            body = await request.json()
-        except Exception:
-            return StreamingResponse(
-                iter([_sse_frame("error", {"content": "Invalid JSON body"})]),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",  # nginx passthrough
-                },
-            )
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
 
         user_message = (body.get("message") or "").strip()
         # Application-level prompt cap: uvicorn/ws frame limits bound the
@@ -2056,9 +2053,9 @@ def create_sse_chat_router(
             The normalized provider profile.
         """
         try:
-            body = await request.json()
-        except Exception:
-            return {"error": "Invalid JSON"}
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
 
         # SSRF validation on user-supplied base_url.
         # Provider switch is user-initiated configuration of their own LLM
@@ -2129,9 +2126,9 @@ def create_sse_chat_router(
         transcript. Returns ``{"cancelled": bool}``.
         """
         try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
+            payload = await read_json(request, allow_empty=True)
+        except InvalidJsonBody:
+            return invalid_json_response()
         session_id = str(payload.get("session_id") or "")
         # Only a thread the caller owns (audit 2026-09-22): these used to act
         # on any thread id in the body, and abort wrote into its graph state.
@@ -2181,9 +2178,9 @@ def create_sse_chat_router(
         ``{ok: false, reason: "no_active_task"}``.
         """
         try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
+            payload = await read_json(request, allow_empty=True)
+        except InvalidJsonBody:
+            return invalid_json_response()
         session_id = str(payload.get("session_id") or "")
         # Only a thread the caller owns (audit 2026-09-22): these used to act
         # on any thread id in the body, and abort wrote into its graph state.
@@ -2341,9 +2338,9 @@ def create_sse_chat_router(
         Body: ``{"session_id": ...}`` (or ``{"thread_id": ...}``).
         """
         try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
+            payload = await read_json(request, allow_empty=True)
+        except InvalidJsonBody:
+            return invalid_json_response()
         session_id = str(payload.get("session_id") or "")
         # Only a thread the caller owns (audit 2026-09-22): these used to act
         # on any thread id in the body, and abort wrote into its graph state.

@@ -189,13 +189,31 @@ def persist_reply(
                 close_reply_turn(thread_id)
             else:
                 close_reply_turn(thread_id, session_id, reply_turn_id)
-        logger.info(
-            "[turn] Reply persisted thread=%s turn=%s chars=%d interrupted=%s",
-            (thread_id or "")[:12],
-            reply_turn_id[:12],
-            len(str(content or "")),
-            interrupted,
-        )
+        # Say what the store answered (FA-108): "persisted" was logged for a
+        # write the store refused, so the log read as saved over a reply only
+        # the checkpoint held.
+        if ok:
+            logger.info(
+                "[turn] Reply persisted thread=%s turn=%s chars=%d interrupted=%s",
+                (thread_id or "")[:12],
+                reply_turn_id[:12],
+                len(str(content or "")),
+                interrupted,
+            )
+        elif not str(content or "").strip() and not pending:
+            logger.debug(
+                "[turn] Nothing to persist thread=%s turn=%s (no text yet)",
+                (thread_id or "")[:12],
+                reply_turn_id[:12],
+            )
+        else:
+            logger.warning(
+                "[turn] Reply NOT persisted thread=%s turn=%s chars=%d: the "
+                "transcript store refused it (the reply is still in the checkpoint)",
+                (thread_id or "")[:12],
+                reply_turn_id[:12],
+                len(str(content or "")),
+            )
         return ok
     except Exception:
         logger.warning(

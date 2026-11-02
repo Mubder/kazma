@@ -141,6 +141,9 @@ def test_the_old_worker_cache_kept_the_old_key(registry, monkeypatch):
     """Negative control: the cache before FA-106 never looked at the registry."""
     reg, used = registry
     monkeypatch.setattr(resilient_chat, "_follow", lambda registry: None)
+    # Nor did anything else clear it: a provider write can reach an agent's
+    # sync_active_model through a settings listener an earlier test left.
+    monkeypatch.setattr(resilient_chat, "reset_failover_cache", lambda: None)
     _worker_call()
     _change_key(reg)
     _worker_call()

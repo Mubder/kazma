@@ -33,11 +33,11 @@ jobs:
     outputs:
       names: ${{ steps.names.outputs.names }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Choose the names
         id: names
         env:
@@ -59,7 +59,7 @@ jobs:
         run: python scripts/pypi_reserve.py --out dist ${WANTED:+--names "$WANTED"}
       - name: Check the metadata
         run: uvx twine check --strict dist/*/*
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pypi-reserve
           path: dist/
@@ -81,7 +81,7 @@ jobs:
       matrix:
         name: ${{ fromJSON(needs.build.outputs.names) }}
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: pypi-reserve
           path: dist/

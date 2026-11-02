@@ -657,7 +657,8 @@ def test_scheduler_sleeps_before_the_first_send():
     import inspect
 
     src = inspect.getsource(daily_digest.digest_scheduler)
-    assert src.index("asyncio.sleep") < src.index("_send_due_digest")
+    # The wait ends at a stop too (2026-11, FA-265: shutdown.sleep_or_shutdown).
+    assert src.index("sleep_or_shutdown") < src.index("_send_due_digest")
 
 
 def test_scheduler_is_registered_at_boot_and_held():

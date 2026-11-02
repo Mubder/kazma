@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
 import logging
 import os
 import secrets
@@ -34,7 +35,9 @@ import httpx
 from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
+    "BINDING_COOKIE_PATH",
     "OidcConfig",
+    "binding_cookie_name",
     "build_authorize_url",
     "exchange_code",
     "fetch_discovery",
@@ -104,8 +107,54 @@ def make_pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
+#: Every sign-in in progress, one settings key (FA-133): ``{state id:
+#: {"verifier", "exp"}}``, changed only by ``atomic_update``. The state was one
+#: global key compared with ``!=``: a second sign-in replaced the first, and a
+#: state that leaked to another browser signed that browser in.
+_PENDING_KEY = "auth.oidc.pending"
+_PENDING_TTL_S = 600
+#: Sign-ins kept at once; past it the one closest to expiry goes first.
+_PENDING_MAX = 32
+#: Where the browser-binding cookie is sent: the callback only.
+BINDING_COOKIE_PATH = "/api/auth/oidc"
+
+
+def _state_id(state: str) -> str:
+    """A sign-in's settings id: the state's hash, so the state itself is
+    stored nowhere but in the browser that started it."""
+    return hashlib.sha256(state.encode("utf-8")).hexdigest()[:32]
+
+
+def binding_cookie_name(state: str) -> str:
+    """The cookie that binds a sign-in to the browser that started it.
+
+    One per sign-in (named by its state), so two sign-ins started in one
+    browser both finish. Its value is the state; the callback refuses a state
+    the browser does not hold (:func:`exchange_code`).
+    """
+    return f"kazma-oidc-{_state_id(state)[:16]}"
+
+
+def _live_pending(curr: Any, now: float) -> dict[str, dict[str, Any]]:
+    """The pending sign-ins in *curr* that have not expired."""
+    if not isinstance(curr, dict):
+        return {}
+    live: dict[str, dict[str, Any]] = {}
+    for sid, entry in curr.items():
+        try:
+            if isinstance(entry, dict) and float(entry.get("exp") or 0) > now:
+                live[str(sid)] = dict(entry)
+        except (TypeError, ValueError):
+            continue
+    return live
+
+
 async def build_authorize_url() -> dict[str, str]:
-    """Build authorize URL + store state/pkce in ConfigStore. Returns dict with url."""
+    """Build the authorize URL and record the sign-in as pending.
+
+    Returns ``url``, ``state``, ``redirect_uri`` and ``binding_cookie`` (the
+    name of the cookie the start route sets to ``state``).
+    """
     cfg = OidcConfig()
     if not cfg.issuer or not cfg.client_id:
         raise RuntimeError("OIDC not configured")
@@ -125,15 +174,16 @@ async def build_authorize_url() -> dict[str, str]:
     verifier, challenge = make_pkce()
     from kazma_core.config_store import get_config_store
 
+    def _add(curr: Any) -> dict[str, dict[str, Any]]:
+        now = time.time()
+        pending = _live_pending(curr, now)
+        while len(pending) >= _PENDING_MAX:
+            pending.pop(min(pending, key=lambda k: float(pending[k].get("exp") or 0)))
+        pending[_state_id(state)] = {"verifier": verifier, "exp": now + _PENDING_TTL_S}
+        return pending
+
     # Off the loop: a settings write is a database round trip.
-    await asyncio.to_thread(
-        get_config_store().batch_set,
-        [
-            ("auth.oidc.state", state, "auth"),
-            ("auth.oidc.pkce_verifier", verifier, "auth"),
-            ("auth.oidc.state_exp", time.time() + 600, "auth"),
-        ],
-    )
+    await asyncio.to_thread(get_config_store().atomic_update, _PENDING_KEY, _add, "auth")
 
     params = {
         "response_type": "code",
@@ -148,37 +198,51 @@ async def build_authorize_url() -> dict[str, str]:
         "url": f"{auth_ep}?{urlencode(params)}",
         "state": state,
         "redirect_uri": cfg.redirect_uri,
+        "binding_cookie": binding_cookie_name(state),
     }
 
 
-async def exchange_code(code: str, state: str) -> dict[str, Any]:
-    """Exchange authorization code for tokens; return claims + role."""
+async def exchange_code(code: str, state: str, *, bound_state: str) -> dict[str, Any]:
+    """Exchange authorization code for tokens; return claims + role.
+
+    ``bound_state`` is the browser's binding cookie (:func:`binding_cookie_name`):
+    a state another browser started is refused, compared in constant time.
+    The pending sign-in is taken out of the store before anything else, in
+    one compare-and-set, so a state is good for one callback whatever
+    happens next -- a second callback with it, at the same moment or later,
+    finds nothing (FA-133).
+    """
     cfg = OidcConfig()
     from kazma_core.config_store import get_config_store
 
-    def _pending() -> tuple[Any, Any, Any]:
-        cs = get_config_store()
-        return (
-            cs.get("auth.oidc.state"),
-            cs.get("auth.oidc.state_exp") or 0,
-            cs.get("auth.oidc.pkce_verifier") or "",
-        )
+    if not state or not bound_state or not hmac.compare_digest(
+        bound_state.encode("utf-8"), state.encode("utf-8")
+    ):
+        raise PermissionError("OIDC sign-in was not started in this browser")
 
-    def _clear_pending() -> None:
-        cs = get_config_store()
-        cs.delete("auth.oidc.state")
-        cs.delete("auth.oidc.pkce_verifier")
-        cs.delete("auth.oidc.state_exp")
+    taken: dict[str, Any] = {}
 
-    # Settings reads and deletes are database round trips: off the loop.
-    expected, exp, verifier = await asyncio.to_thread(_pending)
-    if not expected or state != expected:
+    def _take(curr: Any) -> dict[str, dict[str, Any]]:
+        now = time.time()
+        pending = curr if isinstance(curr, dict) else {}
+        entry = pending.get(_state_id(state))
+        taken.clear()
+        if isinstance(entry, dict):
+            taken.update(entry)
+        rest = _live_pending(pending, now)
+        rest.pop(_state_id(state), None)
+        return rest
+
+    # A settings read-modify-write is a database round trip: off the loop.
+    await asyncio.to_thread(get_config_store().atomic_update, _PENDING_KEY, _take, "auth")
+    if not taken:
         raise PermissionError("Invalid OIDC state")
     try:
-        if time.time() > float(exp):
+        if time.time() > float(taken.get("exp") or 0):
             raise PermissionError("OIDC state expired")
     except (TypeError, ValueError):
         raise PermissionError("OIDC state expired") from None
+    verifier = str(taken.get("verifier") or "")
 
     disc = await fetch_discovery(cfg.issuer)
     token_ep = disc.get("token_endpoint")
@@ -220,19 +284,6 @@ async def exchange_code(code: str, state: str) -> dict[str, Any]:
         raise PermissionError("OIDC claims missing subject")
 
     role = oidc_role_from_claims(claims, cfg)
-    # Clear one-time state
-    try:
-        await asyncio.to_thread(_clear_pending)
-    except Exception:
-        # NOT safe to ignore silently (audit O3): these are one-time values.
-        # If they survive, the same state + PKCE verifier stay valid and the
-        # callback becomes replayable until they expire.
-        logger.error(
-            "[oidc] failed to clear one-time state/PKCE verifier — the "
-            "callback may be replayable until auth.oidc.state_exp lapses",
-            exc_info=True,
-        )
-
     return {
         "claims": claims,
         "role": role,

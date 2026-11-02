@@ -8,6 +8,7 @@ HITL danger-tier. Kill-switch: ``KAZMA_COMPUTER_USE=0``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -295,8 +296,8 @@ async def _screenshot_b64() -> str:
 
         from kazma_core.tools.vision_analyze import _build_data_uri, _resize_image
 
-        raw = Path(str(dest)).read_bytes()
-        raw = _resize_image(raw)
+        # A screenshot's read and resize: off the loop (FA-139).
+        raw = await asyncio.to_thread(lambda: _resize_image(Path(str(dest)).read_bytes()))
         uri = _build_data_uri(raw, "image/png")
         return uri.split(",", 1)[-1]
     except Exception as exc:

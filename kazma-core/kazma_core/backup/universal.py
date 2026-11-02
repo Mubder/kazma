@@ -19,6 +19,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from kazma_core.atomic_files import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -265,16 +266,26 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
     return result
 
 
+#: Files of a backup the offsite copies never carry (2026-11, FA-215, the
+#: owner's decision): the install's ``.env`` holds the vault key, and the
+#: offsite zip and the rclone copy are plain. The local backup keeps it (it
+#: is the vault's recovery key), and so does the restic snapshot, which is
+#: encrypted; the vault key is escrowed apart from both.
+OFFSITE_LEAVES_OUT = (".env",)
+
+
 def _zip_backup_dir(dest: Path) -> Path:
     """Compress the finished backup directory into a single .zip archive.
 
     One file instead of a folder tree: the cloud copy becomes atomic (a
     partial upload can't masquerade as a complete backup), uploads are a
     handful of API calls instead of hundreds, and SQLite DBs compress 5-10x.
+    The archive is the offsite copy: :data:`OFFSITE_LEAVES_OUT` is left out.
     """
     import zipfile
 
-    files = [f for f in dest.rglob("*") if f.is_file()]
+    files = [f for f in dest.rglob("*")
+             if f.is_file() and f.relative_to(dest).as_posix() not in OFFSITE_LEAVES_OUT]
     if not files:
         raise RuntimeError("backup directory is empty — nothing to archive")
     zip_path = dest.parent / f"{dest.name}.zip"
@@ -338,7 +349,9 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
         try:
             proc = await asyncio.to_thread(
                 subprocess.run,
-                ["rclone", "copy", "--transfers", "4", "--", str(dest), remote],
+                ["rclone", "copy", "--transfers", "4",
+                 *(arg for name in OFFSITE_LEAVES_OUT for arg in ("--exclude", f"/{name}")),
+                 "--", str(dest), remote],
                 capture_output=True,
                 text=True, encoding="utf-8", errors="replace",
                 timeout=1800,
@@ -1181,18 +1194,18 @@ def perform_universal_backup(
         "offsite": {"status": "pending", "note": "cloud upload in flight at archive time"},
     }
     manifest_path = dest / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    atomic_write_text(manifest_path, json.dumps(manifest, indent=2))
     offsite = _offsite_sync(dest)
     # Final elapsed includes the cloud upload; the zip's embedded manifest
     # keeps the local-build elapsed it was written with.
     elapsed = round(time.time() - started, 1)
     manifest["elapsed_seconds"] = elapsed
     manifest["offsite"] = offsite
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    atomic_write_text(manifest_path, json.dumps(manifest, indent=2))
     restic_result = _snapshot_to_restic(dest)
     if restic_result:
         manifest["restic"] = restic_result
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        atomic_write_text(manifest_path, json.dumps(manifest, indent=2))
     _alert_on_backup_gaps(
         offsite, db_fail, [r for r in db_results if r.get("error")],
         files_failed=files_failed, file_examples=file_examples,

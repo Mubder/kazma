@@ -1,6 +1,14 @@
-"""R0 baselines — golden topics + hard structural rubric for research reports.
+"""R0 baselines — golden topics + a deterministic rubric for research reports.
 
 Does not require live network. Use after a pipeline run to score artifacts.
+
+The rubric scores the report's content more than its shape (2026-11, FA-235):
+it was structural only -- a title, headings, a Sources section, a length --
+so a long report with every claim uncited and paragraphs repeated scored
+100/100. Most of the score now comes from what the reader relies on: the
+paragraphs cite their sources, the listed sources are used, every cited
+link is listed, nothing is said twice, and the report covers the question.
+Still no model judges it.
 """
 
 from __future__ import annotations
@@ -48,9 +56,47 @@ GOLDEN_TOPICS: list[dict[str, str]] = [
 ]
 
 
+_URL = re.compile(r"https?://[^\s\)\]\>\"']+")
+_FILE_REF = re.compile(r"\bresearch/[\w./-]+\.md\b")
+#: A paragraph shorter than this is a caption or a list line, not a claim.
+_SUBSTANTIVE_CHARS = 120
+
+
+def _split_sources(text: str) -> tuple[str, str]:
+    """``(body, sources section)``: the body is everything before the last
+    ``## Sources`` heading (in either language), the section what follows."""
+    found = list(re.finditer(r"^##\s+(sources|\u0627\u0644\u0645\u0635\u0627\u062f\u0631)\b.*$",
+                             text, re.I | re.M))
+    if not found:
+        return text, ""
+    cut = found[-1]
+    return text[: cut.start()], text[cut.end():]
+
+
+def _paragraphs(body: str) -> list[str]:
+    """The body's paragraphs of prose: no heading, code, table or short line."""
+    body = re.sub(r"```.*?```", "", body, flags=re.S)
+    out: list[str] = []
+    for block in re.split(r"\n\s*\n", body):
+        lines = [line for line in block.strip().splitlines()
+                 if line.strip() and not line.lstrip().startswith(("#", "|", "---"))]
+        para = " ".join(line.strip() for line in lines)
+        if len(para) >= _SUBSTANTIVE_CHARS:
+            out.append(para)
+    return out
+
+
+def _normal(text: str) -> str:
+    return re.sub(r"\W+", " ", text.lower()).strip()
+
+
+def _url_key(url: str) -> str:
+    return url.rstrip(".,;:").rstrip("/").lower()
+
+
 @dataclass
 class RubricScore:
-    """Hard structural checks — not LLM-as-judge."""
+    """Deterministic checks of shape and content — not LLM-as-judge."""
 
     ok: bool
     score: float  # 0–100
@@ -73,17 +119,21 @@ def score_report_markdown(
     *,
     min_sources: int = 4,
     min_chars: int = 1500,
+    topic: str = "",
 ) -> RubricScore:
-    """Score a research report body for structural industry-ish floors."""
+    """Score a research report: its shape a little, its content mostly.
+
+    *topic*: the question the report answers; with it, the body must cover
+    half of its content words (EN/AR, ``memory.query_terms``).
+    """
     text = report_md or ""
     checks: dict[str, bool] = {}
     detail: list[str] = []
 
     checks["has_title"] = bool(re.search(r"^#\s+\S", text, re.M))
     checks["min_length"] = len(text) >= min_chars
-    checks["has_sources_section"] = bool(
-        re.search(r"^##\s+sources\b", text, re.I | re.M)
-    )
+    # Either language's heading (the Arabic report's "المصادر" failed the English-only check).
+    checks["has_sources_section"] = bool(_split_sources(text)[1].strip())
     urls = re.findall(r"https?://[^\s\)\]\>\"']+", text)
     unique_urls = sorted(set(urls))
     checks["min_urls"] = len(unique_urls) >= max(1, min_sources // 2)
@@ -103,15 +153,42 @@ def score_report_markdown(
         or "background" in text.lower()
     )
 
+    # ── content (FA-235) ─────────────────────────────────────────────
+    body, sources_section = _split_sources(text)
+    paragraphs = _paragraphs(body)
+    cited = [p for p in paragraphs if _URL.search(p) or _FILE_REF.search(p)]
+    checks["cited_paragraphs"] = bool(paragraphs) and len(cited) >= 0.5 * len(paragraphs)
+    listed = {_url_key(u) for u in _URL.findall(sources_section)}
+    in_body = {_url_key(u) for u in _URL.findall(body)}
+    checks["sources_used"] = bool(listed) and len(listed & in_body) >= 0.5 * len(listed)
+    checks["citations_resolve"] = bool(in_body) and bool(listed) and in_body <= listed
+    normal = [_normal(p) for p in paragraphs]
+    sentences = [s for s in (_normal(x) for x in re.split(r"(?<=[.!?\u061f])\s+", body)) if len(s) > 40]
+    repeated = len(normal) - len(set(normal)) + (len(sentences) - len(set(sentences)))
+    checks["no_repetition"] = repeated == 0
+    if topic.strip():
+        from kazma_core.memory.query_terms import content_terms, coverage
+
+        terms = content_terms(topic)
+        checks["answers_topic"] = not terms or coverage(terms, body) >= 0.5
+    else:
+        checks["answers_topic"] = True  # nothing to compare: not held against the report
+
+    # Shape is a small part of the score; the content is most of it.
     weights = {
-        "has_title": 10,
-        "min_length": 15,
-        "has_sources_section": 15,
-        "min_urls": 15,
-        "min_domains": 15,
-        "has_headings": 10,
-        "not_error_only": 10,
-        "has_body": 10,
+        "has_title": 5,
+        "min_length": 5,
+        "has_sources_section": 5,
+        "has_headings": 5,
+        "not_error_only": 5,
+        "has_body": 5,
+        "min_urls": 5,
+        "min_domains": 5,
+        "cited_paragraphs": 20,
+        "sources_used": 10,
+        "citations_resolve": 10,
+        "no_repetition": 10,
+        "answers_topic": 10,
     }
     score = 0.0
     for k, w in weights.items():
@@ -120,7 +197,7 @@ def score_report_markdown(
         else:
             detail.append(f"fail:{k}")
 
-    ok = score >= 70 and checks.get("not_error_only", False)
+    ok = score >= 70 and checks.get("not_error_only", False) and checks.get("cited_paragraphs", False)
     return RubricScore(
         ok=ok,
         score=round(score, 1),
@@ -131,6 +208,9 @@ def score_report_markdown(
             "url_count": len(unique_urls),
             "domain_count": len(domains),
             "min_sources_target": min_sources,
+            "paragraphs": len(paragraphs),
+            "cited_paragraphs": len(cited),
+            "topic_checked": bool(topic.strip()),
         },
     )
 

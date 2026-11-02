@@ -67,6 +67,17 @@ _REPO_COLUMNS: tuple[tuple[str, str], ...] = (
 _REPO_COLS = "repo_url, owner, repo, default_branch, is_github"
 
 
+
+def _explicit_workspace() -> Path | None:
+    """The folder ``KAZMA_WORKSPACE`` names, when it is one: the operator's
+    own choice, which the first row is seeded from before any guess."""
+    raw = os.environ.get("KAZMA_WORKSPACE", "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser().resolve()
+    return path if path.is_dir() else None
+
+
 class WorkspaceStore:
     """SQLite-backed store for multi-project workspaces.
 
@@ -102,10 +113,16 @@ class WorkspaceStore:
             conn.executescript(_SCHEMA)
             self._migrate_repo_columns(conn)
 
-            # Boot-time: seed workspace store with current project CWD or default sandbox
+            # Boot-time: seed the workspace store with the operator's
+            # KAZMA_WORKSPACE, else the current project CWD, else the default
+            # sandbox. The seeded row outranks the environment in the binding
+            # ladder (resolve_active_root), so a CWD guess seeded over an
+            # explicit KAZMA_WORKSPACE kept the guess for good -- and under
+            # pytest the guess is the checkout the tests run in (2026-11: a
+            # test's file_write landed in the repository).
             try:
                 row = conn.execute("SELECT COUNT(*) as count FROM workspaces").fetchone()
-                cwd = Path.cwd().resolve()
+                cwd = _explicit_workspace() or Path.cwd().resolve()
                 from kazma_core.workspace.binding import default_sandbox_root
 
                 sandbox = default_sandbox_root().resolve()
@@ -115,7 +132,9 @@ class WorkspaceStore:
 
                 if row and row["count"] == 0:
                     # Prefer CWD if CWD is a real project directory (contains files or .git)
-                    if not ha_runtime and cwd != sandbox and (cwd.joinpath(".git").exists() or any(cwd.iterdir())):
+                    if not ha_runtime and cwd != sandbox and (
+                        cwd == _explicit_workspace() or cwd.joinpath(".git").exists() or any(cwd.iterdir())
+                    ):
                         ws_id = str(uuid.uuid4())
                         name = cwd.name or "Project Workspace"
                         root_path = str(cwd)
@@ -140,7 +159,9 @@ class WorkspaceStore:
                     rows = conn.execute("SELECT id, name, root_path FROM workspaces").fetchall()
                     if not ha_runtime and len(rows) == 1 and rows[0]["name"] == "Default Workspace":
                         sandbox_path = Path(rows[0]["root_path"]).resolve()
-                        if cwd != sandbox_path and (cwd.joinpath(".git").exists() or any(cwd.iterdir())):
+                        if cwd != sandbox_path and (
+                            cwd == _explicit_workspace() or cwd.joinpath(".git").exists() or any(cwd.iterdir())
+                        ):
                             ws_id = str(uuid.uuid4())
                             name = cwd.name or "Project Workspace"
                             created_at = datetime.now(UTC).isoformat()

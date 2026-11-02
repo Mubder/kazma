@@ -204,10 +204,10 @@ class TestChatStreamEndpoint:
             content="not json",
             headers={"content-type": "application/json"},
         )
-        assert resp.status_code == 200
-        body = resp.text
-        assert "event: error" in body
-        assert "Invalid JSON" in body
+        # A body that is not JSON is the caller's error, answered before any
+        # stream opens (2026-11, FA-274).
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "invalid_json"
 
     def test_budget_exceeded_returns_error(self):
         breaker = MagicMock()

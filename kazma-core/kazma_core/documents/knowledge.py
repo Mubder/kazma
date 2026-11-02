@@ -85,6 +85,21 @@ def format_document_hits(hits: list[KnowledgeHit] | tuple[KnowledgeHit, ...]) ->
     return format_untrusted_block(body, source="document_knowledge")
 
 
+def _library_not_found(document_id: Any = None, version_id: Any = None) -> DocumentResult[Any]:
+    """A library this tenant does not hold, said one way (2026-11, FA-234).
+
+    Index answered ``document_access_denied`` and search
+    ``library_access_denied`` for the same missing library, and neither said
+    it does not exist. Another tenant's library reads exactly like none.
+    """
+    return DocumentResult(
+        ok=False,
+        code="library_not_found",
+        message="Knowledge library not found",
+        document_id=document_id,
+        version_id=version_id,
+    )
+
 class DocumentKnowledgeAdapter:
     """Focused publication/search API; no independent embedder or vector store."""
 
@@ -176,7 +191,7 @@ class DocumentKnowledgeAdapter:
             if record.current_version_id != document.version_id:
                 raise ValueError("only the document's current immutable version may be activated")
             if self.store.get_library_for_tenant(library_id, tenant_id) is None:
-                raise DocumentAccessError("knowledge library is unavailable")
+                return _library_not_found(document.document_id, document.version_id)
             chunks = list(chunk_document_ir(document, self.config))
             if not chunks:
                 raise ValueError("DocumentIR produced no indexable structural chunks")
@@ -304,13 +319,15 @@ class DocumentKnowledgeAdapter:
             document_id=document_id,
             actor_id=actor_id,
         )
-        if record is None or self.store.get_library_for_tenant(library_id, tenant_id) is None:
+        if record is None:
             return DocumentResult(
                 ok=False,
                 code="document_access_denied",
-                message="Document or knowledge library is unavailable",
+                message="Document is unavailable",
                 document_id=document_id,
             )
+        if self.store.get_library_for_tenant(library_id, tenant_id) is None:
+            return _library_not_found(document_id)
         # Taking a document out of a library is a change to it: write access,
         # not read (audit 2026-10-26 AUD-061).
         if not self.repository.has_access(
@@ -356,13 +373,15 @@ class DocumentKnowledgeAdapter:
             document_id=document_id,
             actor_id=actor_id,
         )
-        if record is None or self.store.get_library_for_tenant(library_id, tenant_id) is None:
+        if record is None:
             return DocumentResult(
                 ok=False,
                 code="document_access_denied",
-                message="Document or knowledge library is unavailable",
+                message="Document is unavailable",
                 document_id=document_id,
             )
+        if self.store.get_library_for_tenant(library_id, tenant_id) is None:
+            return _library_not_found(document_id)
         hits = await self.index.search_document(
             query,
             tenant_id=tenant_id,
@@ -389,11 +408,7 @@ class DocumentKnowledgeAdapter:
         actor_id: str | None = None,
     ) -> DocumentResult[DocumentSearchResult]:
         if self.store.get_library_for_tenant(library_id, tenant_id) is None:
-            return DocumentResult(
-                ok=False,
-                code="library_access_denied",
-                message="Knowledge library is unavailable",
-            )
+            return _library_not_found()
         hits = await self.index.search(
             query, library_id, top_k=top_k, tenant_id=tenant_id
         )

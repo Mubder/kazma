@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+from collections import OrderedDict
 from typing import Any
 
 __all__ = [
@@ -63,7 +65,13 @@ HITL_RANK: dict[str, int] = {
     "error": 3,
 }
 
-_hitl_emit_seq: dict[str, int] = {}
+#: Each thread's approval-card count, for unique interrupt ids. The least
+#: recently stamped thread is dropped past :data:`_HITL_SEQ_MAX` (2026-11,
+#: FA-145: every thread ever stamped was kept); its next id still differs
+#: by its checkpoint.
+_HITL_SEQ_MAX = 4096
+_hitl_emit_seq: OrderedDict[str, int] = OrderedDict()
+_hitl_emit_lock = threading.Lock()
 
 
 def hitl_rank(state: str | None) -> int:
@@ -198,8 +206,11 @@ def assign_interrupt_id(
     tid = str(thread_id or data.get("thread_id") or "")
     n = 0
     if tid:
-        n = _hitl_emit_seq.get(tid, 0) + 1
-        _hitl_emit_seq[tid] = n
+        with _hitl_emit_lock:
+            n = _hitl_emit_seq.pop(tid, 0) + 1
+            _hitl_emit_seq[tid] = n
+            while len(_hitl_emit_seq) > _HITL_SEQ_MAX:
+                _hitl_emit_seq.popitem(last=False)
     iid = make_interrupt_id(
         thread_id=tid,
         tool=str(data.get("tool") or data.get("tool_name") or ""),

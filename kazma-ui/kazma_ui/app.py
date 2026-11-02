@@ -125,6 +125,11 @@ class KazmaAppBuilder:
         # nosniff refuses a script the OS labels text/plain.
         from kazma_ui.security_headers import SecurityHeadersMiddleware, pin_static_types
 
+        # An upload past its route's limit is refused before Starlette spools
+        # it (FA-134); inside the security headers, so the 413 carries them.
+        from kazma_ui.upload_limits import UploadSizeLimitMiddleware
+
+        self.app.add_middleware(UploadSizeLimitMiddleware)
         pin_static_types()
         self.app.add_middleware(SecurityHeadersMiddleware)
         # Added last, so it is the OUTERMOST layer: it records the TCP peer and
@@ -1155,32 +1160,14 @@ class KazmaAppBuilder:
             # Messages per person per minute (a flood guard). From the settings
             # store, seeded from kazma.yaml: a shipped value that changed
             # reaches an install through config_defaults, like every setting.
-            rate_limits_cfg = self.config_store.get("gateway.rate_limits", {}) or {}
-            if rate_limits_cfg:
-                try:
-                    from kazma_gateway.rate_feedback import RateFeedbackManager
+            # Followed, not read once (2026-11, FA-127): a change in Settings
+            # applies to the next message.
+            try:
+                from kazma_gateway.rate_feedback import follow_rate_limit_settings
 
-                    # Build per-platform active limits dictionary
-                    _active_limits_dict = {}
-                    if self.gateway.adapter_named("telegram") is not None and "telegram" in rate_limits_cfg:
-                        _active_limits_dict["telegram"] = int(rate_limits_cfg["telegram"])
-                    if self.gateway.adapter_named("discord") is not None and "discord" in rate_limits_cfg:
-                        _active_limits_dict["discord"] = int(rate_limits_cfg["discord"])
-                    if self.gateway.adapter_named("slack") is not None and "slack" in rate_limits_cfg:
-                        _active_limits_dict["slack"] = int(rate_limits_cfg["slack"])
-                    if _active_limits_dict:
-                        rfm = RateFeedbackManager(
-                            limit=_active_limits_dict,
-                            window_seconds=60,
-                            cooldown_seconds=30,
-                        )
-                        self.gateway.set_rate_feedback(rfm)
-                        logger.info(
-                            "[Gateway] Rate feedback wired (limits=%s, cooldown=30s)",
-                            _active_limits_dict,
-                        )
-                except Exception as e:
-                    logger.warning("[Gateway] Rate feedback wiring failed: %s", e)
+                follow_rate_limit_settings(self.gateway, self.config_store)
+            except Exception as e:
+                logger.warning("[Gateway] Rate feedback wiring failed: %s", e)
 
             # Suggestions (from gateway.suggestions.enabled YAML config)
             try:

@@ -285,7 +285,7 @@ def _record_frame_activity(
                 "kind": "tool",
                 "title": str(data.get("tool_name") or "tool"),
                 "detail": str(data.get("result") or ""),
-                "state": "done",
+                "state": "failed" if data.get("state") == "failed" else "done",
                 "ts": datetime.now(UTC).isoformat(),
             })
         elif ev_type == "status_update":

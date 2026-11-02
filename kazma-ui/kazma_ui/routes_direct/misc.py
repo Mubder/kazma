@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse as _JSONResponse
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.hitl_decision import GateDecisionUnavailable
 from kazma_core.safety.hitl_gates import TransitionConflict
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -569,10 +570,9 @@ def register_misc_routes(self: Any) -> None:
             return _JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         try:
-            body = await request.json()
-        except Exception:
-            logger.debug("[HITL] Malformed or missing JSON body in approval request", exc_info=True)
-            return _JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
 
         action = body.get("action", "deny")
         approved = action == "approve"

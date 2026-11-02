@@ -547,3 +547,29 @@ def test_x_booking_cannot_report_scheduled_over_a_cancelled_row(real_cron, x_env
     again = c.post("/api/scheduled/x", json={"text": "launch note", "when": "2h"}, headers=_CSRF).json()
     # A fresh booking (no fixed key here): scheduled, and its own operation.
     assert again["operation_id"] != first["operation_id"] and again["state"] == "scheduled"
+
+
+# ── refusals in the envelope (2026-11, FA-241) ───────────────────────────
+
+
+def test_a_blank_prompt_is_the_requests_fault(real_cron) -> None:
+    r = real_cron.client.post("/api/scheduled/cron", json={"timing": "1h", "prompt": "   "}, headers=_CSRF)
+    assert r.status_code == 422 and r.json()["code"] == "prompt_required" and r.json()["ok"] is False
+
+
+def test_an_invalid_request_names_the_field_and_echoes_nothing(real_cron) -> None:
+    too_long = "remember the milk " * 500  # past the 8,000-character prompt cap
+    r = real_cron.client.post("/api/scheduled/cron", json={"timing": "1h", "prompt": too_long}, headers=_CSRF)
+    body = r.json()
+    assert r.status_code == 422 and body["code"] == "invalid_request" and body["fields"] == ["body.prompt"]
+    assert "milk" not in r.text and "detail" not in body
+
+
+def test_a_cap_reached_is_still_a_conflict(real_cron, monkeypatch) -> None:
+    import kazma_core.cron.settings as cs
+
+    real = cs.cron_settings()
+    monkeypatch.setattr(cs, "cron_settings", lambda: SimpleNamespace(**{**vars(real), "max_jobs_per_tenant": 0})
+                        if hasattr(real, "__dict__") else real)
+    r = real_cron.client.post("/api/scheduled/cron", json={"timing": "1h", "prompt": "x"}, headers=_CSRF)
+    assert r.status_code == 409 and r.json()["code"] == "tenant_job_limit"

@@ -16,6 +16,7 @@ from kazma_core.background import spawn_background
 from kazma_core.errors import safe_error
 
 from kazma_ui.rate_limit import rate_limit
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +51,9 @@ def register_settings_routes(self: Any) -> None:
 
         body = {}
         try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=422)
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
         if not isinstance(body, dict):
             return JSONResponse({"ok": False, "error": "a JSON object is required"}, status_code=422)
         try:
@@ -129,9 +130,9 @@ def register_settings_routes(self: Any) -> None:
     async def _settings_memory_backends_put(request: Request):
         body = {}
         try:
-            body = await request.json()
-        except Exception:
-            return {"ok": False, "error": "invalid JSON"}
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
         try:
             import asyncio
 
@@ -196,9 +197,9 @@ def register_settings_routes(self: Any) -> None:
         """Probe Neo4j using saved config, or optional body override before save."""
         body = {}
         try:
-            body = await request.json()
-        except Exception:
-            body = {}
+            body = await read_json(request, allow_empty=True)
+        except InvalidJsonBody:
+            return invalid_json_response()
         import asyncio
 
         return await asyncio.to_thread(_probe_neo4j, body)

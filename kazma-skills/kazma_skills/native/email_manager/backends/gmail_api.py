@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
+from collections.abc import AsyncIterator
 from email.message import EmailMessage as StdEmailMessage
 from typing import Any
 from urllib.parse import quote
@@ -28,6 +30,9 @@ GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 
 #: The headers an inbox listing shows.
 _LIST_HEADERS = ("From", "To", "Subject", "Date")
+#: Mails a listing reads at once: Gmail answers a listing of 20 in about the
+#: time of 3 (a request each), well under its per-user rate limit.
+_LIST_CONCURRENCY = 8
 
 
 class GmailApiBackend:
@@ -59,6 +64,23 @@ class GmailApiBackend:
         # refresh request (which can invalidate rotated refresh tokens and
         # race on self.access_token). Audit M3.
         self._token_lock = asyncio.Lock()
+        # One connection for a listing's requests (2026-11, FA-242): each
+        # request opened its own client -- a TLS handshake per listed mail,
+        # ~0.6 s each on the live install.
+        self._client: httpx.AsyncClient | None = None
+
+    @contextlib.asynccontextmanager
+    async def _connection(self) -> AsyncIterator[httpx.AsyncClient]:
+        """The client of the listing in progress, or one for this request."""
+        if self._client is not None:
+            yield self._client
+            return
+        async with httpx.AsyncClient(timeout=45.0, verify=shared_ssl_context()) as client:
+            self._client = client
+            try:
+                yield client
+            finally:
+                self._client = None
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -75,7 +97,7 @@ class GmailApiBackend:
         params: dict[str, Any] | None = None,
     ) -> Any:
         url = path if path.startswith("http") else f"{GMAIL_API}{path}"
-        async with httpx.AsyncClient(timeout=45.0, verify=shared_ssl_context()) as client:
+        async with self._connection() as client:
             r = await client.request(
                 method, url, headers=self._headers(), json=json_body, params=params
             )
@@ -183,6 +205,12 @@ class GmailApiBackend:
         return ""
 
     async def list_messages(self, query: ListQuery) -> list[EmailMessage]:
+        """The listing's requests share one connection, and up to
+        :data:`_LIST_CONCURRENCY` mails are read at once (FA-242)."""
+        async with self._connection():
+            return await self._list_messages(query)
+
+    async def _list_messages(self, query: ListQuery) -> list[EmailMessage]:
         limit = max(1, min(50, int(query.limit or 20)))
         q_parts = []
         folder = (query.folder or "INBOX").strip()
@@ -219,19 +247,22 @@ class GmailApiBackend:
             if not page_token:
                 break
         ids = ids[offset : offset + limit]
-        out: list[EmailMessage] = []
-        for mid in ids:
-            meta = await self._request(
-                "GET",
-                f"/users/me/messages/{quote(mid, safe='')}",
-                # One parameter per header: Gmail reads "From,To,Subject,Date"
-                # as ONE header's name, matched none, and every listed mail
-                # came back with no sender or date and its preview as the
-                # subject (live 2026-10-20). httpx repeats a list's key.
-                params={"format": "metadata", "metadataHeaders": list(_LIST_HEADERS)},
-            )
-            out.append(self._map(meta))
-        return out
+        gate = asyncio.Semaphore(_LIST_CONCURRENCY)
+
+        async def fetch(mid: str) -> EmailMessage:
+            async with gate:
+                meta = await self._request(
+                    "GET",
+                    f"/users/me/messages/{quote(mid, safe='')}",
+                    # One parameter per header: Gmail reads "From,To,Subject,Date"
+                    # as ONE header's name, matched none, and every listed mail
+                    # came back with no sender or date and its preview as the
+                    # subject (live 2026-10-20). httpx repeats a list's key.
+                    params={"format": "metadata", "metadataHeaders": list(_LIST_HEADERS)},
+                )
+            return self._map(meta)
+
+        return list(await asyncio.gather(*(fetch(mid) for mid in ids)))
 
     async def get_message(self, message_id: str) -> EmailMessage:
         meta = await self._request(

@@ -10,6 +10,7 @@ import logging
 
 __all__ = [
     "get_metrics_response",
+    "record_commitment_decision",
     "record_commitment_terminal",
     "record_context_trim",
     "record_llm_call",
@@ -91,6 +92,15 @@ if _PROMETHEUS_AVAILABLE:
         "kazma_commitment_terminal_total",
         "Commitment gate outcomes that ended the turn (loop prevented)",
         ["decision"],  # clarify_unresolved | cancelled | denied
+    )
+    # Every policy decision the gate makes (a deny, a clarify or confirm card,
+    # an allow that resolved a commitment), counted when it is made. It was a
+    # COUNT(*) of the commitments table, which the GC trims, typed as a
+    # counter: it fell, and said less than its name (2026-11, FA-257).
+    COMMITMENT_DECISIONS_TOTAL = Counter(
+        "kazma_commitment_decisions_total",
+        "Commitment gate decisions by type, since the process started",
+        ["decision"],  # allow | deny | clarify | confirm
     )
 
     # Turn Delivery V2 (kazma_ui/delivery.py — journal + cursor resume).
@@ -219,6 +229,7 @@ else:
     MEMORY_OPERATIONS_TOTAL = None
     LONG_TASK_EVENTS_TOTAL = None
     COMMITMENT_TERMINAL_TOTAL = None
+    COMMITMENT_DECISIONS_TOTAL = None
     LLM_LATENCY_SECONDS = None
     DELIVERY_EVENTS_TOTAL = None
     DELIVERY_DROPPED_TOTAL = None
@@ -320,6 +331,13 @@ def record_hitl_gate_reconciled(action: str) -> None:
     if not _PROMETHEUS_AVAILABLE or HITL_GATE_RECONCILED_TOTAL is None:
         return
     HITL_GATE_RECONCILED_TOTAL.labels(action=(action or "unknown")[:32]).inc()
+
+
+def record_commitment_decision(decision: str) -> None:
+    """Count one commitment-gate decision. No-op without prometheus-client."""
+    if not _PROMETHEUS_AVAILABLE or COMMITMENT_DECISIONS_TOTAL is None:
+        return
+    COMMITMENT_DECISIONS_TOTAL.labels(decision=(decision or "unknown")[:32]).inc()
 
 
 def record_commitment_terminal(decision: str) -> None:

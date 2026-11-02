@@ -288,7 +288,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_VISION_MODELS` | `""` | `kazma_core.vision_capability` | yes |
 | `KAZMA_VOICE_DUPLEX` | (none) | `kazma_core.voice.livekit` | yes |
 | `KAZMA_WATCHER_STALE_SECONDS` | (none) | `kazma_core.safety.bus_bridge` | yes |
-| `KAZMA_WORKSPACE` | `""` | `kazma_core.tools.research_pipeline`, `kazma_core.workspace.binding`, `kazma_ui.app` | yes |
+| `KAZMA_WORKSPACE` | `""` | `kazma_core.stores.workspaces`, `kazma_core.tools.research_pipeline`, `kazma_core.workspace.binding` +1 | yes |
 | `KAZMA_WORKSPACE_ROOT` | `""` | `kazma_core.workspace.root_policy`, `kazma_gateway.routers.workspaces` | yes |
 | `KAZMA_WS_EXTRA_ORIGINS` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_WS_ORIGIN_CHECK` | `""` | `kazma_ui.auth` | yes |

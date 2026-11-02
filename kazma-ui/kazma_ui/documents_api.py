@@ -58,11 +58,15 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.routing import APIRoute
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from kazma_core.diagnostic_scope import read_only_diagnostic
 from kazma_core.documents.errors import DocumentPolicyError
 from kazma_core.errors import safe_error
 
+from kazma_ui.error_envelope import http_envelope, validation_envelope
 from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
@@ -129,7 +133,7 @@ async def _resolve_scope(request: Request) -> tuple[str, str, str]:
 def create_documents_router() -> APIRouter:
     """Create and return the Documents API router."""
 
-    router = APIRouter(prefix="/api/documents", tags=["documents"])
+    router = APIRouter(prefix="/api/documents", tags=["documents"], route_class=_DocumentRoute)
 
     def _svc(request: Request):
         svc = getattr(request.app.state, "documents", None)
@@ -138,7 +142,7 @@ def create_documents_router() -> APIRouter:
     def _unavailable() -> JSONResponse:
         return JSONResponse(
             status_code=503,
-            content={"ok": False, "error": "Document platform is not available"},
+            content={"ok": False, "error": "Document platform is not available", "code": "document_platform_unavailable"},
         )
 
     def _ingestion_error(exc: Any) -> JSONResponse:
@@ -168,8 +172,8 @@ def create_documents_router() -> APIRouter:
         if decision == "ok":
             return None
         if decision == "unauthorized":
-            return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-        return JSONResponse({"ok": False, "error": "Admin role required"}, status_code=403)
+            return JSONResponse({"ok": False, "error": "Unauthorized", "code": "unauthorized"}, status_code=401)
+        return JSONResponse({"ok": False, "error": "Admin role required", "code": "forbidden"}, status_code=403)
 
     # ── Upload intake (streamed, bounded) ───────────────────────────────
 
@@ -223,7 +227,7 @@ def create_documents_router() -> APIRouter:
         if not filename:
             return JSONResponse(
                 status_code=400,
-                content={"ok": False, "error": "Missing X-Document-Filename header"},
+                content={"ok": False, "error": "Missing X-Document-Filename header", "code": "invalid_request"},
             )
         idempotency_key = request.headers.get("X-Idempotency-Key") or None
         force_ocr = request.query_params.get("force_ocr", "").lower() in {"1", "true", "yes"}
@@ -293,7 +297,7 @@ def create_documents_router() -> APIRouter:
             if total == 0:
                 return JSONResponse(
                     status_code=400,
-                    content={"ok": False, "error": "Empty upload"},
+                    content={"ok": False, "error": "Empty upload", "code": "empty_upload"},
                 )
 
             spooled = tmp_path
@@ -356,7 +360,7 @@ def create_documents_router() -> APIRouter:
         rel = str(payload.get("path", "")).strip()
         if not rel:
             return JSONResponse(
-                status_code=400, content={"ok": False, "error": "Missing 'path'"}
+                status_code=400, content={"ok": False, "error": "Missing 'path'", "code": "invalid_request"}
             )
         resolved = await asyncio.to_thread(_resolve_workspace_file, rel)
         if resolved is None:
@@ -396,7 +400,7 @@ def create_documents_router() -> APIRouter:
             logger.warning("[documents_api] import failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=400,
-                content={"ok": False, "error": f"Import failed ({type(exc).__name__})"},
+                content={"ok": False, "error": f"Import failed ({type(exc).__name__})", "code": "import_failed"},
             )
 
     # ── Document actions (convert / pdf / redact / generate / merge) ─────
@@ -411,12 +415,12 @@ def create_documents_router() -> APIRouter:
         body = payload.get("payload")
         if not target_format:
             return JSONResponse(
-                status_code=400, content={"ok": False, "error": "Missing 'target_format'"}
+                status_code=400, content={"ok": False, "error": "Missing 'target_format'", "code": "invalid_request"}
             )
         if not isinstance(body, dict):
             return JSONResponse(
                 status_code=400,
-                content={"ok": False, "error": "'payload' must be an object"},
+                content={"ok": False, "error": "'payload' must be an object", "code": "invalid_request"},
             )
         output_name = _opt_str(payload.get("output_name"))
         title = _opt_str(payload.get("title"))
@@ -446,12 +450,12 @@ def create_documents_router() -> APIRouter:
         if not isinstance(document_ids, list) or len(document_ids) < 2:
             return JSONResponse(
                 status_code=400,
-                content={"ok": False, "error": "'document_ids' must list at least two IDs"},
+                content={"ok": False, "error": "'document_ids' must list at least two IDs", "code": "invalid_request"},
             )
         if any(not isinstance(item, str) or not item.strip() for item in document_ids):
             return JSONResponse(
                 status_code=400,
-                content={"ok": False, "error": "'document_ids' must be non-empty strings"},
+                content={"ok": False, "error": "'document_ids' must be non-empty strings", "code": "invalid_request"},
             )
         output_name = _opt_str(payload.get("output_name"))
         try:
@@ -502,7 +506,7 @@ def create_documents_router() -> APIRouter:
         target_format = str(payload.get("target_format", "")).strip()
         if not target_format:
             return JSONResponse(
-                status_code=400, content={"ok": False, "error": "Missing 'target_format'"}
+                status_code=400, content={"ok": False, "error": "Missing 'target_format'", "code": "invalid_request"}
             )
         try:
             data = await svc.convert_document(
@@ -549,7 +553,7 @@ def create_documents_router() -> APIRouter:
         if start_page is None or end_page is None:
             return JSONResponse(
                 status_code=400,
-                content={"ok": False, "error": "start_page/end_page must be integers"},
+                content={"ok": False, "error": "start_page/end_page must be integers", "code": "invalid_request"},
             )
         try:
             data = await svc.pdf_split_document(
@@ -576,7 +580,7 @@ def create_documents_router() -> APIRouter:
         fields = payload.get("fields")
         if not isinstance(fields, dict) or not fields:
             return JSONResponse(
-                status_code=400, content={"ok": False, "error": "Missing 'fields' object"}
+                status_code=400, content={"ok": False, "error": "Missing 'fields' object", "code": "invalid_request"}
             )
         try:
             data = await svc.pdf_fill_form_document(
@@ -602,7 +606,7 @@ def create_documents_router() -> APIRouter:
         terms = payload.get("terms")
         if not isinstance(terms, list) or not terms:
             return JSONResponse(
-                status_code=400, content={"ok": False, "error": "Missing 'terms' list"}
+                status_code=400, content={"ok": False, "error": "Missing 'terms' list", "code": "invalid_request"}
             )
         try:
             data = await svc.redact_document(
@@ -655,7 +659,7 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             logger.warning("[documents_api] health failed type=%s", type(exc).__name__)
             return JSONResponse(
-                status_code=500, content={"ok": False, "error": "health unavailable"}
+                status_code=500, content={"ok": False, "error": "health unavailable", "code": "health_unavailable"}
             )
 
     # ── Library list / detail ───────────────────────────────────────────
@@ -679,7 +683,7 @@ def create_documents_router() -> APIRouter:
             logger.warning("[documents_api] list failed type=%s", type(exc).__name__)
             return JSONResponse(
                 status_code=500,
-                content={"ok": False, "error": "list failed", "documents": []},
+                content={"ok": False, "error": "list failed", "code": "list_failed", "documents": []},
             )
 
     @router.get("/{document_id}")
@@ -771,7 +775,7 @@ def create_documents_router() -> APIRouter:
         library_id = str(payload.get("library_id", "")).strip()
         if not library_id:
             return JSONResponse(
-                status_code=400, content={"ok": False, "error": "Missing 'library_id'"}
+                status_code=400, content={"ok": False, "error": "Missing 'library_id'", "code": "invalid_request"}
             )
         try:
             data = await asyncio.to_thread(
@@ -798,7 +802,7 @@ def create_documents_router() -> APIRouter:
         library_id = str(payload.get("library_id", "")).strip()
         if not library_id:
             return JSONResponse(
-                status_code=400, content={"ok": False, "error": "Missing 'library_id'"}
+                status_code=400, content={"ok": False, "error": "Missing 'library_id'", "code": "invalid_request"}
             )
         try:
             data = await asyncio.to_thread(
@@ -830,7 +834,7 @@ def create_documents_router() -> APIRouter:
         if not library_id or not query:
             return JSONResponse(
                 status_code=400,
-                content={"ok": False, "error": "Missing 'library_id' or 'query'"},
+                content={"ok": False, "error": "Missing 'library_id' or 'query'", "code": "invalid_request"},
             )
         try:
             data = await svc.search_library(
@@ -859,7 +863,7 @@ def create_documents_router() -> APIRouter:
             )
             if data is None:
                 return JSONResponse(
-                    status_code=404, content={"ok": False, "error": "Job not found"}
+                    status_code=404, content={"ok": False, "error": "Job not found", "code": "job_not_found"}
                 )
             return {"ok": True, "job": data}
         except Exception as exc:  # noqa: BLE001
@@ -943,7 +947,7 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             logger.warning("[documents_api] metrics failed type=%s", type(exc).__name__)
             return JSONResponse(
-                status_code=500, content={"ok": False, "error": "metrics unavailable"}
+                status_code=500, content={"ok": False, "error": "metrics unavailable", "code": "metrics_unavailable"}
             )
 
     @router.get("/ops/capacity")
@@ -962,7 +966,7 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             logger.warning("[documents_api] capacity failed type=%s", type(exc).__name__)
             return JSONResponse(
-                status_code=500, content={"ok": False, "error": "capacity unavailable"}
+                status_code=500, content={"ok": False, "error": "capacity unavailable", "code": "capacity_unavailable"}
             )
 
     @router.get("/ops/readiness")
@@ -978,7 +982,7 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             logger.warning("[documents_api] readiness failed type=%s", type(exc).__name__)
             return JSONResponse(
-                status_code=500, content={"ok": False, "error": "readiness unavailable"}
+                status_code=500, content={"ok": False, "error": "readiness unavailable", "code": "readiness_unavailable"}
             )
 
     @router.get("/ops/retention")
@@ -1010,7 +1014,7 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             logger.warning("[documents_api] retention failed type=%s", type(exc).__name__)
             return JSONResponse(
-                status_code=500, content={"ok": False, "error": "retention unavailable"}
+                status_code=500, content={"ok": False, "error": "retention unavailable", "code": "retention_unavailable"}
             )
 
     @router.get("/ops/audit")
@@ -1046,7 +1050,7 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             logger.warning("[documents_api] audit failed type=%s", type(exc).__name__)
             return JSONResponse(
-                status_code=500, content={"ok": False, "error": "audit unavailable", "events": []}
+                status_code=500, content={"ok": False, "error": "audit unavailable", "code": "audit_unavailable", "events": []}
             )
 
     @router.post("/ops/maintenance/dry-run")
@@ -1070,7 +1074,7 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             logger.warning("[documents_api] maintenance dry-run failed type=%s", type(exc).__name__)
             return JSONResponse(
-                status_code=500, content={"ok": False, "error": "maintenance failed"}
+                status_code=500, content={"ok": False, "error": "maintenance failed", "code": "maintenance_failed"}
             )
 
     @router.post("/ops/maintenance/run")
@@ -1094,7 +1098,7 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             logger.warning("[documents_api] maintenance run failed type=%s", type(exc).__name__)
             return JSONResponse(
-                status_code=500, content={"ok": False, "error": "maintenance failed"}
+                status_code=500, content={"ok": False, "error": "maintenance failed", "code": "maintenance_failed"}
             )
 
     async def _delete_document_impl(
@@ -1193,6 +1197,7 @@ _STATUS_BY_CODE: dict[str, int] = {
     "invalid_document_encoding": 400,
     "intake_corrupt": 400,
     "document_access_denied": 404,
+    "library_not_found": 404,
     "artifact_access_denied": 404,
     "not_ready": 409,
     "idempotency_conflict": 409,
@@ -1211,6 +1216,29 @@ _STATUS_BY_CODE: dict[str, int] = {
     "worker_isolation_unavailable": 503,
     "worker_isolation_busy": 503,
 }
+
+
+class _DocumentRoute(APIRoute):
+    """Every refusal of a document route in one envelope (2026-11, FA-234).
+
+    The routes answer ``{"ok": false, "error", "code"}``. What they RAISE --
+    the JSON body reader's 413/422, the rate limiter's 429, a query FastAPI
+    could not validate -- left as FastAPI's ``{"detail": ...}``, mostly with
+    no code; this route class answers it in the same envelope.
+    """
+
+    def get_route_handler(self) -> Any:
+        handler = super().get_route_handler()
+
+        async def _route(request: Request) -> Any:
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                return validation_envelope(exc)
+            except StarletteHTTPException as exc:
+                return http_envelope(exc)
+
+        return _route
 
 
 def _coded_error(code: str, message: str, *, default: int) -> JSONResponse:
@@ -1233,7 +1261,7 @@ def _unknown_id(exc: Exception) -> JSONResponse | None:
         return None
     logger.debug("[documents_api] malformed %s in a request", exc.kind)
     if exc.kind == "JobId":
-        return JSONResponse(status_code=404, content={"ok": False, "error": "Job not found"})
+        return JSONResponse(status_code=404, content={"ok": False, "error": "Job not found", "code": "job_not_found"})
     return _coded_error("document_access_denied", "Document is unavailable", default=404)
 
 
@@ -1251,7 +1279,7 @@ def _action_error(exc: Exception, op: str) -> JSONResponse:
     logger.warning("[documents_api] %s failed type=%s", op, type(exc).__name__)
     return JSONResponse(
         status_code=400,
-        content={"ok": False, "error": f"{op} failed ({type(exc).__name__})"},
+        content={"ok": False, "error": f"{op} failed ({type(exc).__name__})", "code": "operation_failed"},
     )
 
 
@@ -1364,11 +1392,11 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
         return _coded_error(exc.code, exc.safe_message, default=400)
     if isinstance(exc, JobNotFoundError):
         return JSONResponse(
-            status_code=404, content={"ok": False, "error": "Job not found"}
+            status_code=404, content={"ok": False, "error": "Job not found", "code": "job_not_found"}
         )
     if isinstance(exc, InvalidJobTransitionError):
         return JSONResponse(
-            status_code=409, content={"ok": False, "error": safe_error(exc)}
+            status_code=409, content={"ok": False, "error": safe_error(exc), "code": "invalid_job_transition"}
         )
     # Surface DocumentAccessError from the repository with a clear message
     # instead of a generic "Not found" when not_found_default is set.
@@ -1394,7 +1422,7 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
     logger.warning("[documents_api] %s failed type=%s", op, err_name)
     return JSONResponse(
         status_code=400,
-        content={"ok": False, "error": f"{op} failed ({err_name})"},
+        content={"ok": False, "error": f"{op} failed ({err_name})", "code": "operation_failed"},
     )
 
 

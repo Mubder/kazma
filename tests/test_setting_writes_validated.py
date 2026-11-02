@@ -31,7 +31,9 @@ from kazma_core.settings_validation import SettingRejected, _rules, validate_set
     ("checkpoints.retention_days", 0, (0, "system")),
     ("notifications.lifecycle.events", "started, startup_failed", (["started", "startup_failed"], "notifications")),
     ("tenant.acme.cron.timezone", "UTC", ("UTC", None)),
-    ("agent.language", "anything", ("anything", None)),
+    # 2026-11, FA-251: a language Kazma speaks, and a number the turn can use.
+    ("agent.language", " AR ", ("ar", "agent")),
+    ("agent.max_iterations", "30", (30, "agent")),
     ("documents.ocr.engine", "Neural", ("neural", "documents")),
 ])
 def test_values_a_setting_can_hold(key, value, expect) -> None:
@@ -74,7 +76,7 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     # named by the module that reads it.
     assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY, TENANT_MODE_KEY,
                              *SETTING_BOUNDS, FIRE_WITHOUT_HITL_KEY, TURN_TIMEOUT_KEY, OCR_ENGINE_KEY,
-                             RUNBOOKS_KEY, API_KEY_ENV_KEY}
+                             RUNBOOKS_KEY, API_KEY_ENV_KEY, "agent.language", "agent.max_iterations"}
 
 
 # ── the TUI's client: an answered refusal is not "no server" ───────────────

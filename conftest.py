@@ -62,6 +62,12 @@ os.environ["KAZMA_USER_HOME"] = _TEST_USER_HOME
 # as the same user and reads them, an install writes there and an uninstall
 # removes from there.
 os.environ["KAZMA_SKILLS_HOME"] = _tempfile.mkdtemp(prefix="kazma-test-skills-home-")
+# The coding workspace too (2026-11): a fresh workspace store seeds its first
+# active row from KAZMA_WORKSPACE, else from the working folder -- the checkout
+# the tests run in -- and that row outranks everything after it, so a test's
+# relative file_write landed in the repository (and, in a live install, would
+# land in the install). A test that needs its own workspace still sets one.
+os.environ["KAZMA_WORKSPACE"] = _tempfile.mkdtemp(prefix="kazma-test-workspace-")
 #: Every per-store path override ``kazma_core/paths.py`` reads.
 _STORE_PATH_OVERRIDES = (
     "KAZMA_BACKUPS_DIR",

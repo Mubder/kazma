@@ -66,14 +66,27 @@ def bind_live_agent(agent: Any | None) -> None:
 
 
 def notify_credentials_changed(provider: str = "") -> None:
-    """Rebuild the live agent client after a key save. Never raises."""
+    """Rebuild the live agent client after a key save. Never raises.
+
+    A rebuild that fails leaves the agent on the client it had, built for the
+    key before the save: a WARNING naming the provider and the fallback
+    notice (banner and ops alert) say so (FA-110: it was a DEBUG line)."""
+    from kazma_core.observability.model_fallback import (
+        report_rebind_failed,
+        report_rebind_ok,
+    )
+
     try:
         _sync_agent(_live_agent)
     except Exception as exc:
-        logger.debug(
-            "[model_switch] credential rebind failed (provider=%s): %s",
-            provider, exc,
+        logger.warning(
+            "[model_switch] the agent could not take the new %s key (%s); it keeps "
+            "the client it had until it is rebuilt",
+            provider or "provider", type(exc).__name__,
         )
+        report_rebind_failed(provider=provider, error=type(exc).__name__)
+        return
+    report_rebind_ok(provider)
 
 
 def _profile_snapshot(registry: Any) -> tuple[str, str]:

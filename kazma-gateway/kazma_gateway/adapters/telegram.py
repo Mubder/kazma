@@ -1812,6 +1812,32 @@ class TelegramAdapter(BaseAdapter):
 
 
 
+#: A refused webhook request is said at most once per reason in this many
+#: seconds (FA-132): anyone can POST to the mount, and a WARNING per request
+#: let a stranger fill the log and the daily digest.
+_WEBHOOK_WARN_EVERY_S = 600.0
+#: reason -> (monotonic time of its last WARNING, refusals held back since)
+_webhook_warnings: dict[str, tuple[float, int]] = {}
+
+
+def _warn_webhook_refused(reason: str, message: str) -> None:
+    """Say a refused webhook request: one WARNING per reason per window.
+
+    A refusal inside the window is counted and logged at DEBUG; the next
+    WARNING says how many were held back. The route runs on the event loop,
+    so the table needs no lock.
+    """
+    now = time.monotonic()
+    last, held = _webhook_warnings.get(reason, (None, 0))
+    if last is not None and now - last < _WEBHOOK_WARN_EVERY_S:
+        _webhook_warnings[reason] = (last, held + 1)
+        logger.debug("[telegram-webhook] refused again (%s)", reason)
+        return
+    _webhook_warnings[reason] = (now, 0)
+    suffix = f" ({held} more refused since the last warning)" if held else ""
+    logger.warning("%s%s", message, suffix)
+
+
 def telegram_webhook_router(resolve: Callable[[], TelegramAdapter | None]) -> Any:
     """A FastAPI router for optional webhook ingress (POST, plus ``/health``).
 
@@ -1847,17 +1873,18 @@ def telegram_webhook_router(resolve: Callable[[], TelegramAdapter | None]) -> An
             # request would 401 -- the mount is inactive, and says so. To
             # activate: set TELEGRAM_WEBHOOK_SECRET (or the connector's
             # webhook_secret) AND pass the same value to setWebhook.
-            logger.warning(
+            _warn_webhook_refused(
+                "no_secret",
                 "[telegram-webhook] No webhook_secret configured -- webhook "
                 "mount is inactive (all requests rejected). Set "
-                "TELEGRAM_WEBHOOK_SECRET and pass it to setWebhook."
+                "TELEGRAM_WEBHOOK_SECRET and pass it to setWebhook.",
             )
             return JSONResponse(
                 {"error": "Webhook secret not configured"}, status_code=503
             )
         provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
         if not provided or not hmac.compare_digest(provided, adapter._webhook_secret):
-            logger.warning("[telegram-webhook] Invalid or missing secret token")
+            _warn_webhook_refused("bad_secret", "[telegram-webhook] Invalid or missing secret token")
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         try:

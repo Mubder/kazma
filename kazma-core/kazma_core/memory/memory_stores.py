@@ -298,6 +298,8 @@ ERASURE_HORIZON: tuple[tuple[str, str], ...] = (
      "(memory_state.db.pre_entity_key, memory_state.db.pre_relabel, memory_state.db.pre_reopen); "
      "never carried by a migration", "until the operator removes them"),
     ("space SQLite freed in the memory databases and their write-ahead logs", "until SQLite reuses it"),
+    ("approval records (hitl_gates.db): a decided card's tool arguments, which can quote a memory",
+     "90 days after the decision"),
 )
 
 #: Tables SQLite keeps for itself.

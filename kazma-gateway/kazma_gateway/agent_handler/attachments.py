@@ -19,9 +19,9 @@ Policy (see roadmap Phase 1.2):
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import re
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
@@ -188,14 +188,20 @@ def _fetch_attachment_url(url: str) -> bytes:
 def _persist_attachment(attachment: Attachment) -> str:
     """Persist attachment bytes to disk and return the absolute file path.
 
-    Assumes ``attachment.data`` is populated. The filename is uniqueified
-    to avoid collisions across concurrent turns.
+    Assumes ``attachment.data`` is populated. The name keeps the sender's
+    file name (the model reads it) and adds the content's hash (2026-11,
+    FA-146): the same file sent again is the file already kept, never
+    another copy; two different files of one name stay two files.
     """
+    from kazma_core.atomic_files import atomic_write_bytes
+
     ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
-    base = attachment.filename or f"{attachment.kind}_{uuid.uuid4().hex[:8]}"
-    # Disambiguate while preserving extension.
-    dest = ATTACHMENT_DIR / f"{Path(base).stem}_{uuid.uuid4().hex[:6]}{Path(base).suffix}"
-    dest.write_bytes(attachment.data or b"")
+    data = attachment.data or b""
+    digest = hashlib.sha256(data).hexdigest()
+    base = attachment.filename or f"{attachment.kind}_{digest[:8]}"
+    dest = ATTACHMENT_DIR / f"{Path(base).stem}_{digest[:12]}{Path(base).suffix}"
+    if not dest.is_file():
+        atomic_write_bytes(dest, data)
     return str(dest.resolve())
 
 

@@ -26,6 +26,7 @@ __all__ = [
     "is_shutting_down",
     "reset_shutdown",
     "signal_shutdown",
+    "sleep_or_shutdown",
     "step_bound",
     "uvicorn_graceful_s",
     "wait_for_shutdown",
@@ -154,6 +155,35 @@ def reset_shutdown() -> None:
     global _shutdown_started
     _get_event().clear()
     _shutdown_started = None
+
+
+async def sleep_or_shutdown(seconds: float) -> bool:
+    """Sleep *seconds*, or less if the server begins to stop; True when it did.
+
+    A background loop's wait between runs (2026-11, FA-265): with plain
+    ``asyncio.sleep`` a loop asleep for hours was only cancelled at the end
+    of the stop, after the steps that wait for work to finish. The wake is a
+    shutdown waker that sets an event of this call's own loop, so it works
+    on whichever loop the caller runs.
+    """
+    if is_shutting_down():
+        return True
+    loop = asyncio.get_running_loop()
+    woken = asyncio.Event()
+    remove = add_shutdown_waker(lambda: loop.call_soon_threadsafe(woken.set))
+    sleeper = asyncio.ensure_future(asyncio.sleep(max(0.0, float(seconds))))
+    waiter = asyncio.ensure_future(woken.wait())
+    try:
+        done, _ = await asyncio.wait({sleeper, waiter}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        remove()
+        for task in (sleeper, waiter):
+            if not task.done():
+                task.cancel()
+    if waiter in done or is_shutting_down():
+        return True
+    sleeper.result()  # a cancelled sleep is the caller's cancellation
+    return False
 
 
 async def wait_for_shutdown(timeout: float | None = None) -> None:

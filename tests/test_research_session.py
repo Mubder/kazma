@@ -256,11 +256,17 @@ def test_evaluate_report_path(tmp_path: Path):
     from kazma_core.tools.research_eval import evaluate_report_path
 
     p = tmp_path / "report.md"
+    # A report whose paragraphs cite their sources (the rubric scores content
+    # since 2026-11, FA-235: "body " * 400 scored 100 with nothing cited).
     p.write_text(
         "# Research report: X\n\n## Background\n\n"
-        + ("body " * 400)
-        + "\n\n## Key findings\n\n"
-        + ("more " * 200)
+        "CPython's global interpreter lock lets one thread run Python bytecode at a time, "
+        "which limits CPU-bound threads on multi-core machines (https://docs.python.org/3/).\n\n"
+        "## Key findings\n\n"
+        "PEP 703 makes the lock optional in a free-threaded build, with per-object locking "
+        "and biased reference counting carrying the cost (https://peps.python.org/pep-0703/).\n\n"
+        "SQLite's write-ahead log lets readers proceed while one writer appends, the model a "
+        "free-threaded program meets at its storage layer (https://sqlite.org/wal.html).\n"
         + "\n\n## Sources\n\n"
         "- https://docs.python.org/3/\n"
         "- https://peps.python.org/pep-0703/\n"

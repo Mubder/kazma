@@ -121,7 +121,26 @@ def _args_digest(args: dict[str, Any] | None) -> str:
         return ""
 
 
-def authorize_effect(
+def authorize_effect(tool_name: str, args: dict[str, Any] | None = None, **kwargs: Any) -> EffectDecision:
+    """Authorize one tool effect, and count the gate's decision.
+
+    The decision is :func:`_authorize_effect`'s. A policy decision -- any but a
+    plain allow, and an allow that resolved a commitment -- is counted here,
+    where it is made (``kazma_commitment_decisions_total``, FA-257). Arguments
+    are :func:`_authorize_effect`'s.
+    """
+    decision = _authorize_effect(tool_name, args, **kwargs)
+    if decision.decision != "allow" or decision.commitment_id:
+        try:
+            from kazma_core.metrics import record_commitment_decision
+
+            record_commitment_decision(decision.decision)
+        except (ImportError, ValueError):  # a metric must never change a decision
+            logger.debug("[commitment] decision metric not recorded", exc_info=True)
+    return decision
+
+
+def _authorize_effect(
     tool_name: str,
     args: dict[str, Any] | None = None,
     *,
@@ -1547,7 +1566,9 @@ def _resolve_config_change_act(profile, tool_name, args, *, audit, thread_id, te
                        slots={"key": key[:500]}, confidence=0.0)
         c.status = "aborted"; c.policy_decision = "deny"
         cid = create_commitment(c, cfg=cfg)
-        logger.warning("[commitment] DENY config — protected key %s", key)
+        # An expected, correct refusal: INFO, and the turn shows it as a
+        # refused step (FA-253). It was a WARNING, read as something wrong.
+        logger.info("[commitment] DENY config — protected key %s", key)
         return EffectDecision("deny", f"config: key {key!r} is protected (safety-critical)",
                               profile, audit, commitment_id=cid)
     logger.info(

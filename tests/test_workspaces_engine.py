@@ -30,8 +30,9 @@ def cleanup_stores():
     reset_config_store()
 
 
-def test_workspace_store_boot_default_creation(tmp_path: Path) -> None:
-    """If database is empty, boot should automatically initialize the CWD as the Default Workspace."""
+def test_workspace_store_boot_default_creation(tmp_path: Path, monkeypatch) -> None:
+    """If database is empty and no KAZMA_WORKSPACE is set, boot initializes the CWD."""
+    monkeypatch.delenv("KAZMA_WORKSPACE", raising=False)  # the root conftest pins one
     db_file = tmp_path / "settings.db"
     
     # Instantiate WorkspaceStore with the temp DB file
@@ -119,8 +120,10 @@ def test_workspaces_api_endpoints(tmp_path: Path) -> None:
         data = resp.json()
         assert data["status"] == "ok"
         assert len(data["workspaces"]) == 1
-        assert data["workspaces"][0]["name"] == Path.cwd().name
-        
+        # Seeded from KAZMA_WORKSPACE (the root conftest's temp folder), never
+        # the checkout the tests run in.
+        assert data["workspaces"][0]["name"] == Path(os.environ["KAZMA_WORKSPACE"]).name
+
         default_id = data["active_workspace_id"]
         assert default_id is not None
         

@@ -101,7 +101,7 @@ def _fence_result(text: str, *, own: bool) -> str:
 
 def _shown(hit: Any) -> str:
     """What a recalled memory shows: its display text (question AND answer),
-    never only the match text (``recall._shown``'s rule)."""
+    never only the match text (``recall.shown_text``'s rule)."""
     return str((hit.metadata or {}).get("display") or hit.content or "")
 
 

@@ -713,9 +713,16 @@ def _oauth_setup_page(request: Request) -> HTMLResponseType:
 
 
 def _oauth_result_page(success: bool, message: str) -> HTMLResponseType:
-    """Render a minimal close-the-tab page after the OAuth callback."""
+    """Render a minimal close-the-tab page after the OAuth callback.
+
+    ``message`` is text, escaped here: a token-exchange failure quotes
+    GitHub's own answer, which is not Kazma's to put into HTML (FA-130).
+    """
+    import html as _html
+
     from fastapi.responses import HTMLResponse
 
+    message = _html.escape(message, quote=True)
     color = "#10b981" if success else "#ef4444"
     icon = "✅" if success else "❌"
     html = f"""<!DOCTYPE html>

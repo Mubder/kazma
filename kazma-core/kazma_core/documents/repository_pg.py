@@ -271,6 +271,14 @@ def _chunk(row: Any) -> DocumentChunkRecord:
     )
 
 
+def _cell(row: Any, name: str, index: int) -> Any:
+    """One column of a row by its name: the pool's connections answer dict
+    rows, a plain psycopg connection tuples. The GC mark read every row by
+    position, so on a Postgres catalog every pass failed at the mark with a
+    ``KeyError`` and collected nothing (2026-11, found by FA-205's test)."""
+    return row[name] if isinstance(row, dict) else row[index]
+
+
 class PostgresDocumentRepository:
     """Postgres-backed document metadata (multi-replica safe)."""
 
@@ -1339,9 +1347,9 @@ class PostgresDocumentRepository:
 
     def _jobs_table_exists(self, cur: Any) -> bool:
         try:
-            cur.execute("SELECT to_regclass('public.document_jobs')")
+            cur.execute("SELECT to_regclass('public.document_jobs') AS present")
             row = cur.fetchone()
-            return bool(row and row[0])
+            return bool(row and _cell(row, "present", 0))
         except Exception:
             return False
 
@@ -1394,7 +1402,8 @@ class PostgresDocumentRepository:
                         """,
                         (tombstone_cutoff,),
                     )
-                keep_source = {r[0] for r in cur.fetchall() if r and r[0]}
+                keep_source = {_cell(r, "source_sha256", 0) for r in cur.fetchall()
+                               if r and _cell(r, "source_sha256", 0)}
                 cur.execute(
                     """
                     SELECT DISTINCT b.sha256 AS sha256
@@ -1407,7 +1416,7 @@ class PostgresDocumentRepository:
                     """,
                     (tombstone_cutoff,),
                 )
-                keep_artifacts = {r[0] for r in cur.fetchall() if r and r[0]}
+                keep_artifacts = {_cell(r, "sha256", 0) for r in cur.fetchall() if r and _cell(r, "sha256", 0)}
                 cur.execute(
                     """
                     SELECT v.id AS id, v.document_id AS document_id
@@ -1418,7 +1427,7 @@ class PostgresDocumentRepository:
                     """,
                     (tombstone_cutoff,),
                 )
-                keep_versions = {(r[1], r[0]) for r in cur.fetchall() if r}
+                keep_versions = {(_cell(r, "document_id", 1), _cell(r, "id", 0)) for r in cur.fetchall() if r}
                 cur.execute(
                     """
                     SELECT source_blob_id AS blob_id FROM document_versions
@@ -1426,7 +1435,8 @@ class PostgresDocumentRepository:
                     SELECT blob_id AS blob_id FROM document_artifacts
                     """
                 )
-                referenced_blob_ids = {r[0] for r in cur.fetchall() if r and r[0]}
+                referenced_blob_ids = {_cell(r, "blob_id", 0) for r in cur.fetchall()
+                                       if r and _cell(r, "blob_id", 0)}
         return {
             "keep_source": keep_source,
             "keep_artifacts": keep_artifacts,
@@ -1486,7 +1496,7 @@ class PostgresDocumentRepository:
                 rows = cur.fetchall()
         out: list[str] = []
         for r in rows:
-            bid = r[0]
+            bid = _cell(r, "id", 0)
             if bid not in referenced:
                 out.append(bid)
             if len(out) >= max(0, int(limit)):

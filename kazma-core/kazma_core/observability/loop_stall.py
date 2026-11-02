@@ -85,10 +85,37 @@ def _loop_thread_stack(loop_thread_id: int | None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+#: Stall dumps kept (2026-11, FA-203): none older than this, and at most
+#: :data:`_DUMP_MAX` of the newest. Nothing removed them; 103 sat in the live
+#: install's folder. The weekly report reads a week of them.
+_DUMP_MAX_AGE_S = 30 * 24 * 3600
+_DUMP_MAX = 200
+
+
+def _prune_dumps(folder: Path) -> int:
+    """Remove the dumps past the age or the count; how many were removed."""
+    try:
+        dumps = sorted(folder.glob("stall-*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        logger.debug("[loop-stall] dumps could not be listed for pruning", exc_info=True)
+        return 0
+    cutoff = time.time() - _DUMP_MAX_AGE_S
+    removed = 0
+    for index, dump in enumerate(dumps):
+        try:
+            if index >= _DUMP_MAX or dump.stat().st_mtime < cutoff:
+                dump.unlink()
+                removed += 1
+        except OSError:
+            logger.debug("[loop-stall] dump %s not removed", dump.name, exc_info=True)
+    return removed
+
+
 def _write_dump(lag_s: float, tag: str, loop_thread_id: int | None = None) -> Path | None:
     """Dump every thread's stack, the loop's first. Never raises -- this runs during an incident."""
     try:
-        path = stall_dump_dir() / f"stall-{tag}.txt"
+        folder = stall_dump_dir()
+        path = folder / f"stall-{tag}.txt"
         with path.open("w", encoding="utf-8") as fh:
             fh.write(
                 f"event loop unresponsive for {lag_s:.1f}s\n"
@@ -104,6 +131,7 @@ def _write_dump(lag_s: float, tag: str, loop_thread_id: int | None = None) -> Pa
             fh.flush()
             # all_threads: the blocked one is the point, and it is not this one.
             faulthandler.dump_traceback(file=fh, all_threads=True)
+        _prune_dumps(folder)
         return path
     except Exception:  # noqa: BLE001
         logger.debug("[loop-stall] could not write the dump", exc_info=True)

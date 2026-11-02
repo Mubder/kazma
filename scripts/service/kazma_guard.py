@@ -438,6 +438,25 @@ def _pause_signature(pause: dict | None) -> str:
 # -- logging (deliberately not the app's logger) ----------------------
 
 
+#: The guard's own log is rotated past this size, to one ``.1`` sibling
+#: (2026-11, FA-143): it grew forever (1.35 MB in two months on the live
+#: install). The weekly report and the daily digest read the sibling too.
+GUARD_LOG_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _rotate_if_large(path: Path, max_bytes: int) -> None:
+    """Move *path* to ``<name>.1`` (replacing it) once it passes *max_bytes*.
+
+    The one rotation of every file the guard writes. Never raises: a log
+    that cannot rotate is still written.
+    """
+    try:
+        if path.is_file() and path.stat().st_size > max_bytes:
+            os.replace(path, path.with_name(path.name + ".1"))
+    except OSError:
+        pass
+
+
 class GuardLog:
     """Tiny append-only JSONL logger with stderr mirroring.
 
@@ -464,6 +483,7 @@ class GuardLog:
             **fields,
         }
         line = json.dumps(rec, default=str)
+        _rotate_if_large(self.path, GUARD_LOG_MAX_BYTES)
         try:
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
@@ -1397,8 +1417,7 @@ def _open_server_stderr(log: GuardLog):
     path = _server_stderr_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        if path.is_file() and path.stat().st_size > SERVER_STDERR_MAX_BYTES:
-            os.replace(path, path.with_name(path.name + ".1"))
+        _rotate_if_large(path, SERVER_STDERR_MAX_BYTES)
         fh = path.open("ab")
         return fh, fh.tell()
     except OSError as exc:
@@ -2118,8 +2137,7 @@ class DocumentBroker:
         log_path = _broker_log_path()
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            if log_path.is_file() and log_path.stat().st_size > BROKER_LOG_MAX_BYTES:
-                os.replace(log_path, log_path.with_name(log_path.name + ".1"))
+            _rotate_if_large(log_path, BROKER_LOG_MAX_BYTES)
             fh = log_path.open("ab")
         except OSError:
             fh = None

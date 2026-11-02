@@ -90,9 +90,17 @@ def _backup(monkeypatch, clock):
 
 
 def _digest(monkeypatch, clock):
+    from datetime import UTC, datetime
+
+    from kazma_core.cron import scheduler as cron_scheduler
     from kazma_core.observability import cadence, daily_digest
 
-    sent = clock.base - (daily_digest.DIGEST_INTERVAL_HOURS * 3600 - DUE_IN)
+    # The digest is daily at its set time (FA-208): set it DUE_IN after the
+    # boot, with yesterday's sent at yesterday's time.
+    at = datetime.fromtimestamp(clock.base + DUE_IN, UTC)
+    monkeypatch.setattr(cron_scheduler, "resolve_cron_zone", lambda: (UTC, "UTC"))
+    monkeypatch.setattr(daily_digest, "_digest_time", lambda: (at.hour, at.minute))
+    sent = clock.base + DUE_IN - at.second - 24 * 3600
     monkeypatch.setattr(cadence, "last_run", lambda key: sent)
     monkeypatch.setattr(daily_digest, "build_digest", _hook(clock))
     return lambda: asyncio.get_running_loop().create_task(daily_digest.digest_scheduler())
@@ -117,10 +125,16 @@ def _ledger(monkeypatch, clock):
     return lambda: asyncio.get_running_loop().create_task(fl.ledger_scheduler())
 
 
-def _enqueueing(starter_name: str):
-    """Schedulers that enqueue their work shortly after every boot."""
+def _enqueueing(starter_name: str, interval_s: float):
+    """Schedulers that enqueue their work when their stamp says it is due
+    (FA-149: they ran shortly after EVERY boot)."""
 
     def setup(monkeypatch, clock):
+        from kazma_core.observability import cadence
+
+        ran = clock.base - (interval_s - DUE_IN)
+        monkeypatch.setattr(cadence, "last_run", lambda key: ran)
+        monkeypatch.setattr(wb, "_distinct_tenants", lambda: ["default"])
         monkeypatch.setattr("kazma_core.memory.task_queue.enqueue_task", _hook(clock))
         return getattr(wb, starter_name)
 
@@ -146,8 +160,10 @@ CASES: dict[str, Callable] = {
     "_start_daily_digest_scheduler": _digest,
     "_start_restore_drill_scheduler": _drill,
     "_start_firing_ledger_scheduler": _ledger,
-    "_start_macro_sleep_scheduler": _enqueueing("_start_macro_sleep_scheduler"),
-    "_start_reconsolidation_scheduler": _enqueueing("_start_reconsolidation_scheduler"),
+    "_start_macro_sleep_scheduler": _enqueueing(
+        "_start_macro_sleep_scheduler", wb._MACRO_SLEEP_INTERVAL_HOURS * 3600),
+    "_start_reconsolidation_scheduler": _enqueueing(
+        "_start_reconsolidation_scheduler", wb._RECONSOLIDATION_INTERVAL_HOURS * 3600),
     "_start_session_purge_scheduler": _session_purge,
     "_start_commitment_gc_scheduler": _maintenance,
 }
@@ -231,3 +247,124 @@ def test_a_stamp_round_trips_through_the_settings_store():
     cadence.stamp_run("observability.test_cadence.last", when=1234.5)
     assert cadence.last_run("observability.test_cadence.last") == 1234.5
     assert cadence.last_run("observability.test_cadence.never") is None
+
+
+# ── a recent run waits (2026-11, FA-149) ─────────────────────────────
+
+
+@pytest.mark.parametrize("starter, hours", [
+    ("_start_macro_sleep_scheduler", "_MACRO_SLEEP_INTERVAL_HOURS"),
+    ("_start_reconsolidation_scheduler", "_RECONSOLIDATION_INTERVAL_HOURS"),
+])
+async def test_a_job_that_just_ran_does_not_run_at_boot(starter, hours, monkeypatch):
+    """The negative of the cases above: the stamp says it ran ten minutes
+    ago, so a boot waits the rest of the interval (it used to run 60-180 s
+    after every boot, several times a day)."""
+    from kazma_core.observability import cadence
+
+    clock = _Clock()
+    interval = getattr(wb, hours) * 3600
+    monkeypatch.setattr(cadence, "last_run", lambda key: clock.base - 600)
+    monkeypatch.setattr(wb, "_distinct_tenants", lambda: ["default"])
+    monkeypatch.setattr("kazma_core.memory.task_queue.enqueue_task", _hook(clock))
+    _install_clock(monkeypatch, clock)
+    worked_at = await _run_until_work(getattr(wb, starter), clock)
+    assert worked_at is not None and worked_at >= interval - 600 - 60
+
+
+# ── the digest is sent at its time of day (2026-11, FA-208) ──────────
+
+
+def _digest_wait(monkeypatch, *, now_hm, sent_hm_days_ago, at=(8, 0)):
+    """The digest's wait at local time *now_hm* (UTC here), its last send
+    *sent_hm_days_ago* ``(hour, minute, days ago)`` or None."""
+    from datetime import UTC, datetime, timedelta
+
+    from kazma_core.cron import scheduler as cron_scheduler
+    from kazma_core.observability import cadence, daily_digest
+
+    day = datetime(2026, 11, 2, tzinfo=UTC)
+    now = day.replace(hour=now_hm[0], minute=now_hm[1]).timestamp()
+    sent = None
+    if sent_hm_days_ago is not None:
+        h, m, ago = sent_hm_days_ago
+        sent = (day.replace(hour=h, minute=m) - timedelta(days=ago)).timestamp()
+    monkeypatch.setattr(cron_scheduler, "resolve_cron_zone", lambda: (UTC, "UTC"))
+    monkeypatch.setattr(daily_digest, "_digest_time", lambda: at)
+    monkeypatch.setattr(cadence, "last_run", lambda key: sent)
+    monkeypatch.setattr(daily_digest, "DIGEST_INTERVAL_HOURS", 24)
+    return daily_digest._seconds_until_digest(now=now)
+
+
+def test_a_boot_before_the_time_waits_for_it(monkeypatch):
+    assert _digest_wait(monkeypatch, now_hm=(7, 0), sent_hm_days_ago=(8, 10, 1)) == 3600
+
+
+def test_a_boot_past_an_unsent_time_sends_after_settling(monkeypatch):
+    from kazma_core.observability import daily_digest
+
+    wait = _digest_wait(monkeypatch, now_hm=(9, 30), sent_hm_days_ago=(8, 10, 1))
+    assert wait == daily_digest._SETTLE_S
+
+
+def test_after_a_late_send_the_next_is_at_the_time_not_a_day_later(monkeypatch):
+    """Sent at 08:10 (a boot's settle): the next is tomorrow 08:00, not
+    08:10 -- the interval rule drifted ten minutes a restart."""
+    wait = _digest_wait(monkeypatch, now_hm=(8, 10), sent_hm_days_ago=(8, 10, 0))
+    assert wait == (23 * 60 + 50) * 60
+
+
+def test_the_old_schedules_send_earlier_today_counts(monkeypatch):
+    """Sent at 05:17 under the drifting schedule: today's 08:00 is not sent
+    again at 17:00; the next is tomorrow 08:00."""
+    wait = _digest_wait(monkeypatch, now_hm=(17, 0), sent_hm_days_ago=(5, 17, 0))
+    assert wait == 15 * 3600
+
+
+def test_negative_control_the_interval_rule_drifts(monkeypatch):
+    from kazma_core.observability import cadence
+
+    last = 1_000_000.0 + 8 * 3600 + 600  # sent at 08:10
+    monkeypatch.setattr(cadence, "last_run", lambda key: last)
+    wait = cadence.seconds_until_due("k", 24 * 3600, settle_s=600, now=last)
+    assert wait == 24 * 3600  # the next lands at 08:10, then 08:20 after another settle
+
+
+# ── loops end when Kazma stops (2026-11, FA-265) ─────────────────────
+
+
+async def test_a_sleeping_loop_wakes_at_shutdown():
+    from kazma_core import shutdown
+
+    shutdown.reset_shutdown()
+    try:
+        task = asyncio.get_running_loop().create_task(shutdown.sleep_or_shutdown(6 * 3600))
+        await asyncio.sleep(0)
+        started = time.monotonic()
+        shutdown.signal_shutdown()
+        assert await asyncio.wait_for(task, timeout=5) is True
+        assert time.monotonic() - started < 2
+    finally:
+        shutdown.reset_shutdown()
+
+
+async def test_negative_control_a_plain_sleep_does_not_wake(monkeypatch):
+    from kazma_core import shutdown
+
+    shutdown.reset_shutdown()
+    try:
+        task = asyncio.get_running_loop().create_task(asyncio.sleep(6 * 3600))
+        await asyncio.sleep(0)
+        shutdown.signal_shutdown()
+        done, _ = await asyncio.wait({task}, timeout=0.2)
+        assert not done
+        task.cancel()
+    finally:
+        shutdown.reset_shutdown()
+
+
+async def test_a_short_sleep_returns_false():
+    from kazma_core import shutdown
+
+    shutdown.reset_shutdown()
+    assert await shutdown.sleep_or_shutdown(0.01) is False

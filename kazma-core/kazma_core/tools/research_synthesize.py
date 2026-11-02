@@ -118,6 +118,8 @@ async def synthesize_from_digests(
     outline: str = "",
     max_chars: int = 20_000,
     language: str = "",
+    work_id: str = "",
+    source_count: int | None = None,
 ) -> str:
     """Synthesize a multi-source analysis from saved research files.
 
@@ -125,6 +127,9 @@ async def synthesize_from_digests(
     extracts/digests. Returns markdown with sections and URL citations when
     present in the sources. *language* (``report_language``) is the one the
     analysis is written in; the question's own when not given.
+    *source_count*: the first that many paths are the sources, the rest the
+    run's own evidence (its claims file); "Sources loaded" counts sources
+    only (2026-11, FA-240: it read "4/4" over three sources).
     """
     q = (question or "").strip()
     if not q:
@@ -167,7 +172,8 @@ async def synthesize_from_digests(
             break
         blocks.append(piece)
         used += len(piece)
-        loaded += 1
+        if source_count is None or i <= source_count:
+            loaded += 1
 
     if loaded == 0:
         return "Error: could not load any source files under the workspace."
@@ -229,6 +235,7 @@ async def synthesize_from_digests(
             max_attempts=3,
             max_tokens=min(8000, max(1024, cap_out // 3)),
             label="research-synthesize",
+            thread_id=work_id,  # the ledger's work (FA-260)
             frozen_failover=frozen_failover,
             # A thinking model's hidden reasoning counts against max_tokens:
             # live 2026-10-31 deepseek-flash spent all 8,000 on it, then
@@ -251,7 +258,7 @@ async def synthesize_from_digests(
         header = (
             f"# {words['synthesis']}\n\n"
             f"**{words['question']}:** {q}\n"
-            f"**{words['loaded']}:** {loaded}/{len(path_list)}\n\n"
+            f"**{words['loaded']}:** {loaded}/{len(path_list) if source_count is None else source_count}\n\n"
         )
         return header + text
     except Exception as exc:

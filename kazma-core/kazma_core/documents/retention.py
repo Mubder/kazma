@@ -173,6 +173,12 @@ class DocumentGarbageCollector:
                 report.errors.append(f"blob_rows:{type(exc).__name__}")
         elif budget > 0 and dry_run:
             report.deleted_blob_rows = self._count_orphan_blob_rows(marks=marks, now=now, grace=grace)
+        if budget > 0 and not dry_run:
+            try:
+                budget = self._sweep_idle_catalog(cfg, now=now, grace=grace, budget=budget, report=report)
+            except Exception as exc:  # noqa: BLE001 - report, don't fabricate success
+                report.errors.append(f"idle_catalog:{type(exc).__name__}")
+                logger.warning("[documents.retention] the idle catalog could not be swept", exc_info=True)
 
         # Prune audit rows past retention.
         if self._audit is not None and int(cfg.retention_audit_days) > 0:
@@ -584,6 +590,44 @@ class DocumentGarbageCollector:
             report.errors.append(f"unlink:{type(exc).__name__}")
             logger.debug("[documents.retention] unlink failed for a blob", exc_info=True)
             return False
+
+    def _sweep_idle_catalog(
+        self, cfg: DocumentConfig, *, now: datetime, grace: timedelta, budget: int, report: GcReport
+    ) -> int:
+        """Orphan blob rows of the Postgres catalog when the install keeps its
+        catalog in SQLite (2026-11, FA-205).
+
+        Live, the document catalog is SQLite and the jobs are on Postgres,
+        whose ``document_blobs`` kept a row from a time the catalog was there
+        (2026-08-14): no document, no version, and no GC pass ever read that
+        table. The same mark and the same rule as the catalog in use (an
+        unreferenced row past the grace) run against it; nothing else there
+        is touched.
+        """
+        if getattr(self._repo, "backend_name", "") == "postgres":
+            return budget  # the catalog in use IS Postgres: swept above
+        from kazma_core.db.pg_helpers import get_pool, use_postgres
+
+        if not use_postgres():
+            return budget
+        pool = get_pool()
+        row = pool.execute_one("SELECT to_regclass('document_blobs') IS NOT NULL AS present")
+        if not row or not row["present"]:
+            return budget
+        from .repository_pg import PostgresDocumentRepository
+
+        idle = DocumentGarbageCollector(
+            repository=PostgresDocumentRepository(pool, tenant_quota_bytes=int(cfg.quota_tenant_bytes)),
+            storage=self._storage,
+            policy=self._policy,
+        )
+        before = report.deleted_blob_rows
+        budget = idle._prune_blob_rows(marks=idle._mark(cfg, now), now=now, grace=grace,
+                                       budget=budget, report=report)
+        if report.deleted_blob_rows > before:
+            logger.info("[documents.retention] removed %d orphan blob row(s) from the idle Postgres catalog",
+                        report.deleted_blob_rows - before)
+        return budget
 
     def _count_orphan_blob_rows(
         self, *, marks: dict[str, Any], now: datetime, grace: timedelta

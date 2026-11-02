@@ -937,6 +937,12 @@ _LOOP_STALL_HELPERS = frozenset({
     "build_digest", "gate_outcomes_since", "_has_any_sink",
     "mirror_drift_summary", "purge_completed_tasks", "expire_due_gates",
     "check_database", "perform_universal_backup",
+    # The schedulers' tenant list (a SELECT DISTINCT over every episode) and
+    # the digest's set time (settings reads, the operator's zone): 2026-11,
+    # FA-150 found the tenant list on the loop in three schedulers.
+    "_distinct_tenants", "_seconds_until_digest",
+    # The stores' decided-row prunes (FA-141).
+    "prune_decided_gates", "prune_completed_receipts", "prune_old_calls", "prune_pipeline_logs",
     # The saved-drafts store (agent/artifacts.py): each call opens SQLite,
     # several take BEGIN IMMEDIATE. X Studio's drafts route ran it on the
     # loop until 2026-09-25; the rest were found by adding these names.

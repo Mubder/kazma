@@ -37,6 +37,8 @@ __all__ = [
     "report_failover",
     "report_model_served",
     "report_provider_usable",
+    "report_rebind_failed",
+    "report_rebind_ok",
     "report_substitution",
     "reset_fallback_state",
 ]
@@ -176,6 +178,43 @@ def report_provider_usable(provider: str) -> None:
             severity="info",
             cooldown_s=_SUBSTITUTION_REPEAT_S,
         )
+
+
+def report_rebind_failed(*, provider: str, error: str) -> None:
+    """A key was saved for *provider* and the running agent could not rebuild
+    its client: it keeps answering with the client it had, built for the key
+    before (FA-110: this was a DEBUG line)."""
+    if _suppressed():
+        return
+    name = (provider or "").strip() or "the provider"
+    key = f"rebind:{name.lower()}"
+    episode, fresh = _open(key, "rebind", name, "the previous client")
+    _announce(
+        key, episode,
+        subsystem=f"llm-rebind:{name.lower()}",
+        title=f"The new {name} key is saved but not in use yet",
+        detail=(
+            f"Kazma could not rebuild its model client after the {name} key was "
+            f"saved ({error}), so it keeps answering with the client it had. "
+            f"Reload Kazma to use the new key; this clears once a client is built."
+        ),
+        repeat_s=_SUBSTITUTION_REPEAT_S,
+        fresh=fresh,
+        link="/settings?tab=providers_connectors",
+        link_text="Open Providers",
+    )
+
+
+def report_rebind_ok(provider: str) -> None:
+    """The running agent took *provider*'s new key: end a rebind failure."""
+    name = (provider or "").strip() or "the provider"
+    episode = _close(f"rebind:{name.lower()}")
+    if episode is None:
+        return
+    from kazma_core.observability.alerts import AlertDispatcher
+
+    AlertDispatcher.resolve_alerts_for_subsystem(f"llm-rebind:{name.lower()}")
+    logger.info("[model_fallback] the agent took the new %s key", name)
 
 
 def report_failover(*, model: str, used_model: str, reason: str = "") -> None:

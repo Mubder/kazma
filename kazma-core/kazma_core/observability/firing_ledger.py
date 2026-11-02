@@ -561,6 +561,8 @@ async def ledger_scheduler() -> None:
     often than weekly still emits when overdue (audit M-13). First sleep
     is short (120s) when there is no last_run, mirroring the backup loop.
     """
+    from kazma_core.shutdown import sleep_or_shutdown
+
     interval = SWEEP_INTERVAL_HOURS * 3600
     first = True
     while True:
@@ -577,15 +579,16 @@ async def ledger_scheduler() -> None:
                 remaining = interval - (now - last)
                 delay = 0.0 if remaining <= 0 else max(60.0, remaining)
             first = False
-            if delay > 0:
-                await asyncio.sleep(delay)
+            if delay > 0 and await sleep_or_shutdown(delay):
+                return
             await asyncio.to_thread(run_weekly_sweep, SWEEP_INTERVAL_HOURS)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 -- a failed sweep must not
             # kill the cadence; the next one still fires.
             logger.warning("[firing-ledger] scheduler iteration failed: %s", exc)
-            await asyncio.sleep(300)
+            if await sleep_or_shutdown(300):
+                return
 
 
 def _named(entry: LedgerEntry) -> str:

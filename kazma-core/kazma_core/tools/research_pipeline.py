@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -342,7 +343,7 @@ async def _export_docx(title: str, report_md: str, dest_dir: Path) -> str | None
                 if src.is_file():
                     dest = dest_dir / "report.docx"
                     try:
-                        dest.write_bytes(src.read_bytes())
+                        await asyncio.to_thread(shutil.copyfile, src, dest)  # off the loop (FA-139)
                         return await call(_rel, dest)
                     except Exception:
                         return str(src)
@@ -554,8 +555,14 @@ async def _run_research_pipeline(
         plan_research_queries, ResearchPlan, GapReport,
     )
 
+    # The work the model calls are ledgered under (FA-260): the chat that ran
+    # this research, else the durable job (a Research page run has no chat).
+    from kazma_core.safety.hitl import get_current_thread_id
+
+    work_id = get_current_thread_id() or f"research:{_job.job.job_id}"
     plan = await _job.effect('plan', {}, lambda: plan_research_queries(
-        topic, language=language, max_queries=max_queries if is_deep else min(4, max_queries), is_deep=is_deep),
+        topic, language=language, max_queries=max_queries if is_deep else min(4, max_queries), is_deep=is_deep,
+        work_id=work_id),
         encode=lambda value: value.to_dict(), decode=lambda value: ResearchPlan(**value))
     queries = list(dict.fromkeys(plan.search_queries))
     await _publish_stage(_job, 'plan-publication', out_dir / 'plan.json',
@@ -831,7 +838,7 @@ async def _run_research_pipeline(
     synth_paths = digests + [(await call(_rel, out_dir / "claims-0.md"))]
     synthesis = await _job.effect('synthesis:0', {'paths': synth_paths}, lambda: synthesize_from_digests(
         synth_paths, question=topic, outline=outline, max_chars=24_000 if is_deep else 12_000,
-        language=report_lang))
+        language=report_lang, source_count=len(digests), work_id=work_id))
     if synthesis.startswith('Error:'):
         raise AcquisitionError(FetchErrorCode.PROVIDER_RESPONSE, 'Research synthesis failed; no complete report was published.')
     log.append(f"Synthesis length={len(synthesis)}")
@@ -854,7 +861,7 @@ async def _run_research_pipeline(
             if m.get("ok")
         )
         gap = await _job.effect('gap-critic:0', {}, lambda: critique_synthesis_gaps(
-            topic, synthesis, sources_summary=src_summary, max_followups=3),
+            topic, synthesis, sources_summary=src_summary, max_followups=3, work_id=work_id),
             encode=lambda value: value.to_dict(), decode=lambda value: GapReport(**value))
         await _publish_stage(_job, 'gap-publication:0', out_dir / 'gap_loop_0.json',
                              json.dumps(gap.to_dict(), indent=2, ensure_ascii=False))
@@ -928,7 +935,7 @@ async def _run_research_pipeline(
             await _emit(progress_cb, "reduce", "Re-synthesizing after gap fill…")
             synthesis = await _job.effect('synthesis:1', {'paths': synth_paths}, lambda: synthesize_from_digests(
                 synth_paths, question=topic, outline=outline, max_chars=24_000 if is_deep else 12_000,
-                language=report_lang))
+                language=report_lang, source_count=len(digests), work_id=work_id))
             if synthesis.startswith('Error:'):
                 raise AcquisitionError(FetchErrorCode.PROVIDER_RESPONSE, 'Research gap synthesis failed; no complete report was published.')
             log.append(f"Re-synthesis length={len(synthesis)} after gap loop")
@@ -955,9 +962,9 @@ async def _run_research_pipeline(
     report = await _publish_stage(_job, 'report-publication', report_path, report)
     report_rel = await call(_rel, report_path)
 
-    # Structural rubric (R0), a local stage with an immutable publication.
+    # The report rubric (R0; content first, FA-235), a local stage with an immutable publication.
     from kazma_core.tools.research_eval import score_report_markdown
-    rub = await call(score_report_markdown, report, min_sources=min_sources)
+    rub = await call(score_report_markdown, report, min_sources=min_sources, topic=topic)
     rubric_dict = rub.to_dict()
     rubric_text = await _publish_stage(_job, 'rubric-publication', out_dir / 'rubric.json',
                                       json.dumps(rubric_dict, indent=2))
