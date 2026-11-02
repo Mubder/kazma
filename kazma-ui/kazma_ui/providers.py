@@ -34,6 +34,7 @@ from kazma_ui.models import (
     ProviderUpdateRequest,
 )
 from kazma_core.http_tls import shared_ssl_context
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -377,9 +378,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
         if ctype == "application/json":
             try:
-                body = await request.json()
-            except Exception:
-                body = None
+                body = await read_json(request, allow_empty=True)
+            except InvalidJsonBody:
+                return invalid_json_response()
             if isinstance(body, dict):
                 typed_key = _sanitize_api_key(str(body.get("api_key") or ""))
         if typed_key and _is_masked_placeholder(typed_key):

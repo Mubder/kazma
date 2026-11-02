@@ -119,18 +119,21 @@ def _disc(**extra: Any) -> dict[str, Any]:
 
 
 class _Store:
+    """A settings store holding one pending sign-in for *state*."""
+
     def __init__(self, state: str = "st") -> None:
         self._d: dict[str, Any] = {
-            "auth.oidc.state": state,
-            "auth.oidc.state_exp": time.time() + 600,
-            "auth.oidc.pkce_verifier": "verifier",
+            "auth.oidc.pending": {
+                oidc_mod._state_id(state): {"verifier": "verifier", "exp": time.time() + 600},
+            },
         }
 
     def get(self, k: str) -> Any:
         return self._d.get(k)
 
-    def delete(self, k: str) -> None:
-        self._d.pop(k, None)
+    def atomic_update(self, k: str, fn: Any, category: str = "general") -> Any:
+        self._d[k] = fn(self._d.get(k))
+        return self._d[k]
 
 
 class _Resp:
@@ -296,7 +299,7 @@ async def test_exchange_code_verified_id_token(rsa_keys, oidc_env, monkeypatch) 
     monkeypatch.setattr(oidc_mod, "fetch_discovery", AsyncMock(return_value=_disc()))
     monkeypatch.setattr(oidc_mod.httpx, "AsyncClient", _Client)
 
-    result = await exchange_code("code", "st")
+    result = await exchange_code("code", "st", bound_state="st")
     assert result["user_id"] == "user-1"
     assert result["username"] == "op"
     assert result["role"] == "operator"
@@ -337,7 +340,7 @@ async def test_exchange_code_rejects_unverified_id_token(
     monkeypatch.setattr(oidc_mod.httpx, "AsyncClient", _Client)
 
     with pytest.raises(PermissionError, match="verification failed"):
-        await exchange_code("code", "st")
+        await exchange_code("code", "st", bound_state="st")
 
 
 async def test_exchange_code_userinfo_only_without_id_token(oidc_env, monkeypatch) -> None:
@@ -367,7 +370,7 @@ async def test_exchange_code_userinfo_only_without_id_token(oidc_env, monkeypatc
     monkeypatch.setattr(oidc_mod, "fetch_discovery", AsyncMock(return_value=_disc()))
     monkeypatch.setattr(oidc_mod.httpx, "AsyncClient", _Client)
 
-    result = await exchange_code("code", "st")
+    result = await exchange_code("code", "st", bound_state="st")
     assert result["user_id"] == "ui-9"
     assert result["role"] == "admin"
 
@@ -395,7 +398,7 @@ async def test_exchange_code_userinfo_http_error(oidc_env, monkeypatch) -> None:
     monkeypatch.setattr(oidc_mod.httpx, "AsyncClient", _Client)
 
     with pytest.raises(PermissionError, match="userinfo failed"):
-        await exchange_code("code", "st")
+        await exchange_code("code", "st", bound_state="st")
 
 
 async def test_exchange_code_no_identity(oidc_env, monkeypatch) -> None:
@@ -421,13 +424,13 @@ async def test_exchange_code_no_identity(oidc_env, monkeypatch) -> None:
     monkeypatch.setattr(oidc_mod.httpx, "AsyncClient", _Client)
 
     with pytest.raises(PermissionError, match="no verifiable identity"):
-        await exchange_code("code", "st")
+        await exchange_code("code", "st", bound_state="st")
 
 
 async def test_exchange_code_invalid_state(oidc_env, monkeypatch) -> None:
     _install_store(monkeypatch)
     with pytest.raises(PermissionError, match="Invalid OIDC state"):
-        await exchange_code("code", "nope")
+        await exchange_code("code", "nope", bound_state="nope")
 
 
 def test_oidc_role_from_claims_maps_common_names(oidc_env) -> None:

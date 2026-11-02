@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## The functional audit's Low findings fixed (2026-11-02)
+
+- Results are reported as they are: a reply the transcript refused, a task
+  the store would not record, a provider key the agent could not take, and
+  a swarm dispatch to workers that do not exist (now 404) no longer read as
+  successes. Two metrics count what their names say, every model call is
+  charged to the chat or research job it belongs to, and a call refused
+  before it ran is shown as a failed step of the turn.
+- Less is said before sign-in: health checks show an error code and a log
+  reference instead of the error's text, the GitHub sign-in result page
+  escapes its message, and `/api/auth/status` no longer lists the trusted
+  proxies. OIDC sign-in state is per attempt and bound to the browser that
+  started it.
+- Uploads past their limit are refused before they are read; the Documents
+  and Scheduled pages answer every refusal in one shape with a code; a body
+  that is not JSON is a 400, not a 503. The chat list no longer reloads
+  every session from the database for each reader.
+- Every store declares how long it keeps its data. Approval decisions,
+  tool receipts and finished task ledgers are kept 90 days, model-call
+  records a year. Stall dumps, old backup folders and the guard's log are
+  pruned or rotated, manifests are written whole, and a chat attachment is
+  stored once.
+- Document clean-up now actually runs on a Postgres catalog, and removes
+  the leftover rows an earlier Postgres catalog left behind.
+- The daily digest is sent at a time of day you set (08:00 by default).
+  Background jobs no longer rerun after every restart, every loop stops as
+  soon as Kazma does, and `/abort` pauses an active `/long` task.
+- Chat-app rate limits follow Settings without a restart. `kazma --version`
+  works, and the CLI prints Arabic and symbols on a Windows console. Gmail
+  lists mail over one connection. Swarm workers get the tools their template
+  names, not all of them. Research counts the sources it actually read, and
+  its score reads the report's content.
+- The security report checks that the restic password file is readable by
+  its owner only. The offsite backup copy no longer includes `.env`.
+- Hints and descriptions now say what the code does (the time-zone order,
+  the memory mirror, the vault, Knowledge auto-inject, `python_exec`'s
+  limits). The shipped system prompt carries the rules the built-in prompt
+  had, without the one that stopped all tool calls on any tool error. The
+  Knowledge citation footer is in the answer's language.
+- `KAZMA_WORKSPACE` now chooses the first workspace of a fresh install
+  over the folder Kazma was started in.
+
 ## Malware signatures stay current (2026-11-02)
 
 - The Docker image now refreshes ClamAV's signatures while it runs: its

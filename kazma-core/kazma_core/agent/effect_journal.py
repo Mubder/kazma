@@ -85,6 +85,17 @@ class _EffectJournal:
             if not ready:
                 conn.close()
 
+    def prune_completed(self, *, days: int, now: float | None = None) -> int:
+        """Remove completed receipts past *days* (2026-11, FA-141). A started
+        receipt -- an effect whose outcome is unknown -- is never removed."""
+        cutoff = (now if now is not None else time.time()) - days * 86400
+        with closing(self._connect()) as conn:
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM tool_effects WHERE state = 'completed' AND completed_at < ?", (cutoff,)
+                )
+                return int(cur.rowcount or 0)
+
     def begin(self, effect_id: str, request_hash: str, thread_id: str, tool: str) -> dict[str, Any] | None:
         with closing(self._connect()) as conn:
             with conn:
@@ -228,6 +239,22 @@ async def execute_effect(
             "and this call must not be repeated."
         )
     return result
+
+
+#: How long a completed receipt is kept (2026-11, FA-141): a resume replays
+#: a receipt only for a turn its checkpoint still holds, and an idle chat's
+#: checkpoints are thinned after ``checkpoints.retention_days`` (30).
+COMPLETED_RETENTION_DAYS = 90
+
+
+def prune_completed_receipts(*, days: int = COMPLETED_RETENTION_DAYS) -> int:
+    """The maintenance sweep's prune of the install's receipts."""
+    from kazma_core.paths import data_dir
+
+    path = data_dir() / "tool_effects.db"
+    if not path.exists():
+        return 0
+    return _EffectJournal(path).prune_completed(days=days)
 
 
 def main() -> int:

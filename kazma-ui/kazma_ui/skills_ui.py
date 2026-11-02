@@ -18,6 +18,7 @@ from kazma_ui.models import SkillInstallRequest, SkillToggleRequest
 from kazma_ui.rate_limit import rate_limit
 from kazma_core.errors import safe_error
 from kazma_core.http_tls import shared_ssl_context
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -470,9 +471,9 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
         from kazma_core.agent_skills.checkup import SkillNotFound, check_skill
 
         try:
-            body = await request.json()
-        except ValueError:
-            body = None
+            body = await read_json(request, allow_empty=True)
+        except InvalidJsonBody:
+            return invalid_json_response()
         ref = str((body or {}).get("path") or (body or {}).get("name") or "").strip() \
             if isinstance(body, dict) else ""
         if not ref:

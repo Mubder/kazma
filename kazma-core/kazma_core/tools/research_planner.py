@@ -109,7 +109,7 @@ def _parse_json_blob(text: str) -> dict[str, Any] | None:
             return None
 
 
-async def _llm_json(system: str, user: str, *, max_tokens: int = 1200) -> str:
+async def _llm_json(system: str, user: str, *, max_tokens: int = 1200, work_id: str = "") -> str:
     from kazma_core.web_acquire.research_llm import resolved_route
     from kazma_core.web_acquire.crawl_jobs import call
     route = await call(resolved_route)
@@ -141,6 +141,7 @@ async def _llm_json(system: str, user: str, *, max_tokens: int = 1200) -> str:
         max_attempts=2,
         max_tokens=max_tokens,
         label="research-planner",
+        thread_id=work_id,  # the ledger's work (FA-260)
         frozen_failover=frozen_failover,
         reasoning="off",  # a JSON plan; hidden reasoning spent its budget (live 2026-10-31)
     )
@@ -157,6 +158,7 @@ async def plan_research_queries(
     language: str = "",
     max_queries: int = 8,
     is_deep: bool = True,
+    work_id: str = "",
 ) -> ResearchPlan:
     """Produce search queries + sub-questions for a research topic."""
     topic = (topic or "").strip()
@@ -188,7 +190,7 @@ async def plan_research_queries(
         f"Need up to {n} search_queries.\n"
     )
     try:
-        raw = await _llm_json(system, user, max_tokens=900)
+        raw = await _llm_json(system, user, max_tokens=900, work_id=work_id)
         obj = _parse_json_blob(raw) or {}
         sq = [str(x).strip() for x in (obj.get("search_queries") or []) if str(x).strip()]
         sub = [str(x).strip() for x in (obj.get("sub_questions") or []) if str(x).strip()]
@@ -227,6 +229,7 @@ async def critique_synthesis_gaps(
     *,
     sources_summary: str = "",
     max_followups: int = 3,
+    work_id: str = "",
 ) -> GapReport:
     """Find unsupported claims / missing angles; suggest follow-up searches."""
     if not _env_truthy("KAZMA_RESEARCH_GAP_LOOP", True):
@@ -272,7 +275,7 @@ async def critique_synthesis_gaps(
         f"Draft (truncated):\n{synth[:6000]}\n"
     )
     try:
-        raw = await _llm_json(system, user, max_tokens=800)
+        raw = await _llm_json(system, user, max_tokens=800, work_id=work_id)
         obj = _parse_json_blob(raw) or {}
         gaps = [str(x).strip() for x in (obj.get("gaps") or []) if str(x).strip()]
         unsup = [

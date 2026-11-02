@@ -45,6 +45,7 @@ __all__ = [
     "mission_hard_rounds",
     "mission_recursion_limit",
     "pause_long_task",
+    "pause_long_task_for_abort",
     "record_long_task_event",
     "reset_progress_sender",
     "resolve_turn_budgets",
@@ -701,6 +702,24 @@ def is_continuation_reply(text: str | None) -> bool:
     if len(t.split()) > 8:
         return False
     return bool(_CONTINUATION_RE.search(t))
+
+
+async def pause_long_task_for_abort(thread_id: str | None) -> None:
+    """Pause the chat's long task when its turn is aborted (2026-11, FA-148).
+
+    Both abort paths (the web chat's and the chat apps' ``/abort``) left an
+    active ``/long`` -- budget, mission or ``/unrestricted`` -- running, so
+    the next message ran without a time limit under mission framing; AGENTS
+    25B said ``/abort`` cleared it. A settings read and write: in a thread.
+    Never raises: the abort itself has already happened.
+    """
+    import asyncio
+
+    try:
+        await asyncio.to_thread(pause_long_task, thread_id, reason="aborted")
+    except Exception:  # noqa: BLE001 - the abort stands; the pause is said
+        logger.warning("[long_task] the long task of %s was not paused at abort",
+                       str(thread_id or "")[:12], exc_info=True)
 
 
 def pause_long_task(thread_id: str | None, *, reason: str = "budget_exhausted") -> None:

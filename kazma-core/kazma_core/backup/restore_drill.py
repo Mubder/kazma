@@ -996,17 +996,21 @@ async def drill_scheduler() -> None:
     """
     import asyncio
 
+    from kazma_core.shutdown import sleep_or_shutdown
+
     first = True
     while True:
         try:
             if first:
-                await asyncio.sleep(_DRILL_FIRST_DELAY_SECONDS)
+                if await sleep_or_shutdown(_DRILL_FIRST_DELAY_SECONDS):
+                    return
                 first = False
             else:
                 # Until the next drill (daily or deep) is due -- not a whole
                 # interval: after a boot that found the last drill 23 hours
                 # old, that was 24 more hours (2026-09-28).
-                await asyncio.sleep(await asyncio.to_thread(_seconds_until_a_drill_is_due))
+                if await sleep_or_shutdown(await asyncio.to_thread(_seconds_until_a_drill_is_due)):
+                    return
             # The weekly deep tier first: if it is due, the daily checks it
             # supersedes run anyway below.
             # The drill stamps are settings reads and writes (audit 2026-10-26 AUD-111).
@@ -1035,7 +1039,8 @@ async def drill_scheduler() -> None:
         except Exception as exc:  # noqa: BLE001 -- a failed drill must not
             # kill the cadence; the next one still fires.
             logger.warning("[restore-drill] scheduler iteration failed: %s", exc)
-            await asyncio.sleep(300)
+            if await sleep_or_shutdown(300):
+                return
 
 
 def _alert_failure(res: DrillResult) -> None:

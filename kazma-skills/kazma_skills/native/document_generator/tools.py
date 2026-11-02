@@ -265,7 +265,7 @@ async def generate_pdf(
     if markdown_path:
         # Resolve within the workspace (same ladder as file_read).
         p = await _markdown_source(markdown_path)
-        md = p.read_text(encoding="utf-8", errors="replace")
+        md = await asyncio.to_thread(p.read_text, encoding="utf-8", errors="replace")  # FA-139
         source_md = p
         # Parse markdown headings into sections (same split as the export endpoints).
         parsed: list[dict[str, str]] = []
@@ -339,7 +339,7 @@ async def generate_docx(
     source_md = None
     if markdown_path:
         p = await _markdown_source(markdown_path)
-        md = p.read_text(encoding="utf-8", errors="replace")
+        md = await asyncio.to_thread(p.read_text, encoding="utf-8", errors="replace")  # FA-139
         source_md = p
         parsed: list[dict[str, str]] = []
         cur_h = "Report"

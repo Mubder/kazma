@@ -31,6 +31,7 @@ import logging
 import os
 import re
 import sqlite3
+import time
 from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -693,32 +694,91 @@ async def _send_due_digest() -> float:
     return 0.0
 
 
+#: When the daily digest is sent, in the operator's time zone (``cron.timezone``),
+#: "HH:MM" (2026-11, FA-208).
+DIGEST_TIME_KEY = "observability.daily_digest.time"
+_DEFAULT_DIGEST_TIME = (8, 0)
+#: A digest sent this long before its time counts for it: the one sent on the
+#: old drifting schedule earlier the same morning is not sent again.
+_EARLY_COUNTS_S = 12 * 3600.0
+
+
+def _digest_time() -> tuple[int, int]:
+    """The set time of day, ``(hour, minute)``; 08:00 when unset or invalid."""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = str(get_config_store().get(DIGEST_TIME_KEY) or "").strip()
+    except Exception:  # noqa: BLE001 - an unreadable setting keeps the default time
+        logger.debug("[digest] the digest time could not be read", exc_info=True)
+        return _DEFAULT_DIGEST_TIME
+    hour, _, minute = raw.partition(":")
+    try:
+        h, m = int(hour), int(minute or 0)
+    except ValueError:
+        return _DEFAULT_DIGEST_TIME
+    return (h, m) if 0 <= h < 24 and 0 <= m < 60 else _DEFAULT_DIGEST_TIME
+
+
+def _seconds_until_digest(now: float | None = None) -> float:
+    """How long until the next digest is due (blocking: settings reads).
+
+    Daily, at :data:`DIGEST_TIME_KEY` in the operator's zone (2026-11,
+    FA-208): it was "24 hours after the last one", so each restart's settle
+    and each retry pushed it later, and the morning digest drifted into the
+    afternoon. A digest whose time has passed and that was not sent is due
+    now (``_SETTLE_S`` after a boot); otherwise the wait is to the next
+    time. ``KAZMA_DIGEST_INTERVAL_HOURS`` other than 24 keeps the interval.
+    """
+    from datetime import datetime, timedelta
+
+    from kazma_core.cron.scheduler import resolve_cron_zone
+    from kazma_core.observability.cadence import last_run, seconds_until_due
+
+    if DIGEST_INTERVAL_HOURS != 24:
+        return seconds_until_due(_LAST_SENT_KEY, DIGEST_INTERVAL_HOURS * 3600, settle_s=_SETTLE_S, now=now)
+    zone, _name = resolve_cron_zone()
+    now_ts = time.time() if now is None else now
+    local = datetime.fromtimestamp(now_ts, zone)
+    hour, minute = _digest_time()
+    slot = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if local < slot:
+        slot -= timedelta(days=1)  # today's time is still ahead: the last slot was yesterday's
+    sent = last_run(_LAST_SENT_KEY)
+    if sent is None or sent < slot.timestamp() - _EARLY_COUNTS_S:
+        return _SETTLE_S  # the last slot's digest was never sent
+    following = (slot + timedelta(days=1)).timestamp()
+    return max(60.0, following - now_ts)
+
+
 async def digest_scheduler() -> None:
-    """Deliver the digest once per interval, counted from the last delivery.
+    """Deliver the digest daily at its set time, whatever the restarts.
 
     It slept a full interval from boot before its first send, so a server
     restarted more often than daily never sent one: not once in the week to
     2026-09-28 on the live install, which reloads several times a day. The
     last delivery is stamped (kazma_core.observability.cadence); a restart
-    neither re-sends a digest nor postpones a due one.
+    neither re-sends a digest nor postpones a due one, and the time of day
+    no longer drifts (:func:`_seconds_until_digest`).
 
     The log reading runs off the event loop; the delivery runs on it
-    (ops_alerts delivers through the loop's bus adapters).
+    (ops_alerts delivers through the loop's bus adapters). The waits end at
+    once when the server begins to stop (FA-265).
     """
     import asyncio
 
-    from kazma_core.observability.cadence import seconds_until_due
+    from kazma_core.shutdown import sleep_or_shutdown
 
-    interval = DIGEST_INTERVAL_HOURS * 3600
     while True:
         try:
-            await asyncio.sleep(await asyncio.to_thread(
-                seconds_until_due, _LAST_SENT_KEY, interval, settle_s=_SETTLE_S,
-            ))
-            await asyncio.sleep(await _send_due_digest())
+            if await sleep_or_shutdown(await asyncio.to_thread(_seconds_until_digest)):
+                return
+            if await sleep_or_shutdown(await _send_due_digest()):
+                return
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — a failed digest must not
             # kill the cadence; the next one still fires.
             logger.warning("[digest] scheduler iteration failed: %s", exc)
-            await asyncio.sleep(300)
+            if await sleep_or_shutdown(300):
+                return

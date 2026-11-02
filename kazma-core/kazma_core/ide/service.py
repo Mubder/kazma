@@ -557,9 +557,14 @@ class IdeService:
         }
 
     async def diff(self, rel_path: str, old_content: str, new_content: str) -> dict[str, Any]:
-        """Produce a unified diff between two versions of a file (no tool call)."""
-        old_lines = old_content.splitlines(keepends=True)
-        new_lines = new_content.splitlines(keepends=True)
+        """Produce a unified diff between two versions of a file (no tool call).
+
+        Lines are split without their endings: ``lineterm=""`` and the
+        ``"\\n"`` join add one, and kept endings made every changed line end
+        twice -- a blank line under each (2026-11, FA-244).
+        """
+        old_lines = old_content.splitlines()
+        new_lines = new_content.splitlines()
         unified = difflib.unified_diff(
             old_lines,
             new_lines,

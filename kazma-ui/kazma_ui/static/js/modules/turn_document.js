@@ -762,7 +762,8 @@
         type: 'tool',
         name: String(ev.tool_name || ev.name || 'tool'),
         result: String(ev.result || ev.detail || ''),
-        state: 'done',
+        // A call refused before it ran, or failing, ends failed (FA-253).
+        state: ev.state === 'failed' ? 'failed' : 'done',
       };
       if (ev.tool_call_id) endPart.call_id = String(ev.tool_call_id);
       return [endPart];

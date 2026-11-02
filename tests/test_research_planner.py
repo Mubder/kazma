@@ -39,7 +39,7 @@ async def test_plan_research_fallback_when_llm_off(monkeypatch):
 async def test_plan_research_llm_success(monkeypatch):
     monkeypatch.setenv("KAZMA_RESEARCH_LLM_PLANNER", "1")
 
-    async def _fake(system, user, max_tokens=1200):
+    async def _fake(system, user, max_tokens=1200, work_id=""):
         return (
             '{"sub_questions":["What is X?","Risks of X?"],'
             '"search_queries":["X definition","X risks official docs","X alternatives"],'

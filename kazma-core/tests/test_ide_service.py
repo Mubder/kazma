@@ -161,3 +161,12 @@ async def test_search_within_workspace(ws):
     res = await svc.search("print", glob="*.py")
     assert res["ok"] is True
     assert any("hello.py" in m for m in res["matches"])
+
+
+async def test_diff_is_the_exact_unified_text(ws):
+    """2026-11, FA-244: lines were split with their endings and joined with
+    another, so every line of the diff ended twice."""
+    _, svc = ws
+    res = await svc.diff("hello.py", "a\nb\nc\n", "a\nB\nc\n")
+    assert res["diff"] == "--- a/hello.py\n+++ b/hello.py\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c"
+    assert "\n\n" not in res["diff"]

@@ -1070,6 +1070,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لم يُحمَّل محرك السرب، فلم تُسجَّل المهمة ولم تُشغَّل. سجل الخادم يذكر السبب.",
         "en": "The swarm engine did not load, so the task was not recorded or run. The server log names the cause.",
     },
+    "swarm.workers_not_registered": {
+        "ar": "لا أحد من العمال المحددين مسجَّل ({names})، فلم تُسجَّل المهمة ولم تُشغَّل. اختر «تلقائي» أو أضف العامل في سجل العمال.",
+        "en": "None of the chosen workers is registered ({names}), so the task was not recorded or run. Choose Auto, or add the worker in the Worker Registry.",
+    },
     "swarm.retry_unknown_title": {
         "ar": "قد تكون المهمة غيّرت أشياء بالفعل",
         "en": "This task may already have changed things",

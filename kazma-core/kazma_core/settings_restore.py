@@ -166,9 +166,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("observability.daily_digest.last_sent", RUNTIME, "when the daily digest was last sent"),
     KeyRule("observability.firing_ledger.last_run", RUNTIME, "when the weekly report last ran"),
     KeyRule("backup.restore_drill.", RUNTIME, "when the restore drill last ran"),
-    KeyRule("auth.oidc.state", RUNTIME, "a single sign-on in progress"),
-    KeyRule("auth.oidc.state_exp", RUNTIME, "a single sign-on in progress"),
-    KeyRule("auth.oidc.pkce_verifier", RUNTIME, "a single sign-on in progress"),
+    KeyRule("auth.oidc.", RUNTIME, "single sign-ons in progress (auth.oidc.pending), and the "
+            "one-at-a-time keys an older build kept (state, state_exp, pkce_verifier)"),
     KeyRule("self_improvement.pending_evolution", RUNTIME, "Soul changes waiting for review"),
     # ── Credentials: not in a backup, never restored ──────────────────────
     KeyRule("security.", CREDENTIAL, "the sign-in secret and the disclosure key"),
@@ -251,6 +250,21 @@ def _rule_for(key: str) -> KeyRule | None:
         if _matches(rule.pattern, base) and (best is None or len(rule.pattern) > len(best.pattern)):
             best = rule
     return best
+
+
+def _known_to_this_build(key: str) -> bool:
+    """A rule names *key*, or ``kazma.yaml`` ships it (or a key under it, or
+    the block it is in)."""
+    if _rule_for(key) is not None:
+        return True
+    from kazma_core.settings_validation import shipped_values
+
+    base = base_key(key)
+    shipped = shipped_values()
+    if base in shipped or any(name.startswith(base + ".") for name in shipped):
+        return True
+    parts = base.split(".")
+    return any(".".join(parts[:i]) in shipped for i in range(1, len(parts)))
 
 
 def classify(key: str) -> str:
@@ -672,6 +686,12 @@ class _Planner:
             plan.kept_credentials.append(key)
             return
         current = self.effective.get(key, _MISSING)
+        if current is _MISSING and not _known_to_this_build(key):
+            # A key no rule names, kazma.yaml does not ship and this install
+            # does not hold: no reader here knows it (2026-11, FA-251: a
+            # backup's "audit2611.key" was written).
+            plan.refused[key] = "not a setting this build reads"
+            return
         if kind == LEARNED and _present(current):
             plan.kept_learned.append(key)
             return

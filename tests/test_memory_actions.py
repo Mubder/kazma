@@ -203,3 +203,47 @@ def test_the_daily_digest_counts_the_forgets(tmp_path, monkeypatch):
     monkeypatch.setenv("KAZMA_GUARD_LOG", str(guard))
     text = daily_digest.build_digest()
     assert "memories forgotten from the Memory page: 2" in text, text
+
+
+# ── Reads (2026-11, FA-275) ──────────────────────────────────────────────────
+
+
+def _audit_rows(mem) -> int:
+    conn = sqlite3.connect(str(mem.dir / "memory_ops.db"))
+    try:
+        return conn.execute("SELECT COUNT(*) FROM memory_audit_log").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_a_read_of_something_missing_answers_404_and_leaves_no_trail(mem):
+    before = _audit_rows(mem)
+    r = _client().get("/api/memory/v2/beliefs/b_missing")
+    assert r.status_code == 404 and r.json() == {"ok": False, "error": "not_found"}
+    assert _audit_rows(mem) == before
+
+
+def test_negative_control_without_the_recorder_a_missing_read_is_200(mem):
+    from fastapi.testclient import TestClient
+
+    assert TestClient(_app(recorder=False)).get("/api/memory/v2/beliefs/b_missing").status_code == 200
+
+
+def test_a_streamed_read_is_passed_on_unjudged():
+    """An export streams; its first piece is not an answer to judge (a body
+    that happens to start like a refusal stays 200)."""
+    from fastapi import FastAPI
+    from fastapi.responses import StreamingResponse
+    from fastapi.testclient import TestClient
+    from kazma_ui.memory_actions import MemoryActionRecorder
+
+    app = FastAPI()
+
+    @app.get("/api/memory/v2/stream-probe")
+    def _probe():
+        return StreamingResponse(iter([b'{"ok": false, "error": "not_found", ', b'"rows": []}']),
+                                 media_type="application/json")
+
+    app.add_middleware(MemoryActionRecorder)
+    r = TestClient(app).get("/api/memory/v2/stream-probe")
+    assert r.status_code == 200 and r.text == '{"ok": false, "error": "not_found", "rows": []}'

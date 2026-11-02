@@ -1429,6 +1429,9 @@ def create_graph_handler(
                 from kazma_ui.turn_runtime import close_aborted_turn
 
                 await close_aborted_turn(thread_id)  # never raises
+                from kazma_core.agent.long_task import pause_long_task_for_abort
+
+                await pause_long_task_for_abort(thread_id)  # never raises
                 try:
                     from kazma_ui.hitl_gate_bridge import abort_thread_hitl
 

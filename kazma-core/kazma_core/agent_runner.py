@@ -39,6 +39,11 @@ __all__ = ["AgentConfig", "CHECKPOINT_DB", "CONFIG_FILE", "DeclaredToolExecutor"
 
 logger = logging.getLogger(__name__)
 
+#: The rules every prompt Kazma starts from carries: the default below and the
+#: shipped kazma.yaml's (2026-11, FA-121; tests/test_prompt_rules_reach_the_model.py).
+_PROMPT_RULES = ("TOOL SELECTION:", "DOCUMENT GENERATION RULE:", "ITERATION EFFICIENCY:",
+                 "CRITICAL LANGUAGE RULE:")
+
 CONFIG_FILE = "kazma.yaml"
 from kazma_core.paths import checkpoints_db as _checkpoints_db
 
@@ -426,6 +431,11 @@ class KazmaAgent:
         self._snapshot_recorder = value
 
     def _default_system_prompt(self) -> str:
+        """The prompt when ``kazma.yaml`` sets none. Every rule in
+        :data:`_PROMPT_RULES` is in it and in the shipped ``kazma.yaml``'s
+        (2026-11, FA-121: the rules here never reached a shipped install,
+        and "stop all tool calls on any tool error" contradicted refusals
+        the turn now carries on past)."""
         return (
             "You are Kazma (Arabic: كاظمه / كاظمة — never كازما), "
             "an autonomous multi-platform AI agent framework. "
@@ -463,10 +473,6 @@ class KazmaAgent:
             "- Do NOT re-read files you already read this turn (they are cached)\n"
             "- If you find yourself writing debug files and re-reading them, STOP "
             "and produce the final output with what you already have"
-            "\n\nCRITICAL SYSTEM RULE: If you receive a tool_error or a rejection notification "
-            "from a tool execution (e.g. 'SYSTEM OVERRIDE: Tool blocked...'), you MUST IMMEDIATELY "
-            "stop issuing further tool calls. Synthesize a final text answer explaining the blockage "
-            "or error to the user, and ask for their guidance before continuing."
             "\n\nCRITICAL LANGUAGE RULE: Match the language of the user's *latest* "
             "message only. Arabic latest = Arabic reply; English latest = English reply. "
             "If they mix, match their pattern. Mid-session switches are required "

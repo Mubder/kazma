@@ -433,15 +433,22 @@ def get_or_create_disclosure_key(store: ConfigStore | None = None) -> str:
     return new_key
 
 
+#: The size a WAL file is cut back to after a checkpoint (2026-11, FA-142).
+#: SQLite's default (-1) leaves a WAL at the largest size it ever reached:
+#: one big write kept its tens of megabytes on disk for good.
+SQLITE_JOURNAL_SIZE_LIMIT = 64 * 1024 * 1024
+
+
 def apply_sqlite_pragmas(conn: sqlite3.Connection, *, busy_timeout: int = 5000) -> None:
     """Apply standardized pragmas to a (sync) Kazma SQLite connection.
 
-    - WAL + busy_timeout + synchronous=NORMAL
+    - WAL + busy_timeout + synchronous=NORMAL + journal_size_limit
     """
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(f"PRAGMA journal_size_limit={SQLITE_JOURNAL_SIZE_LIMIT}")
     except Exception as exc:
         logger.warning("[SQLite] Failed to apply pragmas: %s", exc)
 
@@ -452,6 +459,7 @@ async def apply_sqlite_pragmas_async(conn: Any, *, busy_timeout: int = 5000) -> 
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
         await conn.execute("PRAGMA synchronous=NORMAL")
+        await conn.execute(f"PRAGMA journal_size_limit={SQLITE_JOURNAL_SIZE_LIMIT}")
     except Exception as exc:
         logger.warning("[SQLite] Failed to apply async pragmas: %s", exc)
 

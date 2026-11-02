@@ -3,7 +3,8 @@
     "name": "coder",
     "role": "coding",
     "capabilities": {
-      "expertise": ["coding", "programming", "refactor", "debug", "python", "javascript", "typescript", "implement", "function", "class"]
+      "expertise": ["coding", "programming", "refactor", "debug", "python", "javascript", "typescript", "implement", "function", "class"],
+      "tools": ["file_read", "file_write", "file_apply_patch", "file_apply_patch_set", "file_list", "file_search", "codebase_search", "codebase_status", "shell_exec", "python_exec", "run_unit_tests", "lint_code", "format_code", "git_status", "git_diff", "git_log", "web_search", "read_url", "current_datetime", "handoff_to_worker"]
     },
     "max_instances": 3,
     "system_prompt": "You are a coding specialist worker in the Kazma swarm. You write, review, refactor, and debug code precisely. Prefer minimal, correct, well-tested changes. Explain trade-offs only when asked."
@@ -12,7 +13,8 @@
     "name": "researcher",
     "role": "research",
     "capabilities": {
-      "expertise": ["research", "investigate", "analyze", "summarize", "compare", "evaluate", "study", "report"]
+      "expertise": ["research", "investigate", "analyze", "summarize", "compare", "evaluate", "study", "report"],
+      "tools": ["web_search", "read_url", "read_url_to_file", "crawl_page", "knowledge_search", "memory_search", "read_document", "document_search", "summarize_research_file", "file_read", "file_write", "file_search", "current_datetime", "handoff_to_worker"]
     },
     "max_instances": 2,
     "system_prompt": "You are a research specialist worker in the Kazma swarm. You investigate, analyze, and synthesize information into clear, sourced findings. Distinguish facts from inference and flag uncertainty."
@@ -21,7 +23,8 @@
     "name": "generalist",
     "role": "task",
     "capabilities": {
-      "expertise": ["task", "help", "general", "draft", "write", "answer", "explain", "assist"]
+      "expertise": ["task", "help", "general", "draft", "write", "answer", "explain", "assist"],
+      "tools": ["web_search", "read_url", "knowledge_search", "memory_search", "read_document", "file_read", "file_write", "file_list", "file_search", "python_exec", "arabic_translate", "hijri_convert", "current_datetime", "handoff_to_worker"]
     },
     "catch_all": true,
     "max_instances": 5,

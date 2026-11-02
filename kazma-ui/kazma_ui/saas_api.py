@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from kazma_core.errors import safe_error
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +90,9 @@ def create_saas_router() -> APIRouter:
         if denied:
             return denied
         try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         role = str(body.get("role") or "operator").strip().lower()
@@ -161,9 +162,9 @@ def create_saas_router() -> APIRouter:
         if denied:
             return denied
         try:
-            body = await request.json()
-        except Exception:
-            body = {}
+            body = await read_json(request, allow_empty=True)
+        except InvalidJsonBody:
+            return invalid_json_response()
         # The user store round trip and the password hash stay off the loop.
         return await asyncio.to_thread(_patch_user, username, body)
 
@@ -238,9 +239,9 @@ def create_saas_router() -> APIRouter:
         if denied:
             return denied
         try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
         tid = str(body.get("id") or "").strip().lower().replace(" ", "-")
         name = str(body.get("name") or tid).strip()
         if not tid or tid == "default":

@@ -187,8 +187,9 @@ class TestProviderSwitchReconfigure:
             headers={"content-type": "application/json"},
         )
 
-        assert resp.status_code == 200
-        assert resp.json() == {"error": "Invalid JSON"}
+        # A body that is not JSON is the caller's error (2026-11, FA-274).
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "invalid_json"
 
 
 # ═══════════════════════════════════════════════════════════════════

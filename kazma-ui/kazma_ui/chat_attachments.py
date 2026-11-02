@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import logging
 import re
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -32,13 +32,24 @@ _UPLOAD_ID_RE = re.compile(r"^att_[0-9a-f]{32}$")
 
 
 def store_uploaded_attachment(data: bytes, filename: str) -> str:
-    """Store upload bytes and return an opaque, server-resolvable reference."""
+    """Store upload bytes and return an opaque, server-resolvable reference.
+
+    The reference is the content's hash (2026-11, FA-146): the same file
+    uploaded again is the file already stored, never another copy (every
+    upload was a new file, kept for good). The first upload's name suffix
+    stays the file's; the loader finds it by the id alone.
+    """
     if len(data) > MAX_UPLOAD_BYTES:
         raise ValueError("attachment exceeds upload size limit")
-    attachment_id = f"att_{uuid.uuid4().hex}"
-    suffix = Path(filename).suffix
+    attachment_id = f"att_{hashlib.sha256(data).hexdigest()[:32]}"
     ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
-    (ATTACHMENT_DIR / f"{attachment_id}{suffix}").write_bytes(data)
+    held = [p for p in ATTACHMENT_DIR.glob(f"{attachment_id}*")
+            if p.name == attachment_id or p.name.startswith(f"{attachment_id}.")]
+    if held:
+        return attachment_id
+    from kazma_core.atomic_files import atomic_write_bytes
+
+    atomic_write_bytes(ATTACHMENT_DIR / f"{attachment_id}{Path(filename).suffix}", data)
     return attachment_id
 
 

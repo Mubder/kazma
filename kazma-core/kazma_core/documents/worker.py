@@ -288,6 +288,11 @@ class DocumentWorker:
 
     async def _worker_loop(self, index: int) -> None:
         owner = f"{self._owner}:{index}"
+        # A claim that fails fails on every poll while its store is away: one
+        # WARNING when it starts and one line when claims work again, not an
+        # ERROR per poll (FA-202: a pool outage wrote one a second per worker).
+        failing_since: float | None = None
+        failures = 0
         while not self._stop_event.is_set():
             try:
                 job = await asyncio.to_thread(
@@ -299,13 +304,26 @@ class DocumentWorker:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.error(
-                    "Document claim failed worker=%s error_type=%s",
-                    owner,
-                    type(exc).__name__,
-                )
+                failures += 1
+                if failing_since is None:
+                    failing_since = time.monotonic()
+                    logger.warning(
+                        "Document claims failing worker=%s error_type=%s; retrying every "
+                        "poll, said again when they work",
+                        owner,
+                        type(exc).__name__,
+                    )
+                else:
+                    logger.debug("Document claim failed worker=%s error_type=%s",
+                                 owner, type(exc).__name__)
                 await self._wait_for_poll()
                 continue
+            if failing_since is not None:
+                logger.info(
+                    "Document claims work again worker=%s after %.0fs (%d failed polls)",
+                    owner, time.monotonic() - failing_since, failures,
+                )
+                failing_since, failures = None, 0
             if job is None:
                 await self._wait_for_poll()
                 continue

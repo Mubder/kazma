@@ -384,4 +384,5 @@ def test_ledger_sweep_sleeps_before_its_first_report():
     import inspect
 
     src = inspect.getsource(fl.ledger_scheduler)
-    assert src.index("asyncio.sleep") < src.index("run_weekly_sweep")
+    # The wait ends at a stop too (2026-11, FA-265: shutdown.sleep_or_shutdown).
+    assert src.index("sleep_or_shutdown") < src.index("run_weekly_sweep")

@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from kazma_ui.rate_limit import rate_limit
+from kazma_ui.upload_limits import MAX_STT_BYTES
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,9 @@ router = APIRouter(prefix="/api/voice", tags=["voice"])
 #: STT providers cap the audio they accept (OpenAI Whisper: 25 MB). Bound the
 #: read itself so one upload cannot exhaust process memory before rejection —
 #: the sibling chat upload does the same (routes_chat_upload.py).
-_MAX_STT_BYTES = 25 * 1024 * 1024
+#: One limit, shared with the layer that refuses a larger body before it is
+#: read (``kazma_ui.upload_limits``, FA-134).
+_MAX_STT_BYTES = MAX_STT_BYTES
 
 #: The audio-format token derived from a filename/Content-Type becomes a
 #: temp-file suffix in the faster-whisper path (voice/stt.py) and the format

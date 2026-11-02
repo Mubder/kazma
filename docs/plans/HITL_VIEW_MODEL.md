@@ -4,11 +4,12 @@
 > supersedes the **incident-specific layout expectations that require
 > separate approval cards**. Server-owned gate views, the single resolver,
 > and decision/execution separation remain required and unchanged.
-> Incidents 1 and 4 stay unclaimed here; the unified plan's Phase 0 app-graph
-> harness is what claims them.
+> Incidents 1 and 4 are not claimed by this plan's own tests; the unified
+> plan's app-graph harness claims them (`tests/e2e/test_unified_turn_browser.py`,
+> CI job `unified-turn-lifecycle`).
 
 **Date:** 2026-09-19
-**Status:** BINDING (F landing; Playwright 1 and 4 unclaimed)
+**Status:** BINDING (F landing; Playwright 1 and 4 claimed by `tests/e2e/test_unified_turn_browser.py`)
 **Owner:** this series is held by one agent. Bouncing the working copy is how two locally-correct patches still broke the live install.
 **Does not replace:** [`HITL_GATE_REGISTRY_PLAN.md`](HITL_GATE_REGISTRY_PLAN.md) (P6 — decision SoT) or [`TURN_RENDER_V2_KEYED_SLOTS.md`](TURN_RENDER_V2_KEYED_SLOTS.md) (keyed bubble renderer). Those layers stay. This plan is the missing **join** between them, plus every other mouth that still derives “what should I show?” on its own.
 

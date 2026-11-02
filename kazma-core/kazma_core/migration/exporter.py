@@ -55,6 +55,7 @@ from kazma_core.migration.bundle import (
     vault_key_fingerprint,
 )
 from kazma_core.migration.path_rewrite import PathMap
+from kazma_core.atomic_files import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +313,7 @@ def export_bundle(
         if fpath.is_file():
             rel = fpath.relative_to(staging).as_posix()
             manifest.file_hashes[rel] = sha256_file(fpath)
-    (staging / "manifest.json").write_text(manifest.to_json(), encoding="utf-8")
+    atomic_write_text(staging / "manifest.json", manifest.to_json())
 
     # 10. Zip the staging dir → final bundle.
     _log(f"Compressing bundle → {out_path.name}…")

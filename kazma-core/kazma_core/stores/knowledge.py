@@ -533,13 +533,20 @@ class KnowledgeStore:
         finally:
             probe.close()
         if not has:
+            # The tables went with an earlier build's move, which left their
+            # pages -- the libraries' text -- free in the file: compact once.
+            if (self._meta(conn, "legacy_settings_moved") is not None
+                    and self._meta(conn, "legacy_settings_compacted") is None
+                    and _compact_settings_db(str(legacy))):
+                self._set_meta(conn, "legacy_settings_compacted", _now_iso())
             return
         if self._meta(conn, "legacy_settings_moved") is None:
             if not copy_legacy_knowledge(conn, str(legacy)):
                 return
             self._rebuild_fts_locked(conn, reason="moved from settings.db")
             self._set_meta(conn, "legacy_settings_moved", _now_iso())
-        _drop_legacy_tables(str(legacy))
+        if _drop_legacy_tables(str(legacy)) and _compact_settings_db(str(legacy)):
+            self._set_meta(conn, "legacy_settings_compacted", _now_iso())
 
     @staticmethod
     def _migrate_library_columns(conn: sqlite3.Connection) -> None:
@@ -2032,26 +2039,52 @@ def _is_web_url(value: str) -> bool:
         return False
 
 
-def _drop_legacy_tables(settings_path: str) -> None:
+def _drop_legacy_tables(settings_path: str) -> bool:
     """Drop the moved Knowledge tables from ``settings.db``: a copy kept
-    there would hold a deleted library's text for good."""
+    there would hold a deleted library's text for good. True when dropped."""
     try:
         legacy = sqlite3.connect(settings_path, timeout=5, isolation_level=None)
     except sqlite3.Error:
-        return
+        return False
     try:
         legacy.execute("BEGIN IMMEDIATE")
         for table in ("knowledge_chunks_fts", "knowledge_chunks", "knowledge_libraries"):
             legacy.execute(f"DROP TABLE IF EXISTS {table}")
         legacy.execute("COMMIT")
         logger.info("[KnowledgeStore] removed the moved Knowledge tables from settings.db")
+        return True
     except sqlite3.Error:
         if legacy.in_transaction:
             legacy.execute("ROLLBACK")
         logger.warning("[KnowledgeStore] could not remove the moved Knowledge tables from "
                        "settings.db; tried again at the next open", exc_info=True)
+        return False
     finally:
         legacy.close()
+
+
+def _compact_settings_db(settings_path: str) -> bool:
+    """VACUUM ``settings.db`` once its Knowledge tables are gone (2026-11,
+    FA-142): a dropped table's pages stay in the file, free but holding the
+    libraries' text, until the file is rebuilt (29 MB on the live install).
+    True when done; a busy file is tried again at the next open."""
+    try:
+        conn = sqlite3.connect(settings_path, timeout=5, isolation_level=None)
+    except sqlite3.Error:
+        return False
+    try:
+        before = Path(settings_path).stat().st_size
+        conn.execute("VACUUM")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        logger.info("[KnowledgeStore] compacted settings.db after the Knowledge move: %d -> %d bytes",
+                    before, Path(settings_path).stat().st_size)
+        return True
+    except (sqlite3.Error, OSError):
+        logger.info("[KnowledgeStore] settings.db could not be compacted now; tried again at the "
+                    "next open", exc_info=True)
+        return False
+    finally:
+        conn.close()
 
 
 # ══════════════════════════════════════════════════════════════════════════

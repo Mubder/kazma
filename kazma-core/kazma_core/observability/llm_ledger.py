@@ -193,6 +193,14 @@ async def arecord_llm_call(**fields: Any) -> None:
         from kazma_core.observability.correlation import current_turn_id
 
         fields["turn_id"] = current_turn_id()
+    if not fields.get("thread_id"):
+        # The work the call belongs to, from the caller's context when it did
+        # not say: ``run_agent_turn`` binds its thread there, and a graph
+        # whose state holds no thread (Diagnose, a cron task) wrote rows no
+        # one could attribute (2026-11, FA-260).
+        from kazma_core.safety.hitl import get_current_thread_id
+
+        fields["thread_id"] = get_current_thread_id() or ""
     from kazma_core.background import spawn_background
 
     write = spawn_background(asyncio.to_thread(_record_if_enabled, **fields), name="llm-ledger-write")
@@ -320,6 +328,27 @@ def usage_series(
             bucket["cost"] += float(cost or 0.0)
             bucket["calls"] += 1
     return buckets
+
+
+#: How long a model call's row is kept (2026-11, FA-141): a chat's ``/cost``
+#: and the usage charts read it, so a year; the ledger kept every call.
+CALL_RETENTION_DAYS = 365
+_PRUNE_BATCH = 20000
+
+
+def prune_old_calls(*, days: int = CALL_RETENTION_DAYS) -> int:
+    """Remove model-call rows past *days*; how many were removed."""
+    from datetime import UTC, datetime, timedelta
+
+    cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+    with _lock:
+        conn = _get_conn()
+        with conn:
+            cur = conn.execute(
+                "DELETE FROM llm_calls WHERE id IN (SELECT id FROM llm_calls WHERE ts < ? LIMIT ?)",
+                (cutoff, _PRUNE_BATCH),
+            )
+            return int(cur.rowcount or 0)
 
 
 def close_llm_ledger() -> None:

@@ -441,8 +441,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Create Token",
     },
     "settings.cron_tz_hint": {
-        "ar": "المنطقة الزمنية للمهام المجدولة والتذكيرات — \"يومياً الساعة 9 صباحاً\" تُطلق 9 صباحاً بتوقيتها هنا. تنطبق على المهام الجديدة؛ المهمّات الحالية تحتفظ بوقتها المخزَّن. اكتب اسم منطقة IANA (القائمة اختصار وليست حداً).",
-        "en": "Timezone for scheduled tasks and reminders — \"daily at 9am\" fires at 9am here. Applies to newly scheduled tasks; existing jobs keep their stored fire times. Type an IANA zone (the list is a shortcut, not a limit).",
+        "ar": "المنطقة الزمنية للمهام المجدولة والتذكيرات — \"يومياً الساعة 9 صباحاً\" تُطلق 9 صباحاً بتوقيتها هنا. يسري التغيير من الموعد التالي لكل مهمة: موعد المهمة المتكررة التالي يُحسب بالمنطقة السارية حينها، والمهمة لمرة واحدة تحتفظ باللحظة التي حُجزت لها. اكتب اسم منطقة IANA (القائمة اختصار وليست حداً).",
+        "en": "Timezone for scheduled tasks and reminders — \"daily at 9am\" fires at 9am here. A change applies from each job's next run: a recurring job's next time is reckoned in the zone in force then; a one-off keeps the moment it was booked for. Type an IANA zone (the list is a shortcut, not a limit).",
     },
     "settings.cron_tz_invalid": {
         "ar": "ليست منطقة زمنية يعرفها المتصفح. استخدم اسم IANA مثل Asia/Kuwait.",
@@ -473,8 +473,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Default: UTC. Save to set your local zone.",
     },
     "settings.cron_tz_source_env": {
-        "ar": "مضبوطة عبر متغير البيئة KAZMA_TZ (قيمة الإعدادات مُتجاوَزة ما دام موجوداً).",
-        "en": "Set via the KAZMA_TZ environment variable (Settings value is overridden while it is present).",
+        "ar": "مضبوطة عبر متغير البيئة KAZMA_TZ، ويُستعمل ما دام هذا الإعداد فارغاً (المنطقة المختارة هنا تتقدّم عليه).",
+        "en": "Set via the KAZMA_TZ environment variable, used while this setting is empty (a zone chosen here takes precedence).",
     },
     "settings.cron_tz_title": {
         "ar": "المنطقة الزمنية للمهام المجدولة",
@@ -3351,8 +3351,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Postgres DSN",
     },
     "settings.mem.mirror_hint": {
-        "ar": "المرآة تنقل الكتابات الجديدة فقط — لا تُنسخ المعتقدات والحلقات الموجودة تلقائيًا. استخدم المزامنة مرة بعد التفعيل (ولإعادة المزامنة بعد التعديلات الكبيرة).",
-        "en": "The mirror is write-forward only — existing beliefs/episodes aren't copied automatically. Use Sync once after enabling (and to re-sync after bulk edits).",
+        "ar": "تنسخ المرآة كل ذكرى وحقيقة إلى Postgres: كل تغيير خلال دورة الصيانة التالية (كل 15 دقيقة)، ومقارنة كاملة مرة في اليوم ترسل كل ما اختلف. زر المزامنة يجري تلك المقارنة الآن.",
+        "en": "The mirror copies every memory and fact to Postgres: each change within the next maintenance pass (every 15 minutes), and a full comparison once a day that sends whatever differs. Sync runs that comparison now.",
     },
     "settings.mem.opt_sqlite_vec": {
         "ar": "SQLite-vec (محلي)",
@@ -3843,8 +3843,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "{n} secrets stored",
     },
     "settings.sys.vault_hint": {
-        "ar": "اضبط KAZMA_VAULT_KEY في ‎.env أو أعد تشغيل الخادم ليُولَّد تلقائيًا.",
-        "en": "Set KAZMA_VAULT_KEY in .env or restart the server to auto-generate one.",
+        "ar": "اضبط KAZMA_VAULT_KEY في ‎.env. من دونه تولّد إعادة التشغيل مفتاحاً وتكتبه في ‎.env (وفي وضع الإنتاج يرفض الخادم البدء بدلاً من ذلك). احتفظ به: الأسرار المحفوظة بمفتاح آخر لا تُقرأ.",
+        "en": "Set KAZMA_VAULT_KEY in .env. Without one, a restart generates a key and writes it to .env (in production mode the server refuses to start instead). Keep it: secrets saved under another key cannot be read.",
     },
     "settings.sys.vault_tools_hint": {
         "ar": "يستطيع الوكيل تخزين الأسرار المشفّرة واسترجاعها (مفاتيح API والرموز وكلمات المرور) عبر الأداتين <code>vault_store</code> و<code>vault_retrieve</code>. الاسترجاع يتطلب موافقة.",

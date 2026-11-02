@@ -261,6 +261,77 @@ STORE_FAMILIES: dict[str, Store] = {
         reason="test mode only"),
 }
 
+#: How long each store keeps what it holds (2026-11, FA-141): the rule that
+#: removes rows and where it runs, or "kept:" and why nothing does. Four
+#: append-only stores (approval gates, tool receipts, task ledgers, the
+#: model-call ledger) and the swarm's pipeline log grew forever with no
+#: declaration to notice it. ``tests/test_store_retention_declared.py``
+#: requires an entry for every store and family; a sweep named here is one
+#: of ``memory.worker_bootstrap._MAINTENANCE_SWEEPS`` (every 15 minutes).
+RETENTION: dict[str, str] = {
+    "agent_artifacts.db": "the artifact GC sweep: a per-chat cap and an age-out of spent draft sets",
+    "task_ledgers.db": "the task ledger retention sweep: done and superseded ledgers after 90 days; "
+                       "an active one is kept",
+    "tool_effects.db": "the tool receipt retention sweep: completed receipts after 90 days; a receipt "
+                       "of an unknown outcome (started) is kept",
+    "memory_state.db": "kept: the owner's memory; archival, Forget and the summaries manage it (AGENTS 15)",
+    "memory_ops.db": "the task queue purge (completed tasks after 7 days); dead letters until the "
+                     "operator clears them; the audit log is kept (the trail of every change)",
+    "memory_forget_journal.db": "kept: replayed over a restored older memory database, so it outlives "
+                                "every backup",
+    "knowledge_graph.db": "kept: written by nothing since the V1 to V2 move; read once by the backfill",
+    "checkpoints.db": "the checkpoint retention sweep: 200 newest per chat, 10 once a chat is idle past "
+                      "checkpoints.retention_days",
+    "snapshots.db": "Time Travel's budgets on every capture: per step, turn, chat and in total",
+    "time_travel_audit.db": "RETENTION_DAYS and MAX_ROWS, applied as rows are written",
+    "chat_sessions.db": "kept: the owner's chats, until the owner deletes one",
+    "chat_sessions_spool.db": "an entry leaves with its session's next accepted save",
+    "sessions.db": "chat-platform routing; a session expires five minutes after its last message",
+    "cron.db": "finished jobs purged by their finish time (the job retention), hourly",
+    "swarm_tasks.db": "the swarm task retention sweep: swarm.task_retention_days (30; 0 keeps all)",
+    "pipeline_logs.db": "the pipeline log retention sweep, with the swarm task retention's days",
+    "research_sessions.db": "bounded: 256 runs and 128 MiB of research, 1024 rows and 32 MiB of chat "
+                            "web searches",
+    "x_posts.db": "kept: the duplicate and daily-cap checks read every post published",
+    "x_scheduled.db": "kept: every scheduled post and its outcome (the daily and monthly caps count them)",
+    "x_replies.db": "kept: the auto-reply queue, one row per mention answered",
+    "x_datasets.db": "kept: the operator's annotation collections",
+    "x_audit.db": "kept: the X API audit log (purge_x_audit removes by age on request)",
+    "x_publications.db": "ended operations after 90 days, by the publication fire cycle (hourly)",
+    "hitl_gates.db": "the gate retention sweep: decided gates after 90 days; a live one is kept",
+    "run_incidents.db": "the run incident retention sweep",
+    "vault.db": "kept: the install's secrets, until removed",
+    "settings.db": "kept: the settings",
+    "knowledge.db": "kept: the libraries, until the owner deletes one (a 1 GiB quota)",
+    "rbac.db": "kept: roles and permissions",
+    "audit.db": "kept: the audit log",
+    "security_audit.db": "kept: retired, written by nothing",
+    "disclosure.db": "kept: the security disclosure reports",
+    "certifications.db": "kept: each certification carries its own validity",
+    "llm_calls.db": "the model-call retention sweep: rows after 365 days (a chat's /cost reads a year)",
+    "answer_quality.db": "30 days and 10,000 turns, applied as rows are written",
+    "documents.db": "the document GC: tombstones, rejected and dead-letter rows by their retention days",
+    "documents-jobs-fallback.db": "the document GC, with the document store",
+    "sandbox_emails.db": "kept: the test mailbox",
+    "semantic_cache.db": "kept: retired, written by nothing",
+    "security_scan.db": "kept: retired, written by nothing",
+    "file_checkpoints.db": "the 20 newest IDE checkpoints are kept, older ones removed as one is added",
+    "callbacks.db": "button tokens expire after 24 hours, removed as one is added",
+    "registry.db": "kept: the hub's user-level registry",
+    "vector.db": "rebuilt from the memory stores",
+    "chroma.sqlite3": "rebuilt from the Knowledge Library's chunks",
+    "workspaces.db": "a bundle-internal copy of settings.db's table",
+    "memory.db": "kept: retired, written by nothing",
+    "kazma.db": "kept: retired, written by nothing",
+    "ops.db": "kept: retired, written by nothing",
+    "config.db": "kept: retired, written by nothing",
+    "chat_sessions_test.db": "test mode only",
+    "checkpoints_*.db": "the checkpoint retention sweep, as checkpoints.db",
+    "code-index/*.db": "rebuilt from the workspace",
+    "chat_sessions_test_*.db": "test mode only",
+}
+
+
 #: Product modules that build a database FILENAME at runtime (an f-string),
 #: and the declared family or purpose each one produces. The literal-name
 #: gate cannot read an f-string, so every such site is named here instead.

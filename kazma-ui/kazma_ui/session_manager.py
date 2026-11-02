@@ -19,6 +19,7 @@ import os
 import sqlite3
 import sys
 import threading
+import time
 import uuid
 import contextlib
 import dataclasses
@@ -60,6 +61,14 @@ MAX_MESSAGES_PER_SESSION = 200
 # Empty non-gateway web shells older than this are deleted on list (connect
 # used to create durable 0-msg rows; GC cleans the backlog + stragglers).
 EMPTY_WEB_SESSION_GC_SECONDS = 10 * 60
+
+#: How often a session LIST re-reads the database and prunes, per tenant
+#: (2026-11, FA-278). Every list did both -- the database read loads every
+#: session's messages -- and ten pages polling at once queued behind each
+#: other: 0.27 s alone, 1.3 s at ten readers, 8.3 s at sixty, on the live
+#: install. A session this process writes is in the cache at once; this is
+#: how soon one written elsewhere (another replica, a script) is listed.
+LIST_REFRESH_SECONDS = 10.0
 
 
 @dataclass
@@ -225,6 +234,11 @@ class SessionManager:
             self._spool = None
         # Guard OrderedDict + sqlite across threadpool/async (audit M15)
         self._lock = threading.RLock()
+        # A list's database read and prunes: one caller at a time, at most
+        # every LIST_REFRESH_SECONDS per tenant (FA-278).
+        self._list_refresh_lock = threading.Lock()
+        self._list_refreshed_at: dict[str, float] = {}
+        self._list_refreshing = threading.local()
         # T4: per-session mutation locks so read-modify-write sequences from
         # concurrent persist paths (live stream, detached done_callback,
         # /reset) never interleave on the same ChatSession.
@@ -1165,50 +1179,75 @@ class SessionManager:
         and aged ones are garbage-collected when ``prune_empty`` is True so
         the sidebar does not accumulate "Web Session · 0 msgs" forever.
         """
-        if prune_empty:
-            try:
-                self.prune_empty_web_sessions()
-            except Exception:
-                logger.debug(
-                    "[SessionManager] prune_empty_web_sessions raised",
-                    exc_info=True,
-                )
-            try:
-                from kazma_core.sessions.directory import prune_twin_sessions
+        tenant_id = get_current_tenant_id() or "default"
+        self._refresh_for_list(tenant_id, prune=prune_empty)
 
-                prune_twin_sessions(apply=True)
-            except Exception:
-                logger.debug("[SessionManager] prune_twin_sessions raised", exc_info=True)
-
-        try:
-            self._merge_missing_from_db(limit=min(self._max_sessions, 200))
-        except Exception:
-            logger.debug("[SessionManager] list_all db refresh skipped", exc_info=True)
-
+        # The lock only for the copy: filtering and sorting 200 sessions
+        # under it made every concurrent list wait for the others (FA-278).
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
-            sessions: list[ChatSession] = []
-            seen_sids: set[str] = set()
+            held = list(self._sessions.items())
+        sessions: list[ChatSession] = []
+        seen_sids: set[str] = set()
+        for key, sess in held:
+            if sess.session_id in seen_sids:
+                continue
+            if not key.startswith(f"{tenant_id}:"):
+                continue
+            if not include_archived and sess.archived:
+                continue
+            if not include_empty and self._is_empty_web_shell(sess):
+                continue
+            sessions.append(sess)
+            seen_sids.add(sess.session_id)
 
-            for key, sess in self._sessions.items():
-                if sess.session_id in seen_sids:
-                    continue
-                if not key.startswith(f"{tenant_id}:"):
-                    continue
-                if not include_archived and sess.archived:
-                    continue
-                if not include_empty and self._is_empty_web_shell(sess):
-                    continue
-                sessions.append(sess)
-                seen_sids.add(sess.session_id)
+        # Sort by updated_at descending (newest activity first).
+        # Fall back to created_at for old sessions without updated_at.
+        sessions.sort(
+            key=lambda s: s.updated_at or s.created_at or "",
+            reverse=True,
+        )
+        return sessions
 
-            # Sort by updated_at descending (newest activity first).
-            # Fall back to created_at for old sessions without updated_at.
-            sessions.sort(
-                key=lambda s: s.updated_at or s.created_at or "",
-                reverse=True,
-            )
-            return sessions
+    def _refresh_for_list(self, tenant_id: str, *, prune: bool) -> None:
+        """Re-read the database and prune, when this tenant's list is due.
+
+        Due once every :data:`LIST_REFRESH_SECONDS`. The first refresh is
+        waited for (a list must hold the database's sessions); after it, one
+        caller refreshes and the others list what the cache holds rather
+        than queue behind it. A list made inside the refresh (the twin
+        prune lists) does not refresh again.
+        """
+        if getattr(self._list_refreshing, "active", False):
+            return
+        last = self._list_refreshed_at.get(tenant_id)
+        if last is not None and time.monotonic() - last < LIST_REFRESH_SECONDS:
+            return
+        if not self._list_refresh_lock.acquire(blocking=last is None):
+            return
+        self._list_refreshing.active = True
+        try:
+            last = self._list_refreshed_at.get(tenant_id)
+            if last is not None and time.monotonic() - last < LIST_REFRESH_SECONDS:
+                return
+            if prune:
+                try:
+                    self.prune_empty_web_sessions()
+                except Exception:
+                    logger.debug("[SessionManager] prune_empty_web_sessions raised", exc_info=True)
+                try:
+                    from kazma_core.sessions.directory import prune_twin_sessions
+
+                    prune_twin_sessions(apply=True)
+                except Exception:
+                    logger.debug("[SessionManager] prune_twin_sessions raised", exc_info=True)
+            try:
+                self._merge_missing_from_db(limit=min(self._max_sessions, 200))
+            except Exception:
+                logger.debug("[SessionManager] list_all db refresh skipped", exc_info=True)
+            self._list_refreshed_at[tenant_id] = time.monotonic()
+        finally:
+            self._list_refreshing.active = False
+            self._list_refresh_lock.release()
 
     def rename(self, session_id: str, title: str) -> ChatSession | None:
         """Set a custom title on a session. Returns the session or None."""

@@ -166,3 +166,40 @@ def test_without_the_pin_the_same_code_resolves_into_the_checkout():
         cwd=REPO, env=env, capture_output=True, text=True, timeout=60, check=True,
     ).stdout.strip()
     assert Path(out).resolve() == REPO
+
+
+def test_the_active_workspace_is_not_the_checkout():
+    """The coding workspace too (2026-11): a fresh workspace store seeded its
+    first active row from the working folder -- this checkout -- and a test's
+    relative ``file_write`` landed in the repository."""
+    from kazma_core.workspace.binding import resolve_active_root
+
+    assert not Path(resolve_active_root()).resolve().is_relative_to(REPO)
+
+
+def test_an_explicit_workspace_seeds_the_first_row(tmp_path, monkeypatch):
+    from kazma_core.stores.workspaces import WorkspaceStore
+
+    chosen = tmp_path / "chosen"
+    chosen.mkdir()
+    monkeypatch.setenv("KAZMA_WORKSPACE", str(chosen))
+    monkeypatch.chdir(REPO)
+    store = WorkspaceStore(db_path=str(tmp_path / "ws.db"))
+    try:
+        assert Path(store.get_active_workspace()["root_path"]).resolve() == chosen.resolve()
+    finally:
+        store.close()
+
+
+def test_without_an_explicit_workspace_the_seed_is_the_working_folder(tmp_path, monkeypatch):
+    """Negative control: the same store with no ``KAZMA_WORKSPACE`` seeds the
+    folder it runs in -- the checkout, had the pin not been there."""
+    from kazma_core.stores.workspaces import WorkspaceStore
+
+    monkeypatch.delenv("KAZMA_WORKSPACE", raising=False)
+    monkeypatch.chdir(REPO)
+    store = WorkspaceStore(db_path=str(tmp_path / "ws.db"))
+    try:
+        assert Path(store.get_active_workspace()["root_path"]).resolve() == REPO
+    finally:
+        store.close()

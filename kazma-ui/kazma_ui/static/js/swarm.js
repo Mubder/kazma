@@ -1137,6 +1137,9 @@
     if (data && data.code === 'swarm_engine_unavailable') {
       return t('swarm.engine_unavailable');
     }
+    if (data && data.code === 'workers_not_registered') {
+      return t('swarm.workers_not_registered', {names: (data.missing || []).join(', ')});
+    }
     return (data && data.message) || fallback;
   }
 

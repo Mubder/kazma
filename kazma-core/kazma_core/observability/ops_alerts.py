@@ -36,6 +36,7 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
@@ -85,7 +86,12 @@ class _KeyState:
         }
 
 
-_state: dict[str, _KeyState] = {}
+#: Alert keys remembered, least recently seen dropped first (2026-11,
+#: FA-145): the map kept every key ever raised for the life of the process,
+#: and per-incident keys (``run.<id>``, ``rebind:<provider>``) never repeat.
+#: Dropping a key forgets only its cooldown and repeat count.
+_STATE_MAX = 2048
+_state: OrderedDict[str, _KeyState] = OrderedDict()
 _lock = threading.RLock()
 
 #: In-flight alert-delivery threads, so they can be awaited (drain_alerts)
@@ -174,6 +180,10 @@ def _should_send(key: str, cooldown_s: float) -> tuple[bool, int]:
         if rec is None:
             rec = _KeyState(first_seen=now)
             _state[key] = rec
+            while len(_state) > _STATE_MAX:
+                _state.popitem(last=False)
+        else:
+            _state.move_to_end(key)
         rec.last_seen = now
         rec.total += 1
 

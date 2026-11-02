@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse as _JSONResponse
 from kazma_core.errors import safe_error
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,17 @@ def register_auth_routes(self: Any) -> None:
                 "multi_user": multi_user,
             }
         ok = is_authenticated(request, expected)
-        principal = get_request_principal(request) if ok else None
+        if not ok:
+            # Before sign-in only what the sign-in page needs (FA-219): the
+            # proxy check named the trusted proxies and the peer seen, and the
+            # loopback flag and the user mode said more about the install.
+            return {
+                "auth_enabled": True,
+                "authenticated": False,
+                "mode": "secret",
+                "oidc": oidc,
+            }
+        principal = get_request_principal(request)
         return {
             "auth_enabled": True,
             "authenticated": ok,
@@ -150,9 +161,9 @@ def register_auth_routes(self: Any) -> None:
                 status_code=200,
             )
         try:
-            body = await request.json()
-        except Exception:
-            body = {}
+            body = await read_json(request, allow_empty=True)
+        except InvalidJsonBody:
+            return invalid_json_response()
         if not isinstance(body, dict):
             body = {}
         secret = str(body.get("secret") or "").strip()
@@ -256,8 +267,14 @@ def register_auth_routes(self: Any) -> None:
         """Redirect browser to configured OIDC IdP (Phase 4.4)."""
         from fastapi.responses import RedirectResponse
 
+        from kazma_ui.auth import _is_https
+
         try:
-            from kazma_core.security.oidc import build_authorize_url, oidc_configured
+            from kazma_core.security.oidc import (
+                BINDING_COOKIE_PATH,
+                build_authorize_url,
+                oidc_configured,
+            )
 
             if not oidc_configured():
                 return _JSONResponse(
@@ -265,7 +282,20 @@ def register_auth_routes(self: Any) -> None:
                     status_code=503,
                 )
             info = await build_authorize_url()
-            return RedirectResponse(url=info["url"], status_code=302)
+            resp = RedirectResponse(url=info["url"], status_code=302)
+            # Binds the sign-in to this browser (FA-133): the callback takes
+            # the state only from the browser holding it. Lax: the identity
+            # provider's redirect back is a top-level GET, which carries it.
+            resp.set_cookie(
+                key=info["binding_cookie"],
+                value=info["state"],
+                httponly=True,
+                samesite="lax",
+                path=BINDING_COOKIE_PATH,
+                secure=_is_https(request),
+                max_age=600,
+            )
+            return resp
         except Exception as exc:
             logger.exception("[oidc] start failed")
             return _JSONResponse({"error": safe_error(exc)}, status_code=500)
@@ -280,11 +310,16 @@ def register_auth_routes(self: Any) -> None:
         state = request.query_params.get("state") or ""
         if not code or not state:
             return _JSONResponse({"error": "Missing code/state"}, status_code=400)
+        from kazma_core.security.oidc import BINDING_COOKIE_PATH, binding_cookie_name
+
+        binding = binding_cookie_name(state)
         try:
             from kazma_core.security.oidc import exchange_code
             from kazma_core.security.web_sessions import create_session, use_opaque_sessions
 
-            result = await exchange_code(code, state)
+            result = await exchange_code(
+                code, state, bound_state=request.cookies.get(binding, "")
+            )
             import asyncio as _asyncio
 
             if not await _asyncio.to_thread(use_opaque_sessions):
@@ -310,10 +345,13 @@ def register_auth_routes(self: Any) -> None:
                 secure=_is_https(request),
                 max_age=60 * 60 * 24 * 14,
             )
+            resp.delete_cookie(binding, path=BINDING_COOKIE_PATH)
             return resp
         except Exception as exc:
             logger.exception("[oidc] callback failed")
-            return _JSONResponse({"error": safe_error(exc)}, status_code=400)
+            failed = _JSONResponse({"error": safe_error(exc)}, status_code=400)
+            failed.delete_cookie(binding, path=BINDING_COOKIE_PATH)
+            return failed
     @self.app.get("/api/auth/me")
     def _auth_me(request: Request) -> Response:
         """Return current principal (role/username) for UI chrome."""

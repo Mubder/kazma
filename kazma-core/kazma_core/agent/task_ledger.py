@@ -261,6 +261,21 @@ class TaskLedgerStore:
             finally:
                 conn.close()
 
+    def prune_finished(self, *, days: int, now: float | None = None) -> int:
+        """Remove done and superseded ledgers past *days* (2026-11, FA-141).
+        An active ledger -- a chat's task in progress -- is never removed."""
+        cutoff = (now if now is not None else time.time()) - days * 86400
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    cur = conn.execute(
+                        "DELETE FROM task_ledgers WHERE status <> ? AND updated_at < ?", (_ACTIVE, cutoff)
+                    )
+                    return int(cur.rowcount or 0)
+            finally:
+                conn.close()
+
     def active_for(self, thread_id: str, tenant_id: str = "default") -> TaskLedger | None:
         """The ACTIVE ledger for a thread, or None. Never raises."""
         try:
@@ -305,6 +320,10 @@ class TaskLedgerStore:
 
 _store: TaskLedgerStore | None = None
 _store_lock = threading.Lock()
+
+
+#: How long a finished task ledger is kept (2026-11, FA-141).
+FINISHED_RETENTION_DAYS = 90
 
 
 def get_ledger_store() -> TaskLedgerStore:

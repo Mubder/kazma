@@ -152,7 +152,7 @@ async def generate_image(
     filepath = IMAGE_DIR / filename
 
     try:
-        filepath.write_bytes(image_bytes)
+        await asyncio.to_thread(filepath.write_bytes, image_bytes)  # off the loop (FA-139)
     except OSError as exc:
         return f"Error: Could not save image to {filepath} — {exc}"
 

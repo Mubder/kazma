@@ -221,9 +221,11 @@ class TestSwarmInteractive:
             "/api/swarm/dispatch",
             json={"workers": ["nonexistent"], "task": "do something"},
         )
-        assert resp.status_code in (200, 400)
+        # Nothing was dispatched, so it is not a 200 (2026-11, FA-236).
+        assert resp.status_code == 404
         data = resp.json()
-        assert "nonexistent" in data.get("missing", []) or "nonexistent" in str(data)
+        assert data["code"] == "workers_not_registered"
+        assert "nonexistent" in data["missing"]
 
     def test_swarm_start_without_workers_fails(self):
         """Starting with no workers returns 400."""

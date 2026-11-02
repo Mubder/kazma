@@ -159,7 +159,15 @@ def control_plane_store_targeted(
             from kazma_core.paths import data_dir
 
             root = data_dir()
-            candidates.append(root / text)
+            # A relative name means the file where the command runs. The
+            # data dir's file of that name counts when there is no such file
+            # there (the command may ``cd`` into the data dir first), never
+            # over the user's own: ``sqlite3 app.db`` in a workspace holding
+            # app.db was refused as a Kazma store (2026-11, FA-217).
+            in_data_dir = root / text
+            here = Path(cwd) / text if cwd is not None else None
+            if here is None or (in_data_dir.exists() and not here.exists()):
+                candidates.append(in_data_dir)
             # A bare ``hitl_gates.db`` is the store even when cwd is the
             # sandbox. Do not do this for every ``*.db``: ``project.db``
             # under the sandbox is the user's file.

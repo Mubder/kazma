@@ -46,7 +46,9 @@ def cli_commands() -> list[str]:
     for names, _node in _dispatch_tests(_main_function()):
         if set(names) & _HELP_WORDS:
             continue
-        for name in names:
+        # "--version" / "-V" are option spellings of the "version" command
+        # beside them, not commands of their own.
+        for name in [n for n in names if not n.startswith("-")]:
             # "agent_skills" is another spelling of "agent-skills"; "acp"
             # shares a branch with "ask" and is a command of its own.
             if name.replace("_", "-") not in commands:

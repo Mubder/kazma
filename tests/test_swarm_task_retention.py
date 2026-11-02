@@ -140,8 +140,10 @@ def test_the_maintenance_cadence_carries_the_retention_sweep():
 
     labels = [label for label, _ in wb._MAINTENANCE_SWEEPS]
     assert labels == [
-        "commitment GC cycle", "artifact GC", "gate TTL sweep", "ended YOLO windows",
-        "task queue purge", "swarm task retention", "swarm approval rows", "run incident retention",
+        "commitment GC cycle", "artifact GC", "gate TTL sweep", "gate retention",
+        "tool receipt retention", "task ledger retention", "model-call retention", "ended YOLO windows",
+        "task queue purge", "swarm task retention", "pipeline log retention", "swarm approval rows",
+        "run incident retention",
         "checkpoint retention",
         "supervisor watch", "document worker broker", "malware signatures",
         "forget convergence", "memory vector repair", "memory recovery", "retired knowledge promotions",

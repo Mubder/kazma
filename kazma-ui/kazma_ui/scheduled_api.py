@@ -41,12 +41,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
 from kazma_core.errors import safe_error, validation_error
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException
 
+from kazma_ui.error_envelope import http_envelope, validation_envelope
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.same_origin import verify_same_origin
 
@@ -137,7 +140,10 @@ class XScheduleBody(BaseModel):
 
 
 class _ScheduledRoute(APIRoute):
-    """An APIRoute that refuses on an install with platform users (D1)."""
+    """An APIRoute that refuses on an install with platform users (D1), and
+    answers what a route raises in the routes' envelope (2026-11, FA-241):
+    FastAPI's own validation answer echoed the input back -- an 8,001
+    character prompt came back whole -- and had no ``code``."""
 
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         handler = super().get_route_handler()
@@ -152,7 +158,12 @@ class _ScheduledRoute(APIRoute):
                     request.state.scheduled_refusal = refusal
                 else:
                     return JSONResponse({"ok": False, "code": REFUSAL_CODE, "error": refusal}, status_code=409)
-            return await handler(request)
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                return validation_envelope(exc)
+            except HTTPException as exc:
+                return http_envelope(exc)
 
         return checked
 
@@ -358,7 +369,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
 
         sched = get_cron_scheduler()
         if sched is None:
-            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized."}, status_code=503)
+            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized.", "code": "scheduler_unavailable"}, status_code=503)
         ctx = await asyncio.to_thread(_request_context, request)
         job = await sched.get_job(job_id, tenant_id=ctx["tenant"])
         if job is None:
@@ -373,7 +384,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
 
         sched = get_cron_scheduler()
         if sched is None:
-            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized."}, status_code=503)
+            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized.", "code": "scheduler_unavailable"}, status_code=503)
         try:
             from kazma_core.tools.send_message import resolve_delivery_target
 
@@ -410,12 +421,15 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             result.pop("tenant_id", None)
             return JSONResponse({"ok": True, **result})
         except CronLimitError as exc:
-            return JSONResponse({"ok": False, "code": exc.code, "error": str(exc)}, status_code=409)
+            # A prompt missing or too long is the request's fault (422); a
+            # cap reached is the install's state (409). FA-241.
+            status = 422 if exc.code in ("prompt_required", "prompt_too_long") else 409
+            return JSONResponse({"ok": False, "code": exc.code, "error": str(exc)}, status_code=status)
         except ValueError as exc:
             return JSONResponse({"ok": False, "code": "invalid", "error": validation_error(exc)}, status_code=400)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron create failed")
-            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc), "code": "internal_error"}, status_code=500)
 
     @protected.put("/api/scheduled/cron/{job_id}", dependencies=mutating)
     async def edit_cron(job_id: str, body: CronEditBody, request: Request) -> JSONResponse:
@@ -423,7 +437,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
 
         sched = get_cron_scheduler()
         if sched is None:
-            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized."}, status_code=503)
+            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized.", "code": "scheduler_unavailable"}, status_code=503)
         timing = (body.timing or "").strip() or None
         prompt = body.prompt.strip() if body.prompt is not None and body.prompt.strip() else None
         if timing is None and prompt is None:
@@ -438,7 +452,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             return _cron_reply(result)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron edit failed")
-            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc), "code": "internal_error"}, status_code=500)
 
     @protected.delete("/api/scheduled/cron/{job_id}", dependencies=mutating)
     async def delete_cron(job_id: str, request: Request, expected_version: int | None = None) -> JSONResponse:
@@ -446,7 +460,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
 
         sched = get_cron_scheduler()
         if sched is None:
-            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized."}, status_code=503)
+            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized.", "code": "scheduler_unavailable"}, status_code=503)
         try:
             ctx = await asyncio.to_thread(_request_context, request)
             result = await sched.cancel(job_id, tenant_id=ctx["tenant"], expected_version=expected_version,
@@ -454,7 +468,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             return _cron_reply(result)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron delete failed")
-            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc), "code": "internal_error"}, status_code=500)
 
     @protected.post("/api/scheduled/cron/{job_id}/restore", dependencies=mutating)
     async def restore_cron(job_id: str, body: _CronRestoreBody, request: Request) -> JSONResponse:
@@ -462,7 +476,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
 
         sched = get_cron_scheduler()
         if sched is None:
-            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized."}, status_code=503)
+            return JSONResponse({"ok": False, "error": "Cron scheduler not initialized.", "code": "scheduler_unavailable"}, status_code=503)
         try:
             ctx = await asyncio.to_thread(_request_context, request)
             result = await sched.restore(job_id, timing=body.timing.strip(), tenant_id=ctx["tenant"],
@@ -471,7 +485,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             return _cron_reply(result)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron restore failed")
-            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc), "code": "internal_error"}, status_code=500)
 
     # ── Scheduled X post booking ──────────────────────────────────────
     # Plain ``def``: every call below is synchronous SQLite (the publication
@@ -501,6 +515,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
                     {
                         "ok": False,
                         "error": "proposal_id did not resolve to a single saved draft",
+                        "code": "proposal_not_found",
                     },
                     status_code=400,
                 )
@@ -529,6 +544,8 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
                 logger.debug("[scheduled] proposal_posted failed", exc_info=True)
             payload["proposal_id"] = proposal_ref
         status = 200 if ok else (409 if payload.get("code") == "booking_conflict" else 400)
+        if not ok:
+            payload.setdefault("code", "booking_refused")
         return JSONResponse({"ok": ok, **payload}, status_code=status)
 
     router.include_router(protected)

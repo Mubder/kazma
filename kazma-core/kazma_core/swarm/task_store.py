@@ -811,12 +811,25 @@ class TaskStore:
                 metadata=dict(metadata),
             )
             try:
-                self.persist_task(task)
-                failed.append(task.id)
+                written = self.persist_task(task)
             except Exception as exc:  # noqa: BLE001 — recovery must not abort boot
                 logger.warning(
                     "[TaskStore] Failed to requeue orphaned task %s: %s", task.id, exc
                 )
+                written = False
+            if written:
+                failed.append(task.id)
+            else:
+                # The store refused (or could not take) the failed row: the
+                # task is NOT recovered, and counting it would say it was
+                # (FA-109). It stays RUNNING for the next start to decide.
+                from kazma_core.metrics import record_swarm_failure
+
+                logger.warning(
+                    "[TaskStore] Orphaned task %s was not recorded failed; it stays "
+                    "running for the next start", task.id,
+                )
+                record_swarm_failure("task_write")
         if requeued or failed:
             logger.info(
                 "[TaskStore] Orphan recovery: %d requeued, %d terminally failed",

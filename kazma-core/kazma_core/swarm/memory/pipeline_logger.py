@@ -188,6 +188,19 @@ class PipelineLogger:
         return [_row_to_dict(row) for row in cursor.fetchall()]
 
 
+def prune_pipeline_logs(*, days: int, now: float | None = None) -> int:
+    """Remove pipeline log rows past *days* (2026-11, FA-141): the swarm's
+    pipeline telemetry kept every step of every task. It follows the swarm
+    task retention (``swarm.task_retention_days``; 0 keeps everything)."""
+    import time
+
+    if days <= 0:
+        return 0
+    cutoff = (now if now is not None else time.time()) - days * 86400
+    cur = _get_conn().execute("DELETE FROM pipeline_logs WHERE timestamp < ?", (cutoff,))
+    return int(cur.rowcount or 0)
+
+
 def _row_to_dict(row: tuple) -> dict[str, Any]:
     cols = ["id", "timestamp", "correlation_id", "worker_name", "stage",
             "level", "event_type", "message", "metadata", "raw_output"]

@@ -14,14 +14,24 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from kazma_core.english_count import count_noun
 
 __all__ = [
     "RateFeedbackManager",
+    "follow_rate_limit_settings",
 ]
+
+logger = logging.getLogger(__name__)
+
+#: The setting: messages per person per minute, per chat app.
+RATE_LIMITS_KEY = "gateway.rate_limits"
+_PLATFORMS = ("telegram", "discord", "slack")
 
 
 @dataclass
@@ -54,6 +64,10 @@ class RateFeedbackManager:
         self._cooldown = cooldown_seconds
         self._enabled = enabled
         self._buckets: dict[str, _UserBucket] = {}
+
+    def set_limits(self, limit: int | dict[str, int]) -> None:
+        """Take new limits now; each person's bucket keeps its count."""
+        self._limit = limit
 
     def _get_limit_for_user(self, user_id: str) -> int:
         """Get the limit configured for a specific user ID's platform."""
@@ -152,3 +166,47 @@ class RateFeedbackManager:
         reset = self.get_reset_seconds(user_id)
         limit = self._get_limit_for_user(user_id)
         return f"⏳ Slow down — {remaining}/{count_noun(limit, 'request')} available. Resets in {reset}s."
+
+
+def _limits_from(config_store: Any) -> dict[str, int]:
+    """The per-platform limits the setting holds (an empty dict: none set)."""
+    raw = config_store.get(RATE_LIMITS_KEY, {}) or {}
+    limits: dict[str, int] = {}
+    if isinstance(raw, dict):
+        for platform in _PLATFORMS:
+            if platform in raw:
+                try:
+                    limits[platform] = int(raw[platform])
+                except (TypeError, ValueError):
+                    logger.warning("[Gateway] %s.%s is not a number: %r", RATE_LIMITS_KEY, platform, raw[platform])
+    return limits
+
+
+def follow_rate_limit_settings(gateway: Any, config_store: Any) -> Callable[[], None]:
+    """Apply ``gateway.rate_limits`` to *gateway* now and on every change.
+
+    The limits were read once when the server started (2026-11, FA-127): a
+    limit changed in Settings did nothing until a restart. Returns the call
+    that stops following.
+    """
+    def apply() -> None:
+        limits = _limits_from(config_store)
+        current = getattr(gateway, "_rate_feedback", None)
+        if not limits:
+            if current is not None:
+                gateway.set_rate_feedback(None)
+                logger.info("[Gateway] rate feedback off (no %s)", RATE_LIMITS_KEY)
+            return
+        if isinstance(current, RateFeedbackManager):
+            current.set_limits(limits)
+            logger.info("[Gateway] rate limits now %s", limits)
+            return
+        gateway.set_rate_feedback(RateFeedbackManager(limit=limits, window_seconds=60, cooldown_seconds=30))
+        logger.info("[Gateway] Rate feedback wired (limits=%s, cooldown=30s)", limits)
+
+    def on_change(keys: Any) -> None:
+        if keys is None or any(k == RATE_LIMITS_KEY or str(k).startswith(RATE_LIMITS_KEY + ".") for k in keys):
+            apply()
+
+    apply()
+    return config_store.add_change_listener(on_change)

@@ -350,14 +350,9 @@ def register_knowledge_tools(registry: Any) -> None:
                 parts.append(fence_untrusted("\n".join(page).strip(), source="knowledge_search"))
             # Citation directive: the user wants every KB-derived answer
             # to carry a visible footer naming the source library.
-            cited_libs = sorted({h.library_id for h in hits})
-            if len(cited_libs) == 1:
-                lib_footer = f'📚 This data is from Knowledge "{cited_libs[0]}".'
-            else:
-                lib_footer = (
-                    "📚 This data is from Knowledge libraries: "
-                    + ", ".join(f'"{l}"' for l in cited_libs) + "."
-                )
+            from kazma_core.stores.knowledge_index import knowledge_footer
+
+            lib_footer = knowledge_footer(sorted({h.library_id for h in hits}), query)
             parts.append(
                 "\n---\n" + lib_footer + "\n"
                 "You MUST include this footer verbatim at the end of any answer "
@@ -365,4 +360,8 @@ def register_knowledge_tools(registry: Any) -> None:
             )
             return "\n".join(parts)
         except Exception as exc:
-            return f"Error: knowledge search failed — {exc}"
+            # A code and a reference, the exception in the log under it (FA-229:
+            # the model was handed the exception's own text).
+            from kazma_core.errors import safe_error
+
+            return f"Error: knowledge search failed — {safe_error(exc)}"

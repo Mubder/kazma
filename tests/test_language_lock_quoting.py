@@ -53,7 +53,11 @@ def test_the_english_lock_still_keeps_the_reply_english():
 
 def test_the_base_language_rule_carries_the_exemption_too():
     src = (ROOT / "kazma-core/kazma_core/agent_runner.py").read_text(encoding="utf-8")
-    assert src.count("CRITICAL LANGUAGE RULE") == src.count("exactly as stored, in its original script"), (
+    # A copy of the rule is its body ("CRITICAL LANGUAGE RULE: Match ..."); the
+    # rule's bare label in _PROMPT_RULES (which prompts must carry it) is not one.
+    copies = src.count("CRITICAL LANGUAGE RULE: Match")
+    assert copies >= 2
+    assert copies == src.count("exactly as stored, in its original script"), (
         "every copy of the base language rule in agent_runner must carry the "
         "quoted-material exemption"
     )

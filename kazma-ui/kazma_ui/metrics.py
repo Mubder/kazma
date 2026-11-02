@@ -131,15 +131,9 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
                 out: list[str] = []
                 _cconn = _sqlite3.connect(_ops_db(), check_same_thread=False)
                 try:
-                    _rows = _cconn.execute(
-                        "SELECT policy_decision, COUNT(*) FROM commitments "
-                        "WHERE policy_decision IS NOT NULL GROUP BY policy_decision"
-                    ).fetchall()
-                    out.append("# HELP kazma_commitment_decisions_total Commitment gate decisions by type")
-                    out.append("# TYPE kazma_commitment_decisions_total counter")
-                    for _dec, _cnt in _rows:
-                        out.append(f'kazma_commitment_decisions_total{{decision="{_dec}"}} {_cnt}')
-
+                    # kazma_commitment_decisions_total is counted when the gate
+                    # decides (kazma_core.metrics, merged below): a COUNT(*) of
+                    # this table, which the GC trims, fell (FA-257).
                     _pending = _cconn.execute(
                         "SELECT COUNT(*) FROM commitments "
                         "WHERE status IN ('draft','needs_clarify','needs_confirm','ready')"

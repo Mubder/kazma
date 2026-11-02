@@ -1131,12 +1131,16 @@ async def _stream_langgraph_events(
                                 output = output.content
                             elif isinstance(output, dict):
                                 output = output.get("content", json.dumps(output, ensure_ascii=False))
+                            # A call that ended in an error -- refused before
+                            # it ran, or failing -- is a failed row, not a done
+                            # one (2026-11, FA-253).
+                            _tool_state = "failed" if data.get("error") else "done"
                             _durable.note({
                                 "type": "tool",
                                 "name": str(name),
                                 "call_id": str(event.get("run_id") or ""),
                                 "result": str(output)[:5000],
-                                "state": "done",
+                                "state": _tool_state,
                             })
                             await _durable.commit(content_acc)
                             yield await emit_j(
@@ -1147,6 +1151,7 @@ async def _stream_langgraph_events(
                                     # this is what makes start and end ONE row.
                                     "tool_call_id": str(event.get("run_id") or ""),
                                     "result": str(output)[:5000],
+                                    "state": _tool_state,
                                 },
                             )
 

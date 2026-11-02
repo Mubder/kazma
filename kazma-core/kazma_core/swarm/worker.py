@@ -304,16 +304,12 @@ class InProcessWorker(SwarmWorker):
         }
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
 
-        # Start each dispatch with a cold file-read dedup cache: the cache is
-        # process-global and its "[ALREADY READ THIS TURN]" note is only valid
-        # within one agent's turn — a previous task's cached reads must never
-        # be served to this worker.
-        try:
-            from kazma_core.tools.file_read import clear_read_cache
+        # This dispatch reads as a reader of its own: its "[ALREADY READ THIS
+        # TURN]" notes are about its own reads, never the chat's or another
+        # task's (FA-111), and they are dropped when it ends.
+        from kazma_core.tools.file_read import enter_read_scope, leave_read_scope
 
-            clear_read_cache()
-        except Exception:
-            logger.debug("[InProcessWorker:%s] read-cache clear skipped", self.name, exc_info=True)
+        read_scope = enter_read_scope(task_id)
 
         # Initialize variables before try block so exception handler can access them safely
         total_tokens = 0
@@ -779,3 +775,5 @@ class InProcessWorker(SwarmWorker):
                 "cost": total_cost,
                 "duration_seconds": time.monotonic() - dispatch_started,
             }
+        finally:
+            leave_read_scope(read_scope)

@@ -1444,6 +1444,28 @@ class KnowledgeInject:
     footer: str = ""
 
 
+def knowledge_footer(libraries: list[str], text: str) -> str:
+    """The footer an answer from the Knowledge Library carries, in the
+    language of *text* (the user's message, or the search the model ran):
+    2026-11, FA-229 -- it was English under Arabic answers. Kazma's own
+    words, kept here because the core cannot read the interface catalog."""
+    from kazma_core.language_lock import detect_user_language
+
+    quoted_ar = "، ".join(f'"{name}"' for name in libraries)
+    quoted_en = ", ".join(f'"{name}"' for name in libraries)
+    if detect_user_language(text) == "ar":
+        if len(libraries) == 1:
+            return f"📚 هذه المعلومات من مكتبة المعرفة {quoted_ar}."
+        if libraries:
+            return f"📚 هذه المعلومات من مكتبات المعرفة: {quoted_ar}."
+        return "📚 هذه المعلومات من مكتبة المعرفة."
+    if len(libraries) == 1:
+        return f"📚 This data is from Knowledge {quoted_en}."
+    if libraries:
+        return f"📚 This data is from Knowledge libraries: {quoted_en}."
+    return "📚 This data is from the Knowledge Library."
+
+
 def build_knowledge_inject(user_message: str, *, store: KnowledgeStore | None = None) -> KnowledgeInject:
     """The Knowledge block for the latest user message (blocking: callers
     on the loop use ``asyncio.to_thread``).
@@ -1470,13 +1492,7 @@ def build_knowledge_inject(user_message: str, *, store: KnowledgeStore | None = 
     if not block:
         return KnowledgeInject()
     cited_libs = sorted({str((h.get("provenance") or {}).get("library_id") or "") for h in hits} - {""})
-    if len(cited_libs) == 1:
-        lib_footer = f'📚 This data is from Knowledge "{cited_libs[0]}".'
-    elif cited_libs:
-        lib_footer = ("📚 This data is from Knowledge libraries: "
-                      + ", ".join(f'"{library}"' for library in cited_libs) + ".")
-    else:
-        lib_footer = "📚 This data is from the Knowledge Library."
+    lib_footer = knowledge_footer(cited_libs, msg)
     weak = [f"[{i}]" for i, h in enumerate(hits, start=1) if h.get("strength") == "weak"]
     footer = "\n".join((
         f"The block above is Knowledge Library context: {len(hits)} chunk(s) retrieved for this "

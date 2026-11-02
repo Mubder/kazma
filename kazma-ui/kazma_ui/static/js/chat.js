@@ -632,7 +632,7 @@
       kind: 'tool',
       title: data.tool_name || 'tool',
       detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
-      state: 'done',
+      state: data.state === 'failed' ? 'failed' : 'done',
       id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
     });
   }
@@ -3199,7 +3199,8 @@
           kind: 'tool',
           title: data.tool_name || 'tool',
           detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
-          state: isSwarm ? 'running' : 'done',
+          // A call refused before it ran, or failing, ends failed (FA-253).
+          state: data.state === 'failed' ? 'failed' : (isSwarm ? 'running' : 'done'),
           // The graph's own run id, so the LIVE row and the row the
           // server persisted are one row rather than two after a
           // refresh. activityToParts reads 'tool#<id>' back into

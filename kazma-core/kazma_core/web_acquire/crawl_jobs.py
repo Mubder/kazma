@@ -52,6 +52,7 @@ import psutil
 from kazma_core import config_store
 from kazma_core.config_store import ConfigRevisionConflict
 from kazma_core.config_availability import _storage_failures
+from kazma_core.diagnostic_scope import writes_suppressed
 from kazma_core.web_acquire.durable_state import refuse_vaulted
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 from kazma_core.playwright_loop import finish_owned
@@ -236,8 +237,11 @@ _retired_cleared = False
 
 
 def _clear_retired(store) -> None:
+    """Remove the retired registry once per process. A read-only diagnostic
+    (``kazma acquisition status``) leaves it for the next writer: it tried
+    the delete and was refused (2026-11, FA-224)."""
     global _retired_cleared
-    if _retired_cleared:
+    if _retired_cleared or writes_suppressed():
         return
     _retired_cleared = True
     try:
@@ -254,12 +258,16 @@ def _migrate_legacy(store):
         for _ in range(8):
             jobs, revision, legacy = _read_all(store)
             if not legacy:
-                if legacy is not None:
-                    try:
-                        store.delete(_KEY)
-                    except PermissionError:
-                        pass  # a read-only diagnostic; the next writer removes it
+                # A read-only diagnostic leaves the empty old value for the
+                # next writer rather than try a delete it would be refused.
+                if legacy is not None and not writes_suppressed():
+                    store.delete(_KEY)
                 return jobs, revision
+            if writes_suppressed():
+                # A read-only diagnostic: read the old value as it is.
+                merged = dict(jobs)
+                merged.update({job_id: (row, 0) for job_id, row in legacy.items() if job_id not in jobs})
+                return merged, revision
             items = [(_REVISION, revision + 1, _CATEGORY)]
             for job_id, row in legacy.items():
                 if job_id not in jobs:
@@ -271,11 +279,6 @@ def _migrate_legacy(store):
                 store.batch_set(items, expected=(_REVISION, revision))
             except ConfigRevisionConflict:
                 continue
-            except PermissionError:
-                # A read-only diagnostic: read the old value as it is.
-                merged = dict(jobs)
-                merged.update({job_id: (row, 0) for job_id, row in legacy.items() if job_id not in jobs})
-                return merged, revision
             store.delete(_KEY)
         jobs, revision, _legacy = _read_all(store)
         return jobs, revision

@@ -18,6 +18,9 @@ def test_boot_and_reopen_with_nonempty_container_cwd(tmp_path, monkeypatch, ha):
     sandbox = tmp_path / "state" / "workspace"
     sandbox.mkdir(parents=True)
     monkeypatch.chdir(image)
+    # The working-folder rule; an explicit KAZMA_WORKSPACE (the root conftest
+    # pins one) would be seeded first.
+    monkeypatch.delenv("KAZMA_WORKSPACE", raising=False)
     monkeypatch.setenv("KAZMA_RUNTIME_HA", "1" if ha else "0")
     monkeypatch.setattr(binding, "default_sandbox_root", lambda: sandbox)
     database = str(tmp_path / "state" / "settings.db")

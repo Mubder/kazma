@@ -51,6 +51,7 @@ from kazma_ui.models import (
     VoiceSettingsUpdate,
 )
 from kazma_core.http_tls import shared_ssl_context
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -278,9 +279,9 @@ class SettingsRouterBuilder:
             if not await asyncio.to_thread(push_available):
                 return {"status": "error", "error": "push support not installed"}
             try:
-                body = await request.json()
-            except Exception:
-                return {"status": "error", "error": "invalid JSON"}
+                body = await read_json(request)
+            except InvalidJsonBody:
+                return invalid_json_response()
             # AUD-103: the endpoint check resolves DNS and the save is a
             # settings transaction -- both off the event loop. A store that
             # refuses the write is a 500 (logged), never a reported success.
@@ -292,9 +293,9 @@ class SettingsRouterBuilder:
             from kazma_ui.push import unsubscribe
 
             try:
-                body = await request.json()
-            except Exception:
-                return {"status": "error", "error": "invalid JSON"}
+                body = await read_json(request)
+            except InvalidJsonBody:
+                return invalid_json_response()
             # AUD-103: one settings transaction, off the event loop.
             return await asyncio.to_thread(unsubscribe, str((body.get("endpoint")) or ""))
 

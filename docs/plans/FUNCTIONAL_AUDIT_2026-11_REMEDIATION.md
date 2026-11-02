@@ -289,6 +289,19 @@ Class gate: every user-facing string that a model or a tool produces for a turn 
 
 Compact, each with its fix, its gate and the effort. Each gate's negative control is the current code at the site named.
 
+### Stage 3 status (2026-11-02)
+
+Every Stage 3 item below is implemented with its gate and negative control (AGENTS.md §56 names each one), except FA-226, FA-227 and FA-243, recorded as by design. FA-269 and FA-270 landed with Stage 1. Where the work differs from the table:
+
+- FA-205: the orphan the audit found was a `document_blobs` row of the Postgres catalog on an install whose catalog is SQLite; the GC now sweeps that idle catalog with the same mark and grace. The fix also found the Postgres mark itself reading rows by position and failing, so GC on a Postgres catalog had never removed anything.
+- FA-278: the list refreshes from the store at most every 10 s, one refresh at a time (10 concurrent calls: 155 ms each before, 0.9 ms after). Paging was not added: the sidebar groups and searches the whole list in the page.
+- FA-242: only the Gmail listing made a request per message; the Microsoft Graph and calendar readers list in one request and were left alone.
+- FA-133: the per-attempt state is in the settings store (ten minutes, 32 at most) and bound to a cookie scoped to `/api/auth/oidc`, rather than a signed state cookie.
+- FA-121: the rules were merged into the shipped `kazma.yaml` prompt (installs on the old prompt follow it, a `RetiredDefault`), and "stop all tool calls on any tool error" was dropped: it contradicted the refusals a turn now carries on past.
+- FA-215 (Stage 0's decision): the offsite copy leaves `.env` out, the zip and rclone alike.
+- FA-272: the hardening check reads the file's ACL. On the live install `restic.pass` is readable by a second local account; restricting it stays the owner's.
+- Found during the stage: a fresh workspace store seeded the working folder over `KAZMA_WORKSPACE`, so a test wrote into this checkout. The seed takes the variable first, and the test shield pins it (`tests/test_install_data_shield.py`).
+
 | ID | Fix | Gate | Effort |
 |---|---|---|---|
 | FA-108 | Log "persisted" only when `ok`; "NOT persisted" at WARNING otherwise. | A refused save logs no "Reply persisted". | S |

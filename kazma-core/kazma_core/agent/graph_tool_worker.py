@@ -146,6 +146,31 @@ def _severed_again(state: SupervisorState, refused: list[ToolResult]) -> str:
     return again[0] if again else ""
 
 
+def _show_refused_steps(state: dict[str, Any], refused: list[ToolResult]) -> None:
+    """A call refused before it ran is a step of the turn too (FA-253).
+
+    The commitment gate's deny, a preflight refusal (a call that cannot run)
+    and a constraint block answered the model and showed nothing: the turn's
+    block had no row for the call, live or reloaded, so the only trace was
+    the model's own wording. Each is now a tool row that ends ``failed`` with
+    the refusal as its text -- the same activity a run call emits. Never
+    raises: a lost row must not change the refusal.
+    """
+    if not refused:
+        return
+    try:
+        from kazma_core.llm_stream import emit_tool_activity
+    except ImportError:
+        return
+    thread = str(state.get("thread_id") or "")
+    for result in refused:
+        name = str(result.get("name") or "tool")
+        call_id = str(result.get("tool_call_id") or "")
+        reason = str(result.get("content") or "Refused before it ran.")
+        emit_tool_activity("start", name, call_id=call_id, inputs={}, thread_id=thread)
+        emit_tool_activity("end", name, call_id=call_id, error=reason, thread_id=thread)
+
+
 async def _refuse_unrunnable_calls(
     pending: list[PendingToolCall],
     *,
@@ -764,6 +789,7 @@ async def tool_worker_node(
             logger.debug("[ToolWorker] constraint filter skipped", exc_info=True)
 
     if not pending and constraint_blocked_results:
+        _show_refused_steps(state, list(constraint_blocked_results))
         messages = [_normalize_msg(m) for m in state.get("messages", [])]
         tool_messages = [
             {
@@ -1517,6 +1543,7 @@ async def tool_worker_node(
                     approved_ids = {str(x) for x in raw_ids}
 
         # ── Execute safe tools in parallel ────────────────────────────
+        _show_refused_steps(state, list(constraint_blocked_results) + list(semantic_blocked))
         results.extend(list(constraint_blocked_results) + list(semantic_blocked))
         if safe_tools:
             # return_exceptions (audit M-G2): one raising tool used to

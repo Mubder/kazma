@@ -108,6 +108,12 @@ def _tool(name: str):
 # ── KB-S01: every text a page wrote reaches a model inside the fence ───────
 
 
+def _footer(lang: str) -> str:
+    """The library footer in the message's language (2026-11, FA-229)."""
+    return ('This data is from Knowledge "docs"' if lang == "en"
+            else 'هذه المعلومات من مكتبة المعرفة "docs"')
+
+
 def _assert_fenced(out: str, lang: str) -> None:
     payload = "vault key" if lang == "en" else "مفتاح الخزنة"
     assert payload in out  # the page's text arrived ...
@@ -126,7 +132,7 @@ def test_the_search_tool_fences_what_the_page_wrote(kb, lang):
     out = asyncio.run(registry.get_tool("knowledge_search").func(query=query, library="docs"))
     _assert_fenced(out, lang)
     outside = _outside(out)
-    assert "## [1] score=" in outside and 'This data is from Knowledge "docs"' in outside
+    assert "## [1] score=" in outside and _footer(lang) in outside
 
 
 @pytest.mark.parametrize("lang", ["en", "ar"])
@@ -171,7 +177,7 @@ def test_the_turn_note_keeps_kazmas_lines_outside_the_fence(kb, lang):
     assert note_kind({"role": "system", "content": note}) == "knowledge"
     _assert_fenced(note, lang)
     outside, inside = _outside(note), "".join(FENCE.findall(note))
-    for line in ('This data is from Knowledge "docs"', "append the library footer verbatim",
+    for line in (_footer(lang), "append the library footer verbatim",
                  "not the user's personal facts"):
         assert line in outside and line not in inside
 

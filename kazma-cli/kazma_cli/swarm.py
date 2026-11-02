@@ -19,7 +19,9 @@ from rich.table import Table
 from kazma_cli.gateway import (
     DEFAULT_TIMEOUT,
     ServerNotRunningError,
+    _GatewayRequestError,
     _request,
+    _request_failed,
     extract_port,
     resolve_base_url,
 )
@@ -791,17 +793,23 @@ def run(args: list[str]) -> None:
         print_help()
         sys.exit(1)
 
-    # Dispatch with the signature each handler expects.
-    if subcmd in {"dispatch", "broadcast", "consult", "pipeline", "fanout"}:
-        rc = asyncio.run(handler(base_url, positionals, flags))
-    elif subcmd in {"history", "metrics"}:
-        rc = asyncio.run(handler(base_url, flags))
-    elif subcmd in {"task", "approve", "reject"}:
-        rc = asyncio.run(handler(base_url, positionals))
-    elif subcmd == "circuit-breaker":
-        rc = asyncio.run(handler(base_url, positionals, bools))
-    else:
-        rc = asyncio.run(handler(base_url))
+    # Dispatch with the signature each handler expects. An error answer from
+    # the server (a refusal, a 4xx/5xx) is said as the server's reason, never
+    # a traceback: no handler caught it (2026-11, FA-236).
+    try:
+        if subcmd in {"dispatch", "broadcast", "consult", "pipeline", "fanout"}:
+            rc = asyncio.run(handler(base_url, positionals, flags))
+        elif subcmd in {"history", "metrics"}:
+            rc = asyncio.run(handler(base_url, flags))
+        elif subcmd in {"task", "approve", "reject"}:
+            rc = asyncio.run(handler(base_url, positionals))
+        elif subcmd == "circuit-breaker":
+            rc = asyncio.run(handler(base_url, positionals, bools))
+        else:
+            rc = asyncio.run(handler(base_url))
+    except _GatewayRequestError as exc:
+        _request_failed(exc)
+        rc = 1
 
     if rc:
         sys.exit(rc)

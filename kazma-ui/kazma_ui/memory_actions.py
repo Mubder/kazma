@@ -13,6 +13,11 @@ Every request that changes memory (``POST``/``PUT``/``PATCH``/``DELETE`` under
   422 (the request is wrong) or 500 (``safe_error``'s "code (ref: ...)").
   Most routes answered 200 for every failure, ``not_found`` included.
 
+A memory READ (``GET``) gets the same status rule, and no trail (2026-11,
+FA-275): a belief, entity or episode that does not exist answered 200
+``{"ok": false, "error": "not_found"}``. A read whose answer streams (an
+export) is passed on as it comes, never held.
+
 One recorder rather than a call in each of about thirty handlers: a new route
 under ``/api/memory`` is recorded the day it is added.
 ``tests/test_memory_actions.py`` holds every mutating memory route to it.
@@ -133,6 +138,35 @@ def _record(action: str, ids: list[str], status: int, headers: list[tuple[bytes,
         logger.warning("[memory] the audit row of %s was not written", action, exc_info=True)
 
 
+def _read_status(send: Callable[[Message], Awaitable[None]]) -> Callable[[Message], Awaitable[None]]:
+    """*send* with a read's ``ok: false`` answer given its real status.
+
+    Only an answer sent in one piece (a JSON reply) is judged; the first
+    piece of a streamed one is passed on with the rest, unheld.
+    """
+    held: dict[str, Any] = {}
+
+    async def judged(message: Message) -> None:
+        if message["type"] == "http.response.start" and not held.get("passing"):
+            held["start"] = message
+            return
+        if message["type"] == "http.response.body" and "start" in held:
+            start = held.pop("start")
+            if message.get("more_body"):
+                held["passing"] = True
+                await send(start)
+                await send(message)
+                return
+            body = message.get("body", b"")
+            status = _status_for(int(start["status"]), body)
+            await send({**start, "status": status})
+            await send(message)
+            return
+        await send(message)
+
+    return judged
+
+
 class MemoryActionRecorder:
     """ASGI middleware: records every memory mutation and gives its failure
     answer a real status (see the module docstring)."""
@@ -142,8 +176,13 @@ class MemoryActionRecorder:
 
     async def __call__(self, scope: Scope, receive: Callable[[], Awaitable[Message]],
                        send: Callable[[Message], Awaitable[None]]) -> None:
-        if (scope.get("type") != "http" or scope.get("method") not in _MUTATING
-                or not str(scope.get("path", "")).startswith(_PREFIX)):
+        if scope.get("type") != "http" or not str(scope.get("path", "")).startswith(_PREFIX):
+            await self.app(scope, receive, send)
+            return
+        if scope.get("method") == "GET":
+            await self.app(scope, receive, _read_status(send))
+            return
+        if scope.get("method") not in _MUTATING:
             await self.app(scope, receive, send)
             return
         held: dict[str, Any] = {}

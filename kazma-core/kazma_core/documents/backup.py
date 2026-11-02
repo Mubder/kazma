@@ -35,6 +35,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from kazma_core.atomic_files import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -251,9 +252,7 @@ def perform_document_backup(
             "jobs_backend": jobs_backend,
             "promoted_versions": sorted(promoted) if promoted is not None else None,
         }
-        (out / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        atomic_write_text(out / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
         final = out.with_name(name)
         out.rename(final)
         out = final
@@ -451,17 +450,26 @@ def verify_document_backup(
 
 
 def _prune_old(dest_dir: Path, *, retention: int) -> int:
-    """Retain verified recovery points; failed directories never displace them."""
+    """Retain verified recovery points; failed directories never displace them.
+
+    A folder that does not verify (an older build's format, a failed run) is
+    not counted against the retention, but one OLDER than the oldest
+    verified backup kept is removed with the rest (2026-11, FA-204): it can
+    be no better recovery point than the backups kept, and nothing ever
+    removed it. With no verified backup at all, nothing is removed.
+    """
     parent = dest_dir.resolve()
-    dirs = sorted(
-        (p for p in dest_dir.glob("document-store-*")
-         if p.is_dir() and p.resolve().parent == parent
-         and verify_document_backup(backup_dir=p)["ok"]),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    folders = [p for p in dest_dir.glob("document-store-*")
+               if p.is_dir() and p.resolve().parent == parent]
+    verified = {p for p in folders if verify_document_backup(backup_dir=p)["ok"]}
+    dirs = sorted(verified, key=lambda p: p.stat().st_mtime, reverse=True)
+    keep = dirs[:max(1, int(retention))]
+    stale_dirs = dirs[len(keep):]
+    if keep:
+        oldest_kept = min(p.stat().st_mtime for p in keep)
+        stale_dirs += [p for p in folders if p not in verified and p.stat().st_mtime < oldest_kept]
     deleted = 0
-    for stale in dirs[max(1, int(retention)):]:
+    for stale in stale_dirs:
         try:
             shutil.rmtree(stale)
             deleted += 1

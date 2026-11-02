@@ -65,7 +65,9 @@ def test_documents_bucket_429_at_low_limit(monkeypatch: pytest.MonkeyPatch) -> N
     assert first.status_code != 429  # allowed once
     second = client.post("/api/documents", headers=headers, content=b"x")
     assert second.status_code == 429
-    assert "documents" in second.json()["detail"]
+    # The Documents routes answer every refusal in one envelope (2026-11, FA-234).
+    body = second.json()
+    assert body["code"] == "rate_limited" and "documents" in body["error"]
     assert "Retry-After" in second.headers
 
 

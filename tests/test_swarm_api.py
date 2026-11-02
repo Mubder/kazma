@@ -195,13 +195,15 @@ class TestSwarmDispatch:
         assert response.status_code == 400
 
     def test_dispatch_marks_missing_workers(self):
-        """Workers not in registry appear in 'missing' list."""
+        """Workers not in registry appear in 'missing' list, on a refusal: a
+        dispatch that dispatched nothing is not a 200 (2026-11, FA-236)."""
         client = _build_client()
         payload = {"workers": ["ghost"], "task": "invisible work"}
         response = client.post("/api/swarm/dispatch", json=payload)
-        assert response.status_code == 200
+        assert response.status_code == 404
         data = response.json()
         assert "ghost" in data.get("missing", [])
+        assert data["code"] == "workers_not_registered"
 
 
 # ---------------------------------------------------------------------------

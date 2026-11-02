@@ -25,8 +25,27 @@ logger = logging.getLogger(__name__)
 __all__ = ["main"]
 
 
+def _print_utf8() -> None:
+    """Print UTF-8 whatever the console's code page (2026-11, FA-225).
+
+    Kazma's own text has em dashes, arrows and Arabic. On a Windows console
+    or pipe in cp1252, ``kazma doctor`` died on its first em dash with a
+    UnicodeEncodeError. A character the terminal cannot show is replaced,
+    never a crash.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            continue
+
+
 def main() -> None:
     """CLI entry point — supports wizard, hub, and docs commands."""
+    _print_utf8()
     # Run as a tenant, the way an HTTP request does.
     #
     # Vault secrets are tenant-scoped, and everything saved through Settings
@@ -76,6 +95,12 @@ def main() -> None:
     cmd = filtered[0]
     # Rebuild argv so subcommand handlers see a clean list
     sys.argv = [sys.argv[0]] + filtered
+
+    if cmd in ("version", "--version", "-V"):
+        from kazma_cli.banner import _get_version
+
+        print(f"kazma {_get_version()}")
+        return
 
     if cmd == "status":
         _run_status()
@@ -134,6 +159,7 @@ def main() -> None:
 
         print(f"Kazma CLI v{_get_version()}")
         print("Commands:")
+        print("  version    Print Kazma's version (also --version, -V)")
         print("  status     Show Kazma status")
         print("  doctor     Check provider/model resolution (which model, where, will it work)")
         print("  acquisition  Inspect cached crawler errors, usage and credits")

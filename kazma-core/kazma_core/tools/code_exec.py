@@ -33,7 +33,9 @@ __all__ = [
     "DEFAULT_DOCKER_IMAGE",
     "DEFAULT_TIMEOUT",
     "MAX_OUTPUT_CHARS",
+    "MAX_TIMEOUT",
     "MEMORY_LIMIT_MB",
+    "PYTHON_EXEC_DESCRIPTION",
     "docker_available",
     "jail_note_for_tool",
     "python_exec",
@@ -52,6 +54,9 @@ except ImportError:
 
 MAX_OUTPUT_CHARS = 4000
 DEFAULT_TIMEOUT = 30  # seconds
+#: The longest run a call may ask for (2026-11, FA-120: the timeout the model
+#: passed was used as it came; the tool call itself is cut at 120 s anyway).
+MAX_TIMEOUT = 120  # seconds
 MEMORY_LIMIT_MB = 512
 DEFAULT_DOCKER_IMAGE = "python:3.12-slim"
 
@@ -763,6 +768,19 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
         return await asyncio.to_thread(_run_docker_sync)
 
 
+#: The tool's description, built from this module's limits so the two cannot
+#: drift (2026-11, FA-120: it promised a 30 s cap the code did not apply, an
+#: "isolated mode (no site-packages)" the venv's packages contradict, and
+#: said nothing of the output cut at 4,000 characters).
+PYTHON_EXEC_DESCRIPTION = (
+    "Execute Python code in a sandboxed subprocess. Returns the exit code, stdout and stderr. "
+    f"timeout: default {DEFAULT_TIMEOUT} s, at most {MAX_TIMEOUT} s. Memory: {MEMORY_LIMIT_MB} MB. "
+    f"Output past {MAX_OUTPUT_CHARS:,} characters is cut and marked [truncated]. "
+    "The install's own Python packages are importable (no user site-packages); no network "
+    "in the container sandbox. Use for calculations, data processing, prototyping."
+)
+
+
 async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     """Execute Python code in a sandboxed environment.
 
@@ -771,11 +789,16 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
 
     Args:
         code:    Python source code to execute.
-        timeout: Maximum execution time in seconds (default 30).
+        timeout: Maximum execution time in seconds (default 30, at most
+            :data:`MAX_TIMEOUT`).
 
     Returns:
         Formatted output with exit code, stdout, and stderr.
     """
+    try:
+        timeout = max(1, min(int(timeout or DEFAULT_TIMEOUT), MAX_TIMEOUT))
+    except (TypeError, ValueError):
+        timeout = DEFAULT_TIMEOUT
     # Refusals before anything runs raise RefusedBeforeEffect: the registry
     # answers them as ordinary errors, never "effects unknown" (agent/tool_refusal).
     from kazma_core.agent.tool_refusal import RefusedBeforeEffect
@@ -852,6 +875,7 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
 
     finally:
         try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            # A folder walk and its deletes: off the loop (FA-139).
+            await asyncio.to_thread(shutil.rmtree, tmp_dir, ignore_errors=True)
         except Exception as exc:
             logger.debug("Temp dir cleanup failed: %s", exc)

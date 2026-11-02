@@ -178,6 +178,91 @@ def _embedding_key_env(value: Any) -> str:
     return name
 
 
+#: The languages Kazma's prompts and interface catalog are written in
+#: (``kazma_ui.i18n.SUPPORTED_LANGUAGES``, held equal by a test).
+AGENT_LANGUAGES = frozenset({"ar", "en"})
+
+
+def _agent_language(value: Any) -> str:
+    """``agent.language``: a language Kazma speaks (2026-11, FA-251: "xx" was
+    stored, Settings showed it, and the prompt fell back to English)."""
+    text = str(value or "").strip().lower()
+    if text not in AGENT_LANGUAGES:
+        raise SettingRejected(f"agent.language must be one of {sorted(AGENT_LANGUAGES)}")
+    return text
+
+
+def _max_iterations(value: Any) -> int:
+    """``agent.max_iterations``: the range the runtime clamps to (FA-251:
+    -7 and 999999 were stored, and the turn silently used 5 or 100)."""
+    from kazma_core.agent.long_task import _MAX_ITER, _MIN_ITER
+
+    number = _shipped_type_value("agent.max_iterations", value, int)
+    if not _MIN_ITER <= number <= _MAX_ITER:
+        raise SettingRejected(f"agent.max_iterations must be {_MIN_ITER}-{_MAX_ITER}")
+    return number
+
+
+def shipped_values() -> dict[str, Any]:
+    """Every setting ``kazma.yaml`` ships, dotted key -> value (blocking: a
+    parse cached by the files' version)."""
+    from kazma_core.config_loader import install_yaml_section
+    from kazma_core.config_store import shipped_settings
+
+    return {key: value for key, value, _category in shipped_settings(install_yaml_section())}
+
+
+_TRUE = frozenset({"true", "1", "yes", "on"})
+_FALSE = frozenset({"false", "0", "no", "off"})
+
+
+def _shipped_type_value(key: str, value: Any, kind: type) -> Any:
+    """*value* as the type ``kazma.yaml`` ships *key* with: a switch, a whole
+    number or a number, from the value itself or its text (a form sends
+    "30"). Anything else is refused (FA-251: a key with no rule took any
+    value on every path)."""
+    if kind is bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        text = str(value).strip().lower() if isinstance(value, str) else None
+        if text in _TRUE:
+            return True
+        if text in _FALSE:
+            return False
+        raise SettingRejected(f"{key} is a switch: true or false")
+    if isinstance(value, bool):
+        raise SettingRejected(f"{key} is a number, not a switch")
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip()):
+        try:
+            number = float(str(value).strip()) if isinstance(value, str) else float(value)
+        except ValueError:
+            raise SettingRejected(f"{key} is a number") from None
+        if kind is int:
+            if not number.is_integer():
+                raise SettingRejected(f"{key} is a whole number")
+            return int(number)
+        return number
+    raise SettingRejected(f"{key} is a number")
+
+
+def _shipped_type_rule(name: str) -> Callable[[Any], Any] | None:
+    """The type rule of a number or switch ``kazma.yaml`` ships, or None."""
+    shipped = shipped_values().get(name)
+    kind = (bool if isinstance(shipped, bool) else int if isinstance(shipped, int)
+            else float if isinstance(shipped, float) else None)
+    if kind is None:
+        return None
+
+    def check(value: Any) -> Any:
+        if value is None or value == "":
+            return value  # unset: the runtime's default
+        return _shipped_type_value(name, value, kind)
+
+    return check
+
+
 @functools.cache
 def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     """key -> (normalize, category the key is stored under or None).
@@ -208,6 +293,8 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         TURN_TIMEOUT_KEY: (_turn_timeout, "agent"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
         RUNBOOKS_KEY: (validate_runbooks, None),
+        "agent.language": (_agent_language, "agent"),
+        "agent.max_iterations": (_max_iterations, "agent"),
     }
 
 
@@ -249,6 +336,7 @@ def validate_setting(key: str, value: Any) -> tuple[Any, str | None]:
         raise SettingRejected(str(exc)) from None
     rule = _rules().get(name)
     if rule is None:
-        return value, None
+        typed = _shipped_type_rule(name)
+        return (value if typed is None else typed(value)), None
     normalize, category = rule
     return normalize(value), category

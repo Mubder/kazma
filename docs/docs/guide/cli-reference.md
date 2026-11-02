@@ -31,6 +31,7 @@ kazma
 ├── (no args)              # banner + status + help hint
 ├── status                 # probe running server, print versions
 ├── doctor                 # which model and provider will be used, and will it work
+├── version | --version | -V  # print Kazma's version
 ├── acquisition status     # cached crawler errors, usage and credit evidence
 ├── serve [port]           # launch Web UI (uvicorn)
 ├── ask [options] <prompt> # in-process agent (no uvicorn)
@@ -206,7 +207,16 @@ connection.
 kazma doctor
 ```
 
-### 2.10 `kazma agent-skills` {#kazma-agent-skills}
+### 2.10 `kazma version`
+
+Prints `kazma <version>` and exits 0; `kazma --version` and `kazma -V` do
+the same. It reads the installed version only: no settings, no server.
+
+```bash
+kazma --version
+```
+
+### 2.11 `kazma agent-skills` {#kazma-agent-skills}
 
 Agent Skills (`SKILL.md`, the agentskills.io format) installed in the skill
 folders Kazma reads. A skill is checked when the model activates it, and every

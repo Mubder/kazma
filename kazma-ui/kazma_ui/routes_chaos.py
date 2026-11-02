@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +117,9 @@ def register_chaos_routes(app: FastAPI) -> None:
     async def create_custom_injection(request: Request) -> dict[str, Any]:
         """Create a custom fault injection."""
         try:
-            body = await request.json()
-        except Exception as e:
-            raise HTTPException(status_code=400, detail="Invalid JSON") from e
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
 
         required = ["failure_type", "target", "probability", "duration_seconds"]
         for field in required:

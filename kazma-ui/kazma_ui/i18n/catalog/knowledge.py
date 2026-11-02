@@ -253,8 +253,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Auto-inject OFF: the agent must call knowledge_search explicitly.",
     },
     "knowledge.auto_on_msg": {
-        "ar": "الحقن التلقائي مفعّل — ستُدمج مقاطع هذه المكتبة في كل موجّه.",
-        "en": "Auto-inject ON — chunks from this library will be folded into every prompt.",
+        "ar": "الحقن التلقائي مفعّل — يُضاف نص هذه المكتبة إلى الموجّه حين يطابق السؤال.",
+        "en": "Auto-inject ON — text from this library is added to a prompt when it matches the question.",
     },
     "knowledge.auto_off_msg": {
         "ar": "الحقن التلقائي معطّل.",

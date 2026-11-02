@@ -33,21 +33,34 @@ V2 memory lives in `kazma_core.memory`).
 - `get_client(model)` auto-corrects provider/model mismatches at runtime
 - `set_active_model()` switches BOTH model AND provider via `find_provider_for_model()`
 - Never change one without the other or the LLM call goes to the wrong API endpoint
-- **Provider dispatch has FOUR branches** in `get_client()` / `get_model()` /
-  `get_client_by_provider()`: `google`→`GeminiProvider`, `anthropic`→
+- **The client class comes from the provider's declared `api_style`**
+  (`kazma_core/provider_adapters.py`, `build_client`, the one constructor
+  every `ModelRegistry` path calls): `google`→`GeminiProvider`, `anthropic`→
   `AnthropicProvider`, `azure`→`AzureProvider`, `bedrock`→`BedrockProvider`,
-  else the generic `LLMProvider`. The generic `LLMProvider` always sends
+  else (`openai`) the generic `LLMProvider`; a provider's style is in
+  `providers.capabilities`. The generic `LLMProvider` always sends
   `Authorization: Bearer` to `/chat/completions` — it CANNOT reach
   Anthropic-native (`/messages`), Azure (`api-key` header + `api-version`),
-  or Bedrock (SigV4). Adding a non-Bearer provider means a new class +
-  a branch in all three sites (mirror the Google case), not just a preset.
+  or Bedrock (SigV4). Adding a non-Bearer provider means a new class + a row
+  in `provider_adapters._ADAPTERS` + its `api_style` in the capability table,
+  not just a preset.
 - A provider with no usable key is replaced by one that has a key in
   `get_client()` — and that is announced, never silent; provider keys are
   install-scoped so it does not happen for a key that is there. Both in §38.
 
-### 2. Platform Isolation (`kazma-gateway/kazma_gateway/agent_handler.py`)
+### 2. Platform Isolation (`kazma-gateway/kazma_gateway/agent_handler/`)
 - The LangGraph state NEVER contains `chat_id`, `user_id`, or `message_id`
+  as keys of its own.
 - These live in `SessionStore` and are restored via `_build_target_id()` on reply
+- **One declared exception, the `_gateway` routing block** (2026-11, FA-151):
+  `agent_handler/store.py` and `send_message.web_gateway_block` write
+  `thread_id`, `display_name`, `platform` and `delivery_target` -- the
+  platform-prefixed address a reminder is booked to (§16B) and an expired
+  approval is answered at (§30E2) -- and nothing else. A fork's block keeps
+  none of the three platform ids even from an older checkpoint
+  (`time_travel._SNAPSHOT_PLATFORM_IDS`). Gate:
+  `tests/test_gateway_routing_block.py` (a planted `chat_id` key as the
+  negative control).
 - Breaking this leaks platform IDs into the graph and corrupts sessions
 - `SQLiteSessionStore._ensure_db` publishes its connection only after pragmas,
   table creation and migrations finish. Publishing before those awaits lets
@@ -721,7 +734,11 @@ workspace. Three new modules; understanding their interaction is essential.
 - Used by: all `file_*` tools, IdeService, workspace UI API, env_context.
 - **Resolution precedence:** per-task `workspace_scope` ContextVar →
   **active WorkspaceStore row** → `configure_workspace()` pin →
-  `KAZMA_WORKSPACE` env → `{data_dir}/workspace` default sandbox.
+  `KAZMA_WORKSPACE` env → `{data_dir}/workspace` default sandbox. A fresh
+  store seeds its first active row from `KAZMA_WORKSPACE`, else the working
+  folder when it is a project, else the default sandbox: the row then
+  outranks the variable, so a guess seeded over it kept the guess (2026-11,
+  §56).
 - **Binding bus:** `WorkspaceStore.set_active_workspace` →
   `notify_root_changed(root)` → pin tools + MCP rebind for
   `workspace_bound` servers (`${KAZMA_ACTIVE_WORKSPACE}` in command).
@@ -943,8 +960,9 @@ than `_MAX_DELTA_CHARS` (refused, never cut). The cap keeps whole lessons
   AND at apply time (`_auto_apply`/`apply_agent_mutation`) — defense-in-depth.
   Never inject a delta via the old `"Apply these refinements to your behaviour:"`
   framing; always use `format_untrusted_block(evo, source="self_improvement")`.
-- The 3 supervisor injection sites (`agent_runner.py`, `sse_chat/` package,
-  gateway `graph.py`) all use the fence. Keep them in sync if you add a 4th.
+- The 4 supervisor injection sites (`agent_runner.py`, `sse_chat/` package,
+  gateway `graph.py`, `voice_turn.py`) and the swarm worker (`worker.py`) all
+  use the fence. Keep them in sync if you add another.
 - Kill-switch `KAZMA_SELF_IMPROVEMENT=0` is checked live (not just at init) on
   both the chat/supervisor path and the swarm worker path.
 
@@ -961,7 +979,7 @@ and approve test runs on the real graph and saver of `tests/_tt_graph.py`
 - `SnapshotRecorder` is created once per agent (`agent_runner.py` via
   `create_recorder(config=...)`) and passed to `build_supervisor_graph(...,
   snapshot_recorder=...)` at all 3 call sites: the run graph
-  (`_ensure_graph`), the streaming graph (`_ensure_streaming_graph`), and
+  (`_ensure_graph`), the streaming graph (`get_streaming_graph`), and
   child graphs (`build_child_graph`); also the app.py post-startup recompile
   and `kazma_core/cli/ask.py`. If any site omits the recorder, that path stops
   capturing snapshots silently. The server registers it as the process's
@@ -1147,8 +1165,9 @@ authorize that route. HTTP clients always disable ambient environment proxies.
 - **Scraping-scoped ONLY.** The proxy is never applied to LLM API calls — those
   use the separate `http_pool.py`. Never wire `get_scraping_client` into the LLM
   provider path, or provider API keys would route through a third party.
-- **Adding a provider** (BrightData/Oxylabs) = one class under `proxy/` + one
-  line in `registry.py::_PROVIDERS` + one Settings dropdown option. The scraper
+- **Adding a provider** (anyip.io, BrightData and Oxylabs are registered) =
+  one class under `proxy/` + one line in `registry.py::_PROVIDERS` + one
+  Settings dropdown option. The scraper
   talks to the `ProxyProvider` interface, not to any provider directly. Don't
   hard-code a provider into `read_url.py`.
 - **`proxy.password` auto-vault-encrypts** via the existing
@@ -1313,17 +1332,19 @@ scheduler needs a case there.
 - **24h reconsolidation:** `global_reconsolidation` (dedupe + re-embed of
   beliefs, subject-hash partitioned).
 - **15-min commitment GC:** TTL expiry + tiered retention (§20). Every
-  sweep on this cadence is one entry of `_MAINTENANCE_SWEEPS` (commitment GC,
-  artifact GC, HITL-gate TTL, ended YOLO windows -- `safety/yolo.py`; a
-  pre-TTL flag with no end time counts as ended, it had kept one live chat's
-  approvals off since July --, memory task-queue purge, swarm task retention —
-  `swarm.task_retention_days`, default 30, 0 keeps all — checkpoint
-  retention, §41, the supervisor
-  watch, §39, memory vector repair, knowledge vector repair (§24F), memory
-  recovery, retired knowledge promotions and memory turn reconcile, §15F,
-  memory mirror sync, §15K,
-  weekly topic summaries, §15J, entity count repair, §15L),
-  run by ONE isolated
+  sweep on this cadence is one entry of `_MAINTENANCE_SWEEPS`, in this order:
+  commitment GC, artifact GC, HITL-gate TTL, the retention of decided gates,
+  tool receipts, finished task ledgers, model calls (§56), ended YOLO
+  windows -- `safety/yolo.py`; a pre-TTL flag with no end time counts as
+  ended, it had kept one live chat's approvals off since July --, memory
+  task-queue purge, swarm task retention — `swarm.task_retention_days`,
+  default 30, 0 keeps all —, pipeline log retention, swarm approval rows,
+  run incident retention (§52), checkpoint retention (§41), the supervisor
+  watch (§39), the document worker broker (§19 E1), malware signatures
+  (§19 E), forget convergence (§15I), memory vector repair, memory recovery,
+  retired knowledge promotions and memory turn reconcile (§15F), memory
+  mirror sync (§15K), weekly topic summaries (§15J), entity count repair
+  (§15L) and knowledge vector repair (§24F, last), run by ONE isolated
   runner so a failing sweep never stops the rest -- and is logged at WARNING
   (it was DEBUG: a sweep failing every pass is a feature that is off). A new periodic cleanup is a
   new entry there, never a new loop (`tests/test_swarm_task_retention.py`).
@@ -1561,7 +1582,7 @@ four injected were noise.
   `display_text` ("User: ... / Assistant: ..." when both sides exist; one
   side is shown as it is -- a swarm result must not read as something the
   user said) is what the injected block and the tool/probe outputs show
-  (`metadata["display"]`, read through `recall._shown`); `match_text`
+  (`metadata["display"]`, read through `recall.shown_text`); `match_text`
   (summary, else question, else answer) stays what recall compares,
   de-duplicates and seeds the graph walk by -- used for those, the display
   changed which memories were kept and precision fell; `embed_text` keeps
@@ -2438,16 +2459,17 @@ Gates: `tests/test_scheduled_api.py` (real scheduler and store),
   `cron.max_jobs_per_*`); a prompt of 8,000 characters and a timing of 100; a
   `scheduled` rate bucket (30 a minute); a task turn's budget
   (`cron.task_budget_seconds`).
-- **Throughput:** a pass starts every due job, and the semaphore holds all but
-  `max_concurrent`. 50 jobs due among 1,000 fire in one pass
+- **Throughput:** a pass reads up to `max(50, max_concurrent * 10)` due
+  jobs and starts them all; the semaphore holds all but `max_concurrent`.
+  50 jobs due among 1,000 fire in one pass
   (`tests/test_cron_load.py`; the old four-a-pass rule is the negative
   control).
 - **Off the loop:** the zone, the tenant rule, the address and the graph build
   are resolved in a thread (static gate area `scheduled`,
   `tests/test_scheduled_off_loop.py`).
 - **Readiness and metrics:** readiness reads the poll heartbeat
-  (`CronScheduler.liveness()`), degraded within two intervals of a dead or
-  stuck loop. /metrics carries fires, missed jobs, lateness p50/p95, the
+  (`CronScheduler.liveness()`), degraded once the heartbeat is older than
+  two poll intervals plus 30 s. /metrics carries fires, missed jobs, lateness p50/p95, the
   outbox and the heartbeat. The digest counts outcomes from the
   `[cron] outcome` line (`tests/test_cron_liveness.py`).
 - **Dates and origin:** dates on the page and in X Studio go through
@@ -2529,7 +2551,7 @@ ops alerts; empty = every configured platform). `bus_send_targets()`
 filters a `FanOutBusAdapter`; `telegram-group` is not a bus adapter and
 uses the ops-alerts group route. Do NOT construct new adapters or
 introduce a second recipient config. `NullBusAdapter` (no platform
-configured, or under pytest via `_skip_real_adapters`) silently drops
+configured, or under pytest, where `app.py` wires no platform sender) silently drops
 the message; the feature self-disables.
 The bus adapters are standalone `httpx` clients independent of
 `gateway.start()`/`stop()`, so notifications work during early startup
@@ -2865,7 +2887,8 @@ the negative-control witness).
 `documents.quotas.*`, `documents.render.*` and `documents.storage_root`, plus
 rollout `documents.enabled` / `shadow` / `default_authoritative`. Prefer
 `get_document_config()` live reads. Legacy aliases exist for a few keys only
-(`documents.intake_max_bytes` / `intake_max_files`, `documents.worker.*`,
+(`documents.intake_max_bytes` / `intake_max_files`,
+`documents.worker.lease_seconds` / `max_retries`,
 `documents.shadow_mode`, `documents.authoritative_by_default`,
 `documents.limits.max_uncompressed_bytes`) — do not invent
 `documents.max_pages` style flat keys without wiring aliases. A default
@@ -3097,7 +3120,11 @@ just generated; the old reader as its control), `tests/test_document_pdf_policy.
 Jobs: `jobs_pg.py` when Postgres. Metadata: `repository_pg.py` when the
 metadata backend resolves to Postgres (D) and the pool is up. GC is
 backend-agnostic: `retention._mark` dispatches to `repository.gc_mark`, which
-both backends implement, so mark/sweep runs on Postgres metadata. The old
+both backends implement, so mark/sweep runs on Postgres metadata -- in fact
+only since 2026-11 (FA-205): the Postgres mark read its rows by position and
+failed every pass (`repository_pg._cell` reads by name), and an install whose
+catalog is SQLite sweeps the orphan rows a Postgres catalog left
+(`retention._sweep_idle_catalog`). The old
 `gc_postgres_metadata_sql_port_pending` skip is gone and
 `tests/test_leftovers_except_g.py` asserts it stays gone. Audit works on both
 backends.
@@ -3617,7 +3644,7 @@ Latin letter under `_KASHIDA_EM` (0.15 em) is a misnamed kashida ("G"); Arabic
 letters of no width stay (a ligature's parts). `arabic.visual_order` drops
 isolates (python-bidi asserts on them; the whole page's reading failed). The
 PDF parser finds the tables first and reads a single-column page's text
-around them (`pdf_layout.segments_around_tables`): each table once, where it
+around them (`pdf_layout._segments_around_tables`): each table once, where it
 stands; a table's cells were also page text. Gates:
 `tests/test_document_pdf_text_map_faults.py`, `tests/test_document_pdf_rtl.py`.
 **Reading Kazma's own bilingual PDF back** (2026-10-20: the agent read a
@@ -3785,8 +3812,8 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   header; only the kill-switch/import-degradation paths fail open.)
 - **Conservative auto-store**, **No late approve**, **GC cadence** — as before.
 
-**D. Components (`kazma_core/safety/commitment/`).**
-- `side_effects.py` — the single SoT registry: tool → `ToolEffectProfile`.
+**D. Components (`kazma_core/safety/commitment/`, and `kazma_core/safety/side_effects.py`).**
+- `safety/side_effects.py` — the single SoT registry: tool → `ToolEffectProfile`.
   Parity-tested. Unregistered mutators fail-closed (tokenized). MCP tools
   (`mcp__*`) route through `classify_mcp_tool_effect`.
 - `authorize.py` — `authorize_effect` (the policy gate) + `EffectDecision` +
@@ -4070,7 +4097,7 @@ Popen fallback — mirror that.
 
 **Known-correct sites (keep them):**
 - `system/installer.py`, `system/runtime_manager.py`, `telemetry.py`,
-  `models/discovery.py`, `agent/tool_registry.py:shell_exec` — all use
+  `models/discovery.py`, `agent/tool_builtins/system.py:shell_exec` — all use
   `to_thread` + `subprocess`.
 - **Playwright**: the browser tools (`kazma_skills/native/browser_automation`)
   run on the **sync API inside `to_thread`**; the heavier crawl/fetch paths
@@ -4588,16 +4615,21 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   DOES route through `get_scraping_client_sync` (SSRF-per-redirect kept).
 
 **C. CSRF + rate limiting (`kazma_ui`).**
-- `csrf.py` middleware: non-GET `/api/*` with a mismatched Origin/Referer
-  host → 403. `Authorization`-header requests and origin-less clients
-  (curl/CLI/webhooks) are exempt; `X-Forwarded-Host` honored for proxies.
-  **Use `request.url.hostname` — Starlette's URL has no `.host`** (the
+- `csrf.py` middleware: a non-GET `/api/*` whose Origin (else Referer) is
+  not the origin the request was served on or one of
+  `browser_origins.configured_browser_origins()` (`KAZMA_PUBLIC_URL`,
+  `KAZMA_CORS_ORIGINS`) → 403; whole origins are compared (scheme, host,
+  port) and forwarded headers never add to the trusted set (§45).
+  `Authorization`-header requests and origin-less clients
+  (curl/CLI/webhooks) are exempt. **Starlette's URL has no `.host`** (the
   2026-08-14 every-browser-POST-500 crash). Tests must build REAL ASGI-scope
   Requests (`tests/test_csrf.py`) — MagicMock auto-attributes and hides
   exactly that bug class.
-- `rate_limit.py`: per-principal sliding window (cookie > Authorization > IP)
-  on chat stream / voice / research sessions / swarm dispatch (the system
-  flush route it also covered was removed 2026-09-30, AUD-015).
+- `rate_limit.py`: per-principal sliding window (cookie > Authorization > IP),
+  one bucket per `rate_limit("<bucket>", n)` dependency: chat, chat uploads,
+  voice, research, swarm dispatch, approvals, scheduled jobs, runs,
+  documents, IDE exec, skill installs, backups and admin operations (the
+  system flush route it also covered was removed 2026-09-30, AUD-015).
   Active ONLY when auth is enabled (never demo mode); live ConfigStore
   `api.rate_limit.<bucket>_per_minute`; env `KAZMA_RATE_LIMIT_ENABLED=0`.
 
@@ -4663,8 +4695,9 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   separate CI job: smoke (`tests/e2e/test_smoke.py`, polls `/health/live`)
   plus a named GATE step for HITL view-model incidents 2 and 3
   (`tests/e2e/test_hitl_view_model.py`). Remaining `tests/e2e` files run in
-  the same job. Incidents 1 and 4 stay unclaimed (no app-graph pause
-  harness). Torch-bearing `rag` extra is still too heavy for CI.
+  the same job. Incidents 1 and 4 are claimed by
+  `tests/e2e/test_unified_turn_browser.py` in the `unified-turn-lifecycle`
+  job (§31E). Torch-bearing `rag` extra is still too heavy for CI.
 
 **F. Knowledge Library meaning search** (`memory/vector_store_global.py`,
 `stores/knowledge_index.py`). Off from 2026-07-31 to 2026-09-26: the client
@@ -5098,8 +5131,11 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   Behind a same-host nginx/Caddy, `request.client.host` is `127.0.0.1` for
   EVERY internet visitor, so all of them inherited it (finding F-01).
 - `KAZMA_TRUSTED_PROXIES` declares the proxy. `X-Forwarded-For` and
-  `X-Forwarded-Proto` are honoured from those addresses ONLY; peer trust
-  switches off entirely when a proxy is declared. Same rule in
+  `X-Forwarded-Proto` are honoured from those addresses ONLY. With a proxy
+  declared, a request that arrives THROUGH it never gets peer trust
+  (`auth._peer_trust_allowed`); a peer that is not the proxy (a connection
+  that bypassed it) keeps it, and `KAZMA_LOOPBACK_AUTOLOGIN=1` is the
+  explicit opt-in that keeps it for all. Same rule in
   `websocket_is_authenticated()` — its Origin guard passes when the header
   is absent, so a curl client used to get the agent.
 - Anything keying state per client (rate limit, login throttle, audit log)
@@ -5606,7 +5642,8 @@ inferred Approved stamp. That is not a second decision author.
 The registry owns the DECISION (was this gate answered, by whom); the
 LangGraph checkpoint owns EXECUTION (is the graph actually paused). Readers
 consult the registry (`hitl_thread_status`, `close_turn`,
-`/api/pending-approvals`, chat.js `_serverGates`). Paused + no covering
+`/api/pending-approvals`, chat.js `_serverGateViews` while
+`_serverGatesAuth`). Paused + no covering
 row is an **unregistered pending gate**: backfill from the snapshot and
 keep the turn open — never treat absence as "no question". Auto-deny
 uses the registry for *which* is pending and the checkpoint for *how*
@@ -5847,8 +5884,9 @@ keep both in sync):
    (`shared_approvals`): the first human Approve or Deny decides, every card
    shows it, timeout/cancel are their own outcomes. Must not retarget web `claim_gate`.
 
-Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`,
-`_hitlAlreadyClaimed`, `_serverGates`), `turn_document.js`,
+Protected files: `chat.js` (`_paintApprovalGroup`, `_paintHitlSlotCard`,
+`renderTurn`, `_hitlAlreadyClaimed`, `_serverGateViews`, `_serverGatesAuth`),
+`turn_document.js`,
 `turn_runtime.py` (`close_turn`), `hitl_gates.py`, `hitl_status.py`.
 
 
@@ -5881,7 +5919,7 @@ wrote the aborted 2,000-word history (live 2026-10-20). Gate:
 hoist; the note alone as the negative control).
 
 **B. The client projects; it does not author.** `chat.js` paints from the
-TurnDocument / `_serverGates`. Token deltas APPEND; only `turn_complete`
+TurnDocument / `_serverGateViews`. Token deltas APPEND; only `turn_complete`
 has replace semantics (§29F duplicated-prefix invariant). Do not restore
 `tokenAccum` dual-paint (T-4).
 
@@ -6297,10 +6335,12 @@ Kill-switch `KAZMA_OPS_ALERTS=0` (does not mute lifecycle). Mute theorem:
 
 Guard `probe()` reads JSON 503 `checks` and names the failing
 dependency (P0). Same-detail restart pages collapse on a cooldown; a
-recovery card fires once after an unhealthy kill (P1). Remaining backup
-success-summary / `native_pg_backup` ops wiring is still deferred:
-`docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md`. Do not invent a fourth
-notifier, mix ops pages into HITL cards, or page every backup success.
+recovery card fires once after an unhealthy kill (P1). A failed
+`native_pg_backup` pages (`backup.pg_dump`, with its reason) and so does a
+failed offsite copy of it (`backup.pg_offsite`); a success is counted by the
+weekly report, never paged (`docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md`).
+Do not invent a fourth notifier, mix ops pages into HITL cards, or page every
+backup success.
 
 ### 34. Calendar / Gmail OAuth — vault is SoT, no silent sandbox
 
@@ -6547,7 +6587,7 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   sync (four per turn, chat-store writes), the document tools'
   `_resolve_input` (8), `x_test`'s status payload.
 - **On the memory path the inference follows imports** (2026-10-13, Memory
-  audit M34): `test_the_memory_path_reaches_no_helper_through_another_module`
+  audit M34): `test_an_area_reaches_no_helper_through_another_module`
   resolves calls through each module's own `from kazma_... import` bindings,
   public functions included, to a fixed point (`_qualified_stall_helpers`),
   and holds the memory modules to it. Undo resolved its tenant on the loop
@@ -6834,7 +6874,7 @@ Read the named test before changing the code it guards.
   `to_thread` around that work where it must stay on the loop. Among them:
   the backup archive and delete (a whole backup zipped or removed on the
   loop), the security hardening report (~50 s scanning the install, `.venv`
-  included -- now one pruning walk, `hardening._project_files`, ~5 s, in a
+  included -- now one pruning walk, `project_files.iter_project_files`, ~5 s, in a
   worker thread), snapshot maintenance (a `VACUUM`), the research, IDE and
   LSP routes, the email status and settings saves, the Agents and Swarm
   pages' polls, every page render, and the gateway's workspace routes.
@@ -7497,8 +7537,8 @@ and the sibling suites):**
   sat in the chat store's WebSocket send path, which nothing called since
   turns moved to SSE (2026-08-25), so no browser subscribed until 2026-09-30
   (`tests/js/test_push_arming.js`, the old modules as its control). The
-  `turn.timed_out` alert moved from the socket to `agent/turn.py`, beside the
-  wall-clock budget it reports.
+  `turn.timed_out` alert moved from the socket to `agent/turn_budget.py`,
+  beside the wall-clock budget it reports.
 - **A read through a module alias names something the module defines**
   (`tests/test_module_attribute_refs.py`, AUD-027): `KazmaAgent.sync_active_model`
   cleared `graph_builder._failover_clients` inside `try/except: pass` after the
@@ -8162,7 +8202,7 @@ findings. Each fix has a gate that fails on the old code.
   control; a real Postgres stop with `KAZMA_TEST_PG_OUTAGE_CONTAINER`).
 - **A crawl a reload cut off resumes** (FA-263): a crawl that ends
   `interrupted` while Kazma shuts down says `interrupted_by: process_ended`
-  (`crawl_jobs.Job.finish`, `_process_is_ending`), the mark
+  (`crawl_jobs._CrawlJob.finish`, `_process_is_ending`), the mark
   `resume_interrupted_crawls` acts on. Gate: `tests/test_crawl_auto_resume.py`.
 - **The documented restore restores** (FA-267/268/269/270). A restic restore
   is assembled into a data folder Kazma reads (`backup/restore.py`
@@ -8357,6 +8397,155 @@ has a gate that fails on the old code.
   `tests/test_product_knowledge_is_true.py`, `tests/test_native_skill_egress.py`,
   `tests/test_chat_link_previews_off.py`, `tests/test_logging_off_the_loop.py`,
   `tests/test_telegram_units.py`, `tests/e2e/test_first_token_latency.py`.
+
+### 56. The functional audit of 2026-11, Stage 3 (the Low findings)
+
+Plan `docs/plans/FUNCTIONAL_AUDIT_2026-11_REMEDIATION.md`, Stage 3. Each fix
+has a gate that fails on the old code.
+
+- **A result is said as it is** (FA-108/109/110/202/236). `persist_reply`
+  logs what the transcript store answered; orphan recovery counts a task the
+  store refused to write as not recorded; an agent that cannot take a new
+  provider key reports it as a model substitution (§38), not at DEBUG; a
+  document worker logs its store's outage once and its recovery once, not
+  every poll; a swarm dispatch whose workers are all unknown is 404
+  `workers_not_registered` with nothing recorded, and the CLI prints the
+  server's answer. Two metric families say what their names say:
+  `kazma_commitment_decisions_total` is counted when the gate decides (it
+  was a COUNT of a table the GC trims), `kazma_hitl_gates_total` is recorded
+  by the registry once per real transition, every mechanism (FA-257). Every
+  model call names its work: the ledger takes the thread from the caller's
+  context, research names `research:<job id>` (FA-260). A call refused before
+  it ran (a commitment deny, a refusal before its card) is a step of the turn:
+  a start and an end activity carrying the refusal, a `failed` row on the
+  page; the expected deny logs at INFO (FA-253). Gates:
+  `tests/test_results_said_as_they_are.py`,
+  `tests/test_metrics_say_what_they_name.py`,
+  `tests/test_model_calls_name_their_work.py`,
+  `tests/test_refused_call_is_a_step.py`, `tests/js/test_refused_tool_row.js`.
+- **What answers before sign-in says no more than it must.** The GitHub
+  OAuth result page escapes its message (FA-130); a failed readiness or deep
+  health check shows the exception's type, a code and a reference
+  (`health._check_failure`), the text in the log (FA-131); the Telegram
+  webhook warns about refused POSTs once per ten minutes, not per POST
+  (FA-132); `/api/auth/status` before sign-in answers `auth_enabled`,
+  `authenticated: false`, `mode` and `oidc`, never the proxy list (FA-219).
+  OIDC sign-in state is per attempt (`auth.oidc.pending`, ten minutes, 32 at
+  most, written by `atomic_update`), bound to a cookie on `/api/auth/oidc`,
+  compared with `hmac.compare_digest` and taken once; a RUNTIME key in
+  `settings_restore` (FA-133). Gates: `tests/test_open_answers_say_no_more.py`,
+  `tests/test_oidc_sign_in_state.py`.
+- **Request bodies and refusals.** `upload_limits.UploadSizeLimitMiddleware`
+  refuses a chat upload or a voice clip past its limit by its declared length
+  before reading, and a streamed one as it passes the limit (FA-134). The
+  Documents and Scheduled routes answer every refusal in one envelope,
+  `{"ok": false, "error", "code"}` (`kazma_ui/error_envelope.py`), FastAPI's
+  validation answer included, which no longer echoes the input (FA-234,
+  FA-241); a library that does not exist is 404 `library_not_found`. A JSON
+  body that does not parse is 400 `invalid_json` (`kazma_ui/json_body.py`;
+  the chat's session bind answered 503, FA-274). A memory GET that finds
+  nothing is 404 (`memory_actions` reads GET answers too, FA-275). The chat
+  session list refreshes from the database at most every 10 s, one refresh at
+  a time, the others reading the cache: 10 readers at once took 155 ms each,
+  now 0.9 ms; the sidebar groups and searches on the page, so no paging was
+  added (FA-278). Gates: `tests/test_upload_limits.py`,
+  `tests/test_document_error_envelope.py`, `tests/test_scheduled_api.py`,
+  `tests/test_json_body_reader.py`, `tests/test_memory_actions.py`,
+  `tests/test_session_list_concurrency.py`.
+- **Every store says how long it keeps what it holds** (FA-141).
+  `store_registry.RETENTION` has an entry for every store and family (a rule
+  and the sweep that runs it, or "kept:" and why); decided gates, completed
+  tool receipts and finished task ledgers go after 90 days, model calls after
+  365, the pipeline log by the swarm task retention -- each a maintenance
+  sweep (§15B) that removes decided rows only. `hitl_gates.db` is on the
+  erasure horizon. Gate: `tests/test_store_retention_declared.py`.
+- **Files and maps that only grew have a bound** (FA-142/143/144/145/203/
+  204/224). Stall dumps are pruned (200, 30 days); old-format document
+  backups older than the oldest verified one kept are pruned; a read-only
+  diagnostic writes nothing to the crawl journal; the guard rotates its own
+  log; manifests are written whole (`kazma_core/atomic_files.py`); the alert
+  throttle and the approval-card counter keep a bounded number of keys;
+  SQLite WAL files are capped (`SQLITE_JOURNAL_SIZE_LIMIT`) and `settings.db`
+  is compacted once after the Knowledge tables left it. A chat attachment is
+  stored once, named by its content hash (FA-146). The `file_read` cache is
+  per reader (a turn's thread, a swarm worker's scope), so one reader's read
+  never answers another's (FA-111). File I/O in async tools runs in a thread
+  (FA-139). A bare `*.db` a shell command names is the workspace's file
+  unless only the data dir holds it (FA-217). Gates:
+  `tests/test_files_and_maps_stay_bounded.py`,
+  `tests/test_attachments_stored_once.py`,
+  `tests/test_file_read_cache_per_reader.py`,
+  `tests/test_async_tools_file_io_off_the_loop.py`,
+  `tests/test_workspace_db_is_the_users.py`.
+- **Document GC runs where the catalog is** (FA-205). The Postgres mark read
+  its rows by position and failed, so GC on a Postgres catalog never removed
+  anything (`repository_pg._cell` reads by name). An install whose catalog is
+  SQLite also sweeps the orphan blob rows a Postgres catalog left
+  (`retention._sweep_idle_catalog`, same mark and grace). Gate:
+  `tests/test_document_idle_catalog_orphans.py`.
+- **Schedulers keep their time, and stop.** Chat-app rate limits follow the
+  setting live (`rate_feedback.follow_rate_limit_settings`, FA-127); macro
+  sleep and reconsolidation stamp their last run, so a reload does not run
+  them again (FA-149); `_distinct_tenants` runs in a thread (FA-150); the
+  daily digest is sent at `observability.daily_digest.time` (08:00, the
+  operator's zone), not 24 hours after the last boot (FA-208); every loop
+  sleep is `shutdown.sleep_or_shutdown`, so a stop ends it at once (FA-265).
+  `/abort` pauses an active `/long` task (`pause_long_task_for_abort`,
+  FA-148). Gates: `tests/test_rate_limits_follow_settings.py`,
+  `tests/test_scheduler_cadence.py`, `tests/test_abort_pauses_the_long_task.py`.
+- **Smaller truths.** The CLI prints UTF-8 and answers `--version` (FA-225);
+  a malware name with no dot is read (`malware._signature_from`, FA-231); an
+  IDE diff keeps its lines (FA-244); research reports the sources it acquired
+  (FA-240) and its rubric reads the report's content -- cited paragraphs,
+  sources used, citations that resolve, repetition, the topic (FA-235); a
+  Gmail listing uses one connection, 8 reads at once (FA-242; the Microsoft
+  and calendar readers were not N+1); each swarm template declares its tools,
+  so a worker's prompt holds its own (FA-239); every shipped setting has a
+  validation rule, a type rule from its shipped value at least, and a restore
+  refuses a key this build does not read (FA-251); every workflow action is
+  pinned by SHA (FA-209). Gates: `tests/test_cli_prints_utf8_and_version.py`,
+  `tests/test_malware_signature_name.py`, `kazma-core/tests/test_ide_service.py`,
+  `tests/test_research_counts_sources_acquired.py`,
+  `tests/test_research_rubric_reads_content.py`,
+  `tests/test_gmail_listing_one_connection.py`,
+  `tests/test_swarm_worker_prompt_bounded.py`,
+  `tests/test_every_shipped_setting_has_a_rule.py`,
+  `tests/test_actions_pinned_by_sha.py`.
+- **Secrets at rest.** The security report checks that the restic password
+  file is readable by its owner only (`check_secret_file_access`,
+  `security/file_access.readable_by_others`, FA-272: live it is readable by a
+  second local account; restricting it is the owner's). The offsite copy
+  leaves `.env` out, zip and rclone alike (`universal.OFFSITE_LEAVES_OUT`,
+  FA-215, the owner's decision). Gates: `tests/test_secret_file_access_check.py`,
+  `tests/test_offsite_copy_leaves_env_out.py`.
+- **What Kazma's words say is what the code does** (FA-119/120/121/122/123/
+  229). The cron zone hint names its order (`cron.timezone`, `KAZMA_TZ`,
+  UTC); the memory mirror, vault and Knowledge auto-inject hints say what
+  they do; `python_exec`'s description is built from its constants and its
+  timeout is clamped to 120 s; the system prompt's rules are in the shipped
+  `kazma.yaml` (installs on the old prompt follow, `RetiredDefault`), and the
+  rule to stop all tool calls on any tool error is gone; the Knowledge footer
+  is in the turn's language (`knowledge_index.knowledge_footer`) and a failed
+  search hands the model `safe_error`'s code. Gates:
+  `tests/test_hints_say_what_the_code_does.py`,
+  `tests/test_python_exec_description_is_true.py`,
+  `tests/test_prompt_rules_reach_the_model.py`,
+  `tests/test_knowledge_footer_language.py`.
+- **AGENTS.md names what exists** (FA-151/152/154). §2 states the `_gateway`
+  exception; the stale names, counts and paths of §1-§45 are corrected.
+  Every backticked code name here -- a dotted path, a name after its file
+  (`graph_tool_worker.py:tool_worker_node`), a page script's camelCase name,
+  a bare private name, a test -- must exist; what
+  only looks like code is declared with why. Gates:
+  `tests/test_agents_md_names.py` (planted stale names as the control),
+  `tests/test_gateway_routing_block.py`.
+- **A test never writes into the checkout** (found during this stage). A
+  fresh workspace store seeded its first active row from the working folder
+  even with `KAZMA_WORKSPACE` set, and that row outranks the variable (§10A):
+  under pytest the working folder is this repository, and a test's relative
+  `file_write` landed in it. The seed takes `KAZMA_WORKSPACE` first, and the
+  root conftest pins it to a temp folder. Gate:
+  `tests/test_install_data_shield.py` (no variable as the control).
 
 ## UI Conventions (Web)
 

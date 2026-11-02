@@ -18,6 +18,8 @@ from __future__ import annotations
 import asyncio
 import codecs
 import hashlib
+import threading
+from contextvars import ContextVar, Token
 from pathlib import Path
 
 # Shared workspace configuration (re-exported for convenience so callers
@@ -25,7 +27,7 @@ from pathlib import Path
 import kazma_core.tools.file_write as _fw
 from kazma_core.workspace.binding import resolve_tool_path
 
-__all__ = ["MAX_CHARS", "MAX_READ_BUDGET", "clear_read_cache", "file_read"]
+__all__ = ["MAX_CHARS", "MAX_READ_BUDGET", "clear_read_cache", "enter_read_scope", "file_read", "leave_read_scope"]
 
 # Re-export helpers so callers can ``from file_read import configure_workspace``
 configure_workspace = _fw.configure_workspace
@@ -148,9 +150,41 @@ def _friendly_error(exc: Exception, path: str) -> str:
 # redirect, an MCP filesystem server, a sibling swarm worker, or the user's
 # own editor. The stamp is a property of the bytes, so every writer is
 # covered including the ones that do not exist yet.
+#
+# Keyed by WHO read (2026-11, FA-111): the chat thread, or a swarm task's own
+# scope. The cache was one for the process, keyed by the file, so a second
+# chat reading a file the first had read got "[ALREADY READ THIS TURN]" and
+# the content as if it had seen it, and a turn's end -- or any swarm
+# dispatch -- emptied every chat's cache.
 _turn_read_cache: dict[tuple, tuple[tuple | None, str]] = {}
 _turn_read_cache_order: list[tuple] = []
 _READ_CACHE_MAX = 50
+_cache_lock = threading.Lock()
+#: A reader of its own (a swarm task), set by :func:`enter_read_scope`.
+_read_scope: ContextVar[str] = ContextVar("kazma_file_read_scope", default="")
+
+
+def _reader() -> str:
+    """Whose reads the cache holds: the scope set, else the chat thread."""
+    scope = _read_scope.get()
+    if scope:
+        return f"scope:{scope}"
+    from kazma_core.safety.hitl import get_current_thread_id
+
+    return f"thread:{get_current_thread_id() or ''}"
+
+
+def enter_read_scope(name: str) -> Token:
+    """Give the reads that follow a reader of their own (a swarm task)."""
+    return _read_scope.set(name)
+
+
+def leave_read_scope(token: Token) -> None:
+    """End a scope :func:`enter_read_scope` began, dropping its reads."""
+    try:
+        clear_read_cache()
+    finally:
+        _read_scope.reset(token)
 
 
 def _stat_stamp(p: Path) -> tuple | None:
@@ -233,7 +267,7 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         return refusal
 
     # ── Per-turn dedup: same path+offset+limit already read this turn ──
-    cache_key = (str(p), int(offset or 0), int(limit or 500))
+    cache_key = (_reader(), str(p), int(offset or 0), int(limit or 500))
     entry = _turn_read_cache.get(cache_key)
     cached: str | None = None
     if entry is not None:
@@ -244,9 +278,10 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
             # Changed underneath us (or vanished). Drop it and read fresh —
             # never serve "IDENTICAL to what you already received" about
             # bytes that are no longer there.
-            _turn_read_cache.pop(cache_key, None)
-            if cache_key in _turn_read_cache_order:
-                _turn_read_cache_order.remove(cache_key)
+            with _cache_lock:
+                _turn_read_cache.pop(cache_key, None)
+                if cache_key in _turn_read_cache_order:
+                    _turn_read_cache_order.remove(cache_key)
     if cached is not None:
         return (
             f"[ALREADY READ THIS TURN — file_read({path}, offset={offset}, "
@@ -378,25 +413,29 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         result = result[:MAX_CHARS] + f"\n[truncated — output exceeded {MAX_CHARS} chars]"
 
     # Store in per-turn dedup cache (LRU-bounded)
-    if len(_turn_read_cache) >= _READ_CACHE_MAX:
-        oldest = _turn_read_cache_order.pop(0)
-        _turn_read_cache.pop(oldest, None)
-    _turn_read_cache[cache_key] = (pre_read_stamp, result)
-    if cache_key not in _turn_read_cache_order:
-        _turn_read_cache_order.append(cache_key)
+    with _cache_lock:
+        if len(_turn_read_cache) >= _READ_CACHE_MAX and _turn_read_cache_order:
+            oldest = _turn_read_cache_order.pop(0)
+            _turn_read_cache.pop(oldest, None)
+        _turn_read_cache[cache_key] = (pre_read_stamp, result)
+        if cache_key not in _turn_read_cache_order:
+            _turn_read_cache_order.append(cache_key)
 
     return result
 
 
 def clear_read_cache() -> None:
-    """Clear the per-turn file-read dedup cache (canonical entry point).
+    """Drop the current reader's reads (canonical entry point).
 
-    Called on turn start/end (``graph_respond``) and at swarm worker
-    dispatch begin (``swarm/worker.py``) so "[ALREADY READ THIS TURN]"
-    content cached by a previous task/agent is never served to the next.
+    Called at a turn's end (``graph_respond``) for its chat, and when a
+    swarm task's scope ends (:func:`leave_read_scope`); never another chat's.
     """
-    _turn_read_cache.clear()
-    _turn_read_cache_order.clear()
+    reader = _reader()
+    with _cache_lock:
+        mine = [key for key in _turn_read_cache if key[0] == reader]
+        for key in mine:
+            _turn_read_cache.pop(key, None)
+        _turn_read_cache_order[:] = [key for key in _turn_read_cache_order if key[0] != reader]
 
 
 # Back-compat alias (existing importers use this name).
