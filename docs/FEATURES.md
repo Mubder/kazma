@@ -136,7 +136,7 @@ Every line below describes that setup.
 |---|---|---|
 | A supervisor that restarts on real failure, reloads gracefully and pages you over Telegram | Shipped | `scripts/service/kazma_guard.py` |
 | One status card per restart: how long Kazma was down and whether each chat app connected (start and stop messages are optional) | Shipped | Settings → Adapters & Routes → Server status messages |
-| Backups of everything every 6 hours, snapshotted locally and offsite (restic), checked daily, with a weekly restore rehearsal of the database | Shipped | [Disaster recovery](docs/ops/disaster-recovery.md) |
+| Backups of everything every 6 hours, snapshotted locally and offsite (restic), checked daily, with a weekly restore rehearsal of the database; a zip copy to a cloud provider that keeps only the newest N copies | Shipped | [Disaster recovery](docs/ops/disaster-recovery.md) |
 | Move an install to another machine or OS in one bundle | Shipped | `kazma migrate` |
 | Back up your settings to a file and restore them: you see what will change first, the keys you have are never replaced, a lost key comes back from the vault without typing it, and the restore can be undone | Shipped | Settings → System, [Configuration](docs/guide/configuration.md#settings-backup) |
 | Health checks that make a real round trip; alerts to Telegram, Discord or Slack; a daily digest and a weekly resilience report | Shipped | `/health/deep` |

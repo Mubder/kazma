@@ -1159,6 +1159,8 @@
                     this.offsiteS3Bucket = s.bucket || '';
                     this.offsiteS3Endpoint = s.endpoint || '';
                     this.offsiteS3Region = s.region || 'us-east-1';
+                    const keep = Number(this.offsiteConfig.keep);
+                    this.offsiteKeep = Number.isInteger(keep) && keep >= 0 ? keep : 7;
 
                     // OAuth round-trip: user just connected Google/MS from the
                     // backup card. Auto-select + save the provider, then toast.
@@ -1220,6 +1222,35 @@
             }
         },
 
+        // How many offsite copies Kazma keeps (backups.offsite.keep). Saved
+        // through the single-setting route, which validates it: it works on an
+        // install whose offsite copy goes through rclone, with no provider set.
+        async saveOffsiteKeep() {
+            const n = Number(this.offsiteKeep);
+            if (!Number.isInteger(n) || n < 0) {
+                showToast(_t('settings.offsite_keep_invalid', 'Offsite copies kept must be 0 (keep every copy) or more'), 'error');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ key: 'backups.offsite.keep', value: n, category: 'backups' }),
+                });
+                let data = {};
+                try { data = await resp.json(); } catch (e) { /* not JSON */ }
+                if (!resp.ok || data.status === 'error' || data.ok === false) {
+                    showToast(data.detail || data.error || _t('settings.save_failed', 'Save failed'), 'error');
+                } else if (n === 0) {
+                    showToast(_t('settings.offsite_keep_all_saved', 'Kazma keeps every offsite copy'), 'success');
+                } else {
+                    showToast(window.kazmaCount('settings.offsite_keep_saved', n), 'success');
+                }
+            } catch (e) {
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
+            }
+        },
+
         _offsiteCredsPayload() {
             return {
                 provider: this.offsiteProvider,
@@ -1254,9 +1285,14 @@
                     setTimeout(() => { this.offsiteSaved = false; }, 3000);
                     // Refresh statuses so the ✓ badge appears
                     await this.loadOffsiteConfig();
+                } else {
+                    let data = {};
+                    try { data = await resp.json(); } catch (e) { /* not JSON */ }
+                    showToast(data.detail || data.error || _t('settings.save_failed', 'Save failed'), 'error');
                 }
             } catch (e) {
                 console.error('saveOffsite failed:', e);
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
         },
 

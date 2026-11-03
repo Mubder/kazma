@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import threading
@@ -101,11 +102,14 @@ def _offsite_config() -> dict[str, Any]:
     """Live-read offsite sync config (mirrors pg_backup's reader; never raises).
 
     Keys: ``backups.offsite.provider`` (google_drive|onedrive|webdav|s3),
-    ``backups.offsite.enabled``, and legacy ``backups.offsite.rclone_remote``
+    ``backups.offsite.enabled``, legacy ``backups.offsite.rclone_remote``
     (kept for backward compatibility — if only rclone_remote is set, rclone
-    is used as before).
+    is used as before), and ``backups.offsite.keep`` (how many offsite copies
+    to keep, :func:`offsite_keep`).
     """
-    cfg: dict[str, Any] = {"enabled": False, "provider": "", "rclone_remote": ""}
+    cfg: dict[str, Any] = {
+        "enabled": False, "provider": "", "rclone_remote": "", "keep": DEFAULT_OFFSITE_KEEP,
+    }
     try:
         from kazma_core.config_store import get_config_store
 
@@ -118,9 +122,197 @@ def _offsite_config() -> dict[str, Any]:
             if enabled is not None
             else bool(cfg["provider"] or cfg["rclone_remote"])
         )
+        cfg["keep"] = offsite_keep(store.get(OFFSITE_KEEP_KEY))
     except Exception:
         logger.debug("[universal-backup] offsite config read failed", exc_info=True)
     return cfg
+
+
+#: The setting that says how many offsite copies Kazma keeps.
+OFFSITE_KEEP_KEY = "backups.offsite.keep"
+
+#: Offsite copies kept when ``backups.offsite.keep`` is not set: as many as
+#: the local copies (``backups.retention``, 7). At the 6-hour cadence that is
+#: the last day and three quarters; a longer history is a larger number, or
+#: restic's own retention.
+DEFAULT_OFFSITE_KEEP = 7
+
+
+def offsite_keep(value: Any) -> int:
+    """``backups.offsite.keep`` as a count: 0 keeps every copy.
+
+    A value that is not a whole number is the default, never "keep all" and
+    never "keep none": a typo must not start deleting, nor stop it.
+    """
+    if value is None or isinstance(value, bool):
+        return DEFAULT_OFFSITE_KEEP
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_OFFSITE_KEEP
+    return max(0, number)
+
+
+#: The offsite copies Kazma made, named by the second its backup started: a
+#: zip from a native provider, a folder from rclone (``lsf`` ends it in "/").
+#: Nothing else in the folder is ever deleted.
+_NATIVE_COPY = re.compile(r"^(\d+)\.zip$")
+_RCLONE_COPY = re.compile(r"^(\d+)/$")
+#: Deleting old copies stops after this long; what is left goes next run.
+_PRUNE_BUDGET_S = 120.0
+
+def _prune_errors() -> tuple[type[BaseException], ...]:
+    """What a prune step can raise and still leave the backup whole: a
+    provider's own errors (``cloud_sync.PROVIDER_ERRORS``) and, on the rclone
+    path, a process that could not be run. Anything else is a bug and raises.
+    """
+    import subprocess
+    from kazma_core.backup.cloud_sync import PROVIDER_ERRORS
+
+    return (*PROVIDER_ERRORS, subprocess.SubprocessError)
+
+#: One rclone listing or folder delete.
+_RCLONE_PRUNE_CALL_S = 60
+
+
+def _old_copies(names: list[str], pattern: re.Pattern[str], current: str, keep: int) -> list[str]:
+    """The copies past the newest ``keep``, oldest first; ``current`` is kept.
+
+    ``current`` is the copy this run just made. A listing without it is not
+    trusted (a stale or cut answer may be missing others too):
+    :class:`ValueError`, and nothing is deleted.
+    """
+    if current not in names:
+        raise ValueError(f"the listing does not show the copy just made ({current})")
+    older: list[tuple[int, str]] = []
+    for name in names:
+        match = pattern.match(name)
+        if match and name != current:
+            older.append((int(match.group(1)), name))
+    older.sort(reverse=True)
+    return [name for _, name in reversed(older[max(0, keep - 1):])]
+
+
+async def _prune_offsite(
+    list_names: Any, delete_one: Any, *, pattern: re.Pattern[str], current: str, keep: int,
+) -> dict[str, Any]:
+    """Delete the offsite copies past the newest ``keep`` (2026-11-03).
+
+    Kazma kept every copy, 4 a day at ~650 MB, until the owner deleted them by
+    hand. Runs only after the copy was made, on the path that made it; never
+    fails the backup. The answer joins the offsite result: ``pruned`` (names
+    deleted), ``prune_error`` (why one or all could not be), ``prune_left``
+    (copies the time budget left for the next run).
+    """
+    if keep <= 0:
+        return {}
+    try:
+        return await _prune_offsite_steps(list_names, delete_one, pattern, current, keep)
+    except _prune_errors() as exc:  # a prune must never fail the backup
+        logger.warning("[universal-backup] offsite prune failed: %s", exc)
+        return {"prune_error": f"offsite prune failed: {str(exc)[:200]}"}
+
+
+async def _prune_offsite_steps(
+    list_names: Any, delete_one: Any, pattern: re.Pattern[str], current: str, keep: int,
+) -> dict[str, Any]:
+    try:
+        listing = await list_names()
+    except _prune_errors() as exc:  # reported in the answer
+        listing = {"ok": False, "error": str(exc)}
+    if not isinstance(listing, dict):
+        listing = {"ok": False, "error": "not an answer"}
+    if not listing.get("ok"):
+        err = f"could not list the offsite copies: {str(listing.get('error') or 'no answer')[:200]}"
+        logger.warning("[universal-backup] %s; none deleted", err)
+        return {"prune_error": err}
+    try:
+        old = _old_copies([str(n) for n in listing.get("names") or []], pattern, current, keep)
+    except ValueError as exc:
+        logger.warning("[universal-backup] %s; no old offsite copy deleted", exc)
+        return {"prune_error": str(exc)}
+    pruned: list[str] = []
+    failed: list[str] = []
+    deadline = time.monotonic() + _PRUNE_BUDGET_S
+    for name in old:
+        if time.monotonic() >= deadline:
+            break
+        try:
+            answer = await delete_one(name)
+        except _prune_errors() as exc:  # reported in the answer
+            answer = {"ok": False, "error": str(exc)}
+        if isinstance(answer, dict) and answer.get("ok"):
+            pruned.append(name)
+        else:
+            why = answer.get("error") if isinstance(answer, dict) else None
+            failed.append(f"{name}: {str(why or 'refused')[:120]}")
+    out: dict[str, Any] = {"pruned": pruned}
+    if pruned:
+        logger.info(
+            "[universal-backup] deleted %d old offsite copies, keeping the newest %d: %s",
+            len(pruned), keep, ", ".join(pruned),
+        )
+    if failed:
+        out["prune_error"] = "; ".join(failed)[:300]
+        logger.warning("[universal-backup] could not delete old offsite copies: %s", out["prune_error"])
+    left = len(old) - len(pruned) - len(failed)
+    if left:
+        out["prune_left"] = left
+        logger.info("[universal-backup] %d old offsite copies left for the next run", left)
+    return out
+
+
+async def _cannot_list() -> dict[str, Any]:
+    return {"ok": False, "error": "this provider cannot list its copies"}
+
+
+async def _cannot_delete(name: str) -> dict[str, Any]:
+    return {"ok": False, "error": "this provider cannot delete a copy"}
+
+
+async def _rclone_list_copies(base_remote: str) -> dict[str, Any]:
+    """The folders in the rclone remote, as ``lsf --dirs-only`` names them."""
+    import asyncio
+    import subprocess
+
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["rclone", "lsf", "--dirs-only", "--", base_remote],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=_RCLONE_PRUNE_CALL_S,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"rclone lsf timed out after {_RCLONE_PRUNE_CALL_S}s"}
+    if proc.returncode != 0:
+        return {"ok": False, "error": f"rclone lsf: {(proc.stderr or '').strip()[:200]}"}
+    return {"ok": True, "names": [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]}
+
+
+async def _rclone_delete_copy(base_remote: str, name: str) -> dict[str, Any]:
+    """Remove one copy folder, for good (Drive's trash would keep its space)."""
+    import asyncio
+    import subprocess
+
+    match = _RCLONE_COPY.match(name)
+    if not match:
+        return {"ok": False, "error": f"not a Kazma backup copy: {name!r}"}
+    target = f"{base_remote.rstrip('/')}/{match.group(1)}"
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["rclone", "purge", "--drive-use-trash=false", "--", target],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=_RCLONE_PRUNE_CALL_S,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"rclone purge timed out after {_RCLONE_PRUNE_CALL_S}s"}
+    if proc.returncode == 0:
+        return {"ok": True}
+    err = (proc.stderr or "").strip()
+    if "directory not found" in err.lower():
+        return {"ok": True, "already_gone": True}
+    return {"ok": False, "error": f"rclone purge: {err[:200]}"}
 
 
 def _pg_dump_stale_hours() -> float:
@@ -370,6 +562,11 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
             if reason:
                 out["fallback_used"] = True
                 out["primary_error"] = reason[:300]
+            out.update(await _prune_offsite(
+                lambda: _rclone_list_copies(base_remote),
+                lambda name: _rclone_delete_copy(base_remote, name),
+                pattern=_RCLONE_COPY, current=f"{dest.name}/", keep=offsite_keep(cfg.get("keep")),
+            ))
             return out
         err = (proc.stderr or "")[:300]
         logger.warning("[universal-backup] rclone offsite sync failed: %s", err)
@@ -406,6 +603,11 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
                         result.get("remote"),
                     )
                     result.setdefault("via", cfg["provider"])
+                    result.update(await _prune_offsite(
+                        getattr(provider, "list_backups", _cannot_list),
+                        getattr(provider, "delete_backup", _cannot_delete),
+                        pattern=_NATIVE_COPY, current=zip_path.name, keep=offsite_keep(cfg.get("keep")),
+                    ))
                     return result
                 logger.warning(
                     "[universal-backup] offsite sync failed: %s — trying rclone",
@@ -430,7 +632,9 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
         except RuntimeError:
             loop = None
         if loop is not None:
-            return asyncio.run_coroutine_threadsafe(_run(), loop).result(timeout=1900)
+            # The upload or copy (1800 s), then the prune: one listing, and
+            # deletes for at most _PRUNE_BUDGET_S plus the one in flight.
+            return asyncio.run_coroutine_threadsafe(_run(), loop).result(timeout=2100)
         return asyncio.run(_run())
     except Exception as exc:
         logger.warning("[universal-backup] offsite sync error: %s", exc)
@@ -988,6 +1192,21 @@ def _alert_on_backup_gaps(
             )
         if offsite.get("skipped"):
             return  # deliberately disabled -- not a failure
+        if offsite.get("ok") and offsite.get("prune_error"):
+            # The copy was made; the old ones were not deleted. Every run
+            # adds one, so the remote grows until this is fixed -- the shape
+            # of 2026-11-03, when Kazma kept every copy and the owner deleted
+            # them by hand.
+            alert(
+                "backup.offsite_prune_failed",
+                "Old offsite backup copies could not be deleted.",
+                f"{str(offsite.get('prune_error'))[:300]} "
+                "This run's copy was uploaded. The copies past "
+                "backups.offsite.keep stay on the remote until a later run "
+                "deletes them, so it keeps growing until this is fixed.",
+                severity="warn",
+                cooldown_s=_OFFSITE_ALERT_COOLDOWN_S,
+            )
         if offsite.get("ok") and offsite.get("fallback_used"):
             # Offsite protection is intact, so this is not critical -- but a
             # silently-degraded primary is how you end up with one path left

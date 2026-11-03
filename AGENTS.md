@@ -3979,6 +3979,24 @@ Delete/archive/download: `DELETE /api/backup/{name}`,
 `POST …/archive` (zip), `GET …/download`. The per-file copy MUST be robust
 (`_robust_copytree`) — `shutil.copytree` aborts on one vanishing file and
 loses the entire `document-store`. Do NOT revert to `copytree`.
+**Old offsite copies are deleted after each successful upload** (2026-11-03,
+the owner had deleted eleven 344 MB zips by hand). `_offsite_sync` runs
+`_prune_offsite` on the path that made the copy -- the native provider's
+`list_backups` / `delete_backup` (every provider in `cloud_sync.py`, each
+page of a listing, a bad name refused before any request) or `rclone lsf` /
+`rclone purge --drive-use-trash=false` (a folder per copy) -- keeping the
+newest `backups.offsite.keep` (`offsite_keep`, default 7; `0` keeps every
+copy; Settings -> Backup -> Keep cloud copies). Names are the backup's
+epoch (`_NATIVE_COPY` / `_RCLONE_COPY`); a listing that fails, is not whole
+or lacks the copy just uploaded deletes nothing (`_old_copies` raises); a
+copy already gone is done; deletes stop at `_PRUNE_BUDGET_S` and the rest
+wait for the next run. The answer joins the offsite result (`pruned`,
+`prune_error`, `prune_left`), never fails the backup, and a `prune_error`
+raises `backup.offsite_prune_failed` (warn) before the fallback check in
+`_alert_on_backup_gaps`. Deletes are for good, never to a trash. Gates:
+`tests/test_offsite_retention.py` (a trusting rule deleting from a stale
+listing as the negative control), the provider cases in
+`tests/test_cloud_sync.py`.
 **Every copy of a live SQLite database is one step, through one helper**
 (`kazma_core.db.sqlite_snapshot.snapshot_copy`, 2026-10-13, Memory audit M19):
 the universal backup, the native memory backup (`memory/backup.backup_one`,

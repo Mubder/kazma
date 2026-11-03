@@ -59,6 +59,7 @@ def test_values_a_setting_cannot_hold(key, value) -> None:
 def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     from kazma_core.agent.chat_reasoning import CHAT_REASONING_KEY
     from kazma_core.agent.turn_budget import TURN_TIMEOUT_KEY
+    from kazma_core.backup.universal import OFFSITE_KEEP_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
     from kazma_core.documents.config import OCR_ENGINE_KEY
@@ -75,11 +76,12 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     # or step would switch nothing on and say nothing), the embedding key's
     # variable 2026-11-02 (FA-126: it may not name one of Kazma's own), the
     # chat's reasoning level 2026-11-03 (a level the model call cannot send),
-    # each named by the module that reads it.
+    # the offsite copies kept the same day (a count below zero would delete
+    # every copy), each named by the module that reads it.
     assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY, TENANT_MODE_KEY,
                              *SETTING_BOUNDS, FIRE_WITHOUT_HITL_KEY, TURN_TIMEOUT_KEY, OCR_ENGINE_KEY,
-                             RUNBOOKS_KEY, API_KEY_ENV_KEY, CHAT_REASONING_KEY, "agent.language",
-                             "agent.max_iterations"}
+                             RUNBOOKS_KEY, API_KEY_ENV_KEY, CHAT_REASONING_KEY, OFFSITE_KEEP_KEY,
+                             "agent.language", "agent.max_iterations"}
 
 
 # ── the TUI's client: an answered refusal is not "no server" ───────────────

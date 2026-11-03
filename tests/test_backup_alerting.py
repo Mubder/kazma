@@ -119,6 +119,38 @@ def test_a_clean_primary_upload_stays_silent(sent):
     assert not sent
 
 
+# ── old copies that could not be deleted ──────────────────────────────
+
+
+def test_old_copies_left_on_the_remote_are_reported(sent):
+    """The copy went offsite, so this is no crisis -- but every run adds one,
+    and a remote that only grows is how the owner ended up deleting the old
+    copies by hand (2026-11-03)."""
+    _alert_on_backup_gaps(
+        {"ok": True, "via": "s3", "pruned": [],
+         "prune_error": "1700000000.zip: 403 AccessDenied"}, 0)
+    c = next(c for c in sent if c["key"] == "backup.offsite_prune_failed")
+    assert c["severity"] == "warn"
+    assert "403 AccessDenied" in c["detail"], "name what refused"
+    assert "backups.offsite.keep" in c["detail"]
+    assert c["cooldown_s"] == _OFFSITE_ALERT_COOLDOWN_S
+    assert not any(c["key"] == "backup.offsite_failed" for c in sent)
+
+
+def test_a_prune_that_kept_up_stays_silent(sent):
+    _alert_on_backup_gaps({"ok": True, "via": "s3",
+                           "pruned": ["1700000000.zip"]}, 0)
+    assert not sent
+
+
+def test_a_prune_error_beside_a_fallback_reports_both(sent):
+    """The fallback branch returns; the prune check must come before it."""
+    _alert_on_backup_gaps({"ok": True, "via": "rclone", "fallback_used": True,
+                           "primary_error": "boom", "prune_error": "lsf failed"}, 0)
+    keys = {c["key"] for c in sent}
+    assert {"backup.offsite_prune_failed", "backup.offsite_degraded"} <= keys
+
+
 @pytest.mark.asyncio
 async def test_native_pg_backup_failure_pages(monkeypatch, sent):
     from kazma_core.memory import worker_bootstrap as wb

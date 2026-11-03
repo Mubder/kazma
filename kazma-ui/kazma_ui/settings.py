@@ -457,6 +457,7 @@ class SettingsRouterBuilder:
         @router.get("/api/settings/backup/offsite")
         def api_get_offsite_config() -> dict[str, Any]:
             """Get the current offsite backup configuration + provider statuses."""
+            from kazma_core.backup.universal import OFFSITE_KEEP_KEY, offsite_keep
             from kazma_core.config_store import get_config_store as _gcs
             store = _gcs()
             provider = str(store.get("backups.offsite.provider") or "")
@@ -510,6 +511,8 @@ class SettingsRouterBuilder:
             return {
                 "provider": provider,
                 "enabled": bool(enabled),
+                # Offsite copies kept, the newest first (0 = every copy).
+                "keep": offsite_keep(store.get(OFFSITE_KEEP_KEY)),
                 "providers": providers_status,
                 "webdav": {
                     "url": str(store.get("backups.offsite.webdav.url") or ""),
@@ -561,15 +564,25 @@ class SettingsRouterBuilder:
                 reset_current_tenant_id(token)
 
         def _apply_offsite_payload(req: dict[str, Any]) -> None:
-            """Persist provider + credentials from the offsite settings form."""
+            """Persist provider + credentials from the offsite settings form.
+
+            Raises :class:`SettingRejected` for a ``keep`` the setting cannot
+            hold, before anything is written."""
+            from kazma_core.backup.universal import OFFSITE_KEEP_KEY
             from kazma_core.config_store import get_config_store as _gcs
             store = _gcs()
+
+            keep = None
+            if req.get("keep") not in (None, ""):
+                keep, _category = validate_setting(OFFSITE_KEEP_KEY, req.get("keep"))
 
             provider = str(req.get("provider") or "").strip()
             store.set("backups.offsite.provider", provider, category="backups")
             enabled = req.get("enabled")
             if enabled is not None:
                 store.set("backups.offsite.enabled", bool(enabled), category="backups")
+            if keep is not None:
+                store.set(OFFSITE_KEEP_KEY, keep, category="backups")
 
             # WebDAV credentials (password to vault; blank keeps the old value)
             webdav_url = str(req.get("webdav_url") or "").strip()
@@ -635,7 +648,10 @@ class SettingsRouterBuilder:
         @router.put("/api/settings/backup/offsite")
         def api_set_offsite_config(req: dict[str, Any]) -> dict[str, str]:
             """Configure the offsite backup provider."""
-            _apply_offsite_payload(req)
+            try:
+                _apply_offsite_payload(req)
+            except SettingRejected as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from None
             return {"status": "ok"}
 
         @router.post("/api/settings/backup/offsite/test")
@@ -685,6 +701,8 @@ class SettingsRouterBuilder:
                 if provider is None:
                     return {"ok": False, "error": f"Unknown provider: {provider_name}"}
                 return await provider.test_connection()
+            except SettingRejected as exc:
+                return {"ok": False, "error": str(exc)}
             except Exception as exc:
                 return {"ok": False, "error": safe_error(exc)}
 

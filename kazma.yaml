@@ -327,4 +327,5 @@ backups:
   offsite:
     enabled: true
     rclone_remote: ''
+    keep: 7
   extra_paths: research

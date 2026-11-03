@@ -852,3 +852,363 @@ def test_s3_signs_head_request(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert signed["Authorization"].startswith("AWS4-HMAC-SHA256")
     assert signed["x-amz-content-sha256"] == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+# ── listing and deleting old copies (2026-11-03) ─────────────────────────
+#
+# The universal backup keeps the newest ``backups.offsite.keep`` copies on the
+# remote and deletes the rest through these two calls. The prune itself is
+# tested in tests/test_offsite_retention.py; here each provider's own answers:
+# every page of a listing, an empty or missing folder, a listing that cannot
+# be read (an error, never "nothing there"), and a copy already gone (done).
+
+
+def _s3_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
+        "backups.offsite.provider": "s3",
+        "backups.offsite.s3.access_key": "AKID",
+        "backups.offsite.s3.bucket": "kazma-bucket",
+        "backups.offsite.s3.endpoint": "https://s3.example.com",
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.s3.secret_key": "s3secret"}))
+
+
+def _s3_page(keys: list[str], next_token: str = "") -> bytes:
+    contents = "".join(f"<Contents><Key>{k}</Key></Contents>" for k in keys)
+    more = (f"<IsTruncated>true</IsTruncated><NextContinuationToken>{next_token}</NextContinuationToken>"
+            if next_token else "<IsTruncated>false</IsTruncated>")
+    return (f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+            f"{contents}{more}</ListBucketResult>").encode()
+
+
+def test_s3_lists_every_page_and_signs_the_query_it_sends(monkeypatch: pytest.MonkeyPatch) -> None:
+    _s3_config(monkeypatch)
+    captured: list[httpx.Request] = []
+    signed_urls: list[str] = []
+    real_sign = cs.S3Sync._sign_request
+
+    def sign(self: Any, method: str, url: str, *args: Any) -> dict[str, str]:
+        signed_urls.append(url)
+        return real_sign(self, method, url, *args)
+
+    monkeypatch.setattr(cs.S3Sync, "_sign_request", sign)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "continuation-token" not in str(req.url):
+            return httpx.Response(200, content=_s3_page(
+                ["kazma-backups/1700000000.zip", "kazma-backups/1700000100.zip"], "tok/2+"))
+        # A file under a sub-folder is not one of the copies.
+        return httpx.Response(200, content=_s3_page(
+            ["kazma-backups/1700000200.zip", "kazma-backups/nested/x.zip"]))
+
+    _install_mock_transport(monkeypatch, handler, captured)
+    result = asyncio.run(cs.S3Sync().list_backups())
+
+    assert result == {"ok": True, "names": ["1700000000.zip", "1700000100.zip", "1700000200.zip"]}
+    assert len(captured) == 2
+    assert dict(captured[1].url.params)["continuation-token"] == "tok/2+"
+    # The signature covers the query string the request actually carries.
+    for req, url in zip(captured, signed_urls):
+        assert cs._sigv4_query(req.url.query.decode()) == cs._sigv4_query(url.split("?", 1)[1])
+
+
+def test_s3_listing_that_says_more_without_saying_where_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _s3_config(monkeypatch)
+    body = _s3_page(["kazma-backups/1700000000.zip"]).replace(
+        b"<IsTruncated>false</IsTruncated>", b"<IsTruncated>true</IsTruncated>")
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(200, content=body), [])
+
+    result = asyncio.run(cs.S3Sync().list_backups())
+    assert result["ok"] is False
+    assert "could not be read" in result["error"]
+
+
+def test_s3_listing_refused_is_an_error_not_an_empty_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    _s3_config(monkeypatch)
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(403, content=b"<Error/>"), [])
+
+    result = asyncio.run(cs.S3Sync().list_backups())
+    assert result == {"ok": False, "error": "S3 error: HTTP 403 listing the backups"}
+
+
+def test_s3_delete_signs_and_takes_a_gone_copy_as_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    _s3_config(monkeypatch)
+    captured: list[httpx.Request] = []
+    statuses = iter([204, 404, 403])
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(next(statuses)), captured)
+
+    provider = cs.S3Sync()
+    assert asyncio.run(provider.delete_backup("1700000000.zip")) == {"ok": True}
+    assert asyncio.run(provider.delete_backup("1700000000.zip")) == {"ok": True}
+    assert asyncio.run(provider.delete_backup("1700000000.zip")) == {"ok": False, "error": "S3 error: HTTP 403"}
+    assert all(r.method == "DELETE" for r in captured)
+    assert captured[0].url.path == "/kazma-bucket/kazma-backups/1700000000.zip"
+    assert captured[0].headers["authorization"].startswith("AWS4-HMAC-SHA256")
+
+
+def _gdrive_signed_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def token(self: Any) -> str:
+        return "gtoken"
+
+    async def folder(self: Any, token: str, name: str, parent: str | None = None) -> str:
+        return "root-folder-id"
+
+    monkeypatch.setattr(cs.GoogleDriveSync, "_get_access_token", token)
+    monkeypatch.setattr(cs.GoogleDriveSync, "_ensure_folder", folder)
+
+
+def test_gdrive_lists_every_page_of_the_backup_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    _gdrive_signed_in(monkeypatch)
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.params.get("pageToken") == "p2":
+            return _json_response(200, {"files": [{"id": "c", "name": "1700000200.zip"}]})
+        return _json_response(200, {
+            "files": [{"id": "a", "name": "1700000000.zip"}, {"id": "b", "name": "1700000100.zip"}],
+            "nextPageToken": "p2",
+        })
+
+    _install_mock_transport(monkeypatch, handler, captured)
+    result = asyncio.run(cs.GoogleDriveSync().list_backups())
+
+    assert result == {"ok": True, "names": ["1700000000.zip", "1700000100.zip", "1700000200.zip"]}
+    assert "'root-folder-id' in parents" in captured[0].url.params["q"]
+    assert "trashed=false" in captured[0].url.params["q"]
+
+
+def test_gdrive_listing_refused_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _gdrive_signed_in(monkeypatch)
+    _install_mock_transport(monkeypatch, lambda req: _json_response(401, {}), [])
+
+    result = asyncio.run(cs.GoogleDriveSync().list_backups())
+    assert result["ok"] is False
+    assert "Drive API error: 401" in result["error"]
+
+
+def test_gdrive_delete_takes_every_file_of_that_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drive lets two files share a name: a delete by name takes both."""
+    _gdrive_signed_in(monkeypatch)
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET":
+            return _json_response(200, {"files": [{"id": "x1", "name": "1700000000.zip"},
+                                                  {"id": "x2", "name": "1700000000.zip"}]})
+        return httpx.Response(204 if req.url.path.endswith("/x1") else 404)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+    result = asyncio.run(cs.GoogleDriveSync().delete_backup("1700000000.zip"))
+
+    assert result == {"ok": True}
+    assert "name='1700000000.zip'" in captured[0].url.params["q"]
+    deleted = [r.url.path for r in captured if r.method == "DELETE"]
+    assert deleted == ["/drive/v3/files/x1", "/drive/v3/files/x2"]
+
+
+def test_gdrive_delete_refused_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _gdrive_signed_in(monkeypatch)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET":
+            return _json_response(200, {"files": [{"id": "x1", "name": "1700000000.zip"}]})
+        return _json_response(403, {})
+
+    _install_mock_transport(monkeypatch, handler, [])
+    result = asyncio.run(cs.GoogleDriveSync().delete_backup("1700000000.zip"))
+    assert result["ok"] is False
+    assert "Drive API error: 403" in result["error"]
+
+
+def _onedrive_signed_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def token(self: Any) -> str:
+        return "mstoken"
+
+    monkeypatch.setattr(cs.OneDriveSync, "_get_access_token", token)
+
+
+def test_onedrive_lists_every_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    _onedrive_signed_in(monkeypatch)
+    captured: list[httpx.Request] = []
+    next_link = "https://graph.microsoft.com/v1.0/me/drive/items/abc/children?$skiptoken=2"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "skiptoken" in str(req.url):
+            return _json_response(200, {"value": [{"name": "1700000200.zip"}]})
+        return _json_response(200, {"value": [{"name": "1700000000.zip"}, {"name": "1700000100.zip"}],
+                                    "@odata.nextLink": next_link})
+
+    _install_mock_transport(monkeypatch, handler, captured)
+    result = asyncio.run(cs.OneDriveSync().list_backups())
+
+    assert result == {"ok": True, "names": ["1700000000.zip", "1700000100.zip", "1700000200.zip"]}
+    assert all(r.headers["authorization"] == "Bearer mstoken" for r in captured)
+
+
+def test_onedrive_never_sends_its_token_off_graph(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A next page named off graph.microsoft.com is refused, not fetched."""
+    _onedrive_signed_in(monkeypatch)
+    captured: list[httpx.Request] = []
+    _install_mock_transport(monkeypatch, lambda req: _json_response(200, {
+        "value": [{"name": "1700000000.zip"}],
+        "@odata.nextLink": "https://elsewhere.example/children?page=2",
+    }), captured)
+
+    result = asyncio.run(cs.OneDriveSync().list_backups())
+    assert result["ok"] is False
+    assert "off graph.microsoft.com" in result["error"]
+    assert len(captured) == 1
+
+
+def test_onedrive_missing_folder_is_empty_and_a_gone_copy_is_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    _onedrive_signed_in(monkeypatch)
+    captured: list[httpx.Request] = []
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(404), captured)
+
+    provider = cs.OneDriveSync()
+    assert asyncio.run(provider.list_backups()) == {"ok": True, "names": []}
+    assert asyncio.run(provider.delete_backup("1700000000.zip")) == {"ok": True}
+    assert captured[-1].method == "DELETE"
+    assert captured[-1].url.path.endswith("/root:/kazma-backups/1700000000.zip")
+
+
+def test_onedrive_delete_refused_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _onedrive_signed_in(monkeypatch)
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(403), [])
+    result = asyncio.run(cs.OneDriveSync().delete_backup("1700000000.zip"))
+    assert result == {"ok": False, "error": "Graph API error: 403"}
+
+
+def _webdav_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
+        "backups.offsite.provider": "webdav",
+        "backups.offsite.webdav.url": "https://nas.example/dav",
+        "backups.offsite.webdav.username": "user",
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.webdav.password": "pw"}))
+
+
+_MULTISTATUS = b"""<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/dav/kazma-backups/</d:href></d:response>
+  <d:response><d:href>/dav/kazma-backups/1700000000.zip</d:href></d:response>
+  <d:response><d:href>https://nas.example/dav/kazma-backups/1700000100.zip</d:href></d:response>
+  <d:response><d:href>/dav/kazma-backups/a%20b.zip</d:href></d:response>
+</d:multistatus>"""
+
+
+def test_webdav_lists_the_folder_without_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    _webdav_config(monkeypatch)
+    captured: list[httpx.Request] = []
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(207, content=_MULTISTATUS), captured)
+
+    result = asyncio.run(cs.WebDAVSync().list_backups())
+    assert result == {"ok": True, "names": ["1700000000.zip", "1700000100.zip", "a b.zip"]}
+    assert captured[0].method == "PROPFIND"
+    assert captured[0].headers["depth"] == "1"
+    assert captured[0].url.path == "/dav/kazma-backups/"
+
+
+def test_webdav_listing_it_cannot_read_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _webdav_config(monkeypatch)
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(207, content=b"<not xml"), [])
+
+    result = asyncio.run(cs.WebDAVSync().list_backups())
+    assert result == {"ok": False, "error": "WebDAV answered a listing that could not be read"}
+
+
+def test_webdav_missing_folder_is_empty_and_a_gone_copy_is_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    _webdav_config(monkeypatch)
+    captured: list[httpx.Request] = []
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(404), captured)
+
+    provider = cs.WebDAVSync()
+    assert asyncio.run(provider.list_backups()) == {"ok": True, "names": []}
+    assert asyncio.run(provider.delete_backup("1700000000.zip")) == {"ok": True}
+    assert captured[-1].method == "DELETE"
+    assert captured[-1].url.path == "/dav/kazma-backups/1700000000.zip"
+
+
+def test_webdav_delete_refused_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _webdav_config(monkeypatch)
+    _install_mock_transport(monkeypatch, lambda req: httpx.Response(423), [])
+    result = asyncio.run(cs.WebDAVSync().delete_backup("1700000000.zip"))
+    assert result == {"ok": False, "error": "WebDAV error: HTTP 423"}
+
+
+def _ftp_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
+        "backups.offsite.provider": "ftp",
+        "backups.offsite.ftp.host": "192.168.50.45",
+        "backups.offsite.ftp.username": "user",
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.ftp.password": "pw"}))
+
+
+class _ListingFTP(_FakeFTP):
+    """The fake FTP with a backup folder that can be listed and deleted from."""
+
+    files: list[str] = []
+    refuse_delete = False  # a 550 on delete while the file stays
+    empty_answer = ""  # an nlst error, e.g. "550 No files found"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._dirs.add("kazma-backups")
+
+    def nlst(self) -> list[str]:
+        if self.empty_answer:
+            raise ftplib.error_perm(self.empty_answer)
+        return list(_ListingFTP.files)
+
+    def delete(self, name: str) -> None:
+        self.calls.append(("delete", name))
+        if self.refuse_delete or name not in _ListingFTP.files:
+            raise ftplib.error_perm("550 Permission denied")
+        _ListingFTP.files.remove(name)
+
+
+@pytest.fixture
+def listing_ftp(monkeypatch: pytest.MonkeyPatch, fake_ftplib: Any) -> type[_ListingFTP]:
+    _ftp_config(monkeypatch)
+    monkeypatch.setattr(_ListingFTP, "files", ["./1700000000.zip", "1700000100.zip"])
+    monkeypatch.setattr(fake_ftplib, "FTP", _ListingFTP)
+    return _ListingFTP
+
+
+def test_ftp_lists_the_backup_folder_by_name(listing_ftp: type[_ListingFTP]) -> None:
+    result = asyncio.run(cs.FTPSync().list_backups())
+    assert result == {"ok": True, "names": ["1700000000.zip", "1700000100.zip"]}
+    assert ("cwd", "kazma-backups") in _FakeFTP.instances[0].calls
+
+
+def test_ftp_empty_folder_answer_is_empty(listing_ftp: type[_ListingFTP], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(listing_ftp, "empty_answer", "550 No files found")
+    assert asyncio.run(cs.FTPSync().list_backups()) == {"ok": True, "names": []}
+
+
+def test_ftp_listing_error_that_is_not_550_is_an_error(
+    listing_ftp: type[_ListingFTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(listing_ftp, "empty_answer", "530 Not logged in")
+    result = asyncio.run(cs.FTPSync().list_backups())
+    assert result["ok"] is False
+    assert "530" in result["error"]
+
+
+def test_ftp_delete_of_a_gone_copy_is_done(listing_ftp: type[_ListingFTP]) -> None:
+    assert asyncio.run(cs.FTPSync().delete_backup("1700000100.zip")) == {"ok": True}
+    assert listing_ftp.files == ["./1700000000.zip"]
+    # 550, and the name is not listed: gone already.
+    assert asyncio.run(cs.FTPSync().delete_backup("1700000100.zip")) == {"ok": True}
+
+
+def test_ftp_delete_refused_while_still_listed_is_an_error(
+    listing_ftp: type[_ListingFTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 550 can mean "no such file" or "not allowed": only the listing tells."""
+    monkeypatch.setattr(listing_ftp, "refuse_delete", True)
+    result = asyncio.run(cs.FTPSync().delete_backup("1700000000.zip"))
+    assert result["ok"] is False
+    assert "550" in result["error"]

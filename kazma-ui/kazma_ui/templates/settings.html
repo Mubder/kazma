@@ -4027,6 +4027,12 @@
                 <button class="btn btn-secondary btn-sm" @click="saveBackupRetention()">{{ t('settings.save') }}</button>
             </div>
             <div class="form-hint" style="margin:-0.5rem 0 1rem 0">{{ t('settings.backup_retention_hint') }}</div>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:1rem">
+                <label for="offsite-keep" style="font-size:0.85rem">{{ t('settings.offsite_keep') }}</label>
+                <input id="offsite-keep" type="number" class="form-input" x-model.number="offsiteKeep" min="0" step="1" style="max-width:110px">
+                <button class="btn btn-secondary btn-sm" @click="saveOffsiteKeep()">{{ t('settings.save') }}</button>
+            </div>
+            <div class="form-hint" style="margin:-0.5rem 0 1rem 0">{{ t('settings.offsite_keep_hint') }}</div>
             <div style="display:flex;gap:12px;align-items:center;margin-bottom:1.25rem">
                 <button class="btn btn-primary" @click="runBackup()" :disabled="backupRunning">
                     <span x-show="!backupRunning" x-cloak>{{ t('settings.backup_now') }}</span>

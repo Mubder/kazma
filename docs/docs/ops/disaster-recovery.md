@@ -122,6 +122,18 @@ from one that always succeeded.
 
 On-disk staging keeps only **2** generations; the history lives in restic.
 
+**The cloud zip copy has its own count.** Settings → Backup can also send
+each generation, zipped and without `.env`, to a cloud provider's
+`kazma-backups` folder (Google Drive, OneDrive, WebDAV, FTP, S3, or an rclone
+remote). Since 2026-11-03 Kazma keeps the newest **`backups.offsite.keep`**
+copies there (Settings → Backup → **Keep cloud copies**; default 7, `0`
+keeps every copy) and deletes the rest after each upload that succeeds,
+oldest first — for good, never to a trash. Nothing is deleted from a listing
+that failed, is not whole, or does not hold the copy just uploaded; a copy
+that could not be deleted raises the alert `backup.offsite_prune_failed` and
+is tried again at the next backup. Before this every copy stayed: a 344 MB
+zip every six hours on the live install, until its owner deleted them by hand.
+
 ### The passphrase
 
 `<install>/.kazma/restic.pass` (a non-empty legacy `~/.kazma/restic.pass`

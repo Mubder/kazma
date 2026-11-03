@@ -273,8 +273,48 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Keep backups",
     },
     "settings.backup_retention_hint": {
-        "ar": "عدد النسخ المحلية المطلوب الاحتفاظ بها. بعد كل تشغيل تُحذف النسخ الأقدم من هذا العدد نهائياً. النسخ السحابية لا تُحذف أبداً.",
-        "en": "How many local backups to keep. After every run, backups older than this are permanently deleted. Cloud copies are never pruned.",
+        "ar": "عدد النسخ المحلية المطلوب الاحتفاظ بها. بعد كل تشغيل تُحذف النسخ الأقدم من هذا العدد نهائياً. للنسخ السحابية عددها الخاص أدناه.",
+        "en": "How many local backups to keep. After every run, backups older than this are permanently deleted. Cloud copies have their own number, below.",
+    },
+    "settings.offsite_keep": {
+        "ar": "الاحتفاظ بالنسخ السحابية",
+        "en": "Keep cloud copies",
+    },
+    "settings.offsite_keep_hint": {
+        "ar": "عدد النسخ التي يبقيها Kazma في السحابة. بعد كل رفع ناجح يحذف نسخه الأقدم من هذا العدد من مجلد النسخ الاحتياطي (Google Drive وS3 وWebDAV وFTP تحذف فوراً؛ OneDrive ينقلها إلى سلة المحذوفات، وتبقى محسوبة من مساحتك حتى تُفرغ). 0 يحتفظ بكل النسخ. استخدم مجلداً سحابياً واحداً لكل تثبيت: يعدّ Kazma كل نسخة يجدها فيه.",
+        "en": "How many copies Kazma keeps in the cloud. After every upload that succeeds it deletes its copies older than this from the backup folder (Google Drive, S3, WebDAV and FTP delete at once; OneDrive moves them to its recycle bin, which counts against your storage until emptied). 0 keeps every copy. Use one cloud folder per install: Kazma counts every backup it finds there.",
+    },
+    "settings.offsite_keep_invalid": {
+        "ar": "يجب أن يكون عدد النسخ السحابية 0 (الاحتفاظ بكل النسخ) أو أكثر",
+        "en": "Cloud copies kept must be 0 (keep every copy) or more",
+    },
+    "settings.offsite_keep_all_saved": {
+        "ar": "حُفظ — يحتفظ Kazma بكل النسخ السحابية",
+        "en": "Saved — Kazma keeps every cloud copy",
+    },
+    "settings.offsite_keep_saved.zero": {
+        "ar": "حُفظ — يحتفظ Kazma بكل النسخ السحابية",
+        "en": "Saved — Kazma keeps every cloud copy",
+    },
+    "settings.offsite_keep_saved.one": {
+        "ar": "حُفظ — يحتفظ Kazma بأحدث نسخة سحابية",
+        "en": "Saved — Kazma keeps the newest cloud copy",
+    },
+    "settings.offsite_keep_saved.two": {
+        "ar": "حُفظ — يحتفظ Kazma بأحدث نسختين سحابيتين",
+        "en": "Saved — Kazma keeps the newest {n} cloud copies",
+    },
+    "settings.offsite_keep_saved.few": {
+        "ar": "حُفظ — يحتفظ Kazma بأحدث {n} نسخ سحابية",
+        "en": "Saved — Kazma keeps the newest {n} cloud copies",
+    },
+    "settings.offsite_keep_saved.many": {
+        "ar": "حُفظ — يحتفظ Kazma بأحدث {n} نسخة سحابية",
+        "en": "Saved — Kazma keeps the newest {n} cloud copies",
+    },
+    "settings.offsite_keep_saved.other": {
+        "ar": "حُفظ — يحتفظ Kazma بأحدث {n} نسخة سحابية",
+        "en": "Saved — Kazma keeps the newest {n} cloud copies",
     },
     "settings.backup_running": {
         "ar": "جاري النسخ…",
