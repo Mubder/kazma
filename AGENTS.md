@@ -8287,7 +8287,17 @@ findings. Each fix has a gate that fails on the old code.
   `KAZMA_DATABASE_URL`). Gates: `tests/test_service_exposure_check.py`,
   `tests/test_compose_ports_loopback.py`, `tests/test_pg_app_role.py` (every
   store's setup, a dump and the rehearsal as the role, on a database seeded
-  as the superuser; the bare role as the negative control).
+  as the superuser; the bare role as the negative control). **A refused
+  sign-in says why** (2026-11-03: the live switch to `kazma_app` waited 18
+  minutes on a role with no password while the log said "unreachable"):
+  once the pool gives up, `postgres_pool.refusal_reason` signs in once and
+  words Postgres's answer (a refused password, a missing role or database,
+  nothing listening), logged at ERROR and carried in `PostgresUnreachable`
+  and `ConfigStoreUnavailableError.reason` (`config_store._refusal_in`).
+  `scripts/check_database_login.py` signs in as Kazma will before a reload
+  (psql inside the container proves nothing: it trusts loopback). Gate:
+  `tests/test_postgres_refusal_reason.py` (the probe answering nothing as
+  the negative control; a role with no password on real Postgres).
 
 ### 55. The functional audit of 2026-11, Stage 2 (the Medium findings)
 
@@ -8564,8 +8574,25 @@ has a gate that fails on the old code.
 
 The audit's findings clustered into twelve themes; each theme is a standard
 held by a class gate, beyond the single findings. Themes 3, 8 and 9 were met
-by Stages 1-3; theme 7's remaining part (the model, its reasoning, the tool
-count) and theme 10 (GitHub Actions billing) are the owner's.
+by Stages 1-3; theme 10 (GitHub Actions billing) is the owner's, and theme 7
+is the reasoning setting below plus the tool count per turn (open).
+
+- **How much the model reasons before a chat answer is a setting** (theme 7,
+  2026-11-03, the owner's choice: `low`). `agent.chat_reasoning`
+  (`agent/chat_reasoning.py`; Settings -> System; `default` / `off` / `low` /
+  `high` / `max`) reaches every model call of a chat turn -- the supervisor's,
+  its failover, the empty-answer nudge, the respond synthesis -- as
+  `chat_reasoning_kwargs(client)`: only where the client takes it
+  (`LLMProvider.can_turn_off_reasoning`: DeepSeek's own API, `thinking`
+  for off, `reasoning_effort` for the rest, `llm_provider.REASONING_EFFORTS`),
+  so a failover to a provider with a `chat` of its own receives nothing. A
+  model that refuses the field is asked again without it (the blocking
+  path's reasoning-switch fallback; the stream's 4xx falls back to it). X
+  drafting and research keep `reasoning="off"`. Gate:
+  `tests/test_chat_reasoning.py` (each level on the wire, the refusal, the
+  stream, a real turn through the supervisor graph with the call before the
+  setting as the negative control, every `invoke_llm_chat` call in the chat
+  turn's modules carrying the level).
 
 - **A result that says whether it worked is read where it is returned**
   (theme 1). `tests/test_failure_results_are_used.py` covers the vault, the

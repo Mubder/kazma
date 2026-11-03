@@ -406,6 +406,35 @@ class SettingsRouterBuilder:
                 "max": MAX_TURN_TIMEOUT_SECONDS,
             }
 
+        @router.get("/api/settings/chat-reasoning")
+        def api_get_chat_reasoning() -> dict[str, Any]:
+            """How much the model reasons before a chat answer
+            (``agent/chat_reasoning.py``), the levels the page offers, and
+            whether the active provider takes the setting at all."""
+            from kazma_core.agent.chat_reasoning import (
+                CHAT_REASONING_KEY,
+                LEVELS,
+                parse_level,
+                provider_takes_level,
+            )
+
+            level = parse_level(config_store.get(CHAT_REASONING_KEY, "default")) or "default"
+            provider, applies = "", False
+            try:
+                from kazma_core.model_registry import get_model_registry
+
+                registry = get_model_registry()
+                provider = str((registry.get_active_profile() or {}).get("provider") or "")
+                for entry in registry.list_providers() or []:
+                    if str(entry.get("name") or "") == provider:
+                        applies = provider_takes_level(str(entry.get("base_url") or ""))
+                        break
+            except (ImportError, AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                logger.warning("[settings] chat reasoning: cannot read the active provider (%s)",
+                               type(exc).__name__)
+                return {"level": level, "levels": list(LEVELS), "provider": "", "applies": None}
+            return {"level": level, "levels": list(LEVELS), "provider": provider, "applies": applies}
+
         @router.get("/api/settings/cron-timezone")
         def api_get_cron_timezone() -> dict[str, str]:
             """Current operator timezone for scheduled tasks (name + source).

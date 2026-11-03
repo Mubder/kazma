@@ -14,13 +14,11 @@
 --
 -- Run it as the superuser, in Kazma's database (the Docker setup):
 --   docker exec -i kazma-db-win psql -U kazma -d kazma -v ON_ERROR_STOP=1 < deploy/postgres/kazma_app_role.sql
--- Then give the role a password, typed at the prompt (it stays off command
--- lines and files):
---   docker exec -it kazma-db-win psql -U kazma -d kazma -c "\password kazma_app"
--- Then point Kazma at it: KAZMA_DATABASE_URL in .env, and Settings -> Memory
--- -> Memory backends -> Postgres DSN when the memory mirror is on.
--- docs/docs/ops/postgres-and-saas.md ("A database role that is not a
--- superuser") has the whole procedure. Gate: tests/test_pg_app_role.py.
+-- Then put the new address in .env, give the role its password read from
+-- .env (never psql's \password prompt: a paste can arrive empty and clear
+-- the password), check the sign-in with scripts/check_database_login.py, and
+-- only then reload. docs/docs/ops/postgres-and-saas.md ("A database role that
+-- is not a superuser") has every command. Gate: tests/test_pg_app_role.py.
 
 BEGIN;
 -- A table another session holds stops the script here instead of waiting

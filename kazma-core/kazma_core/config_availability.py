@@ -29,14 +29,20 @@ _BOOT_REPORT_S = 60.0
 class ConfigStoreUnavailableError(RuntimeError):
     """No settings write was acknowledged; retry after storage recovers."""
 
-    def __init__(self, *, opening: bool = False) -> None:
+    def __init__(self, *, opening: bool = False, reason: str | None = None) -> None:
         self.backend = str(get_backend())
+        self.reason = reason
         hint = (
             "Check PostgreSQL connectivity and credentials."
             if self.backend == "postgres"
             else "Check settings.db permissions, disk space and locks."
         )
-        if opening:
+        if opening and reason:
+            # The database's own answer (a refused password, a missing role):
+            # "it may still be starting" hid one for 18 minutes (2026-11-03).
+            super().__init__(f"Kazma could not open its settings database ({self.backend}): "
+                             f"{reason}. {hint}")
+        elif opening:
             # Startup reads settings; it saves nothing. The save wording made
             # a boot before Postgres was up read as a lost save (2026-10-29).
             super().__init__(f"Kazma could not open its settings database ({self.backend}); "

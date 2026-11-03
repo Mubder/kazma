@@ -396,4 +396,4 @@ Done, each with its gate and negative control (AGENTS.md §57):
 - **11** -- the daily "dependency advisories" sweep.
 - **12** -- unmet requirements and open advisories in every daily digest until cleared.
 
-Met by Stages 1-3: **3**, **8**, **9**. The owner's: **7** (the model, its reasoning and tool count; Kazma's own share of the first token is benchmarked in CI) and **10** (GitHub Actions billing). The new `Recovery drills` check joins the branch ruleset when the owner adds it.
+Met by Stages 1-3: **3**, **8**, **9**. **7**: the chat's reasoning level is a setting since 2026-11-03 (`agent.chat_reasoning`; the owner chose `low`, measured on live against the budget); the tool count per turn is still open, and Kazma's own share of the first token is benchmarked in CI. The owner's: **10** (GitHub Actions billing). The new `Recovery drills` check joins the branch ruleset when the owner adds it.

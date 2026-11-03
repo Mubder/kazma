@@ -11,6 +11,14 @@
   ("A database role that is not a superuser"). Tested by running every one
   of Kazma's Postgres stores, a backup and the restore rehearsal as the new
   login. The boot warning about a superuser login points to it.
+- When Postgres refuses Kazma's sign-in, the log now says why: a wrong
+  password, a missing role or database, or nothing answering. It used to say
+  only "unreachable". A new check, `scripts/check_database_login.py`, signs
+  in the way Kazma will, so a login change can be checked before the reload.
+- New setting, Settings -> System -> Reasoning before a chat answer: how
+  much the model thinks before each chat answer (the provider's default,
+  off, low, high or max). Less thinking answers sooner and costs less. It
+  reaches DeepSeek's own API; other providers keep their own.
 
 ## Recovery drilled for real, and Arabic and English as equals (2026-11-02)
 

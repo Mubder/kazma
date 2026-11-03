@@ -1856,6 +1856,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حفظ إعدادات الأمان",
         "en": "Save Safety Settings",
     },
+    "settings.save_chat_reasoning": {
+        "ar": "حفظ مستوى التفكير",
+        "en": "Save reasoning level",
+    },
     "settings.save_checkpoint_retention": {
         "ar": "حفظ مدة الاحتفاظ",
         "en": "Save Retention",
@@ -1955,6 +1959,46 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.summarize_old": {
         "ar": "تلخيص الرسائل القديمة",
         "en": "Summarize Old Messages",
+    },
+    "settings.chat_reasoning_default": {
+        "ar": "الافتراضي لدى المزوّد",
+        "en": "The provider's default",
+    },
+    "settings.chat_reasoning_high": {
+        "ar": "مرتفع: العمق المعتاد لدى DeepSeek",
+        "en": "High: DeepSeek's usual depth",
+    },
+    "settings.chat_reasoning_hint": {
+        "ar": "ينطبق على كل دور محادثة في كل الواجهات. التفكير الأقل يجيب أسرع ويكلف أقل، والأكثر يخطط للأعمال متعددة الخطوات بشكل أفضل. يصل إلى واجهة DeepSeek نفسها؛ المزوّدون الآخرون يستخدمون إعدادهم. مسودات X والبحث يبقى التفكير فيها متوقفًا.",
+        "en": "Every chat turn on every surface uses it. Less thinking answers sooner and costs less; more plans multi-step work better. It reaches DeepSeek's own API; other providers use their own setting. X drafting and research keep thinking off.",
+    },
+    "settings.chat_reasoning_label": {
+        "ar": "مقدار تفكير النموذج قبل أن يجيب",
+        "en": "How much the model thinks before it answers",
+    },
+    "settings.chat_reasoning_low": {
+        "ar": "منخفض: تفكير قصير (أسرع)",
+        "en": "Low: a short think (faster)",
+    },
+    "settings.chat_reasoning_max": {
+        "ar": "أقصى: الأعمق (الأبطأ)",
+        "en": "Max: the deepest (slowest)",
+    },
+    "settings.chat_reasoning_not_applied": {
+        "ar": "المزوّد النشط لا يأخذ هذا الإعداد: يجيب بإعداده الافتراضي.",
+        "en": "Your active provider does not take this setting: it answers with its own default.",
+    },
+    "settings.chat_reasoning_off": {
+        "ar": "إيقاف: يجيب فورًا (الأسرع)",
+        "en": "Off: answer at once (fastest)",
+    },
+    "settings.chat_reasoning_saved": {
+        "ar": "تم حفظ مستوى التفكير",
+        "en": "Reasoning level saved",
+    },
+    "settings.chat_reasoning_title": {
+        "ar": "التفكير قبل إجابة المحادثة",
+        "en": "Reasoning before a chat answer",
     },
     "settings.checkpoint_retention_days": {
         "ar": "الاحتفاظ بكامل السجل بعد آخر رسالة (أيام)",

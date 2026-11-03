@@ -146,26 +146,46 @@ a dump and the restore rehearsal as the new role.
 
    It ends with `COMMIT`. If it stops on `lock timeout`, a long query held a
    table: run it again when Kazma is idle. Kazma keeps working throughout:
-   it still signs in as the superuser until step 3.
-2. Give the role a password, typed at the prompt so it stays out of your
-   shell history:
+   it still signs in as the superuser until the reload.
+2. Make a password of letters, digits, `-` and `_` (anything else must be
+   percent-encoded in an address):
 
    ```bash
-   docker exec -it kazma-db-win psql -U kazma -d kazma -c "\password kazma_app"
+   python -c "import secrets; print(secrets.token_urlsafe(24))"
    ```
 
-   Use letters, digits, `-` and `_` only; anything else must be
-   percent-encoded in the address below.
-3. Point Kazma at the role:
-   - `.env`: `KAZMA_DATABASE_URL=postgresql://kazma_app:<password>@127.0.0.1:5433/kazma`
-     (keep your host, port and database name).
-   - If the memory mirror is on (Settings -> Memory -> Memory backends ->
-     Shared state set to Postgres), set its **Postgres DSN** to the same
-     address and press **Save backends**. It keeps its own copy of the
-     address.
-4. Reload: `python scripts/service/kazma_guard.py --reload --when-idle`.
-5. Check: the boot log no longer has the superuser warning, and
-   `/health/ready` answers 200.
+   and put the new address in `.env`, keeping your host, port and database
+   name: `KAZMA_DATABASE_URL=postgresql://kazma_app:<password>@127.0.0.1:5433/kazma`.
+3. Give the role that same password, read from `.env` so it is never typed,
+   shown or kept in your shell history (PowerShell):
+
+   ```powershell
+   $line = (Get-Content <install>\.env | Where-Object { $_ -like 'KAZMA_DATABASE_URL=*' }) -replace '^KAZMA_DATABASE_URL=',''; $pw = ([uri]$line.Trim().Trim('"')).UserInfo.Split(':',2)[1]; "ALTER ROLE kazma_app PASSWORD '$pw';" | docker exec -i kazma-db-win psql -U kazma -d kazma -v ON_ERROR_STOP=1
+   ```
+
+   It prints `ALTER ROLE`. Do not use psql's `\password` prompt: a password
+   pasted into it can arrive empty, and Postgres then clears the role's
+   password with only a notice (live, 2026-11-03).
+4. Check the sign-in **before** reloading, with the install's own Python
+   (`<install>` is the folder Kazma is installed in):
+
+   ```bash
+   <install>\.venv\Scripts\python.exe <install>\scripts\check_database_login.py
+   ```
+
+   It signs in as Kazma will and prints `OK: Kazma signs in to kazma as
+   kazma_app (not a superuser).`, or `NOT OK:` with Postgres's reason. A
+   check run with psql inside the database container proves nothing: the
+   container lets loopback sign-ins in without a password.
+5. If the memory mirror is on (Settings -> Memory -> Memory backends ->
+   Shared state set to Postgres), set its **Postgres DSN** to the same
+   address and press **Save backends**. It keeps its own copy of the
+   address.
+6. Reload: `python scripts/service/kazma_guard.py --reload --when-idle`.
+7. Check: the boot log no longer has the superuser warning, and
+   `/health/ready` answers 200. If the server waits on its database
+   instead, its log names Postgres's reason (`[PostgresPool] Postgres
+   refused the password for kazma_app ...`).
 
 To undo, put the old address back in `.env` (and the memory mirror) and
 reload; the superuser can still use every table. Leave the `kazma`

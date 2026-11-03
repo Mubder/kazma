@@ -12,6 +12,7 @@ from kazma_core.agent.answer_quality import (
     TOOL_ARGUMENT_RECHECK,
     looks_like_tool_arguments,
 )
+from kazma_core.agent.chat_reasoning import chat_reasoning_kwargs
 from kazma_core.agent.graph_helpers import (
     _ensure_about_user,
     _ensure_base_prompt,
@@ -1568,6 +1569,8 @@ async def supervisor_node(
             # configured limit (16384 default). This prevents the wasteful
             # truncation-retry loop on content-generation tasks.
             _call_max_tokens = 8192 if effective_tool_definitions else None
+            # The owner's reasoning level for chat (agent/chat_reasoning.py).
+            _reasoning = await chat_reasoning_kwargs(turn_llm)
             for attempt in range(1, cfg["max_attempts"] + 1):
                 try:
                     return await invoke_llm_chat(
@@ -1576,6 +1579,7 @@ async def supervisor_node(
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=routed_model,
                         max_tokens=_call_max_tokens,
+                        **_reasoning,
                         # S3-2: only the FIRST attempt streams live deltas —
                         # a retry after partial deltas would re-emit from
                         # token 0 and paint the duplicated-prefix incident.
@@ -1707,6 +1711,7 @@ async def supervisor_node(
                         messages=with_source_grounding(_llm_messages),
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=fb_model,
+                        **(await chat_reasoning_kwargs(client)),
                         # S3-2: the primary attempt already streamed its
                         # partial deltas; the failover must stay quiet — its
                         # answer lands via turn_complete (replace semantics).
@@ -1955,6 +1960,7 @@ async def supervisor_node(
                     messages=with_source_grounding(pruned_nudge_msgs),
                     tools=[],
                     model=routed_model,
+                    **(await chat_reasoning_kwargs(turn_llm)),
                 )
                 if nudge_response.content and nudge_response.content.strip():
                     content = nudge_response.content.strip()

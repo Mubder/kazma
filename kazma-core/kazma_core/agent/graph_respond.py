@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Any
 
+from kazma_core.agent.chat_reasoning import chat_reasoning_kwargs
 from kazma_core.agent.graph_helpers import (
     is_unusable_assistant_content,
     sanitize_tool_chains,
@@ -298,7 +299,8 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                 }
                 _synth_started = time.monotonic()
                 _resp = await invoke_llm_chat(
-                    _llm, with_source_grounding(pruned_for_synth + [_wrap_msg]), tools=None
+                    _llm, with_source_grounding(pruned_for_synth + [_wrap_msg]), tools=None,
+                    **(await chat_reasoning_kwargs(_llm)),
                 )
                 await _ledger_synthesis_call(
                     state, _llm, _resp, (time.monotonic() - _synth_started) * 1000
