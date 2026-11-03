@@ -485,6 +485,25 @@
             this.turnTimeoutSaving = false;
         },
 
+        async saveChatReasoning() {
+            this.chatReasoningSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        key: 'agent.chat_reasoning',
+                        value: this.chatReasoning.level,
+                        category: 'agent',
+                    }),
+                });
+                showToast(_k('settings.chat_reasoning_saved', 'Reasoning level saved'), 'success');
+            } catch (e) {
+                showToast(e.message || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
+            }
+            this.chatReasoningSaving = false;
+        },
+
         async loadProxy() {
             try {
                 const data = await this._fetch('/api/settings/proxy');

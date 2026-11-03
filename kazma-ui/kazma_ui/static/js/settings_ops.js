@@ -700,6 +700,19 @@
             } catch (e) { /* keep defaults */ }
         },
 
+        async loadChatReasoning() {
+            try {
+                const data = await this._fetch('/api/settings/chat-reasoning');
+                if (data && typeof data.level === 'string') {
+                    this.chatReasoning = {
+                        level: data.level,
+                        applies: typeof data.applies === 'boolean' ? data.applies : null,
+                        provider: data.provider || '',
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+        },
+
         async loadPackages() {
             this.pkgLoading = true;
             try {

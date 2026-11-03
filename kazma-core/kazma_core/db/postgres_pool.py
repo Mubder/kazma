@@ -7,6 +7,7 @@ uvicorn workers / replicas; SQLite must not be used for multi-replica.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -148,6 +149,78 @@ class PostgresPool:
             pass
 
 
+class PostgresUnreachable(RuntimeError):
+    """The shared pool could not open. ``reason`` is Postgres's own answer, in
+    words (``refusal_reason``), when one could be read."""
+
+    def __init__(self, attempts: int, reason: str | None) -> None:
+        self.reason = reason
+        text = f"Postgres pool unreachable after {attempts} attempts"
+        super().__init__(f"{text}: {reason}" if reason else text)
+
+
+_ROLE_RE = re.compile(r'role "([^"]+)" does not exist')
+_DATABASE_RE = re.compile(r'database "([^"]+)" does not exist')
+_PASSWORD_RE = re.compile(r'password authentication failed for user "([^"]+)"')
+
+
+def _word_refusal(message: str, *, host: str = "", port: int | None = None) -> str:
+    """Postgres's answer to a sign-in, said so the owner knows what to fix."""
+    text = " ".join(str(message or "").split())
+    where = f"{host}:{port}" if host and port else (host or "the database address")
+    found = _PASSWORD_RE.search(text)
+    if found:
+        return (f"Postgres refused the password for {found.group(1)}: the password in "
+                f"KAZMA_DATABASE_URL is not the role's, or the role has none")
+    found = _ROLE_RE.search(text)
+    if found:
+        return f"Postgres has no role named {found.group(1)}"
+    found = _DATABASE_RE.search(text)
+    if found:
+        return f"Postgres has no database named {found.group(1)}"
+    lowered = text.lower()
+    if "no pg_hba.conf entry" in lowered:
+        return "Postgres's pg_hba.conf does not let this sign-in in"
+    if "starting up" in lowered:
+        return "Postgres is still starting"
+    if "too many clients" in lowered or "too many connections" in lowered:
+        return "Postgres has no free connection (too many clients)"
+    if any(word in lowered for word in ("connection refused", "actively refused", "timeout expired",
+                                        "could not connect", "is the server running",
+                                        "could not translate host")):
+        return f"nothing answered at {where}: is the database running?"
+    from kazma_core.security.url_credentials import mask_urls_in_text
+
+    return mask_urls_in_text(text)[:240] or "Postgres gave no reason"
+
+
+def refusal_reason(dsn: str, *, timeout_s: int = 5) -> str | None:
+    """Why Postgres will not let Kazma in at *dsn*, or None when it does.
+
+    The pool reports only ``PoolTimeout``; Postgres's own answer went to
+    stderr, and the log said "unreachable" for 18 minutes while Postgres was
+    refusing a role with no password (live 2026-11-03). One direct sign-in,
+    after the pool has given up, reads the answer.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        psycopg, _dict_row = require_postgres_driver()
+    except ImportError:
+        return None
+    try:
+        parts = urlsplit(dsn)
+        host, port = parts.hostname or "", parts.port
+    except ValueError:
+        host, port = "", None
+    try:
+        conn = psycopg.connect(dsn, connect_timeout=timeout_s, autocommit=True)
+    except (psycopg.Error, OSError) as exc:
+        return _word_refusal(str(exc), host=host, port=port)
+    conn.close()
+    return None
+
+
 def get_postgres_pool() -> PostgresPool | None:
     """Return shared pool when Postgres is configured; else None.
 
@@ -208,10 +281,12 @@ def get_postgres_pool() -> PostgresPool | None:
                         time.sleep(delay)
             if _pool is None:
                 # All retries exhausted — surface the underlying cause so
-                # callers see WHY (not just "pool unavailable").
-                raise RuntimeError(
-                    f"Postgres pool unreachable after {attempts} attempts"
-                ) from last_exc
+                # callers see WHY (not just "pool unavailable"): Postgres's
+                # own answer to one direct sign-in.
+                reason = refusal_reason(dsn)
+                if reason:
+                    logger.error("[PostgresPool] %s", reason)
+                raise PostgresUnreachable(attempts, reason) from last_exc
         return _pool
 
 

@@ -13,7 +13,6 @@ They also exercise the read/list/search/diff happy paths.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -24,18 +23,18 @@ from kazma_core.ide import get_ide_service, reset_ide_service
 def ws(tmp_path, monkeypatch):
     """Point the workspace at a temp dir and reset the singleton per test.
 
-    The workspace is created under the repo working directory (NOT pytest's
-    symlinked ``Local\\Temp\\pytest-of-*`` root) so the path-traversal guard
-    is exercised with real, non-junction paths.
+    The workspace is pytest's temporary folder resolved past the junction in
+    ``Local\\Temp\\pytest-of-*``, so the path-traversal guard is exercised
+    with real, non-junction paths.
 
     Active WorkspaceStore must not leak the developer's monorepo into the
     test pin (binding ladder: store beats pin when a row is active).
     """
-    import shutil
-
-    workspace = Path(os.getcwd()) / ".ide_test_ws"
-    if workspace.exists():
-        shutil.rmtree(workspace)
+    # pytest's temporary folder, RESOLVED (no junction). It was a folder in
+    # the working directory -- the repository itself -- and one of its files
+    # was committed by accident (2026-11-03; AGENTS.md §56: a test never
+    # writes into the checkout).
+    workspace = tmp_path.resolve() / "ide_test_ws"
     workspace.mkdir(parents=True)
     monkeypatch.setenv("KAZMA_WORKSPACE", str(workspace))
     # Isolate from process-wide WorkspaceStore (active row would win over pin).
@@ -63,7 +62,6 @@ def ws(tmp_path, monkeypatch):
     (workspace / "sub").mkdir()
     (workspace / "sub" / "note.md").write_text("# title\n", encoding="utf-8")
     yield workspace, svc
-    shutil.rmtree(workspace, ignore_errors=True)
 
 
 async def test_list_path_happy(ws):
@@ -88,16 +86,14 @@ async def test_read_missing_file(ws):
     assert "not found" in res["error"].lower()
 
 
-def test_resolve_blocks_traversal():
+def test_resolve_blocks_traversal(tmp_path, monkeypatch):
     import shutil
     from kazma_core.ide import get_ide_service, reset_ide_service
     from kazma_core.tools.file_write import configure_workspace
 
-    workspace = Path(os.getcwd()) / ".ide_test_ws_traverse"
-    if workspace.exists():
-        shutil.rmtree(workspace)
+    workspace = tmp_path.resolve() / "ide_test_ws_traverse"
     workspace.mkdir(parents=True)
-    os.environ["KAZMA_WORKSPACE"] = str(workspace)
+    monkeypatch.setenv("KAZMA_WORKSPACE", str(workspace))
     configure_workspace(workspace=str(workspace))
     reset_ide_service()
     svc = get_ide_service()

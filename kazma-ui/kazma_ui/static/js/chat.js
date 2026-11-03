@@ -4767,18 +4767,30 @@
         metaEl.setAttribute('data-' + f, fields[f] ? String(fields[f]) : '');
       }
     });
-    var tail = _META_FIELDS
-      .map(function (f) { return metaEl.getAttribute('data-' + f) || ''; })
-      .filter(Boolean)
-      .join(' · ');
+    var parts = _META_FIELDS
+      .map(function (f) { return [f, metaEl.getAttribute('data-' + f) || '']; })
+      .filter(function (p) { return p[1]; });
     var timeEl = metaEl.querySelector('time');
     if (timeEl) {
       while (timeEl.nextSibling) metaEl.removeChild(timeEl.nextSibling);
-      if (tail) metaEl.appendChild(document.createTextNode(' · ' + tail));
     } else {
-      metaEl.textContent = tail;
+      metaEl.textContent = '';
     }
-    if (tail) metaEl.setAttribute('dir', 'auto');
+    parts.forEach(function (p, i) {
+      if (timeEl || i > 0) metaEl.appendChild(document.createTextNode(' · '));
+      if (p[0] === 'model') {
+        // A model's name is content, the same in every language: since the
+        // line names the model that answered (FA-210) the Arabic page read
+        // "harness-model" as an English word (2026-11-03).
+        var name = document.createElement('span');
+        name.setAttribute('translate', 'no');
+        name.textContent = p[1];
+        metaEl.appendChild(name);
+      } else {
+        metaEl.appendChild(document.createTextNode(p[1]));
+      }
+    });
+    if (parts.length) metaEl.setAttribute('dir', 'auto');
   }
 
   function appendMessage(role, content, attachmentName, ts, opts) {

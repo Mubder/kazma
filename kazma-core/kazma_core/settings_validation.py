@@ -192,6 +192,17 @@ def _agent_language(value: Any) -> str:
     return text
 
 
+def _chat_reasoning(value: Any) -> str:
+    """``agent.chat_reasoning``: one of the levels the chat's model calls send
+    (``agent/chat_reasoning.LEVELS``; 2026-11, roadmap theme 7)."""
+    from kazma_core.agent.chat_reasoning import LEVELS, parse_level
+
+    level = parse_level(value)
+    if level is None:
+        raise SettingRejected(f"agent.chat_reasoning must be one of {list(LEVELS)}")
+    return level
+
+
 def _max_iterations(value: Any) -> int:
     """``agent.max_iterations``: the range the runtime clamps to (FA-251:
     -7 and 999999 were stored, and the turn silently used 5 or 100)."""
@@ -270,6 +281,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     Built on first use: the key names are the owning modules' own constants,
     and importing those modules here at import time would load the swarm
     package for every settings read."""
+    from kazma_core.agent.chat_reasoning import CHAT_REASONING_KEY
     from kazma_core.agent.turn_budget import TURN_TIMEOUT_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
@@ -291,6 +303,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         TASK_RETENTION_KEY: (_task_retention, "swarm"),
         RETENTION_KEY: (_checkpoint_retention, "system"),
         TURN_TIMEOUT_KEY: (_turn_timeout, "agent"),
+        CHAT_REASONING_KEY: (_chat_reasoning, "agent"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
         RUNBOOKS_KEY: (validate_runbooks, None),
         "agent.language": (_agent_language, "agent"),

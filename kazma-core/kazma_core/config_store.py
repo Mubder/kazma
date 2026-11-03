@@ -3023,12 +3023,25 @@ def get_config_store() -> ConfigStore:
                         if attempt < attempts - 1:
                             time.sleep(_INIT_RETRY_BACKOFF_S)
                 if last_exc is not None:
-                    error = ConfigStoreUnavailableError(opening=True)
+                    error = ConfigStoreUnavailableError(opening=True, reason=_refusal_in(last_exc))
                     logger.critical("ConfigStore initialization failed: %s", error)
                     # Leave the singleton unset. The guard's next boot, or
                     # a later caller, can recover against the real database.
                     raise error from last_exc
     return _config_store
+
+
+def _refusal_in(exc: BaseException | None) -> str | None:
+    """The database's worded answer anywhere in *exc*'s chain
+    (``postgres_pool.PostgresUnreachable.reason``), or None."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, str) and reason:
+            return reason
+        exc = exc.__cause__ or exc.__context__
+    return None
 
 
 def is_volatile_store(store: Any) -> bool:

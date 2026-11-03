@@ -2170,6 +2170,24 @@
             <button class="btn btn-primary" @click="saveTurnTimeout()" :disabled="turnTimeoutSaving || turnTimeout.source === 'env'">{{ t('settings.save_turn_timeout') }}</button>
         </div>
 
+        <!-- Reasoning before a chat answer (kazma_core.agent.chat_reasoning) -->
+        <div class="settings-group" id="chat-reasoning-section">
+            <h3>{{ t('settings.chat_reasoning_title') }}</h3>
+            <div class="form-group">
+                <label for="chat-reasoning-level">{{ t('settings.chat_reasoning_label') }}</label>
+                <select id="chat-reasoning-level" class="form-select" x-model="chatReasoning.level" style="max-width:260px">
+                    <option value="default">{{ t('settings.chat_reasoning_default') }}</option>
+                    <option value="off">{{ t('settings.chat_reasoning_off') }}</option>
+                    <option value="low">{{ t('settings.chat_reasoning_low') }}</option>
+                    <option value="high">{{ t('settings.chat_reasoning_high') }}</option>
+                    <option value="max">{{ t('settings.chat_reasoning_max') }}</option>
+                </select>
+                <div class="form-hint">{{ t('settings.chat_reasoning_hint') }}</div>
+                <div class="form-hint" x-show="chatReasoning.applies === false" x-cloak>{{ t('settings.chat_reasoning_not_applied') }}</div>
+            </div>
+            <button class="btn btn-primary" @click="saveChatReasoning()" :disabled="chatReasoningSaving">{{ t('settings.save_chat_reasoning') }}</button>
+        </div>
+
         <!-- Proxy Provider -->
         <div class="settings-group">
             <h3>{{ t('settings.proxy_title') }}</h3>

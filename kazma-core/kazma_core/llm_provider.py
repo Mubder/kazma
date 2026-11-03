@@ -41,6 +41,20 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+#: The reasoning efforts ``chat(reasoning=...)`` passes to an endpoint that
+#: takes them (DeepSeek's own API: ``reasoning_effort``, its default "high").
+#: ``"off"`` is the other value: thinking turned off.
+REASONING_EFFORTS = ("low", "high", "max")
+
+
+def is_deepseek_api(base_url: str) -> bool:
+    """True for DeepSeek's own API: the one endpoint whose reasoning switch
+    Kazma knows (``thinking`` / ``reasoning_effort``)."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(str(base_url or "")).hostname or "").lower()
+    return host == "deepseek.com" or host.endswith(".deepseek.com")
+
 
 def _http_status_is_transient(status_code: int | None) -> bool:
     """True for 429 / 5xx (AGENTS.md §3). None = no HTTP response (network)."""
@@ -1155,15 +1169,18 @@ class LLMProvider:
                 return response
 
             # ── Reasoning switch fallback ───────────────────────────────
-            # A DeepSeek model without the thinking switch may refuse the
-            # field: answer as before, with the model's own default.
-            if ("thinking" in payload and status_code in (400, 422)
-                    and "thinking" in detail_lower):
+            # A DeepSeek model without the thinking switch, or without an
+            # effort level, may refuse the field: answer as before, with the
+            # model's own default.
+            if (("thinking" in payload or "reasoning_effort" in payload)
+                    and status_code in (400, 422)
+                    and ("thinking" in detail_lower or "reasoning" in detail_lower)):
                 logger.warning(
-                    "Provider rejected the thinking switch (HTTP %s) — retrying without it.",
+                    "Provider rejected the reasoning switch (HTTP %s) — retrying without it.",
                     status_code,
                 )
                 payload.pop("thinking", None)
+                payload.pop("reasoning_effort", None)
                 try:
                     resp = await client.post("/chat/completions", json=payload)
                     resp.raise_for_status()
@@ -1414,16 +1431,19 @@ class LLMProvider:
             # its answer got 1,800 tokens of reasoning and no answer (live,
             # 2026-10-26). https://api-docs.deepseek.com/guides/thinking_mode/
             payload["thinking"] = {"type": "disabled"}
+        elif reasoning in REASONING_EFFORTS and self._is_deepseek_endpoint():
+            # Thinking stays on, at the effort asked (DeepSeek's OpenAI-format
+            # field; its default is "high"): the chat's own level, chosen in
+            # Settings (``agent/chat_reasoning.py``).
+            payload["reasoning_effort"] = reasoning
         return payload
 
     def _is_deepseek_endpoint(self) -> bool:
-        from urllib.parse import urlparse
-
-        host = (urlparse(str(self.config.base_url or "")).hostname or "").lower()
-        return host == "deepseek.com" or host.endswith(".deepseek.com")
+        return is_deepseek_api(str(self.config.base_url or ""))
 
     def can_turn_off_reasoning(self) -> bool:
-        """Whether ``chat(reasoning="off")`` reaches this endpoint as a switch.
+        """Whether ``chat(reasoning=...)`` reaches this endpoint as a switch:
+        ``"off"``, or an effort of :data:`REASONING_EFFORTS`.
 
         True only for DeepSeek's own API through this class's ``chat``: the
         providers with their own ``chat`` take no such argument, and no other
@@ -1554,6 +1574,7 @@ class LLMProvider:
         temperature: float | None = None,
         model: str | None = None,
         response_format: dict[str, Any] | None = None,
+        reasoning: str | None = None,
     ) -> Any:
         """Yield ``StreamDelta`` tokens then a final delta with ``response``.
 
@@ -1566,7 +1587,8 @@ class LLMProvider:
         await self._sync_gateway_async()
         if not stream_enabled():
             resp = await self.chat(
-                messages, tools, max_tokens, temperature, model, response_format
+                messages, tools, max_tokens, temperature, model, response_format,
+                reasoning=reasoning,
             )
             if resp.content:
                 yield StreamDelta(content=resp.content)
@@ -1575,7 +1597,7 @@ class LLMProvider:
 
         payload = await asyncio.to_thread(
             self._chat_payload,
-            messages, tools, max_tokens, temperature, model, response_format
+            messages, tools, max_tokens, temperature, model, response_format, reasoning
         )
         payload["stream"] = True
         # Best-effort: OpenAI/LiteLLM return usage on the last chunk.
@@ -1760,7 +1782,8 @@ class LLMProvider:
                         status_code,
                     )
                     resp = await self.chat(
-                        messages, tools, max_tokens, temperature, model, response_format
+                        messages, tools, max_tokens, temperature, model, response_format,
+                        reasoning=reasoning,
                     )
                     if resp.content and not _emitted_any:
                         yield StreamDelta(content=resp.content)
@@ -1812,7 +1835,8 @@ class LLMProvider:
                                 type(e).__name__,
                             )
                             resp = await self.chat(
-                                messages, tools, max_tokens, temperature, model, response_format
+                                messages, tools, max_tokens, temperature, model, response_format,
+                                reasoning=reasoning,
                             )
                             # S3-2: never re-yield content on top of partials the
                             # dead stream already emitted (duplicated-prefix bug).
