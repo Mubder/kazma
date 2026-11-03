@@ -16,6 +16,17 @@ Contract (matches _offsite_sync in backup/universal.py):
         Single-file upload (the universal backup sends ONE .zip per run).
         The folder-tree upload is gone (audit 2026-10-26 AUD-077): nothing
         called it, and it reported ``ok`` when one file of a thousand landed.
+    list_backups() -> {"ok": True, "names": [str, ...]} or {"ok": False, "error": str}
+        Every entry in the provider's ``kazma-backups`` folder, whole (paged
+        to the end, bounded at ``_LIST_MAX_PAGES``). The universal backup
+        keeps only the ones it named itself (``<epoch>.zip``).
+    delete_backup(name) -> {"ok": True} or {"ok": False, "error": str}
+        Removes one entry of that folder for good, so its space is freed --
+        except on OneDrive, whose API has no permanent delete for a personal
+        drive: the item goes to its recycle bin, which counts against the
+        quota until it is emptied (OneDrive empties it after 30 days).
+        Only ``backups.offsite.keep`` calls it (2026-11-03: Kazma kept every
+        copy, 4 a day at ~650 MB, until the owner deleted them by hand).
     test_connection() -> {"ok": bool, "message"|"error": str}
 """
 from __future__ import annotations
@@ -89,9 +100,10 @@ def _read_vault(key: str) -> str:
 def _webdav_tls_verify() -> bool:
     """TLS verification for WebDAV uploads (default ON).
 
-    The universal backup zip carries the plaintext ``.env`` (vault recovery
-    key), so a non-loopback WebDAV with certificate verification disabled is
-    a full secret-exfiltration surface. Verify defaults to on; set
+    The universal backup zip carries every database (chats, memory, the
+    encrypted vault; ``.env`` is left out since 2026-11, FA-215), so a
+    non-loopback WebDAV with certificate verification disabled hands all of
+    it to whoever sits on the path. Verify defaults to on; set
     ``backups.offsite.webdav.tls_verify=false`` only for self-signed lab
     servers (deep-audit 2026-08-19).
     """
@@ -142,9 +154,48 @@ class CloudSyncProvider(Protocol):
         """
         ...
 
+    async def list_backups(self) -> dict[str, Any]:
+        """Every entry of the backup folder: ``{ok, names}`` or ``{ok: False, error}``."""
+        ...
+
+    async def delete_backup(self, name: str) -> dict[str, Any]:
+        """Remove one entry of the backup folder for good: ``{ok}`` or ``{ok: False, error}``."""
+        ...
+
     def status(self) -> dict[str, Any]:
         """Return connection status for the UI."""
         ...
+
+
+#: A listing follows the provider's pages to the end, at most this many: a
+#: folder of 100 pages (100,000 entries on most providers) is not Kazma's.
+_LIST_MAX_PAGES = 100
+
+#: What a provider's listing or delete can raise and still answer ``ok:
+#: False``: the transport (``httpx``), a sign-in or folder refusal
+#: (``RuntimeError`` from the token and folder helpers), an answer that is
+#: not the JSON or the field expected (``ValueError``, ``KeyError``,
+#: ``TypeError``), a socket or file error (``OSError``). Anything else is a
+#: bug and is raised: ``_prune_offsite`` keeps the backup whole either way.
+PROVIDER_ERRORS: tuple[type[BaseException], ...] = (
+    httpx.HTTPError, RuntimeError, ValueError, KeyError, TypeError, OSError,
+)
+
+
+def _ftp_errors() -> tuple[type[BaseException], ...]:
+    """``ftplib``'s own errors beside the provider's (imported where used)."""
+    import ftplib  # nosec B402 - FTPS preferred in _connect; plaintext is a warned fallback
+
+    return (*ftplib.all_errors, *PROVIDER_ERRORS)
+
+
+def _backup_name_ok(name: str) -> bool:
+    """A name ``delete_backup`` may act on: one plain entry of the folder."""
+    return bool(name) and name not in (".", "..") and "/" not in name and "\\" not in name
+
+
+def _refuse_name(name: str) -> dict[str, Any]:
+    return {"ok": False, "error": f"not a backup name: {name!r}"}
 
 
 # ─── Google Drive ──────────────────────────────────────────────────────
@@ -288,6 +339,46 @@ def _google_drive_error(resp: Any) -> str:
     return base
 
 
+def _gdrive_quote(value: str) -> str:
+    """A value inside a single-quoted Drive query string."""
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+async def _gdrive_folder_files(
+    client: httpx.AsyncClient, token: str, folder_id: str, *, name: str | None = None
+) -> list[dict[str, Any]]:
+    """Every file in one Drive folder, all pages, or only the ones called ``name``.
+
+    Drive lets two files share a name, so a delete by name takes each of them.
+    Raises ``RuntimeError`` with Drive's reason, or when the folder runs past
+    ``_LIST_MAX_PAGES``: a listing that is not whole is never pruned from.
+    """
+    query = f"'{_gdrive_quote(folder_id)}' in parents and trashed=false"
+    if name is not None:
+        query += f" and name='{_gdrive_quote(name)}'"
+    files: list[dict[str, Any]] = []
+    page_token = ""
+    for _ in range(_LIST_MAX_PAGES):
+        params: dict[str, Any] = {
+            "q": query,
+            "fields": "nextPageToken,files(id,name)",
+            "pageSize": 1000,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        resp = await client.get(
+            _GDRIVE_FILES_URL, params=params, headers={"Authorization": f"Bearer {token}"}
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(_google_drive_error(resp))
+        data = resp.json() or {}
+        files.extend(f for f in data.get("files") or [] if f.get("id") and f.get("name"))
+        page_token = str(data.get("nextPageToken") or "")
+        if not page_token:
+            return files
+    raise RuntimeError(f"the backup folder runs past {_LIST_MAX_PAGES} pages")
+
+
 class GoogleDriveSync:
     """Google Drive backup via the existing Gmail OAuth tokens.
 
@@ -391,6 +482,36 @@ class GoogleDriveSync:
         if resp.status_code in (200, 201):
             return {"ok": True, "remote": display, "files": 1}
         return {"ok": False, "remote": display, "error": _google_drive_error(resp)}
+
+    async def list_backups(self) -> dict[str, Any]:
+        try:
+            token = await self._get_access_token()
+            root_id = await self._ensure_folder(token, _GDRIVE_ROOT_FOLDER)
+            async with httpx.AsyncClient(timeout=30, verify=shared_ssl_context()) as client:
+                files = await _gdrive_folder_files(client, token, root_id)
+        except PROVIDER_ERRORS as exc:  # the answer carries it
+            return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": True, "names": sorted({str(f["name"]) for f in files})}
+
+    async def delete_backup(self, name: str) -> dict[str, Any]:
+        """Deletes for good, not to the trash: a trashed file keeps its space."""
+        if not _backup_name_ok(name):
+            return _refuse_name(name)
+        try:
+            token = await self._get_access_token()
+            root_id = await self._ensure_folder(token, _GDRIVE_ROOT_FOLDER)
+            async with httpx.AsyncClient(timeout=30, verify=shared_ssl_context()) as client:
+                for entry in await _gdrive_folder_files(client, token, root_id, name=name):
+                    resp = await client.delete(
+                        f"{_GDRIVE_FILES_URL}/{quote(str(entry['id']), safe='')}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    # 404: gone already (another run, or the owner), which is the goal.
+                    if resp.status_code not in (200, 204, 404):
+                        return {"ok": False, "error": _google_drive_error(resp)}
+        except PROVIDER_ERRORS as exc:  # the answer carries it
+            return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": True}
 
     async def test_connection(self) -> dict[str, Any]:
         try:
@@ -621,6 +742,49 @@ class OneDriveSync:
             return {"ok": True, "remote": display, "files": 1, "size": size}
         return {"ok": False, "remote": display, "error": f"Graph API error: {resp.status_code}"}
 
+    async def list_backups(self) -> dict[str, Any]:
+        try:
+            token = await self._get_access_token()
+            names: list[str] = []
+            url: str | None = f"{_MS_GRAPH_DRIVE}:/{quote(_MS_ROOT_FOLDER)}:/children?$select=name&$top=1000"
+            async with httpx.AsyncClient(timeout=30, verify=shared_ssl_context()) as client:
+                for _ in range(_LIST_MAX_PAGES):
+                    resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+                    if resp.status_code == 404:
+                        # No folder yet: nothing was ever uploaded.
+                        return {"ok": True, "names": []}
+                    if resp.status_code != 200:
+                        return {"ok": False, "error": f"Graph API error: {resp.status_code}"}
+                    data = resp.json()
+                    names.extend(str(item.get("name") or "") for item in data.get("value") or [])
+                    url = data.get("@odata.nextLink")
+                    if not url:
+                        return {"ok": True, "names": sorted(n for n in names if n)}
+                    # The token goes to Graph only, never to a link an answer names.
+                    if not str(url).startswith("https://graph.microsoft.com/"):
+                        return {"ok": False, "error": "Graph answered a next page off graph.microsoft.com"}
+            return {"ok": False, "error": f"the backup folder runs past {_LIST_MAX_PAGES} pages"}
+        except PROVIDER_ERRORS as exc:  # the answer carries it
+            return {"ok": False, "error": str(exc)[:300]}
+
+    async def delete_backup(self, name: str) -> dict[str, Any]:
+        if not _backup_name_ok(name):
+            return _refuse_name(name)
+        try:
+            token = await self._get_access_token()
+            async with httpx.AsyncClient(timeout=30, verify=shared_ssl_context()) as client:
+                resp = await client.delete(
+                    f"{_MS_GRAPH_DRIVE}:/{quote(f'{_MS_ROOT_FOLDER}/{name}')}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+        except PROVIDER_ERRORS as exc:  # the answer carries it
+            return {"ok": False, "error": str(exc)[:300]}
+        # 404: gone already, which is the goal. (OneDrive keeps a deleted item
+        # in its recycle bin, which counts against the quota until emptied.)
+        if resp.status_code in (200, 204, 404):
+            return {"ok": True}
+        return {"ok": False, "error": f"Graph API error: {resp.status_code}"}
+
     async def test_connection(self) -> dict[str, Any]:
         try:
             token = await self._get_access_token()
@@ -651,6 +815,37 @@ class OneDriveSync:
 
 
 # ─── WebDAV (WD MyCloud OS5 / any WebDAV server) ───────────────────────
+
+
+def _webdav_child_names(body: bytes, folder_url: str) -> list[str] | None:
+    """The entries a ``Depth: 1`` PROPFIND of *folder_url* lists, else None.
+
+    Each ``<href>`` is matched by local name (servers differ in namespace
+    prefixes) and may be a path or a whole URL; the folder's own entry is
+    left out. The body comes from the network: the guarded parser reads it,
+    and an answer it cannot read is None, so nothing is pruned from it.
+    """
+    from urllib.parse import urlparse
+
+    from kazma_core.security.safe_xml import UnsafeXMLError, parse_untrusted_xml
+
+    try:
+        root = parse_untrusted_xml(body)
+    except (UnsafeXMLError, ValueError, SyntaxError) as exc:
+        logger.warning("[cloud_sync] WebDAV answered XML that could not be read: %s", exc)
+        return None
+    own = unquote(urlparse(folder_url).path).rstrip("/")
+    names: set[str] = set()
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "href":
+            continue
+        path = unquote(urlparse((element.text or "").strip()).path).rstrip("/")
+        if not path or path == own:
+            continue
+        name = path.rsplit("/", 1)[-1]
+        if name:
+            names.add(name)
+    return sorted(names)
 
 
 class WebDAVSync:
@@ -692,6 +887,42 @@ class WebDAVSync:
         if resp.status_code in (200, 201, 204):
             return {"ok": True, "remote": display, "files": 1, "size": size}
         return {"ok": False, "remote": display, "error": f"WebDAV error: HTTP {resp.status_code}"}
+
+    async def list_backups(self) -> dict[str, Any]:
+        url, username, password = await asyncio.to_thread(self._get_config)
+        if not url:
+            return {"ok": False, "error": "WebDAV URL not configured"}
+        auth = (username, password) if username else None
+        folder = f"{url}/{self._ROOT_FOLDER}/"
+        try:
+            async with httpx.AsyncClient(timeout=30, verify=await asyncio.to_thread(_webdav_tls_verify)) as client:
+                resp = await client.request("PROPFIND", folder, auth=auth, headers={"Depth": "1"})
+        except PROVIDER_ERRORS as exc:  # the answer carries it
+            return {"ok": False, "error": str(exc)[:300]}
+        if resp.status_code == 404:
+            return {"ok": True, "names": []}
+        if resp.status_code not in (200, 207):
+            return {"ok": False, "error": f"WebDAV error: HTTP {resp.status_code}"}
+        names = _webdav_child_names(resp.content, folder)
+        if names is None:
+            return {"ok": False, "error": "WebDAV answered a listing that could not be read"}
+        return {"ok": True, "names": names}
+
+    async def delete_backup(self, name: str) -> dict[str, Any]:
+        if not _backup_name_ok(name):
+            return _refuse_name(name)
+        url, username, password = await asyncio.to_thread(self._get_config)
+        if not url:
+            return {"ok": False, "error": "WebDAV URL not configured"}
+        auth = (username, password) if username else None
+        try:
+            async with httpx.AsyncClient(timeout=60, verify=await asyncio.to_thread(_webdav_tls_verify)) as client:
+                resp = await client.delete(f"{url}/{self._ROOT_FOLDER}/{quote(name)}", auth=auth)
+        except PROVIDER_ERRORS as exc:  # the answer carries it
+            return {"ok": False, "error": str(exc)[:300]}
+        if resp.status_code in (200, 204, 404):
+            return {"ok": True}
+        return {"ok": False, "error": f"WebDAV error: HTTP {resp.status_code}"}
 
     async def test_connection(self) -> dict[str, Any]:
         url, username, password = await asyncio.to_thread(self._get_config)
@@ -845,6 +1076,82 @@ class FTPSync:
         except Exception as exc:
             return {"ok": False, "remote": display, "error": f"FTP error: {exc}"}
 
+    def _root(self, cfg: dict[str, Any]) -> str:
+        return f"{cfg['path']}/{self._ROOT_FOLDER}" if cfg["path"] else self._ROOT_FOLDER
+
+    @staticmethod
+    def _quit(ftp: Any) -> None:
+        try:
+            ftp.quit()
+        except _ftp_errors() as exc:  # the work is done; the goodbye is not
+            logger.debug("[backup.ftp] quit failed: %s", exc)
+
+    async def list_backups(self) -> dict[str, Any]:
+        cfg = await asyncio.to_thread(self._get_config)
+        if not cfg["host"]:
+            return {"ok": False, "error": "FTP host not configured"}
+
+        def _run() -> list[str]:
+            import ftplib  # nosec B402 - FTPS preferred in _connect; plaintext is a warned fallback
+
+            ftp = self._connect(cfg)
+            try:
+                try:
+                    ftp.cwd(self._root(cfg))
+                except ftplib.error_perm:
+                    return []  # no folder yet: nothing was ever uploaded
+                try:
+                    listed = ftp.nlst()
+                except ftplib.error_perm as exc:
+                    # Many servers answer an empty folder with "550 No files
+                    # found". Read as empty, which deletes nothing.
+                    if str(exc).startswith("550"):
+                        return []
+                    raise
+                return sorted({str(n).replace("\\", "/").rsplit("/", 1)[-1] for n in listed} - {"", ".", ".."})
+            finally:
+                self._quit(ftp)
+
+        try:
+            return {"ok": True, "names": await asyncio.to_thread(_run)}
+        except _ftp_errors() as exc:  # the answer carries it
+            return {"ok": False, "error": f"FTP error: {exc}"}
+
+    async def delete_backup(self, name: str) -> dict[str, Any]:
+        if not _backup_name_ok(name):
+            return _refuse_name(name)
+        cfg = await asyncio.to_thread(self._get_config)
+        if not cfg["host"]:
+            return {"ok": False, "error": "FTP host not configured"}
+
+        def _run() -> None:
+            import ftplib  # nosec B402 - FTPS preferred in _connect; plaintext is a warned fallback
+
+            ftp = self._connect(cfg)
+            try:
+                ftp.cwd(self._root(cfg))
+                try:
+                    ftp.delete(name)
+                except ftplib.error_perm as exc:
+                    # 550: no such file, gone already, which is the goal --
+                    # unless it is still listed (the server refused the delete).
+                    if not str(exc).startswith("550"):
+                        raise
+                    try:
+                        still = name in {str(n).replace("\\", "/").rsplit("/", 1)[-1] for n in ftp.nlst()}
+                    except ftplib.error_perm:
+                        still = False  # "550 No files found": the folder is empty
+                    if still:
+                        raise
+            finally:
+                self._quit(ftp)
+
+        try:
+            await asyncio.to_thread(_run)
+        except _ftp_errors() as exc:  # the answer carries it
+            return {"ok": False, "error": f"FTP error: {exc}"}
+        return {"ok": True}
+
     async def test_connection(self) -> dict[str, Any]:
         cfg = await asyncio.to_thread(self._get_config)
         if not cfg["host"]:
@@ -921,6 +1228,39 @@ def _s3_xml_text(body: bytes, tag: str) -> str:
         if element.tag.rsplit("}", 1)[-1] == tag:
             return (element.text or "").strip()
     return ""
+
+
+def _s3_list_page(body: bytes) -> tuple[list[str], str] | None:
+    """One ListObjectsV2 page: the object keys and the next page's token.
+
+    The token is '' on the last page. None when the answer cannot be read,
+    is an ``<Error>``, or says there is more without saying where: a listing
+    that is not whole must not be pruned from.
+    """
+    from kazma_core.security.safe_xml import UnsafeXMLError, parse_untrusted_xml
+
+    try:
+        root = parse_untrusted_xml(body)
+    except (UnsafeXMLError, ValueError, SyntaxError) as exc:
+        logger.warning("[cloud_sync] S3 answered a listing that could not be read: %s", exc)
+        return None
+    if root.tag.rsplit("}", 1)[-1] != "ListBucketResult":
+        return None
+    keys: list[str] = []
+    truncated = False
+    token = ""
+    for element in root.iter():
+        local = element.tag.rsplit("}", 1)[-1]
+        text = (element.text or "").strip()
+        if local == "Key" and text:
+            keys.append(text)
+        elif local == "IsTruncated":
+            truncated = text.lower() == "true"
+        elif local == "NextContinuationToken":
+            token = text
+    if truncated and not token:
+        return None
+    return keys, token if truncated else ""
 
 
 class S3Sync:
@@ -1153,6 +1493,51 @@ class S3Sync:
         except ValueError:
             size = 0
         return {"ok": True, "size": size}
+
+    async def list_backups(self) -> dict[str, Any]:
+        config = await asyncio.to_thread(self._get_config)
+        if not config["access_key"] or not config["bucket"]:
+            return {"ok": False, "error": "S3 not configured"}
+        prefix = f"{self._ROOT_FOLDER}/"
+        base = f"{self._build_url(config, '').rstrip('/')}?list-type=2&prefix={quote(prefix, safe='')}"
+        names: list[str] = []
+        token = ""
+        try:
+            async with httpx.AsyncClient(timeout=30, verify=shared_ssl_context()) as client:
+                for _ in range(_LIST_MAX_PAGES):
+                    url = base + (f"&continuation-token={quote(token, safe='')}" if token else "")
+                    signed = await asyncio.to_thread(self._sign_request, "GET", url, {}, None, config)
+                    resp = await client.get(url, headers=signed)
+                    if resp.status_code != 200:
+                        return {"ok": False, "error": f"S3 error: HTTP {resp.status_code} listing the backups"}
+                    page = _s3_list_page(resp.content)
+                    if page is None:
+                        return {"ok": False, "error": "S3 answered a listing that could not be read"}
+                    keys, token = page
+                    names.extend(k[len(prefix):] for k in keys if k.startswith(prefix))
+                    if not token:
+                        return {"ok": True, "names": sorted(n for n in names if n and "/" not in n)}
+        except PROVIDER_ERRORS as exc:  # the answer carries it
+            return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": f"the backup folder runs past {_LIST_MAX_PAGES} pages"}
+
+    async def delete_backup(self, name: str) -> dict[str, Any]:
+        if not _backup_name_ok(name):
+            return _refuse_name(name)
+        config = await asyncio.to_thread(self._get_config)
+        if not config["access_key"] or not config["bucket"]:
+            return {"ok": False, "error": "S3 not configured"}
+        url = self._build_url(config, f"{self._ROOT_FOLDER}/{name}")
+        try:
+            signed = await asyncio.to_thread(self._sign_request, "DELETE", url, {}, None, config)
+            async with httpx.AsyncClient(timeout=30, verify=shared_ssl_context()) as client:
+                resp = await client.delete(url, headers=signed)
+        except PROVIDER_ERRORS as exc:  # the answer carries it
+            return {"ok": False, "error": str(exc)[:300]}
+        # S3 answers 204 whether or not the object was there.
+        if resp.status_code in (200, 204, 404):
+            return {"ok": True}
+        return {"ok": False, "error": f"S3 error: HTTP {resp.status_code}"}
 
     async def test_connection(self) -> dict[str, Any]:
         config = await asyncio.to_thread(self._get_config)

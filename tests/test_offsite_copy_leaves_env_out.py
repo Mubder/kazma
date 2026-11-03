@@ -60,6 +60,7 @@ def test_the_rclone_copy_excludes_env(backup, monkeypatch):
     monkeypatch.setattr(subprocess, "run", run)
     result = universal._offsite_sync(backup)
     assert result.get("ok") is True, result
-    argv = seen[-1]
+    # The copy, not the listing of old copies that follows it.
+    argv = next(a for a in seen if a[:2] == ["rclone", "copy"])
     assert argv[argv.index("--exclude") + 1] == "/.env"
     assert argv.index("--exclude") < argv.index("--")

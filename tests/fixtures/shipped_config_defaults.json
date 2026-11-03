@@ -8,6 +8,7 @@
  "agent.version": "0.11.0",
  "backups.extra_paths": "research",
  "backups.offsite.enabled": true,
+ "backups.offsite.keep": 7,
  "backups.offsite.rclone_remote": "",
  "backups.pg.enabled": true,
  "backups.pg.retention": 7,

@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Old cloud backup copies are deleted (2026-11-03)
+
+- Kazma now keeps only the newest cloud copies of its backups. New setting,
+  Settings -> Backup -> Keep cloud copies (`backups.offsite.keep`, default 7;
+  0 keeps every copy): after each upload that succeeds, the copies older
+  than that are deleted from the provider's `kazma-backups` folder, oldest
+  first, for good. Every provider deletes (Google Drive, OneDrive, WebDAV,
+  FTP, S3, and an rclone remote). Nothing is deleted when the listing could
+  not be read whole or does not show the copy just made; a copy that could
+  not be deleted raises the alert `backup.offsite_prune_failed` and is tried
+  again at the next backup. Before this every copy stayed -- a 344 MB zip
+  every six hours on the live install, deleted by hand.
+
 ## Secret files and the database login (2026-11-03)
 
 - The security report now checks every secret file of the install, not only

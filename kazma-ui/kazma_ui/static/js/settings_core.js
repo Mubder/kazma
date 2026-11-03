@@ -394,6 +394,7 @@
         backupList: [],
         backupListLoaded: false,
         backupRetention: 7,
+        offsiteKeep: 7,
         _backupPollId: null,
 
         // ── Offsite Backup ──

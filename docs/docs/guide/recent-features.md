@@ -9,6 +9,14 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-03 — old cloud backup copies are deleted.** Settings →
+Backup → **Keep cloud copies** (default 7, 0 keeps every copy): after each
+upload that succeeds, Kazma deletes its older copies from the provider's
+`kazma-backups` folder, on every provider and rclone alike, and never from a
+listing it could not read whole; a copy it could not delete raises the alert
+`backup.offsite_prune_failed` and is tried again at the next backup (see
+[Disaster recovery](../ops/disaster-recovery.md)).
+
 **New in 2026-10-16 through 2026-10-21 — approvals, forgetting, documents
 and tools that answer in one call.** An X card offers one approval and Deny,
 names what it does ("Post now"), and a draft the agent saves is posted only

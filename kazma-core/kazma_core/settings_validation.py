@@ -214,6 +214,20 @@ def _max_iterations(value: Any) -> int:
     return number
 
 
+def _offsite_keep(value: Any) -> int:
+    """``backups.offsite.keep``: a whole number, 0 keeps every offsite copy.
+
+    Refused rather than read as the default (the reader's forgiving rule,
+    :func:`kazma_core.backup.universal.offsite_keep`, is for a row already
+    stored): a form that sends -1 or "seven" must hear it was not saved."""
+    from kazma_core.backup.universal import OFFSITE_KEEP_KEY
+
+    number = _shipped_type_value(OFFSITE_KEEP_KEY, value, int)
+    if number < 0:
+        raise SettingRejected(f"{OFFSITE_KEEP_KEY} must be 0 (keep every copy) or more")
+    return number
+
+
 def shipped_values() -> dict[str, Any]:
     """Every setting ``kazma.yaml`` ships, dotted key -> value (blocking: a
     parse cached by the files' version)."""
@@ -283,6 +297,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     package for every settings read."""
     from kazma_core.agent.chat_reasoning import CHAT_REASONING_KEY
     from kazma_core.agent.turn_budget import TURN_TIMEOUT_KEY
+    from kazma_core.backup.universal import OFFSITE_KEEP_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
     from kazma_core.documents.config import OCR_ENGINE_KEY
@@ -308,6 +323,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         RUNBOOKS_KEY: (validate_runbooks, None),
         "agent.language": (_agent_language, "agent"),
         "agent.max_iterations": (_max_iterations, "agent"),
+        OFFSITE_KEEP_KEY: (_offsite_keep, "backups"),
     }
 
 
