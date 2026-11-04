@@ -61,6 +61,9 @@ Configuration (all optional, env vars):
     KAZMA_GUARD_BROKER_IMAGE    pin the worker image (default: the one built
                                 for the code on disk)
     KAZMA_GUARD_BROKER_SCRIPT   the broker program (default: worker_broker.py)
+    KAZMA_GUARD_START_DEPENDENCIES  auto (default: start Docker Desktop, and
+                                Kazma's own stopped containers, when the
+                                engine does not answer) | off
 """
 
 from __future__ import annotations
@@ -162,7 +165,7 @@ GUARD_ACK_S = 20.0
 #                 (state ``pause_held`` = that pause's ``since``).
 #   document_broker -- runs the document worker broker beside Kazma when
 #                 Kazma asks (state ``document_broker``; see DocumentBroker).
-GUARD_FEATURES = ("pause_held", "document_broker")
+GUARD_FEATURES = ("pause_held", "document_broker", "dependencies")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -2243,8 +2246,10 @@ class DocumentBroker:
                      retry_every_s=BROKER_RETRY_S)
         self.state, self.detail = state, detail
         self._next_start = now + BROKER_RETRY_S
+        deps = getattr(self.guard, "deps", None)
         if (state == "docker_unavailable" and now - self._episode_since >= BROKER_ENGINE_PAGE_AFTER_S
-                and self._paged != state):
+                and self._paged != state
+                and not (deps is not None and deps.owns_engine_alerts())):
             self._paged = state
             self.guard._page(
                 "warn", "Docker does not answer: documents are refused",
@@ -2351,6 +2356,581 @@ class DocumentBroker:
         _update_state(document_broker=self.record())
 
 
+# -- Kazma's own dependencies (Docker Desktop, its containers) ---------
+#
+# Live 2026-11-03: topgrade updated Docker Desktop, which then stayed stopped.
+# Kazma's database is a container (kazma-db-win), so Kazma could not become
+# healthy, and the guard restarted it about 34 times over eleven hours
+# ("never became healthy ... attempt 34"). Nothing on the machine was going to
+# start Docker again: Docker Desktop starts at sign-in, and the update had
+# already happened after it. The guard starts it now:
+#
+#   * Docker is wanted when Kazma's record names a container
+#     (kazma_core/guard_dependencies.py writes it, to the file the guard hands
+#     over in KAZMA_GUARD_DEPENDENCIES_FILE) or the document broker is wanted.
+#     Nothing else makes the guard touch Docker.
+#   * The engine down past a grace period, and nothing already on the way
+#     (Docker Desktop running and starting, its installer running, a launch of
+#     ours within its wait), the guard launches Docker Desktop -- into the
+#     signed-in user's session: the guard runs in its own logon session, where
+#     a GUI program would never show and Docker Desktop does not start. A
+#     scheduled task of the guard's own account (KazmaDockerDesktop, run only
+#     on demand) does that. Nobody signed in, or the guard running as SYSTEM:
+#     nothing to launch into, said once.
+#   * Containers are `unless-stopped`, so Docker brings them back itself. Only
+#     a container Kazma's record names, stopped after the engine came back
+#     (and not seen running since), is started: never created, stopped or
+#     removed, and never one Kazma does not use.
+#   * One page per outage, once it has lasted DEPS_PAGE_AFTER_S, and one when
+#     Docker answers again; the restart backoff then ends early, so Kazma comes
+#     back within seconds of its database.
+
+DEPS_MODE_ENV = "KAZMA_GUARD_START_DEPENDENCIES"
+DEPS_MODES = ("auto", "off")
+#: How often Docker is asked while it answers, and while it does not.
+DEPS_CHECK_EVERY_S = 60.0
+DEPS_CHECK_DOWN_S = 15.0
+#: The engine down this long before the guard launches Docker Desktop: a
+#: restart Docker makes itself (an update, a switch of engine) takes about a
+#: minute, and Docker Desktop started at sign-in is not ready at once.
+DEPS_ENGINE_GRACE_S = 120.0
+#: A launch of ours is given this long to answer before it counts as failed.
+DEPS_LAUNCH_WAIT_S = 240.0
+#: Between launches that did not bring the engine up, by consecutive failure.
+DEPS_LAUNCH_BACKOFF_S = (300.0, 900.0, 1800.0)
+#: The outage paged once it has lasted this long.
+DEPS_PAGE_AFTER_S = 600.0
+#: The engine back this long before a stopped container is started: Docker
+#: restarts `unless-stopped` containers itself, in the first seconds.
+DEPS_CONTAINER_SETTLE_S = 60.0
+#: Between starts of a container that would not start, by consecutive failure.
+DEPS_CONTAINER_BACKOFF_S = (60.0, 300.0, 900.0)
+#: Failed starts of one container in a row before the one page about it.
+DEPS_CONTAINER_PAGE_AFTER = 3
+DEPS_TASK_NAME = "KazmaDockerDesktop"
+#: Docker Desktop's own processes (lowercase image names): one running means
+#: Docker is already on the way, and the guard launches nothing.
+_DESKTOP_IMAGES = frozenset({"docker desktop.exe", "com.docker.backend.exe"})
+#: An update in progress: never launch Docker under its installer.
+_INSTALLER_IMAGES = frozenset({"docker desktop installer.exe", "dockerdesktopinstaller.exe"})
+_CONTAINER_NAME_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _deps_mode() -> str:
+    raw = (os.environ.get(DEPS_MODE_ENV) or "auto").strip().lower()
+    return raw if raw in DEPS_MODES else "auto"
+
+
+def _deps_record_path() -> Path:
+    return _broker_file("guard_dependencies.json")
+
+
+def _valid_container_name(name: object) -> bool:
+    """Docker's own rule for a name, checked here before a name read from a
+    file reaches ``docker start``."""
+    return (isinstance(name, str) and 0 < len(name) <= 128 and name[0] not in "_.-"
+            and set(name) <= _CONTAINER_NAME_CHARS)
+
+
+def _run_command(cmd: list[str], timeout: float) -> tuple[int, str, str] | None:
+    """(exit code, stdout, stderr) of *cmd*, or None when it could not run."""
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, check=False, creationflags=_NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return result.returncode, result.stdout or "", result.stderr or ""
+
+
+_DOCKER_CLI_MODULE = None
+
+
+def _docker_cli_module():
+    """kazma_core/docker_cli.py, loaded by path (standard library only)."""
+    global _DOCKER_CLI_MODULE
+    if _DOCKER_CLI_MODULE is None:
+        import importlib.util
+
+        path = REPO_ROOT / "kazma-core" / "kazma_core" / "docker_cli.py"
+        name = "kazma_guard_docker_cli"
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        _DOCKER_CLI_MODULE = module
+    return _DOCKER_CLI_MODULE
+
+
+def _docker_cli() -> str | None:
+    """The docker CLI, found the way Kazma finds it (KAZMA_DOCKER_BIN, PATH,
+    Docker's install folders), or None."""
+    try:
+        return _docker_cli_module().find_docker_cli()
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return None
+
+
+def _docker_desktop_exe(cli: str) -> Path | None:
+    """Docker Desktop's program (Windows): beside the CLI it ships
+    (``...\\Docker\\resources\\bin\\docker.exe``), else its install folder."""
+    candidates: list[Path] = []
+    try:
+        candidates.append(Path(cli).parents[2] / "Docker Desktop.exe")
+    except IndexError:
+        pass
+    for var in ("ProgramFiles", "ProgramW6432"):
+        root = os.environ.get(var)
+        if root:
+            candidates.append(Path(root) / "Docker" / "Docker" / "Docker Desktop.exe")
+    candidates.append(Path(r"C:\Program Files\Docker\Docker\Docker Desktop.exe"))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _docker_desktop_task_xml(user: str, exe: str) -> str:
+    """The on-demand task that starts Docker Desktop in *user*'s signed-in
+    session (an interactive token: it runs only while they are signed in)."""
+    from xml.sax.saxutils import escape
+
+    return (
+        '<?xml version="1.0" encoding="UTF-16"?>'
+        '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
+        "<RegistrationInfo><Description>Started by Kazma's guard to bring Docker Desktop "
+        "back when its engine is down.</Description></RegistrationInfo>"
+        "<Triggers />"
+        f'<Principals><Principal id="Author"><UserId>{escape(user)}</UserId>'
+        "<LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel>"
+        "</Principal></Principals>"
+        "<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+        "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"
+        "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
+        "<AllowHardTerminate>false</AllowHardTerminate>"
+        "<StartWhenAvailable>false</StartWhenAvailable>"
+        "<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>"
+        "<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle>"
+        "</IdleSettings><AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled>"
+        "<Hidden>false</Hidden><RunOnlyIfIdle>false</RunOnlyIfIdle><WakeToRun>false</WakeToRun>"
+        "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>4</Priority></Settings>"
+        f'<Actions Context="Author"><Exec><Command>{escape(exe)}</Command></Exec></Actions>'
+        "</Task>"
+    )
+
+
+def _guard_account() -> str:
+    """``DOMAIN\\user`` the guard runs as (Windows), or ""."""
+    got = _run_command(["whoami"], 20)
+    return got[1].strip() if got and got[0] == 0 else ""
+
+
+def _running_images() -> set[str]:
+    """Lowercase image names of every running process (Windows), or empty."""
+    return {name.lower() for name in _process_names().values()}
+
+
+def _launch_docker_desktop(cli: str) -> tuple[bool, str]:
+    """Start Docker Desktop. (started, what happened)."""
+    if os.name != "nt":
+        got = _run_command([cli, "desktop", "start", "-d"], 60)
+        if got is None:
+            return False, "docker desktop start could not run"
+        return got[0] == 0, (got[2] or got[1]).strip()[:300] or f"exit {got[0]}"
+    exe = _docker_desktop_exe(cli)
+    if exe is None:
+        return False, "Docker Desktop.exe was not found"
+    user = _guard_account()
+    if not user:
+        return False, "the guard's account could not be read"
+    xml_path = _broker_file("docker_desktop_task.xml")
+    try:
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        xml_path.write_bytes(_docker_desktop_task_xml(user, str(exe)).encode("utf-16"))
+        made = _run_command(
+            ["schtasks", "/Create", "/XML", str(xml_path), "/TN", DEPS_TASK_NAME, "/F"], 30)
+    finally:
+        try:
+            xml_path.unlink()
+        except OSError:
+            pass
+    if made is None or made[0] != 0:
+        why = (made[2] or made[1]).strip()[:300] if made else "schtasks could not run"
+        return False, f"the task could not be registered: {why}"
+    ran = _run_command(["schtasks", "/Run", "/TN", DEPS_TASK_NAME], 30)
+    if ran is None or ran[0] != 0:
+        why = (ran[2] or ran[1]).strip()[:300] if ran else "schtasks could not run"
+        return False, f"the task could not be run: {why}"
+    return True, f"started {exe.name} through the {DEPS_TASK_NAME} task"
+
+
+class Dependencies:
+    """Docker Desktop and the containers Kazma uses (see the section comment).
+
+    Ticked from the guard's own loop, like :class:`DocumentBroker`, so the
+    guard stays one thread; a check runs every DEPS_CHECK_EVERY_S (every
+    DEPS_CHECK_DOWN_S while Docker does not answer), each docker call bounded.
+    Never raises out of a tick, and never stops, kills or removes anything.
+    """
+
+    def __init__(self, guard: Guard) -> None:
+        self.guard = guard
+        self.log = guard.log
+        self.mode = _deps_mode()
+        self.state = "off" if self.mode == "off" else "idle"
+        self.detail = ""
+        self.held = False
+        self.cli: str | None = None
+        self._cli_said = False
+        self._next_check = 0.0
+        self.engine_up: bool | None = None
+        self._down_since: float | None = None
+        self._up_since: float | None = None
+        self._seen_down = False      # an outage since the guard started
+        self._launched_at: float | None = None
+        self._launch_failures = 0
+        self._next_launch = 0.0
+        self._launches = 0
+        self._nudged = False
+        self._paged = False
+        self._said = ""              # the waiting state last logged
+        self._recovered = False
+        self._exited_seen: dict[str, int] = {}
+        self._ran_since_up: set[str] = set()
+        self._start_failures: dict[str, int] = {}
+        self._next_start: dict[str, float] = {}
+        self._container_paged: set[str] = set()
+        self._left_alone: set[str] = set()
+        self.containers: list[str] = []
+
+    # -- what Kazma is handed ------------------------------------------
+
+    def server_env(self) -> dict[str, str]:
+        """Where the server records the containers it uses (empty when off)."""
+        if self.mode == "off":
+            return {}
+        return {"KAZMA_GUARD_DEPENDENCIES_FILE": str(_deps_record_path())}
+
+    def recorded_containers(self) -> list[str]:
+        """The containers Kazma's record names, valid names only."""
+        try:
+            data = json.loads(_deps_record_path().read_text(encoding="utf-8") or "{}")
+        except (OSError, ValueError):
+            return []
+        rows = data.get("containers") if isinstance(data, dict) else None
+        names: list[str] = []
+        for row in rows if isinstance(rows, list) else []:
+            name = row.get("name") if isinstance(row, dict) else None
+            if _valid_container_name(name) and name not in names:
+                names.append(name)
+        return names
+
+    # -- lifecycle -------------------------------------------------------
+
+    def on_guard_start(self) -> None:
+        self._write()
+
+    def before_spawn(self) -> None:
+        try:
+            self.held = False
+            # A spawn is what a recovery wakes the backoff for: one noted
+            # before it is spent, and must not end a later backoff early.
+            self._recovered = False
+        except Exception as exc:  # noqa: BLE001 -- see the class docstring
+            self._internal(exc)
+
+    def on_pause(self) -> None:
+        """Maintenance: the guard starts nothing while it holds."""
+        self.held = True
+
+    def take_recovered(self) -> bool:
+        """True once after Docker answered again following an outage (the
+        restart backoff then ends early)."""
+        recovered, self._recovered = self._recovered, False
+        return recovered
+
+    def owns_engine_alerts(self) -> bool:
+        """Whether this class pages about Docker (the broker then does not):
+        only while it watches the engine (not off, not idle -- nothing wanted,
+        or not checked yet -- and not without a docker CLI)."""
+        return self.mode != "off" and self.state not in {"off", "idle", "no_docker_cli"}
+
+    def restart_note(self) -> str:
+        """A line for the restart page while Docker is the problem."""
+        if self.mode == "off" or self.engine_up is not False:
+            return ""
+        notes = {
+            "docker_starting": "The Docker engine does not answer; the guard started Docker Desktop.",
+            "not_coming_up": "The Docker engine does not answer, and the Docker Desktop the guard "
+                             "started has not brought it up.",
+            "docker_not_ready": "The Docker engine does not answer; Docker Desktop is running "
+                                "and not ready yet.",
+            "docker_updating": "The Docker engine does not answer; Docker Desktop is being updated.",
+            "no_session": "The Docker engine does not answer, and nobody is signed in to start "
+                          "Docker Desktop for.",
+            "cannot_launch": "The Docker engine does not answer, and the guard cannot start "
+                             "Docker Desktop (it runs as SYSTEM).",
+            "launch_failed": "The Docker engine does not answer, and the guard could not start "
+                             "Docker Desktop.",
+        }
+        return notes.get(self.state, "The Docker engine does not answer; the guard will start "
+                                     "Docker Desktop if it stays down.")
+
+    def tick(self) -> None:
+        try:
+            self._tick()
+        except Exception as exc:  # noqa: BLE001 -- see the class docstring
+            self._internal(exc)
+
+    def _internal(self, exc: BaseException) -> None:
+        self.log("error", "deps.internal_error", error=f"{type(exc).__name__}: {exc}"[:300])
+
+    # -- the check ---------------------------------------------------------
+
+    def _tick(self) -> None:
+        if self.mode == "off" or self.held:
+            return
+        now = time.monotonic()
+        if now < self._next_check:
+            return
+        self._next_check = now + DEPS_CHECK_EVERY_S
+        self.containers = self.recorded_containers()
+        broker = getattr(self.guard, "broker", None)
+        if not self.containers and not (broker is not None and broker.wanted):
+            self._set("idle", "Kazma uses no container and no document broker")
+            return
+        if self.cli is None:
+            self.cli = _docker_cli()
+        if self.cli is None:
+            if not self._cli_said:
+                self._cli_said = True
+                self.log("warn", "deps.no_docker_cli", wanted=self.containers)
+            self._set("no_docker_cli", "the docker CLI was not found")
+            return
+        if self._engine_answers():
+            self._engine_is_up(now)
+            if self.containers:
+                self._check_containers(now)
+        else:
+            self._next_check = now + DEPS_CHECK_DOWN_S
+            self._engine_is_down(now)
+        self._write()
+
+    def _engine_answers(self) -> bool:
+        got = _run_command([self.cli or "docker", "version", "--format", "{{.Server.Version}}"], 15)
+        return bool(got and got[0] == 0 and got[1].strip())
+
+    def _set(self, state: str, detail: str) -> None:
+        changed = state != self.state
+        self.state, self.detail = state, detail
+        if changed:
+            self._write()
+
+    def _say(self, state: str, detail: str, **fields) -> None:
+        """A waiting state, logged once while it lasts."""
+        self.state, self.detail = state, detail
+        if self._said != state:
+            self._said = state
+            self.log("warn", f"deps.{state}", detail=detail[:300], **fields)
+
+    def _engine_is_up(self, now: float) -> None:
+        if self.engine_up is not True:
+            was_down = self.engine_up is False
+            down_s = int(now - self._down_since) if self._down_since is not None else 0
+            self.engine_up, self._up_since = True, now
+            self._down_since = None
+            self._ran_since_up = set()
+            self._exited_seen = {}
+            if was_down:
+                self.log("info", "deps.engine_up", down_s=down_s, launched=self._launches)
+                if self._paged or self._launches:
+                    what = (f"The guard started Docker Desktop; the engine answers again after "
+                            f"{down_s // 60} min. " if self._launches else
+                            f"The engine answers again after {down_s // 60} min. ")
+                    self.guard._page("success", "Docker is back", what + "Kazma follows.",
+                                     fingerprint="deps:recovered", force=True)
+                self._recovered = True
+            self._launched_at, self._launch_failures, self._next_launch = None, 0, 0.0
+            self._launches, self._nudged, self._paged, self._said = 0, False, False, ""
+        self.state, self.detail = "ok", "the Docker engine answers"
+
+    def _engine_is_down(self, now: float) -> None:
+        if self.engine_up is not False:
+            self.engine_up, self._up_since = False, None
+            self._down_since, self._seen_down = now, True
+            self.log("warn", "deps.engine_down", wanted=self.containers,
+                     grace_s=int(DEPS_ENGINE_GRACE_S))
+        down_for = now - (self._down_since or now)
+        self._maybe_launch(now, down_for)
+        if down_for >= DEPS_PAGE_AFTER_S and not self._paged:
+            self._paged = True
+            self.guard._page(
+                "warn", "Docker does not answer: Kazma cannot start",
+                f"The Docker engine has not answered for {int(down_for // 60)} min, and Kazma "
+                f"needs it ({', '.join(self.containers) or 'the document broker'}). "
+                f"{self.detail.rstrip('.')}. The guard keeps trying.",
+                fingerprint="deps:docker", force=True)
+
+    def _maybe_launch(self, now: float, down_for: float) -> None:
+        if down_for < DEPS_ENGINE_GRACE_S:
+            self.state, self.detail = "docker_down", "the Docker engine does not answer (waiting)"
+            return
+        images = _running_images() if os.name == "nt" else set()
+        if images & _INSTALLER_IMAGES:
+            self._say("docker_updating", "Docker Desktop's installer is running")
+            return
+        if self._launched_at is not None:
+            if now - self._launched_at < DEPS_LAUNCH_WAIT_S:
+                self.state = "docker_starting"
+                self.detail = "the guard started Docker Desktop; waiting for its engine"
+                return
+            self._launched_at = None
+            self._launch_failures += 1
+            wait = DEPS_LAUNCH_BACKOFF_S[min(self._launch_failures, len(DEPS_LAUNCH_BACKOFF_S)) - 1]
+            self._next_launch = now + wait
+            self.log("warn", "deps.not_coming_up", waited_s=int(DEPS_LAUNCH_WAIT_S),
+                     next_try_s=int(wait))
+            self.state = "not_coming_up"
+            self.detail = "Docker Desktop was started and its engine did not answer"
+            return
+        if images & _DESKTOP_IMAGES:
+            # Starting, or stuck: never killed. One nudge, then it is Docker's.
+            if not self._nudged:
+                self._nudged = True
+                got = _run_command([self.cli or "docker", "desktop", "start", "-d"], 60)
+                self.log("info", "deps.desktop_nudged",
+                         exit=got[0] if got else None)
+            self._say("docker_not_ready", "Docker Desktop is running and its engine does not answer")
+            return
+        if now < self._next_launch:
+            return
+        if os.name == "nt":
+            if images and "explorer.exe" not in images:
+                self._say("no_session", "nobody is signed in to start Docker Desktop for")
+                return
+            if _current_user_sid() == "S-1-5-18":
+                self._say("cannot_launch", "the guard runs as SYSTEM and cannot start "
+                                           "Docker Desktop for anyone")
+                return
+        started, what = _launch_docker_desktop(self.cli or "docker")
+        self._launches += 1
+        if started:
+            self._launched_at = now
+            self._said = ""
+            self.log("warn", "deps.docker_launched", detail=what, attempt=self._launches)
+            self.state = "docker_starting"
+            self.detail = "the guard started Docker Desktop; waiting for its engine"
+            return
+        self._launch_failures += 1
+        wait = DEPS_LAUNCH_BACKOFF_S[min(self._launch_failures, len(DEPS_LAUNCH_BACKOFF_S)) - 1]
+        self._next_launch = now + wait
+        self.log("error", "deps.launch_failed", detail=what, next_try_s=int(wait))
+        self.state, self.detail = "launch_failed", f"Docker Desktop could not be started: {what}"
+
+    # -- containers --------------------------------------------------------
+
+    def _container_states(self) -> dict[str, str]:
+        """{name: status} for the recorded containers Docker knows."""
+        got = _run_command([self.cli or "docker", "inspect", "--format",
+                            "{{.Name}}|{{.State.Status}}", *self.containers], 15)
+        states: dict[str, str] = {}
+        if got is None:
+            return states
+        for line in got[1].splitlines():
+            name, _, status = line.strip().lstrip("/").partition("|")
+            if name in self.containers and status:
+                states[name] = status.strip().lower()
+        return states
+
+    def _check_containers(self, now: float) -> None:
+        states = self._container_states()
+        for name in self.containers:
+            status = states.get(name)
+            if status == "running":
+                self._ran_since_up.add(name)
+                self._exited_seen.pop(name, None)
+                if self._start_failures.pop(name, 0) and name in self._container_paged:
+                    self._container_paged.discard(name)
+                    self.guard._page("success", f"Container {name} runs again", "",
+                                     fingerprint=f"deps:container:{name}:recovered", force=True)
+                self._left_alone.discard(name)
+                continue
+            if status not in {"exited", "created"}:
+                self._exited_seen.pop(name, None)
+                continue
+            if not self._seen_down or name in self._ran_since_up:
+                # Stopped while the engine stayed up: someone stopped it.
+                if name not in self._left_alone:
+                    self._left_alone.add(name)
+                    self.log("info", "deps.container_left_stopped", container=name,
+                             status=status)
+                continue
+            seen = self._exited_seen.get(name, 0) + 1
+            self._exited_seen[name] = seen
+            if (seen < 2 or self._up_since is None
+                    or now - self._up_since < DEPS_CONTAINER_SETTLE_S
+                    or now < self._next_start.get(name, 0.0)):
+                continue
+            self._start_container(name, now)
+
+    def _start_container(self, name: str, now: float) -> None:
+        got = _run_command([self.cli or "docker", "start", name], 60)
+        if got is not None and got[0] == 0:
+            self.log("warn", "deps.container_started", container=name)
+            self._exited_seen.pop(name, None)
+            return
+        failures = self._start_failures.get(name, 0) + 1
+        self._start_failures[name] = failures
+        wait = DEPS_CONTAINER_BACKOFF_S[min(failures, len(DEPS_CONTAINER_BACKOFF_S)) - 1]
+        self._next_start[name] = now + wait
+        why = (got[2] or got[1]).strip()[:300] if got else "docker start could not run"
+        self.log("error", "deps.container_start_failed", container=name, error=why,
+                 next_try_s=int(wait))
+        if failures >= DEPS_CONTAINER_PAGE_AFTER and name not in self._container_paged:
+            self._container_paged.add(name)
+            self.guard._page(
+                "warn", f"Container {name} will not start",
+                f"Kazma needs it, and `docker start {name}` failed {failures} times: {why}",
+                fingerprint=f"deps:container:{name}", force=True)
+
+    # -- the state file ------------------------------------------------------
+
+    def record(self) -> dict:
+        return {
+            "mode": self.mode,
+            "state": self.state,
+            "detail": self.detail,
+            "engine_up": self.engine_up,
+            "containers": list(self.containers),
+            "record_file": str(_deps_record_path()),
+            "launches": self._launches,
+            "updated": time.time(),
+        }
+
+    def _write(self) -> None:
+        _update_state(dependencies=self.record())
+
+
+def _dependency_status_lines(state: dict) -> list[str]:
+    """What --status says about Docker and Kazma's containers."""
+    rec = state.get("dependencies")
+    if not isinstance(rec, dict):
+        return []
+    engine = {True: "answers", False: "DOES NOT ANSWER", None: "not checked"}.get(
+        rec.get("engine_up"), "not checked")
+    lines = [f"docker      : {engine} ({rec.get('state')})"]
+    if rec.get("containers"):
+        lines.append(f"  kazma uses: {', '.join(str(c) for c in rec['containers'])}")
+    if rec.get("detail"):
+        lines.append(f"  detail    : {rec.get('detail')}")
+    return lines
+
+
 # -- supervisor -------------------------------------------------------
 
 
@@ -2364,6 +2944,7 @@ class Guard:
     _last_stop_graceful = False
     _last_beat = 0.0
     _internal_errors = 0
+    deps = None
 
     def __init__(self, *, once: bool = False) -> None:
         self.log = GuardLog(_default_log_path())
@@ -2406,6 +2987,8 @@ class Guard:
         self._internal_errors = 0
         # The document worker broker beside Kazma (DocumentBroker).
         self.broker = DocumentBroker(self)
+        # Docker Desktop and the containers Kazma uses (Dependencies).
+        self.deps = Dependencies(self)
 
     # -- lifecycle ----------------------------------------------------
 
@@ -2447,6 +3030,10 @@ class Guard:
         """Page a restart. Collapses identical ``reason`` inside the cooldown."""
         title = f"Kazma stopped: {reason}"
         detail = f"Restarting in {int(delay_s)}s (attempt {self.restarts})."
+        deps = getattr(self, "deps", None)
+        note = deps.restart_note() if deps is not None else ""
+        if note:
+            detail += f"\n{note}"
         if tail:
             last = "\n".join(tail.splitlines()[-8:])[-600:]
             detail += f"\nIts last words (server.stderr.log):\n{last}"
@@ -2595,6 +3182,7 @@ class Guard:
         wake_on_reload: bool = False,
         wake_on_pause: bool = False,
         wake_on_pause_change: str | None = None,
+        wake_on_deps_recovered: bool = False,
     ) -> bool:
         """Interruptible sleep so shutdown, --reload, and a dead child stay responsive.
 
@@ -2602,7 +3190,9 @@ class Guard:
         guard has not dealt with yet (``wake_on_reload``), a pause
         (``wake_on_pause``), the pause lifted or rewritten
         (``wake_on_pause_change``: the signature of the one the caller
-        holds), a child that exited (``wake_on_child_exit``), or shutdown.
+        holds), a child that exited (``wake_on_child_exit``), Docker
+        answering again after an outage (``wake_on_deps_recovered``: the
+        restart backoff ends, Kazma's database is back), or shutdown.
         Beats the heartbeat.
         Returns True when it woke early, False when the time ran out.
         """
@@ -2622,6 +3212,11 @@ class Guard:
                 return True
             if wake_on_pause_change is not None and _pause_signature(read_pause()) != wake_on_pause_change:
                 return True
+            if wake_on_deps_recovered:
+                deps = getattr(self, "deps", None)
+                if deps is not None and deps.take_recovered():
+                    self.log("info", "guard.backoff_ended", why="docker answers again")
+                    return True
             if (
                 wake_on_child_exit
                 and self.proc is not None
@@ -2637,6 +3232,9 @@ class Guard:
         broker = getattr(self, "broker", None)
         if broker is not None:
             broker.tick()
+        deps = getattr(self, "deps", None)
+        if deps is not None:
+            deps.tick()
 
     def _beat(self, *, force: bool = False) -> None:
         """Record that this guard is alive (see HEARTBEAT_EVERY_S)."""
@@ -2753,6 +3351,7 @@ class Guard:
         # Only a guard that will supervise touches the broker: a refused one
         # rewrote the broker's record (and could reap it) on its way out.
         self.broker.on_guard_start()
+        self.deps.on_guard_start()
 
         first = True
         while not self._stop:
@@ -2813,11 +3412,13 @@ class Guard:
                     # The broker first, when Kazma asked for one: it attests
                     # while Kazma boots (minutes), so it is ready before it.
                     self.broker.before_spawn()
+                    self.deps.before_spawn()
                     spawned_at = time.time()
                     self.spawned_at = spawned_at
                     self._stopped_for_reload = False
                     self._stopped_for_maintenance = False
-                    self.proc = spawn(self.cmd, self.cwd, self.log, self.broker.server_env())
+                    self.proc = spawn(self.cmd, self.cwd, self.log,
+                                      {**self.broker.server_env(), **self.deps.server_env()})
                     # --reload reads this: a child spawned after its request
                     # already runs the code it asked for.
                     _update_state(child_spawned=spawned_at)
@@ -2916,7 +3517,10 @@ class Guard:
                     # update repairing the packages that crash it): the
                     # guard holds at once, and the resume after the repair
                     # starts Kazma without waiting out the cooldown.
-                    self._sleep(CRASH_LOOP_COOLDOWN_S, wake_on_reload=True, wake_on_pause=True)
+                    # Docker answering again ends it too: the database was
+                    # what crashed it.
+                    self._sleep(CRASH_LOOP_COOLDOWN_S, wake_on_reload=True, wake_on_pause=True,
+                                wake_on_deps_recovered=True)
                     continue
 
                 delay = self._backoff()
@@ -2928,8 +3532,10 @@ class Guard:
                          restarts=self.restarts, **extra)
                 self.notify_restart(reason, delay, tail=tail)
                 # A pause during the backoff holds at once (the gate before
-                # the next spawn), not after up to five minutes.
-                self._sleep(delay, wake_on_reload=True, wake_on_pause=True)
+                # the next spawn), not after up to five minutes; Docker
+                # answering again starts Kazma at once.
+                self._sleep(delay, wake_on_reload=True, wake_on_pause=True,
+                            wake_on_deps_recovered=True)
             except Exception as exc:  # noqa: BLE001 -- see the comment above the try
                 self._internal_error(exc)
 
@@ -2996,6 +3602,11 @@ class Guard:
         broker = getattr(self, "broker", None)
         if broker is not None:
             broker.on_pause()
+        # Nor does the guard start Docker or containers while held: the
+        # pause may be for Docker itself (an update, a restart by hand).
+        deps = getattr(self, "deps", None)
+        if deps is not None:
+            deps.on_pause()
 
         until = float(pause.get("until") or 0.0)
         human_until = (
@@ -3217,6 +3828,8 @@ def _cmd_status() -> int:
         print("  Kazma is not supervised: a crash will not be restarted.")
         print("  Start it:  schtasks /Run /TN KazmaAgent   (or run --reload)")
     print(f"guard child : pid {state.get('child_pid') if state else 'unknown'}")
+    for line in _dependency_status_lines(state):
+        print(line)
     for line in _broker_status_lines(state, alive):
         print(line)
     return 0
@@ -3244,7 +3857,7 @@ def _broker_status_lines(state: dict, alive: bool) -> list[str]:
         here = _file_sha(Path(__file__).resolve())
         running = state.get("guard_code")
         features = state.get("guard_features") or []
-        if (running and running != here) or "document_broker" not in features:
+        if (running and running != here) or any(f not in features for f in GUARD_FEATURES):
             lines.append("NOTE        : the running guard started from older code than this file.")
             lines.append("  A reload restarts Kazma, not the guard: restart the guard to run "
                          "this code (Document processing operations, 'Restart the guard').")
@@ -3890,6 +4503,11 @@ def main() -> int:
                 "script": str(_broker_script()),
                 "state_dir": str(_broker_file("x").parent),
                 "log": str(_broker_log_path()),
+            },
+            "dependencies": {
+                "mode": guard.deps.mode,
+                "record_file": str(_deps_record_path()),
+                "desktop_task": DEPS_TASK_NAME,
             },
         }, indent=2))
         return 0

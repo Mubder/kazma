@@ -70,6 +70,9 @@ class GuardRun:
             "KAZMA_GUARD_TELEGRAM_CHAT": "",
             "SWARM_BOT_TOKEN": "",
             "SWARM_CHAT_ID": "",
+            # never let a test guard start this machine's Docker Desktop or
+            # its containers (a test that wants it says so in fake_env)
+            "KAZMA_GUARD_START_DEPENDENCIES": "off",
         })
         env.update(fake_env)
         self.env = env

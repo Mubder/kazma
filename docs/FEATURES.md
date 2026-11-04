@@ -135,6 +135,7 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | A supervisor that restarts on real failure, reloads gracefully and pages you over Telegram | Shipped | `scripts/service/kazma_guard.py` |
+| When an update leaves Docker stopped, the supervisor starts Docker Desktop again and then the stopped containers Kazma uses (never another project's) | Shipped | `kazma_guard.py --status`, [Document processing](docs/ops/document-processing.md) |
 | One status card per restart: how long Kazma was down and whether each chat app connected (start and stop messages are optional) | Shipped | Settings → Adapters & Routes → Server status messages |
 | Backups of everything every 6 hours, snapshotted locally and offsite (restic), checked daily, with a weekly restore rehearsal of the database; a zip copy to a cloud provider that keeps only the newest N copies | Shipped | [Disaster recovery](docs/ops/disaster-recovery.md) |
 | Move an install to another machine or OS in one bundle | Shipped | `kazma migrate` |

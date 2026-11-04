@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Kazma starts Docker again when an update leaves it stopped (2026-11-04)
+
+- The guard now starts Docker Desktop when the Docker engine has not
+  answered for two minutes, and then starts the containers Kazma uses that
+  the outage stopped (its database, memory mirror, graph and search). Before,
+  an update that left Docker stopped (topgrade, 2026-11-03) kept Kazma down:
+  the guard restarted it every five minutes for eleven hours, because a
+  restart cannot bring a database back.
+- On Windows Docker Desktop is started in your own session with normal
+  rights, through an on-demand task named `KazmaDockerDesktop`. Nothing is
+  started while Docker's installer is running, or a second time while Docker
+  Desktop is starting, or while nobody is signed in.
+- Only containers Kazma's own settings point to are started, never another
+  project's, and never one you stopped while Docker was running. One limit:
+  after Docker itself restarts, a Kazma container you had stopped by hand
+  earlier is started too.
+- One page when Docker has not answered for 10 minutes, one when it is back;
+  Kazma starts again within seconds of Docker answering. `kazma_guard.py
+  --status` has a `docker` line. Turn it off with
+  `KAZMA_GUARD_START_DEPENDENCIES=off` in the guard's environment.
+
 ## Old cloud backup copies are deleted (2026-11-03)
 
 - Kazma now keeps only the newest cloud copies of its backups. New setting,

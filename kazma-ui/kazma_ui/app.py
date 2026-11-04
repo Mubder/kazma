@@ -1917,6 +1917,12 @@ class KazmaAppBuilder:
 
             spawn_background(_aio.to_thread(start_broker_requests), name="document-broker-request")
 
+            # Tell the guard which containers Kazma's addresses point to, so
+            # it starts them (and the Docker engine) when they stop.
+            from kazma_core.guard_dependencies import start_dependency_records
+
+            spawn_background(_aio.to_thread(start_dependency_records), name="guard-dependency-record")
+
             from kazma_ui.dashboard import set_dashboard_context
 
             set_dashboard_context(checkpoint_manager=self._checkpointer)
