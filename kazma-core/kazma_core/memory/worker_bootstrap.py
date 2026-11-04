@@ -1180,6 +1180,16 @@ def _document_broker() -> None:
     document_broker_sweep()
 
 
+def _guard_dependencies() -> None:
+    # The guard starts the Docker engine and Kazma's containers when they
+    # stop (a Docker Desktop update left the database down for eleven hours,
+    # 2026-11-03). Which containers those are, it learns from here: a
+    # container recreated or a setting changed reaches it within 15 minutes.
+    from kazma_core.guard_dependencies import guard_dependencies_sweep
+
+    guard_dependencies_sweep()
+
+
 def _malware_signatures() -> None:
     # Documents (FA-232): an ops alert when the ClamAV signatures intake
     # scans with are older than ClamAV's own seven days, once a day.
@@ -1227,6 +1237,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("checkpoint retention", _prune_checkpoints),
     ("supervisor watch", _watch_supervisor),
     ("document worker broker", _document_broker),
+    ("guard dependencies", _guard_dependencies),
     ("malware signatures", _malware_signatures),
     ("dependency advisories", _dependency_advisories),
     ("forget convergence", _converge_forgets),

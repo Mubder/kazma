@@ -1153,6 +1153,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # catalog read, a change to it, and a client close that waits for the
     # calls in flight so every index loads again.
     "collection_size", "fit_search_breadth", "reload_vector_indexes",
+    # The guard's dependency record (2026-11-04): settings reads, `docker
+    # inspect` and a file write, at boot and on the maintenance sweep.
+    "_publish_dependencies", "start_dependency_records",
 })
 
 

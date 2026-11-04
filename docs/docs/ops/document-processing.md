@@ -488,6 +488,40 @@ The guard's own settings, in its environment (the `KazmaAgent` task's, not
 always runs one, `off` never does), `KAZMA_GUARD_BROKER_PORT` (pin the port),
 `KAZMA_GUARD_BROKER_IMAGE` (pin an image; no fallback then).
 
+#### When Docker stops: the guard starts it again
+
+An update can leave Docker Desktop stopped (topgrade did, 2026-11-03: Kazma's
+database container was gone and the guard restarted Kazma for eleven hours).
+The guard now starts what Kazma runs on (`KAZMA_GUARD_START_DEPENDENCIES`,
+`auto` by default):
+
+- **Docker Desktop**, when its engine has not answered for two minutes. On
+  Windows the guard registers an on-demand task, `KazmaDockerDesktop`, that
+  runs `Docker Desktop.exe` in the signed-in user's session with normal
+  rights, and runs it; elsewhere it runs `docker desktop start`. It does not
+  while Docker's installer runs (an update in progress), does not start a
+  second copy of a Docker Desktop that is running and not ready yet (it asks
+  that one to start its engine, once), and cannot while nobody is signed in
+  or when the guard runs as SYSTEM -- each said in `guard.log` and in the
+  restart page. A Docker that does not come up in four minutes is started
+  again after 5, 15, then 30 minutes.
+- **The containers Kazma uses**, once Docker answers: the ones the server's
+  record names (`.kazma/guard_dependencies.json`, written at boot and every
+  maintenance pass from the database, memory mirror, graph and search
+  addresses -- loopback only, never another project's container) that the
+  outage stopped. A container stopped while Docker stayed up was stopped by
+  someone and is left alone. One limit: after Docker itself restarts, a
+  recorded container you had stopped by hand before is started too.
+- **Paging.** One page when Docker has not answered for 10 minutes, one when
+  it is back, one when a container will not start after three tries. Docker
+  coming back ends the guard's restart wait at once, so Kazma starts within
+  seconds, not at the end of a five-minute backoff.
+
+`kazma_guard.py --status` shows the `docker` line (answers or not, what the
+guard is doing) and the containers Kazma uses; `guard.log` has the `deps.*`
+events. To turn it off, set `KAZMA_GUARD_START_DEPENDENCIES=off` in the
+`KazmaAgent` task's environment and restart the guard as above.
+
 `python scripts/document_worker_image.py status` says which tag this code
 needs, which are built, and what the guard's broker serves;
 `... prune` removes older builds (never this code's or the one serving).

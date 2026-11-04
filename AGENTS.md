@@ -1340,7 +1340,8 @@ scheduler needs a case there.
   task-queue purge, swarm task retention — `swarm.task_retention_days`,
   default 30, 0 keeps all —, pipeline log retention, swarm approval rows,
   run incident retention (§52), checkpoint retention (§41), the supervisor
-  watch (§39), the document worker broker (§19 E1), malware signatures
+  watch (§39), the document worker broker (§19 E1), guard dependencies
+  (§39), malware signatures
   (§19 E), dependency advisories (§57), forget convergence (§15I), memory vector repair, memory recovery,
   retired knowledge promotions and memory turn reconcile (§15F), memory
   mirror sync (§15K), weekly topic summaries (§15J), entity count repair
@@ -7150,6 +7151,43 @@ code) and Kazma ran with nobody supervising it.
   `document_broker`, and `guard_code` lets `--status` say the running guard
   is older than its file -- a reload restarts Kazma, never the guard, so a
   guard change needs the task restarted once (ops doc, "Restart the guard").
+- **The guard starts what Kazma runs on** (`Dependencies`, 2026-11-04). Live
+  2026-11-03 a topgrade update left Docker Desktop stopped; the database
+  container was gone and the guard restarted Kazma 34 times over eleven hours.
+  Same loop as the broker (`deps.tick()` after `broker.tick()`, never raises:
+  `deps.internal_error`); `KAZMA_GUARD_START_DEPENDENCIES` (`auto`, `off`).
+  - *Docker Desktop*, after two minutes without an engine answer
+    (`docker version`): on Windows `_launch_docker_desktop` registers the
+    on-demand task `KazmaDockerDesktop` (InteractiveToken, LeastPrivilege,
+    IgnoreNew; UTF-16 XML, deleted after) and runs it, so Docker starts in
+    the signed-in user's session with normal rights, never the guard's
+    elevated token; elsewhere `docker desktop start -d`. Never while Docker's
+    installer runs (`docker_updating`); a running Docker Desktop that is not
+    ready is asked once (`desktop_nudged`), never launched twice; no launch
+    with nobody signed in (`no_session`) or as SYSTEM (`cannot_launch`). A
+    launch that does not bring the engine up in 240 s, or fails, backs off
+    300/900/1800 s. One page at ten minutes without an engine, one on the
+    recovery; the broker's own Docker page is left to it while it watches the
+    engine (`owns_engine_alerts`). Docker answering again ends the restart
+    backoff at once (`_sleep(wake_on_deps_recovered=True)`), and the restart
+    page says what Docker is doing (`restart_note`).
+  - *Containers*: only the ones the server's record names
+    (`kazma_core.guard_dependencies._publish_dependencies`, at boot and on the
+    maintenance sweep "guard dependencies", written to
+    `KAZMA_GUARD_DEPENDENCIES_FILE`, only when it changed, never on a silent
+    Docker): the containers publishing a loopback port Kazma's database,
+    memory mirror, graph or search address names (`_match_containers`; a
+    guessed address takes only a Kazma-named container, a tie goes to the
+    running one, then the last record, else nothing). The guard starts one
+    only when an engine outage stopped it, twice seen stopped, 60 s after the
+    engine came back; a container stopped while the engine stayed up, or
+    after it ran again, is left alone (`deps.container_left_stopped`). Three
+    failed starts page once; the recovery pages once. The state file's
+    `dependencies` and `--status`'s `docker` line say what it does;
+    `guard_features` lists `dependencies`.
+  Gate: `tests/test_guard_dependencies.py` (fake clock, fake docker, the task
+  XML; the guard without the check as the negative control; the broker page
+  with and without it).
 - **Settings' "Restart server" asks the guard.** A server the guard started
   writes the guard's reload request (`supervisor_watch.request_guard_reload`;
   the guard hands the path over in `KAZMA_GUARD_RELOAD_FILE`, an older guard
