@@ -332,13 +332,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "المجلوبة",
         "en": "fetched",
     },
+    # Chunk counts, not page counts (live 2026-11-05: "fetched: 1 · ingested:
+    # 7" read as seven pages from one).
     "knowledge.job_ingested": {
-        "ar": "المستوعبة",
-        "en": "ingested",
+        "ar": "مقاطع مخزنة",
+        "en": "chunks stored",
     },
     "knowledge.job_skipped": {
-        "ar": "المتخطاة",
-        "en": "skipped",
+        "ar": "مقاطع مخزنة من قبل",
+        "en": "chunks already stored",
+    },
+    "knowledge.job_pages": {
+        "ar": "الصفحات",
+        "en": "Pages",
     },
     "knowledge.job_unchanged": {
         "ar": "دون تغيير",

@@ -96,9 +96,29 @@ def delete_library(library_id: str) -> dict[str, Any]:
         _unindex_documents(library_id, documents)
     deleted = get_knowledge_index().delete_library(library_id)
     removed = delete_provenance(library_id)
-    logger.info("[knowledge] library %s deleted (%d document(s) unindexed, fetched pages %s)",
-                library_id, len(documents), "removed" if removed else "NOT removed")
-    return {"deleted": deleted, "documents": len(documents), "provenance_removed": removed}
+    crawls = _forget_finished_crawls(library_id)
+    logger.info("[knowledge] library %s deleted (%d document(s) unindexed, fetched pages %s, "
+                "%s finished crawl(s) removed)", library_id, len(documents),
+                "removed" if removed else "NOT removed", "?" if crawls is None else crawls)
+    return {"deleted": deleted, "documents": len(documents), "provenance_removed": removed,
+            "crawl_jobs_removed": crawls}
+
+
+def _forget_finished_crawls(library_id: str) -> int | None:
+    """The library's finished crawls leave the journal (none can resume a
+    deleted library). A journal that cannot be written is a WARNING: the
+    acquisition monitor already leaves a gone library's crawls unreported,
+    and the job is evicted with the journal's other finished jobs."""
+    from kazma_core.config_availability import _storage_failures
+    from kazma_core.web_acquire.crawl_jobs import forget_library
+    from kazma_core.web_acquire.result import AcquisitionError
+
+    try:
+        return forget_library(library_id)
+    except (AcquisitionError, *_storage_failures()) as exc:
+        logger.warning("[knowledge] library %s deleted, but its finished crawls stay in the "
+                       "crawl journal: %s", library_id, type(exc).__name__)
+        return None
 
 
 def _unindex_documents(library_id: str, documents: list[tuple[str, str]]) -> None:
