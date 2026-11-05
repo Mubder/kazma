@@ -885,6 +885,9 @@ def test_dns_gate_catches_the_redirect_hop_shape():
 # names one; a call in an async body must go through asyncio.to_thread.
 
 _LOOP_STALL_HELPERS = frozenset({
+    # Outage pages owed a recovery note (observability/outage_pages.py): a
+    # file in the data dir read and written whole.
+    "note_outage_page", "outage_page_owed", "owed_outage_pages", "settle_outage_page",
     # The malware probe runs ``clamdscan --ping`` and ``clamscan --version``
     # (FA-232/FA-233), and the sweep that alerts on stale signatures.
     "probe_malware_scanner", "signature_alert_sweep", "malware_blocks_intake",

@@ -261,3 +261,59 @@ def test_app_wires_the_manager_not_the_executor():
     block = src.split("start_mcp_reconnector", 1)[1][:600]
     assert 'getattr(executor, "mcp", None)' in src.split(
         "start_mcp_reconnector", 1)[0][-800:] or "executor" in block
+
+
+# ── a page sent before a restart ──────────────────────────────────────
+
+
+def _page_three_times(rec):
+    for _ in range(3):
+        asyncio.run(rec.sweep_once())
+        rec._state["fs"].next_attempt_at = 0
+
+
+def test_a_server_paged_before_a_restart_is_announced_back_after_it(_no_alerts):
+    """The page promises a "back" note; the restart must not swallow it."""
+    _page_three_times(MCPReconnector(FakeManager(errors={"fs": "refused"}), _cfg("fs")))
+    assert [k for k, _ in _no_alerts] == ["mcp.reconnect_failing"]
+
+    # A new process: the server came back while Kazma restarted.
+    back = FakeManager()
+    back._connected.add("fs")
+    asyncio.run(MCPReconnector(back, _cfg("fs")).sweep_once())
+    assert [k for k, _ in _no_alerts] == ["mcp.reconnect_failing", "mcp.server_recovered"]
+
+    # The note was settled: a third process says nothing.
+    asyncio.run(MCPReconnector(back, _cfg("fs")).sweep_once())
+    assert len(_no_alerts) == 2
+
+
+def test_a_server_still_down_after_a_restart_is_not_paged_twice(_no_alerts):
+    _page_three_times(MCPReconnector(FakeManager(errors={"fs": "refused"}), _cfg("fs")))
+    mgr = FakeManager(errors={"fs": "refused"}, recover_after={"fs": 5})
+    rec = MCPReconnector(mgr, _cfg("fs"))
+    for _ in range(5):
+        asyncio.run(rec.sweep_once())
+        if "fs" in rec._state:
+            rec._state["fs"].next_attempt_at = 0
+    assert [k for k, _ in _no_alerts] == ["mcp.reconnect_failing", "mcp.server_recovered"]
+
+
+def test_a_removed_server_owes_no_note(_no_alerts):
+    from kazma_core.observability import outage_pages
+
+    _page_three_times(MCPReconnector(FakeManager(errors={"fs": "refused"}), _cfg("fs")))
+    asyncio.run(MCPReconnector(FakeManager(), _cfg()).sweep_once())
+    assert outage_pages.owed_outage_pages("mcp.") == {}
+
+
+def test_without_the_mark_the_restart_swallows_the_note(_no_alerts, monkeypatch):
+    """Negative control: the process global alone, as before."""
+    from kazma_core.observability import outage_pages
+
+    monkeypatch.setattr(outage_pages, "owed_outage_pages", lambda prefix: {})
+    _page_three_times(MCPReconnector(FakeManager(errors={"fs": "refused"}), _cfg("fs")))
+    back = FakeManager()
+    back._connected.add("fs")
+    asyncio.run(MCPReconnector(back, _cfg("fs")).sweep_once())
+    assert [k for k, _ in _no_alerts] == ["mcp.reconnect_failing"]

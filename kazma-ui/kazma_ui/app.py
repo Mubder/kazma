@@ -404,6 +404,15 @@ class KazmaAppBuilder:
                 e,
             )
 
+        # Before the first client too: a substitution an earlier process
+        # announced is still owed its "resolved" note (outage_pages).
+        try:
+            from kazma_core.observability.model_fallback import restore_owed_fallbacks
+
+            restore_owed_fallbacks()
+        except (OSError, ValueError) as e:
+            logger.warning("[model_fallback] owed fallback notes not restored: %s", e)
+
         self.registry = initialize_model_registry(self.config_store)
 
         # ── Env-var override: KAZMA_PROVIDER / KAZMA_MODEL / *_API_KEY ──

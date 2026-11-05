@@ -605,3 +605,35 @@ def test_a_session_deleted_through_the_research_store_settles_its_alert(fixture,
     assert research_session.delete_session(session.id) is True
     monitor.tick(now=1010)
     assert 'link:/research?session=' + session.id not in {a['callback_id'] for a in monitor.recent_alerts()}
+
+
+def test_a_page_sent_before_a_restart_is_followed_by_its_recovery_after_it(fixture, monkeypatch):
+    """Live 2026-11-03 23:37Z and 11-04 10:35Z: the monitor paged during a
+    Docker outage, the guard restarted Kazma before the database was back, and
+    the new process -- which had paged nothing -- never said it was back."""
+    lasting = int(monitor._UNAVAILABLE_AFTER_S // 15) + 3
+    _Checks(monkeypatch, ['down'] * lasting).run()
+    assert _keys(fixture) == ['acquisition.monitor_unavailable']
+    _Checks(monkeypatch, ['ok']).run()  # a new process
+    assert _keys(fixture) == ['acquisition.monitor_unavailable', 'acquisition.monitor_recovered']
+    assert 'settings database could not be reached' in fixture.sent[1][0][2]
+    _Checks(monkeypatch, ['ok']).run()  # settled: nothing more
+    assert len(_keys(fixture)) == 2
+
+
+def test_a_restart_during_the_outage_does_not_page_it_twice(fixture, monkeypatch):
+    lasting = int(monitor._UNAVAILABLE_AFTER_S // 15) + 3
+    _Checks(monkeypatch, ['down'] * lasting).run()
+    _Checks(monkeypatch, ['down'] * lasting + ['ok']).run()
+    assert _keys(fixture) == ['acquisition.monitor_unavailable', 'acquisition.monitor_recovered']
+
+
+def test_without_the_mark_the_restart_swallows_the_recovery(fixture, monkeypatch):
+    """Negative control: the process global alone, as before."""
+    from kazma_core.observability import outage_pages
+
+    monkeypatch.setattr(outage_pages, 'outage_page_owed', lambda key: None)
+    lasting = int(monitor._UNAVAILABLE_AFTER_S // 15) + 3
+    _Checks(monkeypatch, ['down'] * lasting).run()
+    _Checks(monkeypatch, ['ok']).run()
+    assert _keys(fixture) == ['acquisition.monitor_unavailable']

@@ -26,10 +26,12 @@ fallback anyone is living with.
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,7 @@ __all__ = [
     "report_rebind_ok",
     "report_substitution",
     "reset_fallback_state",
+    "restore_owed_fallbacks",
 ]
 
 #: A substitution lasts until someone fixes a key, so repeating it every 15
@@ -61,10 +64,98 @@ class _Episode:
     count: int = 1
     announced: bool = False
     last_alert: float = 0.0
+    #: Its announcement is on record in ``outage_pages`` (substitutions only).
+    marked: bool = False
 
 
 _lock = threading.Lock()
 _active: dict[str, _Episode] = {}
+
+#: A substitution's page promises "this clears by itself once it works", and
+#: the note that says so is sent by the process that sees the key work. Its
+#: episode lived in ``_active`` only, so a restart in between (a reload, a
+#: deploy, the guard) left the page with no note. The announced episode is
+#: kept in ``outage_pages`` under this prefix, and a new process takes it
+#: back at boot (:func:`restore_owed_fallbacks`).
+_MARK_PREFIX = "llm.fallback.substitution:"
+
+#: ``get_client`` runs on the event loop too (the supervisor's failover), so
+#: the marks are written by one daemon thread, in the order asked: a note
+#: then its settle never land the other way round.
+_marks: queue.SimpleQueue[tuple[str, str, dict[str, Any]] | threading.Event] = queue.SimpleQueue()
+_writer: threading.Thread | None = None
+
+
+def _write_marks() -> None:
+    from kazma_core.observability.outage_pages import note_outage_page, settle_outage_page
+
+    while True:
+        item = _marks.get()
+        if isinstance(item, threading.Event):
+            item.set()
+            continue
+        action, key, fields = item
+        if action == "note":
+            note_outage_page(key, **fields)
+        else:
+            settle_outage_page(key)
+
+
+def _keep_mark(action: str, key: str, **fields: Any) -> None:
+    global _writer
+    _marks.put((action, _MARK_PREFIX + key.removeprefix("substitution:"), fields))
+    with _lock:
+        if _writer is None or not _writer.is_alive():
+            _writer = threading.Thread(target=_write_marks, name="model-fallback-marks", daemon=True)
+            _writer.start()
+
+
+def _flush_marks(timeout: float = 5.0) -> bool:
+    """Wait for the marks asked so far to be written (tests)."""
+    if _writer is None:
+        return True
+    done = threading.Event()
+    _marks.put(done)
+    return done.wait(timeout)
+
+
+def restore_owed_fallbacks() -> int:
+    """Take back the announced substitutions an earlier process left open.
+
+    Called once at boot, before the registry builds its first client, and
+    never on the event loop (it reads a file). A provider whose key now works
+    then ends its episode with the resolved note; one still without a key is
+    not announced again before its repeat is due. Returns how many.
+    """
+    from kazma_core.observability.outage_pages import owed_outage_pages
+
+    owed = owed_outage_pages(_MARK_PREFIX)
+    restored = 0
+    with _lock:
+        for mark_key, mark in owed.items():
+            name = mark_key.removeprefix(_MARK_PREFIX)
+            key = f"substitution:{name}"
+            if key in _active:
+                continue
+            since = float(mark.get("since") or 0) or time.time()
+            paged_at = float(mark.get("paged_at") or since)
+            configured, _, used = str(mark.get("cause") or "").partition("|")
+            _active[key] = _Episode(
+                "substitution",
+                configured or name,
+                used or "another provider",
+                since,
+                paged_at,
+                announced=True,
+                last_alert=paged_at,
+                marked=True,
+            )
+            restored += 1
+    if restored:
+        logger.info(
+            "[model_fallback] %d announced substitution(s) still open from before the restart", restored
+        )
+    return restored
 
 
 def _suppressed() -> bool:
@@ -115,6 +206,12 @@ def _announce(
 
     if alert(f"llm.fallback.{key}", title, detail, severity="warn", cooldown_s=repeat_s):
         episode.announced = True
+        if episode.kind == "substitution" and not episode.marked:
+            episode.marked = True
+            _keep_mark(
+                "note", key, since=episode.first_seen,
+                cause=f"{episode.configured}|{episode.used}",
+            )
     AlertDispatcher.post_banner(
         subsystem=subsystem, title=title, reason=detail, since=episode.first_seen,
         link=link, link_text=link_text,
@@ -167,7 +264,7 @@ def report_provider_usable(provider: str) -> None:
     if episode.announced and not _suppressed():
         from kazma_core.observability.ops_alerts import alert
 
-        alert(
+        sent = alert(
             f"llm.fallback.{key}.resolved",
             f"Model fallback resolved: {name} has a usable key again",
             (
@@ -178,6 +275,16 @@ def report_provider_usable(provider: str) -> None:
             severity="info",
             cooldown_s=_SUBSTITUTION_REPEAT_S,
         )
+        if episode.marked:
+            if sent:
+                _keep_mark("settle", key)
+            else:
+                logger.warning(
+                    "[model_fallback] the note that %s works again was not sent; "
+                    "it stays owed", name,
+                )
+    elif episode.marked and not _suppressed():
+        _keep_mark("settle", key)
 
 
 def report_rebind_failed(*, provider: str, error: str) -> None:
@@ -274,6 +381,11 @@ def _active_fallbacks() -> list[dict[str, object]]:
 
 
 def reset_fallback_state() -> None:
-    """Forget open episodes (tests)."""
+    """Forget open episodes (tests): what a restart forgets.
+
+    Marks already asked for are written first, so none lands in the next
+    test's folder.
+    """
+    _flush_marks(timeout=2.0)
     with _lock:
         _active.clear()

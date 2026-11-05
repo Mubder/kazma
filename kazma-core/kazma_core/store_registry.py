@@ -357,7 +357,9 @@ class DataDirEntry:
     state: bool = False
     #: Copied by the universal backup. False for a file the running server
     #: holds locked: the copy fails (a WARNING every backup) and restores
-    #: nothing a server could use.
+    #: nothing a server could use; and for one an older copy would make
+    #: wrong (``outage_pages.json``: restored, it owes notes for pages long
+    #: since followed by their recovery).
     backed_up: bool = True
 
 
@@ -413,6 +415,12 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
         "this install's identity", "machine",
         reason="two installs must never share one: shared-store peers and the "
                "memory mirror tell installs apart by it"),
+    "outage_pages.json": DataDirEntry(
+        "outage pages this process still owes a recovery note "
+        "(observability/outage_pages.py)", "machine",
+        reason="it names this install's own pages; on another machine, or restored from an "
+               "older copy, it would announce a recovery of an outage nobody was told of",
+        backed_up=False),
     "pg_tables_seen.json": DataDirEntry(
         "Kazma's tables this install has found in its Postgres", "machine",
         reason="it describes this install's own Postgres: the boot check tells a "

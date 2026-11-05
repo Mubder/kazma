@@ -16,6 +16,11 @@ _cycles: dict[str, dict[str, Any]] = {}
 #: What each loop is called in its notice.
 _LOOP_NAMES = {"mentions": "mentions polling", "scheduler": "post scheduler"}
 
+#: The outage mark of a loop paged "is failing" (``x.loop:<name>``). The page
+#: promises one message when the loop recovers; the mark keeps that promise
+#: across a restart (:mod:`kazma_core.observability.outage_pages`).
+_PAGE_PREFIX = "x.loop:"
+
 
 def _health_card(name: str, transition: str, failures: int, error: str) -> str:
     """The [Ops] card for a loop that started failing or recovered.
@@ -43,9 +48,21 @@ def record_cycle(name: str, *, success: bool, interval: float, error: str = "") 
     """
     if name not in ("mentions", "scheduler"):
         raise ValueError("Unknown X loop.")
+    from kazma_core.observability.outage_pages import (
+        note_outage_page,
+        outage_page_owed,
+        settle_outage_page,
+    )
+
     now = time.time()
     with _lock:
-        previous = _cycles.get(name, {})
+        first = name not in _cycles
+    # The first run of this process takes over a page an earlier one sent and
+    # never followed with its recovery: still failing pages nothing, and the
+    # next success says the loop recovered.
+    owed = outage_page_owed(_PAGE_PREFIX + name) if first else None
+    with _lock:
+        previous = _cycles.get(name) or ({"incident": True} if owed else {})
         failures = 0 if success else previous.get("failures", 0) + 1
         incident = previous.get("incident", False)
         transition = ("recovered" if success else "failed") if (success and incident) or (failures >= 3 and not incident) else ""
@@ -64,6 +81,11 @@ def record_cycle(name: str, *, success: bool, interval: float, error: str = "") 
                         message=_health_card(name, transition, failures, error))
         except (sqlite3.Error, OSError, RuntimeError):
             logger.exception("X health incident notice could not be persisted")
+            return
+        if transition == "failed":
+            note_outage_page(_PAGE_PREFIX + name, since=now, cause=str(error or "")[:300])
+        else:
+            settle_outage_page(_PAGE_PREFIX + name)
 
 
 def _loop_health(name: str, task: Any) -> dict[str, Any]:

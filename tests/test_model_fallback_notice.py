@@ -339,3 +339,77 @@ def test_the_swap_gate_catches_a_silent_fallback():
     told = silent.replace("    return b\n", "    report_substitution(provider=a)\n    return b\n")
     assert _unreported_swaps(silent, "x.py") == ["x.py:2"]
     assert _unreported_swaps(told, "x.py") == []
+
+
+# -- a restart in the middle ---------------------------------------------------
+#
+# The page says "this clears by itself once it works", and the note that says so
+# came from the process that saw the key work. A reload in between (a deploy,
+# the guard) left the page with no note: the episode lived in memory only.
+
+
+def _owed() -> dict | None:
+    from kazma_core.observability.outage_pages import outage_page_owed
+
+    assert model_fallback._flush_marks()
+    return outage_page_owed("llm.fallback.substitution:deepseek")
+
+
+def _restart() -> None:
+    """What a new process has: no episode in memory, only the marks."""
+    model_fallback.reset_fallback_state()
+
+
+def test_a_substitution_announced_before_a_restart_is_resolved_after_it(registry, pages):
+    registry.get_client()
+    assert _owed() is not None, "the announced substitution is on record"
+
+    _restart()
+    assert model_fallback.restore_owed_fallbacks() == 1
+    registry.upsert_provider({"name": "deepseek", "api_key": "sk-deepseek"})
+    registry.get_client()
+
+    assert [p["key"] for p in pages.sent] == [
+        "llm.fallback.substitution:deepseek",
+        "llm.fallback.substitution:deepseek.resolved",
+    ]
+    assert "deepseek/deepseek-flash" in pages.sent[1]["detail"]
+    assert "zai/glm-5.3-flash" in pages.sent[1]["detail"]
+    assert _owed() is None, "the note went out: nothing is owed"
+
+
+def test_a_restart_during_the_substitution_does_not_page_it_again(registry, pages):
+    registry.get_client()
+    _owed()
+
+    _restart()
+    model_fallback.restore_owed_fallbacks()
+    registry.get_client()
+
+    assert [p["key"] for p in pages.sent] == ["llm.fallback.substitution:deepseek"]
+    assert _owed() is not None
+
+
+def test_a_resolved_note_that_was_not_sent_stays_owed(registry, pages):
+    registry.get_client()
+    pages.state["deliver"] = False
+    registry.upsert_provider({"name": "deepseek", "api_key": "sk-deepseek"})
+    registry.get_client()
+
+    assert pages.sent[-1]["key"] == "llm.fallback.substitution:deepseek.resolved"
+    assert _owed() is not None, "the next process tries the note again"
+
+
+def test_without_the_mark_the_restart_swallows_the_resolution(registry, pages, monkeypatch):
+    """Negative control: the episode in memory alone, as before."""
+    monkeypatch.setattr(
+        "kazma_core.observability.outage_pages.owed_outage_pages", lambda prefix: {},
+    )
+    registry.get_client()
+
+    _restart()
+    model_fallback.restore_owed_fallbacks()
+    registry.upsert_provider({"name": "deepseek", "api_key": "sk-deepseek"})
+    registry.get_client()
+
+    assert [p["key"] for p in pages.sent] == ["llm.fallback.substitution:deepseek"]
