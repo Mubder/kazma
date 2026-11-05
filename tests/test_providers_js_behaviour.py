@@ -124,3 +124,65 @@ class TestSummaryAndLabels:
         assert _run("return M.stateLabel('chat_failing');") == "Chat failing"
         assert _run("return M.stateLabel('models_ok_chat_failing');") == "models ok · chat failing"
         assert _run("return M.stateLabel('no-such-state');") == "Not tested"
+
+
+class TestStoredChecks:
+    """Live 2026-11-05: the Providers list said "Chat failing" for Z.AI while
+    its detail panel said both checks were "not run yet" and showed no alert:
+    the panel read only a result from this page visit, the row the stored
+    health the last check wrote."""
+
+    def _states(self, result: str, health: str) -> dict:
+        rows = _run(f"return M.checksFor({result}, {health});")
+        return {row["key"]: (row["state"], row["detail"]) for row in rows}
+
+    def test_stored_chat_failing_shows_the_failed_chat_check(self):
+        states = self._states("null", "'chat_failing'")
+        assert states == {"models": ("ok", "last check"), "chat": ("fail", "last check")}
+
+    def test_stored_healthy_shows_both_checks_passed(self):
+        assert self._states("null", "'healthy'") == {
+            "models": ("ok", "last check"), "chat": ("ok", "last check"),
+        }
+
+    def test_stored_down_fails_the_model_list_and_leaves_chat_unknown(self):
+        for health in ("'down'", "'degraded'"):
+            assert self._states("null", health) == {
+                "models": ("fail", "last check"), "chat": ("idle", ""),
+            }
+
+    def test_never_checked_stays_not_run(self):
+        assert self._states("null", "undefined") == {
+            "models": ("idle", ""), "chat": ("idle", ""),
+        }
+
+    def test_a_fresh_result_wins_over_stored_health(self):
+        states = self._states(
+            "{success: true, reachable: true, latency_ms: 12, chat_ms: 30}", "'chat_failing'"
+        )
+        assert states["models"][0] == "ok" and states["chat"][0] == "ok"
+        assert "last check" not in states["chat"][1]
+
+    def test_the_old_call_without_health_is_the_negative_control(self):
+        """What the hub passed before: the result only. Stored chat_failing then
+        reads as two checks never run, the panel the owner saw."""
+        assert self._states("null", "undefined") == {
+            "models": ("idle", ""), "chat": ("idle", ""),
+        }
+        assert _run("return M.cardState({health: 'chat_failing'}, null);") == "chat_failing"
+
+    def test_the_stored_alert_line_says_it_is_the_last_checks(self):
+        assert _run("return M.storedDetail({health: 'chat_failing'});").startswith(
+            "Saved from the last check"
+        )
+        assert _run("return M.storedDetail({});") == ""
+
+    def test_the_hub_hands_the_panel_the_stored_health(self):
+        hub = (_JS.parent / "settings_hub.js").read_text(encoding="utf-8")
+        assert "ProvidersManager.checksFor(p && p._test, p && p.health)" in hub
+        assert "ProvidersManager.storedDetail(p)" in hub
+        template = (
+            _JS.parent.parent.parent / "templates" / "settings.html"
+        ).read_text(encoding="utf-8")
+        assert "x-show=\"providerState(selectedHubProvider()) !== 'untested'\"" in template
+        assert 'x-show="selectedHubProvider()._test"' not in template
