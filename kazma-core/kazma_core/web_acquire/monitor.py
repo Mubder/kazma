@@ -122,6 +122,7 @@ def _collect():
     stored = {'session:' + s['id'] for s in sessions}
     rows = list(crawl_jobs._read()[1].values())
     gone = _gone_libraries(rows)
+    _forget_gone_crawls(gone)
     for row in rows:
         if _finished_crawl_of(row, gone):
             # Its library was deleted: nothing can resume it and nothing is
@@ -180,6 +181,37 @@ def _finished_crawl_of(row, gone):
     return (row.get('kind', 'site') in crawl_jobs._KB_KINDS
             and row['status'] in crawl_jobs._TERMINAL
             and row['library_id'] in gone)
+
+
+_forget_failed = False
+
+
+def _forget_gone_crawls(gone):
+    """A deleted library's finished crawls leave the journal here too.
+
+    Deleting a library removes them (``crawl_jobs.forget_library``), but a
+    library deleted before that, or one whose removal failed, left them
+    behind: the Knowledge page offered Resume on three crawls of libraries
+    deleted days before, and Resume answers "no longer exists" (live
+    2026-11-05). A journal that cannot be written keeps them, said once."""
+    global _forget_failed
+    from kazma_core.web_acquire import crawl_jobs
+
+    for library in sorted(gone):
+        try:
+            removed = crawl_jobs.forget_library(library)
+        except (AcquisitionError, *_storage_failures()) as exc:
+            if not _forget_failed:
+                logger.warning('[acquisition] the finished crawls of deleted libraries stay in the '
+                               'crawl journal for now: %s', type(exc).__name__)
+            _forget_failed = True
+            return
+        if removed:
+            from kazma_core.english_count import count_noun
+
+            logger.info('[acquisition] %s of deleted library %s left the crawl journal',
+                        count_noun(removed, 'finished crawl'), library)
+    _forget_failed = False
 
 
 def _gone_libraries(rows):
