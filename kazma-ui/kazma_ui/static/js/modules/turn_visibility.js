@@ -20,25 +20,38 @@ window.KazmaTurnVisibility = (function() {
   'use strict';
 
   var _baseTitle = null;
+  var _written = null;
   var _active = false;
   var _events = 0;
   var _flashTimer = null;
   var _flashOn = false;
 
+  /* The page's own title, without this module's marks. It is read again
+     whenever the title is not the one this module last wrote: a soft
+     navigation gives the tab the next page's title (nav.js syncChrome), and
+     a title kept from the first page was written back over it at the next
+     visibility change or turn frame (live 2026-11-05: the Chat page's
+     title on the Knowledge page). */
   function baseTitle() {
-    if (_baseTitle == null) {
-      _baseTitle = document.title.replace(/^[\u25CF\u2022]\s*/, '');
+    var now = String(document.title || '');
+    if (_baseTitle == null || now !== _written) {
+      _baseTitle = now.replace(/^[\u25CF\u2022]\s*/, '');
     }
     return _baseTitle;
   }
 
+  function setTitle(text) {
+    _written = text;
+    document.title = text;
+  }
+
   function render() {
     if (!_active || !document.hidden) {
-      document.title = baseTitle();
+      setTitle(baseTitle());
       return;
     }
     var badge = '\u25CF ' + (_events > 0 ? '(' + _events + ') ' : '');
-    document.title = badge + baseTitle();
+    setTitle(badge + baseTitle());
   }
 
   function armPush() {
@@ -117,14 +130,17 @@ window.KazmaTurnVisibility = (function() {
     if (!document.hidden) { render(); return; }
     var text = plainText(summary);
     if (text.length > 120) text = text.slice(0, 117) + '\u2026';
-    // Title keeps a subtle done marker until the tab is shown again.
-    document.title = '\u2713 ' + (text ? text + ' \u2014 ' : '') + baseTitle();
+    // Title keeps a subtle done marker until the tab is shown again,
+    // alternating between the answer and the page's own title.
+    function doneTitle(withText) {
+      var base = baseTitle();
+      return '\u2713 ' + (withText && text ? text + ' \u2014 ' : '') + base;
+    }
+    setTitle(doneTitle(true));
     _flashOn = false;
     _flashTimer = setInterval(function() {
       _flashOn = !_flashOn;
-      document.title = _flashOn
-        ? document.title
-        : '\u2713 ' + baseTitle();
+      setTitle(doneTitle(!_flashOn));
       if (!document.hidden) {
         clearInterval(_flashTimer);
         _flashTimer = null;
@@ -168,7 +184,6 @@ window.KazmaTurnVisibility = (function() {
       if (_flashTimer) { clearInterval(_flashTimer); _flashTimer = null; }
       _active = false;
       render();
-      document.title = baseTitle();
     },
   };
 })();
