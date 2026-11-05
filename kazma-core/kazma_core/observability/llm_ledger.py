@@ -34,6 +34,7 @@ __all__ = [
     "thread_usage",
     "turn_usage",
     "usage_series",
+    "usage_since",
 ]
 
 logger = logging.getLogger(__name__)
@@ -282,6 +283,30 @@ def thread_usage(thread_id: str) -> dict[str, Any] | None:
             ).fetchone()
     except (sqlite3.Error, OSError) as exc:
         logger.warning("[llm-ledger] a chat's usage is unreadable: %s", exc)
+        return None
+    return {"calls": int(calls or 0), "tokens": int(tokens or 0), "cost": float(cost or 0.0)}
+
+
+def usage_since(since: datetime) -> dict[str, Any] | None:
+    """Tokens, cost and call count of every LLM call recorded since *since*.
+
+    What the daily cost limit counts (``agent.turn_token_budget``'s module,
+    plan E1): *since* is the operator's local midnight, compared in UTC as
+    the rows store it. ``None`` when the ledger cannot be read, so an
+    unreadable ledger is never taken for nothing spent. Blocking: callers
+    run it off the loop.
+    """
+    stamp = (since if since.tzinfo else since.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
+    try:
+        with _lock:
+            conn = _get_conn()
+            calls, tokens, cost = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(total_tokens), 0), "
+                "COALESCE(SUM(cost_usd), 0.0) FROM llm_calls WHERE ts >= ?",
+                (stamp,),
+            ).fetchone()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[llm-ledger] today's usage is unreadable: %s", exc)
         return None
     return {"calls": int(calls or 0), "tokens": int(tokens or 0), "cost": float(cost or 0.0)}
 

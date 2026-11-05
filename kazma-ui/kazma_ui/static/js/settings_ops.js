@@ -700,6 +700,20 @@
             } catch (e) { /* keep defaults */ }
         },
 
+        async loadTurnSpending() {
+            try {
+                const data = await this._fetch('/api/settings/turn-spending');
+                if (data && typeof data.tokens === 'number') {
+                    this.turnSpending = {
+                        tokens: data.tokens,
+                        tokensMax: typeof data.tokens_max === 'number' ? data.tokens_max : 100000000,
+                        dailyUsd: typeof data.daily_usd === 'number' ? data.daily_usd : 0,
+                        dailyMax: typeof data.daily_max === 'number' ? data.daily_max : 1000000,
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+        },
+
         async loadChatReasoning() {
             try {
                 const data = await this._fetch('/api/settings/chat-reasoning');

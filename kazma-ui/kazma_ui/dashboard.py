@@ -393,6 +393,38 @@ def usage_over_time(request: Request, range: str = "hour") -> JSONResponse:  # n
     })
 
 
+@router.get("/api/dashboard/spend-today")
+def spend_today(request: Request) -> JSONResponse:
+    """What today's model calls cost, against the daily limit (plan E1).
+
+    "Today" starts at midnight in the operator's zone, the day the daily
+    cost limit counts. ``available`` is False when the per-call ledger is
+    off or cannot be read: the card then says so, never "$0".
+    """
+    if (denied := require_admin(request)) is not None:
+        return denied
+    from kazma_core.agent.turn_token_budget import (
+        daily_cost_limit_setting,
+        daily_spend,
+        turn_token_budget_setting,
+    )
+
+    spend = daily_spend()
+    limit = daily_cost_limit_setting()
+    budget = turn_token_budget_setting()
+    return JSONResponse({
+        "available": bool(spend.get("measured")),
+        "reason": spend.get("reason"),
+        "cost": spend.get("cost", 0.0),
+        "tokens": spend.get("tokens", 0),
+        "calls": spend.get("calls", 0),
+        "date": spend.get("date"),
+        "zone": spend.get("zone"),
+        "limit_usd": limit["usd"],
+        "turn_token_budget": budget["tokens"],
+    })
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Session Management API
 # ══════════════════════════════════════════════════════════════════════════

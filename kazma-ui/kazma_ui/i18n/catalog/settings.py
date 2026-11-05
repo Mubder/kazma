@@ -179,6 +179,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الافتراضي 300 ثانية. أقل من دقيقة يولّد بطاقات رفض متتالية إذا ابتعدت.",
         "en": "Default 300 seconds. Under a minute mints a deny-retry card storm if you step away.",
     },
+    "settings.daily_cost_limit": {
+        "ar": "أوقف الأدوار الجديدة إذا تجاوزت تكلفة اليوم (دولار)",
+        "en": "Refuse new turns once today's cost passes (US dollars)",
+    },
+    "settings.daily_cost_limit_hint": {
+        "ar": "تُحسب من سجل استدعاءات النموذج منذ منتصف الليل بتوقيتك. عند 80٪ يصلك تنبيه واحد في اليوم؛ وعند الحد تُرفض الأدوار الجديدة حتى منتصف الليل. القيمة 0 تعني بلا حد (الافتراضي).",
+        "en": "Counted from the model-call ledger since midnight in your time zone. At 80% you get one alert a day; at the limit new turns are refused until midnight. 0 means no limit (the default).",
+    },
+    "settings.save_turn_spending": {
+        "ar": "حفظ حدود الإنفاق",
+        "en": "Save Spending Limits",
+    },
     "settings.soul_requires_confirm": {
         "ar": "تأكيد دلتا الروح قبل التطبيق",
         "en": "Confirm Soul deltas before apply",
@@ -2373,6 +2385,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إشعارات المهام",
         "en": "Task notifications",
     },
+    "settings.turn_spending_saved": {
+        "ar": "تم حفظ حدود الإنفاق",
+        "en": "Spending limits saved",
+    },
+    "settings.turn_spending_title": {
+        "ar": "حدود الإنفاق",
+        "en": "Spending limits",
+    },
     "settings.turn_timeout_env": {
         "ar": "هذه القيمة مضبوطة بالمتغير KAZMA_TURN_TIMEOUT_SECONDS في بيئة الخادم؛ غيّرها هناك.",
         "en": "Set by KAZMA_TURN_TIMEOUT_SECONDS in the server's environment; change it there.",
@@ -2392,6 +2412,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.turn_timeout_title": {
         "ar": "حد وقت الدور",
         "en": "Turn time limit",
+    },
+    "settings.turn_token_budget": {
+        "ar": "أوقف الدور إذا أنفق أكثر من (رمز)",
+        "en": "Stop a turn that spends more than (tokens)",
+    },
+    "settings.turn_token_budget_hint": {
+        "ar": "يُحسب كل استدعاء للنموذج في دور محادثة واحد. عند 70٪ يُطلب من النموذج أن ينهي بما لديه؛ وعند الحد يتوقف الدور ويقول ذلك، والرد بـ «كمل» يمنحه مرة ونصف الحد. الأمر /long يرفعه عن المحادثة. القيمة 0 تعني بلا حد؛ الافتراضي 500,000.",
+        "en": "Every model call of one chat turn counts. At 70% the model is asked to finish with what it has; at the limit the turn stops and says so, and replying “continue” gives it one and a half times the limit. /long lifts it for a chat. 0 means no limit; the default is 500,000.",
     },
     "settings.uninstall": {
         "ar": "إزالة",

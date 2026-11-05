@@ -259,6 +259,11 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             len(messages),
         )
         _needs_synthesis = False
+    if state.get("turn_budget_stopped"):
+        # The turn's token budget stopped it (agent/turn_token_budget.py): a
+        # synthesis is one more model call past the budget the owner set.
+        logger.info("[Respond] turn token budget reached — skipping synthesis")
+        _needs_synthesis = False
     if _needs_synthesis:
         _llm = llm
         if _llm is not None:

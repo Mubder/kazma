@@ -196,6 +196,18 @@ class SupervisorState(TypedDict, total=False):
     last_cost_usd: float
     """Dollar cost of the most recent LLM call."""
 
+    turn_tokens: int
+    """Tokens every model call of this turn spent so far (prompt + completion),
+    against ``agent.turn_token_budget`` (``agent/turn_token_budget.py``). A
+    continuation of a turn the budget stopped keeps counting."""
+
+    turn_budget_stopped: bool
+    """The turn ended because it reached its token budget; a reply that
+    continues it grants ``CONTINUE_FACTOR`` times the limit."""
+
+    turn_token_budget_granted: int
+    """The limit a continued turn runs under (0: the configured budget)."""
+
     _last_finish_reason: str
     """finish_reason of the most recent LLM call. ``"length"`` means the
     provider truncated the completion at max_tokens — tool-call JSON may be
@@ -443,6 +455,9 @@ def initial_supervisor_state(
         last_model="",
         last_tokens=0,
         last_cost_usd=0.0,
+        turn_tokens=0,
+        turn_budget_stopped=False,
+        turn_token_budget_granted=0,
         thread_id=thread_id or str(uuid.uuid4()),
         tenant_id=tenant_id,
         snapshot_id="",

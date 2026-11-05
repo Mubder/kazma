@@ -6164,6 +6164,30 @@ every graph run inside the budget; each with its negative control),
 `tests/e2e/test_turn_time_limit.py` (the real route; the old pump as the
 control).
 
+**A turn's tokens are bounded too, and so is a day's spend**
+(`kazma_core/agent/turn_token_budget.py`, plan E1, 2026-11-05; the owner's
+choice: 500,000 tokens, no daily limit). `agent.turn_token_budget` (Settings
+-> System; 0 is none; `/long` active is none) counts every model call of the
+turn -- the supervisor's, its failover, the empty-answer nudge -- into
+`SupervisorState.turn_tokens`; from 70 % each call carries a call-local note
+(turn-note kind `budget_check`, never in the checkpoint), and at the limit the
+supervisor goes to RESPOND with `turn_budget_stopped` and says what it has and
+how to go on, in the user's language; `respond_node` skips its synthesis then,
+as on `turn_failed`. A continuation reply (`long_task.is_continuation_reply`,
+which reads Arabic without its vowel marks: the stop asks for "كمل" and only
+the shadda spelling matched) grants half the budget again
+(`turn_token_budget_granted`); any other message starts a fresh budget.
+`agent.daily_cost_limit_usd` (off by default) refuses a turn before any model
+call once today's ledger spend (`llm_ledger.usage_since`, from the operator's
+local midnight) reaches it, and raises `cost.daily_limit` once a day at 80 %;
+a spend the ledger cannot measure refuses nothing and says so once. Both
+reads run off the loop and ride out a store that cannot answer
+(`store_errors()`). Settings shows both values (`GET
+/api/settings/turn-spending`), the Dashboard today's spend against the limit
+(admin only). Gate: `tests/test_turn_token_budget.py` (real graphs: the note,
+the stop, a continuation, a fresh message, the refusal; the supervisor without
+the limit and the old grant as negative controls).
+
 **A plan feeds only the running turn.** `_paintTextSlot` paints every turn,
 finished ones on every reload; plan ingestion there logged progress on the
 live turn and painted a "Kazma is thinking…" header under a finished answer

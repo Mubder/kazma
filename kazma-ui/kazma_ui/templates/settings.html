@@ -2170,6 +2170,22 @@
             <button class="btn btn-primary" @click="saveTurnTimeout()" :disabled="turnTimeoutSaving || turnTimeout.source === 'env'">{{ t('settings.save_turn_timeout') }}</button>
         </div>
 
+        <!-- What a turn and a day may spend (kazma_core.agent.turn_token_budget) -->
+        <div class="settings-group" id="turn-spending-section">
+            <h3>{{ t('settings.turn_spending_title') }}</h3>
+            <div class="form-group">
+                <label for="turn-token-budget">{{ t('settings.turn_token_budget') }}</label>
+                <input id="turn-token-budget" type="number" class="form-input" x-model.number="turnSpending.tokens" min="0" :max="turnSpending.tokensMax" step="10000" style="max-width:200px">
+                <div class="form-hint">{{ t('settings.turn_token_budget_hint') }}</div>
+            </div>
+            <div class="form-group">
+                <label for="daily-cost-limit">{{ t('settings.daily_cost_limit') }}</label>
+                <input id="daily-cost-limit" type="number" class="form-input" x-model.number="turnSpending.dailyUsd" min="0" :max="turnSpending.dailyMax" step="0.5" style="max-width:200px">
+                <div class="form-hint">{{ t('settings.daily_cost_limit_hint') }}</div>
+            </div>
+            <button class="btn btn-primary" @click="saveTurnSpending()" :disabled="turnSpendingSaving">{{ t('settings.save_turn_spending') }}</button>
+        </div>
+
         <!-- Reasoning before a chat answer (kazma_core.agent.chat_reasoning) -->
         <div class="settings-group" id="chat-reasoning-section">
             <h3>{{ t('settings.chat_reasoning_title') }}</h3>

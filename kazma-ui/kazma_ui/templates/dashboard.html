@@ -117,6 +117,12 @@
       <div class="metric-value" id="metric-cost">${{ "%.4f"|format(cost_current) }}</div>
       <div class="metric-sub" id="metric-headroom">${{ "%.4f"|format(cost_headroom) }} {{ t('dashboard.headroom') }}</div>
     </div>
+    <div class="metric-card" id="spend-today-card">
+      <div class="metric-icon"><span class="ki" data-icon="trending-up" aria-hidden="true"></span></div>
+      <div class="metric-label">{{ t('dashboard.spend_today') }}</div>
+      <div class="metric-value" id="metric-spend-today">—</div>
+      <div class="metric-sub" id="metric-spend-limit">{{ t('dashboard.spend_today_loading') }}</div>
+    </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="hash" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.total_tokens') }}</div>

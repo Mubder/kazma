@@ -47,7 +47,10 @@
     }, 10000));
     // The charts' buckets are minutes to hours wide: once a minute is enough.
     _timers.push(setInterval(function() {
-      if (!document.hidden) refreshCharts();
+      if (!document.hidden) {
+        refreshCharts();
+        fetchSpendToday();
+      }
     }, 60000));
 
     // Time range selector
@@ -143,6 +146,7 @@
   // ── Data Fetching ─────────────────────────────────────
   function fetchInitialData() {
     fetchAnswerQuality();
+    fetchSpendToday();
     refreshCharts();
     fetch('/api/dashboard/status')
       .then(function(r) { return r.json(); })
@@ -218,6 +222,36 @@
       }
       recent.appendChild(item);
     });
+  }
+
+  // Today's spend against the daily limit (plan E1). A ledger that is off
+  // or unreadable says so: an unknown spend is never shown as $0.
+  function fetchSpendToday() {
+    var value = $('metric-spend-today');
+    var sub = $('metric-spend-limit');
+    if (!value || !sub) return;
+    var get = window.kazmaGetJson ? window.kazmaGetJson('/api/dashboard/spend-today')
+      : fetch('/api/dashboard/spend-today').then(function(r) { return r.ok ? r.json() : null; });
+    Promise.resolve(get).then(function(data) {
+      if (!data) return;  // a failed read keeps the last reading on screen
+      if (!data.available) {
+        value.textContent = '—';
+        sub.textContent = window.tOr('dashboard.spend_today_unmeasured', 'Not measured: the per-call ledger is off or unreadable.');
+        return;
+      }
+      var cost = Number(data.cost) || 0;
+      value.textContent = '$' + cost.toFixed(cost < 1 ? 4 : 2);
+      var limit = Number(data.limit_usd) || 0;
+      if (limit > 0) {
+        var share = Math.round(cost / limit * 100);
+        sub.textContent = window.tOr('dashboard.spend_today_of_limit', '{share}% of the ${limit} daily limit')
+          .replace('{share}', fmtNumber(share)).replace('{limit}', fmtNumber(limit));
+        value.style.color = share >= 100 ? 'var(--error)' : (share >= 80 ? 'var(--warning)' : '');
+      } else {
+        sub.textContent = window.tOr('dashboard.spend_today_no_limit', 'No daily limit set');
+        value.style.color = '';
+      }
+    }).catch(function() { /* keep the last reading */ });
   }
 
   function fetchStatusFallback() {

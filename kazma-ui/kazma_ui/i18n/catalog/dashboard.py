@@ -867,6 +867,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تنظيف لقطات السفر عبر الزمن؟",
         "en": "Clean up time-travel snapshots?",
     },
+    "dashboard.spend_today": {
+        "ar": "إنفاق اليوم",
+        "en": "Spent today",
+    },
+    "dashboard.spend_today_loading": {
+        "ar": "جارٍ القراءة…",
+        "en": "Reading…",
+    },
+    "dashboard.spend_today_no_limit": {
+        "ar": "لا حد يومي مضبوط",
+        "en": "No daily limit set",
+    },
+    "dashboard.spend_today_of_limit": {
+        "ar": "{share}٪ من الحد اليومي ${limit}",
+        "en": "{share}% of the ${limit} daily limit",
+    },
+    "dashboard.spend_today_unmeasured": {
+        "ar": "غير مقاس: سجل الاستدعاءات متوقف أو تتعذر قراءته.",
+        "en": "Not measured: the per-call ledger is off or unreadable.",
+    },
     "dashboard.system_resources": {
         "ar": "موارد النظام",
         "en": "System Resources",
