@@ -6325,7 +6325,9 @@ finished crawl of a library that no longer exists is not stored either
 (`_gone_libraries`; a store that cannot answer keeps every crawl, said once), and
 deleting a library removes its finished crawls from the journal
 (`crawl_jobs.forget_library`, 2026-11-05: "Crawl interrupted" for a deleted
-library stayed in the bell). The monitor pages its own failure only after
+library stayed in the bell), and so does the monitor's scan
+(`monitor._forget_gone_crawls`: a library deleted before that rule, or whose purge
+failed; the Knowledge page offered Resume on them). The monitor pages its own failure only after
 `_UNAVAILABLE_AFTER_S` (5 min) without a check, naming the cause, and follows a page with
 `acquisition.monitor_recovered`: it paged on the first failed 15 s check, so a 35 s Postgres restart
 sent a red page and no recovery (2026-10-22). Delivery callbacks persist platform acceptance,

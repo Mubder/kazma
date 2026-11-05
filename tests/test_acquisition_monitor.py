@@ -797,3 +797,56 @@ def test_a_journal_that_refuses_the_purge_does_not_fail_the_delete(fixture, monk
         result = knowledge_lifecycle.delete_library('docs')
     assert result['deleted'] and result['crawl_jobs_removed'] is None
     assert any('stay in the crawl journal' in r.getMessage() for r in caplog.records)
+
+def test_a_crawl_an_earlier_delete_left_leaves_the_journal(fixture, monkeypatch, tmp_path):
+    """Live 2026-11-05: the Knowledge page offered Resume on crawls of three
+    libraries deleted days before (Resume answers "no longer exists"). The
+    monitor's scan takes them out of the journal; a running crawl and a crawl
+    of a library that exists stay."""
+    from kazma_core.tools import research_session
+    from kazma_core.web_acquire import crawl_jobs
+
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    store = _library_store(tmp_path, monkeypatch)
+    store.create_library('kept', 'Kept')
+    running = _kb_crawl('no-such-library')
+    kept = _kb_crawl('kept', 'interrupted')
+    left = _kb_crawl('deleted-earlier', 'interrupted')
+    _REAL_COLLECT()
+    assert crawl_jobs.inspect_jobs(left.job_id) is None
+    assert crawl_jobs.inspect_jobs(kept.job_id) is not None
+    assert crawl_jobs.inspect_jobs(running.job_id) is not None
+
+
+def test_negative_control_without_the_scan_cleanup_the_crawl_stays(fixture, monkeypatch, tmp_path):
+    from kazma_core.tools import research_session
+    from kazma_core.web_acquire import crawl_jobs
+
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    monkeypatch.setattr(monitor, '_forget_gone_crawls', lambda gone: None)
+    _library_store(tmp_path, monkeypatch)
+    left = _kb_crawl('deleted-earlier', 'interrupted')
+    _REAL_COLLECT()
+    assert crawl_jobs.inspect_jobs(left.job_id) is not None
+
+
+def test_a_journal_that_refuses_the_cleanup_keeps_the_scan_going(fixture, monkeypatch, tmp_path, caplog):
+    import logging
+
+    from kazma_core.tools import research_session
+    from kazma_core.web_acquire import crawl_jobs
+
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    monkeypatch.setattr(monitor, '_forget_failed', False)
+    _library_store(tmp_path, monkeypatch)
+    left = _kb_crawl('deleted-earlier', 'interrupted')
+
+    def refused(library_id):
+        raise OSError('journal unavailable')
+
+    monkeypatch.setattr(crawl_jobs, 'forget_library', refused)
+    with caplog.at_level(logging.WARNING, logger=monitor.logger.name):
+        assert 'job:' + left.job_id not in _REAL_COLLECT()[4]
+        _REAL_COLLECT()
+    said = [r for r in caplog.records if r.name == monitor.logger.name and 'stay in the' in r.getMessage()]
+    assert len(said) == 1  # once, not every scan
