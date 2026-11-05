@@ -215,14 +215,21 @@ def _isolated_guard_files(tmp_path, monkeypatch):
     guard writes a heartbeat and reload acknowledgements into its state).
 
     A guard a test drives never starts this machine's Docker Desktop or its
-    containers either (``KAZMA_GUARD_START_DEPENDENCIES=off``); the tests of
-    that feature turn it back on with fakes in place.
+    containers either (``KAZMA_GUARD_START_DEPENDENCIES=off``), never reads
+    the free disk space (``KAZMA_GUARD_DISK_WATCH=off``: a CI runner has less
+    than the low line) and never sends a heartbeat
+    (``KAZMA_GUARD_OUTSIDE_WATCH=off``); the tests of those features turn
+    them back on with fakes in place.
     """
     monkeypatch.setenv("KAZMA_GUARD_STATE", str(tmp_path / "guard.state.json"))
     monkeypatch.setenv("KAZMA_GUARD_RELOAD_FILE", str(tmp_path / "guard.reload"))
     monkeypatch.setenv("KAZMA_GUARD_PAUSE_FILE", str(tmp_path / "guard.paused"))
     monkeypatch.setenv("KAZMA_GUARD_LOG", str(tmp_path / "guard.log"))
     monkeypatch.setenv("KAZMA_GUARD_START_DEPENDENCIES", "off")
+    # Nor reads this machine's free disk space or sends an outside-watch
+    # heartbeat; the tests of those features turn them on with fakes.
+    monkeypatch.setenv("KAZMA_GUARD_DISK_WATCH", "off")
+    monkeypatch.setenv("KAZMA_GUARD_OUTSIDE_WATCH", "off")
 
 
 @pytest.fixture(autouse=True)

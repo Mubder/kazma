@@ -38,7 +38,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from kazma_core.db import availability
 
 REPO = Path(__file__).resolve().parents[1]
@@ -435,6 +434,8 @@ _NO_DATABASE = "touches no database: "
 _ONE_REQUEST = "waits inside one request or job, which its caller bounds"
 
 DECLARED = {
+    "kazma-core/kazma_core/db/availability.py::wait_while_away":
+        "the wait itself: every loop in AWARE calls it while the database is away",
     "kazma-core/kazma_core/memory/worker_bootstrap.py::_start_commitment_gc_scheduler._loop":
         _KEEPS_RUNNING + "most of its sweeps are SQLite, the supervisor watch must not stop with "
         "the database, and a sweep that fails while away is recorded as waiting_for_database",

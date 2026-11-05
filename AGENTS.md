@@ -7248,6 +7248,38 @@ code) and Kazma ran with nobody supervising it.
   Gate: `tests/test_guard_dependencies.py` (fake clock, fake docker, the task
   XML; the guard without the check as the negative control; the broker page
   with and without it).
+- **The guard watches the free disk space** (`DiskWatch`, resilience plan
+  B2a). Once a minute, off the same loop (`_broker_tick`), it reads the data
+  folder's drive and, when Docker keeps its disk image on another drive,
+  that one (`watched`). Either measure crosses a level (`disk_level`: low 15 %
+  or 20 GB, critical 5 % or 5 GB); leaving takes both clear by 1 % and 1 GB,
+  so a drive at a line is one page. One page per level, naming what stops
+  first (documents below their 512 MB floor, then backups, then the
+  database; on Docker's drive, the database), and one "Disk space is back"
+  only after a page. The state file's `disk` and `--status`'s `disk` line say
+  the level; `KAZMA_GUARD_DISK_WATCH=off` turns it off (the root conftest
+  does: a CI runner has less than the low line). Gate:
+  `tests/test_guard_disk_watch.py` (the rule without the margin and a guard
+  without the watch as negative controls).
+- **The guard sends a heartbeat to an outside observer once paired**
+  (`OutsideWatch`, resilience plan B1). Nothing on this machine can say the
+  machine is off, asleep or cut off. With `<install>/.kazma/observer.key` (32+
+  characters, written by `kazma observer pair`, restricted to the guard's
+  account like the broker token: a key it cannot restrict is never used,
+  `key_unprotected`), it POSTs every minute to
+  `KAZMA_GUARD_OUTSIDE_WATCH_URL` (https, or http to this machine only),
+  signed `v1=<HMAC-SHA256>` of `"<timestamp>.<body>"` (`sign_heartbeat`; the
+  shared vector `tests/fixtures/observer/heartbeat_vector.json`, read by the
+  observer's verifier too). The body is an allowlist (`heartbeat_body`):
+  states, numbers, the readiness checks' NAMES (`ProbeResult.checks`, never
+  the detail's text), the commit, the database, Docker, cloudflared, disk and
+  power -- no chat, path, name or error ever. One send in flight, on a daemon
+  thread with a 5 s bound; a hung observer is `skipped`. The answer (`reached`,
+  `rejected`, `unreachable`) is logged once per change and kept in the state
+  file's `outside_watch` and `--status`'s `outside` line.
+  `KAZMA_GUARD_OUTSIDE_WATCH=off` wins over a key. Gate:
+  `tests/test_observer_heartbeat.py` (the snapshot sent as it is, and a guard
+  without the watch, as negative controls).
 - **Settings' "Restart server" asks the guard.** A server the guard started
   writes the guard's reload request (`supervisor_watch.request_guard_reload`;
   the guard hands the path over in `KAZMA_GUARD_RELOAD_FILE`, an older guard

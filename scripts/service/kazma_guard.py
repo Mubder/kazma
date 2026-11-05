@@ -64,20 +64,30 @@ Configuration (all optional, env vars):
     KAZMA_GUARD_START_DEPENDENCIES  auto (default: start Docker Desktop, and
                                 Kazma's own stopped containers, when the
                                 engine does not answer) | off
+    KAZMA_GUARD_DISK_WATCH      auto (default: check the free space where
+                                Kazma writes, once a minute) | off
+    KAZMA_GUARD_OUTSIDE_WATCH   auto (default: send the outside observer a
+                                heartbeat once the install is paired) | off
+    KAZMA_GUARD_OUTSIDE_WATCH_URL  the observer's heartbeat address
+                                (default: https://status.kazma.ai/v1/heartbeat)
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
+import re
 import secrets
+import shutil
 import signal
 import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -175,8 +185,11 @@ GUARD_ACK_S = 20.0
 #                 (state ``pause_held`` = that pause's ``since``).
 #   document_broker -- runs the document worker broker beside Kazma when
 #                 Kazma asks (state ``document_broker``; see DocumentBroker).
+#   disk_watch -- checks the free space where Kazma writes (state ``disk``).
+#   outside_watch -- the heartbeat to the outside observer (state
+#                 ``outside_watch``; see OutsideWatch).
 GUARD_FEATURES = ("pause_held", "document_broker", "dependencies", "boot_wait",
-                  "database_hold")
+                  "database_hold", "disk_watch", "outside_watch")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -940,15 +953,47 @@ class ProbeResult(tuple):
     answered: bool
     restart_required: bool
     database: dict | None
+    # The NAMES of the checks the answer says failed (or are degraded):
+    # what the outside watch may carry, never the detail's error text.
+    checks: tuple[str, ...]
 
     def __new__(cls, healthy: bool, detail: str, answered: bool = True,
                 restart_required: bool = False,
-                database: dict | None = None) -> ProbeResult:
+                database: dict | None = None,
+                checks: tuple[str, ...] = ()) -> ProbeResult:
         obj = super().__new__(cls, (healthy, detail))
         obj.answered = answered
         obj.restart_required = restart_required
         obj.database = database
+        obj.checks = tuple(checks)
         return obj
+
+
+_CHECK_NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz_")
+
+
+def _check_names(raw_or_data: object, *, failed_only: bool = True) -> tuple[str, ...]:
+    """The names of the readiness checks that did not pass, from a body
+    (text or parsed): failed ones, or (``failed_only=False``) every one not
+    ``ok``. Names only, lowercase words, at most eight."""
+    data = raw_or_data
+    if isinstance(raw_or_data, str):
+        try:
+            data = json.loads(raw_or_data)
+        except ValueError:
+            return ()
+    if not isinstance(data, dict) or not isinstance(data.get("checks"), dict):
+        return ()
+    names = []
+    for key, val in data["checks"].items():
+        if not isinstance(val, dict) or not isinstance(key, str):
+            continue
+        status = str(val.get("status") or "").lower()
+        bad = status == "failed" if failed_only else status not in (
+            "ok", "healthy", "not_initialized")
+        if bad and 0 < len(key) <= 40 and set(key) <= _CHECK_NAME_CHARS:
+            names.append(key)
+    return tuple(sorted(set(names))[:8])
 
 
 # The readiness body names every check; with the database state it passes
@@ -983,7 +1028,8 @@ def probe(url: str, timeout: float) -> ProbeResult:
             if resp.status != 200:
                 restart, db = _readiness_fields(raw)
                 return ProbeResult(False, _health_failure_detail(raw, http_status=resp.status),
-                                   restart_required=restart, database=db)
+                                   restart_required=restart, database=db,
+                                   checks=_check_names(raw))
         # HTTP 200 IS the contract. /health/ready returns 503 only when a
         # CRITICAL dependency (config store, database) is gone; a partial
         # failure is reported as "degraded" with 200 and the explicit
@@ -1006,7 +1052,7 @@ def probe(url: str, timeout: float) -> ProbeResult:
             failing = _failing_checks(data)
             return ProbeResult(False, "; ".join(failing[:6]) if failing else "not_ready",
                                restart_required=data.get("restart_required") is True,
-                               database=db)
+                               database=db, checks=_check_names(data))
         degraded = [
             k for k, v in (data.get("checks") or {}).items()
             if isinstance(v, dict)
@@ -1017,7 +1063,8 @@ def probe(url: str, timeout: float) -> ProbeResult:
             # Serving, but say so -- this is how a partial outage becomes
             # visible in the guard log instead of passing silently.
             detail = f"{detail} (degraded: {','.join(sorted(degraded)[:4])})"
-        return ProbeResult(True, detail, database=db)
+        return ProbeResult(True, detail, database=db,
+                           checks=_check_names(data, failed_only=False))
     except urllib.error.HTTPError as exc:
         # urlopen raises on 503. The JSON body names the failing check;
         # do not format this as unreachable: Service Unavailable.
@@ -1028,7 +1075,8 @@ def probe(url: str, timeout: float) -> ProbeResult:
             raw = ""
         restart, db = _readiness_fields(raw)
         return ProbeResult(False, _health_failure_detail(raw, http_status=int(exc.code or 0)),
-                           restart_required=restart, database=db)
+                           restart_required=restart, database=db,
+                           checks=_check_names(raw))
     except urllib.error.URLError as exc:
         return ProbeResult(False, f"unreachable: {getattr(exc, 'reason', exc)}", answered=False)
     except Exception as exc:  # noqa: BLE001 -- a probe must never raise
@@ -3065,6 +3113,601 @@ def _dependency_status_lines(state: dict) -> list[str]:
     return lines
 
 
+# -- free disk space ---------------------------------------------------
+#
+# Resilience plan B2a. A full drive stops Kazma in a set order: the
+# document store refuses work below its floor first, then backups fail, then
+# the database (and Docker's disk image, when Docker keeps it on another
+# drive) stops writing. The guard checks the free space once a minute, warns
+# once at the low level and pages once at the critical one, naming what
+# stops next, and says once when there is room again. Either measure (the
+# share or the bytes) crosses a level; leaving it needs both clear of a
+# margin, so a drive hovering at a line is not a page a minute. The level
+# also travels in the outside-watch heartbeat (OutsideWatch below).
+
+DISK_CHECK_EVERY_S = 60.0
+DISK_LOW_PCT = 15.0
+DISK_LOW_BYTES = 20 * 1024 ** 3
+DISK_CRITICAL_PCT = 5.0
+DISK_CRITICAL_BYTES = 5 * 1024 ** 3
+DISK_MARGIN_PCT = 1.0
+DISK_MARGIN_BYTES = 1024 ** 3
+# kazma_core.documents keeps this much free before it starts a stage.
+DOCUMENT_FLOOR_BYTES = 512 * 1024 ** 2
+_DISK_LEVELS = ("ok", "low", "critical")
+
+
+def disk_level(free: int, total: int, current: str = "ok") -> str:
+    """``critical``, ``low`` or ``ok`` for *free* bytes of *total*.
+
+    Entering a level takes either measure below its line; leaving one
+    takes both above it by the margin (DISK_MARGIN_PCT, DISK_MARGIN_BYTES).
+    """
+    if total <= 0:
+        return current if current in _DISK_LEVELS else "ok"
+    pct = 100.0 * free / total
+
+    def below(pct_line: float, bytes_line: int, margin: bool) -> bool:
+        if margin:
+            return pct < pct_line + DISK_MARGIN_PCT or free < bytes_line + DISK_MARGIN_BYTES
+        return pct < pct_line or free < bytes_line
+
+    if below(DISK_CRITICAL_PCT, DISK_CRITICAL_BYTES, current == "critical"):
+        return "critical"
+    if below(DISK_LOW_PCT, DISK_LOW_BYTES, current in ("low", "critical")):
+        return "low"
+    return "ok"
+
+
+def _data_dir_guess() -> Path:
+    """Where Kazma keeps its data: ``KAZMA_DATA_DIR``, else the install's
+    ``kazma-data`` (kazma_core.paths.data_dir, without importing it)."""
+    env = (os.environ.get("KAZMA_DATA_DIR") or "").strip()
+    return Path(env) if env else REPO_ROOT / "kazma-data"
+
+
+def _existing(path: Path) -> Path | None:
+    """*path*, or its nearest existing parent (a data dir not made yet)."""
+    for candidate in (path, *path.parents):
+        try:
+            if candidate.exists():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def _docker_disk_dir() -> Path | None:
+    """Where Docker Desktop keeps its disk image, when it is on this machine."""
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or ""
+        candidate = Path(base) / "Docker" / "wsl" if base else None
+    elif sys.platform == "darwin":
+        candidate = Path.home() / "Library" / "Containers" / "com.docker.docker" / "Data"
+    else:
+        candidate = Path("/var/lib/docker")
+    try:
+        return candidate if candidate is not None and candidate.is_dir() else None
+    except OSError:
+        return None
+
+
+def _drive_label(path: Path) -> str:
+    """``C:`` on Windows, the path itself elsewhere."""
+    drive = getattr(path, "drive", "") or ""
+    return drive if drive else str(path)
+
+
+def _same_volume(a: Path, b: Path) -> bool:
+    try:
+        return a.stat().st_dev == b.stat().st_dev
+    except OSError:
+        return str(a.drive).lower() == str(b.drive).lower() if os.name == "nt" else False
+
+
+class DiskWatch:
+    """Free space where Kazma writes (see the section comment).
+
+    Ticked from the guard's own loop; one check every DISK_CHECK_EVERY_S,
+    the reader injectable for tests. Never raises out of a tick.
+    """
+
+    def __init__(self, guard: Guard, *, reader=None, paths=None) -> None:
+        self.guard = guard
+        self.log = guard.log
+        self.reader = reader or shutil.disk_usage
+        self._paths = paths
+        self._next_check = 0.0
+        self.levels: dict[str, str] = {}
+        self.readings: dict[str, dict] = {}
+        self._paged: set[str] = set()
+
+    def watched(self) -> list[tuple[str, str, Path]]:
+        """(key, role, path) of each volume to watch: the data dir, and
+        Docker's disk image when it is on another volume."""
+        if self._paths is not None:
+            return list(self._paths)
+        found: list[tuple[str, str, Path]] = []
+        data = _existing(_data_dir_guess())
+        if data is not None:
+            found.append((_drive_label(data), "data", data))
+        docker = _docker_disk_dir()
+        if docker is not None and (data is None or not _same_volume(docker, data)):
+            found.append((_drive_label(docker), "docker", docker))
+        return found
+
+    def mode(self) -> str:
+        return "off" if (os.environ.get("KAZMA_GUARD_DISK_WATCH") or "").strip().lower() in (
+            "off", "0", "false", "no") else "auto"
+
+    def on_guard_start(self) -> None:
+        self._write()
+
+    def tick(self) -> None:
+        try:
+            self._tick()
+        except Exception as exc:  # noqa: BLE001 -- see the class docstring
+            self._internal(exc)
+
+    def _internal(self, exc: BaseException) -> None:
+        self.log("error", "disk.internal_error", error=f"{type(exc).__name__}: {exc}"[:300])
+
+    def worst(self) -> dict | None:
+        """The reading with the least room, for the heartbeat."""
+        if not self.readings:
+            return None
+        key = min(self.readings, key=lambda k: self.readings[k]["free_pct"])
+        return {"free_pct": self.readings[key]["free_pct"],
+                "level": self.levels.get(key, "ok")}
+
+    def _tick(self) -> None:
+        if self.mode() == "off":
+            return
+        now = time.monotonic()
+        if now < self._next_check:
+            return
+        self._next_check = now + DISK_CHECK_EVERY_S
+        for key, role, path in self.watched():
+            try:
+                usage = self.reader(str(path))
+            except OSError as exc:
+                self.readings.pop(key, None)
+                self.log("warn", "disk.unreadable", drive=key, error=str(exc)[:200])
+                continue
+            total = int(getattr(usage, "total", 0) or 0)
+            free = int(getattr(usage, "free", 0) or 0)
+            before = self.levels.get(key, "ok")
+            level = disk_level(free, total, before)
+            pct = round(100.0 * free / total, 1) if total else 0.0
+            self.readings[key] = {"role": role, "free_pct": pct, "free_gb": round(free / 1024 ** 3, 1),
+                                  "total_gb": round(total / 1024 ** 3, 1)}
+            self.levels[key] = level
+            if level != before:
+                self._changed(key, role, before, level, pct, free)
+        self._write()
+
+    def _changed(self, key: str, role: str, before: str, level: str, pct: float, free: int) -> None:
+        gb = round(free / 1024 ** 3, 1)
+        self.log("warn" if level != "ok" else "info", "disk.level", drive=key, role=role,
+                 state=level, before=before, free_pct=pct, free_gb=gb)
+        where = "Docker's disk image" if role == "docker" else "Kazma's data"
+        if level == "ok":
+            if key in self._paged:
+                self._paged.discard(key)
+                self.guard._page("success", f"Disk space is back on {key}",
+                                 f"{pct}% ({gb} GB) free where {where} is kept.",
+                                 fingerprint=f"disk:{key}:ok", force=True)
+            return
+        self._paged.add(key)
+        severity = "critical" if level == "critical" else "warn"
+        title = (f"Disk almost full on {key}" if level == "critical"
+                 else f"Disk space low on {key}")
+        self.guard._page(severity, title,
+                         f"{pct}% ({gb} GB) free where {where} is kept. {self._what_stops(role)}",
+                         fingerprint=f"disk:{key}:{level}", force=True)
+
+    @staticmethod
+    def _what_stops(role: str) -> str:
+        floor_mb = DOCUMENT_FLOOR_BYTES // 1024 ** 2
+        if role == "docker":
+            return ("When it fills, the database in Docker stops writing: chats, "
+                    "settings and memory stop saving. Free space on this drive.")
+        return (f"What stops first: documents refuse work below {floor_mb} MB free, "
+                "then backups fail, then the database stops writing. Free space on "
+                "this drive.")
+
+    def record(self) -> dict:
+        return {
+            "volumes": {key: {**reading, "level": self.levels.get(key, "ok")}
+                        for key, reading in self.readings.items()},
+            "updated": time.time(),
+        }
+
+    def _write(self) -> None:
+        _update_state(disk=self.record())
+
+
+def _disk_status_lines(state: dict) -> list[str]:
+    """What --status says about free disk space."""
+    rec = state.get("disk")
+    if not isinstance(rec, dict) or not isinstance(rec.get("volumes"), dict):
+        return []
+    lines = []
+    for key, vol in rec["volumes"].items():
+        if not isinstance(vol, dict):
+            continue
+        lines.append(f"disk        : {vol.get('level')} ({vol.get('free_pct')}% / "
+                     f"{vol.get('free_gb')} GB free on {key}, {vol.get('role')})")
+    return lines
+
+
+# -- the outside watch -------------------------------------------------
+#
+# Resilience plan B1. Everything else in the guard runs on this machine, so
+# none of it can say the machine is off, asleep or cut off. Once the owner
+# has paired the install with an observer (``kazma observer pair`` writes
+# <install>/.kazma/observer.key), the guard sends it a heartbeat every
+# OUTSIDE_WATCH_EVERY_S: the observer (deploy/observer, a Cloudflare Worker
+# on kazma.ai) pages when the heartbeats stop or say something is wrong.
+#
+# The heartbeat is an allowlist, built by heartbeat_body: states, counts and
+# check NAMES -- no chat, no content, no path, no name, no error text. It is
+# signed with HMAC-SHA256 under the pairing key (sign_heartbeat), over
+# "<timestamp>.<body>", so the observer can refuse a forged or replayed one.
+# The key must be readable by the guard's account alone (restricted like the
+# broker token); a key file anyone else may read is never used. One send at
+# a time, on a daemon thread, bounded by OUTSIDE_WATCH_TIMEOUT_S: an observer
+# that hangs never holds up the guard.
+
+OUTSIDE_WATCH_EVERY_S = 60.0
+OUTSIDE_WATCH_TIMEOUT_S = 5.0
+DEFAULT_OUTSIDE_WATCH_URL = "https://status.kazma.ai/v1/heartbeat"
+OBSERVER_KEY_MIN_CHARS = 32
+_NAME_RE = re.compile(r"^[a-z_]{1,40}$")
+_STATE_WORD_RE = re.compile(r"^[a-z_]{1,24}$")
+
+
+def sign_heartbeat(key: bytes, ts: int, body: bytes) -> str:
+    """``v1=<hex>``: HMAC-SHA256 under *key* of ``b"<ts>." + body``."""
+    mac = hmac.new(key, str(int(ts)).encode("ascii") + b"." + body, hashlib.sha256)
+    return "v1=" + mac.hexdigest()
+
+
+def _word(value: object) -> str | None:
+    """*value* when it is a short lowercase state word, else None."""
+    text = str(value) if isinstance(value, str) else ""
+    return text if _STATE_WORD_RE.match(text) else None
+
+
+def _install_hash() -> str:
+    """A stable, anonymous name for this install: the hash of its install
+    id (``<data dir>/install_id``), else of where it is installed."""
+    try:
+        raw = (_data_dir_guess() / "install_id").read_text(encoding="utf-8").strip()
+    except OSError:
+        raw = ""
+    seed = raw or str(REPO_ROOT)
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+
+def _git_head(root: Path) -> str | None:
+    """The commit the install has checked out, read from .git's files."""
+    git = root / ".git"
+    try:
+        head = (git / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref: "):
+            ref = head[5:].strip()
+            ref_file = git / ref
+            if ref_file.is_file():
+                head = ref_file.read_text(encoding="utf-8").strip()
+            else:
+                head = ""
+                packed = git / "packed-refs"
+                for line in packed.read_text(encoding="utf-8").splitlines():
+                    parts = line.split()
+                    if len(parts) == 2 and parts[1] == ref:
+                        head = parts[0]
+                        break
+    except OSError:
+        return None
+    head = head.lower()
+    if len(head) >= 12 and all(c in "0123456789abcdef" for c in head):
+        return head[:12]
+    return None
+
+
+def _cloudflared_state() -> str:
+    """``running``, ``not_running`` or ``unknown`` (no tool to ask)."""
+    if os.name == "nt":
+        got = _run_command(["tasklist", "/FI", "IMAGENAME eq cloudflared.exe",
+                            "/FO", "CSV", "/NH"], 10)
+        if got is None or got[0] != 0:
+            return "unknown"
+        return "running" if "cloudflared.exe" in got[1].lower() else "not_running"
+    got = _run_command(["pgrep", "-x", "cloudflared"], 10)
+    if got is None or got[0] not in (0, 1):
+        return "unknown"
+    return "running" if got[0] == 0 else "not_running"
+
+
+def _power_state() -> dict | None:
+    """``{"on_battery", "percent"}`` where the machine has a battery, else None."""
+    if os.name == "nt":
+        import ctypes
+
+        class _PowerStatus(ctypes.Structure):
+            _fields_ = [("ac", ctypes.c_ubyte), ("flag", ctypes.c_ubyte),
+                        ("percent", ctypes.c_ubyte), ("saver", ctypes.c_ubyte),
+                        ("life", ctypes.c_ulong), ("full", ctypes.c_ulong)]
+
+        status = _PowerStatus()
+        try:
+            ok = ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(status))
+        except (AttributeError, OSError):
+            return None
+        if not ok or status.flag in (128, 255):  # no battery / unknown
+            return None
+        return {"on_battery": status.ac == 0,
+                "percent": None if status.percent == 255 else int(status.percent)}
+    base = Path("/sys/class/power_supply")
+    try:
+        supplies = sorted(base.iterdir()) if base.is_dir() else []
+    except OSError:
+        return None
+    for supply in supplies:
+        try:
+            if (supply / "type").read_text(encoding="utf-8").strip() != "Battery":
+                continue
+            status = (supply / "status").read_text(encoding="utf-8").strip()
+            percent = int((supply / "capacity").read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            continue
+        return {"on_battery": status == "Discharging", "percent": percent}
+    return None
+
+
+def heartbeat_body(snapshot: dict) -> bytes:
+    """The heartbeat's JSON body, built from *snapshot* through an allowlist.
+
+    Only these keys, each a state word, a number, a boolean or a list of
+    check names, ever leave the machine; anything else in *snapshot* (a
+    probe's detail, a path, an error) is dropped here, not by the caller.
+    """
+    guard = snapshot.get("guard") or {}
+    kazma = snapshot.get("kazma") or {}
+    disk = snapshot.get("disk") or {}
+    power = snapshot.get("power")
+    db = snapshot.get("database") or {}
+
+    def number(value: object) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return round(float(value), 1)
+
+    why = [name for name in (kazma.get("why") or []) if isinstance(name, str) and _NAME_RE.match(name)]
+    build = kazma.get("build")
+    body = {
+        "v": 1,
+        "install": str(snapshot.get("install") or "")[:16],
+        "sent_at": int(snapshot.get("sent_at") or 0),
+        "seq": int(snapshot.get("seq") or 0),
+        "guard": {
+            "state": _word(guard.get("state")),
+            "uptime_s": number(guard.get("uptime_s")),
+            "code": str(guard.get("code") or "")[:12] or None,
+        },
+        "kazma": {
+            "state": _word(kazma.get("state")),
+            "ready": kazma.get("ready") is True,
+            "why": sorted(set(why))[:8],
+            "uptime_s": number(kazma.get("uptime_s")),
+            "build": build if isinstance(build, str) and len(build) == 12
+            and all(c in "0123456789abcdef" for c in build) else None,
+        },
+        "maintenance": snapshot.get("maintenance") is True,
+        "database": {"state": _word(db.get("state")), "confirmed": db.get("confirmed") is True},
+        "docker": _word(snapshot.get("docker")),
+        "cloudflared": _word(snapshot.get("cloudflared")),
+        "disk": {"free_pct": number(disk.get("free_pct")), "level": _word(disk.get("level"))},
+        "power": None if not isinstance(power, dict) else {
+            "on_battery": power.get("on_battery") is True,
+            "percent": number(power.get("percent")),
+        },
+    }
+    return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _outside_watch_url() -> str | None:
+    """The observer's heartbeat URL: https, or http to this machine (tests)."""
+    raw = (os.environ.get("KAZMA_GUARD_OUTSIDE_WATCH_URL") or DEFAULT_OUTSIDE_WATCH_URL).strip()
+    try:
+        parsed = urllib.parse.urlparse(raw)
+    except ValueError:
+        return None
+    if parsed.scheme == "https" and parsed.hostname:
+        return raw
+    if parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost", "::1"):
+        return raw
+    return None
+
+
+def _observer_key_path() -> Path:
+    return _kazma_home() / "observer.key"
+
+
+class OutsideWatch:
+    """The heartbeat to the outside observer (see the section comment).
+
+    Off until the owner pairs (no key file), or with
+    KAZMA_GUARD_OUTSIDE_WATCH=off. Ticked from the guard's loop: the tick
+    builds the snapshot and starts one send thread; the thread only sends
+    and records the answer, which the next tick logs. Never raises out of a
+    tick.
+    """
+
+    def __init__(self, guard: Guard, *, opener=None, key_path: Path | None = None,
+                 restrict=None) -> None:
+        self.guard = guard
+        self.log = guard.log
+        self.opener = opener or urllib.request.urlopen
+        self.key_path = key_path or _observer_key_path()
+        self.restrict = restrict or _restrict_to_owner
+        self.state = "off"
+        self._said = "off"
+        self._key: bytes | None = None
+        self._key_sig: tuple[int, int] | None = None
+        self._key_state = "missing"
+        self._next_send = 0.0
+        self._seq = 0
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._result: tuple[str, int | None, float] | None = None
+        self.last_ack: float | None = None
+        self.skipped = 0
+
+    def mode(self) -> str:
+        return "off" if (os.environ.get("KAZMA_GUARD_OUTSIDE_WATCH") or "").strip().lower() in (
+            "off", "0", "false", "no") else "auto"
+
+    def on_guard_start(self) -> None:
+        self._write()
+
+    def tick(self) -> None:
+        try:
+            self._tick()
+        except Exception as exc:  # noqa: BLE001 -- see the class docstring
+            self._internal(exc)
+
+    def _internal(self, exc: BaseException) -> None:
+        self.log("error", "outside_watch.internal_error",
+                 error=f"{type(exc).__name__}: {exc}"[:300])
+
+    def _load_key(self) -> bytes | None:
+        """The pairing key, read once per version of the file, and only when
+        the file is restricted to the guard's account."""
+        try:
+            st = self.key_path.stat()
+        except OSError:
+            self._key, self._key_sig, self._key_state = None, None, "missing"
+            return None
+        sig = (int(st.st_mtime_ns), int(st.st_size))
+        if sig == self._key_sig:
+            return self._key
+        self._key_sig = sig
+        self._key = None
+        if not self.restrict(self.key_path):
+            self._key_state = "key_unprotected"
+            return None
+        try:
+            text = self.key_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            self._key_state = "missing"
+            return None
+        if len(text) < OBSERVER_KEY_MIN_CHARS:
+            self._key_state = "key_invalid"
+            return None
+        self._key = text.encode("utf-8")
+        self._key_state = "ok"
+        return self._key
+
+    def _tick(self) -> None:
+        self._take_result()
+        if self.mode() == "off":
+            self._set("off")
+            return
+        key = self._load_key()
+        if key is None:
+            self._set("off" if self._key_state == "missing" else self._key_state)
+            return
+        url = _outside_watch_url()
+        if url is None:
+            self._set("bad_url")
+            return
+        now = time.monotonic()
+        if now < self._next_send:
+            return
+        self._next_send = now + OUTSIDE_WATCH_EVERY_S
+        if self._thread is not None and self._thread.is_alive():
+            self.skipped += 1
+            return
+        if self.state == "off":
+            self._set("reaching")
+        self._seq += 1
+        snapshot = self.guard._heartbeat_snapshot(self._seq)
+        thread = threading.Thread(target=self._send, args=(url, key, snapshot),
+                                  name="kazma-guard-outside-watch", daemon=True)
+        self._thread = thread
+        thread.start()
+
+    def _send(self, url: str, key: bytes, snapshot: dict) -> None:
+        """On the send thread: fill what is slow to read, sign, post."""
+        outcome, status = "unreachable", None
+        try:
+            snapshot["cloudflared"] = _cloudflared_state()
+            snapshot["power"] = _power_state()
+            body = heartbeat_body(snapshot)
+            ts = int(time.time())
+            req = urllib.request.Request(url, data=body, method="POST", headers={
+                "Content-Type": "application/json",
+                "X-Kazma-Install": str(snapshot.get("install") or ""),
+                "X-Kazma-Timestamp": str(ts),
+                "X-Kazma-Signature": sign_heartbeat(key, ts, body),
+            })
+            with self.opener(req, timeout=OUTSIDE_WATCH_TIMEOUT_S) as resp:
+                status = int(getattr(resp, "status", 0) or 0)
+            outcome = "reached" if 200 <= status < 300 else "unreachable"
+        except urllib.error.HTTPError as exc:
+            status = int(exc.code or 0)
+            outcome = "rejected" if status in (401, 403) else "unreachable"
+        except Exception:  # noqa: BLE001 -- a send on its own thread must never raise
+            outcome = "unreachable"
+        with self._lock:
+            self._result = (outcome, status, time.time())
+
+    def _take_result(self) -> None:
+        with self._lock:
+            result, self._result = self._result, None
+        if result is None:
+            return
+        outcome, status, at = result
+        if outcome == "reached":
+            self.last_ack = at
+        self._set(outcome, status=status)
+
+    def _set(self, state: str, *, status: int | None = None) -> None:
+        if state != self.state:
+            self.state = state
+            self._write()
+        if state != self._said:
+            self._said = state
+            level = "info" if state in ("off", "reached", "reaching") else "warn"
+            self.log(level, f"outside_watch.{state}", http_status=status)
+
+    def record(self) -> dict:
+        return {
+            "state": self.state,
+            "mode": self.mode(),
+            "last_ack": self.last_ack,
+            "skipped": self.skipped,
+            "updated": time.time(),
+        }
+
+    def _write(self) -> None:
+        _update_state(outside_watch=self.record())
+
+
+def _outside_status_lines(state: dict) -> list[str]:
+    """What --status says about the outside watch."""
+    rec = state.get("outside_watch")
+    if not isinstance(rec, dict):
+        return []
+    line = f"outside     : {rec.get('state')}"
+    ack = rec.get("last_ack")
+    if isinstance(ack, (int, float)) and ack > 0:
+        line += f" (last answered {int(max(0, time.time() - ack))} s ago)"
+    return [line]
+
+
 # -- supervisor -------------------------------------------------------
 
 
@@ -3079,6 +3722,12 @@ class Guard:
     _last_beat = 0.0
     _internal_errors = 0
     deps = None
+    disk = None
+    outside = None
+    started_at = 0.0
+    # The last readiness answer (state, check names, database), for the
+    # outside watch: see _note_probe.
+    _probe_note: dict | None = None
 
     def __init__(self, *, once: bool = False) -> None:
         self.log = GuardLog(_default_log_path())
@@ -3123,6 +3772,10 @@ class Guard:
         self.broker = DocumentBroker(self)
         # Docker Desktop and the containers Kazma uses (Dependencies).
         self.deps = Dependencies(self)
+        # Free disk space where Kazma writes (DiskWatch).
+        self.disk = DiskWatch(self)
+        # The heartbeat to the outside observer (OutsideWatch).
+        self.outside = OutsideWatch(self)
 
     # -- lifecycle ----------------------------------------------------
 
@@ -3271,7 +3924,9 @@ class Guard:
                          code=self.proc.returncode,
                          after_s=round(time.monotonic() - started, 1))
                 return False
-            ok, detail = probe(self.health_url, PROBE_TIMEOUT_S)
+            boot_result = probe(self.health_url, PROBE_TIMEOUT_S)
+            self._note_probe(boot_result)
+            ok, detail = boot_result
             if ok:
                 # Is the thing answering actually the thing we launched?
                 # After a restart, an orphan holding the port answers this
@@ -3400,6 +4055,70 @@ class Guard:
         deps = getattr(self, "deps", None)
         if deps is not None:
             deps.tick()
+        disk = getattr(self, "disk", None)
+        if disk is not None:
+            disk.tick()
+        outside = getattr(self, "outside", None)
+        if outside is not None:
+            outside.tick()
+
+    def _note_probe(self, result: object) -> None:
+        """Remember the last readiness answer, for the outside watch."""
+        try:
+            ready = bool(result[0])  # type: ignore[index]
+        except (TypeError, IndexError, KeyError):
+            return
+        self._probe_note = {
+            "ready": ready,
+            "answered": getattr(result, "answered", True) is not False,
+            "checks": list(getattr(result, "checks", ()) or ()),
+            "database": database_state(result),
+            "at": time.time(),
+        }
+
+    def _heartbeat_snapshot(self, seq: int) -> dict:
+        """What the outside watch may report. heartbeat_body keeps only its
+        allowlist of this; the send thread adds cloudflared and power."""
+        now = time.time()
+        paused = read_pause() is not None
+        proc = getattr(self, "proc", None)
+        note = self._probe_note
+        if note is not None and float(note.get("at") or 0.0) < self.spawned_at:
+            note = None  # an answer from the child before this one
+        if proc is None or proc.poll() is not None:
+            kazma_state = "down"
+        elif note is None:
+            kazma_state = "starting"
+        elif not note.get("answered"):
+            kazma_state = "unreachable"
+        else:
+            kazma_state = "ready" if note.get("ready") else "not_ready"
+        alive = kazma_state not in ("down",)
+        db = (note or {}).get("database") or {}
+        deps = getattr(self, "deps", None)
+        engine = getattr(deps, "engine_up", None) if deps is not None else None
+        disk = getattr(self, "disk", None)
+        return {
+            "install": _install_hash(),
+            "sent_at": int(now),
+            "seq": int(seq),
+            "guard": {
+                "state": "paused" if paused else "supervising",
+                "uptime_s": now - self.started_at if self.started_at else None,
+                "code": _file_sha(Path(__file__).resolve())[:12],
+            },
+            "kazma": {
+                "state": kazma_state,
+                "ready": kazma_state == "ready",
+                "why": list((note or {}).get("checks") or []),
+                "uptime_s": now - self.spawned_at if alive and self.spawned_at else None,
+                "build": _git_head(self.cwd),
+            },
+            "maintenance": paused,
+            "database": {"state": db.get("state"), "confirmed": db.get("confirmed") is True},
+            "docker": {True: "up", False: "down"}.get(engine, "unknown"),
+            "disk": disk.worst() if disk is not None else None,
+        }
 
     def _beat(self, *, force: bool = False) -> None:
         """Record that this guard is alive (see HEARTBEAT_EVERY_S)."""
@@ -3495,6 +4214,7 @@ class Guard:
         # orphan is invisible to the probe (nothing bound yet) and both
         # instances race for the port.
         reap_orphan(self.log)
+        self.started_at = time.time()
         # From here on this is the guard --reload, --status and the server
         # see as alive (the heartbeat; see HEARTBEAT_EVERY_S).
         _update_state(guard_pid=os.getpid(), guard_started=time.time(),
@@ -3517,6 +4237,8 @@ class Guard:
         # rewrote the broker's record (and could reap it) on its way out.
         self.broker.on_guard_start()
         self.deps.on_guard_start()
+        self.disk.on_guard_start()
+        self.outside.on_guard_start()
 
         first = True
         while not self._stop:
@@ -3888,6 +4610,7 @@ class Guard:
             next_probe = time.monotonic() + PROBE_INTERVAL_S
 
             result = probe(self.health_url, PROBE_TIMEOUT_S)
+            self._note_probe(result)
             ok, detail = result
             if ok:
                 if consecutive:
@@ -4042,6 +4765,10 @@ def _cmd_status() -> int:
     for line in _dependency_status_lines(state):
         print(line)
     for line in _broker_status_lines(state, alive):
+        print(line)
+    for line in _disk_status_lines(state):
+        print(line)
+    for line in _outside_status_lines(state):
         print(line)
     return 0
 
