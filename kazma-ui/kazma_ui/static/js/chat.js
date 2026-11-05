@@ -3247,26 +3247,26 @@
         if (!_mine()) return;
         noteTurnActivity();
         if (!currentMsgEl) return;
-        var isSwarm = (data.tool_name === 'dispatch_swarm' || data.tool_name === 'swarm_dispatch' || (data.result && data.result.indexOf('Swarm task dispatched') !== -1));
+        // A dispatched swarm task is a call that finished: its row ends like
+        // any other, as the server stores it, so the live row and the
+        // reloaded row agree. The task's own progress is the Swarm page's
+        // and run supervision's. Until 2026-11-05 the row stayed "running"
+        // and a "Background Task Active" box was written into the answer:
+        // it kept pulsing after the task had finished, quoted the model's
+        // own instructions ("Use check_swarm_task(...)") to the reader, and
+        // was gone after a reload.
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
           detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
           // A call refused before it ran, or failing, ends failed (FA-253).
-          state: data.state === 'failed' ? 'failed' : (isSwarm ? 'running' : 'done'),
+          state: data.state === 'failed' ? 'failed' : 'done',
           // The graph's own run id, so the LIVE row and the row the
           // server persisted are one row rather than two after a
           // refresh. activityToParts reads 'tool#<id>' back into
           // call_id, which is what partKey keys on.
           id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
-        if (isSwarm) {
-          var content = currentMsgEl.querySelector('.message-content');
-          var resultBox = document.createElement('div');
-          resultBox.className = 'swarm-bg-badge';
-          resultBox.innerHTML = '<span class="pulse-dot"></span><div><strong>' + escapeHtml(ti('background_task_active', 'Background Task Active:')) + '</strong> ' + escapeHtml(truncateStr(data.result, 300)) + '</div>';
-          content.appendChild(resultBox);
-        }
         scrollToBottom();
       },
 

@@ -1105,10 +1105,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "— الافتراضي —",
         "en": "— default —",
     },
-    "chat.background_task_active": {
-        "ar": "مهمة تعمل في الخلفية:",
-        "en": "Background Task Active:",
-    },
     "chat.clarification_needed": {
         "ar": "مطلوب توضيح",
         "en": "Clarification Needed",
