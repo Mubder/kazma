@@ -4418,6 +4418,18 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   Production origin leases, spacing and cooldowns use durable ConfigStore CAS
   across processes, including fixed sync search and native browser HTTP. Live
   capacity counters describe this Python process, not every concurrent process.
+  **A lease is never held by a release that failed** (2026-11-05): this
+  process's writers of a durable table take turns (`durable_state._table_lock`;
+  the CAS is for other processes, with `_retry_pause`), a poll that only waits
+  writes nothing (`durable_state.Unchanged`, `origin_state._waited`),
+  `origin_state.release` never raises (a WARNING), and a lease naming this
+  process that it no longer holds (`origin_state._HELD`) is taken back at the
+  origin's next admission. Live, a deep research's parallel searches polled
+  with a write every 50 ms until the table was "busy"; two releases gave up,
+  the running server held SearXNG's two slots, and every later search waited
+  its 30 s and failed until a restart. Gate:
+  `tests/test_origin_leases_under_contention.py` (the old lock, poll and
+  release as negative controls).
   Gates: `tests/test_origin_scheduler.py`, real browser/KB compatibility suites.
   Tests isolate the scheduler per case; production cooldowns persist across jobs.
   `web_acquire.robots` defaults automated crawl/KB/research-save jobs to KazmaBot
