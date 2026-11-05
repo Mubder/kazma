@@ -29,6 +29,7 @@ import logging
 import time
 from typing import Any
 
+from kazma_core.db import availability
 from kazma_core.runs.contract import ACTIVE_STATES, Run, RunState, Verdict
 from kazma_core.runs.kinds import KINDS
 
@@ -223,6 +224,10 @@ async def _loop() -> None:
     _restore_owed_page(await asyncio.to_thread(outage_page_owed, _PAGE_KEY))
     logger.info("[runs] run supervisor started (every %ds)", int(TICK_SECONDS))
     while not is_shutting_down():
+        # The database being away is said once, by db.availability: a pass
+        # now would only fail, and page "run supervision is not working" too.
+        if await availability.wait_while_away():
+            return
         try:
             await tick()
         except asyncio.CancelledError:

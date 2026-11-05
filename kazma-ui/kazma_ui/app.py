@@ -1037,7 +1037,13 @@ class KazmaAppBuilder:
                 async def _heartbeat_loop() -> None:
                     import time as _time
 
+                    from kazma_core.db import availability
+
                     while True:
+                        # The stamp lives in the settings store: while the
+                        # database is away it can only fail.
+                        if await availability.wait_while_away():
+                            return
                         try:
                             from kazma_core.config_store import get_config_store
 

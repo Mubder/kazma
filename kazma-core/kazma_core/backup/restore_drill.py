@@ -996,6 +996,7 @@ async def drill_scheduler() -> None:
     """
     import asyncio
 
+    from kazma_core.db import availability
     from kazma_core.shutdown import sleep_or_shutdown
 
     first = True
@@ -1006,11 +1007,17 @@ async def drill_scheduler() -> None:
                     return
                 first = False
             else:
+                # A stamp read during an outage answers "never ran": the
+                # drill would run again the moment the database came back.
+                if await availability.wait_while_away():
+                    return
                 # Until the next drill (daily or deep) is due -- not a whole
                 # interval: after a boot that found the last drill 23 hours
                 # old, that was 24 more hours (2026-09-28).
                 if await sleep_or_shutdown(await asyncio.to_thread(_seconds_until_a_drill_is_due)):
                     return
+            if await availability.wait_while_away():
+                return
             # The weekly deep tier first: if it is due, the daily checks it
             # supersedes run anyway below.
             # The drill stamps are settings reads and writes (audit 2026-10-26 AUD-111).

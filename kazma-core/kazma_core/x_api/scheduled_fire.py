@@ -71,9 +71,15 @@ async def stop_scheduled_x_loop() -> None:
 
 
 async def _loop(poll_interval: float) -> None:
+    from kazma_core.db import availability
     from kazma_core.x_api.health import record_cycle
 
     while True:
+        # The account's credentials are in the settings store: a poll during
+        # an outage only logs an exception a cycle. A post that waits past
+        # its hold is missed, and says so, when the database answers again.
+        if await availability.wait_while_away():
+            return
         try:
             await _fire_due_posts()
             await asyncio.to_thread(record_cycle, "scheduler", success=True, interval=poll_interval)

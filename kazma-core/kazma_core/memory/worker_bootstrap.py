@@ -705,15 +705,21 @@ def _start_macro_sleep_scheduler() -> None:
         return
 
     async def _loop() -> None:
+        from kazma_core.db import availability
         from kazma_core.observability.cadence import seconds_until_due, stamp_run
         from kazma_core.shutdown import sleep_or_shutdown
 
         interval = _MACRO_SLEEP_INTERVAL_HOURS * 3600
         while True:
+            # Before the stamp is read too: an unreadable stamp means "due".
+            if await availability.wait_while_away():
+                return
             # Counted from the last run, never from boot (2026-11, FA-149): it
             # ran 60 s after every boot, several times a day on the live install.
             wait = await asyncio.to_thread(seconds_until_due, _MACRO_SLEEP_CADENCE_KEY, interval, settle_s=60)
             if await sleep_or_shutdown(wait):
+                return
+            if await availability.wait_while_away():
                 return
             try:
                 # Fan out over all active tenants so decay/promotion/archival
@@ -762,9 +768,12 @@ def _start_backup_export_scheduler() -> None:
         # First sweep shortly after boot (skip the full day-long wait), then
         # repeat once per day. The body only enqueues; the durable worker
         # drains the actual backup/export work on its own loop.
+        from kazma_core.db import availability
         from kazma_core.shutdown import sleep_or_shutdown
 
         if await sleep_or_shutdown(120):
+            return
+        if await availability.wait_while_away():
             return
         if _backup_ran_recently():
             # Skip the boot sweep when a backup is already fresh.
@@ -796,6 +805,11 @@ def _start_backup_export_scheduler() -> None:
             if await sleep_or_shutdown(await asyncio.to_thread(_seconds_until_backup_due)):
                 return
         while True:
+            # A backup taken while the database is away holds no Postgres
+            # dump and fails the restic run's settings reads: wait, then take
+            # the whole one.
+            if await availability.wait_while_away():
+                return
             try:
                 from kazma_core.db.pg_backup import pg_backup_enabled
 
@@ -859,11 +873,14 @@ def _start_session_purge_scheduler() -> None:
         return
 
     async def _loop() -> None:
+        from kazma_core.db import availability
         from kazma_core.shutdown import sleep_or_shutdown
 
         if await sleep_or_shutdown(120):  # first sweep shortly after boot
             return
         while True:
+            if await availability.wait_while_away():
+                return
             try:
                 from kazma_core.security.web_sessions import purge_expired_sessions
 
@@ -1296,13 +1313,27 @@ async def _run_sweeps(sweeps: tuple[tuple[str, Callable[[], None]], ...]) -> Non
     meaning search, off from 2026-07-31 to 2026-09-26 behind one debug line).
     A locked or busy database is INFO for its first passes and WARNING from
     the third in a row. Each outcome is recorded for health (``sweep_health``).
+
+    The cadence keeps running while Postgres is away (most sweeps are SQLite,
+    and the supervisor watch must not stop with the database). A sweep that
+    fails then is waiting for the database: DEBUG, not counted against it,
+    and recorded as ``waiting_for_database`` (plan A3: one WARNING for the
+    outage, from ``db.availability``, never one per sweep per pass).
     """
+    from kazma_core.db import availability
+
     for label, sweep in sweeps:
         state = _SWEEP_STATE.setdefault(label, {"last_ok_at": None, "last_failed_at": None,
                                                 "consecutive_failures": 0, "last_error": None})
         try:
             await asyncio.to_thread(sweep)
         except Exception as exc:
+            if availability.note_failure("maintenance", exc) or availability.is_away():
+                state["waiting_for_database"] = True
+                state["last_failed_at"] = time.time()
+                state["last_error"] = f"waits for the database: {type(exc).__name__}"
+                logger.debug("[memory_worker] %s waits for the database", label, exc_info=True)
+                continue
             state["consecutive_failures"] += 1
             state["last_failed_at"] = time.time()
             state["last_error"] = f"{type(exc).__name__}: {exc}"[:300]
@@ -1317,6 +1348,7 @@ async def _run_sweeps(sweeps: tuple[tuple[str, Callable[[], None]], ...]) -> Non
         else:
             state["consecutive_failures"] = 0
             state["last_ok_at"] = time.time()
+            state.pop("waiting_for_database", None)
 
 
 def _start_commitment_gc_scheduler() -> None:
@@ -1377,15 +1409,21 @@ def _start_reconsolidation_scheduler() -> None:
         return
 
     async def _loop() -> None:
+        from kazma_core.db import availability
         from kazma_core.observability.cadence import seconds_until_due, stamp_run
         from kazma_core.shutdown import sleep_or_shutdown
 
         interval = _RECONSOLIDATION_INTERVAL_HOURS * 3600
         while True:
+            # Before the stamp is read too: an unreadable stamp means "due".
+            if await availability.wait_while_away():
+                return
             # Counted from the last run (FA-149); 180 s after boot when due,
             # offset from the backup so they don't stampede the disk.
             wait = await asyncio.to_thread(seconds_until_due, _RECONSOLIDATION_CADENCE_KEY, interval, settle_s=180)
             if await sleep_or_shutdown(wait):
+                return
+            if await availability.wait_while_away():
                 return
             try:
                 # Fan dedup/re-embed over all active tenants (off the loop: FA-150).

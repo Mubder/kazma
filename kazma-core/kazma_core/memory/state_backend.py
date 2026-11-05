@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import sys
 import threading
 import time
 from collections.abc import Iterable
@@ -161,6 +162,7 @@ class PostgresStateBackend:
         self._pool: Any = None
         self._pool_lock = threading.Lock()
         self._closed = False
+        self._ours: bool | None = None
 
     def _connect(self) -> Any:
         """A connection for one operation; its ``close()`` gives it back.
@@ -170,6 +172,26 @@ class PostgresStateBackend:
         thousands a pass at scale). Without psycopg's pool package, a new
         connection, as before.
         """
+        from kazma_core.db import availability
+
+        if self._ours is None:
+            self._ours = availability.is_kazma_database(self._dsn)
+        ours = self._ours
+        began = availability.now()
+        conn = None
+        try:
+            conn = self._open_connection()
+        finally:
+            failure = sys.exc_info()[1] if conn is None else None
+            if ours and isinstance(failure, Exception):
+                # The mirror on Kazma's own server: its outage is the one
+                # process-wide outage (AGENTS.md section 44), said once.
+                availability.note_failure("memory mirror", failure)
+        if ours:
+            availability.note_success("memory mirror", since=began)
+        return conn
+
+    def _open_connection(self) -> Any:
         pool = self._get_pool()
         if pool is not None:
             return _PooledConnection(pool, pool.getconn(timeout=self._timeout))

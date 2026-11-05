@@ -113,6 +113,16 @@ FAILURES_TO_KILL = int(os.environ.get("KAZMA_GUARD_FAILURES", "3"))
 # paged; past it the guard restarts anyway, for the case where the database
 # is back and Kazma's own connections are what is stuck.
 DEPENDENCY_OUTAGE_S = float(os.environ.get("KAZMA_GUARD_DEPENDENCY_OUTAGE_S", "600"))
+# A booting server rewrites its boot-status file on every try while it waits
+# for its database (a try is the pool's attempts, ~30 s, plus a 10 s pause).
+# A record older than this says nothing about now.
+BOOT_STATUS_FRESH_S = 150.0
+# A boot waiting this long for its database is paged, once.
+BOOT_WAIT_PAGE_S = 120.0
+# The server pages its own database outage (ops alert database.away) this
+# long after it began (db.availability.PAGE_AFTER_S); the guard pages instead
+# when the server has not, this long past that.
+APP_PAGE_GRACE_S = 90.0
 
 # Backoff between restarts: index by consecutive-restart count, capped.
 BACKOFF_LADDER_S = (5, 15, 30, 60, 120, 300)
@@ -165,7 +175,8 @@ GUARD_ACK_S = 20.0
 #                 (state ``pause_held`` = that pause's ``since``).
 #   document_broker -- runs the document worker broker beside Kazma when
 #                 Kazma asks (state ``document_broker``; see DocumentBroker).
-GUARD_FEATURES = ("pause_held", "document_broker", "dependencies")
+GUARD_FEATURES = ("pause_held", "document_broker", "dependencies", "boot_wait",
+                  "database_hold")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -286,6 +297,101 @@ def _reload_path() -> Path:
     if env:
         return Path(env)
     return _guard_file("guard.reload")
+
+
+def _boot_status_path() -> Path:
+    """What the booting server says it waits for (resilience plan A3).
+
+    The server writes it on every try while it waits for its settings
+    database (``kazma_core.config_availability.write_boot_status``) and
+    clears it once past the wait. A boot that waits is not a hang: on
+    2026-11-03/04 33 of 34 restarts were a boot that waited 780 s for a
+    database Docker had taken away, exited, and was restarted after a 300 s
+    backoff with a page each time.
+    """
+    env = os.environ.get("KAZMA_GUARD_BOOT_STATUS")
+    if env:
+        return Path(env)
+    return _guard_file("boot_status.json")
+
+
+def read_boot_status(spawned_at: float, *, now: float | None = None) -> dict | None:
+    """The boot-status record of the server spawned at ``spawned_at``, while
+    fresh; else None.
+
+    Matched by time, not pid: on Windows the venv's python.exe is a launcher,
+    and the process that writes is not the guard's child. A record written
+    before this spawn is an earlier boot's; one older than
+    BOOT_STATUS_FRESH_S says nothing about now (a boot that stops rewriting it
+    is treated as any other boot: the start budget applies).
+    """
+    try:
+        data = json.loads(_boot_status_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        at = float(data.get("at") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    current = time.time() if now is None else now
+    if at < spawned_at - 1.0 or current - at > BOOT_STATUS_FRESH_S:
+        return None
+    return data
+
+
+def _clear_boot_status() -> None:
+    """Remove an earlier boot's record before a spawn."""
+    try:
+        _boot_status_path().unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass  # read_boot_status ignores a record older than the spawn
+
+
+def database_state(result: object) -> dict | None:
+    """The server's own database state from a readiness answer, or None.
+
+    ``kazma_core.db.availability.snapshot()`` in ``database_availability``.
+    """
+    db = getattr(result, "database", None)
+    return db if isinstance(db, dict) else None
+
+
+def app_watches_database(db: dict | None) -> bool:
+    """The server has confirmed its database away and its own prober is
+    still trying: the outage is the database's, and the server will notice
+    the moment it is back. A restart cannot bring the database back."""
+    if not db or db.get("state") != "away" or not db.get("confirmed"):
+        return False
+    try:
+        age = float(db.get("probe_age_s") or 0.0)
+        stale = float(db.get("probe_stale_after_s") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return stale > 0 and age <= stale
+
+
+def app_pages_database_outage(db: dict | None) -> bool:
+    """The server has paged its database outage, or will shortly.
+
+    Kazma pages ``database.away`` itself ``page_at_s`` after the database
+    went away; the guard leaves the page to it until APP_PAGE_GRACE_S past
+    that, so one outage is one card. A page that has not reached anyone by
+    then (``paged`` is what was delivered) is the guard's to send.
+    """
+    if not db or db.get("state") != "away":
+        return False
+    if db.get("paged"):
+        return True
+    try:
+        away = float(db.get("away_s") or 0.0)
+        page_at = float(db.get("page_at_s") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return away < page_at + APP_PAGE_GRACE_S
 
 
 def _write_json_atomic(path: Path, data: dict) -> None:
@@ -833,22 +939,39 @@ class ProbeResult(tuple):
 
     answered: bool
     restart_required: bool
+    database: dict | None
 
     def __new__(cls, healthy: bool, detail: str, answered: bool = True,
-                restart_required: bool = False) -> ProbeResult:
+                restart_required: bool = False,
+                database: dict | None = None) -> ProbeResult:
         obj = super().__new__(cls, (healthy, detail))
         obj.answered = answered
         obj.restart_required = restart_required
+        obj.database = database
         return obj
+
+
+# The readiness body names every check; with the database state it passes
+# 4 KB, and a body cut short parses as nothing.
+_PROBE_BODY_MAX = 32768
+
+
+def _readiness_fields(raw: str) -> tuple[bool, dict | None]:
+    """``restart_required`` and the server's database state from a readiness
+    body (resilience plan A3: ``database_availability``)."""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return False, None
+    if not isinstance(data, dict):
+        return False, None
+    db = data.get("database_availability")
+    return data.get("restart_required") is True, db if isinstance(db, dict) else None
 
 
 def _says_restart_required(raw: str) -> bool:
     """The readiness body names a failure only a restart clears."""
-    try:
-        data = json.loads(raw)
-    except Exception:
-        return False
-    return isinstance(data, dict) and data.get("restart_required") is True
+    return _readiness_fields(raw)[0]
 
 
 def probe(url: str, timeout: float) -> ProbeResult:
@@ -856,10 +979,11 @@ def probe(url: str, timeout: float) -> ProbeResult:
     try:
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read(4096).decode("utf-8", "replace")
+            raw = resp.read(_PROBE_BODY_MAX).decode("utf-8", "replace")
             if resp.status != 200:
+                restart, db = _readiness_fields(raw)
                 return ProbeResult(False, _health_failure_detail(raw, http_status=resp.status),
-                                   restart_required=_says_restart_required(raw))
+                                   restart_required=restart, database=db)
         # HTTP 200 IS the contract. /health/ready returns 503 only when a
         # CRITICAL dependency (config store, database) is gone; a partial
         # failure is reported as "degraded" with 200 and the explicit
@@ -873,11 +997,16 @@ def probe(url: str, timeout: float) -> ProbeResult:
             data = json.loads(raw)
         except Exception:
             return ProbeResult(True, "200 (unparsed body)")
+        if not isinstance(data, dict):
+            return ProbeResult(True, "200 (unparsed body)")
+        db = data.get("database_availability")
+        db = db if isinstance(db, dict) else None
         status = str(data.get("status", "")).lower()
         if status == "not_ready":
             failing = _failing_checks(data)
             return ProbeResult(False, "; ".join(failing[:6]) if failing else "not_ready",
-                               restart_required=data.get("restart_required") is True)
+                               restart_required=data.get("restart_required") is True,
+                               database=db)
         degraded = [
             k for k, v in (data.get("checks") or {}).items()
             if isinstance(v, dict)
@@ -888,17 +1017,18 @@ def probe(url: str, timeout: float) -> ProbeResult:
             # Serving, but say so -- this is how a partial outage becomes
             # visible in the guard log instead of passing silently.
             detail = f"{detail} (degraded: {','.join(sorted(degraded)[:4])})"
-        return ProbeResult(True, detail)
+        return ProbeResult(True, detail, database=db)
     except urllib.error.HTTPError as exc:
         # urlopen raises on 503. The JSON body names the failing check;
         # do not format this as unreachable: Service Unavailable.
         raw = ""
         try:
-            raw = exc.read(4096).decode("utf-8", "replace")
+            raw = exc.read(_PROBE_BODY_MAX).decode("utf-8", "replace")
         except Exception:
             raw = ""
+        restart, db = _readiness_fields(raw)
         return ProbeResult(False, _health_failure_detail(raw, http_status=int(exc.code or 0)),
-                           restart_required=_says_restart_required(raw))
+                           restart_required=restart, database=db)
     except urllib.error.URLError as exc:
         return ProbeResult(False, f"unreachable: {getattr(exc, 'reason', exc)}", answered=False)
     except Exception as exc:  # noqa: BLE001 -- a probe must never raise
@@ -1457,6 +1587,10 @@ def spawn(cmd: list[str], cwd: Path, log: GuardLog,
     # the process to exit (FA-261: each step had its own bound, and their sum
     # did not fit the 60 s grace).
     env["KAZMA_SHUTDOWN_BUDGET_S"] = str(max(5.0, GRACEFUL_STOP_S - SHUTDOWN_MARGIN_S))
+    # ...and where to say what its boot waits for (_boot_status_path): with
+    # it, the boot waits for its database as long as the guard lets it.
+    _clear_boot_status()
+    env["KAZMA_GUARD_BOOT_FILE"] = str(_boot_status_path())
     # ...and the document worker broker's address, token file and request
     # file (DocumentBroker.server_env), so .env needs nothing for it.
     env.update(extra_env or {})
@@ -3109,6 +3243,12 @@ class Guard:
         deadline = started + START_TIMEOUT_S
         last = ""
         next_progress = started + 60.0
+        # The boot says it waits for its database (read_boot_status): the
+        # start budget then runs from the latest word, a page goes out once,
+        # and a recovery card once it is ready (resilience plan A3).
+        waiting_for: str | None = None
+        wait_logged = False
+        wait_paged = False
         while time.monotonic() < deadline and not self._stop:
             self._beat()
             self._broker_tick()
@@ -3148,14 +3288,39 @@ class Guard:
                     return False
                 self.log("info", "child.ready",
                          detail=detail, after_s=round(time.monotonic() - started, 1))
+                if wait_paged:
+                    self._page("success", "Kazma is up: its database answers again",
+                               f"The boot waited {round(time.monotonic() - started)} s "
+                               "for its database and went on by itself.",
+                               fingerprint="boot-db-wait-over")
                 return True
             last = detail
+            status = read_boot_status(spawned_at)
+            waiting_for = str(status.get("waiting_for") or "") or None if status else None
+            if waiting_for:
+                # Waiting is not hanging: the boot rewrites the record on
+                # every try, so the budget runs from the latest one.
+                deadline = max(deadline, time.monotonic() + START_TIMEOUT_S)
+                reason = str(status.get("reason") or "")[:300]
+                if not wait_logged:
+                    self.log("warn", "child.waiting_for_database",
+                             reason=reason, since=status.get("since"))
+                    wait_logged = True
+                if not wait_paged and time.monotonic() - started >= BOOT_WAIT_PAGE_S:
+                    self._page("warn", "Kazma is waiting for its database",
+                               "The server started and is waiting for its settings "
+                               "database; it goes on by itself the moment it answers. "
+                               "Not restarting it."
+                               + (f" The database said: {reason}" if reason else ""),
+                               fingerprint="boot-db-wait")
+                    wait_paged = True
             # Heartbeat while waiting, so a slow boot is visibly different
             # from a hang when someone reads this log at 3am.
             if time.monotonic() >= next_progress:
                 self.log("info", "child.starting",
                          waited_s=round(time.monotonic() - started),
-                         budget_s=START_TIMEOUT_S, last=last)
+                         budget_s=START_TIMEOUT_S, last=last,
+                         waiting_for=waiting_for)
                 next_progress += 60.0
             time.sleep(3.0)
         self.log("error", "child.never_ready", last=last,
@@ -3670,11 +3835,21 @@ class Guard:
         naming the database): the process is alive and its dependency is
         not -- a restart cannot fix that, so it is ridden out for
         DEPENDENCY_OUTAGE_S and paged once, then restarted if it persists.
+
+        Unless the answer says the database is away and Kazma's own check is
+        still watching it (``app_watches_database``, resilience plan A3): a
+        restart cannot bring the database back, and a restarted Kazma only
+        waits for it again at boot, so the restart is held for as long as
+        that holds. The page is then Kazma's own (``database.away``, and
+        ``database.back`` when it returns); the guard pages only when Kazma's
+        page has not reached anyone APP_PAGE_GRACE_S after it was due.
         """
         consecutive = 0
         unanswered = 0
         outage_since: float | None = None
         outage_paged = False
+        app_paged = False
+        held_logged_at: float | None = None
         unrunnable = 0
         next_probe = time.monotonic() + PROBE_INTERVAL_S
         while not self._stop:
@@ -3717,17 +3892,24 @@ class Guard:
             if ok:
                 if consecutive:
                     self.log("info", "health.recovered", after_failures=consecutive)
-                if outage_paged:
+                if outage_paged and not app_paged:
+                    # When Kazma paged the outage it says it is over itself
+                    # (database.back): a second card would say the same.
                     self._page(
                         "success",
                         "Kazma is ready again",
                         "The dependency it was waiting for is back; no restart was needed.",
                         fingerprint="not-ready-recovered",
                     )
+                if held_logged_at is not None and outage_since is not None:
+                    self.log("info", "health.restart_hold_over",
+                             not_ready_s=int(time.monotonic() - outage_since))
                 consecutive = 0
                 unanswered = 0
                 outage_since = None
                 outage_paged = False
+                app_paged = False
+                held_logged_at = None
                 unrunnable = 0
                 continue
 
@@ -3768,27 +3950,56 @@ class Guard:
                     outage_since = now
             else:
                 unanswered += 1
+            db = database_state(result) if answered else None
+            watching = app_watches_database(db)
+            if db and db.get("paged"):
+                app_paged = True
             self.log("warn", "health.failed", detail=detail, answered=answered,
-                     consecutive=consecutive, threshold=FAILURES_TO_KILL)
+                     consecutive=consecutive, threshold=FAILURES_TO_KILL,
+                     database=(db or {}).get("state"))
             if unanswered >= FAILURES_TO_KILL:
                 # Alive but not answering -- the case no OS supervisor catches.
                 stop_child(self.proc, self.log, grace_s=UNHEALTHY_STOP_S)
                 return f"unhealthy ({detail})"
             if outage_since is not None and now - outage_since >= DEPENDENCY_OUTAGE_S:
-                # Ridden out as long as it is worth: the dependency may be
-                # back and Kazma's own connections what is stuck.
-                stop_child(self.proc, self.log, grace_s=UNHEALTHY_STOP_S)
-                return f"unhealthy ({detail}; not ready for {int(now - outage_since)}s)"
+                if watching:
+                    # The database is away and Kazma's own check is watching
+                    # it: a restart would only have Kazma wait for it again,
+                    # at boot. Held; said once, and again every
+                    # DEPENDENCY_OUTAGE_S while it lasts.
+                    if held_logged_at is None or now - held_logged_at >= DEPENDENCY_OUTAGE_S:
+                        self.log("warn", "health.restart_held", detail=detail,
+                                 not_ready_s=int(now - outage_since),
+                                 database_away_s=(db or {}).get("away_s"))
+                        held_logged_at = now
+                else:
+                    # Ridden out as long as it is worth: the dependency may be
+                    # back and Kazma's own connections what is stuck.
+                    stop_child(self.proc, self.log, grace_s=UNHEALTHY_STOP_S)
+                    return f"unhealthy ({detail}; not ready for {int(now - outage_since)}s)"
             if answered and consecutive >= FAILURES_TO_KILL and not outage_paged:
+                if app_paged:
+                    # Kazma's own page (database.away) reached the owner.
+                    outage_paged = True
+                    self.log("warn", "health.dependency_down", detail=detail,
+                             paged_by="kazma", database_held=watching)
+                    continue
+                if app_pages_database_outage(db):
+                    continue  # Kazma pages it itself, shortly
                 outage_paged = True
                 self.log("warn", "health.dependency_down", detail=detail,
-                         restart_after_s=int(DEPENDENCY_OUTAGE_S))
+                         restart_after_s=int(DEPENDENCY_OUTAGE_S), database_held=watching)
+                if watching:
+                    tail = ("Kazma's own check is watching the database and Kazma "
+                            "goes on the moment it answers; the guard does not restart it.")
+                else:
+                    tail = (f"If it lasts {int(DEPENDENCY_OUTAGE_S // 60)} min the guard "
+                            "restarts Kazma anyway.")
                 self._page(
                     "warn",
                     "Kazma is up, but not ready",
                     f"{detail}. Not restarting: Kazma answers, and a restart "
-                    "cannot bring back what it is waiting for. If it lasts "
-                    f"{int(DEPENDENCY_OUTAGE_S // 60)} min the guard restarts Kazma anyway.",
+                    f"cannot bring back what it is waiting for. {tail}",
                     fingerprint="not-ready",
                 )
         return "guard shutting down"

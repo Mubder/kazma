@@ -13,6 +13,7 @@ import logging
 import time
 from urllib.parse import quote
 
+from kazma_core.db import availability
 from kazma_core.web_acquire.durable_state import mutate
 from kazma_core.web_acquire.result import AcquisitionError
 from kazma_core.config_availability import _storage_failures
@@ -588,6 +589,10 @@ async def _loop():
 
     _restore_owed_page(await asyncio.to_thread(outage_page_owed, _PAGE_KEY))
     while True:
+        # A database outage is said once, by db.availability; checking now
+        # would only fail, and page "monitoring unavailable" (twice live).
+        if await availability.wait_while_away():
+            return
         try:
             await call(tick)
         except (*_storage_failures(), AcquisitionError, ValueError, TypeError, KeyError, AttributeError) as exc:

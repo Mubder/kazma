@@ -197,6 +197,12 @@ async def _loop() -> None:
     while True:
         try:
             await asyncio.sleep(_SCAN_INTERVAL_SECONDS)
+            from kazma_core.db import availability
+
+            # The chat store is the database's: a sweep during an outage
+            # only fails, and a turn it would heal waits for it.
+            if await availability.wait_while_away():
+                return
             # Each open turn's approval state is a chat-store read and a heal
             # is a chat-store write: off the loop, one sweep at a time (this
             # loop is the only caller, so the module's clocks are not shared)

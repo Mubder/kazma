@@ -42,6 +42,7 @@ from kazma_core.config_availability import (
     _storage_unavailable,
     durable_settings_write,
 )
+from kazma_core.db import availability as _availability
 from kazma_core.diagnostic_scope import refuse_write, writes_suppressed
 from kazma_core.security.url_credentials import (
     mask_urls_in_text,
@@ -1213,6 +1214,8 @@ class ConfigStore(_ChangeNotices):
                 self._pg_probe.release()
 
     def _mark_pg_down(self, exc: BaseException | None) -> None:
+        if exc is not None:
+            _availability.note_failure("settings", exc)
         self._pg_down_until = time.monotonic() + self._PG_OUTAGE_HOLD_S
         if not self._pg_down:
             self._pg_down = True
@@ -1246,11 +1249,18 @@ class ConfigStore(_ChangeNotices):
                 self._warn_if_stale_sqlite_shadow()
                 self._warn_if_data_dir_implies_isolation()
             except Exception as exc:
-                logger.error(
-                    "[ConfigStore] Postgres init failed (%s) — falling back is unsafe; "
-                    "fix KAZMA_DATABASE_URL or install psycopg",
-                    exc,
-                )
+                # An outage is said once, by db.availability (live 2026-11-04:
+                # this line 594 times in one outage). Anything else is a
+                # configuration the owner must fix.
+                if _availability.note_failure("settings", exc):
+                    logger.debug("[ConfigStore] Postgres init waits for the database: %s",
+                                 type(exc).__name__)
+                else:
+                    logger.error(
+                        "[ConfigStore] Postgres init failed (%s) — falling back is unsafe; "
+                        "fix KAZMA_DATABASE_URL or install psycopg",
+                        exc,
+                    )
                 raise
             return
         with self._lock:
@@ -3016,7 +3026,8 @@ def get_config_store() -> ConfigStore:
                         break
                     except Exception as e:
                         last_exc = e
-                        logger.warning(
+                        logger.log(
+                            logging.DEBUG if _availability.is_outage(e) else logging.WARNING,
                             "ConfigStore init attempt %d/%d failed (%s)",
                             attempt + 1, attempts, type(e).__name__,
                         )
@@ -3024,7 +3035,14 @@ def get_config_store() -> ConfigStore:
                             time.sleep(_INIT_RETRY_BACKOFF_S)
                 if last_exc is not None:
                     error = ConfigStoreUnavailableError(opening=True, reason=_refusal_in(last_exc))
-                    logger.critical("ConfigStore initialization failed: %s", error)
+                    # During an outage the availability state has said it
+                    # once (and pages after two minutes); every caller that
+                    # tried meanwhile is not a new emergency.
+                    logger.log(
+                        logging.DEBUG if _availability.note_failure("settings", last_exc)
+                        else logging.CRITICAL,
+                        "ConfigStore initialization failed: %s", error,
+                    )
                     # Leave the singleton unset. The guard's next boot, or
                     # a later caller, can recover against the real database.
                     raise error from last_exc

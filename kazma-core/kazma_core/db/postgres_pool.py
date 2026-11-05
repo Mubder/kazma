@@ -13,6 +13,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
+from kazma_core.db import availability as _availability
 from kazma_core.db.backend import get_database_url, is_postgres, require_postgres_driver
 
 __all__ = ["PostgresPool", "get_postgres_pool", "pool_connection_kwargs", "reset_postgres_pool"]
@@ -79,6 +80,9 @@ class PostgresPool:
             ) from exc
 
         self._dict_row = dict_row
+        # What a lost server raises here: told to the availability state
+        # (db.availability), never caught.
+        self._driver_errors: tuple[type[BaseException], ...] = (psycopg.Error,)
         # timeout = seconds a caller waits for a free connection. Default 30
         # let /health/ready pin the event loop while pool workers sat in
         # wait_conn (live 2026-08-31). Fail the ping instead of hanging.
@@ -109,8 +113,18 @@ class PostgresPool:
 
     @contextmanager
     def connection(self, *, timeout: float | None = None) -> Generator[Any, None, None]:
-        with self._pool.connection(timeout=timeout) as conn:
-            yield conn
+        # The pool's answers feed the one availability state: a lost server
+        # marks the database away (once, for every caller), an answer after
+        # that marks it back. Never refused here: psycopg's own timeout
+        # bounds a checkout while the database is away.
+        start = _availability.now()
+        try:
+            with self._pool.connection(timeout=timeout) as conn:
+                yield conn
+        except self._driver_errors as exc:
+            _availability.note_failure("pool", exc)
+            raise
+        _availability.note_success("pool", since=start)
 
     def execute(self, sql: str, params: tuple | list | dict | None = None) -> list[dict]:
         """Run *sql* and commit; return its rows.
@@ -145,17 +159,23 @@ class PostgresPool:
     def close(self) -> None:
         try:
             self._pool.close()
-        except Exception:
-            pass
+        except (*self._driver_errors, OSError, RuntimeError) as exc:
+            logger.debug("[PostgresPool] close failed: %s", type(exc).__name__)
 
 
 class PostgresUnreachable(RuntimeError):
     """The shared pool could not open. ``reason`` is Postgres's own answer, in
     words (``refusal_reason``), when one could be read."""
 
-    def __init__(self, attempts: int, reason: str | None) -> None:
+    def __init__(self, attempts: int, reason: str | None, *, away: bool = False) -> None:
         self.reason = reason
-        text = f"Postgres pool unreachable after {attempts} attempts"
+        self.away = away
+        if away:
+            # Refused without trying: the database is known to be away
+            # (db.availability), and its prober says when it is back.
+            text = "Postgres is not answering"
+        else:
+            text = f"Postgres pool unreachable after {attempts} attempts"
         super().__init__(f"{text}: {reason}" if reason else text)
 
 
@@ -244,6 +264,13 @@ def get_postgres_pool() -> PostgresPool | None:
         return None
     with _lock:
         if _pool is None:
+            if _availability.is_away():
+                # Live 2026-11-03/04: every caller rebuilt the pool for itself
+                # through an eleven-hour outage -- 3,080 "attempt failed"
+                # lines and 6,192 of the pool's own. The prober signs in every
+                # 15 s; until it gets in, nobody waits on a pool that cannot
+                # open.
+                raise PostgresUnreachable(0, _availability.cached_reason(), away=True)
             if not dsn:
                 dsn = get_database_url()
             if not dsn:
@@ -268,7 +295,7 @@ def get_postgres_pool() -> PostgresPool | None:
                     # Pool construction/health-check failed. Reset any
                     # half-built pool and retry — the DB may be mid-startup.
                     last_exc = exc
-                    logger.warning(
+                    logger.debug(
                         "[PostgresPool] attempt %d/%d failed (%s)",
                         attempt,
                         attempts,
@@ -284,8 +311,15 @@ def get_postgres_pool() -> PostgresPool | None:
                 # callers see WHY (not just "pool unavailable"): Postgres's
                 # own answer to one direct sign-in.
                 reason = refusal_reason(dsn)
-                if reason:
-                    logger.error("[PostgresPool] %s", reason)
+                # An outage is said once, by the availability state (one
+                # WARNING when its prober confirms it, one INFO when it is
+                # back). Anything else -- a schema lock, a permission -- is
+                # this pool's own failure, said here.
+                if not _availability.note_failure("pool", last_exc, reason=reason):
+                    logger.error(
+                        "[PostgresPool] could not open after %d attempts (%s)",
+                        attempts, type(last_exc).__name__,
+                    )
                 raise PostgresUnreachable(attempts, reason) from last_exc
         return _pool
 

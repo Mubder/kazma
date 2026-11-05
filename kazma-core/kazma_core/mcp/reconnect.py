@@ -347,6 +347,13 @@ class MCPReconnector:
                 await asyncio.sleep(self._sweep)
                 if self._stop:
                     break
+                from kazma_core.db import availability
+
+                # The stored configs are the database's, and a database
+                # outage is usually Docker's: every container-run server is
+                # down with it. Retrying then only pages "not coming back".
+                if await availability.wait_while_away():
+                    break
                 await self.sweep_once()
             except asyncio.CancelledError:
                 raise

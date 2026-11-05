@@ -64,10 +64,15 @@ def _check_failure(what: str, exc: BaseException) -> str:
     :func:`~kazma_core.errors.safe_error`'s stable code and reference, and the
     exception is logged under that reference.
     """
+    from kazma_core.db import availability
     from kazma_core.errors import safe_error
 
     info = safe_error(exc, log=False)
-    logger.error("%s (ref: %s): %s: %s", what, info.ref, type(exc).__name__, exc)
+    # While the database is away the outage is said once, by
+    # db.availability; every probe's failed check repeating it at ERROR is
+    # what filled the log on 2026-11-04 (plan A3).
+    level = logging.DEBUG if availability.is_away() or availability.is_outage(exc) else logging.ERROR
+    logger.log(level, "%s (ref: %s): %s: %s", what, info.ref, type(exc).__name__, exc)
     return f"{type(exc).__name__}: {info}"
 
 
@@ -668,6 +673,12 @@ async def _readiness(*, runtime: Any = None, required: Any = None):
         "required_capabilities": sorted(critical),
         "unavailable_capabilities": critical_failed,
     }
+    # The database's availability as the process sees it (plan A3): away
+    # since when, why, and whether the owner was already paged -- the guard
+    # reads it so it does not page the same outage a second time.
+    from kazma_core.db import availability
+
+    response["database_availability"] = availability.snapshot()
     # A failure that only a restart can clear (the volatile settings store):
     # the guard restarts on it instead of riding it out as an outage.
     if any(c.get("restart_required") for c in checks.values() if isinstance(c, dict)):

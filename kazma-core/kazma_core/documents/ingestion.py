@@ -312,8 +312,14 @@ class DocumentIngestionService:
         proven dead are touched, so a live intake -- here or elsewhere -- is
         never raced.
         """
+        from kazma_core.db import availability
+
         while True:
             await asyncio.sleep(_INTAKE_SWEEP_SECONDS)
+            # The intake reservations are in the job store: a sweep while the
+            # database is away only fails. The outage is said once, elsewhere.
+            if await availability.wait_while_away():
+                return
             try:
                 await asyncio.to_thread(self._recover_stranded_intakes)
             except store_errors() as exc:

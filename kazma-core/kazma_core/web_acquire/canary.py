@@ -218,13 +218,20 @@ def metric_lines() -> list[str]:
 
 
 async def _loop() -> None:
+    from kazma_core.db import availability
     from kazma_core.db.pg_helpers import store_errors
     from kazma_core.observability.cadence import seconds_until_due, stamp_run
     from kazma_core.web_acquire.result import AcquisitionError
 
     while True:
+        # Before the stamp is read too: an unreadable stamp means "due", so a
+        # read during an outage would run the day's check again once it ends.
+        if await availability.wait_while_away():
+            return
         wait = await asyncio.to_thread(seconds_until_due, _CADENCE_KEY, _INTERVAL_S, settle_s=_SETTLE_S)
         await asyncio.sleep(wait)
+        if await availability.wait_while_away():
+            return
         try:
             if (await asyncio.to_thread(settings))["enabled"]:
                 await run_canary()

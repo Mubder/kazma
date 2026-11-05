@@ -33,6 +33,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from kazma_core.db import availability
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -111,6 +113,11 @@ async def _loop(poll_interval: float | None) -> None:
     errors = 0
     while True:
         wait = poll_interval or _DEFAULT_POLL
+        # Settings and the post ledger live in the database: a poll while it
+        # is away only fails (and counts toward the hour's backoff). The
+        # outage is said once, by db.availability.
+        if await availability.wait_while_away():
+            return
         try:
             from kazma_core.tenant_context import tenant_scope
 

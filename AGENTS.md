@@ -7536,6 +7536,36 @@ problem was its database. Each layer now holds on its own:
   database, and the probes always answer** (2026-11, FA-259: a 2-minute
   outage still got Kazma killed, a 12-minute one kept it down 15 minutes).
   See §54.
+- **One answer to "is the database away"** (`kazma_core/db/availability.py`,
+  resilience plan A3, 2026-11). Live 2026-11-03/04 Docker took the database
+  away for eleven hours: every background loop retried on its own clock and
+  logged a WARNING each pass (the pool alone 1,900 lines an hour), the memory
+  queue dead-lettered work that had done nothing wrong, and 33 of 34 guard
+  restarts were a boot that waited its 13 minutes and exited. Now a failure
+  of Kazma's own database (`is_kazma_database`; `is_outage`: SQLSTATE class
+  08/28, 57P01-03, 53300, 3D000, a pool timeout, `PostgresUnreachable`,
+  through the cause chain -- never a query error, never SQLite) is reported
+  with `note_failure`; ONE prober thread then signs in every `PROBE_EVERY_S`
+  (one per outage, respawned when stale) and ends it. One WARNING when it
+  starts, one page `database.away` at `PAGE_AFTER_S`, one `database.back`
+  only when the away page was delivered (`on_delivery`); the pool's own
+  chatter is filtered only while away (`_install_log_filter`). Every
+  background loop that touches the database waits while it is away
+  (`wait_while_away`, or `is_away` to skip a pass), or is declared with why
+  (`AWARE` / `DECLARED` in the gate, found from the source: every `async def`
+  holding a `while` that sleeps). The memory queue puts an outage-failed task
+  back without spending an attempt (`task_queue._ack(outage=True)`); the
+  maintenance runner records a sweep that met the outage as
+  `waiting_for_database`, not a failure; cron holds a task's fire (a
+  reminder, which needs no database, still rings). A guarded boot waits for
+  its settings database without a limit and says so in
+  `KAZMA_GUARD_BOOT_FILE` (`config_availability.write_boot_status`), which
+  the guard reads (`read_boot_status`) instead of counting a hang; readiness
+  carries the state (`database_availability`), and the guard does not page
+  an outage the server is already watching (`app_watches_database`). Gate:
+  `tests/test_database_availability.py` (planted loops and the turn-liveness
+  loop without its wait as negative controls; a normal failure spending its
+  attempt; a task fire running while answering).
 
 ### 45. The full audit's fixes (2026-09-30, `docs/audits/AUDIT_FULL_2026-09-30.md`)
 

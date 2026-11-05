@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**282** variables are read by the product code; **282** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**283** variables are read by the product code; **283** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -109,6 +109,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_GITHUB_APP_SLUG` | (none) | `kazma_core.git_identity` | yes |
 | `KAZMA_GIT_SHA` | (none) | `kazma_core.version` | yes |
 | `KAZMA_GRAPH_PROVIDER` | (none) | `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |
+| `KAZMA_GUARD_BOOT_FILE` | (none) | `kazma_core.config_availability` | yes |
 | `KAZMA_GUARD_BROKER_REQUEST_FILE` | (none) | `kazma_core.documents.broker_supervision` | yes |
 | `KAZMA_GUARD_DEPENDENCIES_FILE` | (none) | `kazma_core.guard_dependencies` | yes |
 | `KAZMA_GUARD_LOG` | (none) | `kazma_core.observability.daily_digest` | yes |

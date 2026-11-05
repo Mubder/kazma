@@ -787,6 +787,9 @@ class CronScheduler:
         now = self._clock.now()
         sem = self._sem or asyncio.Semaphore(self._max_concurrent)
         settings = None
+        held = 0
+        from kazma_core.db import availability
+
         for job in await self._store.due_jobs(now=now, limit=max(50, self._max_concurrent * 10)):
             if not self._running:
                 break
@@ -799,6 +802,15 @@ class CronScheduler:
             if self._is_missed(job, now, settings.catchup_seconds):
                 await self._record_missed(job, now)
                 continue
+            if job.kind != "reminder" and availability.is_away():
+                # A task fire runs an agent turn on the settings, the vault's
+                # keys and the model list: with the database away it only
+                # fails and spends one of its three runs. It waits for the
+                # database; past its catch-up window it is missed, and says
+                # so, as any late job. A reminder needs only cron.db and the
+                # chat apps, and still rings.
+                held += 1
+                continue
             # Every due job of the pass is started; the semaphore holds all
             # but max_concurrent until a slot frees (the claim, and so the
             # lease, comes after it). Starting only max_concurrent a pass left
@@ -808,6 +820,8 @@ class CronScheduler:
             exec_task = asyncio.create_task(self._execute_bounded(job, sem), name=f"cron-exec-{job.job_id}")
             self._exec_tasks.add(exec_task)
             exec_task.add_done_callback(self._exec_done(job.job_id))
+        if held:
+            logger.debug("[CronScheduler] %d task fire(s) wait for the database", held)
         await self._drain_deliveries()
         await self._drain_alerts()
 

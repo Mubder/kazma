@@ -826,11 +826,18 @@ async def digest_scheduler() -> None:
     """
     import asyncio
 
+    from kazma_core.db import availability
     from kazma_core.shutdown import sleep_or_shutdown
 
     while True:
         try:
+            # An unreadable last-sent stamp reads as "never sent": a check
+            # during an outage would send the day's digest again.
+            if await availability.wait_while_away():
+                return
             if await sleep_or_shutdown(await asyncio.to_thread(_seconds_until_digest)):
+                return
+            if await availability.wait_while_away():
                 return
             if await sleep_or_shutdown(await _send_due_digest()):
                 return

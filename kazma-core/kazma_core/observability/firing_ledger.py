@@ -561,12 +561,17 @@ async def ledger_scheduler() -> None:
     often than weekly still emits when overdue (audit M-13). First sleep
     is short (120s) when there is no last_run, mirroring the backup loop.
     """
+    from kazma_core.db import availability
     from kazma_core.shutdown import sleep_or_shutdown
 
     interval = SWEEP_INTERVAL_HOURS * 3600
     first = True
     while True:
         try:
+            # An unreadable stamp reads as "never ran": a read during an
+            # outage would send the week's report again.
+            if await availability.wait_while_away():
+                return
             # Both off the loop: the ConfigStore read is a Postgres round
             # trip, and the scan reads a week of rotated logs (~4M lines on
             # the live install). A scan on the loop was already one of the
@@ -580,6 +585,8 @@ async def ledger_scheduler() -> None:
                 delay = 0.0 if remaining <= 0 else max(60.0, remaining)
             first = False
             if delay > 0 and await sleep_or_shutdown(delay):
+                return
+            if await availability.wait_while_away():
                 return
             await asyncio.to_thread(run_weekly_sweep, SWEEP_INTERVAL_HOURS)
         except asyncio.CancelledError:

@@ -707,6 +707,12 @@ def start_document_maintenance_loop(
                 if is_shutting_down():
                     logger.info("[documents.retention] maintenance loop exiting (shutdown)")
                     return
+                from kazma_core.db import availability
+
+                # Its settings and (on Postgres) its catalog are the
+                # database's: a pass during an outage only fails.
+                if await availability.wait_while_away():
+                    return
                 from .config import get_document_rollout
 
                 # Both are settings reads (a snapshot of documents.*): off the
