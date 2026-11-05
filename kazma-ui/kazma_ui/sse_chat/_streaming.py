@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter
 from kazma_core.exceptions import sanitize_error
+from kazma_core.safety.prompt_fence import observation_text
 from kazma_core.shutdown import SHUTDOWN_WAKE, is_shutting_down
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,8 @@ def _tool_end_fields(data: Any) -> tuple[str, str]:
     ``on_tool_end`` into a stored row and a ``tool_result`` frame. The resume
     path sent its frame without ``state``, so a call that failed after an
     Approve painted "Done" live while the stored row said "Failed" (live
-    2026-11-05). One function, so the two cannot drift again.
+    2026-11-05). One function, so the two cannot drift again. The text is
+    what the tool said, its data fences opened (``observation_text``).
     """
     data = data if isinstance(data, dict) else {}
     output = data.get("output", "")
@@ -114,7 +116,8 @@ def _tool_end_fields(data: Any) -> tuple[str, str]:
     # A call that ended in an error -- refused before it ran, or failing --
     # is a failed row, not a done one (2026-11, FA-253).
     state = "failed" if data.get("error") else "done"
-    return str(output if output is not None else "")[:5000], state
+    # The row is for a person: the data fence's preamble is for the model.
+    return observation_text(str(output if output is not None else ""))[:5000], state
 
 
 def hb_arg_summary(inputs: Any, limit: int = 48) -> str:

@@ -70,9 +70,9 @@ def intercept_capacity_fast_path(
                 "reply": _cap.reply,
             })
             yield await _journal_fast_path(thread_id, "done", {
-                "tokens": 1,
+                "tokens": 0,
                 "cost": 0.0,
-                "duration_ms": 100,
+                "duration_ms": 0,
                 "content": _cap.reply,
                 # Capacity ack: excludes this done frame from cursor replay
                 # (it now carries the full reply — replaying it into a
@@ -103,9 +103,9 @@ def intercept_capacity_fast_path(
                     "reply": _pl.reply,
                 })
                 yield await _journal_fast_path(thread_id, "done", {
-                    "tokens": 1,
+                    "tokens": 0,
                     "cost": 0.0,
-                    "duration_ms": 50,
+                    "duration_ms": 0,
                     "content": _pl.reply,
                     # Capacity ack — see the /long generator note above.
                     "capacity": True,
@@ -124,9 +124,9 @@ def intercept_capacity_fast_path(
                 thread_id, "capacity", {"action": "yolo", "reply": confirmation}
             )
             yield await _journal_fast_path(thread_id, "done", {
-                "tokens": 1,
+                "tokens": 0,
                 "cost": 0.0,
-                "duration_ms": 100,
+                "duration_ms": 0,
                 "content": confirmation,
                 # Capacity ack — see the /long generator note above.
                 "capacity": True,

@@ -32,6 +32,7 @@ __all__ = [
     "filter_injection",
     "format_untrusted_block",
     "fence_untrusted",
+    "observation_text",
     "sanitize_fence_source",
 ]
 
@@ -326,3 +327,25 @@ def format_untrusted_block(content: str, *, source: str) -> str:
         "--- END OBSERVATION ---\n"
         "</kazma:data>"
     )
+
+
+# One fence as format_untrusted_block writes it. The body cannot hold a fence
+# tag or a sentinel (_sanitize_fence_body), so the shortest match is the block.
+_FENCED_BLOCK_RE: re.Pattern[str] = re.compile(
+    r"<kazma:data source=\"[^\"]*\" untrusted=\"true\">\n"
+    r".*?--- BEGIN OBSERVATION ---\n(.*?)\n--- END OBSERVATION ---\n</kazma:data>",
+    re.DOTALL,
+)
+
+
+def observation_text(text: str) -> str:
+    """*text* with each data fence replaced by what it holds, for a person.
+
+    The fence is written for the model: ~800 characters telling it the data is
+    not instructions. A tool row on the chat page showed that preamble first,
+    and its 5,000-character cut then held less of the output (live 2026-11-05,
+    a ``git_log`` row). What the tool said outside a fence stays as it is.
+    """
+    if not text or "<kazma:data" not in text:
+        return text or ""
+    return _FENCED_BLOCK_RE.sub(lambda m: m.group(1), text)
