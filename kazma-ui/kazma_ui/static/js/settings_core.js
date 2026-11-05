@@ -529,7 +529,7 @@
         // fires.
         xReply: {
             reply_style: { language: 'source', dialect: '', slang: 'none', length: 'standard', allow_uncensored_language: false, profanity: 'none' },
-            auto_qualification_hold: '',
+            auto_qualification_hold: '', auto_qualification_hold_code: '',
             ai: { selection: 'global', provider: '', model: '' }, ai_options: [], ai_roles: [],
             enabled: false, mode: 'off', summoners: [], trigger: '',
             max_replies_per_day: 5, max_replies_per_target_per_day: 1,
@@ -541,7 +541,7 @@
             post_length: 'full',
             moods: ['professional', 'friendly', 'humorous', 'roast', 'angry', 'dry', 'deadpan', 'supportive'],
             connector_ready: false, can_draft: false, handle: '',
-            poller_running: false, live_reason: '',
+            poller_running: false, live_reason: '', live_reason_code: '', live_reason_values: {},
         },
         xReplyRoleBindings: {},
         xReplyModelTesting: false,

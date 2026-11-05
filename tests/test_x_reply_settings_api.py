@@ -449,9 +449,9 @@ def test_live_reason_says_live_when_it_is(monkeypatch):
 
 def test_live_reason_never_describes_unqualified_auto_as_publishing_ready(monkeypatch):
     monkeypatch.setattr("kazma_ui.x_reply_api._poller_running", lambda: True)
-    monkeypatch.setattr("kazma_core.x_api.qualification.qualification_hold", lambda cfg: "Real evaluation required.")
+    monkeypatch.setattr("kazma_core.x_api.qualification.qualification_hold_code", lambda cfg: "evaluation_missing")
     reason = _reason(mode="auto")
-    assert "automatic publishing held" in reason and "Real evaluation required" in reason
+    assert "automatic publishing held" in reason and "human-reviewed bilingual evaluation" in reason
 
 
 async def test_settings_save_rejects_stale_revision_and_retains_current_policy():

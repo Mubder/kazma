@@ -1269,6 +1269,64 @@
             this._loadXReplyLibraries();
         },
 
+        // Why automatic publishing is held, in the page's language. The
+        // server sends a code (auto_qualification_hold_code); its English
+        // sentence is what drafts and logs record.
+        xReplyHoldText() {
+            switch (this.xReply.auto_qualification_hold_code) {
+                case 'stance_check_off':
+                    return _k('settings.xt.hold.stance_check_off', 'Unattended posting requires mandatory verification. Enable stance checking and complete release evaluation.');
+                case 'evaluation_missing':
+                    return _k('settings.xt.hold.evaluation_missing', 'Unattended posting needs a current human-reviewed bilingual evaluation. Draft held for approval.');
+                case 'evaluation_stale':
+                    return _k('settings.xt.hold.evaluation_stale', 'The X release evaluation is invalid or stale. Draft held for revalidation and approval.');
+                case 'evaluation_unverifiable':
+                    return _k('settings.xt.hold.evaluation_unverifiable', 'Release qualification could not be verified. Draft held for approval.');
+                default:
+                    return '';
+            }
+        },
+
+        // Is auto-reply going to do anything, and if not why: the server's
+        // code (live_reason_code) and values, worded here. For a policy
+        // error this is only the lead-in; the errors themselves are the
+        // server's diagnostics, shown beside it as they are.
+        xReplyLiveReason() {
+            const values = this.xReply.live_reason_values || {};
+            const mode = values.mode === 'auto'
+                ? _k('settings.xt.mode_name.auto', 'auto')
+                : _k('settings.xt.mode_name.draft', 'draft');
+            switch (this.xReply.live_reason_code) {
+                case 'connector_not_ready':
+                    return _k('settings.xt.reason.connector_not_ready', 'The X connector is not posting-ready — save and test the credentials above.');
+                case 'disabled':
+                    return _k('settings.xt.reason.disabled', 'Auto-reply is OFF. Nothing will happen on X until you enable it and press Save.');
+                case 'mode_off':
+                    return _k('settings.xt.reason.mode_off', "Mode is 'off'. Pick draft or auto, then press Save.");
+                case 'policy_errors':
+                    return _k('settings.xt.reason.policy_errors', 'Subject policy needs correction before drafting:');
+                case 'no_summoners':
+                    return _k('settings.xt.reason.no_summoners', 'No trusted handles saved, so nobody can summon it.');
+                case 'poller_stopped':
+                    return _k('settings.xt.reason.poller_stopped', 'Saved and live in {mode} mode, but the mentions poller is not running — Save again to start it, or restart Kazma. /x roast works meanwhile.', { mode: mode });
+                case 'auto_held':
+                    return _k('settings.xt.reason.auto_held', 'Mentions poller running; automatic publishing held. {hold}', { hold: this.xReplyHoldText() });
+                case 'all_reviewed':
+                    return _k('settings.xt.reason.all_reviewed', 'Mentions poller running; every subject requires review before publishing.');
+                case 'voice_only':
+                    return _k('settings.xt.reason.voice_only', 'Live in {mode} mode, poller running, voice-only — no subjects, emoji picks the tone.', { mode: mode });
+                case 'live': {
+                    const n = Number(values.n) || 0;
+                    if (typeof root.kazmaCount === 'function') {
+                        return root.kazmaCount('settings.xt.reason.live', n, { mode: mode });
+                    }
+                    return _k('settings.xt.reason.live.other', 'Live in {mode} mode, poller running, {n} subjects.', { mode: mode, n: n });
+                }
+                default:
+                    return '';
+            }
+        },
+
         async _loadXReplyLibraries() {
             try {
                 const data = await this._fetch('/api/kb/libraries');

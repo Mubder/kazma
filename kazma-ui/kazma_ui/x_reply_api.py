@@ -197,7 +197,7 @@ def _payload() -> dict[str, Any]:
     from kazma_core.tenant_context import tenant_scope
     from kazma_core.x_api.config import get_x_config
     from kazma_core.x_api.model_selection import X_MODEL_ROLES, model_options, validate_selection
-    from kazma_core.x_api.qualification import qualification_hold
+    from kazma_core.x_api.qualification import HOLD_TEXT, qualification_hold_code
     from kazma_core.x_api.stance import MOOD_EMOJI, MOODS, get_reply_config
 
     with tenant_scope(x_tenant_id()):
@@ -206,7 +206,8 @@ def _payload() -> dict[str, Any]:
         xcfg = get_x_config()
         ai = validate_selection(get_config_store().get(x_config_key("connectors.x.ai")))
         ai_options = model_options()
-        auto_hold = qualification_hold(cfg)
+        hold_code = qualification_hold_code(cfg)
+    live_code, live_values = _live_status(cfg, xcfg, hold_code=hold_code)
 
     return {
         "ok": True,
@@ -216,7 +217,10 @@ def _payload() -> dict[str, Any]:
         "ai": ai,
         "ai_options": ai_options,
         "ai_roles": list(X_MODEL_ROLES),
-        "auto_qualification_hold": auto_hold,
+        # The page words the codes in its language (settings.xt.hold.<code>,
+        # settings.xt.reason.<code>); the English is for API callers and logs.
+        "auto_qualification_hold": HOLD_TEXT[hold_code] if hold_code else "",
+        "auto_qualification_hold_code": hold_code,
         "summoners": list(cfg.summoners),
         "trigger": cfg.trigger,
         "max_replies_per_day": cfg.max_replies_per_day,
@@ -249,12 +253,34 @@ def _payload() -> dict[str, Any]:
         # config would allow it; this says whether the loop exists, which is a
         # different question after a config change without a restart.
         "poller_running": _poller_running(),
-        "live_reason": _live_reason(cfg, xcfg, auto_hold=auto_hold),
+        "live_reason": _live_text(live_code, live_values),
+        "live_reason_code": live_code,
+        "live_reason_values": live_values,
     }
 
 
-def _live_reason(cfg: Any, xcfg: Any, *, auto_hold: str | None = None) -> str:
-    """One sentence: is this thing actually going to do anything, and if not, why.
+# The English of each live-status code. The page words the same codes from
+# its catalog (settings.xt.reason.<code>); a code added here needs both.
+_LIVE_TEXT: dict[str, str] = {
+    "connector_not_ready": "The X connector is not posting-ready — save and test the credentials above.",
+    "disabled": "Auto-reply is OFF. Nothing will happen on X until you enable it and press Save.",
+    "mode_off": "Mode is 'off'. Pick draft or auto, then press Save.",
+    "policy_errors": "Subject policy needs correction before drafting: {errors}",
+    "no_summoners": "No trusted handles saved, so nobody can summon it.",
+    "poller_stopped": (
+        "Saved and live in {mode} mode, but the mentions poller is not "
+        "running — Save again to start it, or restart Kazma. /x roast works meanwhile."
+    ),
+    "auto_held": "Mentions poller running; automatic publishing held. {hold}",
+    "all_reviewed": "Mentions poller running; every subject requires review before publishing.",
+    "voice_only": "Live in {mode} mode, poller running, voice-only — no subjects, emoji picks the tone.",
+    "live": "Live in {mode} mode, poller running, {subjects}.",
+}
+
+
+def _live_status(cfg: Any, xcfg: Any, *, hold_code: str | None = None) -> tuple[str, dict[str, Any]]:
+    """Is this thing actually going to do anything, and if not, why: a code
+    and the values its sentence names.
 
     An operator can have a working dry run and a completely inert feature at
     the same time -- the preview reads the card in the editor, everything else
@@ -263,36 +289,49 @@ def _live_reason(cfg: Any, xcfg: Any, *, auto_hold: str | None = None) -> str:
     went nowhere with nothing to explain it.
     """
     if not xcfg.can_post():
-        return "The X connector is not posting-ready — save and test the credentials above."
+        return "connector_not_ready", {}
     if not cfg.enabled:
-        return "Auto-reply is OFF. Nothing will happen on X until you enable it and press Save."
+        return "disabled", {}
     if cfg.mode == "off":
-        return "Mode is 'off'. Pick draft or auto, then press Save."
+        return "mode_off", {}
     if cfg.config_errors:
-        return "Subject policy needs correction before drafting: " + "; ".join(cfg.config_errors)
+        return "policy_errors", {"errors": "; ".join(cfg.config_errors)}
     if not cfg.summoners and cfg.summoner_policy != "anyone":
-        return "No trusted handles saved, so nobody can summon it."
+        return "no_summoners", {}
     if not _poller_running():
-        return (
-            f"Saved and live in {cfg.mode} mode, but the mentions poller is not "
-            "running — Save again to start it, or restart Kazma. /x roast works meanwhile."
-        )
+        return "poller_stopped", {"mode": cfg.mode}
     n = len(cfg.subjects)
     if cfg.mode == "auto":
-        if auto_hold is None:
-            from kazma_core.x_api.qualification import qualification_hold
+        if hold_code is None:
+            from kazma_core.x_api.qualification import qualification_hold_code
 
-            auto_hold = qualification_hold(cfg)
-        if auto_hold:
-            return "Mentions poller running; automatic publishing held. " + auto_hold
+            hold_code = qualification_hold_code(cfg)
+        if hold_code:
+            return "auto_held", {"hold": hold_code}
         if not any(subject.allow_auto for subject in cfg.subjects):
-            return "Mentions poller running; every subject requires review before publishing."
+            return "all_reviewed", {}
     if n == 0:
-        return (
-            f"Live in {cfg.mode} mode, poller running, voice-only — "
-            "no subjects, emoji picks the tone."
-        )
-    return f"Live in {cfg.mode} mode, poller running, {n} subject(s)."
+        return "voice_only", {"mode": cfg.mode}
+    return "live", {"mode": cfg.mode, "n": n}
+
+
+def _live_text(code: str, values: dict[str, Any]) -> str:
+    """The English sentence of a live-status code."""
+    from kazma_core.english_count import count_noun
+    from kazma_core.x_api.qualification import HOLD_TEXT
+
+    filled = dict(values)
+    if "hold" in filled:
+        filled["hold"] = HOLD_TEXT.get(filled["hold"], filled["hold"])
+    if "n" in filled:
+        filled["subjects"] = count_noun(filled["n"], "subject")
+    return _LIVE_TEXT[code].format(**filled)
+
+
+def _live_reason(cfg: Any, xcfg: Any, *, hold_code: str | None = None) -> str:
+    """One sentence, in English: is this thing actually going to do anything."""
+    code, values = _live_status(cfg, xcfg, hold_code=hold_code)
+    return _live_text(code, values)
 
 
 @router.get("")
