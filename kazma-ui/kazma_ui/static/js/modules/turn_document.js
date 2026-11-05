@@ -666,6 +666,16 @@
       return 'hitl:' + iid + ':' + hs;
     }
     var step = (ev && ev.step) || {};
+    // A step with an id ('tool#<call id>') is that step's own event: two
+    // calls of one tool whose arguments open alike are two rows. Keyed by
+    // name, state and the first 40 characters of the detail, the second
+    // call's start and end were taken for the first's and dropped -- live
+    // 2026-11-05 a turn ran 16 calls and showed 12, a failed one "Done".
+    if (t === 'progress' && step.id) {
+      var pd = String(step.detail || '');
+      return 'p:' + String(step.id) + ':' + String(step.state || '') + ':'
+        + pd.length + ':' + pd.slice(0, 40);
+    }
     var c = String((ev && (ev.content || ev.reply || step.title || '')) || '');
     var st = String(step.state || ev.state || '');
     var d = String(step.detail || ev.detail || '').slice(0, 40);
