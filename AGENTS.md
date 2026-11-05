@@ -6320,7 +6320,12 @@ yesterday's stayed in the bell a day after the fix (2026-10-21). An alert for a 
 longer stored -- a session the owner deleted, a crawl evicted from the journal --
 is settled the same way (`_collect` names every stored run, 2026-11-02: "Research
 failed" for a deleted test session linked to "Session not found";
-`tests/test_acquisition_monitor.py`, the monitor without the list as control). The monitor pages its own failure only after
+`tests/test_acquisition_monitor.py`, the monitor without the list as control). A
+finished crawl of a library that no longer exists is not stored either
+(`_gone_libraries`; a store that cannot answer keeps every crawl, said once), and
+deleting a library removes its finished crawls from the journal
+(`crawl_jobs.forget_library`, 2026-11-05: "Crawl interrupted" for a deleted
+library stayed in the bell). The monitor pages its own failure only after
 `_UNAVAILABLE_AFTER_S` (5 min) without a check, naming the cause, and follows a page with
 `acquisition.monitor_recovered`: it paged on the first failed 15 s check, so a 35 s Postgres restart
 sent a red page and no recovery (2026-10-22). Delivery callbacks persist platform acceptance,

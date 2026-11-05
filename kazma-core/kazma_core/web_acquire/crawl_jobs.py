@@ -897,6 +897,23 @@ def purge_terminal(*, kinds=None):
     return _mutate(change)
 
 
+def forget_library(library_id):
+    """A deleted Knowledge library's finished crawls leave the journal.
+
+    Nothing can resume them (the resume route refuses a library that is
+    gone), so kept they only paged "explicit recovery required" for a
+    library the owner had deleted (live 2026-11-05). A running crawl is
+    never removed: the delete refuses while one runs. Returns how many."""
+    def change(jobs):
+        gone = [key for key, row in jobs.items()
+                if row['library_id'] == library_id and row['status'] in _TERMINAL
+                and row.get('kind', 'site') in _KB_KINDS]
+        for key in gone:
+            del jobs[key]
+        return len(gone)
+    return _mutate(change)
+
+
 def projection(job_id):
     from kazma_core.web_acquire import accounting, credits
 

@@ -540,6 +540,7 @@ def test_a_crawl_that_stored_nothing_is_a_warning_not_a_success(fixture, monkeyp
     from kazma_core.tools import research_session
     from kazma_core.web_acquire import crawl_jobs
     monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    _library_store(tmp_path, monkeypatch).create_library('kb-empty', 'Empty')
     job = crawl_jobs.start('kb-empty', 'https://docs.fixture.example/',
                            dict(mode='local_only', robots=True, max_pages=1, scope='exact', delay_ms=0))
     job.update(lambda row: row.update(excluded=1, notes=['excluded', 'nothing_stored']))
@@ -637,3 +638,162 @@ def test_without_the_mark_the_restart_swallows_the_recovery(fixture, monkeypatch
     _Checks(monkeypatch, ['down'] * lasting).run()
     _Checks(monkeypatch, ['ok']).run()
     assert _keys(fixture) == ['acquisition.monitor_unavailable']
+
+
+# ── 2026-11-05: a deleted library's finished crawl leaves the bell ──
+
+
+def _library_store(tmp_path, monkeypatch):
+    """A private Knowledge store the monitor and the lifecycle both read."""
+    from kazma_core.stores import knowledge
+
+    store = knowledge.KnowledgeStore(db_path=str(tmp_path / 'knowledge.db'))
+    monkeypatch.setattr(knowledge, 'get_knowledge_store', lambda: store)
+    return store
+
+
+def _kb_crawl(library, status=None):
+    from kazma_core.web_acquire import crawl_jobs
+
+    job = crawl_jobs.start(library, 'https://docs.fixture.example/',
+                           dict(mode='local_only', robots=False, max_pages=1, scope='tree', delay_ms=0))
+    if status:
+        job.finish(status)
+    return job
+
+
+def _interrupted_crawl_alerted(fixture, monkeypatch, tmp_path):
+    from kazma_core.tools import research_session
+
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    monkeypatch.setattr(monitor, '_collect', _REAL_COLLECT)
+    store = _library_store(tmp_path, monkeypatch)
+    store.create_library('docs', 'Docs')
+    job = _kb_crawl('docs')
+    monitor.tick(now=1000)
+    job.finish('interrupted')
+    raised = monitor.tick(now=1001)
+    assert [r['key'] for r in raised] == ['job:' + job.job_id]
+    store.delete_library('docs')  # the journal row stays
+    return job
+
+
+def _alerted_jobs():
+    return {a['callback_id'] for a in monitor.recent_alerts() if 'knowledge?job=' in a['callback_id']}
+
+
+def test_an_interrupted_crawl_of_a_deleted_library_leaves_the_bell(fixture, monkeypatch, tmp_path):
+    """Live 2026-11-05: "Run interrupted -- explicit recovery required" stayed
+    in the bell for a crawl of a library the owner had deleted; the resume it
+    asked for is refused for a library that is gone."""
+    _interrupted_crawl_alerted(fixture, monkeypatch, tmp_path)
+    sent = len(fixture.sent)
+    monitor.tick(now=1010)
+    assert _alerted_jobs() == set()
+    assert len(fixture.sent) == sent  # settling raises nothing
+
+
+def test_negative_control_without_the_library_check_the_alert_stays(fixture, monkeypatch, tmp_path):
+    _interrupted_crawl_alerted(fixture, monkeypatch, tmp_path)
+    monkeypatch.setattr(monitor, '_gone_libraries', lambda rows: set())
+    monitor.tick(now=1010)
+    assert len(_alerted_jobs()) == 1
+
+
+def test_what_the_library_check_still_reports(fixture, monkeypatch, tmp_path):
+    """A running crawl is reported whatever its library (the delete refuses
+    while one runs), and a finished crawl of a library that exists is kept."""
+    from kazma_core.tools import research_session
+
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    store = _library_store(tmp_path, monkeypatch)
+    store.create_library('kept', 'Kept')
+    running = _kb_crawl('no-such-library')
+    finished = _kb_crawl('kept', 'interrupted')
+    gone = _kb_crawl('also-gone', 'partial')
+    stored = _REAL_COLLECT()[4]
+    assert 'job:' + running.job_id in stored
+    assert 'job:' + finished.job_id in stored
+    assert 'job:' + gone.job_id not in stored
+
+
+def test_a_store_that_cannot_answer_keeps_every_crawl_reported(fixture, monkeypatch, tmp_path, caplog):
+    import logging
+
+    from kazma_core.stores import knowledge
+    from kazma_core.tools import research_session
+
+    monkeypatch.setattr(research_session, '_db_path', lambda: tmp_path / 'research.db')
+    monkeypatch.setattr(monitor, '_library_check_failed', False)
+
+    def broken():
+        raise OSError('knowledge.db is locked')
+
+    monkeypatch.setattr(knowledge, 'get_knowledge_store', broken)
+    job = _kb_crawl('docs', 'interrupted')
+    with caplog.at_level(logging.WARNING, logger=monitor.logger.name):
+        assert 'job:' + job.job_id in _REAL_COLLECT()[4]
+        assert 'job:' + job.job_id in _REAL_COLLECT()[4]
+    said = [r for r in caplog.records if r.name == monitor.logger.name and 'cannot tell' in r.getMessage()]
+    assert len(said) == 1  # once, not every scan
+    store = _library_store(tmp_path, monkeypatch)
+    store.create_library('docs', 'Docs')
+    with caplog.at_level(logging.WARNING, logger=monitor.logger.name):
+        _REAL_COLLECT()
+    assert any('checked again' in r.getMessage() for r in caplog.records if r.name == monitor.logger.name)
+
+
+def _lifecycle_on(store, monkeypatch):
+    from kazma_core.stores import knowledge_index
+
+    monkeypatch.setattr(knowledge_index, 'get_knowledge_index',
+                        lambda: SimpleNamespace(delete_library=store.delete_library))
+
+
+def test_deleting_a_library_removes_its_finished_crawls_from_the_journal(fixture, monkeypatch, tmp_path):
+    from kazma_core.stores import knowledge_lifecycle
+    from kazma_core.web_acquire import crawl_jobs
+
+    store = _library_store(tmp_path, monkeypatch)
+    store.create_library('docs', 'Docs')
+    store.create_library('other', 'Other')
+    _lifecycle_on(store, monkeypatch)
+    mine = _kb_crawl('docs', 'interrupted')
+    theirs = _kb_crawl('other', 'completed')
+    result = knowledge_lifecycle.delete_library('docs')
+    assert result['deleted'] and result['crawl_jobs_removed'] == 1
+    assert crawl_jobs.inspect_jobs(mine.job_id) is None
+    assert crawl_jobs.inspect_jobs(theirs.job_id) is not None
+
+
+def test_negative_control_without_the_purge_the_crawl_stays(fixture, monkeypatch, tmp_path):
+    from kazma_core.stores import knowledge_lifecycle
+    from kazma_core.web_acquire import crawl_jobs
+
+    store = _library_store(tmp_path, monkeypatch)
+    store.create_library('docs', 'Docs')
+    _lifecycle_on(store, monkeypatch)
+    monkeypatch.setattr(knowledge_lifecycle, '_forget_finished_crawls', lambda library_id: None)
+    job = _kb_crawl('docs', 'interrupted')
+    knowledge_lifecycle.delete_library('docs')
+    assert crawl_jobs.inspect_jobs(job.job_id) is not None
+
+
+def test_a_journal_that_refuses_the_purge_does_not_fail_the_delete(fixture, monkeypatch, tmp_path, caplog):
+    import logging
+
+    from kazma_core.stores import knowledge_lifecycle
+    from kazma_core.web_acquire import crawl_jobs
+
+    store = _library_store(tmp_path, monkeypatch)
+    store.create_library('docs', 'Docs')
+    _lifecycle_on(store, monkeypatch)
+
+    def refused(library_id):
+        raise OSError('journal unavailable')
+
+    monkeypatch.setattr(crawl_jobs, 'forget_library', refused)
+    with caplog.at_level(logging.WARNING, logger=knowledge_lifecycle.logger.name):
+        result = knowledge_lifecycle.delete_library('docs')
+    assert result['deleted'] and result['crawl_jobs_removed'] is None
+    assert any('stay in the crawl journal' in r.getMessage() for r in caplog.records)

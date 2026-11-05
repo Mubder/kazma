@@ -120,7 +120,15 @@ def _collect():
     crawl_jobs.recover()
     left_to_agent = set()
     stored = {'session:' + s['id'] for s in sessions}
-    for row in crawl_jobs._read()[1].values():
+    rows = list(crawl_jobs._read()[1].values())
+    gone = _gone_libraries(rows)
+    for row in rows:
+        if _finished_crawl_of(row, gone):
+            # Its library was deleted: nothing can resume it and nothing is
+            # left to look at. Kept out of `stored`, so its alert settles
+            # ("Run interrupted -- explicit recovery required" for a library
+            # the owner had deleted, live 2026-11-05).
+            continue
         stored.add('job:' + row['job_id'])
         if row['job_id'] in linked:
             continue
@@ -160,6 +168,51 @@ def _collect():
             # this one's warnings. Notes are the limits and exclusions.
             subject=None if research else row['library_id'], notes=list(row.get('notes', []))))
     return jobs, credits.snapshot(), accounting._read_evidence(), left_to_agent, stored
+
+
+_library_check_failed = False
+
+
+def _finished_crawl_of(row, gone):
+    """A finished Knowledge crawl whose library is in ``gone``."""
+    from kazma_core.web_acquire import crawl_jobs
+
+    return (row.get('kind', 'site') in crawl_jobs._KB_KINDS
+            and row['status'] in crawl_jobs._TERMINAL
+            and row['library_id'] in gone)
+
+
+def _gone_libraries(rows):
+    """The libraries of finished Knowledge crawls that no longer exist.
+
+    A store that cannot answer leaves every crawl reported (an empty set):
+    a missed warning costs more than a stale one. Said once at WARNING, and
+    its recovery once."""
+    global _library_check_failed
+    from kazma_core.web_acquire import crawl_jobs
+
+    wanted = {row['library_id'] for row in rows
+              if row.get('kind', 'site') in crawl_jobs._KB_KINDS
+              and row['status'] in crawl_jobs._TERMINAL and row.get('library_id')}
+    if not wanted:
+        return set()
+    import sqlite3
+
+    try:
+        from kazma_core.stores.knowledge import get_knowledge_store
+
+        store = get_knowledge_store()
+        gone = {library for library in wanted if not store.library_exists(library)}
+    except (sqlite3.Error, OSError) as exc:
+        if not _library_check_failed:
+            logger.warning('[acquisition] cannot tell which crawled libraries still exist '
+                           '(%s); every finished crawl stays reported', type(exc).__name__)
+        _library_check_failed = True
+        return set()
+    if _library_check_failed:
+        logger.warning('[acquisition] crawled libraries can be checked again')
+        _library_check_failed = False
+    return gone
 
 
 def _identity(key):

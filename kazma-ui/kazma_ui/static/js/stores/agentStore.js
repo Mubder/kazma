@@ -607,7 +607,10 @@ function registerAgentStore() {
           // mirrored here for WS telemetry frames.
           try {
             if (window.KazmaChat && typeof window.KazmaChat.showContextCompacted === 'function') {
-              window.KazmaChat.showContextCompacted(data || frame || {});
+              // The chip is one per turn: name the turn wherever the frame does.
+              const compacted = Object.assign({}, data || frame || {});
+              if (!compacted.turn_id && frame && frame.turn_id) compacted.turn_id = frame.turn_id;
+              window.KazmaChat.showContextCompacted(compacted);
             } else if (window.showToast) {
               window.showToast('🗜️ ' + ((data && data.detail) || _ti('context_compacted', 'Earlier context was compacted')), 'info', 6000);
             }

@@ -195,12 +195,15 @@
         </div>
       </template>
       <div style="margin-top:6px;font-size:0.8rem;color:var(--text-secondary);">
+        {{ t('knowledge.job_pages') }} —
         {{ t('knowledge.job_discovered') }}: <span x-text="activeJob.discovered || 0"></span> ·
         {{ t('knowledge.job_fetched') }}: <span x-text="activeJob.fetched || 0"></span> ·
-        {{ t('knowledge.job_ingested') }}: <span x-text="activeJob.ingested || 0"></span> ·
-        {{ t('knowledge.job_skipped') }}: <span x-text="activeJob.skipped || 0"></span> ·
         {{ t('knowledge.job_unchanged') }}: <span x-text="activeJob.pages_unchanged || 0"></span> ·
         {{ t('knowledge.job_failed') }}: <span x-text="activeJob.failed || 0"></span>
+      </div>
+      <div style="font-size:0.8rem;color:var(--text-secondary);">
+        {{ t('knowledge.job_ingested') }}: <span x-text="activeJob.ingested || 0"></span> ·
+        {{ t('knowledge.job_skipped') }}: <span x-text="activeJob.skipped || 0"></span>
       </div>
       <template x-if="jobDone() && (activeJob.pages || []).length">
         <div id="kb-crawl-report" style="margin-top:8px;border-top:1px dashed var(--border);padding-top:6px;font-size:0.8rem;">

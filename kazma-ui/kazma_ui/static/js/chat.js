@@ -687,6 +687,59 @@
     return true;
   }
 
+  /**
+   * Context-integrity S3-1: a compact "earlier context compacted" chip in
+   * the transcript, so the user never has to ask why the agent forgot.
+   * Payload: {detail, dropped_user, dropped_assistant, stubbed_segments,
+   * turn_id}. One chip per turn: the tab that sent the turn hears the same
+   * journaled frame through its stream AND its WebSocket (both mouths paint
+   * every frame, AGENTS.md §31 D), and every copy used to add a chip -- two
+   * chips under one turn on live (2026-11-05). A copy for a turn that has
+   * its chip updates that chip.
+   */
+  function _paintContextCompacted(data) {
+    if (!messagesEl) return null;
+    data = data || {};
+    var detail = String(data.detail || 'earlier context was compacted');
+    var key = String(data.turn_id || '');
+    var chips = messagesEl.querySelectorAll('.context-compacted-chip');
+    for (var i = 0; i < chips.length; i++) {
+      var prior = chips[i];
+      var same = key
+        ? prior.getAttribute('data-turn-id') === key
+        // A frame naming no turn: the same chip only when nothing came after it.
+        : (prior === messagesEl.lastElementChild
+           && prior.getAttribute('data-detail') === detail);
+      if (!same) continue;
+      prior.title = detail;
+      prior.setAttribute('data-detail', detail);
+      var shown = prior.querySelector('.context-compacted-chip-detail');
+      if (shown) shown.textContent = detail;
+      return prior;
+    }
+    var chip = document.createElement('div');
+    chip.className = 'context-compacted-chip';
+    chip.title = detail;
+    chip.setAttribute('data-detail', detail);
+    if (key) chip.setAttribute('data-turn-id', key);
+    var icon = document.createElement('span');
+    icon.className = 'context-compacted-chip-icon';
+    icon.textContent = '🗜️';
+    var label = document.createElement('span');
+    label.textContent = ti('context_compacted', 'Earlier context compacted');
+    chip.appendChild(icon);
+    chip.appendChild(label);
+    var hover = document.createElement('div');
+    hover.className = 'context-compacted-chip-detail';
+    // The server's own words: shown as written in either language.
+    hover.setAttribute('translate', 'no');
+    hover.textContent = detail;
+    chip.appendChild(hover);
+    messagesEl.appendChild(chip);
+    try { messagesEl.scrollTop = messagesEl.scrollHeight; } catch (e) { /* ignore */ }
+    return chip;
+  }
+
   function applyJournalFrame(type, data) {
     data = data || {};
     switch (String(type || '')) {
@@ -8808,32 +8861,9 @@
       _loadInFlightFor = null;
       loadSession(chatSessionId);
     },
-    /**
-     * Context-integrity S3-1: a compact "earlier context compacted" chip in
-     * the transcript. The user should never have to ask why the agent
-     * forgot — trim/stub events now arrive as `context_compacted` SSE/WS
-     * events and land here. Payload: {detail, dropped_user,
-     * dropped_assistant, stubbed_segments}.
-     */
+    /** The "earlier context compacted" chip: `_paintContextCompacted`. */
     showContextCompacted: function(data) {
-      if (!messagesEl) return;
-      var detail = (data && data.detail) || 'earlier context was compacted';
-      var chip = document.createElement('div');
-      chip.className = 'context-compacted-chip';
-      chip.title = detail;
-      var icon = document.createElement('span');
-      icon.className = 'context-compacted-chip-icon';
-      icon.textContent = '🗜️';
-      var label = document.createElement('span');
-      label.textContent = ti('context_compacted', 'Earlier context compacted');
-      chip.appendChild(icon);
-      chip.appendChild(label);
-      var hover = document.createElement('div');
-      hover.className = 'context-compacted-chip-detail';
-      hover.textContent = detail;
-      chip.appendChild(hover);
-      messagesEl.appendChild(chip);
-      try { messagesEl.scrollTop = messagesEl.scrollHeight; } catch (e) { /* ignore */ }
+      _paintContextCompacted(data);
     },
     paintCapacityReply: function(reply, optTurnId) {
       if (!reply || !messagesEl) return;
