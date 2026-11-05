@@ -413,6 +413,20 @@ def _park(obj) -> None:
 
 
 @_pytest.fixture(autouse=True)
+def _isolate_outage_pages(tmp_path, monkeypatch):
+    """Each test owes only the recovery notes it paged itself.
+
+    The data dir is pinned once per session, so without this a page one test
+    marks in ``outage_pages.json`` would be owed a "back" note by the next
+    test's monitor, supervisor, MCP reconnector or X loop.
+    """
+    from kazma_core.observability import outage_pages as _outage_pages
+
+    monkeypatch.setattr(_outage_pages, "_file", lambda: tmp_path / "outage_pages.json")
+    yield
+
+
+@_pytest.fixture(autouse=True)
 def _isolate_process_singletons(tmp_path):
     import os as _os
 

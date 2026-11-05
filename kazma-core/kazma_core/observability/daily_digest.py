@@ -72,13 +72,26 @@ _PAUSE_START = "maintenance.active"
 _PAUSE_END = "maintenance.resumed"
 _RELOAD = "guard.operator_reload"
 
-# Application log markers. Substring match on the message, because these
-# lines are formatted with %-args and the values vary per turn.
-_APP_MARKERS = {
-    "Backfilled unanswered turn": "answers recovered from checkpoint",
-    "LLM call attempt": "LLM retries",
-    "failed to connect": "MCP connection failures",
-}
+# Application log lines, each read by how its message OPENS: its "[tag] " and
+# the words after it, matched at the start of the message (``re.match``).
+# A marker matched anywhere in the message also matched text a variable
+# carried: on 2026-11-05 the digest reported five "MCP connection failures"
+# that were the health check quoting Docker's own "failed to connect to the
+# docker API" during a Docker outage, with every MCP server connected. Each
+# entry: the needle (a literal the raw line holds, for the quick scan), the
+# pattern, the label. A pattern with a group "n" adds that number: the MCP
+# summary names how many servers failed, one line per connect.
+_APP_LINES: tuple[tuple[str, re.Pattern[str], str], ...] = (
+    ("Backfilled unanswered turn",
+     re.compile(r"\[SSE\] Backfilled unanswered turn"),
+     "answers recovered from checkpoint"),
+    ("LLM call attempt",
+     re.compile(r"\[[^\]\s]+\] LLM call attempt \d+/\d+ failed"),
+     "LLM retries"),
+    ("failed to connect",
+     re.compile(r"\[MCP\] (?P<n>\d+) server\(s\) failed to connect"),
+     "MCP connection failures"),
+)
 
 # One line per finished turn, from every transport
 # (kazma_ui.turn_runtime._note_finished_turn). Turns were counted from "SSE
@@ -381,7 +394,8 @@ def _scan_app_log(
     alerts: dict[str, dict] = {}
     chats: dict[str, dict] = {}
     needles = (
-        *_APP_MARKERS, _TURN_MARKER, _ALERT_MARKER, _MEMORY_ACTION, _CRON_MARKER,
+        *(needle for needle, _pattern, _label in _APP_LINES),
+        _TURN_MARKER, _ALERT_MARKER, _MEMORY_ACTION, _CRON_MARKER,
         *_UNASKED_NEEDLES,
     )
     # The live file is read before the rotated ones: a window's "off" is
@@ -421,9 +435,10 @@ def _scan_app_log(
             if str(rec.get("level", "WARNING")).upper() != "INFO":
                 tally["attention"] = True
             continue
-        for marker, label in _APP_MARKERS.items():
-            if marker in msg:
-                counts[label] += 1
+        for _needle, pattern, label in _APP_LINES:
+            line = pattern.match(msg)
+            if line:
+                counts[label] += int(line.groupdict().get("n") or 1)
     for ts, msg in sorted(unasked, key=lambda item: item[0]):
         _note_unasked(chats, ts, msg)
     return counts, turns, alerts, chats

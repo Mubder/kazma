@@ -329,10 +329,19 @@ def test_a_paused_or_stopped_turn_is_not_finished_and_a_failed_one_says_so(
 # -- the lines it reads are lines the code writes --------------------------
 
 
-def _unread_markers(lines, markers=None, turn_line=None) -> list[str]:
-    markers = daily_digest._APP_MARKERS if markers is None else markers
+def _unread(lines, app_lines=None, literals=(), turn_line=None) -> list[str]:
+    """What the digest reads that no line the code writes holds: a literal
+    marker (anywhere in a line), an app line's pattern (at a line's start),
+    the needle of each line its pattern takes (the quick scan drops a line
+    without it) and the turn line."""
+    app_lines = daily_digest._APP_LINES if app_lines is None else app_lines
     turn_line = daily_digest._TURN_LINE if turn_line is None else turn_line
-    missing = [m for m in markers if not any(m in line for line in lines)]
+    missing = [m for m in literals if not any(m in line for line in lines)]
+    for needle, pattern, _label in app_lines:
+        taken = [line for line in lines if pattern.match(line)]
+        if not taken:
+            missing.append(pattern.pattern)
+        missing.extend(f"{needle!r} not in {line!r}" for line in taken if needle not in line)
     if not any(turn_line.search(line) for line in lines):
         missing.append(turn_line.pattern)
     return missing
@@ -345,17 +354,82 @@ def test_every_line_the_digest_reads_is_one_the_code_writes():
     (tests/_emitted_lines.py), like the weekly report's signatures."""
     lines = emitted_app_lines(product_roots())
     assert len(lines) > 1000, "the source walk found almost nothing"
-    read = {**daily_digest._APP_MARKERS, daily_digest._ALERT_MARKER: "alerts"}
-    assert _unread_markers(lines, read) == []
+    assert _unread(lines, literals=[daily_digest._ALERT_MARKER]) == []
 
 
 def test_the_marker_gate_catches_a_line_no_code_writes():
-    """Negative control (§28): the retired marker, and a renamed turn line."""
+    """Negative control (§28): the retired line, a needle the line does not
+    hold, and a renamed turn line."""
+    import re
+
     lines = ["[turn] Turn finished: platform=1 key=1 failed=1",
              "[SSE] Backfilled unanswered turn from checkpoint for 1"]
-    stale = {"Detached turn completed": "x", "Backfilled unanswered turn": "y"}
-    assert _unread_markers(lines, stale) == ["Detached turn completed"]
-    assert _unread_markers(["[turn] Turn done: 1"], {}) == [daily_digest._TURN_LINE.pattern]
+    stale = (("Detached turn completed", re.compile(r"\[SSE\] Detached turn completed"), "x"),
+             ("Backfilled unanswered turn", re.compile(r"\[SSE\] Backfilled unanswered turn"), "y"))
+    assert _unread(lines, stale) == [r"\[SSE\] Detached turn completed"]
+    wrong_needle = (("Backfilled turn", re.compile(r"\[SSE\] Backfilled unanswered turn"), "y"),)
+    assert len(_unread(lines, wrong_needle)) == 1
+    assert _unread(["[turn] Turn done: 1"], ()) == [daily_digest._TURN_LINE.pattern]
+
+
+#: What the health check logged on live while Docker was stopped
+#: (2026-11-03/04): Docker's own words, carried in a variable.
+_DOCKER_HEALTH_LINE = (
+    "[Health] the Docker daemon is not running (docker info exit 1): failed to "
+    "connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine; "
+    "check if the path is correct and if the daemon is running")
+
+
+def _counted(msg: str) -> list[str]:
+    """The labels the digest counts for one message, as it reads it."""
+    return [label for _needle, pattern, label in daily_digest._APP_LINES if pattern.match(msg)]
+
+
+def test_a_counted_line_quoted_inside_another_line_is_not_counted():
+    """The digest reads a line by how its message opens. A marker matched
+    anywhere took text a variable carried: on 2026-11-05 it reported five
+    "MCP connection failures" that were the health check quoting Docker
+    ("failed to connect to the docker API"), every MCP server connected.
+    Class gate: every line the code writes that the digest counts is counted
+    as written, and not once quoted inside another line."""
+    lines = emitted_app_lines(product_roots())
+    counted = [line for line in lines if _counted(line)]
+    assert len(counted) >= len(daily_digest._APP_LINES)
+    quoted = [line for line in counted
+              if _counted(f"[Health] the check failed: {line}")
+              or _counted(f"[MCP] test of server '1' failed: {line}")]
+    assert quoted == []
+    assert _counted(_DOCKER_HEALTH_LINE) == []
+
+
+def test_control_a_marker_matched_anywhere_counts_the_docker_line():
+    """Negative control: the old rule (a substring anywhere in the message)
+    counted the health check's line as an MCP failure."""
+    old_markers = {"Backfilled unanswered turn": "answers recovered from checkpoint",
+                   "LLM call attempt": "LLM retries",
+                   "failed to connect": "MCP connection failures"}
+    assert [label for marker, label in old_markers.items()
+            if marker in _DOCKER_HEALTH_LINE] == ["MCP connection failures"]
+
+
+def test_mcp_failures_are_the_servers_mcp_said_failed(tmp_path, monkeypatch):
+    """Through the whole digest: the Docker health lines count nothing, and
+    the MCP summary counts the servers it names (one line per connect, so a
+    server is never counted twice with its own error line)."""
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(
+        tmp_path, [("WARNING", _DOCKER_HEALTH_LINE)] * 5)))
+    assert "MCP connection failures" not in daily_digest.build_digest(hours=24)
+
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, [
+        ("WARNING", _DOCKER_HEALTH_LINE),
+        ("ERROR", "[MCP] Failed to connect server 'github': timed out"),
+        ("ERROR", "[MCP] Failed to connect server 'files': refused"),
+        ("WARNING", "[MCP] 2 server(s) failed to connect: github (timed out); "
+                    "files (refused) — tools from these servers are unavailable "
+                    "until fixed (see /mcp settings page)"),
+    ], name="kazma2.log")))
+    assert "MCP connection failures: 2" in daily_digest.build_digest(hours=24)
 
 
 def test_recoveries_are_separated_from_problems(tmp_path, monkeypatch):

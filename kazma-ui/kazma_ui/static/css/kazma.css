@@ -634,6 +634,13 @@ button { cursor: pointer; font-family: inherit; }
   -webkit-backdrop-filter: blur(16px);
   min-height: var(--header-height);
   flex-shrink: 0;
+  /* The blur makes the header its own stacking context, so its menus
+     (z-index 200) can rise only inside it. On the page's base level the
+     chat and the IDE editor, painted after it, covered the bell list and
+     the account menu. Its own layer, above the page body and below the
+     mobile drawer (200), the search overlay and dialogs. */
+  position: relative;
+  z-index: 150;
 }
 .header-left {
   display: flex;
@@ -763,7 +770,11 @@ button { cursor: pointer; font-family: inherit; }
 .user-menu-dropdown {
   position: absolute;
   top: 100%;
-  right: 0;
+  /* The header's buttons sit at its inline end (the right in English, the
+     left in Arabic), so a menu opens from its button's end edge toward the
+     page. "right: 0" opened an Arabic menu off the window's left edge on a
+     phone. */
+  inset-inline-end: 0;
   margin-top: var(--sp-1);
   min-width: 200px;
   background: var(--bg-surface);
@@ -4568,6 +4579,12 @@ details.kazma-working > summary {
   /* ── Header overflow control ── */
   .header-right { flex-wrap: wrap; flex-shrink: 1; }
   .header-right .sidebar-collapsed-hide { display: none; }  /* hide "New Chat" label */
+  /* Wrapped, a menu's button can sit anywhere in the row, and a menu hung
+     from its button left the window on one side or the other (the Arabic
+     bell list past the left edge, the account menu past the right). Here a
+     menu hangs from the header's own end instead, always inside it. */
+  .page-header .user-menu { position: static; }
+  .page-header .user-menu-dropdown { inset-inline-end: var(--sp-2); }
   .header-title {
     overflow: hidden;
     text-overflow: ellipsis;

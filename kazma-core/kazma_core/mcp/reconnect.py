@@ -25,6 +25,11 @@ Design notes
   otherwise the only news is bad news and the channel gets muted.
 * **Never raises.** The loop is a background task next to the agent; an
   exception here must not take anything else down.
+* **A "still down" page is owed its "back" note across restarts.** The page
+  is marked in :mod:`kazma_core.observability.outage_pages`; a new process
+  reads the marks at its first sweep, so a server that comes back after
+  Kazma restarted is still announced (the acquisition monitor lost its note
+  that way, live 2026-11-03 and 11-04).
 """
 
 from __future__ import annotations
@@ -53,6 +58,9 @@ BACKOFF_LADDER_S: tuple[float, ...] = (30, 60, 120, 300, 900, 1800)
 # failure is already reported by the connect path; this is for "it is still
 # down and retrying is not helping".
 ALERT_AFTER_ATTEMPTS = 3
+
+#: Outage marks of servers paged "has not come back" (one per server).
+_PAGE_PREFIX = "mcp.reconnect_failing:"
 
 # Substrings that mean "retrying at speed cannot possibly help": the server
 # is misconfigured rather than temporarily unreachable.
@@ -113,6 +121,9 @@ class MCPReconnector:
         self._sweep = sweep_interval_s
         self._state: dict[str, _ServerState] = {}
         self._stop = False
+        # Servers paged "has not come back" whose "back" note is still owed,
+        # read from the outage marks at the first sweep (None until then).
+        self._owed: set[str] | None = None
 
     # -- introspection -------------------------------------------------
 
@@ -144,6 +155,31 @@ class MCPReconnector:
             alert(key, title, detail, severity=severity)
         except Exception:  # noqa: BLE001 — alerting must never break recovery
             logger.debug("[MCP-reconnect] alert failed", exc_info=True)
+
+    async def _load_owed(self) -> None:
+        """The servers an earlier process paged and never said were back."""
+        from kazma_core.observability.outage_pages import owed_outage_pages
+
+        # The marks never raise: an unreadable file is logged there and read
+        # as no marks, so the sweep runs either way.
+        marks = await asyncio.to_thread(owed_outage_pages, _PAGE_PREFIX)
+        self._owed = {key[len(_PAGE_PREFIX):] for key in marks}
+
+    async def _mark(self, name: str, *, owed: bool, cause: str = "") -> None:
+        """Record (or settle) the "back" note owed for *name*."""
+        from kazma_core.observability.outage_pages import note_outage_page, settle_outage_page
+
+        if self._owed is None:
+            self._owed = set()
+        # A mark that cannot be written is logged by outage_pages and never
+        # raised: it costs only the note after a restart.
+        if owed:
+            await asyncio.to_thread(note_outage_page, _PAGE_PREFIX + name,
+                                    since=time.time(), cause=cause)
+            self._owed.add(name)
+        else:
+            await asyncio.to_thread(settle_outage_page, _PAGE_PREFIX + name)
+            self._owed.discard(name)
 
     def _connected_names(self) -> set[str]:
         """Names the manager currently considers connected.
@@ -198,10 +234,17 @@ class MCPReconnector:
         errors = dict(getattr(self._manager, "connection_errors", {}) or {})
         connected_names = self._connected_names()
 
+        if self._owed is None:
+            await self._load_owed()
+        owed = self._owed if self._owed is not None else set()
+
         # Forget state for servers that are no longer configured or have been
-        # disabled -- otherwise a removed server retries forever.
+        # disabled -- otherwise a removed server retries forever. A removed
+        # server is owed no "back" note.
         for gone in [n for n in self._state if n not in by_name]:
             self._state.pop(gone, None)
+        for gone in [n for n in owed if n not in by_name]:
+            await self._mark(gone, owed=False)
 
         for name, cfg in by_name.items():
             if name in connected_names:
@@ -219,7 +262,22 @@ class MCPReconnector:
                         "info",
                     )
                     recovered += 1
+                elif name in owed:
+                    logger.info("[MCP-reconnect] '%s' is back (paged before a restart)", name)
+                    self._alert(
+                        "mcp.server_recovered",
+                        f"MCP server '{name}' is back — its tools are available again.",
+                        "It was still down when Kazma restarted.",
+                        "info",
+                    )
+                    recovered += 1
+                if name in owed:
+                    await self._mark(name, owed=False)
                 continue
+
+            if name in owed and name not in self._state:
+                # Paged by an earlier process: keep retrying, never page twice.
+                self._state[name] = _ServerState(alerted=True)
 
             if name not in errors and name not in self._state:
                 # Not connected and not previously an error: it may simply
@@ -257,6 +315,8 @@ class MCPReconnector:
                     "info",
                 )
                 self._state.pop(name, None)
+                if name in owed:
+                    await self._mark(name, owed=False)
                 recovered += 1
                 continue
 
@@ -276,6 +336,7 @@ class MCPReconnector:
                     f"{int(delay)}s.",
                     "warn",
                 )
+                await self._mark(name, owed=True, cause=st.last_error[:120])
         return recovered
 
     async def run(self) -> None:

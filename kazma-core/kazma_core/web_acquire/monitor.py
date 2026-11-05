@@ -30,6 +30,7 @@ _UNAVAILABLE_AFTER_S = 300
 _failing_since: float | None = None
 _failure_cause = ''
 _paged = False
+_PAGE_KEY = 'acquisition.monitor_unavailable'
 _DEFAULTS = dict(enabled=True, stall_seconds=180, low_credit_threshold=100,
                  notify_completed=True)
 _TERMINAL = {'done', 'partial', 'error', 'cancelled', 'interrupted', 'empty'}
@@ -497,14 +498,36 @@ async def _loop():
     from kazma_core.observability.alerts import AlertDispatcher
     from kazma_core.observability.ops_alerts import alert
 
+    from kazma_core.observability.outage_pages import (
+        note_outage_page, outage_page_owed, settle_outage_page)
+
+    _restore_owed_page(await asyncio.to_thread(outage_page_owed, _PAGE_KEY))
     while True:
         try:
             await call(tick)
         except (*_storage_failures(), AcquisitionError, ValueError, TypeError, KeyError, AttributeError) as exc:
-            _monitor_failed(exc, alert=alert, banner=AlertDispatcher.post_banner)
+            if _monitor_failed(exc, alert=alert, banner=AlertDispatcher.post_banner):
+                await asyncio.to_thread(note_outage_page, _PAGE_KEY,
+                                        since=_failing_since, cause=_failure_cause)
         else:
-            _monitor_ran(alert=alert, resolve=AlertDispatcher.resolve_alerts_for_subsystem)
+            if _monitor_ran(alert=alert, resolve=AlertDispatcher.resolve_alerts_for_subsystem):
+                await asyncio.to_thread(settle_outage_page, _PAGE_KEY)
         await asyncio.sleep(_POLL_SECONDS)
+
+
+def _restore_owed_page(mark):
+    """A page an earlier process sent is still owed its recovery note.
+
+    The guard restarts Kazma during the outages that page this monitor (a
+    Docker outage takes the database), and the new process had paged
+    nothing: the note never came (live 2026-11-03 and 11-04).
+    """
+    global _failing_since, _failure_cause, _paged
+    if not mark:
+        return
+    _paged = True
+    _failing_since = float(mark.get('since') or time.time())
+    _failure_cause = str(mark.get('cause') or 'it could not run')
 
 
 def _cause_of(exc):
@@ -518,7 +541,10 @@ def _minutes(seconds):
 
 
 def _monitor_failed(exc, *, alert, banner):
-    """One failed check: said at once in the log, paged only if it lasts."""
+    """One failed check: said at once in the log, paged only if it lasts.
+
+    True when this check sent the page (its recovery note is then owed).
+    """
     global _failing_since, _failure_cause, _paged
     now = time.time()
     _failure_cause = _cause_of(exc)
@@ -526,7 +552,7 @@ def _monitor_failed(exc, *, alert, banner):
         _failing_since = now
         logger.warning('Acquisition monitoring could not run: %s', _failure_cause, exc_info=True)
     if _paged or now - _failing_since < _UNAVAILABLE_AFTER_S:
-        return
+        return False
     _paged = True
     detail = 'It has not run for %s: %s. Research and crawl alerts are not being checked.' % (
         _minutes(now - _failing_since), _failure_cause)
@@ -534,11 +560,16 @@ def _monitor_failed(exc, *, alert, banner):
     banner(subsystem='AcquisitionMonitor', title='Research/crawl monitoring unavailable',
            reason=detail, severity='ERROR', link='/settings?tab=system')
     alert('acquisition.monitor_unavailable', 'Research/crawl monitoring unavailable', detail, severity='error')
+    return True
 
 
 def _monitor_ran(*, alert, resolve):
-    """A check ran: a page that was sent is followed by its recovery."""
+    """A check ran: a page that was sent is followed by its recovery.
+
+    True when a page was owed its note (the note went out with this call).
+    """
     global _failing_since, _paged
+    owed = _paged
     if _failing_since is not None:
         down_for = time.time() - _failing_since
         if _paged:
@@ -550,6 +581,7 @@ def _monitor_ran(*, alert, resolve):
     _failing_since = None
     _paged = False
     resolve('AcquisitionMonitor')
+    return owed
 
 
 def start():

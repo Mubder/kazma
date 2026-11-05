@@ -223,3 +223,64 @@ def test_the_supervisors_own_outage_is_paged_after_five_minutes_not_at_once(worl
     assert supervisor._note_pass(boom, now=T0 + 500) == "failing"
     assert supervisor._note_pass(None, now=T0 + 530) == "ok"
     assert len(world.alerts) == 2
+
+
+class _Passes:
+    """Runs the supervisor loop over a list of pass outcomes on a fake clock."""
+
+    def __init__(self, monkeypatch, outcomes, *, step=30.0):
+        from types import SimpleNamespace
+
+        clock = [T0]
+        pending = list(outcomes)
+        monkeypatch.setattr(supervisor, "time", SimpleNamespace(time=lambda: clock[0]))
+        monkeypatch.setattr(supervisor, "_failing_since", None)
+        monkeypatch.setattr(supervisor, "_paged_unavailable", False)
+
+        async def fake_tick(*, now=None):
+            if pending.pop(0) == "down":
+                raise OSError("database away")
+            return {}
+
+        async def sleep(_delay):
+            if not pending:
+                raise asyncio.CancelledError()
+            clock[0] += step
+
+        monkeypatch.setattr(supervisor, "tick", fake_tick)
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+
+    def run(self):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(supervisor._loop())
+
+
+def _lasting_outage() -> list[str]:
+    return ["down"] * (int(supervisor._UNAVAILABLE_AFTER_S // 30) + 2)
+
+
+def test_a_page_sent_before_a_restart_is_followed_by_its_recovery_after_it(world, monkeypatch):
+    """The guard restarts Kazma during the outages that page this loop; the
+    new process had paged nothing and said nothing when it worked again."""
+    _Passes(monkeypatch, _lasting_outage()).run()
+    assert [a["key"] for a in world.alerts] == ["runs.supervisor_unavailable"]
+    _Passes(monkeypatch, ["ok"]).run()  # a new process
+    assert [a["key"] for a in world.alerts] == ["runs.supervisor_unavailable", "runs.supervisor_recovered"]
+    _Passes(monkeypatch, ["ok"]).run()  # settled: nothing more
+    assert len(world.alerts) == 2
+
+
+def test_a_restart_during_the_outage_does_not_page_it_twice(world, monkeypatch):
+    _Passes(monkeypatch, _lasting_outage()).run()
+    _Passes(monkeypatch, [*_lasting_outage(), "ok"]).run()
+    assert [a["key"] for a in world.alerts] == ["runs.supervisor_unavailable", "runs.supervisor_recovered"]
+
+
+def test_without_the_mark_the_restart_swallows_the_recovery(world, monkeypatch):
+    """Negative control: the process globals alone, as before."""
+    from kazma_core.observability import outage_pages
+
+    monkeypatch.setattr(outage_pages, "outage_page_owed", lambda key: None)
+    _Passes(monkeypatch, _lasting_outage()).run()
+    _Passes(monkeypatch, ["ok"]).run()
+    assert [a["key"] for a in world.alerts] == ["runs.supervisor_unavailable"]

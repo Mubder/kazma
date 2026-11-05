@@ -45,6 +45,7 @@ _task: asyncio.Task[None] | None = None
 _watch_started: float | None = None
 _failing_since: float | None = None
 _paged_unavailable = False
+_PAGE_KEY = "runs.supervisor_unavailable"
 
 
 def _condition_of(run: Run) -> str | None:
@@ -198,7 +199,20 @@ def _note_pass(error: BaseException | None, *, now: float | None = None) -> str:
     return "failing"
 
 
+def _restore_owed_page(mark: dict[str, Any] | None) -> None:
+    """A page an earlier process sent is still owed its recovery note: the
+    guard restarts Kazma during the outages that page this loop, and the new
+    process had paged nothing (the acquisition monitor's live case,
+    2026-11-03 and 11-04)."""
+    global _failing_since, _paged_unavailable
+    if mark:
+        _paged_unavailable = True
+        _failing_since = float(mark.get("since") or time.time())
+
+
 async def _loop() -> None:
+    from kazma_core.observability.outage_pages import (
+        note_outage_page, outage_page_owed, settle_outage_page)
     from kazma_core.runs.incidents import get_incident_store
     from kazma_core.shutdown import is_shutting_down
 
@@ -206,6 +220,7 @@ async def _loop() -> None:
         await asyncio.to_thread(get_incident_store().recover)
     except (OSError, RuntimeError) as exc:
         logger.warning("[runs] incident recovery at start failed: %s", exc)
+    _restore_owed_page(await asyncio.to_thread(outage_page_owed, _PAGE_KEY))
     logger.info("[runs] run supervisor started (every %ds)", int(TICK_SECONDS))
     while not is_shutting_down():
         try:
@@ -214,9 +229,13 @@ async def _loop() -> None:
             raise
         except Exception as exc:  # noqa: BLE001 -- the loop must outlive any one bad pass
             logger.warning("[runs] supervisor pass failed: %s", exc, exc_info=True)
-            _note_pass(exc)
+            outcome = _note_pass(exc)
         else:
-            _note_pass(None)
+            outcome = _note_pass(None)
+        if outcome == "paged":
+            await asyncio.to_thread(note_outage_page, _PAGE_KEY, since=_failing_since or time.time())
+        elif outcome == "recovered":
+            await asyncio.to_thread(settle_outage_page, _PAGE_KEY)
         await asyncio.sleep(TICK_SECONDS)
 
 

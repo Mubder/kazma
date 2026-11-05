@@ -75,3 +75,41 @@ async def test_health_route_suppresses_config_read_side_effects(env, monkeypatch
     monkeypatch.setattr(env, "health_snapshot", snapshot)
     assert (await api._x_health()).status_code == 200
     assert diagnostics.active_diagnostic() is None
+
+
+def _pending():
+    from kazma_core.x_api.publication_store import get_publication_store
+
+    return get_publication_store().summary(tenant_id="default")["pending_notifications"]
+
+
+def test_a_loop_paged_before_a_restart_says_it_recovered_after_it(env, monkeypatch):
+    """The failing card promises a recovery card; a restart kept it only in
+    ``_cycles``, so the new process never sent it."""
+    from kazma_core.observability import outage_pages
+
+    for _ in range(3):
+        env.record_cycle("mentions", success=False, interval=60, error="timeout")
+    assert _pending() == 1
+    monkeypatch.setattr(env, "_cycles", {})  # a new process
+    for _ in range(3):
+        env.record_cycle("mentions", success=False, interval=60, error="timeout")
+    assert _pending() == 1, "still failing after the restart pages nothing new"
+    env.record_cycle("mentions", success=True, interval=60)
+    assert _pending() == 2
+    assert outage_pages.outage_page_owed("x.loop:mentions") is None
+    monkeypatch.setattr(env, "_cycles", {})
+    env.record_cycle("mentions", success=True, interval=60)
+    assert _pending() == 2, "a settled note is not sent again"
+
+
+def test_without_the_mark_the_restart_swallows_the_recovery(env, monkeypatch):
+    """Negative control: the process global alone, as before."""
+    from kazma_core.observability import outage_pages
+
+    monkeypatch.setattr(outage_pages, "outage_page_owed", lambda key: None)
+    for _ in range(3):
+        env.record_cycle("mentions", success=False, interval=60, error="timeout")
+    monkeypatch.setattr(env, "_cycles", {})
+    env.record_cycle("mentions", success=True, interval=60)
+    assert _pending() == 1
