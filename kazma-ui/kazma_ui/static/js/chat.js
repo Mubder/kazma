@@ -198,7 +198,10 @@
   function tiCount(base, n, oneEn, otherEn, vars) {
     var forms = (((window.CHAT_I18N || {}).plural) || {})[base] || {};
     var cat = _pluralCategory(n);
-    var s = String(forms[cat] || forms.other || (Number(n) === 1 ? oneEn : otherEn)).replace(/\{n\}/g, String(n));
+    // vars.n shows the number another way ("80,676") while the form follows
+    // the number itself, as window.kazmaCount does.
+    var shown = (vars && vars.n != null) ? String(vars.n) : String(n);
+    var s = String(forms[cat] || forms.other || (Number(n) === 1 ? oneEn : otherEn)).replace(/\{n\}/g, function () { return shown; });
     // A function, so a value holding "$&" or "$'" is inserted as it is.
     if (vars) Object.keys(vars).forEach(function (k) { var v = String(vars[k]); s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), function () { return v; }); });
     return s;
@@ -4522,9 +4525,7 @@
         if (elapsed) parts.push(elapsed);
         if (_lastTurnStats) {
           if (_lastTurnStats.cost) parts.push(KS.formatCost(_lastTurnStats.cost));
-          if (_lastTurnStats.tokens) {
-            parts.push(KS.formatTokens(_lastTurnStats.tokens) + ' ' + ti('tokens', 'tokens'));
-          }
+          if (_lastTurnStats.tokens) parts.push(_tokensText(_lastTurnStats.tokens));
         }
         titleEl.textContent = parts.join(' \u00B7 ');
         titleEl.title = titleEl.textContent;
@@ -4776,10 +4777,17 @@
   // and the live frame used to overwrite the time with it (2026-09-26).
   // Usage shows when there is some (a model that reports none is not "0
   // tokens · $0.0000"); the duration whenever it is known.
+  // A token count in its plural form ("1 token", Arabic dual and plural):
+  // "1 tokens" was glued from one word (2026-11-05).
+  function _tokensText(tokens) {
+    var n = Number(tokens) || 0;
+    return tiCount('count_tokens', n, '{n} token', '{n} tokens', { n: KS.formatTokens(n) });
+  }
+
   function _turnStatsText(tokens, cost, durationMs) {
     var bits = [];
     if (Number(tokens) > 0 || Number(cost) > 0) {
-      bits.push(KS.formatTokens(Number(tokens) || 0) + ' ' + ti('tokens', 'tokens'));
+      bits.push(_tokensText(tokens));
       bits.push(KS.formatCost(Number(cost) || 0));
     }
     if (Number(durationMs) > 0) bits.push(KS.formatDuration(Number(durationMs)));
@@ -7333,7 +7341,7 @@
     if (costBadge) costBadge.textContent = KS.formatCost(_sessionTotals.cost);
     if (tokensBadge) {
       tokensBadge.textContent = formatCompactCount(_sessionTotals.tokens) + ' ' + ti('tok_unit', 'tok');
-      tokensBadge.title = KS.formatTokens(_sessionTotals.tokens) + ' ' + ti('tokens', 'tokens');
+      tokensBadge.title = _tokensText(_sessionTotals.tokens);
     }
   }
 
@@ -7344,7 +7352,7 @@
     if (costBadge) costBadge.textContent = KS.formatCost(0);
     if (tokensBadge) {
       tokensBadge.textContent = '0 ' + ti('tok_unit', 'tok');
-      tokensBadge.title = '0 ' + ti('tokens', 'tokens');
+      tokensBadge.title = _tokensText(0);
     }
   }
 

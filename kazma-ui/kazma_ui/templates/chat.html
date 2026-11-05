@@ -285,6 +285,7 @@ function setupWall() {
       hitl_allow_n: {{ plural_forms('chat.hitl_allow_n') | tojson }},
       hitl_allow_n_title: {{ plural_forms('chat.hitl_allow_n_title') | tojson }},
       session_msgs: {{ plural_forms('chat.session_msgs') | tojson }},
+      count_tokens: {{ plural_forms('common.ui.tokens') | tojson }},
       hitl_wants_to_run_n: {{ plural_forms('chat.hitl_wants_to_run_n') | tojson }}
     },
     // The turn's memory row, and keys chat.js used with no entry here (they
@@ -346,7 +347,6 @@ function setupWall() {
     attached: {{ t('chat.attached') | tojson }},
     stop_generation: {{ t('chat.stop_generation') | tojson }},
     yolo_running: {{ t('chat.yolo_running') | tojson }},
-    tokens: {{ t('chat.tokens') | tojson }},
     executing_approved: {{ t('chat.executing_approved') | tojson }},
     approved: {{ t('chat.approved') | tojson }},
     denied: {{ t('chat.denied') | tojson }},

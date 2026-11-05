@@ -510,6 +510,50 @@
   }
 
   // ── System Resources (via Telemetry SSE) ──────────────
+  /*
+   * One reading of /api/telemetry/stream, as kazma_core.telemetry's
+   * TelemetrySnapshot.to_dict() sends it: cpu (percent), ram_used_gb,
+   * ram_total_gb. The page read cpu_percent / memory_mb, which the stream
+   * never sent, so CPU and RAM showed "–" from 2026-06-26 to 2026-11-05.
+   * A reading without a number, or with an error, leaves them at "–".
+   */
+  function _formatShare(percent) {
+    var f = window.KazmaFormat;
+    var share = Math.min(100, Math.max(0, percent)) / 100;
+    return f ? f.number(share, { style: 'percent', maximumFractionDigits: 1 }) : percent.toFixed(1) + '%';
+  }
+
+  function _formatGb(gb) {
+    var f = window.KazmaFormat;
+    return f ? f.number(gb, { style: 'unit', unit: 'gigabyte', maximumFractionDigits: 1 }) : gb.toFixed(1) + ' GB';
+  }
+
+  function _showResources(data) {
+    // A reading the server could not take (no psutil) carries zeros and an
+    // error: "0%" would be a reading of an idle machine.
+    if (data && data.error) data = null;
+    var cpu =data && typeof data.cpu === 'number' ? data.cpu : null;
+    var used = data && typeof data.ram_used_gb === 'number' ? data.ram_used_gb : null;
+    var total = data && typeof data.ram_total_gb === 'number' ? data.ram_total_gb : null;
+    var cpuBar = $('cpu-bar');
+    var memBar = $('mem-bar');
+    if (cpu === null) {
+      setMetric('res-cpu', '–');
+      if (cpuBar) cpuBar.style.width = '0%';
+    } else {
+      setMetric('res-cpu', _formatShare(cpu));
+      if (cpuBar) cpuBar.style.width = Math.min(100, Math.max(0, cpu)) + '%';
+    }
+    if (used === null || !total) {
+      setMetric('res-memory', '–');
+      if (memBar) memBar.style.width = '0%';
+    } else {
+      var percent = (used / total) * 100;
+      setMetric('res-memory', _formatGb(used) + ' / ' + _formatGb(total) + ' (' + _formatShare(percent) + ')');
+      if (memBar) memBar.style.width = Math.min(100, Math.max(0, percent)) + '%';
+    }
+  }
+
   function startResourceMonitor() {
     var eventSource = new EventSource('/api/telemetry/stream');
     window.__kazmaEventSources = window.__kazmaEventSources || [];
@@ -518,29 +562,21 @@
     // window.kazmaOnSoftNavLeave, and with it hitl_approval.js's).
     _resourceStream = eventSource;
     eventSource.onmessage = function(event) {
-      try {
-        var data = JSON.parse(event.data);
-        if (data.cpu_percent !== undefined) {
-          setMetric('res-cpu', data.cpu_percent.toFixed(1) + '%');
-          var cpuBar = $('cpu-bar');
-          if (cpuBar) cpuBar.style.width = Math.min(100, data.cpu_percent) + '%';
-          var memLabel = data.memory_mb ? data.memory_mb.toFixed(0) + ' MB' : '–';
-          if (data.memory_percent != null) memLabel += ' (' + Number(data.memory_percent).toFixed(0) + '%)';
-          setMetric('res-memory', memLabel);
-          var memBar = $('mem-bar');
-          if (memBar) {
-            var mp = data.memory_percent != null
-              ? Number(data.memory_percent)
-              : (data.memory_mb != null ? Math.min(100, (data.memory_mb / 8192) * 100) : 0);
-            memBar.style.width = Math.min(100, Math.max(0, mp)) + '%';
-          }
-        }
-      } catch(e) {}
+      var data = null;
+      try { data = JSON.parse(event.data); } catch (e) { data = null; }
+      _showResources(data);
     };
     eventSource.onerror = function() {
-      // Fallback: hide resource section
-      var resSection = $('resources-section');
-      if (resSection) resSection.style.display = 'none';
+      // No reading now: say so, and keep the section. The browser
+      // reconnects a dropped stream itself, but a response that is not the
+      // stream (a proxy's 502 while Kazma restarts) closes it for good: it
+      // used to hide the whole section until a reload.
+      _showResources(null);
+      if (eventSource.readyState !== 2 || _resourceStream !== eventSource) return;
+      _resourceStream = null;
+      _timers.push(setTimeout(function () {
+        if (_resourceStream === null) startResourceMonitor();
+      }, 15000));
     };
   }
 

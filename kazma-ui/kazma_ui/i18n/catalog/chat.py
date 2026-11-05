@@ -731,10 +731,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اليوم",
         "en": "Today",
     },
-    "chat.tokens": {
-        "ar": "رمز",
-        "en": "tokens",
-    },
     "chat.tool_allowed": {
         "ar": "تم السماح بالأداة ✓",
         "en": "Tool allowed ✓",

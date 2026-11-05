@@ -611,9 +611,9 @@ def create_sse_chat_router(
                 yield _sse_frame("token", {"content": confirmation})
                 yield _sse_frame("done", {
                     "content": confirmation,
-                    "tokens": 1,
+                    "tokens": 0,
                     "cost": 0.0,
-                    "duration_ms": 100,
+                    "duration_ms": 0,
                 })
 
             return StreamingResponse(
@@ -674,9 +674,9 @@ def create_sse_chat_router(
                 yield _sse_frame("token", {"content": confirmation})
                 yield _sse_frame("done", {
                     "content": confirmation,
-                    "tokens": 1,
+                    "tokens": 0,
                     "cost": 0.0,
-                    "duration_ms": 100,
+                    "duration_ms": 0,
                 })
 
             return StreamingResponse(
@@ -697,7 +697,7 @@ def create_sse_chat_router(
 
             async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
                 yield _sse_frame("token", {"content": _swarm_usage})
-                yield _sse_frame("done", {"content": _swarm_usage, "tokens": 1, "cost": 0.0, "duration_ms": 100})
+                yield _sse_frame("done", {"content": _swarm_usage, "tokens": 0, "cost": 0.0, "duration_ms": 0})
 
             return StreamingResponse(
                 _swarm_usage_gen(),
