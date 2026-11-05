@@ -96,6 +96,27 @@ _HB_PREFER_ARGS = (
 )
 
 
+def _tool_end_fields(data: Any) -> tuple[str, str]:
+    """A finished call's output text and its row's state, on every path.
+
+    The streaming path and the approval-resume path both turn an
+    ``on_tool_end`` into a stored row and a ``tool_result`` frame. The resume
+    path sent its frame without ``state``, so a call that failed after an
+    Approve painted "Done" live while the stored row said "Failed" (live
+    2026-11-05). One function, so the two cannot drift again.
+    """
+    data = data if isinstance(data, dict) else {}
+    output = data.get("output", "")
+    if hasattr(output, "content"):
+        output = output.content
+    elif isinstance(output, dict):
+        output = output.get("content", json.dumps(output, ensure_ascii=False))
+    # A call that ended in an error -- refused before it ran, or failing --
+    # is a failed row, not a done one (2026-11, FA-253).
+    state = "failed" if data.get("error") else "done"
+    return str(output if output is not None else "")[:5000], state
+
+
 def hb_arg_summary(inputs: Any, limit: int = 48) -> str:
     """One short quoted value naming what a tool is acting on.
 
@@ -812,19 +833,20 @@ async def _stream_langgraph_events(
                                     )[:2000],
                                 })
                             elif _k == "on_tool_end":
-                                _out = str(_d.get("output") or "")[:5000]
+                                _out, _end_state = _tool_end_fields(_d)
                                 _durable.note({
                                     "type": "tool",
                                     "name": str(_ev.get("name") or "tool"),
                                     "call_id": str(_ev.get("run_id") or ""),
                                     "result": _out,
-                                    "state": "failed" if _d.get("error") else "done",
+                                    "state": _end_state,
                                 })
                                 await _durable.commit(content_acc)
                                 yield await emit_j("tool_result", {
                                     "tool_name": str(_ev.get("name") or "tool"),
                                     "tool_call_id": str(_ev.get("run_id") or ""),
                                     "result": _out,
+                                    "state": _end_state,
                                 })
                         if _resume_task.done():
                             break
@@ -1145,20 +1167,12 @@ async def _stream_langgraph_events(
                             _hb["phase"] = "supervisor"
                             _hb["current"] = ""
                             _hb["detail"] = ""
-                            output = data.get("output", "")
-                            if hasattr(output, "content"):
-                                output = output.content
-                            elif isinstance(output, dict):
-                                output = output.get("content", json.dumps(output, ensure_ascii=False))
-                            # A call that ended in an error -- refused before
-                            # it ran, or failing -- is a failed row, not a done
-                            # one (2026-11, FA-253).
-                            _tool_state = "failed" if data.get("error") else "done"
+                            output, _tool_state = _tool_end_fields(data)
                             _durable.note({
                                 "type": "tool",
                                 "name": str(name),
                                 "call_id": str(event.get("run_id") or ""),
-                                "result": str(output)[:5000],
+                                "result": output,
                                 "state": _tool_state,
                             })
                             await _durable.commit(content_acc)
@@ -1169,7 +1183,7 @@ async def _stream_langgraph_events(
                                     # Same run id as the on_tool_start above —
                                     # this is what makes start and end ONE row.
                                     "tool_call_id": str(event.get("run_id") or ""),
-                                    "result": str(output)[:5000],
+                                    "result": output,
                                     "state": _tool_state,
                                 },
                             )
