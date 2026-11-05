@@ -117,6 +117,7 @@
     loadOutputTarget();
     loadActiveTasks();
     loadApproval();
+    loadRecentResults();
 
     bindAutoExclusive('worker-checkboxes', 'selected_workers');
     bindAutoExclusive('play-worker-checkboxes', 'play_selected_workers');
@@ -1173,9 +1174,91 @@
   // TASK RESULTS RENDERING
   // ══════════════════════════════════════════════════════
 
-  function appendPendingResult(workerNames, task, pattern) {
+  // The newest tasks the task store holds, whoever dispatched them: a chat's
+  // dispatch_swarm, the API, another tab. Only dispatches made from this
+  // page filled the card, so on 2026-11-05 it said "No tasks dispatched yet"
+  // over five finished tasks. A stored task's card opens its details.
+  var RECENT_RESULTS = 5;
+
+  function hideResultsNotes() {
     var emptyEl = $('task-results-empty');
     if (emptyEl) emptyEl.style.display = 'none';
+    var statusEl = $('task-results-status');
+    if (statusEl) statusEl.style.display = 'none';
+  }
+
+  function recentResultOutput(task) {
+    var out = task.synthesized_output || task.aggregated_output || '';
+    if (!out) {
+      var withOutput = (task.worker_results || []).filter(function(r) { return r && r.output; });
+      if (withOutput.length) out = withOutput[0].output;
+    }
+    return String(out || '');
+  }
+
+  function recentResultCard(task) {
+    var status = String(task.status || '').toLowerCase();
+    var good = status === 'completed' || status === 'success';
+    var bad = status === 'failed' || status === 'error' || status === 'cancelled' || status === 'timeout';
+    var statusColor = good ? 'var(--success)' : bad ? 'var(--danger)' : 'var(--warning)';
+    var statusBg = good ? 'var(--success-subtle)' : bad ? 'var(--danger-subtle)' : 'var(--warning-subtle)';
+    var output = recentResultOutput(task);
+    var card = document.createElement('div');
+    card.className = 'task-result-card';
+    card.setAttribute('data-task-id', String(task.id || task.task_id || ''));
+    card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);cursor:pointer;';
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;">' +
+        '<span translate="no" style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerLabels(task.workers) || '?') + '</span>' +
+        '<span class="badge" style="background:' + statusBg + ';color:' + statusColor + ';">• ' + esc(stateLabel(task.status)) + '</span>' +
+      '</div>' +
+      '<div translate="no" style="font-size:0.8rem;color:var(--text-muted);">' + esc(String(task.prompt || '').slice(0, 120)) + '</div>' +
+      (output ? '<div translate="no" style="margin-top:6px;padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:150px;overflow-y:auto;">' + esc(output.slice(0, 500)) + '</div>' : '') +
+      (!output && task.error ? '<div translate="no" style="margin-top:4px;padding:8px;background:var(--danger-subtle);border-radius:4px;font-size:0.75rem;color:var(--danger);">[!]  ' + esc(String(task.error).slice(0, 500)) + '</div>' : '');
+    return card;
+  }
+
+  function hasResultCard(listEl, taskId) {
+    var cards = listEl.children || [];
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].getAttribute && cards[i].getAttribute('data-task-id') === taskId) return true;
+    }
+    return false;
+  }
+
+  function loadRecentResults() {
+    return fetch('/api/swarm/tasks?pageSize=' + RECENT_RESULTS)
+      .then(function(r) {
+        // A refused read is a failure, never "no tasks dispatched".
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        var listEl = $('task-results-list');
+        if (!listEl) return;
+        var statusEl = $('task-results-status');
+        if (statusEl) statusEl.style.display = 'none';
+        (data.tasks || []).forEach(function(task) {
+          var id = String(task.id || task.task_id || '');
+          if (!id || hasResultCard(listEl, id)) return;
+          // After the cards this page added: they are newer.
+          listEl.appendChild(recentResultCard(task));
+        });
+        var emptyEl = $('task-results-empty');
+        if (emptyEl) emptyEl.style.display = (listEl.children || []).length ? 'none' : 'block';
+      })
+      .catch(function() {
+        var listEl = $('task-results-list');
+        var statusEl = $('task-results-status');
+        if (!statusEl) return;
+        if (listEl && (listEl.children || []).length) { statusEl.style.display = 'none'; return; }
+        statusEl.textContent = t('common.request_failed');
+        statusEl.style.display = 'block';
+      });
+  }
+
+  function appendPendingResult(workerNames, task, pattern) {
+    hideResultsNotes();
     var listEl = $('task-results-list');
     if (!listEl) return;
     var card = document.createElement('div');
@@ -1193,8 +1276,7 @@
   }
 
   function renderTaskResults(data, task, pattern) {
-    var emptyEl = $('task-results-empty');
-    if (emptyEl) emptyEl.style.display = 'none';
+    hideResultsNotes();
     var listEl = $('task-results-list');
     if (!listEl) return;
     // Remove pending card
