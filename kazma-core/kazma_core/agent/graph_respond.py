@@ -84,7 +84,7 @@ def _what_ran(state: SupervisorState, messages: list[dict[str, Any]]) -> str:
         name = str(result.get("name") or m.get("name") or names.get(call_id) or "tool")
         result["name"] = name
         outcome = classify_tool_result(result)
-        not_run = (ToolOutcome.POLICY, ToolOutcome.USER_DENY, ToolOutcome.TERMINAL)
+        not_run = (ToolOutcome.POLICY, ToolOutcome.USER_DENY, ToolOutcome.TERMINAL, ToolOutcome.REFUSED)
         (refused if outcome in not_run else ran).append(name)
     parts = []
     if ran:

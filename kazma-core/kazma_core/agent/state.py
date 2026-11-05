@@ -87,10 +87,15 @@ class ToolResult(TypedDict, total=False):
     is_error: bool
     duration_ms: float
     # Optional structured outcome honored by tool_loop_breaker.classify_tool_result
-    # (ok | empty | policy | user_deny | transient | hard | terminal). "terminal"
-    # marks a control-plane turn-ender (e.g. unresolved commitment clarify) —
-    # not tool death; forces RESPOND and does not credit the hard-failure breaker.
+    # (ok | empty | policy | user_deny | transient | hard | terminal | refused).
+    # "terminal" marks a control-plane turn-ender (e.g. unresolved commitment
+    # clarify) — not tool death; forces RESPOND and does not credit the
+    # hard-failure breaker.
     outcome: str
+    # True when the call was refused before it did anything (a wrong path, a
+    # missing argument, a policy that refused it): correctable, counted on
+    # its own allowance by the loop breaker, never as a hard failure.
+    refused: bool
 
 
 # ── Scratchpad merge reducer (context-integrity S1-1) ───────────────────
@@ -235,6 +240,14 @@ class SupervisorState(TypedDict, total=False):
 
     circuit_breaker_tripped: bool
     """Flag indicating whether the tool execution circuit breaker has tripped."""
+
+    consecutive_refusals: int
+    """Tool rounds in a row that held a refusal before effect (and no OK
+    result); the breaker stops the turn at ``REFUSAL_ALLOWANCE``."""
+
+    refused_signatures: list[str]
+    """Signatures of calls refused this turn: the same call refused twice
+    stops the turn at once (``tool_loop_breaker.update_breaker``)."""
 
     tool_signatures: list[str]
     """Recent (tool_name, canonical-args) signatures for semantic-loop
@@ -438,6 +451,8 @@ def initial_supervisor_state(
         consecutive_tool_failures=0,
         test_fail_retries=0,
         circuit_breaker_tripped=False,
+        consecutive_refusals=0,
+        refused_signatures=[],
         tool_signatures=[],
         auto_continue=False,
         task_status=TaskStatus.IDLE,

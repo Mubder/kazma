@@ -1041,6 +1041,7 @@ async def tool_worker_node(
                     content=result["content"],
                     is_error=True,
                     duration_ms=duration_ms,
+                    refused=True,
                 )
 
             # Document-generation guard: the model is trying to build a
@@ -1077,6 +1078,7 @@ async def tool_worker_node(
                         content=_doc_hint,
                         is_error=True,
                         duration_ms=_dur,
+                        refused=True,
                     )
             # Per-tool wall-clock timeout (audit B: fault isolation). A hung
             # tool (deadlocked MCP server, wedged subprocess) previously
@@ -1228,13 +1230,19 @@ async def tool_worker_node(
                     "[ToolWorker] Truncated result from %s (%d → %d chars)", tc["name"], len(raw_content), len(content)
                 )
 
-            return ToolResult(
+            final = ToolResult(
                 tool_call_id=tc["id"],
                 name=tc["name"],
                 content=content,
                 is_error=result.get("is_error", False),
                 duration_ms=duration_ms,
             )
+            # Refused before anything ran (the registry says so): the loop
+            # breaker counts it apart from tool failures (plan D1). Never
+            # for a call whose effects are unknown.
+            if result.get("refused") and not result.get("effect_uncertain"):
+                final["refused"] = True
+            return final
 
         def _denied_result(tc: PendingToolCall, answer: Any = None) -> ToolResult:
             """The result of a call the approval did not let through.
@@ -1605,14 +1613,27 @@ async def tool_worker_node(
         # errors in one batch credit +1 only (not +N). See tool_loop_breaker.
         from kazma_core.agent.tool_loop_breaker import update_breaker
 
+        from kazma_core.agent.tool_loop_breaker import tool_signature as _breaker_sig
+
         prev_failures = int(state.get("consecutive_tool_failures", 0) or 0)
-        breaker_state, results = update_breaker(prev_failures, list(results))
+        breaker_state, results = update_breaker(
+            prev_failures,
+            list(results),
+            previous_refusals=int(state.get("consecutive_refusals", 0) or 0),
+            previous_refused_signatures=list(state.get("refused_signatures") or []),
+            signatures_by_id={
+                str(tc.get("id") or ""): _breaker_sig(tc["name"], tc.get("arguments") or {})
+                for tc in safe_tools + danger_tools
+            },
+        )
         consecutive_failures = breaker_state.consecutive_hard_rounds
         breaker_tripped_now = breaker_state.tripped
         if breaker_tripped_now:
             logger.warning(
-                "[ToolWorker] Circuit breaker tripped! %d consecutive hard tool rounds.",
+                "[ToolWorker] Circuit breaker tripped (%s): %d hard rounds, %d refused rounds.",
+                breaker_state.tripped_by or "hard",
                 consecutive_failures,
+                breaker_state.consecutive_refusal_rounds,
             )
 
         # PR3 (loop kill): a TERMINAL outcome (unresolved / cancelled / denied
@@ -1639,7 +1660,7 @@ async def tool_worker_node(
         sigs = list(state.get("tool_signatures") or [])
         for tc in safe_tools + danger_tools:
             outcome = _id_to_outcome.get(str(tc.get("id")), "")
-            if outcome in ("policy", "user_deny", "empty"):
+            if outcome in ("policy", "user_deny", "empty", "refused"):
                 continue
             sigs.append(tool_signature(tc["name"], tc.get("arguments") or {}))
         sigs = sigs[-24:]  # bounded window
@@ -1779,6 +1800,8 @@ async def tool_worker_node(
             "tool_results": cumulative,
             "consecutive_tool_failures": consecutive_failures,
             "circuit_breaker_tripped": breaker_tripped_now,
+            "consecutive_refusals": breaker_state.consecutive_refusal_rounds,
+            "refused_signatures": breaker_state.refused_signatures,
             "tool_signatures": sigs,
             "recovery_probes": _probes,
             # If the breaker just tripped or max consecutive failures hit, force RESPOND

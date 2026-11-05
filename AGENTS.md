@@ -5899,6 +5899,23 @@ unsafe; a successful tool receipt alone does not prove the next worker safe.
 dispatch, preserving the original failure through output hooks. Read errors
 remain correctable. This does not make the external server transactional.
 
+**A refusal counts on its own allowance, never as tool death** (2026-11-05,
+plan D1). Every error the registry and `UnifiedToolExecutor` return before the
+tool ran -- unknown or switched-off tool, a hook, commitment, permission or
+division refusal, a preflight or approval refusal, missing arguments,
+`RefusedBeforeEffect`, a read that answered with an error -- carries
+`refused: True`, and `classify_tool_result` makes it `REFUSED` (a
+policy-worded one keeps its class; `effect_uncertain` always wins). The
+hard breaker neither counts nor resets on it; `update_breaker` counts refused
+rounds apart (`REFUSAL_ALLOWANCE` = 6, reset by a success), and the same call
+refused twice (`tool_signature`, kept in `SupervisorState.refused_signatures`)
+ends the turn at once with the refusal and a stop note, so the model tells the
+user what is missing. Live 2026-11-04 three wrong-path refusals ended a
+research turn as tool death. The chat tool worker and the swarm worker use
+the same breaker. Gate: `tests/test_refusals_stay_correctable.py` (every error
+dict either executor builds carries `refused` or is declared post-invocation;
+the unmarked results as the negative control).
+
 Tests: `tests/test_hitl_gates.py`, `test_hitl_gate_bridge.py`,
 `test_hitl_gate_read_cutover.py`, `test_hitl_gate_swarm_pipeline.py`,
 `test_hitl_gate_reconciler.py`.

@@ -2404,7 +2404,8 @@ class UnifiedToolExecutor:
 
             _div_err = await check_division_tool(tool_name)
             if _div_err:
-                return {"content": _div_err, "is_error": True}
+                # Refused before effect: nothing ran (tool_loop_breaker).
+                return {"content": _div_err, "is_error": True, "refused": True}
         except Exception:
             logger.debug("[Unified] division check skipped", exc_info=True)
 
@@ -2434,6 +2435,8 @@ class UnifiedToolExecutor:
 
                     _denied, arguments = await apply_pre_tool_hooks(tool_name, arguments)
                     if _denied is not None:
+                        if isinstance(_denied, dict):
+                            _denied.setdefault("refused", True)
                         return _denied
                 except Exception:
                     logger.debug("[Unified] pre-tool hook failed", exc_info=True)
@@ -2507,12 +2510,14 @@ class UnifiedToolExecutor:
                                     return {
                                         "content": f"MCP tool '{tool_name}' denied by HITL approval gate.",
                                         "is_error": True,
+                                        "refused": True,
                                     }
                         except Exception as _e:
                             logger.debug("Safety check failed for MCP tool %s: %s", tool_name, _e)
                             return {
                                 "content": f"MCP tool '{tool_name}' blocked — SafetyMiddleware unavailable.",
                                 "is_error": True,
+                                "refused": True,
                             }
 
                 logger.debug("[Unified] Routing '%s' → MCP server '%s'", tool_name, server_name)
@@ -2549,6 +2554,7 @@ class UnifiedToolExecutor:
         return {
             "content": f"Tool '{tool_name}' not found. Available: {all_available[:20]}",
             "is_error": True,
+            "refused": True,
         }
 
     # ── Introspection ───────────────────────────────────────────────

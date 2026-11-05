@@ -312,11 +312,17 @@ async def supervisor_node(
     # all subsequent turns (state persists in the checkpointer).
     breaker_reset = {}
     if iteration == 0:
-        if state.get("circuit_breaker_tripped", False) or state.get("consecutive_tool_failures", 0) > 0:
+        if (
+            state.get("circuit_breaker_tripped", False)
+            or state.get("consecutive_tool_failures", 0) > 0
+            or state.get("consecutive_refusals", 0) > 0
+        ):
             logger.info("[Supervisor] Resetting tool circuit breaker for new turn")
         breaker_reset = {
             "circuit_breaker_tripped": False,
             "consecutive_tool_failures": 0,
+            "consecutive_refusals": 0,
+            "refused_signatures": [],
             "tool_argument_rechecks": 0,
         }
         if cost_breaker and hasattr(cost_breaker, "record_user_interaction"):
@@ -1337,6 +1343,8 @@ async def supervisor_node(
             "needs_compaction": False,
             "circuit_breaker_tripped": False,
             "consecutive_tool_failures": 0,
+            "consecutive_refusals": 0,
+            "refused_signatures": [],
         }
         logger.info(
             "[Supervisor] Deterministic trim applied: %d → %d messages (budget=%d)",

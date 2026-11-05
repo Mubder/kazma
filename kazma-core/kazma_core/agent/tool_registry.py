@@ -522,15 +522,20 @@ class LocalToolRegistry:
         _hitl_already_approved = claim_call_authority(_hitl_approved_ctx, tool_name)
         _graph_is_authority = claim_call_authority(_graph_hitl_gate_ctx, tool_name)
         tool = self._tools.get(tool_name)
+        # Every answer given before the tool is invoked is a refusal before
+        # effect (``"refused": True``): nothing ran, the model may correct
+        # the call, and the loop breaker counts it apart from hard failures
+        # (tool_loop_breaker.REFUSAL_ALLOWANCE).
         if tool is None:
             return {
                 "content": f"Tool '{tool_name}' not found. Available: {list(self._tools.keys())}",
                 "is_error": True,
+                "refused": True,
             }
         from kazma_core.skills.switches import switched_off_reason
 
         if (refusal := switched_off_reason(tool_name, tool.skill_id)) is not None:
-            return {"content": refusal, "is_error": True}
+            return {"content": refusal, "is_error": True, "refused": True}
 
         # Closed schema: drop invented keys; JSON null on defaulted params
         # becomes "omitted" so Python defaults still apply (OpenAI strict).
@@ -545,6 +550,8 @@ class LocalToolRegistry:
 
             _denied, arguments = await apply_pre_tool_hooks(tool_name, arguments)
             if _denied is not None:
+                if isinstance(_denied, dict):
+                    _denied.setdefault("refused", True)
                 return _denied
             if isinstance(arguments, dict):
                 arguments = filter_tool_arguments(arguments, tool.input_schema)
@@ -564,7 +571,7 @@ class LocalToolRegistry:
                 context={"source": "registry"},
             )
             if _dec.decision == "deny":
-                return {"content": f"[commitment] blocked: {_dec.reason}", "is_error": True}
+                return {"content": f"[commitment] blocked: {_dec.reason}", "is_error": True, "refused": True}
             if _dec.decision in ("clarify", "confirm"):
                 # execute() has no graph interrupt context. Routing to the
                 # bus AND interrupt() would mint a second gate row (audit
@@ -580,6 +587,7 @@ class LocalToolRegistry:
                         "Run this from chat so the interrupt card can collect the answer."
                     ),
                     "is_error": True,
+                    "refused": True,
                 }
             if _dec.decision == "allow" and getattr(_dec, "rewritten_args", None):
                 arguments = dict(_dec.rewritten_args)
@@ -594,6 +602,7 @@ class LocalToolRegistry:
                     return {
                         "content": "[commitment] blocked: authorization failed closed",
                         "is_error": True,
+                        "refused": True,
                     }
             except Exception:
                 pass
@@ -657,6 +666,7 @@ class LocalToolRegistry:
                         "set allowed: ['*'] for the single-operator default."
                     ),
                     "is_error": True,
+                    "refused": True,
                 }
         except Exception as exc:
             from kazma_core.permissions import permissions_enforce_requested
@@ -671,6 +681,7 @@ class LocalToolRegistry:
                         "failed closed (KAZMA_PERMISSIONS_ENFORCE or users: map)."
                     ),
                     "is_error": True,
+                    "refused": True,
                 }
             logger.debug("[ToolRegistry] permissions check skipped: %s", exc)
 
@@ -680,7 +691,7 @@ class LocalToolRegistry:
 
             _div_err = await check_division_tool(tool_name)
             if _div_err:
-                return {"content": _div_err, "is_error": True}
+                return {"content": _div_err, "is_error": True, "refused": True}
         except Exception as exc:
             logger.debug("[ToolRegistry] division check skipped: %s", exc)
 
@@ -692,7 +703,11 @@ class LocalToolRegistry:
         if tool_name in PREFLIGHT_TOOLS:
             _preflight_refused = await call_refusal(tool_name, arguments)
             if _preflight_refused:
-                return {"content": f"Error: {_preflight_refused} Nothing was run.", "is_error": True}
+                return {
+                    "content": f"Error: {_preflight_refused} Nothing was run.",
+                    "is_error": True,
+                    "refused": True,
+                }
 
         # ── Safety check — gate danger-tier tools (HITL) ───────────
         # Use the async check() so a real bus adapter can post an approval
@@ -726,6 +741,7 @@ class LocalToolRegistry:
                         return {
                             "content": f"Tool '{tool_name}' denied by HITL approval gate.",
                             "is_error": True,
+                            "refused": True,
                         }
             except Exception as exc:
                 # Safety unavailable — fail closed (do not execute danger tools).
@@ -733,6 +749,7 @@ class LocalToolRegistry:
                 return {
                     "content": f"Tool '{tool_name}' blocked — SafetyMiddleware unavailable.",
                     "is_error": True,
+                    "refused": True,
                 }
 
         start = time.monotonic()
@@ -829,6 +846,7 @@ class LocalToolRegistry:
                                 "Re-issue the tool call with ALL required arguments as valid JSON."
                             ),
                             "is_error": True,
+                            "refused": True,
                         }
 
                 from kazma_core.agent.dispatch_effects import note_effect_invocation
@@ -889,7 +907,13 @@ class LocalToolRegistry:
                     or _json_reports_failure(content)
                 )
                 await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=not _is_err)
-                return await _with_post({"content": content, "is_error": _is_err})
+                payload: dict[str, Any] = {"content": content, "is_error": _is_err}
+                if _is_err and _read_only:
+                    # A read that answered with an error changed nothing
+                    # (a wrong path, a missing row): correctable, like a
+                    # refusal before effect.
+                    payload["refused"] = True
+                return await _with_post(payload)
 
             except retryable_exc as exc:
                 last_exc = exc
@@ -915,7 +939,7 @@ class LocalToolRegistry:
                 else:
                     logger.info("Tool '%s' refused before running: %s", tool_name, exc)
                 await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=False)
-                return await _with_post({"content": exc.content(), "is_error": True})
+                return await _with_post({"content": exc.content(), "is_error": True, "refused": True})
 
             except TypeError as exc:
                 # Argument-shape mismatch (e.g. wrong types from the model).
