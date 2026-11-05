@@ -312,6 +312,8 @@ def _valid_row(row):
         return False
     if 'excluded' in row and (type(row['excluded']) is not int or row['excluded'] < 0):
         return False
+    if 'failure' in row and (not isinstance(row['failure'], str) or len(row['failure']) > _FAILURE_MAX):
+        return False
     if 'notes' in row and (not isinstance(row['notes'], list) or len(row['notes']) > 8
                            or any(not isinstance(note, str) for note in row['notes'])):
         return False
@@ -567,6 +569,7 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
                     page.update(status='pending', receipt=None, error='')
         if kind is not None:
             row['kind'] = kind
+        row.pop('failure', None)
         row.update(status='running', claim=token, owner=owner, install=install, host=host, updated_at=now)
         return row
     with _ACTIVE_LOCK:
@@ -706,8 +709,12 @@ class _CrawlJob:
         data['message'] = data['message'][:2000]
         self.update(lambda row: row.update(progress=data))
 
-    def finish(self, status, *, interrupted_by=None):
+    def finish(self, status, *, interrupted_by=None, failure=''):
         """End the job with *status*.
+
+        *failure* is the job's own one-line reason for ending ``failed``
+        (a research pipeline's "no URLs found"), kept on the row as
+        ``failure`` for ``failure_reason`` to read.
 
         An interruption while the process shuts down is the process's end,
         not the owner's Stop: it is recorded ``interrupted_by:
@@ -729,6 +736,8 @@ class _CrawlJob:
             row.update(status=status, owner=None)
             if interrupted_by is not None:
                 row['interrupted_by'] = interrupted_by
+            if failure:
+                row['failure'] = _one_line(failure)
         try:
             self.update(change)
         finally:
@@ -811,6 +820,48 @@ def metric_lines():
                   "# TYPE kazma_kb_crawl_page_handled_ratio gauge",
                   f"kazma_kb_crawl_page_handled_ratio {summary['rate']}"]
     return lines
+
+
+_FAILURE_MAX = 300
+
+
+def _one_line(text):
+    """The first line of *text*, without an ``Error:`` prefix, secrets
+    redacted, at most ``_FAILURE_MAX`` characters."""
+    from kazma_core.errors import redact_secrets
+
+    line = next((part.strip() for part in str(text).splitlines() if part.strip()), '')
+    if line.lower().startswith('error:'):
+        line = line[len('error:'):].strip()
+    line = redact_secrets(line)
+    return line if len(line) <= _FAILURE_MAX else line[:_FAILURE_MAX - 1].rstrip() + '…'
+
+
+def failure_reason(row):
+    """Why a job that did not finish well ended, in one line ('' if unknown).
+
+    The one answer for the Running work card, the run incidents and their
+    chat cards: a pipeline counting "0 failed, 0 uncertain" over a run that
+    failed because the search found no addresses said nothing (live
+    2026-11-05). In order: the reason the job recorded when it finished, an
+    interruption, a stage that failed, a crawl's error message, then its
+    page counts.
+    """
+    if row.get('failure'):
+        return str(row['failure'])
+    if row.get('status') == 'interrupted':
+        return ('Kazma restarted while it ran' if row.get('interrupted_by') == 'process_ended'
+                else 'Stopped before it finished')
+    for key, effect in (row.get('effects') or {}).items():
+        if effect.get('status') == 'failed':
+            return f"Stage {key} failed ({effect.get('error') or 'error'})"
+    progress = row.get('progress') or {}
+    if progress.get('phase') == 'error' and progress.get('message'):
+        return _one_line(progress['message'])
+    counts = _summary_counts(row)
+    if counts['failed'] or counts['ambiguous']:
+        return f"{counts['failed']} failed, {counts['ambiguous']} uncertain"
+    return ''
 
 
 def _summary_counts(row):

@@ -139,7 +139,7 @@ class _Crawls:
 
     def _run(self, row: dict[str, Any], since: dict[str, float], owner_gone: bool | None,
              agent_run: bool) -> Run:
-        from kazma_core.web_acquire.crawl_jobs import _summary_counts
+        from kazma_core.web_acquire.crawl_jobs import _summary_counts, failure_reason
 
         native = str(row["status"])
         state = RunState(self.STATE_MAP.get(native, RunState.UNKNOWN))
@@ -158,7 +158,7 @@ class _Crawls:
             ended_at=updated if native != "running" else None,
             version=str(updated or ""),
             link=("/research?job=" if research else "/knowledge?job=") + quote(row["job_id"], safe=""),
-            detail=f"{counts['failed']} failed, {counts['ambiguous']} uncertain" if state == RunState.FAILED else "",
+            detail=failure_reason(row) if state == RunState.FAILED else "",
             announced_by="the agent turn that ran it" if agent_run else "",
         )
 

@@ -255,9 +255,9 @@ class _PipelineJob:
             data = dict(ok=result.ok, backend=result.backend, error_code=result.error_code, evidence_clipped=True)
         await crawl_jobs.call(self.job.update, lambda row: row['effects'][key].update(receipt=data))
 
-    async def finish(self, status):
+    async def finish(self, status, failure=''):
         def finish():
-            self.job.finish(status)
+            self.job.finish(status, failure=failure)
             self.finished = True
         from kazma_core.web_acquire.artifact_storage import settle
         await settle(self.job, self.root, self.directory)

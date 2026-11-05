@@ -467,7 +467,7 @@ async def run_research_pipeline(
                                                   _initial_log=log, **options)
             result = await job.effect('terminal-summary', {}, lambda: asyncio.sleep(0, result=result))
             status = 'failed' if result.startswith('Error:') else 'partial' if job.ambiguous_sources else 'completed'
-            await job.finish(status)
+            await job.finish(status, failure=result if status == 'failed' else '')
             return result + f'\n**Durable job:** `{durable_id}`\n'
     except AcquisitionError as exc:
         return f'Error: {exc}\n**Durable job:** `{durable_id or "not admitted"}`\n'
