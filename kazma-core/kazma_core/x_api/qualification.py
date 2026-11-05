@@ -152,23 +152,43 @@ def evaluate_report(report: Any, fingerprint: str, *, now: float | None = None) 
             "expires_at": created + 14 * 86400, "fingerprint": fingerprint}
 
 
-def qualification_hold(cfg: ReplyConfig) -> str:
-    """Return the mandatory hold reason; no setting can disable required checks."""
+# Why automatic publishing is held, by code. The Settings page words each code
+# from its catalog (``settings.xt.hold.<code>``) in the page's language; the
+# English here is what a draft records and what logs say.
+HOLD_TEXT: dict[str, str] = {
+    "stance_check_off": "Unattended posting requires mandatory verification. Enable stance checking and complete release evaluation.",
+    "evaluation_missing": "Unattended posting needs a current human-reviewed bilingual evaluation. Draft held for approval.",
+    "evaluation_stale": "The X release evaluation is invalid or stale. Draft held for revalidation and approval.",
+    "evaluation_unverifiable": "Release qualification could not be verified. Draft held for approval.",
+}
+
+
+def qualification_hold_code(cfg: ReplyConfig) -> str:
+    """Return the code of the mandatory hold, or "" when nothing holds.
+
+    No setting can disable the required checks.
+    """
     from kazma_core.config_store import get_config_store
     from kazma_core.x_api.ownership import x_config_key
 
     if not cfg.stance_check:
-        return "Unattended posting requires mandatory verification. Enable stance checking and complete release evaluation."
+        return "stance_check_off"
     report = get_config_store().get(x_config_key("connectors.x.reply.qualification"))
     if not report:
-        return "Unattended posting needs a current human-reviewed bilingual evaluation. Draft held for approval."
+        return "evaluation_missing"
     try:
         evaluate_report(report, pipeline_fingerprint(cfg))
     except (ValueError, TypeError, KeyError):
-        return "The X release evaluation is invalid or stale. Draft held for revalidation and approval."
+        return "evaluation_stale"
     except (OSError, sqlite3.Error, RuntimeError):
-        return "Release qualification could not be verified. Draft held for approval."
+        return "evaluation_unverifiable"
     return ""
+
+
+def qualification_hold(cfg: ReplyConfig) -> str:
+    """Return the mandatory hold reason in English; "" when nothing holds."""
+    code = qualification_hold_code(cfg)
+    return HOLD_TEXT[code] if code else ""
 
 
 def qualification_status() -> dict[str, Any]:

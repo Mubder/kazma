@@ -3130,13 +3130,15 @@
                      a working preview and a completely inert feature at the same
                      time. That happened on the first live test and a real
                      mention went nowhere with nothing to explain it. -->
-                <p x-show="xReply.live_reason" x-cloak
+                <p x-show="xReply.live_reason_code" x-cloak
                    :style="xReply.poller_running && xReply.can_draft
                            ? 'background:var(--bg-secondary);border-inline-start:3px solid var(--accent);'
                            : 'background:var(--bg-secondary);border-inline-start:3px solid var(--warning,#c80);'"
                    style="margin:0 0 16px;padding:10px 12px;border-radius:6px;font-size:0.84rem;">
-                    <strong x-text="xReply.mode === 'auto' && xReply.auto_qualification_hold ? t('settings.xt.review_held') : (xReply.poller_running && xReply.can_draft) ? t('settings.xt.live') : t('settings.xt.not_live')"></strong>
-                    <span translate="no" x-text="' — ' + xReply.live_reason"></span>
+                    <strong x-text="xReply.mode === 'auto' && xReply.auto_qualification_hold_code ? t('settings.xt.review_held') : (xReply.poller_running && xReply.can_draft) ? t('settings.xt.live') : t('settings.xt.not_live')"></strong>
+                    <span x-text="' — ' + xReplyLiveReason()"></span>
+                    <span translate="no" x-show="xReply.live_reason_code === 'policy_errors'"
+                          x-text="' ' + ((xReply.live_reason_values || {}).errors || '')"></span>
                 </p>
 
                 <template x-if="!xReply.connector_ready">
@@ -3325,8 +3327,8 @@
                 </label>
                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 12px;">
                     {{ t('settings.xt.stance_hint') }}
-                    <span x-show="xReply.mode === 'auto' && xReply.auto_qualification_hold" x-cloak
-                          style="display:block;color:var(--warning,#c80);" x-text="xReply.auto_qualification_hold"></span>
+                    <span x-show="xReply.mode === 'auto' && xReply.auto_qualification_hold_code" x-cloak
+                          style="display:block;color:var(--warning,#c80);" x-text="xReplyHoldText()"></span>
                     <span x-show="xReply.mode === 'auto' && !xReply.stance_check" x-cloak
                           style="color:var(--warning,#c80);">
                         {{ t('settings.xt.stance_off_warning') }}
