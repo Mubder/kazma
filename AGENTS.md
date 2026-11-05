@@ -8046,7 +8046,12 @@ press. Plan and evidence: `docs/plans/RUN_SUPERVISION_PLAN.md`; guide:
   `notify = suppressed`. A failure that ended before this process started
   watching is quiet. One recovery note when a stalled run moves again. The
   turn-liveness watchdog no longer pages `turn.stuck_open`: the chat-turn
-  adapter reports the abandoned turn and its card offers Close.
+  adapter reports the abandoned turn and its card offers Close. A failed
+  crawl's or research pipeline's reason is `crawl_jobs.failure_reason`: what
+  the job recorded at its end (`_CrawlJob.finish(failure=)`, the pipeline's
+  "found no URLs"), else the interruption, the stage, the page counts, else
+  nothing; it gave "0 failed, 0 uncertain" for a search that found nothing
+  (2026-11-05, `tests/test_failed_run_says_why.py`).
 - **Deciding** (`decide.py`): claim (the first decision wins; a second is
   told who decided what, where), then `registry.perform` asks the run as it
   is NOW and refuses an action it no longer offers, then the kind's own
