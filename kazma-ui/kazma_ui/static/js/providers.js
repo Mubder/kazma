@@ -72,6 +72,17 @@ var ProvidersManager = window.ProvidersManager = {
         return { label: this.stateLabel('unreachable'), tone: 'danger', detail: result.error || this._t('settings.prov_no_response', 'no response') };
     },
 
+    /**
+     * The alert's line when this visit has no result of its own: the state
+     * comes from the stored health, which keeps no reason.
+     * @param {Object} provider
+     * @returns {string}
+     */
+    storedDetail(provider) {
+        if (this.cardState(provider, null) === 'untested') return '';
+        return this._t('settings.prov_from_last_check', 'Saved from the last check. Run the checks again for the details.');
+    },
+
     /** A catalog string in the page's language (window.tOr), else English. */
     _t(key, fallback) {
         if (typeof window !== 'undefined' && typeof window.tOr === 'function') return window.tOr(key, fallback);
@@ -261,15 +272,28 @@ var ProvidersManager = window.ProvidersManager = {
      * (system turn, tool round-trip) live in scripts/provider_conformance.py
      * and cost money, so they are not run from this page.
      *
+     * Without a result from this page visit, the provider's stored health (what
+     * the last check wrote) decides, as it decides the list row's pill: the row
+     * said "Chat failing" while this panel said both checks were "not run yet"
+     * (live 2026-11-05). Only the outcome is stored, so the detail says it is
+     * the last check's.
+     *
      * @param {Object} result  a test result, or null before Test is pressed
+     * @param {string} [health]  the provider's stored health
      * @returns {Array<{key: string, label: string, state: 'ok'|'fail'|'idle', detail: string}>}
      */
-    checksFor(result) {
+    checksFor(result, health) {
         var idle = { state: 'idle', detail: '' };
         if (!result) {
+            var storedModels = 'idle';
+            var storedChat = 'idle';
+            if (health === 'healthy') { storedModels = 'ok'; storedChat = 'ok'; }
+            else if (health === 'chat_failing') { storedModels = 'ok'; storedChat = 'fail'; }
+            else if (health === 'down' || health === 'degraded') { storedModels = 'fail'; }
+            var last = this._t('settings.prov_last_check', 'last check');
             return [
-                { key: 'models', label: 'model_list', state: 'idle', detail: '' },
-                { key: 'chat', label: 'completion', state: 'idle', detail: '' },
+                { key: 'models', label: 'model_list', state: storedModels, detail: storedModels === 'idle' ? '' : last },
+                { key: 'chat', label: 'completion', state: storedChat, detail: storedChat === 'idle' ? '' : last },
             ];
         }
         var reachable = result.success || result.reachable === true;

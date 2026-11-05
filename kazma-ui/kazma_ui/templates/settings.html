@@ -126,7 +126,7 @@
 
                                     <!-- What the last check found, and what to do about it. -->
                                     <div class="pc-alert" :class="'alert-' + providerState(selectedHubProvider())"
-                                         x-show="selectedHubProvider()._test" x-cloak>
+                                         x-show="providerState(selectedHubProvider()) !== 'untested'" x-cloak>
                                         <span class="pc-at" x-text="providerStateLabel(selectedHubProvider())"></span>
                                         <span class="pc-ab" x-text="providerStateDetail(selectedHubProvider())"></span>
                                         <span class="pc-ab" x-show="providerState(selectedHubProvider()) === 'chat_failing'" x-cloak>

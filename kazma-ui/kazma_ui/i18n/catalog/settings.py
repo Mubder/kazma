@@ -3486,6 +3486,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا استجابة",
         "en": "no response",
     },
+    "settings.prov_last_check": {
+        "ar": "آخر فحص",
+        "en": "last check",
+    },
+    "settings.prov_from_last_check": {
+        "ar": "محفوظ من آخر فحص. شغّل الفحوص مرة أخرى لمعرفة التفاصيل.",
+        "en": "Saved from the last check. Run the checks again for the details.",
+    },
     "settings.cap_tools": {
         "ar": "الأدوات",
         "en": "Tools",
