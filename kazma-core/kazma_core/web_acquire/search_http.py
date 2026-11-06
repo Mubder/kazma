@@ -17,23 +17,48 @@ _OUTPUT = 512 * 1024
 USER_AGENT = 'KazmaSearch/0.7 (+https://github.com/Mubder/kazma; web search)'
 
 
-def run_http_search(backend, query, count, *, base=None, local=False):
+#: Tavily's search API (resilience plan F1): a remote provider, used only when
+#: the acquisition policy names it, and never through the scraping proxy (the
+#: request carries the key).
+TAVILY_ENDPOINT = 'https://api.tavily.com/search'
+
+
+def _endpoint(backend, base):
+    if backend == 'searxng':
+        return base.rstrip('/') + '/search'
+    return {'bing': 'https://www.bing.com/search', 'tavily': TAVILY_ENDPOINT}.get(
+        backend, 'https://en.wikipedia.org/w/api.php')
+
+
+def _proxy_for(backend, local, active=None):
+    """The scraping proxy a search goes through: none for a loopback SearXNG,
+    and none for Tavily, whose request carries an API key (the proxy is for
+    scraping only, AGENTS.md section 13)."""
+    if local or backend == 'tavily':
+        return None
+    if active is None:
+        from kazma_core.proxy.client import get_active_proxy_url
+
+        active = get_active_proxy_url
+    return active()
+
+
+def run_http_search(backend, query, count, *, base=None, local=False, key=None):
     from kazma_core.web_acquire.origins import origin_scheduler
     from kazma_core.web_acquire.search_sdk import search_cancel
-    endpoint = (base.rstrip('/') + '/search') if backend == 'searxng' else 'https://www.bing.com/search' if backend == 'bing' else 'https://en.wikipedia.org/w/api.php'
+    endpoint = _endpoint(backend, base)
     with origin_scheduler().request_sync(endpoint, cancel_event=search_cancel.get()):
-        return _run_http_search(backend, query, count, base=base, local=local)
+        return _run_http_search(backend, query, count, base=base, local=local, key=key)
 
 
-def _run_http_search(backend, query, count, *, base=None, local=False):
-    from kazma_core.proxy.client import get_active_proxy_url
+def _run_http_search(backend, query, count, *, base=None, local=False, key=None):
     from kazma_core.security.process_budget import OutputLimitExceeded, run_bounded
     from kazma_core.web_acquire.process_worker import current_process_owner
     from kazma_core.web_acquire.search_runtime import remaining
     from kazma_core.web_acquire.search_sdk import search_cancel
     from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
-    proxy = None if local else get_active_proxy_url()
+    proxy = _proxy_for(backend, local)
     owner = current_process_owner.get()
     if owner is not None:
         owner.before_dispatch()
@@ -42,7 +67,7 @@ def _run_http_search(backend, query, count, *, base=None, local=False):
     if origin_delay.get() > 30:
         raise AcquisitionError(FetchErrorCode.LIMIT, 'Search origin delay exceeds the bounded worker deadline; dispatch refused.')
     payload = json.dumps(dict(delay=origin_delay.get(), backend=backend, query=query, count=count, base=base, proxy=proxy,
-        parent_pid=os.getpid(), lifetime=timeout)).encode('utf-8')
+        parent_pid=os.getpid(), lifetime=timeout, key=key)).encode('utf-8')
     if len(payload) > 32768:
         raise AcquisitionError(FetchErrorCode.LIMIT, 'Search worker input exceeds its 32KiB budget.')
     allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'ssl_cert_file', 'ssl_cert_dir'}
@@ -82,7 +107,7 @@ def _run_http_search(backend, query, count, *, base=None, local=False):
         feedback = data.pop('origin_feedback', None)
         if feedback is not None:
             from kazma_core.web_acquire.origins import origin_scheduler, _origin
-            endpoint = (base.rstrip('/') + '/search') if backend == 'searxng' else 'https://www.bing.com/search' if backend == 'bing' else 'https://en.wikipedia.org/w/api.php'
+            endpoint = _endpoint(backend, base)
             if (not isinstance(feedback, dict) or type(feedback.get('status')) is not int
                     or _origin(feedback.get('url', '')) != _origin(endpoint)
                     or not isinstance(feedback.get('retry_after'), (str, type(None)))
@@ -254,13 +279,41 @@ def _wikipedia(payload, count):
     return rows
 
 
-def _request(request):
+def _rows(backend, raw, count, data):
+    """The result rows of one backend's answer (*data* gets SearXNG's
+    suspended engines). Raises ValueError on an answer of the wrong shape."""
+    if backend == 'bing':
+        return _bing(raw.decode('utf-8', errors='replace'))[:count]
+    if backend == 'wikipedia':
+        return _wikipedia(json.loads(raw), count)
+    payload = json.loads(raw)
+    if not isinstance(payload, dict) or not isinstance(payload.get('results', []), list):
+        raise ValueError(f'Invalid {backend} shape')
+    if backend == 'tavily':
+        return [{'title': row.get('title') or 'Untitled', 'href': row.get('url', ''), 'body': row.get('content', '')}
+                for row in payload.get('results', [])[:count] if isinstance(row, dict)]
+    rows = [{'title': row.get('title', 'Untitled'), 'href': row.get('url', ''), 'body': row.get('content', '')}
+            for row in payload.get('results', [])[:count]]
+    engines = payload.get('unresponsive_engines') or []
+    if isinstance(engines, list):
+        names = [str(row[0])[:128] for row in engines[:4] if isinstance(row, list) and row]
+        if names:
+            data['detail'] = ' (engines suspended: ' + ', '.join(names) + ')'
+    return rows
+
+
+def _request(request, transport=None):
     import httpx
 
     backend, query, count = request['backend'], request['query'], request['count']
+    body = None
     if backend == 'searxng':
         url = request['base'].rstrip('/') + '/search'
         params = dict(q=query, format='json', categories='general', language='all', pageno=1)
+    elif backend == 'tavily':
+        # The key goes in a header, from stdin: never in a URL or an argument.
+        url, params = TAVILY_ENDPOINT, None
+        body = {'query': query, 'max_results': min(count, 10), 'search_depth': 'basic'}
     elif backend == 'bing':
         url, params = 'https://www.bing.com/search', {'q': query}
     else:
@@ -271,15 +324,19 @@ def _request(request):
     if initial.scheme not in {'http', 'https'} or not initial.hostname or initial.username or initial.password or initial.query or initial.fragment:
         raise ValueError('Invalid search endpoint')
     headers = {'Accept-Encoding': 'identity', 'User-Agent': USER_AGENT, 'Accept': '*/*'}
+    if backend == 'tavily':
+        headers['Authorization'] = 'Bearer ' + request['key']
     data = {'status': 'ok', 'results': [], 'reached': False, 'detail': ''}
     try:
         with httpx.Client(proxy=request['proxy'], trust_env=False, follow_redirects=False,
-                timeout=8, headers=headers) as client:
+                timeout=8, headers=headers, **({'transport': transport} if transport is not None else {})) as client:
             for hop in range(6):
                 if hop and request.get('delay'):
                     import time
                     time.sleep(request['delay'])
-                with client.stream('GET', url, params=params) as response:
+                stream = (client.stream('POST', url, json=body) if body is not None
+                          else client.stream('GET', url, params=params))
+                with stream as response:
                     data['reached'] = True
                     retry = response.headers.get('retry-after')
                     if retry is not None and len(retry) > 8192:
@@ -291,7 +348,8 @@ def _request(request):
                         from urllib.parse import urljoin
                         destination = urljoin(str(response.url), response.headers.get('location', ''))
                         parsed = urlsplit(destination)
-                        if (hop == 5 or (parsed.scheme, parsed.hostname, parsed.port) !=
+                        # A Tavily request is one reserved request: never re-sent.
+                        if (hop == 5 or backend == 'tavily' or (parsed.scheme, parsed.hostname, parsed.port) !=
                                 (initial.scheme, initial.hostname, initial.port) or parsed.username or parsed.password):
                             raise ValueError('Search service redirect refused')
                         url, params = destination, None
@@ -308,21 +366,7 @@ def _request(request):
                             return {'status': 'limit'}
                         raw.extend(chunk)
                     break
-        if backend == 'bing':
-            rows = _bing(raw.decode('utf-8', errors='replace'))[:count]
-        elif backend == 'searxng':
-            payload = json.loads(raw)
-            if not isinstance(payload, dict) or not isinstance(payload.get('results', []), list):
-                raise ValueError('Invalid SearXNG shape')
-            rows = [{'title': row.get('title', 'Untitled'), 'href': row.get('url', ''), 'body': row.get('content', '')}
-                    for row in payload.get('results', [])[:count]]
-            engines = payload.get('unresponsive_engines') or []
-            if isinstance(engines, list):
-                names = [str(row[0])[:128] for row in engines[:4] if isinstance(row, list) and row]
-                if names:
-                    data['detail'] = ' (engines suspended: ' + ', '.join(names) + ')'
-        else:
-            rows = _wikipedia(json.loads(raw), count)
+        rows = _rows(backend, bytes(raw), count, data)
         data['results'] = [{key: str(row[key])[:8192] for key in ('title', 'href', 'body')} for row in rows]
         return data
     except httpx.ProxyError:
@@ -339,7 +383,7 @@ def _worker():
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
     request = json.loads(sys.stdin.buffer.read(32769))
-    if (request['backend'] not in {'searxng', 'bing', 'wikipedia'} or not isinstance(request['query'], str)
+    if (request['backend'] not in {'searxng', 'bing', 'wikipedia', 'tavily'} or not isinstance(request['query'], str)
             or len(request['query']) > 4096 or type(request['count']) is not int or not 1 <= request['count'] <= 15
             or (request['base'] is not None and (not isinstance(request['base'], str) or len(request['base']) > 8192))
             or (request['proxy'] is not None and (not isinstance(request['proxy'], str) or len(request['proxy']) > 8192))
@@ -352,6 +396,9 @@ def _worker():
         raise ValueError('Invalid search origin delay')
     if request['backend'] == 'searxng' and request['base'] is None:
         raise ValueError('Missing service endpoint')
+    key = request.get('key')
+    if request['backend'] == 'tavily' and (not isinstance(key, str) or not 0 < len(key) <= 256):
+        raise ValueError('Missing or invalid Tavily key')
     guard = Path(__file__).resolve().parents[1] / 'security' / 'worker_lifetime.py'
     runpy.run_path(str(guard), run_name='kazma_core.security.worker_lifetime')['arm_deadline'](request['parent_pid'], request['lifetime'])
     print(json.dumps(_request(request), ensure_ascii=True))

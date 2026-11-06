@@ -271,6 +271,21 @@ fi
 
 log_ok "Kazma is ready"
 echo ""
+
+# ── 5. System dependencies (resilience plan K2) ─────────────────────────────
+# OCR with Arabic, LibreOffice, ClamAV and its daily refresh, the Arabic fonts
+# and Docker: the plan is shown first, and nothing is installed without a yes.
+log_header "5. System dependencies"
+$VENV_PYTHON -m kazma_cli setup system --dry-run || true
+if [[ -t 0 ]]; then
+    read -r -p "Install what is missing now? [y/N] " answer
+    if [[ "$answer" =~ ^[Yy] ]]; then
+        $VENV_PYTHON -m kazma_cli setup system -y || log_warn "Some system dependencies were not installed: run kazma setup system again"
+    else
+        log_info "Later:          $VENV_PYTHON -m kazma_cli setup system"
+    fi
+fi
+echo ""
 log_info "Configure:      edit .env (OPENAI_API_KEY or another provider)"
 log_info "Run Web UI:     .venv/bin/kazma serve          # http://127.0.0.1:9090"
 log_info "Run TUI:        .venv/bin/kazma-tui"

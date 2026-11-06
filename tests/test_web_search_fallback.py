@@ -42,6 +42,7 @@ def test_run_search_falls_through_empty_backends(monkeypatch):
 
 def test_run_search_all_empty_reports_attempts(monkeypatch):
     monkeypatch.setattr(ws, "_searxng_search", lambda q, n: (None, "searxng:empty"))
+    monkeypatch.setattr(ws, "_tavily_search", lambda q, n: (None, "tavily:not permitted"))
     monkeypatch.setattr(ws, "_ddg_search", lambda q, n: (None, "duckduckgo:empty"))
     monkeypatch.setattr(ws, "_bing_search", lambda q, n: (None, "bing:empty"))
     monkeypatch.setattr(ws, "_wikipedia_search", lambda q, n: (None, "wikipedia:empty"))
@@ -49,7 +50,9 @@ def test_run_search_all_empty_reports_attempts(monkeypatch):
     results, attempts, backend = ws._run_search("OpenAI", 3)
     assert results == []
     assert backend == ""
-    assert len(attempts) == 4
+    # Every backend is tried and named, Tavily (resilience plan F1) included.
+    assert attempts == ["searxng:empty", "tavily:not permitted", "duckduckgo:empty", "bing:empty",
+                        "wikipedia:empty"]
 
 
 @pytest.mark.asyncio

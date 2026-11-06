@@ -54,6 +54,28 @@ The script: requires Python 3.11+, installs `uv` if missing, runs
 when needed, and import-checks LangGraph / aiosqlite / textual. It does **not**
 install `[all]` (that pulls torch, Playwright, WeasyPrint, Temporal, E2B).
 
+At the end it shows the plan of `kazma setup system` and asks whether to run
+it: the programs Kazma needs from the system itself, installed with the OS's
+package manager (winget, Homebrew, apt, dnf).
+
+| What | Windows (winget) | macOS (Homebrew) | Debian / Ubuntu / WSL (apt) | Fedora (dnf) |
+|---|---|---|---|---|
+| OCR | `UB-Mannheim.TesseractOCR`, plus the Arabic and English models (a pinned release, checked by SHA-256) | `tesseract`, `tesseract-lang` | `tesseract-ocr`, `tesseract-ocr-ara`, `tesseract-ocr-eng` | `tesseract`, `tesseract-langpack-ara` |
+| Office conversion | `TheDocumentFoundation.LibreOffice` | `--cask libreoffice` | `libreoffice-writer` | `libreoffice-writer` |
+| Malware scan | `Cisco.ClamAV`, plus a daily `freshclam` task | `clamav`, plus a daily `freshclam` launchd job | `clamav`, `clamav-freshclam` | `clamav`, `clamav-update` |
+| Arabic fonts | bundled with Kazma | bundled with Kazma | `fonts-noto-core` | `google-noto-sans-arabic-fonts` |
+| Docker | `Docker.DockerDesktop` | Docker Desktop (cask) | `docker.io` | `moby-engine` |
+
+```bash
+kazma setup system --check     # what is there, what is missing; changes nothing
+kazma setup system --dry-run   # the plan; runs nothing
+kazma setup system             # asks, then installs what is missing (-y: no question)
+```
+
+A second run finds nothing to do. `kazma doctor` shows the same checks and
+names this command for anything missing. Postgres as a service is
+`kazma setup postgres` (the operations guide, "Postgres as an OS service").
+
 ### Path B — Editable install (manual)
 
 ```bash

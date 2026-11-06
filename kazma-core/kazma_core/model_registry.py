@@ -64,18 +64,50 @@ def lookup_context_window(model: str | None) -> int | None:
     model_id = str(model).strip()
     if not model_id:
         return None
+    override = _owner_setting(f"models.context_window.{model_id}")
+    if override is not None:
+        try:
+            return max(1024, int(override))
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _owner_setting(key: str) -> Any:
+    """A per-model setting the owner set (``models.<what>.<model>``), or None,
+    also while the settings store cannot answer. Never raises."""
     try:
         from kazma_core.config_store import get_config_store
 
-        override = get_config_store().get(f"models.context_window.{model_id}")
-        if override is not None:
-            try:
-                return max(1024, int(override))
-            except (TypeError, ValueError):
-                pass
-    except Exception:
-        pass
-    return None
+        return get_config_store().get(key)
+    except Exception:  # noqa: BLE001 -- the store away: the default applies
+        logger.debug("[model_registry] %s unreadable", key, exc_info=True)
+        return None
+
+#: The output limit of a step that may call tools, when the model has none of
+#: its own (``models.max_output_tokens.<model>``).
+TOOL_STEP_OUTPUT_TOKENS = 8192
+
+
+def tool_step_output_limit(model: str | None) -> int:
+    """The output limit of a supervisor step that offers tools: the owner's
+    word for *model* (``models.max_output_tokens.<model>``, 1,024 to
+    200,000), else :data:`TOOL_STEP_OUTPUT_TOKENS`. Never raises.
+
+    8,192 for every model cut eight file writes off mid-argument in the
+    functional audit (resilience plan D2): a model that writes more in one
+    answer gets its own limit here. A settings read: callers on the loop use
+    ``asyncio.to_thread``.
+    """
+    model_id = str(model or "").strip()
+    override = _owner_setting(f"models.max_output_tokens.{model_id}") if model_id else None
+    if override is not None:
+        try:
+            return max(1024, min(200_000, int(override)))
+        except (TypeError, ValueError):
+            pass
+    return TOOL_STEP_OUTPUT_TOKENS
+
 
 # ── Singleton lifecycle ──────────────────────────────────────────────
 

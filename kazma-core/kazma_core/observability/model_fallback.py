@@ -29,6 +29,9 @@ import logging
 import queue
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +39,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "drill_notices",
+    "failover_open",
     "report_failover",
     "report_model_served",
     "report_provider_usable",
@@ -158,6 +163,29 @@ def restore_owed_fallbacks() -> int:
     return restored
 
 
+#: Inside a drill (resilience plan F2), the notices a failover raises are
+#: held here instead of sent: the drill checks them, and pages nobody.
+_drill: ContextVar[list[dict[str, str]] | None] = ContextVar("model_fallback_drill", default=None)
+
+
+@contextmanager
+def drill_notices() -> Iterator[list[dict[str, str]]]:
+    """Hold the notices raised inside the block (``key``, ``title``,
+    ``detail``) instead of sending them (:mod:`.failover_drill`)."""
+    held: list[dict[str, str]] = []
+    token = _drill.set(held)
+    try:
+        yield held
+    finally:
+        _drill.reset(token)
+
+
+def failover_open(model: str) -> bool:
+    """Whether a failover away from *model* is still open."""
+    with _lock:
+        return f"failover:{(model or '').strip().lower()}" in _active
+
+
 def _suppressed() -> bool:
     from kazma_core.diagnostic_scope import writes_suppressed
 
@@ -200,6 +228,10 @@ def _announce(
         if due:
             episode.last_alert = now
     if not due:
+        return
+    held = _drill.get()
+    if held is not None:
+        held.append({"key": f"llm.fallback.{key}", "title": title, "detail": detail})
         return
     from kazma_core.observability.alerts import AlertDispatcher
     from kazma_core.observability.ops_alerts import alert

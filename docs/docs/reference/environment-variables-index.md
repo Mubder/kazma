@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**284** variables are read by the product code; **284** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**285** variables are read by the product code; **285** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -255,6 +255,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_STRICT_TOOLS` | (none) | `kazma_core.agent.tool_schema` | yes |
 | `KAZMA_SUMMARIES_MAX_ENTRIES` | `"500"` | `kazma_core.summarizer` | yes |
 | `KAZMA_SWARM_MAX_ACTIVE` | (none) | `kazma_core.swarm.engine` | yes |
+| `KAZMA_TAVILY_API_KEY` | (none) | `kazma_core.tools.web_search` | yes |
 | `KAZMA_TEMPORAL` | (none) | `kazma_core.swarm.durable` | yes |
 | `KAZMA_TEMPORAL_HOST` | (none) | `kazma_core.swarm.durable` | yes |
 | `KAZMA_TEMPORAL_NAMESPACE` | (none) | `kazma_core.swarm.durable` | yes |

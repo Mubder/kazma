@@ -1606,6 +1606,14 @@ async def supervisor_node(
         from kazma_core.retry import friendly_llm_error, load_retry_config
 
         cfg = await asyncio.to_thread(load_retry_config)  # settings
+        from kazma_core.model_registry import tool_step_output_limit
+
+        # The output limit of a step that may call tools: the model's own
+        # (models.max_output_tokens.<model>), a settings read (plan D2).
+        _tool_step_tokens = await asyncio.to_thread(
+            tool_step_output_limit,
+            routed_model or getattr(getattr(turn_llm, "config", None), "model", ""),
+        )
         # Guard: max_attempts <= 0 would make range(1, 1) empty and raise
         # last_exc=None — the LLM would never be called. Clamp to >= 1.
         cfg["max_attempts"] = max(1, int(cfg.get("max_attempts", 1) or 1))
@@ -1642,7 +1650,7 @@ async def supervisor_node(
             # turns (no tools) may produce long answers — use the full
             # configured limit (16384 default). This prevents the wasteful
             # truncation-retry loop on content-generation tasks.
-            _call_max_tokens = 8192 if effective_tool_definitions else None
+            _call_max_tokens = _tool_step_tokens if effective_tool_definitions else None
             # The owner's reasoning level for chat (agent/chat_reasoning.py).
             _reasoning = await chat_reasoning_kwargs(turn_llm)
             for attempt in range(1, cfg["max_attempts"] + 1):

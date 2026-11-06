@@ -158,7 +158,7 @@ def reserve(provider, account, *, units=1):
         except InvalidOperation:
             raise AcquisitionError(FetchErrorCode.POLICY, 'Invalid acquisition financial cap; remote dispatch refused.') from None
         raise AcquisitionError(FetchErrorCode.POLICY, 'A financial cap was requested, but this service has no verified per-request monetary upper bound. Remote dispatch refused; use local extraction or provider-enforced spending controls.')
-    if provider not in {'proxy', 'firecrawl', 'jina'} or type(units) is not int or not 1 <= units <= 6:
+    if provider not in {'proxy', 'firecrawl', 'jina', 'tavily'} or type(units) is not int or not 1 <= units <= 6:
         raise AcquisitionError(FetchErrorCode.POLICY, 'Invalid remote allowance request; dispatch refused.')
     if not acquisition_policy().permits(provider):
         raise AcquisitionError(FetchErrorCode.POLICY, 'Remote service refused by acquisition policy.')
@@ -208,6 +208,12 @@ def _response_received(reservation, status, *, usage=None):
         if row is not None:
             row.update(state='response_received', http_status=status, provider_usage=usage)
     _mutate(change)
+
+
+def record_response(reservation, status):
+    """Record the HTTP status a reserved request got (a request made outside
+    an httpx client of this process: the search worker's Tavily call)."""
+    _response_received(reservation, status)
 
 
 def snapshot(job_id=None):

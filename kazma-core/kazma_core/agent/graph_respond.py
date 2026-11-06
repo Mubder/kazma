@@ -393,6 +393,12 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     messages = await format_terminal_answer(
         messages, llm=llm, state=state, on_call=_record_format_call,
     )
+    # The answer against what the turn's tools did (plan D3): a claimed file
+    # no tool wrote gets a "Not done" line; files written but not named get
+    # one line built from the receipts. Pure, no I/O.
+    from kazma_core.agent.answer_receipts import check_answer_receipts
+
+    messages = check_answer_receipts(messages, state)
 
     # Metadata only, once at the shared graph terminal boundary. A ledger
     # failure must not prevent a reply, and disk work stays off the loop.

@@ -176,6 +176,7 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
             note = f"searxng:ok@{base}" if results else f"searxng:empty@{base}{receipt['detail']}"
             if results:
                 _searxng_cache['note'] = note
+                _searxng_answered()
                 return results, note
         elif status == 'http':
             note = f"searxng:http_{receipt['detail']}@{base}"
@@ -185,7 +186,77 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
     if not reached_any:
         _searxng_cache.update(base=None, dead_until=now + 60.0)
     _searxng_cache['note'] = last_note
+    _note_searxng_silent(now, last_note)
     return None, last_note
+
+
+#: SearXNG answering nothing for this long is a page (resilience plan F1).
+SEARXNG_SILENT_PAGE_S = 3600.0
+
+
+def _note_searxng_silent(now: float, note: str) -> None:
+    """Count how long SearXNG has answered nothing; page once at an hour.
+
+    Its answer resets the count (``_searxng_answered``). The page says what
+    SearXNG last answered and that searches go to the next service.
+    """
+    since = _searxng_cache.setdefault("silent_since", now)
+    if now - since >= SEARXNG_SILENT_PAGE_S and not _searxng_cache.get("silent_paged"):
+        _searxng_cache["silent_paged"] = True
+        from kazma_core.observability.ops_alerts import alert
+
+        alert("search.searxng_silent", "Local search (SearXNG) has answered nothing for an hour",
+              f"Its last answer: {note[:300]}. Searches go to the next service meanwhile. "
+              "Check the SearXNG container and its engines.", severity="warn", cooldown_s=6 * 3600.0)
+
+
+def _searxng_answered() -> None:
+    _searxng_cache.pop("silent_since", None)
+    _searxng_cache.pop("silent_paged", None)
+
+
+def tavily_key() -> str:
+    """Tavily's key: ``KAZMA_TAVILY_API_KEY``, else ``TAVILY_API_KEY``; empty
+    when neither is set."""
+    import os
+
+    return (os.environ.get("KAZMA_TAVILY_API_KEY") or os.environ.get("TAVILY_API_KEY") or "").strip()
+
+
+def _tavily_search(query: str, max_results: int, *, run: Any = None) -> tuple[list[dict[str, str]] | None, str]:
+    """Tavily, the search service after SearXNG (resilience plan F1).
+
+    A remote provider: used only when the acquisition policy names it
+    (``KAZMA_ACQUISITION_MODE=local_first_with_remote_fallback`` and
+    ``tavily`` in ``KAZMA_ACQUISITION_REMOTE_PROVIDERS``) and a key is set.
+    Each query reserves one request of the remote allowance before it leaves,
+    and its HTTP status is recorded on that reservation. An allowance that is
+    spent passes the query on to the next backend.
+    """
+    from kazma_core.web_acquire.policy import acquisition_policy
+
+    if not acquisition_policy().permits("tavily"):
+        return None, "tavily:not permitted"
+    key = tavily_key()
+    if not key:
+        return None, "tavily:no key"
+    from kazma_core.web_acquire import accounting
+
+    if run is None:
+        from kazma_core.web_acquire.search_http import run_http_search as run
+    try:
+        reservation = accounting.reserve("tavily", accounting.account_fingerprint("tavily", key), units=1)
+    except AcquisitionError as exc:
+        logger.warning("[web_search] Tavily not asked: %s", exc)
+        return None, f"tavily:{exc.code}"
+    receipt = run("tavily", query, max_results, key=key)
+    rows, status = receipt["results"], receipt["status"]
+    answered = 200 if status == "ok" else int(receipt["detail"]) if status == "http" and receipt["detail"].isdigit() else None
+    if answered is not None:
+        accounting.record_response(reservation, answered)
+    if status == "ok":
+        return (rows, "tavily:ok") if rows else (None, "tavily:empty")
+    return None, "tavily:" + ("http_" + receipt["detail"] if status == "http" else status)
 
 
 def _ddg_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
@@ -253,6 +324,7 @@ def _run_search(query: str, max_results: int) -> tuple[list[dict[str, str]], lis
     attempts: list[str] = []
     backends: list[tuple[str, Any]] = [
         ("searxng", _searxng_search),
+        ("tavily", _tavily_search),
         ("duckduckgo", _ddg_search),
         ("bing", _bing_search),
         ("wikipedia", _wikipedia_search),
