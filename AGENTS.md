@@ -6683,6 +6683,17 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   request in the gate's table or fails. See §16's multi-tenant note.
 - **Every product module is reached** (`tests/test_orphan_modules.py`); a
   module only its own tests import fails, unless allowlisted with a reason.
+- **Every PowerShell script Kazma ships can start**
+  (`tests/test_powershell_scripts_start.py`, 2026-11-06). setup.ps1 declared
+  its own `-Debug` under `[CmdletBinding()]`, which gives an advanced script
+  PowerShell's common parameters, so PowerShell (5.1 and 7) refused to start
+  it: from 2026-06-27 the Windows install's first step could not run (found
+  setting up the drill VM; parsing and `Get-Command` both succeed, only an
+  invocation fails). An advanced script declares no common parameter, read
+  by PowerShell's own parser and without one; a script with non-ASCII text
+  starts with a UTF-8 BOM (5.1 reads a BOM-less file in the ANSI code page,
+  and `industry_smoke.ps1`'s em dash ended a string); setup.ps1 is run in
+  an empty folder.
 - **No function reads a name it imported on another path**
   (`tests/test_unbound_local_imports.py`, 2026-10-02). Any import in a
   function makes the name local to the whole function, so a read on a path

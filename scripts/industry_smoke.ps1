@@ -1,4 +1,4 @@
-# Industry smoke — offline matrix rows (no live LLM / SearXNG required)
+﻿# Industry smoke — offline matrix rows (no live LLM / SearXNG required)
 # Usage: pwsh -File scripts/industry_smoke.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
