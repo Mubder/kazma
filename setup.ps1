@@ -21,7 +21,10 @@
     .\setup.ps1 -Debug
 #>
 
-[CmdletBinding()]
+# No [CmdletBinding()]: it would make this an advanced script, which gets
+# PowerShell's own -Debug, and PowerShell then refuses to start the script at
+# all ("A parameter with the name 'Debug' was defined multiple times").
+# tests/test_powershell_scripts_start.py holds every shipped script to that.
 param(
     [switch]$Debug
 )

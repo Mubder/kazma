@@ -1,4 +1,4 @@
-# Memory smoke — run golden + priority batch (local dev / CI)
+﻿# Memory smoke — run golden + priority batch (local dev / CI)
 # Usage: pwsh -File scripts/memory_smoke.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot

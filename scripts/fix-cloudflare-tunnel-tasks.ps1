@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   One-time fix for the Cloudflare-tunnel 1033 / "I have to run wsl_fixed_access
   manually every reboot" problem.

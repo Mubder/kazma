@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Give Windows a stable way to open Kazma running inside WSL2.
 
