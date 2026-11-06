@@ -112,6 +112,30 @@ def test_negative_control_the_path_only_lookup_was_the_incident(fake_docker, mon
     assert "KAZMA_DOCKER_BIN" in str(exc.value), "the hint names the override"
 
 
+def test_the_installed_postgres_tools_come_before_any_container(fake_docker, monkeypatch, tmp_path):
+    """Live 2026-11-06, after the move to the Postgres service: no pg_dump on
+    PATH and KAZMA_DB_CONTAINER still naming the old container. The dump went
+    through that container -- its stale database while it ran, a failure once
+    it was stopped. The tools of the Postgres ``kazma setup postgres``
+    installed (its record's bin_dir) reach the server Kazma uses."""
+    import os
+
+    from kazma_core import postgres_service as pgs
+
+    bin_dir = tmp_path / "PostgreSQL" / "16" / "bin"
+    bin_dir.mkdir(parents=True)
+    tool = bin_dir / ("pg_dump.exe" if os.name == "nt" else "pg_dump")
+    tool.write_text("", encoding="utf-8")
+    monkeypatch.setattr(pgs, "read_record", lambda path=None: {"postgres": {"bin_dir": str(bin_dir)}})
+    seen: list = []
+    _probe_ok(monkeypatch, seen)
+    assert pg_bridge.resolve_pg_dump() == [str(tool)]
+    assert seen == []  # the container was never asked
+    # Control: without the record, the dump goes through the container KAZMA_DB_CONTAINER names.
+    monkeypatch.setattr(pgs, "read_record", lambda path=None: {})
+    assert pg_bridge.resolve_pg_dump()[-2:] == ["kazma-db-win", "pg_dump"]
+
+
 def test_the_python_exec_jail_uses_the_same_lookup(fake_docker):
     from kazma_core.tools import code_exec
 
