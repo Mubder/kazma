@@ -43,15 +43,37 @@ if ($Debug) {
     $VerbosePreference = "Continue"
 }
 
+# ── Helper: run a program ────────────────────────────────────────────────────
+# Windows PowerShell 5.1 turns every line a program writes to stderr into an
+# error record once stderr is redirected (2>&1, 2>$null), and under "Stop"
+# the first one ends this script: uv prints "Using CPython ..." to stderr, so
+# setup stopped at uv sync. Every program runs through Invoke-Native, with
+# "Continue" for that call; the script judges it by $LASTEXITCODE, which is
+# -1 when the program did not start at all.
+# tests/test_powershell_scripts_start.py holds every shipped script to that.
+
+function Invoke-Native {
+    param([scriptblock]$Command, [switch]$StdoutOnly)
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $global:LASTEXITCODE = -1
+    try {
+        if ($StdoutOnly) { & $Command 2>$null }
+        else { & $Command 2>&1 | ForEach-Object { "$_" } }
+    } catch {
+        # Not there at all (PowerShell throws even under "Continue").
+        Write-Verbose "$_"
+        $global:LASTEXITCODE = -1
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+}
+
 # ── Helper: test if uv actually works ────────────────────────────────────────
 
 function Test-UvWorks {
-    try {
-        $null = & uv --version 2>&1
-        return $LASTEXITCODE -eq 0
-    } catch {
-        return $false
-    }
+    $null = Invoke-Native -StdoutOnly { uv --version }
+    return $LASTEXITCODE -eq 0
 }
 
 # ── Banner ───────────────────────────────────────────────────────────────────
@@ -69,14 +91,14 @@ $PythonCandidates = @("python", "python3", "py")
 
 foreach ($cmd in $PythonCandidates) {
     try {
-        $versionOutput = & $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+        $versionOutput = Invoke-Native -StdoutOnly { & $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" }
         if ($LASTEXITCODE -eq 0 -and $versionOutput) {
-            $parts = $versionOutput.Trim() -split '\.'
+            $parts = "$versionOutput".Trim() -split '\.'
             $major = [int]$parts[0]
             $minor = [int]$parts[1]
             if ($major -ge 3 -and $minor -ge 11) {
                 $PythonCmd = $cmd
-                $fullVersion = & $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" 2>$null
+                $fullVersion = Invoke-Native -StdoutOnly { & $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" }
                 Log-Ok "Python $fullVersion detected ($cmd)"
                 break
             }
@@ -96,16 +118,16 @@ if (-not $PythonCmd) {
 $UvInstalled = $false
 
 if (Test-UvWorks) {
-    $uvVersion = & uv --version 2>$null
+    $uvVersion = Invoke-Native -StdoutOnly { uv --version }
     Log-Ok "uv detected: $uvVersion"
     $UvInstalled = $true
 } else {
     Log-Warn "uv not found — installing via pip..."
 
     # Priority 1: pip
-    & $PythonCmd -m pip install --user uv 2>&1 | ForEach-Object { Write-Verbose $_ }
+    Invoke-Native { & $PythonCmd -m pip install --user uv } | ForEach-Object { Write-Verbose $_ }
     if (Test-UvWorks) {
-        $uvVersion = & uv --version 2>$null
+        $uvVersion = Invoke-Native -StdoutOnly { uv --version }
         Log-Ok "uv installed via pip: $uvVersion"
         $UvInstalled = $true
     }
@@ -114,11 +136,11 @@ if (Test-UvWorks) {
     if (-not $UvInstalled) {
         Log-Info "pip failed, trying official installer..."
         try {
-            Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression 2>&1 | ForEach-Object { Write-Verbose $_ }
+            Invoke-Native { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression } | ForEach-Object { Write-Verbose $_ }
             # Refresh PATH for the current session
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
             if (Test-UvWorks) {
-                $uvVersion = & uv --version 2>$null
+                $uvVersion = Invoke-Native -StdoutOnly { uv --version }
                 Log-Ok "uv installed via installer: $uvVersion"
                 $UvInstalled = $true
             }
@@ -163,7 +185,8 @@ Log-Header "2. Sync Handshake (uv sync)"
 # rag = vector memory; dev = tests/lint; tui = kazma-tui.
 # There is no [cli] extra — kazma-cli is a first-class package in the wheel.
 # Full set: uv sync --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
-& uv sync --extra rag --extra dev --extra tui 2>&1 | ForEach-Object { Write-Verbose $_ }
+Log-Info "Installing Kazma's packages; the first run downloads PyTorch and can take several minutes"
+Invoke-Native { uv sync --extra rag --extra dev --extra tui } | ForEach-Object { Write-Verbose $_ }
 if ($LASTEXITCODE -eq 0) {
     Log-Ok "Environment synced from pyproject.toml (rag + dev + tui extras)"
 } else {
@@ -188,7 +211,7 @@ if ($LASTEXITCODE -eq 0) {
 
     # pyproject.toml syntax
     try {
-        & $PythonCmd -c "import tomllib; tomllib.load(open('pyproject.toml', 'rb'))" 2>$null
+        $null = Invoke-Native -StdoutOnly { & $PythonCmd -c "import tomllib; tomllib.load(open('pyproject.toml', 'rb'))" }
         if ($LASTEXITCODE -eq 0) {
             Log-Ok "pyproject.toml syntax valid"
         } else {
@@ -230,7 +253,7 @@ if (-not (Test-Path $VenvPython)) {
 $IntroErrors = 0
 
 function Check-Import($module, $label) {
-    $null = & $VenvPython -c "import $module" 2>&1
+    $null = Invoke-Native { & $VenvPython -c "import $module" }
     if ($LASTEXITCODE -eq 0) {
         Log-Ok "$label loaded"
     } else {
@@ -253,7 +276,7 @@ if ($IntroErrors -gt 0) {
     exit 1
 }
 
-$testOutput = & $VenvPython -m pytest tests/ --co -q 2>$null | Select-Object -Last 3
+$testOutput = Invoke-Native -StdoutOnly { & $VenvPython -m pytest tests/ --co -q } | Select-Object -Last 3
 $testLine = ($testOutput | Where-Object { $_ -match '\d+' } | Select-Object -Last 1)
 if ($testLine -match '(\d+)') {
     $testCount = $matches[1]
