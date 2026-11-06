@@ -1,6 +1,6 @@
 {
- "recorded": "2026-11-02",
- "source": "OSV, for the versions the live install ran that day (scripts/record_osv_advisories.py)",
+ "recorded": "2026-11-07",
+ "source": "OSV, for the versions installed in C:\\Users\\balfa\\kazma\\.venv\\Scripts\\python.exe, G:\\GitHubRepos\\kazma\\.venv\\Scripts\\python.exe (added to the earlier recordings)",
  "advisories": [
   {
    "package": "accelerate",
@@ -13,6 +13,12 @@
    "version": "1.2.0",
    "vuln_id": "GHSA-9v8h-qqgm-4m35",
    "fixed_version": "1.2.1"
+  },
+  {
+   "package": "certifi",
+   "version": "2026.6.17",
+   "vuln_id": "GHSA-6q48-6c7w-9gw2",
+   "fixed_version": "2026.10.18"
   },
   {
    "package": "chromadb",
@@ -103,6 +109,12 @@
    "version": "1.2.1",
    "vuln_id": "GHSA-j586-36cw-2gc2",
    "fixed_version": "1.2.3"
+  },
+  {
+   "package": "oauthlib",
+   "version": "4.0.0",
+   "vuln_id": "GHSA-3jp2-3mrg-2vxc",
+   "fixed_version": "4.0.1"
   },
   {
    "package": "pillow",
@@ -349,6 +361,24 @@
    "version": "12.3.0",
    "vuln_id": "GHSA-xvh5-g6gv-559v",
    "fixed_version": "13.0.0"
+  },
+  {
+   "package": "pypdf",
+   "version": "6.21.3",
+   "vuln_id": "GHSA-5849-834g-hvw5",
+   "fixed_version": "6.21.4"
+  },
+  {
+   "package": "pypdf",
+   "version": "6.21.3",
+   "vuln_id": "GHSA-cggf-277g-3q54",
+   "fixed_version": "6.21.4"
+  },
+  {
+   "package": "pypdf",
+   "version": "6.21.3",
+   "vuln_id": "GHSA-mfr5-77xh-9j7h",
+   "fixed_version": "6.21.4"
   }
  ]
 }
