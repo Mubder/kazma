@@ -7437,7 +7437,10 @@ code) and Kazma ran with nobody supervising it.
   without the watch, and a bare URL or Request (11 in the old guard), as
   negative controls; the name on a real request).
   **The observer** is `deploy/observer` (a Worker: `src/diagnose.js` the
-  table pull-probe x heartbeat -> condition, a heartbeat missing after 90 s;
+  table pull-probe x heartbeat -> condition, a heartbeat missing after 90 s,
+  a 5-minute `/health/ready` 503 superseded by a heartbeat saying ready 45 s
+  or more later, `READY_SUPERSEDED_S` -- a probe that met a reboot paged
+  "dependency down" for 6 minutes on the first live day;
   `src/incidents.js` one page on the third failed minute, hourly reminders,
   one recovery page, maintenance quiet, an unsent page retried; D1
   `schema.sql`; the status page behind Access and the Worker's own check of

@@ -3963,7 +3963,14 @@ class OutsideWatch:
         outcome, status, at = result
         if outcome == "reached":
             self.last_ack = at
+        unchanged = outcome == self.state
         self._set(outcome, status=status)
+        if outcome == "reached" and unchanged:
+            # Each answered heartbeat's time reaches the state file: --status,
+            # `kazma observer status` and Settings read its age from there.
+            # Written only on a change of state, it froze at the first answer
+            # ("last answered 403 s ago" over a minute's heartbeats, 2026-11-06).
+            self._write()
 
     def _set(self, state: str, *, status: int | None = None) -> None:
         if state != self.state:

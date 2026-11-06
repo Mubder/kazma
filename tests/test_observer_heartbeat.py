@@ -215,6 +215,20 @@ def test_a_paired_guard_sends_a_signed_heartbeat_a_minute(monkeypatch, tmp_path)
     assert h.restricted == [h.key_path]  # restricted once, not every send
 
 
+def test_every_answered_heartbeat_reaches_the_state_file(monkeypatch, tmp_path):
+    """The age --status shows is the last answer's, not the first's (live
+    2026-11-06: "last answered 403 s ago" over a minute's heartbeats)."""
+    h = _Harness(monkeypatch, tmp_path)
+    for _ in range(125):
+        h.tick()
+    assert len(h.opener.requests) == 3
+    recorded = guard._read_state()["outside_watch"]["last_ack"]
+    assert recorded == h.watch.last_ack
+    # Control: the first answer's time is older than the one recorded.
+    first_answer = guard.time.time() - 125 + 1  # the harness clock at the first tick
+    assert recorded > first_answer + 100
+
+
 def test_the_heartbeat_names_the_guard_not_urllib(monkeypatch, tmp_path):
     """Live 2026-11-06: Cloudflare's bot check refused urllib's own name
     ("Python-urllib/3.x", error 1010), so every heartbeat was a 403 before it

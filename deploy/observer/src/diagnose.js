@@ -19,6 +19,12 @@
 export const FRESH_S = 90;
 // A /health/ready answer older than this says nothing about now.
 export const READY_FRESH_S = 6 * 60;
+// A heartbeat saying "ready" received this long after a /health/ready 503
+// carries a newer answer: the guard asks the same route every 30 s (10 s at
+// most each). Live 2026-11-06 the 5-minute probe met Kazma booting after a
+// restart, and its 503 kept the install "dependency_down" for 6 minutes --
+// an incident and a page -- while every heartbeat said ready.
+export const READY_SUPERSEDED_S = 45;
 
 export const GOOD = new Set(["up", "maintenance"]);
 
@@ -102,7 +108,9 @@ const DOWN_STATES = new Set(["down", "starting", "unreachable"]);
 export function diagnose({ live, ready, heartbeat, now, expectHeartbeat = true }) {
   const site = classifyLive(live);
   const hb = heartbeat && now - heartbeat.received_at <= FRESH_S ? heartbeat.body : null;
-  const readyDown = !!(ready && ready.status >= 500 && now - ready.at <= READY_FRESH_S);
+  const newerReady = !!(hb && hb.kazma && hb.kazma.state === "ready" && ready
+    && heartbeat.received_at - ready.at >= READY_SUPERSEDED_S);
+  const readyDown = !!(ready && ready.status >= 500 && now - ready.at <= READY_FRESH_S && !newerReady);
 
   if (hb && hb.maintenance) return { condition: "maintenance", detail: "planned work" };
   if (site === "refused") {

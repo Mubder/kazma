@@ -207,6 +207,19 @@ test("each row of the diagnosis table", () => {
     heartbeat: fresh(), now: NOW }).condition, "dependency_down");
 });
 
+test("a heartbeat saying ready well after a 503 is the newer answer", () => {
+  // Live 2026-11-06: the 5-minute /health/ready probe met Kazma booting after
+  // a restart; its 503 kept the install dependency_down for 6 minutes (an
+  // incident, a page) while every heartbeat said ready.
+  const booting = { status: 503, at: NOW - 300 };
+  assert.equal(diagnose({ live: { status: 200 }, ready: booting, heartbeat: fresh(), now: NOW }).condition, "up");
+  // Controls: a heartbeat too close to the 503 to be newer, and one saying not ready.
+  assert.equal(diagnose({ live: { status: 200 }, ready: { status: 503, at: NOW - 50 },
+    heartbeat: fresh(), now: NOW }).condition, "dependency_down");
+  assert.equal(diagnose({ live: { status: 200 }, ready: booting, now: NOW,
+    heartbeat: fresh({ kazma: { state: "not_ready", why: ["database"] } }) }).condition, "dependency_down");
+});
+
 test("without the heartbeat the probe alone cannot tell the machine from the tunnel", () => {
   // The negative control for the heartbeat: the same outside answers, the
   // site alone, read the same.
