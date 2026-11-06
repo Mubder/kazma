@@ -912,16 +912,32 @@ def format_operator_card(
 
 
 def _failing_checks(data: dict) -> list[str]:
-    """Named failed ready-checks, with error text when the body has it."""
+    """Named failed ready-checks, with error text when the body has it: every
+    check that failed, and every REQUIRED one (``unavailable_capabilities``)
+    that is not ok -- a required check that is only "degraded" (no provider
+    key) holds readiness too, and the log said a bare "not_ready" for it."""
+    required = data.get("unavailable_capabilities")
+    required = {str(n) for n in required} if isinstance(required, list) else set()
     parts: list[str] = []
     for key, val in (data.get("checks") or {}).items():
         if not isinstance(val, dict):
             continue
-        if str(val.get("status") or "").lower() != "failed":
+        status = str(val.get("status") or "").lower()
+        if status != "failed" and not (key in required and status not in ("ok", "healthy")):
             continue
         err = str(val.get("error") or val.get("detail") or "").strip()
         parts.append(f"{key}: {err}" if err else str(key))
     return parts
+
+
+def _needs_setup(data: object) -> tuple[str, ...]:
+    """The required checks that wait for the owner (``needs_setup`` in a
+    readiness body: a provider key). Names only, as ``_check_names``."""
+    names = data.get("needs_setup") if isinstance(data, dict) else None
+    if not isinstance(names, list):
+        return ()
+    return tuple(sorted({n for n in names if isinstance(n, str) and 0 < len(n) <= 40
+                         and set(n) <= _CHECK_NAME_CHARS}))[:8]
 
 
 def _health_failure_detail(raw: str, *, http_status: int = 0) -> str:
@@ -959,16 +975,21 @@ class ProbeResult(tuple):
     # The NAMES of the checks the answer says failed (or are degraded):
     # what the outside watch may carry, never the detail's error text.
     checks: tuple[str, ...]
+    # Not ready only because the owner has something to set up (a provider
+    # key): Kazma is up, and no restart can fix it.
+    needs_setup: tuple[str, ...]
 
     def __new__(cls, healthy: bool, detail: str, answered: bool = True,
                 restart_required: bool = False,
                 database: dict | None = None,
-                checks: tuple[str, ...] = ()) -> ProbeResult:
+                checks: tuple[str, ...] = (),
+                needs_setup: tuple[str, ...] = ()) -> ProbeResult:
         obj = super().__new__(cls, (healthy, detail))
         obj.answered = answered
         obj.restart_required = restart_required
         obj.database = database
         obj.checks = tuple(checks)
+        obj.needs_setup = tuple(needs_setup)
         return obj
 
 
@@ -987,13 +1008,15 @@ def _check_names(raw_or_data: object, *, failed_only: bool = True) -> tuple[str,
             return ()
     if not isinstance(data, dict) or not isinstance(data.get("checks"), dict):
         return ()
+    required = data.get("unavailable_capabilities")
+    required = {str(n) for n in required} if isinstance(required, list) else set()
     names = []
     for key, val in data["checks"].items():
         if not isinstance(val, dict) or not isinstance(key, str):
             continue
         status = str(val.get("status") or "").lower()
-        bad = status == "failed" if failed_only else status not in (
-            "ok", "healthy", "not_initialized")
+        bad = (status == "failed" or (key in required and status not in ("ok", "healthy"))
+               if failed_only else status not in ("ok", "healthy", "not_initialized"))
         if bad and 0 < len(key) <= 40 and set(key) <= _CHECK_NAME_CHARS:
             names.append(key)
     return tuple(sorted(set(names))[:8])
@@ -1022,6 +1045,14 @@ def _says_restart_required(raw: str) -> bool:
     return _readiness_fields(raw)[0]
 
 
+def _setup_in(raw: str) -> tuple[str, ...]:
+    """``_needs_setup`` of a readiness body given as text."""
+    try:
+        return _needs_setup(json.loads(raw))
+    except ValueError:
+        return ()
+
+
 def probe(url: str, timeout: float) -> ProbeResult:
     """Return (healthy, detail). Any non-200 or exception is unhealthy."""
     try:
@@ -1032,7 +1063,7 @@ def probe(url: str, timeout: float) -> ProbeResult:
                 restart, db = _readiness_fields(raw)
                 return ProbeResult(False, _health_failure_detail(raw, http_status=resp.status),
                                    restart_required=restart, database=db,
-                                   checks=_check_names(raw))
+                                   checks=_check_names(raw), needs_setup=_setup_in(raw))
         # HTTP 200 IS the contract. /health/ready returns 503 only when a
         # CRITICAL dependency (config store, database) is gone; a partial
         # failure is reported as "degraded" with 200 and the explicit
@@ -1055,7 +1086,8 @@ def probe(url: str, timeout: float) -> ProbeResult:
             failing = _failing_checks(data)
             return ProbeResult(False, "; ".join(failing[:6]) if failing else "not_ready",
                                restart_required=data.get("restart_required") is True,
-                               database=db, checks=_check_names(data))
+                               database=db, checks=_check_names(data),
+                               needs_setup=_needs_setup(data))
         degraded = [
             k for k, v in (data.get("checks") or {}).items()
             if isinstance(v, dict)
@@ -1079,7 +1111,7 @@ def probe(url: str, timeout: float) -> ProbeResult:
         restart, db = _readiness_fields(raw)
         return ProbeResult(False, _health_failure_detail(raw, http_status=int(exc.code or 0)),
                            restart_required=restart, database=db,
-                           checks=_check_names(raw))
+                           checks=_check_names(raw), needs_setup=_setup_in(raw))
     except urllib.error.URLError as exc:
         return ProbeResult(False, f"unreachable: {getattr(exc, 'reason', exc)}", answered=False)
     except Exception as exc:  # noqa: BLE001 -- a probe must never raise
@@ -4096,6 +4128,19 @@ class Guard:
         self._last_page_at = now
         return True
 
+    def _say_needs_setup(self, needs: tuple[str, ...], detail: str) -> None:
+        """Kazma is up and waits for its owner (``needs_setup``: a provider
+        key). Said once and paged once: never a restart, which cannot add a
+        key (the drill VM, 2026-11-06: a fresh install with no key was
+        restarted every 15 minutes while its owner tried to set it up)."""
+        self._waiting_setup = True
+        self.log("warn", "health.needs_setup", needs=",".join(needs), detail=detail)
+        home = self.health_url.split("/health", 1)[0] + "/"
+        self._page("warn", "Kazma is up and needs setup",
+                   f"{detail}. Open {home} and go to Settings -> Providers. "
+                   "Not restarting: a restart cannot add what is missing.",
+                   fingerprint="needs-setup")
+
     def _page(
         self,
         severity: str,
@@ -4200,6 +4245,7 @@ class Guard:
         deadline = started + START_TIMEOUT_S
         last = ""
         next_progress = started + 60.0
+        self._waiting_setup = False  # a new child: its own setup wait, if any
         # The boot says it waits for its database (read_boot_status): the
         # start budget then runs from the latest word, a page goes out once,
         # and a recovery card once it is ready (resilience plan A3).
@@ -4231,7 +4277,9 @@ class Guard:
             boot_result = probe(self.health_url, PROBE_TIMEOUT_S)
             self._note_probe(boot_result)
             ok, detail = boot_result
-            if ok:
+            needs = (tuple(getattr(boot_result, "needs_setup", ()) or ())
+                     if getattr(boot_result, "answered", False) else ())
+            if ok or needs:
                 # Is the thing answering actually the thing we launched?
                 # After a restart, an orphan holding the port answers this
                 # probe perfectly, and the guard would supervise a stranger
@@ -4245,6 +4293,13 @@ class Guard:
                     # Detection alone left the guard refusing forever.
                     reap_port_holder(self.health_url, self.log)
                     return False
+                if not ok:
+                    # Up, and waiting for its owner: started, not "never
+                    # ready". _supervise holds it the same way.
+                    self.log("info", "child.up_needs_setup", needs=",".join(needs),
+                             detail=detail, after_s=round(time.monotonic() - started, 1))
+                    self._say_needs_setup(needs, detail)
+                    return True
                 self.log("info", "child.ready",
                          detail=detail, after_s=round(time.monotonic() - started, 1))
                 if wait_paged:
@@ -4925,6 +4980,23 @@ class Guard:
             result = probe(self.health_url, PROBE_TIMEOUT_S)
             self._note_probe(result)
             ok, detail = result
+            needs = (tuple(getattr(result, "needs_setup", ()) or ())
+                     if getattr(result, "answered", False) else ())
+            if not ok and needs:
+                # Up, waiting for its owner (a provider key): no restart can
+                # fix it, so none counts toward one. Said once.
+                if not getattr(self, "_waiting_setup", False):
+                    self._say_needs_setup(needs, detail)
+                consecutive = 0
+                unanswered = 0
+                outage_since = None
+                outage_paged = False
+                held_logged_at = None
+                unrunnable = 0
+                continue
+            if ok and getattr(self, "_waiting_setup", False):
+                self._waiting_setup = False
+                self.log("info", "health.setup_done")
             if ok:
                 if consecutive:
                     self.log("info", "health.recovered", after_failures=consecutive)
@@ -5069,7 +5141,16 @@ def _cmd_page(title: str, detail: str) -> int:
 def _cmd_status() -> int:
     pause = read_pause()
     holder = _port_holder_pid(_port_from_url(DEFAULT_HEALTH_URL))
-    ok, detail = probe(DEFAULT_HEALTH_URL, 5.0)
+    result = probe(DEFAULT_HEALTH_URL, 5.0)
+    ok, detail = result
+    if ok:
+        word = "healthy"
+    elif result.answered and result.needs_setup:
+        word = "up, needs setup in Settings -> Providers"
+    elif result.answered:
+        word = "up, not ready"
+    else:
+        word = "not answering"
     print(f"supervision : {'PAUSED' if pause else 'active'}")
     if pause:
         until = float(pause.get("until") or 0.0)
@@ -5079,7 +5160,7 @@ def _cmd_status() -> int:
             datetime.fromtimestamp(until, UTC).strftime("%Y-%m-%d %H:%M UTC")
             if until else "never (will nag hourly)"))
         print(f"  flag file : {_pause_path()}")
-    print(f"server      : {'healthy' if ok else 'not answering'} ({detail})")
+    print(f"server      : {word} ({detail})")
     if holder:
         print(f"  port {_port_from_url(DEFAULT_HEALTH_URL)}  : held by pid {holder}")
     state = _read_state()
@@ -5539,7 +5620,19 @@ def _wait_for_new_boot(health_url: str, requested_at: float, before: str | None,
     while time.monotonic() < deadline:
         boot = server_started_at(health_url, 5.0)
         if boot is not None and boot > requested_at:
-            ok, _detail = probe(health_url, 5.0)
+            result = probe(health_url, 5.0)
+            ok, detail = result
+            needs = (tuple(getattr(result, "needs_setup", ()) or ())
+                     if getattr(result, "answered", False) else ())
+            if not ok and needs:
+                # The new build is up and waits for its owner: done, said so.
+                # It waited out the whole start budget for a provider key
+                # (the drill VM, 2026-11-06).
+                after = _live_commit(health_url)
+                print(f"Kazma is up on build {after or '?'}, but needs setup: {detail}")
+                print(f"  Open {health_url.split('/health', 1)[0]}/ and go to Settings -> Providers.")
+                log("warn", f"{event}.needs_setup", commit=after, needs=",".join(needs))
+                return 0
             if ok:
                 after = _live_commit(health_url)
                 if before is None:

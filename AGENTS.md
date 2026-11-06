@@ -7357,6 +7357,25 @@ code) and Kazma ran with nobody supervising it.
   database was away keeps the in-memory fallback for the life of the
   process) is restarted like no answer. A result without the flags gets the
   old rule. `tests/test_guard_probe_answers.py` (real HTTP).
+- **Waiting for its owner is up, never a restart** (the drill VM, 2026-11-06:
+  a fresh install with no provider key was restarted every 15 minutes, its
+  log saying only `not_ready`, while its owner tried to set it up). A
+  readiness check only the owner can fix carries `needs_setup` (the
+  provider check: no active model, no API key for a remote provider), and
+  `/health/ready` lists `needs_setup` (and what to do, `setup`) when EVERY
+  required check that fails is one; it still answers 503. The guard reads it
+  (`ProbeResult.needs_setup`): at start the child is up
+  (`child.up_needs_setup`, not `child.never_ready`), while running it counts
+  toward no restart, said once and paged once (`health.needs_setup`,
+  `_say_needs_setup`), and `health.setup_done` when it is ready.
+  `--reload` ends there ("up on build X, but needs setup"), `--status` says
+  "up, needs setup" (it said "not answering" for any answered failure), and
+  every required check that is not ok is named in the guard's detail, not
+  only `failed` ones. Gates: `tests/test_readiness_needs_setup.py` (the real
+  readiness body read by the guard's own probe over HTTP; a real failure
+  beside it as the negative control), `tests/test_guard_integration.py`
+  (a real guard: no restart past the start budget and the outage runway, the
+  same body without the flag restarted as the control).
 - **The server's last words are kept.** The guard sends the server's stderr to
   `.kazma/server.stderr.log` (beside `guard.log`, rotated at 2 MB) and quotes
   the lines the server wrote before it went in `guard.restarting`
