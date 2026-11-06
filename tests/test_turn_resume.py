@@ -126,6 +126,38 @@ def test_a_safe_cut_turn_is_found_and_continued_to_its_end(tmp_path, journal, mo
     asyncio.run(run())
 
 
+def test_the_pass_reads_the_checkpoint_manager_the_app_hands_it(tmp_path, journal):
+    """The app hands the start-up pass its CheckpointManager (the per-thread
+    locks over the saver), not the saver: the pass lists through it."""
+    from kazma_gateway.stores.checkpoint import CheckpointManager
+
+    async def run():
+        async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.db")) as saver:
+            manager = CheckpointManager(saver)
+            graph, _calls, _config = await _cut_turn(manager, "web-m")
+            found = await turn_resume._find_cut_turns(manager, graph)
+            assert [t.thread_id for t in found] == ["web-m"] and found[0].safe
+
+    asyncio.run(run())
+
+
+def test_negative_control_the_manager_without_a_listing_failed_every_boot(tmp_path, journal, monkeypatch):
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+
+    from kazma_gateway.stores.checkpoint import CheckpointManager
+
+    monkeypatch.setattr(CheckpointManager, "alist", BaseCheckpointSaver.alist)
+
+    async def run():
+        async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.db")) as saver:
+            manager = CheckpointManager(saver)
+            graph, _calls, _config = await _cut_turn(manager, "web-n")
+            with pytest.raises(NotImplementedError):
+                await turn_resume._find_cut_turns(manager, graph)
+
+    asyncio.run(run())
+
+
 def test_an_unknown_effect_waits_for_the_owner(tmp_path, journal):
     async def run():
         async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.db")) as saver:
