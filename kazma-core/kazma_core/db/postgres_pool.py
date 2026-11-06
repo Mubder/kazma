@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 _pool: PostgresPool | None = None
 _lock = threading.Lock()
+#: A missing driver is said once a process, not on every boot-wait try.
+_driver_missing_said = False
 
 #: Seconds a new connection may take before psycopg gives up and the pool
 #: retries (with its own backoff). psycopg's default is 130.
@@ -179,6 +181,59 @@ class PostgresUnreachable(RuntimeError):
         super().__init__(f"{text}: {reason}" if reason else text)
 
 
+class PostgresDriverMissing(RuntimeError):
+    """Kazma has a Postgres address and no driver to reach it with.
+
+    Not an outage: the server may be fine, and waiting does not install a
+    package. On the drill VM (2026-11-06) ``kazma setup postgres`` wrote
+    ``KAZMA_DATABASE_URL`` into an environment without psycopg; the boot
+    waited, every surface said the database was unreachable, and the cause
+    was only ``(ImportError)`` in kazma.log. ``reason`` says what to run."""
+
+    driver_missing = True
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        self.away = False
+        super().__init__(reason)
+
+
+#: The reason, in words, wherever it is shown (the boot wait, the guard, the log).
+DRIVER_MISSING = ("Kazma's Postgres driver is not installed in this Python environment "
+                  "(the kazma[postgres] extra: psycopg, psycopg_pool): run kazma setup postgres, "
+                  "which installs it")
+
+
+#: What the pool imports to reach Postgres.
+DRIVER_MODULES = ("psycopg", "psycopg.rows", "psycopg_pool")
+
+
+def _import_all(modules: tuple[str, ...]) -> None:
+    import importlib
+
+    for name in modules:
+        importlib.import_module(name)
+
+
+def driver_missing(modules: tuple[str, ...] = DRIVER_MODULES) -> str | None:
+    """Why this environment cannot reach Postgres at all, or None.
+
+    A boot waiting for its database finds a driver installed meanwhile: the
+    import system's directory caches are cleared before a module is called
+    missing, so the next try of the wait goes on with no restart."""
+    try:
+        _import_all(modules)
+    except ImportError:
+        import importlib
+
+        importlib.invalidate_caches()
+        try:
+            _import_all(modules)
+        except ImportError as exc:
+            return f"{DRIVER_MISSING} (missing: {exc.name or exc})"
+    return None
+
+
 _ROLE_RE = re.compile(r'role "([^"]+)" does not exist')
 _DATABASE_RE = re.compile(r'database "([^"]+)" does not exist')
 _PASSWORD_RE = re.compile(r'password authentication failed for user "([^"]+)"')
@@ -224,10 +279,13 @@ def refusal_reason(dsn: str, *, timeout_s: int = 5) -> str | None:
     """
     from urllib.parse import urlsplit
 
+    missing = driver_missing()
+    if missing:
+        return missing  # no sign-in can be tried: that IS the reason
     try:
         psycopg, _dict_row = require_postgres_driver()
     except ImportError:
-        return None
+        return DRIVER_MISSING
     try:
         parts = urlsplit(dsn)
         host, port = parts.hostname or "", parts.port
@@ -278,6 +336,16 @@ def get_postgres_pool() -> PostgresPool | None:
             # Normalize postgres:// → postgresql:// for psycopg
             if dsn.startswith("postgres://"):
                 dsn = "postgresql://" + dsn[len("postgres://") :]
+            missing = driver_missing()
+            if missing:
+                # Five attempts and a sign-in cannot install a package: said
+                # once at ERROR, then raised at once (the boot wait passes the
+                # reason to the guard and the log).
+                global _driver_missing_said
+                if not _driver_missing_said:
+                    logger.error("[PostgresPool] %s", missing)
+                    _driver_missing_said = True
+                raise PostgresDriverMissing(missing)
             min_size = int(os_env("KAZMA_PG_POOL_MIN", "1"))
             max_size = int(os_env("KAZMA_PG_POOL_MAX", "10"))
 

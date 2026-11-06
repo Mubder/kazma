@@ -635,6 +635,11 @@ def load_persisted_extras() -> list[str]:
             found.extend(p.strip() for p in raw.split(",") if p.strip())
     except Exception:
         pass
+    found.extend(_recorded_extras_file())
+    return _normalize_extras(found)
+
+
+def _recorded_extras_file() -> list[str]:
     try:
         path = _extras_file()
         if path.is_file():
@@ -642,10 +647,22 @@ def load_persisted_extras() -> list[str]:
             if isinstance(data, dict):
                 data = data.get("extras") or data.get("installed") or []
             if isinstance(data, list):
-                found.extend(str(x) for x in data)
+                return [str(x) for x in data]
     except Exception:
         pass
-    return _normalize_extras(found)
+    return []
+
+
+def extras_in_this_environment() -> list[str]:
+    """The extras this environment holds, read without the settings store
+    (it may be a Postgres that is not up while setup runs): each extra's
+    import markers and the recorded file. ``setup.ps1`` and ``setup.sh`` sync
+    them again with ``--inexact``, so a re-run keeps -- and upgrades -- what
+    was installed after the first run; an exact ``uv sync`` of its default
+    extras removed the rest (the drill VM, 2026-11-06: the Postgres driver)."""
+    found = [extra for extra, markers in _EXTRA_MARKERS.items()
+             if any(_module_available(m) for m in markers)]
+    return _normalize_extras(found + _recorded_extras_file())
 
 
 def persist_extras(extras: list[str]) -> None:

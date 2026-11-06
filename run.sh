@@ -16,7 +16,8 @@ echo "=== Kazma minimal E2E reproduction ==="
 # --- 1. Install: framework + rag/dev/tui extras ---
 #     There is no [cli] extra (kazma-cli is in the wheel). rag is required
 #     for vector memory / RAG tests.
-uv sync --extra rag --extra dev --extra tui 2>&1 | tail -5
+# --inexact: an exact sync removes every extra it does not name.
+uv sync --inexact --extra rag --extra dev --extra tui --extra postgres 2>&1 | tail -5
 
 PY=".venv/bin/python"
 

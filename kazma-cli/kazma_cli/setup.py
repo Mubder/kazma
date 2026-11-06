@@ -156,6 +156,63 @@ def _run_step(step, secrets_: list[str], *, run=subprocess.run) -> tuple[bool, s
     return done.returncode in step.ok_codes, f"exit {_exit_text(done.returncode)}" + (f": {out[-600:]}" if out else "")
 
 
+def _extra_requirements(extra: str) -> list[str]:
+    """The requirements Kazma's *extra* adds (``kazma[postgres]``), from the
+    installed package's metadata, else the checkout's pyproject.toml. A
+    self-reference (``kazma[...]``) is left out."""
+    from importlib.metadata import PackageNotFoundError, requires
+
+    from packaging.requirements import Requirement
+
+    try:
+        lines = requires("kazma") or []
+    except PackageNotFoundError:
+        lines = []
+    found: list[str] = []
+    for line in lines:
+        req = Requirement(line)
+        if req.marker is None or req.name.lower() == "kazma":
+            continue
+        if req.marker.evaluate({"extra": extra}) and not req.marker.evaluate({"extra": ""}):
+            extras = f"[{','.join(sorted(req.extras))}]" if req.extras else ""
+            found.append(f"{req.name}{extras}{req.specifier}")
+    if found:
+        return found
+    import tomllib
+
+    from kazma_core.paths import get_project_root
+
+    try:
+        data = tomllib.loads((get_project_root() / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    return [r for r in data.get("project", {}).get("optional-dependencies", {}).get(extra, [])
+            if not r.strip().lower().startswith("kazma[")]
+
+
+def _driver_step():
+    """The step that installs Kazma's Postgres driver into the environment
+    Kazma runs in, or None when it is there. ``kazma setup postgres`` wrote
+    ``KAZMA_DATABASE_URL`` into an environment without it (the drill VM,
+    2026-11-06): the server then waited for a database it could not reach.
+    ``uv pip install`` adds; it never removes what is installed."""
+    import shutil as _shutil
+
+    from kazma_core.db.postgres_pool import driver_missing
+    from kazma_core.postgres_service import Step
+
+    if not driver_missing():
+        return None
+    requirements = _extra_requirements("postgres")
+    if not requirements:
+        raise RuntimeError("Kazma's postgres extra lists no packages here (no package metadata, "
+                           "no pyproject.toml): install kazma[postgres] by hand")
+    uv = _shutil.which("uv")
+    argv = ((uv, "pip", "install", "--python", sys.executable, *requirements) if uv
+            else (sys.executable, "-m", "pip", "install", *requirements))
+    return Step("Install Kazma's Postgres driver (the kazma[postgres] extra)", argv)
+
+
 def _print_check(platform, record: dict, state: dict | None) -> int:
     from kazma_core import postgres_service as pgs
 
@@ -175,6 +232,11 @@ def _print_check(platform, record: dict, state: dict | None) -> int:
         mark = "ok" if value else ("??" if value is None else "NO")
         problems += 0 if value else 1
         _say(f"  {mark:4} {label}")
+    from kazma_core.db.postgres_pool import driver_missing
+
+    driver_ok = driver_missing() is None
+    problems += 0 if driver_ok else 1
+    _say(f"  {'ok' if driver_ok else 'NO':4} Kazma's Postgres driver (psycopg) in {sys.prefix}")
     if problems:
         _say("Repair it with: kazma setup postgres")
     return 0 if not problems else 1
@@ -580,6 +642,16 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
             # The service runs as set up and Kazma's address already names it:
             # this run is the move only, which needs no admin rights.
             steps = []
+    # First, whatever else is done or skipped: without the driver nothing
+    # after it reaches the database, and .env must not name a database Kazma
+    # cannot reach. Added after the filter above (its title starts "Install").
+    try:
+        driver = _driver_step()
+    except RuntimeError as exc:
+        _say(str(exc))
+        return 2
+    if driver is not None:
+        steps = [driver, *steps]
 
     if container:
         hold = hold or _MoveHold()

@@ -30,7 +30,7 @@ kazma/
 ├── pyproject.toml       # Single hatchling build (6 packages in the wheel)
 ├── Dockerfile           # Main agent image
 ├── docker-compose.yml   # Host 9090 → container 8000
-├── setup.ps1            # Windows bootstrap (uv sync rag+dev+tui)
+├── setup.ps1            # Windows bootstrap (uv sync --inexact rag+dev+tui+postgres)
 ├── setup.sh             # Linux / macOS / WSL bootstrap
 └── run.sh               # Minimal E2E reproduction
 ```
@@ -66,7 +66,7 @@ source .venv/bin/activate
 ```bash
 # Same extras as setup.sh / setup.ps1:
 pip install -e ".[rag,dev,tui]"
-# or: uv sync --extra rag --extra dev --extra tui
+# or: uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
 ```
 
 There is **no `[cli]` extra** and no `[tracing]` extra. Full extra table: [Quickstart §2](quickstart#path-b--editable-install-manual).
@@ -74,13 +74,13 @@ There is **no `[cli]` extra** and no `[tracing]` extra. Full extra table: [Quick
 ### 2.2 Windows
 
 ```powershell
-.\setup.ps1            # Python 3.11+, uv, uv sync rag+dev+tui, import check
+.\setup.ps1            # Python 3.11+, uv, uv sync --inexact rag+dev+tui+postgres, import check
 ```
 
 ### 2.3 uv (used by `setup.sh` / `run.sh`)
 
 ```bash
-uv sync --extra rag --extra dev --extra tui
+uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
 # Full optional set (heavy):
 # uv sync --all-extras
 ```

@@ -108,6 +108,10 @@ _state = _State()
 
 def _outage_one(exc: BaseException) -> bool:
     cls = type(exc)
+    if getattr(exc, "driver_missing", False):
+        # postgres_pool.PostgresDriverMissing, and the settings store's error
+        # carrying it: the server may be fine, and no wait installs psycopg.
+        return False
     if cls.__name__ == "PostgresUnreachable":
         return True
     if cls.__name__ == "ConfigStoreUnavailableError":

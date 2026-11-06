@@ -256,8 +256,8 @@ def _with_cmdletbinding(text: str) -> str:
     return planted
 
 
-_SYNC_NOW = "Invoke-Native { uv sync --extra rag --extra dev --extra tui } | ForEach-Object { Write-Verbose $_ }"
-_SYNC_THEN = "& uv sync --extra rag --extra dev --extra tui 2>&1 | ForEach-Object { Write-Verbose $_ }"
+_SYNC_NOW = "Invoke-Native { uv sync @syncArgs } | ForEach-Object { Write-Verbose $_ }"
+_SYNC_THEN = "& uv sync @syncArgs 2>&1 | ForEach-Object { Write-Verbose $_ }"
 
 
 def _with_old_uv_sync(text: str) -> str:
@@ -389,15 +389,19 @@ def test_setup_script_starts(shell, tmp_path):
 _FAKE_UV = (
     "@echo off\r\n"
     "if \"%1\"==\"--version\" (echo uv 0.0.0-stand-in& exit /b 0)\r\n"
+    "echo %*>>\"%~dp0uv-args.txt\"\r\n"
     "echo Using CPython 3.12 interpreter at: stand-in-python.exe 1>&2\r\n"
     "echo Resolved 1 package in 1ms 1>&2\r\n"
     "exit /b 0\r\n"
 )
 
 
-def _sync_folder(root: Path, script_text: str) -> tuple[Path, dict]:
+def _sync_folder(root: Path, script_text: str, *, extras_present: tuple[str, ...] = ()) -> tuple[Path, dict]:
     """A folder setup.ps1 accepts as an install, a venv holding no packages,
-    and a stand-in uv first on PATH that writes to stderr as uv does."""
+    and a stand-in uv first on PATH that writes to stderr as uv does (and
+    records each call's arguments in ``uv-args.txt`` beside it).
+    *extras_present*: the extras the venv reports it already holds, through a
+    stand-in ``kazma_cli.update.extras_in_this_environment``."""
     import sys
 
     root.mkdir()
@@ -407,6 +411,12 @@ def _sync_folder(root: Path, script_text: str) -> tuple[Path, dict]:
     script.write_text(script_text, encoding="utf-8-sig")
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(root / ".venv")],
                    check=True, capture_output=True, timeout=120)
+    if extras_present:
+        package = root / ".venv" / "Lib" / "site-packages" / "kazma_cli"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "update.py").write_text(
+            f"def extras_in_this_environment():\n    return {list(extras_present)!r}\n", encoding="utf-8")
     bin_dir = root.parent / f"{root.name}-bin"
     bin_dir.mkdir()
     (bin_dir / "uv.cmd").write_text(_FAKE_UV, encoding="ascii")
@@ -425,7 +435,8 @@ def test_setup_script_gets_past_uv_sync_on_windows_powershell(shell, tmp_path):
         pytest.skip("no Windows PowerShell here")
     text = (ROOT / "setup.ps1").read_text(encoding="utf-8-sig")
 
-    script, env = _sync_folder(tmp_path / "now", text)
+    # A re-run on an install that already holds the web extra and rag.
+    script, env = _sync_folder(tmp_path / "now", text, extras_present=("web", "rag"))
     done = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
         cwd=script.parent, capture_output=True, text=True, timeout=300, env=env,
@@ -437,6 +448,12 @@ def test_setup_script_gets_past_uv_sync_on_windows_powershell(shell, tmp_path):
     assert "Environment synced" in output, output
     assert "aiosqlite not importable" in output, output
     assert done.returncode == 1, output
+    # What uv was asked: remove nothing, and sync the defaults (the Postgres
+    # driver among them) plus what the install already held, each once.
+    calls = (tmp_path / "now-bin" / "uv-args.txt").read_text(encoding="utf-8").split()
+    assert calls[:2] == ["sync", "--inexact"], calls
+    named = [calls[i + 1] for i, word in enumerate(calls) if word == "--extra"]
+    assert named == ["rag", "dev", "tui", "postgres", "web"], named
 
     # The negative control: the uv sync line as it was ends the script at
     # the stand-in's first stderr line.

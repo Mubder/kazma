@@ -182,13 +182,31 @@ if (Test-Path "pyproject.toml" -PathType Leaf) {
 
 Log-Header "2. Sync Handshake (uv sync)"
 
-# rag = vector memory; dev = tests/lint; tui = kazma-tui.
+# rag = vector memory; dev = tests/lint; tui = kazma-tui; postgres = the
+# driver for the database `kazma setup postgres` sets up.
 # There is no [cli] extra — kazma-cli is a first-class package in the wheel.
-# Full set: uv sync --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
+# Full set: uv sync --inexact --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
+#
+# --inexact, and every extra the install already has: a plain `uv sync`
+# makes the environment exactly the extras it names and removes the rest, so
+# a re-run of this script removed whatever was installed after the first run
+# (the drill VM, 2026-11-06: the Postgres driver, with KAZMA_DATABASE_URL set).
+$DefaultExtras = @("rag", "dev", "tui", "postgres")
+$extras = [System.Collections.Generic.List[string]]::new()
+foreach ($x in $DefaultExtras) { $extras.Add($x) }
+$existingPython = @(".venv\Scripts\python.exe", ".venv\bin\python") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($existingPython) {
+    $present = Invoke-Native -StdoutOnly { & $existingPython -I -c "from kazma_cli.update import extras_in_this_environment as e; print(' '.join(e()))" }
+    if ($LASTEXITCODE -eq 0) {
+        foreach ($x in ("$present" -split '\s+')) { if ($x -and -not $extras.Contains($x)) { $extras.Add($x) } }
+    }
+}
+$syncArgs = @("--inexact")
+foreach ($x in $extras) { $syncArgs += @("--extra", $x) }
 Log-Info "Installing Kazma's packages; the first run downloads PyTorch and can take several minutes"
-Invoke-Native { uv sync --extra rag --extra dev --extra tui } | ForEach-Object { Write-Verbose $_ }
+Invoke-Native { uv sync @syncArgs } | ForEach-Object { Write-Verbose $_ }
 if ($LASTEXITCODE -eq 0) {
-    Log-Ok "Environment synced from pyproject.toml (rag + dev + tui extras)"
+    Log-Ok "Environment synced from pyproject.toml (extras: $($extras -join ', '))"
 } else {
     $syncExit = $LASTEXITCODE
     Log-Fail "uv sync failed (exit code $syncExit)"
@@ -245,7 +263,7 @@ if (-not (Test-Path $VenvPython)) {
     $VenvPython = ".venv\bin\python"
     if (-not (Test-Path $VenvPython)) {
         Log-Fail "Virtual environment not found at .venv\"
-        Log-Info "uv sync may have failed silently. Try: uv sync --verbose"
+        Log-Info "uv sync may have failed silently. Try: uv sync $($syncArgs -join ' ') --verbose"
         exit 1
     }
 }
@@ -272,7 +290,7 @@ Check-Import "textual" "textual (TUI)"
 if ($IntroErrors -gt 0) {
     Write-Host ""
     Log-Fail "$IntroErrors core import(s) failed"
-    Log-Info "Fix: uv sync --reinstall"
+    Log-Info "Fix: uv sync $($syncArgs -join ' ') --reinstall"
     exit 1
 }
 
@@ -321,7 +339,7 @@ Log-Info "Run Web UI:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve     # h
 Log-Info "Run TUI:        & '$(Join-Path $ScriptsDir 'kazma-tui.exe')'"
 Log-Info "Run tests:      $VenvPython scripts\fast_test.py"
 Log-Info "Watch/reload:   $VenvPython scripts\service\kazma_guard.py --install"
-Log-Info "Everything:     uv sync --all-extras"
+Log-Info "Everything:     uv sync --inexact --all-extras"
 Log-Info "Docs:           https://github.com/Mubder/kazma"
 Write-Host ""
 Write-Host "🇰🇼 كاظمه — Built to remember. Built to last." -ForegroundColor Green

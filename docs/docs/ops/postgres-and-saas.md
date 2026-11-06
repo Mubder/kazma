@@ -214,15 +214,20 @@ package manager:
 What it does, in order (it prints the plan and asks first; `-y` skips the
 question, `--dry-run` prints the commands, `--check` only reports):
 
-1. Installs Postgres 16 as a service that starts at boot and restarts when it
+1. Installs Kazma's own Postgres driver (the `kazma[postgres]` extra: psycopg)
+   into the Python environment Kazma runs in, when it is not there. Without it
+   Kazma has an address and no way to reach it, and the server waits at
+   startup saying the driver is not installed. A second run installs it too.
+   If it does not install, nothing after it is done.
+2. Installs Postgres 16 as a service that starts at boot and restarts when it
    fails, listening on this machine only (`listen_addresses = 'localhost'`),
    with `scram-sha-256` sign-in.
-2. Creates the `kazma` database and the `kazma_app` role (not a superuser,
+3. Creates the `kazma` database and the `kazma_app` role (not a superuser,
    `deploy/postgres/kazma_app_role.sql`).
-3. Turns on WAL archiving (below).
-4. Writes `KAZMA_DATABASE_URL` into the install's `.env` (never printed; the
+4. Turns on WAL archiving (below).
+5. Writes `KAZMA_DATABASE_URL` into the install's `.env` (never printed; the
    file restricted to your account), and signs in once as Kazma will.
-5. Records what it did in `kazma-data/setup_record.json`: `kazma doctor`
+6. Records what it did in `kazma-data/setup_record.json`: `kazma doctor`
    checks the service from it, and the guard watches the service (it starts a
    service that stopped once per outage, and pages once if it stays down).
 

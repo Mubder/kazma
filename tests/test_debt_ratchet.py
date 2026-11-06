@@ -577,7 +577,9 @@ def _is_test_path(f: str) -> bool:
 
 
 def structural_debt() -> dict[str, list[str]]:
-    everything = _tracked(["*.py", "*.yaml", "*.yml", "*.toml", "*.json"])
+    # Shell scripts are callers too: setup.ps1 and setup.sh call
+    # kazma_cli.update.extras_in_this_environment by name.
+    everything = _tracked(["*.py", "*.yaml", "*.yml", "*.toml", "*.json", "*.ps1", "*.sh"])
     product = {
         f: t for f, t in everything.items()
         if f.startswith("kazma-") and f.endswith(".py") and not _is_test_path(f)
