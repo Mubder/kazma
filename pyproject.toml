@@ -135,7 +135,7 @@ web = [
 ]
 # Multi-replica / SaaS shared state (Phase 4.3)
 postgres = [
-    "psycopg[binary,pool]>=3.3.6",
+    "psycopg[binary,pool]>=3.3.7",
     "langgraph-checkpoint-postgres>=3.1.3",
 ]
 # Compatibility alias. These libraries are already base dependencies.
