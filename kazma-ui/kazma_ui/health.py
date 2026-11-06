@@ -280,6 +280,10 @@ def _check_knowledge_vectors() -> dict[str, Any]:
         return {"status": "failed", "component": "knowledge_vectors", "error": "check failed"}
 
 
+#: What the owner does when the provider check needs setup.
+_PROVIDER_SETUP = "Settings -> Providers: add the provider's API key, or choose a local model"
+
+
 def check_llm_provider() -> dict[str, Any]:
     """Is an LLM provider configured with usable credentials?
 
@@ -299,12 +303,17 @@ def check_llm_provider() -> dict[str, Any]:
         base_url = str(profile.get("base_url") or "")
         key = str(profile.get("api_key") or "")
         needs_key = base_url.startswith("http") and "localhost" not in base_url             and "127.0.0.1" not in base_url
+        # needs_setup: only the owner can fix it (a restart cannot add a key).
+        # The guard reads it from /health/ready and does not restart for it:
+        # on the drill VM (2026-11-06) a fresh install with no key was
+        # restarted every 15 minutes while its owner tried to set it up.
         if not model:
             return {"status": "degraded", "component": "llm_provider",
-                    "error": "no active model"}
+                    "error": "no active model", "needs_setup": _PROVIDER_SETUP}
         if needs_key and key in ("", "not-needed"):
             return {"status": "degraded", "component": "llm_provider",
-                    "model": model, "error": "no API key for a remote provider"}
+                    "model": model, "error": "no API key for a remote provider",
+                    "needs_setup": _PROVIDER_SETUP}
         return {"status": "ok", "component": "llm_provider", "model": model}
     except Exception as e:
         logger.error("LLM provider health check failed: %s", e)
@@ -683,6 +692,15 @@ async def _readiness(*, runtime: Any = None, required: Any = None):
     # the guard restarts on it instead of riding it out as an outage.
     if any(c.get("restart_required") for c in checks.values() if isinstance(c, dict)):
         response["restart_required"] = True
+    # Its opposite: every required check that fails waits for the owner (a
+    # provider key). Kazma is up and its pages serve; the guard does not
+    # restart it, and says once what to set up.
+    setup = {name: str(checks[name].get("needs_setup"))
+             for name in critical_failed
+             if isinstance(checks.get(name), dict) and checks[name].get("needs_setup")}
+    if critical_failed and len(setup) == len(critical_failed):
+        response["needs_setup"] = sorted(setup)
+        response["setup"] = setup
 
     return JSONResponse(content=response, status_code=http_status)
 

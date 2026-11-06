@@ -180,7 +180,9 @@ def test_the_activity_url_is_derived_from_the_health_url(monkeypatch):
             return b'{"active_turns": 0}'
 
     def _open(url, timeout=5):
-        seen.append(url)
+        # The guard sends a Request carrying its own name (_request, the
+        # observer pairing of 2026-11-06), not a bare URL.
+        seen.append(getattr(url, "full_url", url))
         return _Resp()
 
     monkeypatch.setattr(guard.urllib.request, "urlopen", _open)

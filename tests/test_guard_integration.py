@@ -256,6 +256,36 @@ def test_a_not_ready_that_only_a_restart_clears_is_restarted(tmp_path):
         assert g.count("health.dependency_down") == 0
 
 
+def test_a_server_waiting_for_setup_is_up_and_never_restarted(tmp_path):
+    """No provider key (the drill VM, 2026-11-06): Kazma is up, its pages
+    serve, and readiness says the owner has something to set up. A restart
+    cannot add a key. The guard restarted it every 15 minutes, saying only
+    "not_ready", while its owner tried to set it up."""
+    port = _free_port()
+    done = tmp_path / "setup-done"
+    with GuardRun(tmp_path, port, FAKE_NEEDS_SETUP="1", FAKE_SETUP_DONE_FILE=str(done),
+                  START_TIMEOUT="10", FAILURES="2", INTERVAL="2",
+                  KAZMA_GUARD_DEPENDENCY_OUTAGE_S="6") as g:
+        ev = g.wait_for("child.up_needs_setup", timeout=60)
+        assert "llm_provider: no API key" in str(ev.get("detail")), ev
+        time.sleep(16)  # past the start budget (10 s) and the outage runway (6 s)
+        assert g.count("guard.restarting") == 0 and g.count("child.never_ready") == 0
+        assert g.count("child.spawned") == 1
+        assert g.count("health.needs_setup") == 1, "said once, not every probe"
+        done.write_text("", encoding="utf-8")  # the owner added a key
+        g.wait_for("health.setup_done", timeout=30)
+
+
+def test_a_setup_wait_without_its_flag_was_restarted(tmp_path):
+    """Negative control: the same answer from a build before needs_setup."""
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_NEEDS_SETUP="old", START_TIMEOUT="8",
+                  FAILURES="2", INTERVAL="2") as g:
+        ev = g.wait_for("child.never_ready", timeout=60)
+        assert "llm_provider: no API key" in str(ev.get("last")), "the check is named, at least"
+        g.wait_for("guard.restarting", timeout=30)
+
+
 def test_a_long_dependency_outage_is_restarted_after_the_runway(tmp_path):
     """Past the runway the guard restarts anyway: the database may be back
     and Kazma's own connections what is stuck."""

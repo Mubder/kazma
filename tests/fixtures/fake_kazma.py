@@ -17,6 +17,11 @@ each of the specific ways that broke the guard in production:
                           gone and the app says stop routing traffic
     FAKE_NOT_READY_RESTART_REQUIRED  ...and says only a restart clears it
                           (the volatile settings store)
+    FAKE_NEEDS_SETUP      from the start, not ready + 503 because no provider
+                          key is set, as Kazma answers it (``needs_setup``);
+                          "old": the same body without ``needs_setup`` (a
+                          build before 2026-11-07, the negative control)
+    FAKE_SETUP_DONE_FILE  ...ready once this file exists (the owner added a key)
     FAKE_DEGRADED_AFTER_S   report degraded + 200: a partial failure that is
                           explicitly still serving and must NOT be restarted
     FAKE_HANG_AFTER_S     stop answering entirely without exiting
@@ -70,6 +75,28 @@ ACTIVE_TURNS = int(os.environ.get("FAKE_ACTIVE_TURNS", "0"))
 ACTIVITY = os.environ.get("FAKE_ACTIVITY", "1").lower() not in ("0", "false", "no")
 NOTE_ENV = [name for name in os.environ.get("FAKE_NOTE_ENV", "").split(",") if name]
 BROKER_REQUEST = os.environ.get("FAKE_BROKER_REQUEST", "").strip().lower()
+NEEDS_SETUP = os.environ.get("FAKE_NEEDS_SETUP", "").strip().lower()
+SETUP_DONE_FILE = os.environ.get("FAKE_SETUP_DONE_FILE", "")
+
+
+def _needs_setup_body() -> dict | None:
+    """Kazma's readiness with no provider key (the drill VM, 2026-11-06)."""
+    if not NEEDS_SETUP or (SETUP_DONE_FILE and os.path.exists(SETUP_DONE_FILE)):
+        return None
+    body: dict = {
+        "status": "not_ready",
+        "checks": {
+            "database": {"status": "ok"},
+            "llm_provider": {"status": "degraded", "component": "llm_provider",
+                             "model": "gpt-4o-mini", "error": "no API key for a remote provider",
+                             "needs_setup": "Settings -> Providers"},
+        },
+        "unavailable_capabilities": ["llm_provider"],
+    }
+    if NEEDS_SETUP != "old":
+        body["needs_setup"] = ["llm_provider"]
+        body["setup"] = {"llm_provider": "Settings -> Providers"}
+    return body
 
 _state = {"hung": False, "not_ready": False, "degraded": False}
 
@@ -126,6 +153,15 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/health/ready"):
             if COUNT_PROBES:
                 _note("probe")
+            setup = _needs_setup_body()
+            if setup is not None:
+                raw = json.dumps(setup).encode()
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
             if _state["not_ready"]:
                 # Critical dependency gone: the app itself says stop
                 # routing traffic. The guard rides a dependency outage out
