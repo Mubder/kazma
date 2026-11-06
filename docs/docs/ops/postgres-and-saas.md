@@ -232,21 +232,33 @@ installer's throwaway one, which the next step replaces. A second run checks
 and repairs, and never reinstalls. Run it from an elevated terminal on
 Windows.
 
-**Moving off the Docker container.** With Kazma idle and paused for
-maintenance (`python scripts/service/kazma_guard.py --pause --stop --reason
-"database move"`):
+**Moving off the Docker container.** One command switches Kazma, with Kazma
+running:
 
 ```bash
 kazma setup postgres --port 5432 --move-from-container kazma-db-win
 ```
 
-It sets up the new server, copies the container's database into it
-(`pg_dump` inside the container, `pg_restore` as `kazma_app`), compares the
-row count of every Kazma table, and only then writes the new address into
-`.env`. Then resume the guard (`--resume`) and Kazma reloads onto the new
-server. Point the memory mirror's address (`memory.backends.state.url`) at
-the same server if it has its own. The container is left as it was: it is the
-way back (put the old address back), and can be removed after 30 days.
+It sets up the new server, then, once no chat turn is running, stops Kazma
+through its guard, so nothing is written to the container while it is
+copied. It copies the container's database in (`pg_dump` inside the
+container, `pg_restore` as `kazma_app`), compares the row count of every
+Kazma table, and only then writes the new address into `.env`. Kazma is then
+started on the new database; once it is seen signed in there, the container
+is stopped and kept (it does not start again by itself). The container is the
+way back (start it, put the old address back); remove it with `docker rm`
+once you are sure. A Kazma running with no guard to stop it is refused before
+anything is done: stop it yourself, then run the command.
+
+Run again, the command replaces an earlier copy on the new server only if
+Kazma never started on it (its last start there is not newer than the
+container's) and nothing is connected to it; a database Kazma has started on
+is never written over. On a healthy service whose address `.env` already
+names, a second run is the move only and needs no elevated terminal. The
+memory mirror keeps its own address (`memory.backends.state.url`, and
+`memory.backends.vector.url`): the move points each one that names the
+container at the new server, while Kazma is stopped. One stored in plain text
+instead of the vault is named, for you to change in Settings.
 
 **Disks that ask for a password at boot.** A Mac with FileVault on, a Windows
 PC whose BitLocker asks for a PIN, and a Linux disk encrypted with LUKS that

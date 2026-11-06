@@ -47,6 +47,7 @@ __all__ = [
     "Platform",
     "Step",
     "detect_platform",
+    "empty_database_steps",
     "read_record",
     "service_state",
     "setup_plan",
@@ -256,6 +257,23 @@ def setup_plan(p: Platform, *, port: int = DEFAULT_PORT, superuser_password: str
                       stdin=f"ALTER ROLE {APP_ROLE} PASSWORD {_sql_literal(app_password)};\n", env=env,
                       shown=" ".join(_psql(p, port=port, database=DATABASE)) + " < (password)"))
     return steps
+
+
+def empty_database_steps(p: Platform, *, port: int = DEFAULT_PORT, superuser_password: str,
+                         role_sql: str) -> list[Step]:
+    """Kazma's database on this server dropped and made again, empty and
+    owned by ``kazma_app``: before a move copies the container in again over
+    an earlier copy Kazma never started on (``backup.pg_move``). A plain
+    ``DROP DATABASE``, never ``WITH (FORCE)``: a session still connected
+    fails the step instead of being cut off."""
+    env = {"PGPASSWORD": superuser_password} if p.os == "windows" else {}
+    return [
+        Step(f"Empty Kazma's database on the new server (drop and create {DATABASE})", _psql(p, port=port),
+             stdin=f"DROP DATABASE IF EXISTS {DATABASE};\nCREATE DATABASE {DATABASE};\n", env=env,
+             shown=" ".join(_psql(p, port=port)) + f" < (DROP DATABASE {DATABASE}; CREATE DATABASE {DATABASE})"),
+        Step(f"Give it to {APP_ROLE}", _psql(p, port=port, database=DATABASE), stdin=role_sql, env=env,
+             shown=" ".join(_psql(p, port=port, database=DATABASE)) + " < kazma_app_role.sql"),
+    ]
 
 
 def database_url(app_password: str, port: int = DEFAULT_PORT) -> str:

@@ -185,3 +185,66 @@ def test_negative_control_a_row_lost_in_the_move_is_said(two_databases, monkeypa
         bin_dir="/no/client/tools")
     assert ok is False
     assert any("DIFFERS kazma_settings: 3 -> 2" in line for line in said), said
+
+
+def test_a_second_move_replaces_a_copy_kazma_never_started_on_and_never_one_it_did(two_databases, monkeypatch):
+    """The live shape of 2026-11-06: a first copy made while Kazma still ran on
+    the container. A second move replaces that copy (Kazma never started on
+    it) with the container's newer rows; a database Kazma started on (a newer
+    boot stamp there) or one something is connected to is never emptied."""
+    psycopg = pytest.importorskip("psycopg")
+
+    container, dsn, src, dst = two_databases
+    user = urlsplit(dsn).username or "postgres"
+    monkeypatch.setattr("kazma_core.db.backend.get_database_url", lambda: _with_database(dsn, src))
+    with psycopg.connect(_with_database(dsn, src), autocommit=True) as conn:
+        conn.execute("INSERT INTO kazma_settings VALUES (%s, '100.5')", (pg_move.BOOT_KEY,))
+    dst_url, port = _with_database(dsn, dst), urlsplit(dsn).port or 5432
+    runner = _run_restoring_in_the_container(container, dst, user)
+    emptied: list[bool] = []
+
+    def empty() -> bool:
+        emptied.append(True)
+        with psycopg.connect(dsn, autocommit=True) as admin:
+            admin.execute(f"DROP DATABASE {dst}")
+            admin.execute(f"CREATE DATABASE {dst}")
+        return True
+
+    def move(empty_target=empty) -> tuple[bool, list[str]]:
+        said: list[str] = []
+        ok = pg_move.move_from_container(container, dst_url, port=port, say=said.append, run=runner,
+                                         bin_dir="/no/client/tools", empty_target=empty_target)
+        return ok, said
+
+    ok, said = move()
+    assert ok, said
+    assert emptied == []  # an empty database: copied straight in
+
+    # Kazma kept writing to the container after the first copy.
+    with psycopg.connect(_with_database(dsn, src), autocommit=True) as conn:
+        conn.execute("INSERT INTO kazma_chat_sessions VALUES ('s3')")
+    ok, said = move(empty_target=None)
+    assert not ok, said  # nothing given to empty it: the earlier copy stays as it is
+    ok, said = move()
+    assert ok, said
+    assert emptied == [True]
+    with psycopg.connect(dst_url) as conn:
+        assert conn.execute("SELECT count(*) FROM kazma_chat_sessions").fetchone()[0] == 3
+
+    # Kazma started on the new server and wrote there: never emptied again.
+    with psycopg.connect(dst_url, autocommit=True) as conn:
+        conn.execute("UPDATE kazma_settings SET value = '200.0' WHERE key = %s", (pg_move.BOOT_KEY,))
+        conn.execute("INSERT INTO kazma_chat_sessions VALUES ('written-on-the-new-server')")
+    ok, said = move()
+    assert not ok and emptied == [True]
+    assert any("Kazma has started on the new server" in line for line in said), said
+    with psycopg.connect(dst_url) as conn:
+        assert conn.execute("SELECT count(*) FROM kazma_chat_sessions").fetchone()[0] == 4
+
+    # Something connected to it: refused whatever the stamps say.
+    with psycopg.connect(dst_url, autocommit=True) as conn:
+        conn.execute("UPDATE kazma_settings SET value = '100.5' WHERE key = %s", (pg_move.BOOT_KEY,))
+    with psycopg.connect(dst_url):
+        ok, said = move()
+    assert not ok and emptied == [True]
+    assert any("session(s) are connected" in line for line in said), said
