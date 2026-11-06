@@ -7427,9 +7427,15 @@ code) and Kazma ran with nobody supervising it.
   thread with a 5 s bound; a hung observer is `skipped`. The answer (`reached`,
   `rejected`, `unreachable`) is logged once per change and kept in the state
   file's `outside_watch` and `--status`'s `outside` line.
-  `KAZMA_GUARD_OUTSIDE_WATCH=off` wins over a key. Gate:
-  `tests/test_observer_heartbeat.py` (the snapshot sent as it is, and a guard
-  without the watch, as negative controls).
+  `KAZMA_GUARD_OUTSIDE_WATCH=off` wins over a key. **Every request the guard
+  makes carries its own name** (`_request`, `GUARD_USER_AGENT`): Cloudflare's
+  bot check refuses urllib's ("Python-urllib", error 1010), and on the first
+  live pairing (2026-11-06) every heartbeat was a 403 before the Worker.
+  `kazma observer status` reads the guard's state file where the guard keeps
+  it when no path was handed over (`outside_watch._guard_state_path`). Gate:
+  `tests/test_observer_heartbeat.py` (the snapshot sent as it is, a guard
+  without the watch, and a bare URL or Request (11 in the old guard), as
+  negative controls; the name on a real request).
   **The observer** is `deploy/observer` (a Worker: `src/diagnose.js` the
   table pull-probe x heartbeat -> condition, a heartbeat missing after 90 s;
   `src/incidents.js` one page on the third failed minute, hourly reminders,

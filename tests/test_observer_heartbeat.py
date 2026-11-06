@@ -215,6 +215,93 @@ def test_a_paired_guard_sends_a_signed_heartbeat_a_minute(monkeypatch, tmp_path)
     assert h.restricted == [h.key_path]  # restricted once, not every send
 
 
+def test_the_heartbeat_names_the_guard_not_urllib(monkeypatch, tmp_path):
+    """Live 2026-11-06: Cloudflare's bot check refused urllib's own name
+    ("Python-urllib/3.x", error 1010), so every heartbeat was a 403 before it
+    reached the observer, while the observer itself answered."""
+    h = _Harness(monkeypatch, tmp_path)
+    h.tick()
+    headers = {k.lower(): v for k, v in h.opener.requests[0].header_items()}
+    assert headers["user-agent"] == guard.GUARD_USER_AGENT
+    assert "urllib" not in headers["user-agent"].lower()
+
+
+def _requests_not_built_by_the_helper(source: str) -> list[str]:
+    """Each request in *source* the guard does not build through ``_request``:
+    a urllib Request made anywhere else, or urlopen handed anything but a
+    request ``_request`` built (a bare URL goes out as "Python-urllib")."""
+    import ast
+
+    def is_attr(node, name):
+        return isinstance(node, ast.Attribute) and node.attr == name
+
+    def from_helper(node):
+        return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_request"
+
+    found = []
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        built = {t.id for n in ast.walk(fn) if isinstance(n, ast.Assign) and from_helper(n.value)
+                 for t in n.targets if isinstance(t, ast.Name)}
+        for call in ast.walk(fn):
+            if not isinstance(call, ast.Call):
+                continue
+            if is_attr(call.func, "Request") and fn.name != "_request":
+                found.append(f"{fn.name}:{call.lineno} Request")
+            if is_attr(call.func, "urlopen"):
+                arg = call.args[0] if call.args else None
+                if not (from_helper(arg) or (isinstance(arg, ast.Name) and arg.id in built)):
+                    found.append(f"{fn.name}:{call.lineno} urlopen")
+    return found
+
+
+def test_every_request_the_guard_makes_carries_its_name():
+    assert _requests_not_built_by_the_helper(GUARD.read_text(encoding="utf-8")) == []
+
+
+def test_negative_control_a_bare_url_or_request_is_caught():
+    planted = (
+        "import urllib.request\n"
+        "def ping(url):\n"
+        "    with urllib.request.urlopen(url, timeout=5) as r:\n"
+        "        pass\n"
+        "def post(url):\n"
+        "    req = urllib.request.Request(url, method='POST')\n"
+        "    urllib.request.urlopen(req)\n"
+    )
+    assert _requests_not_built_by_the_helper(planted) == ["ping:3 urlopen", "post:6 Request", "post:7 urlopen"]
+
+
+def test_the_name_goes_out_on_a_real_request():
+    """Through urllib itself, to a server on this machine: the probe's
+    request carries the guard's name."""
+    seen: list[str] = []
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - the stdlib's name
+            seen.append(self.headers.get("User-Agent", ""))
+            raw = b'{"status":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        guard.probe(f"http://127.0.0.1:{server.server_port}/health/ready", 5.0)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen == [guard.GUARD_USER_AGENT]
+
+
 def test_a_refusal_and_an_outage_are_told_apart(monkeypatch, tmp_path):
     err = urllib.error.HTTPError("https://x", 401, "no", {}, None)
     h = _Harness(monkeypatch, tmp_path, opener=_Opener(error=err))
