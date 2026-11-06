@@ -8,26 +8,37 @@ a separate PC -- the owner's choice, plan item 13).
 
 Steps (``--only`` runs some; ``--dry-run`` lists them):
 
-1. ``postgres``  -- the database stopped for two minutes: Kazma answers
-   "not ready: database away" and is NOT restarted (the guard rides it out),
-   and is ready again within two minutes of the database's return.
-2. ``kill``      -- the server killed mid-turn: the guard restarts it, and a
-   safe turn that was running continues by itself (C1).
-3. ``docker``    -- Docker stopped: the guard starts it again (2026-11-04).
-4. ``network``   -- the network cut by a firewall rule for two minutes: chat
-   replies wait in the outbox and are delivered after (F3).
-5. ``disk``      -- the disk filled to its floor (a small virtual disk): the
-   guard pages, documents refuse work, nothing is corrupted.
-6. ``reload``    -- a reload under load: every turn finishes or is told it
-   was stopped for the restart; nothing is lost (C3).
+1. ``postgres``  -- the database stopped: Kazma answers "not ready" and is
+   NOT restarted (the guard rides it out, §44), and is ready again within
+   two minutes of the database's return. The database is what the install
+   runs: the OS service ``kazma setup postgres`` recorded (then the guard
+   must start it itself, A1), else the container ``--db-container`` names.
+2. ``kill``      -- the server killed: the guard starts it again and it is
+   ready within five minutes.
+3. ``docker``    -- Docker Desktop stopped: the guard starts it again and
+   Docker answers within ten minutes. Skipped when Kazma uses no container
+   on this machine (the guard then has nothing to start Docker for) or
+   there is no Docker.
+4. ``network``   -- the network cut by a firewall rule for two minutes: the
+   server stays up, and is ready after.
+5. ``disk``      -- the data folder's disk filled to ~400 MB free: the guard
+   records the disk level (low or critical) and the server stays up.
+6. ``reload``    -- an operator reload: the guard reloads (not a crash
+   restart) and the server is ready again within three minutes. A turn and a
+   document job in flight across a real reload are CI's drill
+   (``tests/test_drill_graceful_reload.py``).
 
-Each step reads the outcome from the target's own answers (``/health/*``,
-the guard's state file); the result is one JSON line per step and a summary
-(``--report``), for the weekly report.
+Each step reads the outcome from the target's own answers (``/health/*``)
+and the guard's own record of what it did (its state file and its log,
+``<install>/.kazma/guard.state.json`` and ``guard.log``) -- only fields and
+events the guard writes (``tests/test_chaos_week.py`` holds the drill to
+them). The result is one JSON line per step and a summary (``--report``).
 
-Run on the drill machine, from its install folder:
+Run on the drill machine, from its install folder, in an elevated shell on
+Windows (stopping a service, the guard's server and a firewall rule need
+it):
 
-    python scripts/chaos_week.py --target http://127.0.0.1:9191 --install . [--only postgres,kill]
+    .venv\\Scripts\\python.exe scripts\\chaos_week.py --target http://127.0.0.1:9191 --install .
 """
 
 from __future__ import annotations
@@ -41,10 +52,19 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 LIVE_PORT = 9090
 MARKER = Path(".kazma") / "chaos-ok"
+#: Steps that stop a service, kill an elevated process or add a firewall rule.
+ADMIN_STEPS = ("postgres", "kill", "network")
+#: Guard log events: a restart the guard counted as a crash.
+CRASH_EVENTS = ("guard.restarting", "guard.crash_loop")
+#: Fields of the guard's state file the drill reads.
+STATE_FIELDS = ("child_pid", "dependencies", "disk")
+#: Guard log events the drill reads.
+GUARD_EVENTS = CRASH_EVENTS + ("guard.operator_reload", "dbsvc.start_tried", "deps.docker_launched")
 
 
 @dataclass
@@ -54,6 +74,16 @@ class StepResult:
     expected: str
     observed: str
     seconds: float = 0.0
+    skipped: bool = False
+
+
+@dataclass
+class Outcome:
+    """What a command did."""
+
+    ok: bool
+    detail: str = ""
+    missing: bool = False
 
 
 @dataclass
@@ -63,11 +93,18 @@ class Drill:
 
     target: str
     install: Path
+    data_dir: Path | None = None
+    db_container: str = "kazma-db"
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run
     sleep: Callable[[float], None] = time.sleep
     now: Callable[[], float] = time.monotonic
+    wall: Callable[[], float] = time.time
     get: Callable[[str], tuple[int, dict]] | None = None
     notes: list[str] = field(default_factory=list)
+
+    @property
+    def data(self) -> Path:
+        return self.data_dir or self.install / "kazma-data"
 
     def answer(self, path: str) -> tuple[int, dict]:
         if self.get is not None:
@@ -83,6 +120,17 @@ class Drill:
         except (urllib.error.URLError, OSError, ValueError):
             return 0, {}
 
+    def act(self, argv: list[str], timeout: float = 60) -> Outcome:
+        """Run *argv*; never raises."""
+        try:
+            got = self.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
+        except FileNotFoundError:
+            return Outcome(False, f"{argv[0]} not found", missing=True)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return Outcome(False, f"{type(exc).__name__}: {exc}"[:300])
+        said = " ".join(str(part).strip() for part in (got.stdout, got.stderr) if part).strip()
+        return Outcome(got.returncode == 0, f"exit {got.returncode}: {said}"[:300])
+
     def wait_for(self, check: Callable[[], bool], timeout: float, every: float = 5.0) -> float | None:
         """Seconds until *check* held, or None at *timeout*."""
         start = self.now()
@@ -97,6 +145,34 @@ class Drill:
             return json.loads((self.install / ".kazma" / "guard.state.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
+
+    def guard_events(self, since: float) -> list[dict]:
+        """The guard's log events written at or after *since* (epoch seconds),
+        the rotated file included."""
+        found: list[dict] = []
+        for name in ("guard.log.1", "guard.log"):
+            try:
+                lines = (self.install / ".kazma" / name).read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    rec = json.loads(line)
+                    when = datetime.fromisoformat(str(rec.get("ts"))).timestamp()
+                except (ValueError, TypeError, AttributeError):
+                    continue
+                if when >= since:
+                    found.append(rec)
+        return found
+
+    def setup_record(self) -> dict:
+        """The database service ``kazma setup postgres`` recorded, or {}."""
+        try:
+            data = json.loads((self.data / "setup_record.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        rec = data.get("postgres") if isinstance(data, dict) else None
+        return rec if isinstance(rec, dict) else {}
 
 
 def refusal(target: str, install: Path, live_env: Path | None = None) -> str:
@@ -116,39 +192,93 @@ def _ready(drill: Drill) -> bool:
     return drill.answer("/health/ready")[0] == 200
 
 
+def _events(drill: Drill, since: float, *names: str) -> list[dict]:
+    return [e for e in drill.guard_events(since) if e.get("event") in names]
+
+
+def _database_control(drill: Drill) -> tuple[list[str], list[str], str, bool] | str:
+    """(stop, start, what, a service) for the database the install runs, or why not."""
+    rec = drill.setup_record()
+    service, os_name = str(rec.get("service") or ""), str(rec.get("os") or "")
+    if service:
+        if os_name == "windows":
+            return ["sc", "stop", service], ["sc", "start", service], f"the {service} service", True
+        if os_name == "macos":
+            return f"the {service} service is a launchd job: launchd starts it again at once"
+        return (["sudo", "systemctl", "stop", service], ["sudo", "systemctl", "start", service],
+                f"the {service} service", True)
+    name = drill.db_container
+    return ["docker", "stop", name], ["docker", "start", name], f"the {name} container", False
+
+
 def step_postgres(drill: Drill) -> StepResult:
-    expected = "not ready (database away) while it is down, no restart, ready within 2 min of its return"
-    before = drill.guard_state().get("restarts", 0)
-    drill.run(["docker", "stop", "kazma-db"], capture_output=True, check=False, timeout=60)
+    expected = ("not ready while the database is down, no restart, ready within 2 min of its "
+                "return; a service is started again by the guard")
+    control = _database_control(drill)
+    if isinstance(control, str):
+        return StepResult("postgres", True, expected, f"skipped: {control}", skipped=True)
+    stop, start, what, service = control
+    since = drill.wall()
+    stopped = drill.act(stop)
+    if not stopped.ok:
+        return StepResult("postgres", False, expected, f"could not stop {what}: {stopped.detail}")
     away = drill.wait_for(lambda: drill.answer("/health/ready")[0] == 503, 90)
     drill.sleep(120.0)
-    drill.run(["docker", "start", "kazma-db"], capture_output=True, check=False, timeout=60)
+    drill.act(start)  # refused when the guard already started it: that is the point
     back = drill.wait_for(lambda: _ready(drill), 180)
-    restarted = drill.guard_state().get("restarts", 0) != before
-    ok = away is not None and back is not None and back <= 120 and not restarted
-    return StepResult("postgres", ok, expected,
-                      f"not ready after {away}s; ready {back}s after the return; restarted: {restarted}")
+    restarts = len(_events(drill, since, *CRASH_EVENTS))
+    started = any(e.get("accepted") for e in _events(drill, since, "dbsvc.start_tried"))
+    ok = away is not None and back is not None and back <= 120 and not restarts
+    if service:
+        ok = ok and started
+    observed = (f"{what}: not ready after {away}s; ready {back}s after the return; "
+                f"crash restarts: {restarts}")
+    if service:
+        observed += f"; the guard started the service: {started}"
+    return StepResult("postgres", ok, expected, observed)
 
 
 def step_kill(drill: Drill) -> StepResult:
-    expected = "the guard restarts the server; it is ready again within 5 min"
+    expected = "the guard starts the server again; it is ready within 5 min"
     pid = drill.guard_state().get("child_pid")
     if not pid:
         return StepResult("kill", False, expected, "no server pid in the guard's state")
     kill = (["taskkill", "/F", "/PID", str(pid)] if sys.platform == "win32" else ["kill", "-9", str(pid)])
-    drill.run(kill, capture_output=True, check=False, timeout=30)
+    killed = drill.act(kill, 30)
+    if not killed.ok:
+        return StepResult("kill", False, expected, f"could not kill pid {pid}: {killed.detail}")
     back = drill.wait_for(lambda: _ready(drill), 300)
-    return StepResult("kill", back is not None, expected, f"ready {back}s after the kill")
+    return StepResult("kill", back is not None, expected, f"pid {pid} killed; ready {back}s after")
+
+
+def _docker_answers(drill: Drill) -> Outcome:
+    return drill.act(["docker", "version", "--format", "{{.Server.Version}}"], 30)
 
 
 def step_docker(drill: Drill) -> StepResult:
-    expected = "the guard starts Docker again and the database answers within 10 min"
-    if sys.platform == "win32":
-        drill.run(["taskkill", "/F", "/IM", "Docker Desktop.exe"], capture_output=True, check=False, timeout=60)
-    else:
-        drill.run(["sudo", "systemctl", "stop", "docker"], capture_output=True, check=False, timeout=60)
-    back = drill.wait_for(lambda: _ready(drill), 600, every=15.0)
-    return StepResult("docker", back is not None, expected, f"ready {back}s after Docker stopped")
+    expected = "the guard starts Docker again; Docker answers and the server is ready within 10 min"
+    deps = drill.guard_state().get("dependencies") or {}
+    if deps.get("state") == "idle":
+        return StepResult("docker", True, expected,
+                          "skipped: Kazma uses no container on this machine, so the guard has "
+                          "nothing to start Docker for", skipped=True)
+    before = _docker_answers(drill)
+    if before.missing:
+        return StepResult("docker", True, expected, "skipped: no Docker on this machine", skipped=True)
+    if not before.ok:
+        return StepResult("docker", False, expected, f"Docker did not answer before the step: {before.detail}")
+    since = drill.wall()
+    stop = (["docker", "desktop", "stop"] if sys.platform == "win32"
+            else ["sudo", "systemctl", "stop", "docker.socket", "docker"])
+    stopped = drill.act(stop, 120)
+    if not stopped.ok:
+        return StepResult("docker", False, expected, f"could not stop Docker: {stopped.detail}")
+    down = drill.wait_for(lambda: not _docker_answers(drill).ok, 120)
+    back = drill.wait_for(lambda: _docker_answers(drill).ok and _ready(drill), 600, every=15.0)
+    launched = bool(_events(drill, since, "deps.docker_launched"))
+    return StepResult("docker", down is not None and back is not None, expected,
+                      f"Docker down after {down}s; answering and ready {back}s after; "
+                      f"the guard launched it: {launched}")
 
 
 def step_network(drill: Drill) -> StepResult:
@@ -163,26 +293,36 @@ def step_network(drill: Drill) -> StepResult:
                "--comment", rule]
         drop = ["sudo", "iptables", "-D", "OUTPUT", "!", "-o", "lo", "-j", "REJECT", "-m", "comment",
                 "--comment", rule]
-    drill.run(add, capture_output=True, check=False, timeout=30)
+    cut = drill.act(add, 30)
+    if not cut.ok:
+        return StepResult("network", False, expected, f"could not cut the network: {cut.detail}")
     try:
         drill.sleep(120.0)
         live = drill.answer("/health/live")[0] == 200
     finally:
-        drill.run(drop, capture_output=True, check=False, timeout=30)
+        restored = drill.act(drop, 30)
+    if not restored.ok:
+        drill.notes.append(f"the firewall rule {rule} may still be there: {restored.detail}")
     back = drill.wait_for(lambda: _ready(drill), 180)
-    return StepResult("network", live and back is not None, expected, f"live during: {live}; ready {back}s after")
+    return StepResult("network", live and back is not None and restored.ok, expected,
+                      f"live during: {live}; rule removed: {restored.ok}; ready {back}s after")
+
+
+def _disk_level_seen(drill: Drill) -> bool:
+    volumes = (drill.guard_state().get("disk") or {}).get("volumes") or {}
+    return any(isinstance(v, dict) and v.get("level") in ("low", "critical") for v in volumes.values())
 
 
 def step_disk(drill: Drill) -> StepResult:
-    expected = "the guard pages the disk level (low or critical) and the server stays up"
-    filler = drill.install / "kazma-data" / "chaos-fill.bin"
+    expected = "the guard records the disk level (low or critical) and the server stays up"
+    if not drill.data.is_dir():
+        return StepResult("disk", False, expected, f"no data folder at {drill.data} (pass --data-dir)")
+    filler = drill.data / "chaos-fill.bin"
     try:
-        free = __import__("shutil").disk_usage(str(filler.parent)).free
+        free = __import__("shutil").disk_usage(str(drill.data)).free
         with open(filler, "wb") as out:
             out.truncate(max(0, free - 400 * 1024 ** 2))  # leave ~400 MB: below the document floor
-        level = drill.wait_for(lambda: any(v.get("level") in ("low", "critical") for v in
-                                           (drill.guard_state().get("disk") or {}).get("volumes", {}).values()),
-                               180, every=10.0)
+        level = drill.wait_for(lambda: _disk_level_seen(drill), 180, every=10.0)
         alive = drill.answer("/health/live")[0] == 200
     finally:
         filler.unlink(missing_ok=True)
@@ -191,14 +331,17 @@ def step_disk(drill: Drill) -> StepResult:
 
 
 def step_reload(drill: Drill) -> StepResult:
-    expected = "a reload under load: ready again within 3 min, no restart counted as a crash"
-    before = drill.guard_state().get("restarts", 0)
+    expected = "an operator reload, not a crash restart: ready again within 3 min"
+    since = drill.wall()
     guard = drill.install / "scripts" / "service" / "kazma_guard.py"
-    drill.run([sys.executable, str(guard), "--reload"], capture_output=True, check=False, timeout=600)
+    asked = drill.act([sys.executable, str(guard), "--reload"], 600)
+    if not asked.ok:
+        return StepResult("reload", False, expected, f"the reload was not taken: {asked.detail}")
     back = drill.wait_for(lambda: _ready(drill), 180)
-    crashed = drill.guard_state().get("restarts", 0) != before
-    return StepResult("reload", back is not None and not crashed, expected,
-                      f"ready {back}s after; a crash counted: {crashed}")
+    reloaded = bool(_events(drill, since, "guard.operator_reload"))
+    crashes = len(_events(drill, since, *CRASH_EVENTS))
+    return StepResult("reload", back is not None and reloaded and not crashes, expected,
+                      f"ready {back}s after; the guard reloaded: {reloaded}; crash restarts: {crashes}")
 
 
 STEPS: dict[str, Callable[[Drill], StepResult]] = {
@@ -220,10 +363,34 @@ def run_drill(drill: Drill, names: list[str]) -> list[StepResult]:
     return results
 
 
+def summary(results: list[StepResult]) -> str:
+    ran = [r for r in results if not r.skipped]
+    passed = sum(1 for r in ran if r.ok)
+    line = f"Chaos drill: {passed} of {len(ran)} steps behaved as expected."
+    skipped = [r.step for r in results if r.skipped]
+    if skipped:
+        line += f" Skipped: {', '.join(skipped)}."
+    return line
+
+
+def _is_admin() -> bool:
+    if sys.platform != "win32":
+        return True                       # the steps ask sudo themselves
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except (AttributeError, OSError):
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chaos_week", description="The weekly chaos drill (private installs only).")
     parser.add_argument("--target", required=True, help="the drill install's address, e.g. http://127.0.0.1:9191")
     parser.add_argument("--install", required=True, help="the drill install's folder")
+    parser.add_argument("--data-dir", default="", help="the install's data folder (default: <install>/kazma-data)")
+    parser.add_argument("--db-container", default="kazma-db",
+                        help="the database container, when no database service was set up")
     parser.add_argument("--only", default="", help="comma-separated steps (default: all)")
     parser.add_argument("--dry-run", action="store_true", help="list the steps; do nothing")
     parser.add_argument("--report", default="", help="write the results here as JSON")
@@ -243,12 +410,23 @@ def main(argv: list[str] | None = None) -> int:
     if why:
         print(f"Refused: {why}.")
         return 2
-    results = run_drill(Drill(options.target, install), names)
-    passed = sum(1 for r in results if r.ok)
-    print(f"Chaos drill: {passed} of {len(results)} steps behaved as expected.")
+    needs_admin = [n for n in names if n in ADMIN_STEPS]
+    if needs_admin and not _is_admin():
+        print(f"Refused: run from an elevated shell ({', '.join(needs_admin)} need it), "
+              f"or leave them out with --only.")
+        return 2
+    drill = Drill(options.target, install, data_dir=Path(options.data_dir) if options.data_dir else None,
+                  db_container=options.db_container)
+    if not _ready(drill):
+        print(f"Refused: {options.target} is not ready; start the drill install first.")
+        return 2
+    results = run_drill(drill, names)
+    print(summary(results))
+    for note in drill.notes:
+        print(f"Note: {note}")
     if options.report:
         Path(options.report).write_text(json.dumps([asdict(r) for r in results], indent=2), encoding="utf-8")
-    return 0 if passed == len(results) else 1
+    return 0 if all(r.ok for r in results) else 1
 
 
 if __name__ == "__main__":
