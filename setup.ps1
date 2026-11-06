@@ -271,6 +271,22 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
 
 Log-Ok "Kazma is ready"
 Write-Host ""
+
+# ── 5. System dependencies (resilience plan K2) ──────────────────────────────
+# OCR with Arabic, LibreOffice, ClamAV and its daily refresh, the Arabic fonts
+# and Docker: the plan is shown first, and nothing is installed without a yes.
+Log-Header "5. System dependencies"
+& $VenvPython -m kazma_cli setup system --dry-run
+if ([Environment]::UserInteractive) {
+    $answer = Read-Host "Install what is missing now? (needs an elevated terminal) [y/N]"
+    if ($answer -match '^[Yy]') {
+        & $VenvPython -m kazma_cli setup system -y
+        if ($LASTEXITCODE -ne 0) { Log-Warn "Some system dependencies were not installed: run kazma setup system again" }
+    } else {
+        Log-Info "Later:          $VenvPython -m kazma_cli setup system"
+    }
+}
+Write-Host ""
 $ScriptsDir = Split-Path $VenvPython
 Log-Info "Configure:      edit .env (OPENAI_API_KEY or another provider)"
 Log-Info "Run Web UI:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve     # http://127.0.0.1:9090"

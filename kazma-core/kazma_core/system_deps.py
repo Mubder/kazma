@@ -1,0 +1,329 @@
+"""Every system dependency, installed by Kazma (resilience plan K2).
+
+``setup.ps1`` and ``setup.sh`` install uv and the Python packages only.
+Tesseract (with Arabic and English), LibreOffice, ClamAV and its signature
+updates, the Arabic fonts and Docker were installed by hand, and a missing
+one was found later, one failed document at a time. ``kazma setup system``
+(``kazma_cli.setup``) does it the way ``kazma setup postgres`` does
+Postgres: check each one, show the plan, ask, run it, record it.
+
+One table per package manager (:data:`PACKAGES`); Postgres is
+``kazma setup postgres`` (K1). Windows installs Tesseract without Arabic, so
+the Arabic and English models are downloaded from a pinned release and
+checked against their SHA-256 (:data:`TESSDATA`). The malware signatures get
+a daily refresh of their own: a scheduled task (Windows), a launchd job
+(macOS), the distribution's freshclam service (Linux). Nothing is installed
+without the owner's yes (``-y`` for a scripted install), and a second run
+changes nothing.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from kazma_core.postgres_service import Platform, Step
+
+__all__ = ["DEPENDENCIES", "PACKAGES", "TESSDATA", "DepState", "check_all", "fetch_tessdata",
+           "freshclam_agent_plist", "install_plan", "record_system", "tessdata_folder"]
+
+Runner = Callable[..., subprocess.CompletedProcess]
+
+#: What Kazma needs from the system, in install order.
+DEPENDENCIES = ("ocr", "office", "malware", "fonts", "docker")
+LABELS = {
+    "ocr": "OCR (Tesseract, Arabic and English)",
+    "office": "Office conversion (LibreOffice)",
+    "malware": "Malware scan (ClamAV and its daily signature refresh)",
+    "fonts": "Arabic fonts",
+    "docker": "Docker (the document container, the sandbox, SearXNG)",
+}
+
+#: Each dependency's packages per package manager. ``None``: nothing to
+#: install there (the fonts are bundled with Kazma on Windows and macOS).
+PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
+    "winget": {
+        "ocr": ("UB-Mannheim.TesseractOCR",),
+        "office": ("TheDocumentFoundation.LibreOffice",),
+        "malware": ("Cisco.ClamAV",),
+        "fonts": None,
+        "docker": ("Docker.DockerDesktop",),
+    },
+    "brew": {
+        "ocr": ("tesseract", "tesseract-lang"),
+        "office": ("--cask", "libreoffice"),
+        "malware": ("clamav",),
+        "fonts": None,
+        "docker": ("--cask", "docker"),
+    },
+    "apt": {
+        "ocr": ("tesseract-ocr", "tesseract-ocr-ara", "tesseract-ocr-eng"),
+        "office": ("libreoffice-writer",),
+        "malware": ("clamav", "clamav-freshclam"),
+        "fonts": ("fonts-noto-core",),
+        "docker": ("docker.io",),
+    },
+    "dnf": {
+        "ocr": ("tesseract", "tesseract-langpack-ara"),
+        "office": ("libreoffice-writer",),
+        "malware": ("clamav", "clamav-update"),
+        "fonts": ("google-noto-sans-arabic-fonts",),
+        "docker": ("moby-engine",),
+    },
+}
+
+#: Tesseract's models from the tessdata_fast 4.1.0 release, checked against
+#: these digests before they are kept (Windows: the installer brings English
+#: only). Recorded 2026-11-06.
+TESSDATA: dict[str, tuple[str, int, str]] = {
+    "ara": ("https://github.com/tesseract-ocr/tessdata_fast/raw/4.1.0/ara.traineddata", 1_432_056,
+            "e3206d3dc87fd50c24a0fb9f01838615911d25168f4e64415244b67d2bb3e729"),
+    "eng": ("https://github.com/tesseract-ocr/tessdata_fast/raw/4.1.0/eng.traineddata", 4_113_088,
+            "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"),
+}
+
+#: The Windows task that refreshes the malware signatures every day.
+FRESHCLAM_TASK = "KazmaFreshclam"
+#: The macOS launchd job that does the same.
+FRESHCLAM_AGENT = "ai.kazma.freshclam"
+
+
+@dataclass
+class DepState:
+    """One dependency as found: ``ok`` True, False, or None (cannot tell)."""
+
+    name: str
+    ok: bool | None
+    detail: str
+    missing: list[str] = field(default_factory=list)
+
+
+def _out(run: Runner, argv: list[str], timeout: float = 30) -> tuple[int, str]:
+    try:
+        done = run(argv, capture_output=True, text=True, timeout=timeout, check=False,
+                   encoding="utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError):
+        return 127, ""
+    return done.returncode, (done.stdout or "") + (done.stderr or "")
+
+
+def _tesseract(which: Callable[[str], str | None]) -> str | None:
+    found = which("tesseract")
+    if found:
+        return found
+    exe = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Tesseract-OCR" / "tesseract.exe"
+    return str(exe) if os.name == "nt" and exe.is_file() else None
+
+
+def _check_ocr(run: Runner, which: Callable[[str], str | None]) -> DepState:
+    exe = _tesseract(which)
+    if not exe:
+        return DepState("ocr", False, "tesseract is not installed", ["tesseract"])
+    code, text = _out(run, [exe, "--list-langs"])
+    if code != 0:
+        return DepState("ocr", None, f"tesseract did not list its languages (exit {code})")
+    langs = {line.strip() for line in text.splitlines()}
+    missing = [lang for lang in ("ara", "eng") if lang not in langs]
+    if missing:
+        return DepState("ocr", False, f"tesseract has no {' or '.join(missing)} model", missing)
+    _, version = _out(run, [exe, "--version"])
+    first = (version.splitlines() or [""])[0].strip()
+    return DepState("ocr", True, f"{first or 'tesseract'}, Arabic and English")
+
+
+def _check_office(find: Callable[[], str | None]) -> DepState:
+    exe = find()
+    if not exe:
+        return DepState("office", False, "LibreOffice is not installed", ["libreoffice"])
+    return DepState("office", True, f"LibreOffice at {exe}")
+
+
+def _freshclam_scheduled(os_name: str, run: Runner) -> bool | None:
+    if os_name == "windows":
+        code, _ = _out(run, ["schtasks", "/Query", "/TN", FRESHCLAM_TASK])
+        return code == 0
+    if os_name == "macos":
+        code, _ = _out(run, ["launchctl", "list", FRESHCLAM_AGENT])
+        return code == 0
+    service = "clamav-freshclam"
+    code, text = _out(run, ["systemctl", "is-enabled", service])
+    if code == 127:
+        return None  # no systemd (a container, WSL without it): cannot tell
+    return code == 0 or "enabled" in text
+
+
+def _check_malware(os_name: str, run: Runner, which: Callable[[str], str | None]) -> DepState:
+    scanner = which("clamscan") or which("clamdscan")
+    if not scanner and os_name == "windows":
+        candidate = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "ClamAV" / "clamscan.exe"
+        scanner = str(candidate) if candidate.is_file() else None
+    if not scanner:
+        return DepState("malware", False, "ClamAV is not installed", ["clamav"])
+    scheduled = _freshclam_scheduled(os_name, run)
+    if scheduled is False:
+        return DepState("malware", False, "ClamAV is installed, but nothing refreshes its signatures daily",
+                        ["freshclam schedule"])
+    return DepState("malware", True, "ClamAV" + ("" if scheduled else " (daily refresh: cannot tell here)"))
+
+
+def _check_fonts(os_name: str, run: Runner, which: Callable[[str], str | None]) -> DepState:
+    if os_name in ("windows", "macos"):
+        return DepState("fonts", True, "bundled with Kazma (IBM Plex Sans Arabic)")
+    if not which("fc-list"):
+        return DepState("fonts", False, "fontconfig (fc-list) is not installed", ["fonts"])
+    _, text = _out(run, ["fc-list", ":lang=ar", "family"])
+    if re.search(r"Noto (Naskh|Sans|Kufi) Arabic", text):
+        return DepState("fonts", True, "Noto Arabic fonts")
+    return DepState("fonts", False, "no Noto Arabic font", ["fonts"])
+
+
+def _check_docker(run: Runner, find: Callable[[], str | None]) -> DepState:
+    exe = find()
+    if not exe:
+        return DepState("docker", False, "Docker is not installed", ["docker"])
+    code, text = _out(run, [exe, "version", "--format", "{{.Server.Version}}"], timeout=20)
+    if code != 0:
+        return DepState("docker", None, "Docker is installed; its engine does not answer now")
+    return DepState("docker", True, f"Docker engine {text.strip()[:40]}")
+
+
+def check_all(platform: Platform, *, run: Runner = subprocess.run,
+              which: Callable[[str], str | None] = shutil.which,
+              soffice: Callable[[], str | None] | None = None,
+              docker: Callable[[], str | None] | None = None) -> list[DepState]:
+    """Every dependency as found on this machine. *soffice* and *docker* find
+    those programs (Kazma's own finders by default)."""
+    if soffice is None:
+        from kazma_core.documents.binaries import find_soffice as soffice
+    if docker is None:
+        from kazma_core.docker_cli import find_docker_cli as docker
+    return [
+        _check_ocr(run, which),
+        _check_office(soffice),
+        _check_malware(platform.os, run, which),
+        _check_fonts(platform.os, run, which),
+        _check_docker(run, docker),
+    ]
+
+
+def _install(platform: Platform, packages: tuple[str, ...]) -> tuple[str, ...]:
+    manager = platform.manager
+    if manager == "winget":
+        return ("winget", "install", "--exact", "--silent", "--accept-package-agreements",
+                "--accept-source-agreements", "--id", packages[0])
+    if manager == "brew":
+        return ("brew", "install", *packages)
+    if manager == "apt":
+        return ("sudo", "apt-get", "install", "-y", "--no-install-recommends", *packages)
+    if manager == "dnf":
+        return ("sudo", "dnf", "install", "-y", *packages)
+    raise ValueError(f"no package manager for {platform.os}")
+
+
+def _freshclam_steps(platform: Platform) -> list[Step]:
+    if platform.os == "windows":
+        exe = str(Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "ClamAV" / "freshclam.exe")
+        return [Step("refresh the malware signatures daily",
+                     ("schtasks", "/Create", "/TN", FRESHCLAM_TASK, "/SC", "DAILY", "/ST", "04:00",
+                      "/RL", "HIGHEST", "/TR", f'"{exe}"', "/F"), admin=True)]
+    if platform.os == "macos":
+        return [Step("refresh the malware signatures daily (launchd)", action="freshclam_agent")]
+    service = "clamav-freshclam"
+    return [Step("refresh the malware signatures daily", ("sudo", "systemctl", "enable", "--now", service),
+                 ok_codes=(0, 1))]
+
+
+def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
+    """The steps that put in what *states* found missing, nothing more."""
+    if platform.manager is None:
+        return []
+    table = PACKAGES[platform.manager]
+    steps: list[Step] = []
+    if platform.manager == "apt" and any(s.ok is False and table.get(s.name) for s in states):
+        steps.append(Step("refresh the package lists", ("sudo", "apt-get", "update")))
+    for state in states:
+        if state.ok is not False:
+            continue
+        packages = table.get(state.name)
+        if state.name == "malware" and state.missing == ["freshclam schedule"]:
+            steps.extend(_freshclam_steps(platform))
+            continue
+        if state.name == "ocr" and platform.manager == "winget" and state.missing != ["tesseract"]:
+            steps.extend(Step(f"download Tesseract's {lang} model", action=f"tessdata:{lang}")
+                         for lang in state.missing if lang in TESSDATA)
+            continue
+        if packages is None:
+            continue
+        steps.append(Step(f"install {LABELS[state.name]}", _install(platform, packages),
+                          admin=platform.manager in ("winget",)))
+        if state.name == "ocr" and platform.manager == "winget":
+            steps.extend(Step(f"download Tesseract's {lang} model", action=f"tessdata:{lang}") for lang in TESSDATA)
+        if state.name == "malware":
+            steps.extend(_freshclam_steps(platform))
+    return steps
+
+
+def fetch_tessdata(lang: str, folder: Path, *, opener: Callable[..., Any] = urllib.request.urlopen) -> Path:
+    """Download Tesseract's *lang* model into *folder*, kept only when its
+    size and SHA-256 are the pinned ones (:data:`TESSDATA`)."""
+    url, size, digest = TESSDATA[lang]
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{lang}.traineddata"
+    partial = target.with_suffix(".traineddata.partial")
+    hasher = hashlib.sha256()
+    got = 0
+    with opener(url, timeout=120) as response, open(partial, "wb") as out:  # noqa: S310 -- a pinned https URL
+        while chunk := response.read(1 << 16):
+            got += len(chunk)
+            if got > size:
+                break
+            hasher.update(chunk)
+            out.write(chunk)
+    if got != size or hasher.hexdigest() != digest:
+        partial.unlink(missing_ok=True)
+        raise ValueError(f"{lang}.traineddata did not match its pinned size and SHA-256; nothing was kept")
+    os.replace(partial, target)
+    return target
+
+
+def tessdata_folder(which: Callable[[str], str | None] = shutil.which) -> Path | None:
+    """Where the Tesseract that is installed reads its models."""
+    exe = _tesseract(which)
+    return Path(exe).parent / "tessdata" if exe else None
+
+
+def record_system(states: list[DepState], path: Path | None = None) -> Path:
+    """Record what ``kazma setup system`` found (atomically), beside the
+    Postgres record: ``{"system": {name: {ok, detail, at}}}``."""
+    import json
+    import time
+
+    from kazma_core.atomic_files import atomic_write_text
+    from kazma_core.postgres_service import _record_path, read_record
+
+    target = path or _record_path()
+    data = read_record(target)
+    now = time.time()
+    data.update({"version": 1, "system": {s.name: {"ok": s.ok, "detail": s.detail, "at": now} for s in states}})
+    atomic_write_text(target, json.dumps(data, indent=2))
+    return target
+
+
+def freshclam_agent_plist(freshclam: str) -> str:
+    """The macOS launchd job: freshclam every day at 04:00."""
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>{FRESHCLAM_AGENT}</string>
+<key>ProgramArguments</key><array><string>{freshclam}</string></array>
+<key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+</dict></plist>
+"""

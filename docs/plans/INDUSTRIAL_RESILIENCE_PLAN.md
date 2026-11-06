@@ -101,15 +101,21 @@ interrupted turn continues by itself).
 | E1 turn and daily budgets | done | `4b1a50864` |
 | A3 one "database away" state | done | `f1c228347` |
 | B2a disk watch, B1 the guard's heartbeat | done | `551722e01` |
-| B1 the observer Worker, pairing, Settings card, digest line | built; the Cloudflare side is the owner's (`deploy/observer/README.md`) | this batch |
-| F3 chat-reply outbox | done | this batch |
-| H open alerts: malware signatures refreshed by Kazma itself | done | this batch |
-| A1 `kazma setup postgres`, the guard's service watch, `kazma doctor` | built; the live move is the owner's (elevated terminal) | this batch |
-| A2 WAL archiving, base backups, offsite, restore | built; active once A1 runs | this batch |
-| C1 a cut turn continues | done | this batch |
-| C2 `scripts/deploy_live.py` | done | this batch |
-| C3 every step of the stop timed | done | this batch |
-| B2b `kazma maintenance begin/end` | done; topgrade and the two machine settings are the owner's | this batch |
+| B1 the observer Worker, pairing, Settings card, digest line | built; the Cloudflare side is the owner's (`deploy/observer/README.md`) | `824ceaec4` |
+| F3 chat-reply outbox | done | `824ceaec4` |
+| H open alerts: malware signatures refreshed by Kazma itself | done | `824ceaec4` |
+| A1 `kazma setup postgres`, the guard's service watch, `kazma doctor` | built; the live move is the owner's (elevated terminal) | `824ceaec4` |
+| A2 WAL archiving, base backups, offsite, restore | built; active once A1 runs | `824ceaec4` |
+| C1 a cut turn continues | done | `824ceaec4` |
+| C2 `scripts/deploy_live.py` | done | `824ceaec4` |
+| C3 every step of the stop timed | done | `824ceaec4` |
+| B2b `kazma maintenance begin/end` | done; topgrade and the two machine settings are the owner's | `824ceaec4` |
+| F1 Tavily after SearXNG, the SearXNG silence page | done; the key and the two policy variables are the owner's | this batch |
+| F2 the monthly backup-model drill | done; the second vendor's model and key are the owner's | this batch |
+| D2 a step's output limit follows its model | done (file_append, markdown_path and the write-in-parts refusal existed) | this batch |
+| D3 the answer checked against the turn's receipts | done | this batch |
+| D4 no duplicate writes or documents in one turn | done (identical re-reads were already counted by the stagnation guard) | this batch |
+| K2 `kazma setup system` | done (package managers faked in the tests) | this batch |
 
 ---
 

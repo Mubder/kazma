@@ -227,6 +227,34 @@ async def _markdown_source(markdown_path: str) -> Path:
     return p
 
 
+def _same_document(kind: str, payload: dict[str, Any]) -> str:
+    """The canonical text of a document request: the same title, sections and
+    tables are the same document (plan D4)."""
+    import json
+
+    return json.dumps({"kind": kind, "title": payload.get("title"), "sections": payload.get("sections"),
+                       "tables": payload.get("tables")}, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _generated_already(kind: str, payload: dict[str, Any]) -> None:
+    """Refuse a document the running turn already generated, naming its file."""
+    from kazma_core.tools.turn_writes import earlier_copy
+
+    earlier = earlier_copy("document", _same_document(kind, payload), "")
+    if earlier:
+        raise RefusedBeforeEffect(
+            f"Error: this {kind.upper()} was already generated in this turn, at {earlier}; it was not "
+            "generated again. Send or use that file; to change it, call again with the changed content.")
+
+
+def _note_generated(kind: str, payload: dict[str, Any], result: Any) -> None:
+    from kazma_core.tools.turn_writes import note_written
+
+    path = getattr(result.data, "export_path", None) if getattr(result, "ok", False) and result.data else None
+    if path:
+        note_written("document", _same_document(kind, payload), str(path))
+
+
 async def generate_pdf(
     title: str,
     sections: list[dict[str, str]] | None = None,
@@ -293,6 +321,7 @@ async def generate_pdf(
         payload["lang"] = lang
     if rtl is not None:
         payload["rtl"] = bool(rtl)
+    _generated_already("pdf", payload)
     result = await DocumentService().generate(
         "pdf",
         payload,
@@ -311,6 +340,7 @@ async def generate_pdf(
             # The incomplete file is known and named; a new call writes a new
             # file: a correctable error, not an unknown effect.
             raise KnownEffectError(f"{_err} (incomplete file: {_path})")
+    _note_generated("pdf", payload, result)
     answer = _output(result, "PDF")
     return answer + await _keep_with_research(result, title, "pdf", source_md)
 
@@ -364,6 +394,7 @@ async def generate_docx(
         payload["lang"] = lang
     if rtl is not None:
         payload["rtl"] = bool(rtl)
+    _generated_already("docx", payload)
     result = await DocumentService().generate(
         "docx",
         payload,
@@ -371,6 +402,7 @@ async def generate_docx(
         export_dir=DOC_DIR,
         **_scope(),
     )
+    _note_generated("docx", payload, result)
     answer = _output(result, "DOCX")
     return answer + await _keep_with_research(result, title, "docx", source_md)
 

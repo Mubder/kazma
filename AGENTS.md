@@ -4045,6 +4045,24 @@ new folder set to replay to TIME; the live database is never touched. Gate:
 `tests/test_setup_postgres.py` (retention, the archiver's numbers, restore,
 offsite order).
 
+### 21b. Every system dependency is installed by Kazma (`kazma_core/system_deps.py`)
+
+Resilience plan K2. `kazma setup system` (`kazma_cli.setup._setup_system`)
+checks Tesseract with Arabic and English, LibreOffice, ClamAV and its daily
+signature refresh, the Arabic fonts and Docker (`check_all`; the finders
+`documents.binaries.find_soffice` and `docker_cli.find_docker_cli`), shows the
+plan for the missing ones only (`install_plan`, one table per package
+manager: `PACKAGES`), asks (`-y` for a script), runs it, and records the
+result beside the Postgres record (`record_system`, `setup_record.json`
+"system"). Windows' Tesseract brings English only: the Arabic and English
+models come from a pinned tessdata_fast release, kept only when size and
+SHA-256 match (`TESSDATA`, `fetch_tessdata`). The signatures get a daily
+refresh of their own (a `KazmaFreshclam` scheduled task, a launchd job, the
+distribution's freshclam service). `setup.ps1`/`setup.sh` show the plan at
+the end and ask; `kazma doctor` lists each and names the command. A second
+run changes nothing. Gate: `tests/test_setup_system.py` (every package
+manager faked; nothing installed without a yes; a tampered model refused).
+
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
 Kazma is a first-class citizen of the open **agentskills.io** `SKILL.md`
@@ -4611,6 +4629,18 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   provider whose `chat` takes no such argument
   (`tests/test_research_reasoning_off.py`, passing it through as the
   negative control).
+- **Tavily is the search service after SearXNG** (resilience plan F1,
+  `web_search._tavily_search`): a remote provider, asked only when the
+  acquisition policy names `tavily` and `KAZMA_TAVILY_API_KEY` is set. Each
+  query reserves one request of the remote allowance before it leaves and
+  its HTTP status is recorded on the reservation (`accounting.record_response`);
+  a spent allowance passes the query on. The search worker posts it with the
+  key in a header (stdin to the child, never a URL), never through the
+  scraping proxy (`search_http._proxy_for`), and never follows a redirect.
+  SearXNG answering nothing for an hour pages once (alert "search.searxng_silent"),
+  and an answer resets it. Research readiness says whether Tavily is on
+  (`second_search`). Gate: `tests/test_search_tavily.py` (no policy, no key,
+  the proxy and the chain without Tavily as negative controls).
 - **A search answer about something else is no answer** (2026-10-31,
   `web_search._answers_the_query`): a backend's results of which fewer than
   half hold a content word of the query (`memory.query_terms`) in title,
@@ -7082,6 +7112,19 @@ Read the named test before changing the code it guards.
   `tests/test_model_fallback_notice.py::test_every_model_swap_is_reported`
   (every swap log line's class/function must report; negative control), and
   `tests/js/test_alert_banner_link.js` (off-site links are dropped).
+- **The failover chain is taken once a month** (`observability/failover_drill.py`,
+  resilience plan F2): the maintenance sweep "model failover drill" runs, in a
+  process of its own (`python -m kazma_core.observability.failover_drill`; by
+  hand `scripts/model_failover_drill.py`), the primary forced down for one
+  test prompt through `resilient_chat`. A backup of another vendor (another
+  provider address) in `agent.nonstop.failover.chain` must answer it, the
+  failover notice must name it (`model_fallback.drill_notices` holds it:
+  nothing is paged), and the primary must answer again with the notice
+  closed. The result is `system.drills.model_failover`, the log line
+  `[failover-drill] PASS/FAIL` (the weekly report), and a failure the ops
+  alert `llm.failover_drill_failed` naming the step -- no backup configured
+  included. Gate: `tests/test_model_failover_drill.py` (each step failing on
+  its own; the drill without the held notices as the negative control).
 - **A remote vector store is used, and reported, from a probe of what it can
   hold** (`memory/backends.py`). pgvector's probe reads the catalog (extension
   installed / installable, may the role create the table, the existing

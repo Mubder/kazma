@@ -118,6 +118,11 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("Knowledge page not stored", r"\[kb_ingest\] page \S+ \(",
               "a page a crawl did not store, by outcome and reason", kind=SYMPTOM,
               group=r"\[kb_ingest\] page (?P<k>\S+ \([^)]+\))"),
+    # Monthly (observability/failover_drill.py): the primary forced down,
+    # the backup of another vendor answering, the notice, the switch back.
+    Signature("backup-model drill", r"\[failover-drill\] (PASS|FAIL):",
+              "the failover chain was taken, not merely configured",
+              kind=ROUTINE, per_week=0.25),
     # Daily (web_acquire/canary.py): a real crawl of one known page.
     Signature("crawl canary", r"\[acquisition\] canary (passed|failed)",
               "a crawl was run end to end, not merely configured",

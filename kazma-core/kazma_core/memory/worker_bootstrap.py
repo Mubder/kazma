@@ -1223,6 +1223,15 @@ def _dependency_advisories() -> None:
     advisory_sweep()
 
 
+def _model_failover_drill() -> None:
+    # Resilience plan F2: once a month the failover chain is taken for real,
+    # in a process of its own, and the result kept and logged for the weekly
+    # report; a failure is an ops alert naming the step.
+    from kazma_core.observability.failover_drill import drill_sweep
+
+    drill_sweep()
+
+
 def _wal_archive() -> None:
     # WAL archiving (kazma_core.backup.wal_archive, resilience plan A2): the
     # archiver's numbers, the weekly base backup, retention, offsite.
@@ -1282,6 +1291,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("guard dependencies", _guard_dependencies),
     ("malware signatures", _malware_signatures),
     ("dependency advisories", _dependency_advisories),
+    ("model failover drill", _model_failover_drill),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),

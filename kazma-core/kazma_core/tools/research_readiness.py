@@ -202,6 +202,11 @@ def _research_readiness(*, probe_search, job_id):
         "off",
         "no",
     )
+    from kazma_core.tools.web_search import tavily_key
+
+    tavily = policy.permits("tavily") and bool(tavily_key())
+    checks.append({"id": "second_search", "ok": True, "level": "info",
+                   "message": "Tavily search after SearXNG: " + ("on" if tavily else "off")})
     checks.append(
         {
             "id": "hard_page_backends",

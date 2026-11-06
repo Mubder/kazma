@@ -90,7 +90,7 @@ BASELINE = {
     # except Exception / except BaseException / bare except, any body
     "blind_except": 3371,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 389,
+    "silent_except": 388,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
@@ -99,7 +99,7 @@ STRUCTURAL_BASELINE = {
     # the Scheduled soak names health.check_cron, and the Time Travel soak
     # SnapshotStore and close_shared_checkpoints. The 2026-11 functional
     # audit's evidence names alert_read_only_remote and SettingsRouterBuilder.
-    "module_local_public_symbols": 516,
+    "module_local_public_symbols": 515,
     "patched_value_imports": 72,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

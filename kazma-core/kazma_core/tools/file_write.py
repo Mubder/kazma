@@ -103,6 +103,14 @@ async def file_write(path: str, content: str) -> str:
     byte_count = len(encoded_bytes)
     if byte_count > MAX_FILE_WRITE_BYTES:
         raise RefusedBeforeEffect(f"Error: Content exceeds maximum write limit of 8 MB (received {byte_count} bytes).")
+    from kazma_core.tools.turn_writes import earlier_copy, note_written
+
+    # The same content again under another name in one turn (plan D4).
+    earlier = earlier_copy("file", encoded_bytes, str(p))
+    if earlier:
+        raise RefusedBeforeEffect(
+            f"Error: this exact content was already written in this turn, to {earlier}; "
+            f"{path} was not written. Use {earlier}, or write the content that differs.")
 
     def _write_sync() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -144,6 +152,7 @@ async def file_write(path: str, content: str) -> str:
     except OSError as exc:
         return _friendly_error(exc, path)
 
+    note_written("file", encoded_bytes, str(p))
     line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
     try:
         from kazma_core.code_index.indexer import notify_file_changed

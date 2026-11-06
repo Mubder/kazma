@@ -79,9 +79,9 @@ def acquisition_policy() -> AcquisitionPolicy:
     providers = frozenset(p.strip().lower() for p in
                          os.environ.get("KAZMA_ACQUISITION_REMOTE_PROVIDERS", "").split(",")
                          if p.strip())
-    if providers - {"jina", "firecrawl", "proxy"}:
+    if providers - {"jina", "firecrawl", "proxy", "tavily"}:
         raise AcquisitionPolicyError(
-            "Invalid KAZMA_ACQUISITION_REMOTE_PROVIDERS; allowed names: jina, firecrawl, proxy."
+            "Invalid KAZMA_ACQUISITION_REMOTE_PROVIDERS; allowed names: jina, firecrawl, proxy, tavily."
         )
     network = os.environ.get('KAZMA_BROWSER_NETWORK_MODE', 'required').strip().lower()
     if network not in {'required', 'compatibility'}:

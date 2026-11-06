@@ -302,6 +302,24 @@ def _collect() -> list[tuple[str, str]]:
     return out
 
 
+def _system_rows(states=None) -> list[tuple[str, str]]:
+    """Every system dependency (resilience plan K2): OCR with Arabic and
+    English, LibreOffice, ClamAV and its daily refresh, the Arabic fonts,
+    Docker. A missing one names the command that installs it. Read-only."""
+    from kazma_core import postgres_service as pgs
+    from kazma_core.system_deps import LABELS, check_all
+
+    out: list[tuple[str, str]] = []
+    for state in states if states is not None else check_all(pgs.detect_platform()):
+        if state.ok:
+            out.append(_line(OK, f"{LABELS[state.name]}: {state.detail}"))
+        elif state.ok is None:
+            out.append(_line(WARN, f"{LABELS[state.name]}: {state.detail}"))
+        else:
+            out.append(_line(WARN, f"{LABELS[state.name]}: {state.detail}", "install: kazma setup system"))
+    return out
+
+
 def _database_service_rows() -> list[tuple[str, str]]:
     """The database's OS service (resilience plan A1), when ``kazma setup
     postgres`` set one up: installed, running, starting at boot, restarting on
@@ -354,6 +372,11 @@ def run(argv: list[str] | None = None) -> int:
     print("\nKazma doctor — provider & model resolution\n")
     for _status, rendered in rows:
         print(rendered)
+    system_rows = _system_rows()
+    print("\nSystem dependencies\n")
+    for _status, rendered in system_rows:
+        print(rendered)
+    rows = rows + system_rows
     db_rows = _database_service_rows()
     if db_rows:
         print("\nThe database service\n")

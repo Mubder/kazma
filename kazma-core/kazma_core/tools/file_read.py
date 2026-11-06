@@ -431,6 +431,9 @@ def clear_read_cache() -> None:
     swarm task's scope ends (:func:`leave_read_scope`); never another chat's.
     """
     reader = _reader()
+    from kazma_core.tools.turn_writes import forget_reader
+
+    forget_reader(reader)  # what the turn wrote, by content (plan D4)
     with _cache_lock:
         mine = [key for key in _turn_read_cache if key[0] == reader]
         for key in mine:

@@ -159,8 +159,103 @@ def run(args: list[str]) -> int:
     pg.add_argument("--move-from-container", metavar="NAME",
                     help="copy the data of this Docker container (Kazma's database today) into the new server")
     pg.add_argument("--no-env", action="store_true", help="do not write KAZMA_DATABASE_URL into .env")
+    system = sub.add_parser("system", help="OCR, LibreOffice, ClamAV, the Arabic fonts and Docker")
+    system.add_argument("-y", "--yes", action="store_true", help="do not ask before acting")
+    system.add_argument("--check", action="store_true", help="report only; change nothing")
+    system.add_argument("--dry-run", action="store_true", help="print the plan; run nothing")
     options = parser.parse_args(args)
+    if options.what == "system":
+        return _setup_system(options)
     return _setup_postgres(options)
+
+
+def _print_states(states) -> int:
+    from kazma_core.system_deps import LABELS
+
+    problems = 0
+    for state in states:
+        mark = "ok" if state.ok else ("??" if state.ok is None else "NO")
+        problems += 1 if state.ok is False else 0
+        _say(f"  {mark:4} {LABELS[state.name]}: {state.detail}")
+    return problems
+
+
+def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platform=None, finders=None) -> int:
+    """``kazma setup system`` (resilience plan K2): check, show the plan, ask,
+    install what is missing, record it. A second run finds nothing to do."""
+    import shutil as _shutil
+
+    from kazma_core import postgres_service as pgs
+    from kazma_core.system_deps import (
+        DepState,
+        check_all,
+        fetch_tessdata,
+        freshclam_agent_plist,
+        install_plan,
+        record_system,
+        tessdata_folder,
+    )
+
+    which = which or _shutil.which
+    platform = platform or pgs.detect_platform()
+    _say(f"platform: {platform.os}" + (" (WSL)" if platform.wsl else "")
+         + f", package manager: {platform.manager or 'none known'}")
+    states: list[DepState] = check_all(platform, run=run, which=which, **(finders or {}))
+    problems = _print_states(states)
+    if options.check:
+        record_system(states)
+        if problems:
+            _say("Install what is missing with: kazma setup system")
+        return 1 if problems else 0
+    steps = install_plan(platform, states)
+    if not steps:
+        _say("Nothing to install." if not problems else
+             "Kazma knows no package manager here (winget, Homebrew, apt, dnf): install the missing ones by hand.")
+        record_system(states)
+        return 0 if not problems else 2
+    _say("The plan:")
+    for i, step in enumerate(steps, 1):
+        _say(f"  {i:2}. {step.title}\n      {step.printable()}")
+    if options.dry_run:
+        return 0
+    if platform.os == "windows" and any(s.admin for s in steps) and not pgs.is_admin():
+        _say("Run this from an elevated terminal (Run as administrator): installing needs it.")
+        return 2
+    if not options.yes and ask("Go ahead? [y/N] ").strip().lower() not in ("y", "yes"):
+        _say("Nothing was done.")
+        return 1
+    for step in steps:
+        _say(f"-> {step.title}")
+        if step.action.startswith("tessdata:"):
+            folder = tessdata_folder(which)
+            try:
+                if folder is None:
+                    raise ValueError("tesseract was not found after its install")
+                fetch_tessdata(step.action.split(":", 1)[1], folder)
+                ok, detail = True, ""
+            except (OSError, ValueError) as exc:
+                ok, detail = False, str(exc)
+        elif step.action == "freshclam_agent":
+            freshclam = which("freshclam") or "/opt/homebrew/bin/freshclam"
+            agent = Path.home() / "Library" / "LaunchAgents" / "ai.kazma.freshclam.plist"
+            try:
+                agent.parent.mkdir(parents=True, exist_ok=True)
+                agent.write_text(freshclam_agent_plist(freshclam), encoding="utf-8")
+                ok, detail = _run_step(type(step)("load it", ("launchctl", "load", "-w", str(agent))), [], run=run)
+            except OSError as exc:
+                ok, detail = False, str(exc)
+        else:
+            ok, detail = _run_step(step, [], run=run)
+        if not ok:
+            _say(f"   FAILED: {detail}")
+            _say("Nothing past this step was done. Fix it and run kazma setup system again.")
+            record_system(check_all(platform, run=run, which=which, **(finders or {})))
+            return 1
+    after = check_all(platform, run=run, which=which, **(finders or {}))
+    record_system(after)
+    _say("After the install:")
+    left = _print_states(after)
+    return 0 if not left else 1
 
 
 def _setup_postgres(options, *, run=subprocess.run) -> int:
@@ -301,4 +396,7 @@ def run_restore(args: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    from kazma_core.env_files import load_env_files
+
+    load_env_files()
     sys.exit(run(sys.argv[1:]))
