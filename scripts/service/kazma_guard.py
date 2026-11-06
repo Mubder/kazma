@@ -828,7 +828,7 @@ class Notifier:
             body = urllib.parse.urlencode(
                 {"chat_id": self.chat, "text": text, "disable_web_page_preview": "true"}
             ).encode()
-            req = urllib.request.Request(url, data=body, method="POST")
+            req = _request(url, data=body, method="POST")
             with urllib.request.urlopen(req, timeout=10):
                 pass
             if delayed:
@@ -858,7 +858,7 @@ def server_started_at(ready_url: str, timeout: float) -> float | None:
     *is the thing answering actually the thing I launched?*
     """
     try:
-        req = urllib.request.Request(_live_url(ready_url), method="GET")
+        req = _request(_live_url(ready_url))
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
                 return None
@@ -1025,7 +1025,7 @@ def _says_restart_required(raw: str) -> bool:
 def probe(url: str, timeout: float) -> ProbeResult:
     """Return (healthy, detail). Any non-200 or exception is unhealthy."""
     try:
-        req = urllib.request.Request(url, method="GET")
+        req = _request(url)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read(_PROBE_BODY_MAX).decode("utf-8", "replace")
             if resp.status != 200:
@@ -3513,6 +3513,20 @@ def _disk_status_lines(state: dict) -> list[str]:
 
 OUTSIDE_WATCH_EVERY_S = 60.0
 OUTSIDE_WATCH_TIMEOUT_S = 5.0
+
+#: The guard's name on every request it makes (``_request``). Cloudflare's bot
+#: check refuses urllib's own name ("Python-urllib/3.x", error 1010): live
+#: 2026-11-06 every heartbeat to the outside observer was refused that way, a
+#: 403 before it reached the Worker, while the observer itself worked.
+GUARD_USER_AGENT = "KazmaGuard/1 (+https://github.com/Mubder/kazma)"
+
+
+def _request(url: str, *, data: bytes | None = None, method: str = "GET",
+             headers: dict[str, str] | None = None) -> urllib.request.Request:
+    """A request carrying the guard's own name. Every request the guard makes
+    is built here (``tests/test_observer_heartbeat.py`` holds it)."""
+    return urllib.request.Request(url, data=data, method=method,
+                                  headers={"User-Agent": GUARD_USER_AGENT, **(headers or {})})
 DEFAULT_OUTSIDE_WATCH_URL = "https://status.kazma.ai/v1/heartbeat"
 OBSERVER_KEY_MIN_CHARS = 32
 _NAME_RE = re.compile(r"^[a-z_]{1,40}$")
@@ -3924,7 +3938,7 @@ class OutsideWatch:
             snapshot["power"] = _power_state()
             body = heartbeat_body(snapshot)
             ts = int(time.time())
-            req = urllib.request.Request(url, data=body, method="POST", headers={
+            req = _request(url, data=body, method="POST", headers={
                 "Content-Type": "application/json",
                 "X-Kazma-Install": str(snapshot.get("install") or ""),
                 "X-Kazma-Timestamp": str(ts),
@@ -5036,7 +5050,7 @@ def _cmd_page(title: str, detail: str) -> int:
         url = f"https://api.telegram.org/bot{notify.token}/sendMessage"
         body = urllib.parse.urlencode(
             {"chat_id": notify.chat, "text": text, "disable_web_page_preview": "true"}).encode()
-        with urllib.request.urlopen(urllib.request.Request(url, data=body, method="POST"), timeout=10):
+        with urllib.request.urlopen(_request(url, data=body, method="POST"), timeout=10):
             pass
     except (urllib.error.URLError, OSError) as exc:
         print(f"not sent: {type(exc).__name__}")
@@ -5395,7 +5409,7 @@ def _live_commit(health_url: str) -> str:
     if not live.endswith("/health/live"):
         live = "http://127.0.0.1:9090/health/live"
     try:
-        with urllib.request.urlopen(live, timeout=5) as resp:
+        with urllib.request.urlopen(_request(live), timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8") or "{}")
         build = data.get("build") if isinstance(data, dict) else None
         if isinstance(build, dict):
@@ -5414,7 +5428,7 @@ def _activity(health_url: str) -> dict | None:
     base = health_url.rstrip("/").rsplit("/", 1)[0]
     url = base + "/activity" if base.endswith("/health") else "http://127.0.0.1:9090/health/activity"
     try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        with urllib.request.urlopen(_request(url), timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8") or "{}")
         return data if isinstance(data, dict) else None
     except (urllib.error.URLError, OSError, ValueError):

@@ -224,6 +224,21 @@ def test_the_summary_is_signed_and_the_key_never_reaches_settings(observer, rest
     assert outside_watch._observer_summary()["ok"] is False
 
 
+def test_status_from_a_shell_reads_the_guards_own_state_file(monkeypatch, tmp_path):
+    """Run from the owner's shell, nothing hands over KAZMA_GUARD_STATE_FILE:
+    the guard's file is read where the guard keeps it (live 2026-11-06 the
+    status said "Kazma was not started by the guard" over a running guard)."""
+    home = tmp_path / "home"  # the autouse fixture's KAZMA_USER_HOME
+    (home / "guard.state.json").write_text(json.dumps({"outside_watch": {"state": "rejected"}}),
+                                           encoding="utf-8")
+    assert outside_watch._guard_view()["state"] == "rejected"
+    # Control: a handed path wins (the server's own view).
+    handed = tmp_path / "handed.json"
+    handed.write_text(json.dumps({"outside_watch": {"state": "reached"}}), encoding="utf-8")
+    monkeypatch.setenv("KAZMA_GUARD_STATE_FILE", str(handed))
+    assert outside_watch._guard_view()["state"] == "reached"
+
+
 def test_the_summary_is_kept_a_minute_unless_asked_fresh(observer, restricted):
     outside_watch.pair_with_observer(observer.url, TOKEN)
     observer.summary = {"condition": "up", "up_7d_pct": 100, "incidents_7d": []}

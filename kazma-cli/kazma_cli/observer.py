@@ -39,7 +39,7 @@ def _print_status(data: dict) -> None:
         seen = f", last answered {int(time.time() - ack)} s ago" if isinstance(ack, (int, float)) else ""
         print(f"  guard       : {guard.get('state')}{seen}")
     else:
-        print("  guard       : no record (Kazma was not started by the guard)")
+        print("  guard       : no record (no guard has sent a heartbeat for this install yet)")
     observer = data.get("observer") or {}
     if observer.get("ok"):
         print(f"  observer    : {observer.get('condition')}"

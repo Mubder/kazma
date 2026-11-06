@@ -273,11 +273,21 @@ def _observer_summary(pairing: dict[str, str] | None = None, *, fresh: bool = Fa
     return dict(value)
 
 
+def _guard_state_path() -> Path:
+    """The guard's state file: the one it handed the server
+    (``KAZMA_GUARD_STATE_FILE``), else ``<install>/.kazma/guard.state.json``,
+    where the guard keeps it (its ``_state_path``). ``kazma observer status``
+    run from a shell has no handed path, and said "Kazma was not started by
+    the guard" over a guard sending heartbeats (2026-11-06)."""
+    from kazma_core.paths import user_home
+
+    handed = (os.environ.get("KAZMA_GUARD_STATE_FILE") or "").strip()
+    return Path(handed) if handed else user_home() / "guard.state.json"
+
+
 def _guard_view() -> dict[str, Any] | None:
     """The guard's record of its heartbeats (state file, ``outside_watch``)."""
-    path = (os.environ.get("KAZMA_GUARD_STATE_FILE") or "").strip()
-    if not path:
-        return None
+    path = _guard_state_path()
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8") or "{}")
     except (OSError, ValueError):
