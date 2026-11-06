@@ -18,13 +18,25 @@ closing curly quote, which PowerShell takes for a double quote. Three more
 scripts held non-ASCII text with no BOM and parsed by luck. A script with
 any non-ASCII byte must start with a UTF-8 BOM (PowerShell 7 reads either).
 
-So the gate reads every tracked script's param block -- with PowerShell's
-own parser where a PowerShell is installed, and with a reading here that
-needs none (CI's Linux job may have no pwsh) -- and an advanced script
-(``[CmdletBinding()]``, or ``[Parameter()]`` on any parameter) must not
-declare a common parameter. And setup.ps1 is run in an empty folder, where it
-gets past its banner and stops at its first checks; the copy with the
-attribute put back is each check's negative control.
+The VM's next run found a third, past the point the first run test reached:
+setup.ps1 sets ``$ErrorActionPreference = "Stop"``, and once a program's
+stderr is redirected (``2>&1``, ``2>$null``) Windows PowerShell 5.1 turns
+each line it writes there into an error record -- under "Stop" the first one
+ends the script. uv writes "Using CPython ..." to stderr, so setup stopped
+at ``uv sync`` (NativeCommandError). A script that sets "Stop" runs programs
+through its ``Invoke-Native`` helper ("Continue" for the call, judged by
+``$LASTEXITCODE``, -1 when the program is not there), and redirects stderr
+nowhere else; scripts/wsl_fixed_access.ps1 had the same two shapes.
+
+So the gate reads every tracked script -- with PowerShell's own parser where
+a PowerShell is installed, and with a reading here that needs none (CI's
+Linux job may have no pwsh): an advanced script (``[CmdletBinding()]``, or
+``[Parameter()]`` on any parameter) declares no common parameter, and a
+script that sets "Stop" redirects stderr only inside ``Invoke-Native``. And
+setup.ps1 is run twice for real: in an empty folder (past its banner, it
+stops at its first checks) and, on Windows, in a folder whose stand-in uv
+writes to stderr (past ``uv sync``, it stops at the imports of a venv that
+holds none). Each check's negative control is the script as it was.
 """
 
 from __future__ import annotations
@@ -114,6 +126,62 @@ def static_conflicts(text: str) -> list[str]:
     return sorted(c for c in COMMON_PARAMETERS if c.lower() in names)
 
 
+def _code_only(text: str) -> str:
+    """The script with its comments and string literals blanked (newlines
+    kept, so line numbers stay)."""
+    out: list[str] = []
+    i, n = 0, len(text)
+
+    def blank(chunk: str) -> str:
+        return "".join("\n" if c == "\n" else " " for c in chunk)
+
+    while i < n:
+        if text.startswith("<#", i):
+            j = text.find("#>", i + 2)
+            j = n if j < 0 else j + 2
+        elif text[i] == "#":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+        elif text[i] == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "`" else 1
+            j += 1
+        elif text[i] == "'":
+            j = i + 1
+            while j < n and not (text[j] == "'" and not text.startswith("''", j)):
+                j += 2 if text.startswith("''", j) else 1
+            j += 1
+        else:
+            out.append(text[i])
+            i += 1
+            continue
+        out.append(blank(text[i:j]))
+        i = j
+    return "".join(out)
+
+
+_STOP = re.compile(r"\$ErrorActionPreference\s*=\s*[\"']Stop[\"']", re.I)
+
+
+def static_stderr_redirects(text: str) -> list[int]:
+    """Lines of a script that sets "Stop" where stderr is redirected outside
+    its Invoke-Native helper, read without PowerShell."""
+    if not _STOP.search(text):
+        return []
+    code = _code_only(text)
+    helper = re.search(r"function\s+Invoke-Native\s*\{", code, flags=re.I)
+    if helper:
+        level, j = 1, helper.end()
+        while j < len(code) and level:
+            level += {"{": 1, "}": -1}.get(code[j], 0)
+            j += 1
+        code = code[:helper.start()] + "".join(
+            "\n" if c == "\n" else " " for c in code[helper.start():j]) + code[j:]
+    return sorted({code.count("\n", 0, m.start()) + 1
+                   for m in re.finditer(r"(?<![\w$.])[2*]>", code)})
+
+
 # ── PowerShell's own reading ──────────────────────────────────────────────
 
 _PROBE = r"""
@@ -139,7 +207,23 @@ $out = foreach ($p in ($env:KAZMA_PS_PATHS -split '\|')) {
     }
     $conflicts = @()
     if ($advanced) { $conflicts = @($names | Where-Object { $common -contains $_ }) }
-    [pscustomobject]@{ path = $p; errors = @($errors | ForEach-Object { $_.Message }); conflicts = $conflicts }
+    $stop = @($ast.FindAll({ param($n)
+        $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $n.Left.Extent.Text -eq '$ErrorActionPreference' -and $n.Right.Extent.Text -match 'Stop' }, $true)).Count -gt 0
+    $redirects = @()
+    if ($stop) {
+        $redirects = @($ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.RedirectionAst] -and
+            ($n.FromStream -eq 'Error' -or $n.FromStream -eq 'All') }, $true) | Where-Object {
+                $up = $_.Parent; $inside = $false
+                while ($up) {
+                    if ($up -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $up.Name -eq 'Invoke-Native') { $inside = $true; break }
+                    $up = $up.Parent
+                }
+                -not $inside
+            } | ForEach-Object { $_.Extent.StartLineNumber } | Sort-Object -Unique)
+    }
+    [pscustomobject]@{ path = $p; errors = @($errors | ForEach-Object { $_.Message }); conflicts = $conflicts; stderr_redirects = $redirects }
 }
 ConvertTo-Json -InputObject @($out) -Depth 4 -Compress
 """
@@ -170,6 +254,17 @@ def _with_cmdletbinding(text: str) -> str:
     planted = re.sub(r"(?m)^param\(", "[CmdletBinding()]\nparam(", text, count=1)
     assert planted != text
     return planted
+
+
+_SYNC_NOW = "Invoke-Native { uv sync --extra rag --extra dev --extra tui } | ForEach-Object { Write-Verbose $_ }"
+_SYNC_THEN = "& uv sync --extra rag --extra dev --extra tui 2>&1 | ForEach-Object { Write-Verbose $_ }"
+
+
+def _with_old_uv_sync(text: str) -> str:
+    """setup.ps1 with its uv sync line as it was: stderr redirected under
+    "Stop"."""
+    assert text.count(_SYNC_NOW) == 1
+    return text.replace(_SYNC_NOW, _SYNC_THEN)
 
 
 # ── the gates ─────────────────────────────────────────────────────────────
@@ -207,6 +302,22 @@ def test_the_bom_rule_sees_a_script_without_one():
     assert bom_problem(b"Write-Host 'plain'\r\n") is None
 
 
+@pytest.mark.parametrize("script", _tracked_scripts(), ids=lambda p: p.name)
+def test_a_stop_script_redirects_stderr_only_in_its_helper(script):
+    assert static_stderr_redirects(script.read_text(encoding="utf-8-sig")) == []
+
+
+def test_the_redirect_reading_sees_the_old_lines():
+    text = (ROOT / "setup.ps1").read_text(encoding="utf-8-sig")
+    old = _with_old_uv_sync(text)
+    line = old.replace("\r\n", "\n").split("\n").index(_SYNC_THEN) + 1
+    assert static_stderr_redirects(old) == [line]
+    # Inside a string, or in a script that never sets "Stop", it is not one.
+    assert static_stderr_redirects('$ErrorActionPreference = "Stop"\nwsl -e bash -lc "x 2>/dev/null"\n') == []
+    assert static_stderr_redirects("tool 2>$null\n") == []
+    assert static_stderr_redirects("$ErrorActionPreference = 'Stop'\n# tool 2>&1\ntool 2>&1\n") == [3]
+
+
 def test_the_reading_sees_the_old_setup_script():
     text = (ROOT / "setup.ps1").read_text(encoding="utf-8-sig")
     assert static_conflicts(_with_cmdletbinding(text)) == ["Debug"]
@@ -228,17 +339,23 @@ def test_powershell_reads_every_script_without_errors_or_conflicts(shell, tmp_pa
                        encoding="utf-8-sig")
     no_bom = tmp_path / "industry_smoke_without_bom.ps1"
     no_bom.write_bytes((ROOT / "scripts" / "industry_smoke.ps1").read_bytes()[len(_BOM):])
-    rows = powershell_reading(shell, scripts + [planted, no_bom], tmp_path)
+    old_sync = tmp_path / "old_sync_setup.ps1"
+    old_sync_text = _with_old_uv_sync((ROOT / "setup.ps1").read_text(encoding="utf-8-sig"))
+    old_sync.write_text(old_sync_text, encoding="utf-8-sig")
+    rows = powershell_reading(shell, scripts + [planted, no_bom, old_sync], tmp_path)
     # The negative controls: PowerShell's own parser says the same as the
-    # reading here about the old setup script, and 5.1 cannot parse the
-    # smoke script as it was (7 reads UTF-8 with or without a BOM).
+    # reading here about the old setup script and its old uv sync line, and
+    # 5.1 cannot parse the smoke script as it was (7 reads UTF-8 with or
+    # without a BOM).
     assert rows["planted_setup.ps1"]["conflicts"] == ["Debug"]
+    assert rows[old_sync.name]["stderr_redirects"] == static_stderr_redirects(old_sync_text) != []
     if shell == "powershell.exe":
         assert rows[no_bom.name]["errors"], "5.1 parsed the BOM-less smoke script"
     for script in scripts:
         row = rows[script.name]
         assert row["errors"] == [], (script.name, row["errors"])
         assert row["conflicts"] == [], (script.name, row["conflicts"])
+        assert row["stderr_redirects"] == [], (script.name, row["stderr_redirects"])
 
 
 @pytest.mark.parametrize("shell", _shells() or ["none"])
@@ -267,3 +384,67 @@ def test_setup_script_starts(shell, tmp_path):
     refused = _run_setup(shell, old)
     assert _REFUSED in refused.stdout + refused.stderr
     assert "Environmental Guardrails" not in refused.stdout
+
+
+_FAKE_UV = (
+    "@echo off\r\n"
+    "if \"%1\"==\"--version\" (echo uv 0.0.0-stand-in& exit /b 0)\r\n"
+    "echo Using CPython 3.12 interpreter at: stand-in-python.exe 1>&2\r\n"
+    "echo Resolved 1 package in 1ms 1>&2\r\n"
+    "exit /b 0\r\n"
+)
+
+
+def _sync_folder(root: Path, script_text: str) -> tuple[Path, dict]:
+    """A folder setup.ps1 accepts as an install, a venv holding no packages,
+    and a stand-in uv first on PATH that writes to stderr as uv does."""
+    import sys
+
+    root.mkdir()
+    (root / "kazma.yaml").write_text("agent: {}\n", encoding="utf-8")
+    (root / "pyproject.toml").write_text("[project]\nname = 'stand-in'\n", encoding="utf-8")
+    script = root / "setup.ps1"
+    script.write_text(script_text, encoding="utf-8-sig")
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(root / ".venv")],
+                   check=True, capture_output=True, timeout=120)
+    bin_dir = root.parent / f"{root.name}-bin"
+    bin_dir.mkdir()
+    (bin_dir / "uv.cmd").write_text(_FAKE_UV, encoding="ascii")
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join([str(bin_dir), str(Path(sys.executable).parent), env.get("PATH", "")])
+    return script, env
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the stand-in uv is a .cmd file")
+@pytest.mark.parametrize("shell", [s for s in _shells() if s == "powershell.exe"] or ["none"])
+def test_setup_script_gets_past_uv_sync_on_windows_powershell(shell, tmp_path):
+    """Windows PowerShell 5.1, the one a fresh Windows has: past uv sync,
+    whose stand-in writes to stderr, setup reaches the import checks of a
+    venv that holds nothing and stops there, by its own check."""
+    if shell == "none":
+        pytest.skip("no Windows PowerShell here")
+    text = (ROOT / "setup.ps1").read_text(encoding="utf-8-sig")
+
+    script, env = _sync_folder(tmp_path / "now", text)
+    done = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+        cwd=script.parent, capture_output=True, text=True, timeout=300, env=env,
+        encoding="utf-8", errors="replace",
+    )
+    output = done.stdout + done.stderr
+    assert "NativeCommandError" not in output, output
+    assert "uv detected: uv 0.0.0-stand-in" in output, output
+    assert "Environment synced" in output, output
+    assert "aiosqlite not importable" in output, output
+    assert done.returncode == 1, output
+
+    # The negative control: the uv sync line as it was ends the script at
+    # the stand-in's first stderr line.
+    script, env = _sync_folder(tmp_path / "then", _with_old_uv_sync(text))
+    refused = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+        cwd=script.parent, capture_output=True, text=True, timeout=300, env=env,
+        encoding="utf-8", errors="replace",
+    )
+    assert "NativeCommandError" in refused.stdout + refused.stderr
+    assert "Environment synced" not in refused.stdout

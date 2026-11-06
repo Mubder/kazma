@@ -6692,8 +6692,12 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   invocation fails). An advanced script declares no common parameter, read
   by PowerShell's own parser and without one; a script with non-ASCII text
   starts with a UTF-8 BOM (5.1 reads a BOM-less file in the ANSI code page,
-  and `industry_smoke.ps1`'s em dash ended a string); setup.ps1 is run in
-  an empty folder.
+  and `industry_smoke.ps1`'s em dash ended a string); a script that sets
+  `$ErrorActionPreference = "Stop"` redirects a program's stderr only inside
+  its `Invoke-Native` helper (5.1 makes each redirected stderr line an error
+  record, and under "Stop" uv's "Using CPython ..." ended setup at `uv
+  sync`); setup.ps1 is run in an empty folder and, on Windows PowerShell,
+  past `uv sync` with a stand-in uv that writes to stderr.
 - **No function reads a name it imported on another path**
   (`tests/test_unbound_local_imports.py`, 2026-10-02). Any import in a
   function makes the name local to the whole function, so a read on a path

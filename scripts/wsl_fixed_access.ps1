@@ -54,6 +54,29 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Windows PowerShell 5.1 turns a program's redirected stderr into error
+# records, and under "Stop" the first one ends the script -- so a wsl call
+# made before WSL is ready stopped the script instead of retrying. Programs
+# run through Invoke-Native ("Continue" for the call; judged by
+# $LASTEXITCODE, -1 when the program did not start).
+# tests/test_powershell_scripts_start.py holds every shipped script to that.
+function Invoke-Native {
+    param([scriptblock]$Command, [switch]$StdoutOnly)
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $global:LASTEXITCODE = -1
+    try {
+        if ($StdoutOnly) { & $Command 2>$null }
+        else { & $Command 2>&1 | ForEach-Object { "$_" } }
+    } catch {
+        # Not there at all (PowerShell throws even under "Continue").
+        Write-Verbose "$_"
+        $global:LASTEXITCODE = -1
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+}
+
 function Test-IsAdmin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     $p = New-Object Security.Principal.WindowsPrincipal($id)
@@ -77,7 +100,7 @@ $deadline = (Get-Date).AddSeconds($WaitForNetwork)
 $attempt = 0
 while ((Get-Date) -lt $deadline) {
     $attempt++
-    $raw = (wsl -d $Distro -e bash -lc "hostname -I 2>/dev/null" 2>$null)
+    $raw = Invoke-Native -StdoutOnly { wsl -d $Distro -e bash -lc "hostname -I 2>/dev/null" }
     if ($raw) {
         $cands = ($raw -split "\s+") | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }
         # Prefer 172.28.x (WSL Hyper-V) then 172.x (skip docker 172.17.x)
@@ -105,7 +128,7 @@ Write-Host "  Port:    $Port"
 Write-Host ""
 
 # Refresh portproxy: localhost:Port → WSL_IP:Port
-netsh interface portproxy delete v4tov4 listenaddress=$ListenAddress listenport=$Port 2>$null | Out-Null
+Invoke-Native -StdoutOnly { netsh interface portproxy delete v4tov4 listenaddress=$ListenAddress listenport=$Port } | Out-Null
 netsh interface portproxy add v4tov4 listenaddress=$ListenAddress listenport=$Port connectaddress=$wslIp connectport=$Port
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  [ERROR] portproxy add failed (exit $LASTEXITCODE)." -ForegroundColor Red
