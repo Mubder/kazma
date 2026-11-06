@@ -7364,6 +7364,16 @@ code) and Kazma ran with nobody supervising it.
   database was away keeps the in-memory fallback for the life of the
   process) is restarted like no answer. A result without the flags gets the
   old rule. `tests/test_guard_probe_answers.py` (real HTTP).
+- **One address for the guard and every command** (`health_url`, 2026-11-07):
+  `KAZMA_GUARD_HEALTH_URL` when set; for a command (`--status`, `--reload`,
+  `--pause --stop`, `--resume`, the update's hold) the URL the running guard
+  recorded (`health_url` in its state file); else the port the server binds
+  (`install_port`: `KAZMA_PORT` from the environment or the install's .env,
+  one key read, the file never loaded); else 9090. On the drill VM Kazma
+  bound 9191 and `--status` probed the built-in 9090 whatever was set,
+  calling a healthy Kazma "not answering"; a port in .env now needs no
+  `setx`. Gate: `tests/test_guard_health_url.py` (no other read of the
+  variable or the built-in URL).
 - **Waiting for its owner is up, never a restart** (the drill VM, 2026-11-06:
   a fresh install with no provider key was restarted every 15 minutes, its
   log saying only `not_ready`, while its owner tried to set it up). A
@@ -8771,7 +8781,10 @@ findings. Each fix has a gate that fails on the old code.
   once needed stays held). Recorded from live alone, the drill VM's fresh
   install (2026-11-06) got certifi, oauthlib and pypdf below their fixes
   past a green gate. A `uv lock` upgrade that crosses a major version
-  (pypdf 7) is kept to the series the fix is in until it is tested. A
+  (pypdf 7) is kept to the series the fix is in until it is tested, in
+  pyproject too (`pypdf>=6.21.4,<7`): `kazma update` installs the newest
+  version within the floors and does not read uv.lock, so the drill VM's
+  update installed pypdf 7.0.0 while the lock said 6.21.4. A
   default provider's imports are base dependencies with floors (FA-248:
   `edge-tts>=7.3.1`), and a failed voice reply on Telegram is a WARNING.
   Gate: `tests/test_default_voice_providers_declared.py`.
@@ -9187,7 +9200,11 @@ is the reasoning setting below plus the tool count per turn (open).
   which raises nothing) and raises `security.advisories_new` once per new
   advisory, naming the package, the fixed version and the update command;
   reviewed advisories stay quiet. What is still open is kept in the RUNTIME
-  key `system.security.advisories` (`open_advisories`).
+  key `system.security.advisories` (`open_advisories`), and each stored one
+  is held against the version installed NOW (`advisory_watch._still_open`):
+  read as stored, the drill VM's five advisories stayed on the Dashboard after
+  `kazma update` had installed the fixes, under "It closes when the installed
+  version is past the fix" (2026-11-07; `tests/test_advisories_close_when_fixed.py`).
 - **An unmet requirement stays in front of the owner** (theme 12). The boot
   check records its result (`install_requirements.REQUIREMENTS_KEY`,
   `last_requirements_check`; a check that finds none clears it), and the
