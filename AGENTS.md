@@ -3939,7 +3939,12 @@ update dropped the CLI from the system PATH on 2026-09-25 — every dump after
 it failed while Docker and the container were fine. The docker CLI is found
 by `kazma_core.docker_cli.find_docker_cli()` (`KAZMA_DOCKER_BIN`, PATH,
 Docker's install folders), never `shutil.which("docker")` alone
-(`tests/test_docker_cli_discovery.py` gates it). Boot checks the tool
+(`tests/test_docker_cli_discovery.py` gates it). The tools of the Postgres
+`kazma setup postgres` installed (its record's `bin_dir`,
+`pg_bridge._installed_tool`) come after PATH and before any container: after
+the move to the service (2026-11-06) `KAZMA_DB_CONTAINER` still named the
+old container, and a dump through it read that container's stale database.
+Boot checks the tool
 (`pg_dump_tool_problem`, ops alert `backup.pg_tools`), and a failed dump's
 alert carries its reason (`last_pg_backup_failure`), redacted. Putting the
 folder back on PATH then needs only `kazma_guard.py --reload`: the server
@@ -7370,7 +7375,10 @@ code) and Kazma ran with nobody supervising it.
     Docker): the containers publishing a loopback port Kazma's database,
     memory mirror, graph or search address names (`_match_containers`; a
     guessed address takes only a Kazma-named container, a tie goes to the
-    running one, then the last record, else nothing). The guard starts one
+    running one, then the last record, else nothing; `KAZMA_DB_CONTAINER`
+    counts only when it publishes the database's port, and with none running
+    a port that answers belongs to a server outside Docker, so no stopped
+    container is named for it). The guard starts one
     only when an engine outage stopped it, twice seen stopped, 60 s after the
     engine came back; a container stopped while the engine stayed up, or
     after it ran again, is left alone (`deps.container_left_stopped`). Three

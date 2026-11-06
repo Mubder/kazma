@@ -28,10 +28,17 @@ How a container gets on the list:
 * SearXNG's built-in default (``127.0.0.1:8088``) is a guess, not a
   configured address. It counts only for a container named like Kazma's own,
   so another project's container on that port is never started for Kazma.
-* ``KAZMA_DB_CONTAINER`` names the database's container outright.
+* ``KAZMA_DB_CONTAINER`` names the database's container outright -- when it
+  publishes the port the database's address uses. After the move to the
+  Postgres service (``kazma setup postgres --move-from-container``) the
+  variable may still name the old container, which publishes another port.
 * When two containers could be the one, the running one wins. With none
   running, the one the last record named wins. If neither settles it, the
   address is skipped and the reason is logged.
+* With none running, a port that answers is held by a server outside Docker
+  (the Postgres service): no stopped container is named for it. Live
+  2026-11-06 another project's stopped ``kca-postgres``, publishing 5432, was
+  named for the memory mirror the native service serves on 5432.
 * When Docker cannot be asked, nothing is written: the last record stands,
   and the engine being down is what the guard must fix. When a setting
   cannot be read, its containers from the last record are kept.
@@ -52,6 +59,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -251,6 +259,17 @@ def _published_ports(row: dict[str, Any]) -> set[int]:
     return ports
 
 
+def _port_answers(port: int) -> bool:
+    """Something on this machine takes a connection on *port* now."""
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
 def _name(row: dict[str, Any]) -> str:
     return str(row.get("Name") or "").lstrip("/")
 
@@ -269,11 +288,13 @@ def _match_containers(
     *,
     unread: frozenset[str] | set[str] = frozenset(),
     named_db: str = "",
+    answering: Callable[[int], bool] = lambda port: False,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """``(the containers Kazma depends on, what could not be decided)``.
 
-    Pure: the rules of the module docstring, on ``docker inspect`` rows and
-    the last record's entries."""
+    Pure but for *answering* (is a port on this machine answered now): the
+    rules of the module docstring, on ``docker inspect`` rows and the last
+    record's entries."""
     rows = {_name(r): r for r in inspected if CONTAINER_NAME.match(_name(r))}
     before = {str(e.get("name")): e for e in previous if isinstance(e, dict)}
     chosen: dict[str, dict[str, Any]] = {}
@@ -288,7 +309,8 @@ def _match_containers(
 
     named = named_db.strip()
     for endpoint in endpoints:
-        if endpoint.purpose == "database" and named and named in rows:
+        if (endpoint.purpose == "database" and named and named in rows
+                and endpoint.port in _published_ports(rows[named])):
             take(named, "database", endpoint.port)
             continue
         candidates = [
@@ -301,6 +323,10 @@ def _match_containers(
         running = [n for n in candidates if _running(rows[n])]
         if len(running) == 1:
             take(running[0], endpoint.purpose, endpoint.port)
+            continue
+        if not running and answering(endpoint.port):
+            # No candidate runs, yet the port answers: a server outside Docker
+            # (the Postgres service kazma setup installed) holds it.
             continue
         pool = running or candidates
         remembered = [n for n in pool if n in before]
@@ -376,7 +402,7 @@ def _publish_dependencies() -> bool:
         previous = _read_record(path)
         containers, undecided = _match_containers(
             endpoints, inspected, previous, unread=unread,
-            named_db=_env(("KAZMA_DB_CONTAINER",)),
+            named_db=_env(("KAZMA_DB_CONTAINER",)), answering=_port_answers,
         )
         for line in undecided:
             logger.info("[guard] more than one container could serve %s; none is named for the guard", line)

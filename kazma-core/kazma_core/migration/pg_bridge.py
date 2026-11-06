@@ -6,7 +6,8 @@ Used by the exporter (dump the source DB into the bundle) and the importer
 
 Design — discover the binary, don't assume an install:
 - ``_resolve_pg_dump()`` / ``_resolve_pg_restore()`` try, in order:
-  (1) the binary on PATH (``shutil.which``);
+  (1) the binary on PATH (``shutil.which``), then the one in the Postgres
+      ``kazma setup postgres`` installed (its record's ``bin_dir``);
   (2) ``docker exec ${KAZMA_DB_CONTAINER:-kazma-db} <bin>`` — the robust
       default for the common Docker-based deployment, where the host has
       no local pg client tools but the DB container always does;
@@ -100,10 +101,36 @@ def resolve_pg_restore() -> Sequence[str]:
     return _resolve_tool("pg_restore")
 
 
+def _installed_tool(tool: str) -> str | None:
+    """*tool* from the Postgres ``kazma setup postgres`` installed (its
+    record's ``bin_dir``), when it is there.
+
+    Its tools connect over TCP to the address they are given, so they reach
+    the server Kazma uses, wherever it runs. Live 2026-11-06, after the move
+    off the container, PATH had no pg_dump and ``KAZMA_DB_CONTAINER`` still
+    named the old container: every backup would have dumped that container's
+    stale database while it ran, and failed once it was stopped."""
+    from kazma_core.postgres_service import read_record
+
+    try:
+        bin_dir = str((read_record().get("postgres") or {}).get("bin_dir") or "")
+    except AttributeError:  # a record whose "postgres" is not an object
+        return None
+    if not bin_dir:
+        return None
+    path = Path(bin_dir) / (f"{tool}.exe" if os.name == "nt" else tool)
+    return str(path) if path.is_file() else None
+
+
 def _resolve_tool(tool: str) -> Sequence[str]:
     # (1) Local binary on PATH.
     if shutil.which(tool):
         return [tool]
+    # (1b) The Postgres kazma setup postgres installed: ahead of any container,
+    # whose tools reach only the container's own server.
+    installed = _installed_tool(tool)
+    if installed:
+        return [installed]
     # (2) Docker container (the common Kazma deployment shape: the DB runs
     # in a container that HAS the client tools, even when the host doesn't).
     container = os.environ.get("KAZMA_DB_CONTAINER", "").strip() or "kazma-db"

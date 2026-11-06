@@ -669,6 +669,26 @@ def test_ties_the_running_one_then_the_last_record_then_undecided():
     assert [c["name"] for c in out] == ["kazma-test-pg"]
 
 
+def test_after_the_move_to_the_postgres_service_no_stopped_container_is_named():
+    """Live 2026-11-06, right after the move: the database and the memory
+    mirror on the native service (5432); the old container stopped on 5433 and
+    still named by KAZMA_DB_CONTAINER; another project's stopped container
+    publishing 5432. The record named both containers."""
+    endpoints = [gd.Endpoint("database", 5432), gd.Endpoint("memory mirror", 5432)]
+    rows = [_row("kazma-db-win", 5433, running=False), _row("kca-postgres", 5432, running=False)]
+    out, undecided = gd._match_containers(endpoints, rows, [], named_db="kazma-db-win",
+                                          answering=lambda port: port == 5432)
+    assert out == [] and undecided == []
+    # Controls: with nothing answering on 5432 (the outage this list exists
+    # for), the stopped container that publishes it is taken; a named
+    # container that publishes the database's port still counts.
+    down, _ = gd._match_containers(endpoints, rows, [], named_db="kazma-db-win", answering=lambda port: False)
+    assert [c["name"] for c in down] == ["kca-postgres"]
+    named, _ = gd._match_containers([gd.Endpoint("database", 5433)], rows, [], named_db="kazma-db-win",
+                                    answering=lambda port: True)
+    assert [c["name"] for c in named] == ["kazma-db-win"]
+
+
 def test_an_unread_setting_keeps_its_container_while_it_exists():
     previous = [{"name": "kazma-neo4j-win", "ports": [7687], "for": ["graph"]}]
     out, _ = gd._match_containers([], [_row("kazma-neo4j-win", 7687)], previous,
