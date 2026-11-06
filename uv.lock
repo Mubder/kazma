@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'darwin'",
@@ -2530,7 +2530,7 @@ wheels = [
 
 [[package]]
 name = "kazma"
-version = "0.11.0"
+version = "0.20.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## 0.20.0 — Kazma keeps running, or tells you why (2026-11-06)
+
+The industrial resilience release (docs/plans/INDUSTRIAL_RESILIENCE_PLAN.md).
+
+- **Watched from outside.** An observer on kazma.ai checks Kazma every minute
+  from outside this machine and pages its own bot when the machine is off,
+  asleep or cut off, the tunnel is down, or Kazma or its database is away
+  (`kazma observer pair`; the Cloudflare side is yours, see
+  deploy/observer/README.md). The guard also watches the free disk space,
+  the power (a USB UPS: on battery it pages, at 30 % it stops Kazma cleanly
+  and starts it when power is back) and the database's OS service.
+- **The database.** `kazma setup postgres` installs Postgres 16 as a service
+  that starts at boot (Windows, macOS, Linux, WSL), with WAL archiving and
+  point-in-time restore (`kazma restore postgres`). One "database away" state:
+  Kazma waits it out quietly, pages once, and with the database still away a
+  minute into a start it runs read-only from a local copy of the settings:
+  the chat apps tell each chat once and keep its messages, answered when the
+  database is back.
+- **Nothing lost to a restart.** A turn a restart cut off continues by itself
+  when that is safe; chat-app replies go through an outbox and are retried
+  (never sent twice); every deploy is checked and undone if it fails
+  (`scripts/deploy_live.py`); `kazma maintenance begin|end` wraps updates.
+- **Turns that finish.** A refusal no longer ends a turn; a turn has a token
+  budget (500,000 by default) and an optional daily spend limit; long files
+  are written in parts with each model's own output limit; an answer that
+  claims a file no tool wrote gets a "Not done" line; the same content or
+  document is not written twice in one turn.
+- **No single outside service.** Tavily is the search service after SearXNG
+  (opt-in, your key); a monthly drill takes the failover chain to a backup
+  model of another vendor and checks the notice and the switch back.
+- **Signals you can use.** Quiet logs (the polls and routine lines out), one
+  "Open problems" list on the Dashboard (acknowledge, snooze for a day), the
+  weekly report against targets (uptime, turns, restarts, recovery time,
+  backups, stops, alerts), and `kazma setup system` installs OCR with Arabic,
+  LibreOffice, ClamAV, the Arabic fonts and Docker.
+- **The UI tells the truth.** A step shows done only when it ended; two
+  narrations stay two paragraphs; a turn without an answer says so; a new
+  chat offers "Don't remember this chat" before its first message; and more.
+
 ## Kazma starts Docker again when an update leaves it stopped (2026-11-04)
 
 - The guard now starts Docker Desktop when the Docker engine has not

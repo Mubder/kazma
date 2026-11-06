@@ -65,7 +65,7 @@ MAX_ITERATIONS = 10
 
 
 def _default_version() -> str:
-    """Public base version, e.g. ``0.11.0``. Falls back rather than raising."""
+    """Public base version, e.g. ``0.20.0``. Falls back rather than raising."""
     try:
         from kazma_core.version import get_base_version
 
