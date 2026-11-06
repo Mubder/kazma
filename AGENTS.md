@@ -4040,10 +4040,15 @@ archive" reads `pg_stat_archiver` (a failing archiver, or none archived for
 (`pg_basebackup -Ft -z -X fetch`, two kept, a failed one leaves no folder),
 prunes the WAL the older one no longer needs, and sends new segments and base
 backups offsite (`pgwal-*`, `pgbase-*`, in order; a failed upload stops the
-pass). `kazma restore postgres --to TIME --into DIR` lays a base backup into a
-new folder set to replay to TIME; the live database is never touched. Gate:
-`tests/test_setup_postgres.py` (retention, the archiver's numbers, restore,
-offsite order).
+pass). `kazma restore postgres --to TIME --into DIR` lays the newest base
+backup taken before TIME (`wal_archive._base_before`; a time without a zone is
+this machine's) into a new folder set to replay to TIME; the live database is
+never touched. It took the newest base whatever TIME was, and Postgres cannot
+replay a base back to a time before it was taken. Gate:
+`tests/test_setup_postgres.py` (retention, the archiver's numbers, restore and
+its base, offsite order), `tests/test_resilience_postgres.py` (the archiver's
+numbers, outage or query error and the move from a container, on a real
+Postgres; a row lost in the move as the negative control).
 
 ### 21b. Every system dependency is installed by Kazma (`kazma_core/system_deps.py`)
 

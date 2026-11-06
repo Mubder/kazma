@@ -322,6 +322,26 @@ def wal_sweep(now: float | None = None) -> str:
 # -- restore ------------------------------------------------------------------------------------------
 
 
+def _base_before(target_time: str, bases: list[Path]) -> Path:
+    """The newest base backup taken before *target_time* (a time without a
+    zone is this machine's, as the service reads ``recovery_target_time``).
+    A base taken after it cannot replay back to it: Postgres refuses a
+    recovery target before the backup's own end."""
+    from datetime import datetime
+
+    try:
+        when = datetime.fromisoformat(target_time.strip()).astimezone().timestamp()
+    except ValueError as exc:
+        raise ValueError(f"{target_time!r} is not a time: write it like 2026-11-20 14:05") from exc
+    earlier = [b for b in bases if int(b.name) < when]
+    if not earlier:
+        if not bases:
+            raise ValueError("there is no base backup to restore from")
+        oldest = time.strftime("%Y-%m-%d %H:%M", time.localtime(min(int(b.name) for b in bases)))
+        raise ValueError(f"the oldest base backup is from {oldest}: a restore can go back to then, not before")
+    return max(earlier, key=lambda b: int(b.name))
+
+
 def restore_to(target_time: str, new_data_dir: Path, archive_dir: Path, *, base: Path | None = None,
                os_name: str = "windows") -> list[str]:
     """Lay the newest base backup older than *target_time* into *new_data_dir*
@@ -330,9 +350,7 @@ def restore_to(target_time: str, new_data_dir: Path, archive_dir: Path, *, base:
     data folder is never touched."""
     if new_data_dir.exists() and any(new_data_dir.iterdir()):
         raise ValueError(f"{new_data_dir} is not empty: a restore goes into a new folder")
-    base = base or (_base_backups() or [None])[0]
-    if base is None:
-        raise ValueError("there is no base backup to restore from")
+    base = base or _base_before(target_time, _base_backups())
     new_data_dir.mkdir(parents=True, exist_ok=True)
     with tarfile.open(base / "base.tar.gz", "r:gz") as tar:
         tar.extractall(new_data_dir, filter="data")
