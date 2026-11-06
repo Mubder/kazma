@@ -2213,7 +2213,7 @@
                 <p>{{ t('settings.outside_watch_not_paired') }}</p>
                 <pre translate="no" dir="ltr"><code>kazma observer pair</code></pre>
             </div>
-            <dl x-show="outsideWatch.loaded && outsideWatch.paired" x-cloak data-outside-paired style="display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:4px 16px;margin:8px 0">
+            <dl x-show="outsideWatch.loaded && outsideWatch.paired" x-cloak data-outside-paired class="outside-watch-grid">
                 <dt>{{ t('settings.outside_watch_observer') }}</dt>
                 <dd><bdi dir="ltr" translate="no" x-text="outsideWatch.url"></bdi></dd>
                 <dt>{{ t('settings.outside_watch_guard') }}</dt>
@@ -2224,13 +2224,13 @@
                     <div style="display:contents">
                         <dt>{{ t('settings.outside_watch_now') }}</dt>
                         <dd><span x-text="outsideCondition(outsideWatch.observer.condition)"></span>
-                            <span class="form-hint" translate="no" x-show="outsideWatch.observer.detail" x-text="outsideWatch.observer.detail"></span></dd>
+                            <span class="form-hint" translate="no" x-show="outsideWatch.observer.detail" x-cloak x-text="outsideWatch.observer.detail"></span></dd>
                         <dt>{{ t('settings.outside_watch_week') }}</dt>
                         <dd x-text="outsideUptime(outsideWatch.observer)"></dd>
                         <dt>{{ t('settings.outside_watch_incidents') }}</dt>
                         <dd>
-                            <span x-show="outsideWatch.loaded && !(outsideWatch.observer.incidents_7d || []).length">{{ t('settings.outside_watch_no_incidents') }}</span>
-                            <ul x-show="(outsideWatch.observer.incidents_7d || []).length">
+                            <span x-show="outsideWatch.loaded && !(outsideWatch.observer.incidents_7d || []).length" x-cloak>{{ t('settings.outside_watch_no_incidents') }}</span>
+                            <ul x-show="(outsideWatch.observer.incidents_7d || []).length" x-cloak>
                                 <template x-for="(inc, i) in (outsideWatch.observer.incidents_7d || [])" :key="i">
                                     <li><span x-text="outsideCondition(inc.cause)"></span>: <span x-text="outsideIncidentWhen(inc)"></span></li>
                                 </template>
@@ -3192,7 +3192,7 @@
                    style="margin:0 0 16px;padding:10px 12px;border-radius:6px;font-size:0.84rem;">
                     <strong x-text="xReply.mode === 'auto' && xReply.auto_qualification_hold_code ? t('settings.xt.review_held') : (xReply.poller_running && xReply.can_draft) ? t('settings.xt.live') : t('settings.xt.not_live')"></strong>
                     <span x-text="' — ' + xReplyLiveReason()"></span>
-                    <span translate="no" x-show="xReply.live_reason_code === 'policy_errors'"
+                    <span translate="no" x-show="xReply.live_reason_code === 'policy_errors'" x-cloak
                           x-text="' ' + ((xReply.live_reason_values || {}).errors || '')"></span>
                 </p>
 

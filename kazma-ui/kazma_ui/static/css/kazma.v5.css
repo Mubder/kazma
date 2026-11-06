@@ -753,3 +753,13 @@ html[data-theme="light"] { color-scheme: only light; }
 .runs-fold summary { cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); }
 .runs-runbook-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .runs-runbook { display: flex; align-items: flex-start; gap: 8px; font-size: 0.85rem; }
+
+/* Settings -> System -> Outside watch: the paired observer's facts. A class,
+   never an inline display: the element is x-show'n (an inline display wins
+   over Alpine's display:none). */
+.outside-watch-grid {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 8px 0;
+}

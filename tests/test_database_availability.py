@@ -127,6 +127,20 @@ def test_other_failures_are_not_an_outage(exc):
     assert not availability.is_outage(exc)
 
 
+def test_the_settings_store_word_for_an_outage_is_an_outage():
+    """A loop that met the settings store's outage (``ConfigStoreUnavailableError``,
+    a RuntimeError, not raised from psycopg's error) waits like any other; on
+    SQLite the same error is a local file's trouble, never the server's."""
+    from kazma_core.config_availability import ConfigStoreUnavailableError
+
+    away = ConfigStoreUnavailableError(opening=True, reason="connection refused")
+    away.backend = "postgres"
+    assert availability.is_outage(away)
+    local = ConfigStoreUnavailableError()
+    local.backend = "sqlite"
+    assert not availability.is_outage(local)
+
+
 def test_an_outage_is_found_through_its_cause():
     try:
         try:
@@ -441,6 +455,9 @@ DECLARED = {
         "the database, and a sweep that fails while away is recorded as waiting_for_database",
     "kazma-core/kazma_core/observability/alerts.py::_health_check_loop":
         _KEEPS_RUNNING + "it is how an outage is seen",
+    "kazma-ui/kazma_ui/read_only_mode.py::create_read_only_app._watch":
+        _KEEPS_RUNNING + "it runs only while the database is away and is how the read-only "
+        "server sees it come back (one sign-in every 10 s, then a normal start)",
     "kazma-core/kazma_core/memory/task_queue.py::_MemoryWorker._run_lease_renewal":
         _NO_DATABASE + "renews leases in memory_ops.db (SQLite)",
     "kazma-core/kazma_core/observability/loop_stall.py::start_stall_watchdog._heartbeat":

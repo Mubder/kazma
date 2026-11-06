@@ -110,6 +110,11 @@ def _outage_one(exc: BaseException) -> bool:
     cls = type(exc)
     if cls.__name__ == "PostgresUnreachable":
         return True
+    if cls.__name__ == "ConfigStoreUnavailableError":
+        # The settings store's own word for an outage (a RuntimeError, not
+        # psycopg's): its database is away. On SQLite it is a local file's
+        # trouble, never the server's.
+        return getattr(exc, "backend", "") == "postgres"
     module = cls.__module__ or ""
     if not module.startswith(("psycopg", "psycopg_pool")):
         return False

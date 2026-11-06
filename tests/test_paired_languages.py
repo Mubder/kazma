@@ -210,6 +210,45 @@ def _web_command(lang: str) -> bool:
     return bool(reply) and detect_user_language(reply) == lang
 
 
+def _receipt_line(turn: tuple[str, str]) -> bool:
+    """A file the answer claims and no tool wrote gets its "Not done" line,
+    in the answer's language (resilience plan D3)."""
+    from kazma_core.agent.answer_receipts import check_answer_receipts
+
+    question, answer = turn
+    out = check_answer_receipts([{"role": "user", "content": question},
+                                 {"role": "assistant", "content": answer}], {})[-1]["content"]
+    added = out[len(answer):].strip()
+    return bool(added) and detect_user_language(added) == detect_user_language(answer)
+
+
+def _budget_texts(text: str) -> bool:
+    """The turn the token budget stopped, and the turn the daily limit
+    refused, answer in the user's language (resilience plan E1)."""
+    from kazma_core.agent.turn_token_budget import daily_refusal_text, stop_text
+
+    lang = detect_user_language(text)
+    return all(detect_user_language(t) == lang
+               for t in (stop_text(text, 520_000, 500_000), daily_refusal_text(text, 5.0, 5.0)))
+
+
+def _outbox_notices(text: str) -> bool:
+    """A reply that went out late, or after one that may not have arrived
+    whole, opens with that line in the reader's language (plan F3)."""
+    from kazma_gateway.gateway import _earlier_reply_notice, _late_reply_notice
+
+    lang = detect_user_language(text)
+    return all(detect_user_language(notice(text).splitlines()[0]) == lang
+               for notice in (_earlier_reply_notice, _late_reply_notice))
+
+
+def _read_only_notice(text: str) -> bool:
+    """While the database is away each chat is told once, in its language (plan A4)."""
+    from kazma_ui.read_only_mode import _notice
+
+    return detect_user_language(_notice(text)) == detect_user_language(text)
+
+
 M = "kazma-core/kazma_core/"
 
 PAIRS: list[Pair] = [
@@ -323,6 +362,15 @@ PAIRS: list[Pair] = [
          "The meeting is on Tuesday.", "الاجتماع يوم الثلاثاء.", _direction, True),
     Pair("runs_listing", (M + "runs/text.py",), "en", "ar", _runs_listing, True),
     Pair("web_commands", ("kazma-ui/kazma_ui/sse_chat/_command_discovery.py",), "en", "ar", _web_command, True),
+    Pair("receipt_not_done", (M + "agent/answer_receipts.py",),
+         ("Save the report as a PDF.", "I saved report.pdf for you."),
+         ("احفظ التقرير PDF.", "حفظت لك الملف report.pdf في مجلد العمل."), _receipt_line, True),
+    Pair("budget_texts", (M + "agent/turn_token_budget.py",),
+         "Summarise the report, please.", "لخص لي التقرير لو سمحت.", _budget_texts, True),
+    Pair("outbox_notices", ("kazma-gateway/kazma_gateway/gateway.py",),
+         "Here is the summary you asked for.", "هذا الملخص الذي طلبته.", _outbox_notices, True),
+    Pair("read_only_notice", ("kazma-ui/kazma_ui/read_only_mode.py",),
+         "hello, are you there?", "مرحبا، أنت موجود؟", _read_only_notice, True),
 ]
 
 
@@ -420,6 +468,10 @@ def test_negative_control_a_pair_catches_an_english_only_rule(monkeypatch):
 
 #: Product modules with Arabic in their code that need no pair here, and why.
 DECLARED: dict[str, str] = {
+    "kazma-gateway/kazma_gateway/agent_handler/hitl.py":
+        "the restart notice of a continued turn is two fixed strings that "
+        "language_lock.in_their_language chooses between (the fixed_reply pair runs that "
+        "chooser); tests/test_turn_resume.py delivers it",
     M + "agent/command_catalog.py": "each command's description in both languages (description / "
                                     "description_ar); tests/test_slash_help_and_menu.py",
     M + "agent/state.py": "an attribute's documentation string names an Arabic pivot phrase",

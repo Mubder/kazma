@@ -269,13 +269,19 @@ def create_read_only_app(start: ReadOnlyStart, *, probe: Any = None, on_back: An
 
     @app.get("/health/live")
     def _live() -> JSONResponse:
-        return JSONResponse({"status": "read_only", "read_only": True})
+        from kazma_core.diagnostic_scope import read_only_diagnostic
+
+        with read_only_diagnostic("read-only health"):
+            return JSONResponse({"status": "read_only", "read_only": True})
 
     @app.get("/health/ready")
     def _ready() -> JSONResponse:
-        return JSONResponse({"status": "not_ready", "ready": False, "read_only": True,
-                             "checks": {"database": "away"}, "database_availability": _availability()},
-                            status_code=503)
+        from kazma_core.diagnostic_scope import read_only_diagnostic
+
+        with read_only_diagnostic("read-only readiness"):
+            return JSONResponse({"status": "not_ready", "ready": False, "read_only": True,
+                                 "checks": {"database": "away"}, "database_availability": _availability()},
+                                status_code=503)
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     def _everything(path: str, request: Request):

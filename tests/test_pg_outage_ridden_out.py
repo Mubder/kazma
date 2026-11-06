@@ -466,9 +466,12 @@ def test_a_boot_does_not_wait_out_a_bug():
 
 
 def test_the_boot_waits_where_it_opens_the_store():
-    """The app's boot calls the wait, not the store directly."""
+    """The app's boot calls the wait, not the store directly (it also hands
+    the wait the read-only start's check, ``on_wait``: resilience plan A4)."""
+    import re
+
     source = Path("kazma-ui/kazma_ui/app.py").read_text(encoding="utf-8")
-    assert "wait_for_settings_store(get_config_store)" in source
+    assert re.search(r"wait_for_settings_store\(get_config_store\b", source)
 
 
 # ── A real outage (opt-in) ──────────────────────────────────────────────

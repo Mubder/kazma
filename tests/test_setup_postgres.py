@@ -319,6 +319,31 @@ def test_a_restore_goes_into_a_new_folder_and_replays_to_a_time(tmp_path):
         wal_archive.restore_to("2026-11-20 14:05", target, tmp_path / "wal", base=root / "300")
 
 
+def test_a_restore_takes_the_newest_base_backup_before_the_time(tmp_path):
+    """A weekly base taken after the time asked for cannot replay back to it
+    (Postgres refuses a target before the backup's end): the restore takes
+    the newest base before the time, and says how far back it can go."""
+    from datetime import datetime
+
+    def epoch(text: str) -> int:
+        return int(datetime.fromisoformat(text).astimezone().timestamp())
+
+    root = tmp_path / "base"
+    older, newer = epoch("2026-11-10 03:00"), epoch("2026-11-17 03:00")
+    _base(root, older, "000000010000000000000010")
+    _base(root, newer, "000000010000000000000030")
+    bases = wal_archive._base_backups(root)
+    assert wal_archive._base_before("2026-11-14 12:00", bases).name == str(older)
+    assert wal_archive._base_before("2026-11-20 14:05", bases).name == str(newer)
+    with pytest.raises(ValueError, match="oldest base backup is from 2026-11-10 03:00"):
+        wal_archive._base_before("2026-11-01 00:00", bases)
+    with pytest.raises(ValueError, match="not a time"):
+        wal_archive._base_before("last tuesday", bases)
+    # Negative control: the old choice, the newest base whatever the time,
+    # takes the base from after a mid-week target.
+    assert bases[0].name == str(newer)
+
+
 def test_the_sweep_does_nothing_where_setup_was_not_run(tmp_path, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     assert wal_archive.wal_sweep() == "not set up"

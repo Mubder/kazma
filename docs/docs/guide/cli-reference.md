@@ -47,6 +47,10 @@ kazma
 ├── swarm ...              # swarm orchestration via REST
 ├── update                 # check/install CLI updates
 ├── migrate ...            # export/verify/import an installation
+├── setup ...              # install what Kazma runs on (postgres, system)
+├── restore postgres ...   # restore the database to a point in time, into a new folder
+├── observer ...           # pair with the outside observer (pair, status, unpair)
+├── maintenance ...        # an update window: begin, end
 └── --help | -h | help     # print command list
 ```
 
@@ -237,6 +241,61 @@ list shows the result of that check:
 ```bash
 kazma agent-skills list
 kazma agent-skills sign ~/.agents/skills/my-skill ~/.agents/skills/other-skill
+```
+
+### 2.12 `kazma setup` {#kazma-setup}
+
+Installs what Kazma runs on, with the operating system's own package
+manager (winget, Homebrew, apt, dnf). Every subcommand shows its plan first
+and asks; `-y` skips the question, `--check` reports and changes nothing,
+`--dry-run` prints the commands and runs none. A second run repairs and never
+reinstalls.
+
+| Subcommand | Description |
+|---|---|
+| `kazma setup postgres` | PostgreSQL 16 as an OS service that starts at boot and restarts on failure, listening on this machine only, with the `kazma` database, the `kazma_app` role and WAL archiving. Writes `KAZMA_DATABASE_URL` into `.env` (never printed; `--no-env` leaves `.env` alone). `--port` picks the port (5432). `--move-from-container NAME` copies a Docker container's database in first and compares every Kazma table's row count before `.env` changes. Needs an elevated shell on Windows. |
+| `kazma setup system` | Tesseract with Arabic and English, LibreOffice, ClamAV with a daily signature refresh, the Arabic fonts and Docker: checks each, installs only what is missing. |
+
+```bash
+kazma setup postgres --check
+kazma setup system -y
+```
+
+### 2.13 `kazma restore` {#kazma-restore}
+
+`kazma restore postgres --to TIME --into DIR` lays the newest base backup
+taken before TIME into DIR, a new and empty folder, set to replay the
+archived WAL up to TIME. The live database is never touched: start a
+Postgres on DIR, check it, then point Kazma at it.
+
+```bash
+kazma restore postgres --to "2026-11-20 14:05" --into D:/kazma-pg-restore
+```
+
+### 2.14 `kazma observer` {#kazma-observer}
+
+The outside observer checks Kazma every minute from outside this machine
+and pages its own bot when the machine, the tunnel, Kazma or its database is
+away (setting it up on Cloudflare: `deploy/observer/README.md`).
+
+| Subcommand | Description |
+|---|---|
+| `kazma observer pair [--url URL]` | Pair this install with the observer: the guard then sends it a signed heartbeat every minute. The key is kept in a file only the guard's account can read; it is never printed. |
+| `kazma observer status [--json]` | What the observer sees now: its last heartbeat, its own check of the public address, any open incident. |
+| `kazma observer unpair [--forget]` | Stop the heartbeat and remove the key. `--forget` also deletes what the observer kept for this install. |
+
+### 2.15 `kazma maintenance` {#kazma-maintenance}
+
+An update window, so planned work restarts nothing and pages nobody.
+
+| Subcommand | Description |
+|---|---|
+| `kazma maintenance begin [--reason TEXT] [--hours N]` | Waits until no chat turn runs, then pauses the guard under a maintenance reason. The window ends by itself after `--hours` (2). |
+| `kazma maintenance end` | Resumes the guard, waits up to five minutes for Kazma's deep health check, and pages if Kazma is not healthy. |
+
+```bash
+kazma maintenance begin --reason "Windows updates"
+kazma maintenance end
 ```
 
 ---

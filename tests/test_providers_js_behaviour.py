@@ -179,7 +179,9 @@ class TestStoredChecks:
 
     def test_the_hub_hands_the_panel_the_stored_health(self):
         hub = (_JS.parent / "settings_hub.js").read_text(encoding="utf-8")
-        assert "ProvidersManager.checksFor(p && p._test, p && p.health)" in hub
+        # And whether the provider is on: a switched-off provider's panel
+        # says "Off" only (resilience plan I7, tests/js/test_provider_off_state.js).
+        assert "ProvidersManager.checksFor(p && p._test, p && p.health, p && p.enabled)" in hub
         assert "ProvidersManager.storedDetail(p)" in hub
         template = (
             _JS.parent.parent.parent / "templates" / "settings.html"
