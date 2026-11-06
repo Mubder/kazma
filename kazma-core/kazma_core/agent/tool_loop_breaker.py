@@ -10,7 +10,7 @@ Design goals:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -25,12 +25,23 @@ __all__ = [
     "tool_signature",
     "update_breaker",
     "HARD_FAILURE_THRESHOLD",
+    "REFUSAL_ALLOWANCE",
     "RECOVERY_SPIRAL_THRESHOLD",
     "STAGNATION_REPEAT_THRESHOLD",
     "STAGNATION_WINDOW",
 ]
 
 HARD_FAILURE_THRESHOLD = 3
+
+# A refusal before effect (a wrong path, a missing argument, an unknown tool,
+# ``RefusedBeforeEffect``) changed nothing: the model reads the refusal and
+# corrects the call. It is not tool death, so it has its own allowance --
+# rounds of refusals with no successful call in between -- instead of the
+# three hard rounds that ended a turn after three honest typos (resilience
+# plan D1, live 2026-11-04). The SAME call refused again with the same
+# arguments is a loop, not a correction, and stops at once.
+REFUSAL_ALLOWANCE = 6
+_REFUSED_SIGNATURES_KEPT = 48
 
 # S2-3 recovery spiral: the model hunting its own prior output through
 # session/checkpoint/audit stores after a trim. Every query adds tool output
@@ -165,6 +176,9 @@ class ToolOutcome(StrEnum):
     # orchestrator must route straight to RESPOND instead of handing the model
     # a retryable error. See PR3 (incident 2026-08-12 loop kill).
     TERMINAL = "terminal"
+    # Refused before anything ran (``refused`` on the result): correctable,
+    # counted against REFUSAL_ALLOWANCE, never against the hard breaker.
+    REFUSED = "refused"
 
 
 @dataclass
@@ -172,6 +186,10 @@ class BreakerState:
     consecutive_hard_rounds: int = 0
     tripped: bool = False
     last_round_hard: bool = False
+    consecutive_refusal_rounds: int = 0
+    refused_signatures: list[str] = field(default_factory=list)
+    # Why it tripped: "hard" | "refusals" | "repeated_refusal" | "".
+    tripped_by: str = ""
 
 
 def classify_mcp_error(content: str, *, is_error: bool) -> ToolOutcome:
@@ -216,6 +234,18 @@ def classify_tool_result(result: dict[str, Any]) -> ToolOutcome:
 
     if _SILENT_DEATH.search(content):
         return ToolOutcome.HARD
+
+    # Refused before anything ran (the registry marks it): correctable. A
+    # result whose effects are unknown is never a refusal, whatever it says.
+    if result.get("refused") and not result.get("effect_uncertain"):
+        inferred = (
+            classify_mcp_error(content, is_error=True) if is_error else ToolOutcome.HARD
+        )
+        # Policy-worded refusals keep their old, uncounted class; what used to
+        # count as tool death is a refusal now.
+        if inferred in (ToolOutcome.HARD, ToolOutcome.TRANSIENT):
+            return ToolOutcome.REFUSED
+        return inferred
 
     # Browser tools that no-op in 0ms (Playwright never spawned) used to
     # classify EMPTY and reset the breaker — a 70-round probe loop.
@@ -291,11 +321,23 @@ def detect_stagnation(
     return None
 
 
+_REFUSAL_STOP = (
+    "SYSTEM OVERRIDE: {why} STOP calling tools. Answer the user now with what "
+    "you have: say which step could not be done and why, in one or two "
+    "sentences, and ask them for what is missing (the right path, name or "
+    "value)."
+)
+
+
 def update_breaker(
     previous_consecutive: int,
     results: list[dict[str, Any]],
     *,
     threshold: int = HARD_FAILURE_THRESHOLD,
+    previous_refusals: int = 0,
+    previous_refused_signatures: list[str] | tuple[str, ...] = (),
+    signatures_by_id: dict[str, str] | None = None,
+    refusal_allowance: int = REFUSAL_ALLOWANCE,
 ) -> tuple[BreakerState, list[dict[str, Any]]]:
     """Update breaker from one ToolWorker batch (one round).
 
@@ -309,6 +351,12 @@ def update_breaker(
       - Pure policy / empty / user_deny rounds → reset consecutive to 0
         (control-plane signals, not tool health death).
       - Cap +1 per call regardless of parallel sibling count.
+      - REFUSED (refused before anything ran) never credits the hard counter
+        and never resets it: a round with a refusal and no OK adds 1 to its
+        own count, which trips at ``refusal_allowance``; an OK resets it. A
+        call refused again with the same arguments (``signatures_by_id``:
+        tool_call_id -> ``tool_signature``, kept across the turn in
+        ``previous_refused_signatures``) trips at once.
     """
     stamped: list[dict[str, Any]] = []
     outcomes: list[ToolOutcome] = []
@@ -321,6 +369,7 @@ def update_breaker(
 
     has_ok = ToolOutcome.OK in outcomes
     has_hard = ToolOutcome.HARD in outcomes
+    has_refused = ToolOutcome.REFUSED in outcomes
 
     consecutive = previous_consecutive
     last_hard = False
@@ -330,13 +379,53 @@ def update_breaker(
     elif has_hard:
         consecutive = previous_consecutive + 1
         last_hard = True
+    elif has_refused:
+        # A refusal is not tool death, and it is no sign of recovery either:
+        # a dying tool on both sides of a refusal still counts.
+        consecutive = previous_consecutive
     else:
         # policy / empty / user_deny only — not tool death
         consecutive = 0
 
-    tripped = consecutive >= threshold
+    refusals = 0 if has_ok else previous_refusals + (1 if has_refused else 0)
+    known = list(previous_refused_signatures or ())
+    repeated: list[str] = []
+    for tr2, outcome in zip(stamped, outcomes, strict=True):
+        if outcome != ToolOutcome.REFUSED:
+            continue
+        sig = (signatures_by_id or {}).get(str(tr2.get("tool_call_id") or ""))
+        if not sig:
+            continue
+        if sig in known:
+            repeated.append(str(tr2.get("name") or "a tool"))
+        else:
+            known.append(sig)
+    known = known[-_REFUSED_SIGNATURES_KEPT:]
 
-    if tripped:
+    tripped_by = ""
+    if consecutive >= threshold:
+        tripped_by = "hard"
+    elif repeated:
+        tripped_by = "repeated_refusal"
+    elif refusals >= refusal_allowance:
+        tripped_by = "refusals"
+    tripped = bool(tripped_by)
+
+    if tripped_by in ("repeated_refusal", "refusals"):
+        why = (
+            "You repeated a call that was already refused "
+            f"({', '.join(sorted(set(repeated)))}) with the same arguments."
+            if tripped_by == "repeated_refusal"
+            else f"{refusals} rounds of tool calls in a row were refused."
+        )
+        stop = _REFUSAL_STOP.format(why=why)
+        for tr2 in stamped:
+            if tr2.get("outcome") == ToolOutcome.REFUSED.value or tr2.get("is_error"):
+                # Keep the refusal: it says what was wrong.
+                before = str(tr2.get("content") or "").rstrip()
+                tr2["content"] = f"{before}\n\n{stop}" if before else stop
+                tr2["is_error"] = True
+    elif tripped:
         # Rewrite remaining messaging for the model (schema-valid tool msgs)
         for tr2 in stamped:
             if classify_tool_result(tr2) == ToolOutcome.HARD or tr2.get("is_error"):
@@ -352,6 +441,9 @@ def update_breaker(
             consecutive_hard_rounds=consecutive,
             tripped=tripped,
             last_round_hard=last_hard,
+            consecutive_refusal_rounds=refusals,
+            refused_signatures=known,
+            tripped_by=tripped_by,
         ),
         stamped,
     )

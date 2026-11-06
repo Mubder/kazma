@@ -13,6 +13,7 @@ for the life of the process.
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -55,15 +56,24 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
         check=AsyncConnectionPool.check_connection,
         open=False,
     )
-    await pool.open()
+    from kazma_core.db import availability
+
+    began = availability.now()
     ready = False
     try:
+        await pool.open()
         saver = AsyncPostgresSaver(conn=pool, serde=kazma_checkpoint_serde())  # type: ignore[arg-type]
         await saver.setup()
         ready = True
+        availability.note_success("checkpoints", since=began)
     finally:
-        if not ready:  # a failed setup must not leave its pool open
-            await pool.close()
+        if not ready:
+            # One process-wide "the database is away" (AGENTS.md section 44),
+            # told what stopped the setup; the error itself goes on up.
+            failure = sys.exc_info()[1]
+            if isinstance(failure, Exception):
+                availability.note_failure("checkpoints", failure)
+            await pool.close()  # a failed setup must not leave its pool open
     return saver
 
 

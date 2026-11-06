@@ -1,0 +1,7 @@
+{
+  "_comment": "One signed heartbeat, shared by the guard's signer (tests/test_observer_heartbeat.py) and the observer Worker's verifier (deploy/observer). Signature = 'v1=' + hex HMAC-SHA256 under key of '<timestamp>.<body>'.",
+  "key": "test-observer-key-0123456789abcdef0123456789",
+  "timestamp": 1700000000,
+  "body": "{\"v\":1}",
+  "signature": "v1=caefa36c8191c535b8c6fe24654547ee1edc72edfdba1ac3843db34994dc060e"
+}

@@ -485,6 +485,27 @@
             this.turnTimeoutSaving = false;
         },
 
+        async saveTurnSpending() {
+            this.turnSpendingSaving = true;
+            try {
+                const pairs = [
+                    ['agent.turn_token_budget', this.turnSpending.tokens],
+                    ['agent.daily_cost_limit_usd', this.turnSpending.dailyUsd],
+                ];
+                for (const [key, value] of pairs) {
+                    await window.kazmaSave('/api/settings/single', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key, value, category: 'agent' }),
+                    });
+                }
+                showToast(_k('settings.turn_spending_saved', 'Spending limits saved'), 'success');
+            } catch (e) {
+                showToast(e.message || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
+            }
+            this.turnSpendingSaving = false;
+        },
+
         async saveChatReasoning() {
             this.chatReasoningSaving = true;
             try {

@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**282** variables are read by the product code; **282** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**284** variables are read by the product code; **284** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -57,7 +57,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CRON_STALE_HOURS` | `""` | `kazma_core.cron.settings` | yes |
 | `KAZMA_CUA_PLANNER` | `"1"` | `kazma_core.tools.computer_use_planners` | yes |
 | `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | yes |
-| `KAZMA_DATABASE_URL` | (none) | `kazma_core.db.backend`, `kazma_core.memory.backends` | yes |
+| `KAZMA_DATABASE_URL` | (none) | `kazma_cli.setup`, `kazma_core.db.backend`, `kazma_core.memory.backends` | yes |
 | `KAZMA_DATA_DIR` | (none) | `kazma_core.backup.restore`, `kazma_core.config_store`, `kazma_core.memory.backfill_v2` +1 | yes |
 | `KAZMA_DB_BACKEND` | (none) | `kazma_core.db.backend` | yes |
 | `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
@@ -109,11 +109,12 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_GITHUB_APP_SLUG` | (none) | `kazma_core.git_identity` | yes |
 | `KAZMA_GIT_SHA` | (none) | `kazma_core.version` | yes |
 | `KAZMA_GRAPH_PROVIDER` | (none) | `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |
+| `KAZMA_GUARD_BOOT_FILE` | (none) | `kazma_core.config_availability` | yes |
 | `KAZMA_GUARD_BROKER_REQUEST_FILE` | (none) | `kazma_core.documents.broker_supervision` | yes |
 | `KAZMA_GUARD_DEPENDENCIES_FILE` | (none) | `kazma_core.guard_dependencies` | yes |
 | `KAZMA_GUARD_LOG` | (none) | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_GUARD_RELOAD_FILE` | (none) | `kazma_core.observability.supervisor_watch` | yes |
-| `KAZMA_GUARD_STATE_FILE` | (none) | `kazma_core.documents.broker_supervision`, `kazma_core.install_requirements`, `kazma_core.observability.supervisor_watch` | yes |
+| `KAZMA_GUARD_STATE_FILE` | (none) | `kazma_core.documents.broker_supervision`, `kazma_core.install_requirements`, `kazma_core.observability.outside_watch` +1 | yes |
 | `KAZMA_HARD_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_HITL_CANONICAL_FLOOR` | `""` | `kazma_core.safety.hitl` | yes |
 | `KAZMA_HITL_GRANT_TTL_SECONDS` | (none) | `kazma_core.safety.hitl_grants` | yes |
@@ -183,6 +184,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_NEO4J_URL` | (none) | `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |
 | `KAZMA_NEO4J_USER` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_NO_TRUNCATE` | (none) | `kazma_core.agent.graph_helpers` | yes |
+| `KAZMA_OBSERVER_PAIRING_TOKEN` | (none) | `kazma_cli.observer` | yes |
 | `KAZMA_OCR_MODEL_DIR` | (none) | `kazma_core.documents.ocr.neural_models` | yes |
 | `KAZMA_OIDC_CLIENT_ID` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OIDC_CLIENT_SECRET` | (none) | `kazma_core.security.oidc` | yes |

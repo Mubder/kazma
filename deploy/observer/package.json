@@ -1,0 +1,16 @@
+{
+  "name": "kazma-observer",
+  "private": true,
+  "description": "The outside observer for a Kazma install (resilience plan B1).",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/observer.test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "devDependencies": {
+    "wrangler": "4.158.0"
+  }
+}

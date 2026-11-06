@@ -54,6 +54,9 @@ class _ChatTurnAdapter:
         "running": RunState.RUNNING,
         "awaiting_approval": RunState.WAITING_HUMAN,
         "abandoned": RunState.RUNNING,
+        # Cut off by a restart while a tool whose effect is unknown ran
+        # (turn_resume, resilience plan C1): it waits for the owner.
+        "cut": RunState.RUNNING,
     }
 
     async def list_runs(self, now: float, *, window_s: float) -> list[Run]:
@@ -100,6 +103,20 @@ class _ChatTurnAdapter:
                 actions=("cancel",) if native == "running" else (("close",) if native == "abandoned" else ()),
                 link="/chat",
             ))
+        from kazma_ui.turn_resume import cut_turns
+
+        listed = {run.native_id for run in runs}
+        for tid, cut in cut_turns().items():
+            if tid in listed:
+                continue
+            runs.append(Run(
+                run_id=f"chat_turn:{tid}", kind="chat_turn", native_id=tid,
+                title=titles.get(tid) or tid[:12], state=RunState(self.STATE_MAP["cut"]),
+                native_state="cut", started_at=cut.at, progress_at=cut.at,
+                progress_note=f"cut off by a restart while {', '.join(cut.unknown)} ran; its effect is unknown",
+                owner_alive=False, version=str(int(cut.at)),
+                actions=("continue", "close"), link="/chat",
+            ))
         return runs
 
     @staticmethod
@@ -135,6 +152,15 @@ class _ChatTurnAdapter:
         return origin_from(routing.get("delivery_target"), native_id)
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:
+        if action == "continue":
+            from kazma_ui.turn_resume import continue_turn, cut_turns
+
+            cut = cut_turns().get(native_id)
+            graph = _graph()
+            if cut is None or graph is None:
+                return ActionResult(False, "not_cut", "This turn is no longer waiting to continue.")
+            started, words = await continue_turn(graph, cut)
+            return ActionResult(started, "continued" if started else "not_continued", words)
         if action == "cancel":
             graph = _graph()
             if graph is None:
@@ -146,7 +172,9 @@ class _ChatTurnAdapter:
                                 "The turn was stopped." if outcome.get("ok") else str(outcome.get("warning") or ""))
         if action == "close":
             from kazma_ui.reply_sink import close_reply_turn
+            from kazma_ui.turn_resume import forget_cut_turn
 
+            forget_cut_turn(native_id)
             await asyncio.to_thread(close_reply_turn, native_id)
             _abandoned_since.pop(native_id, None)
             logger.warning("[runs] closed an abandoned chat turn thread=%s", native_id[:12])

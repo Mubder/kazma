@@ -179,6 +179,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الافتراضي 300 ثانية. أقل من دقيقة يولّد بطاقات رفض متتالية إذا ابتعدت.",
         "en": "Default 300 seconds. Under a minute mints a deny-retry card storm if you step away.",
     },
+    "settings.daily_cost_limit": {
+        "ar": "أوقف الأدوار الجديدة إذا تجاوزت تكلفة اليوم (دولار)",
+        "en": "Refuse new turns once today's cost passes (US dollars)",
+    },
+    "settings.daily_cost_limit_hint": {
+        "ar": "تُحسب من سجل استدعاءات النموذج منذ منتصف الليل بتوقيتك. عند 80٪ يصلك تنبيه واحد في اليوم؛ وعند الحد تُرفض الأدوار الجديدة حتى منتصف الليل. القيمة 0 تعني بلا حد (الافتراضي).",
+        "en": "Counted from the model-call ledger since midnight in your time zone. At 80% you get one alert a day; at the limit new turns are refused until midnight. 0 means no limit (the default).",
+    },
+    "settings.save_turn_spending": {
+        "ar": "حفظ حدود الإنفاق",
+        "en": "Save Spending Limits",
+    },
     "settings.soul_requires_confirm": {
         "ar": "تأكيد دلتا الروح قبل التطبيق",
         "en": "Confirm Soul deltas before apply",
@@ -2373,6 +2385,170 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إشعارات المهام",
         "en": "Task notifications",
     },
+    "settings.turn_spending_saved": {
+        "ar": "تم حفظ حدود الإنفاق",
+        "en": "Spending limits saved",
+    },
+    "settings.turn_spending_title": {
+        "ar": "حدود الإنفاق",
+        "en": "Spending limits",
+    },
+    "settings.outside_watch_title": {
+        "ar": "المراقبة من الخارج",
+        "en": "Outside watch",
+    },
+    "settings.outside_watch_hint": {
+        "ar": "كل ما يراقب Kazma غير هذا يعمل على هذا الجهاز نفسه، فلا شيء منه يستطيع أن يخبرك أن الجهاز توقف أو نام أو انقطع عن الشبكة. بعد الربط بالمراقب يرسل إليه الحارس نبضة كل دقيقة، ويراسلك المراقب من خارج الجهاز عبر بوت خاص به.",
+        "en": "Everything else that watches Kazma runs on this machine, so none of it can say the machine is off, asleep or cut off from the network. Paired with the observer, the guard sends it a heartbeat every minute, and the observer messages you from outside through a bot of its own.",
+    },
+    "settings.outside_watch_not_paired": {
+        "ar": "غير مربوط: لا شيء خارج هذا الجهاز يراقبه. اربطه مرة واحدة من سطر الأوامر على هذا الجهاز:",
+        "en": "Not paired: nothing outside this machine is watching it. Pair it once from a terminal on this machine:",
+    },
+    "settings.outside_watch_observer": {
+        "ar": "المراقب",
+        "en": "Observer",
+    },
+    "settings.outside_watch_last_heartbeat": {
+        "ar": "آخر نبضة استلمها المراقب",
+        "en": "Last heartbeat the observer took",
+    },
+    "settings.outside_watch_never": {
+        "ar": "لا شيء بعد",
+        "en": "None yet",
+    },
+    "settings.outside_watch_guard": {
+        "ar": "نبضة الحارس",
+        "en": "The guard's heartbeat",
+    },
+    "settings.outside_watch_guard_reached": {
+        "ar": "تصل",
+        "en": "Delivered",
+    },
+    "settings.outside_watch_guard_reaching": {
+        "ar": "تبدأ",
+        "en": "Starting",
+    },
+    "settings.outside_watch_guard_unreachable": {
+        "ar": "لم يرد المراقب",
+        "en": "The observer did not answer",
+    },
+    "settings.outside_watch_guard_rejected": {
+        "ar": "رفضها المراقب: أعد الربط",
+        "en": "The observer refused it: pair again",
+    },
+    "settings.outside_watch_guard_key_unprotected": {
+        "ar": "تعذّر حصر ملف المفتاح في هذا الحساب، فلا يُستخدم",
+        "en": "The key file could not be restricted to this account, so it is not used",
+    },
+    "settings.outside_watch_guard_key_invalid": {
+        "ar": "تعذّرت قراءة ملف المفتاح: أعد الربط",
+        "en": "The key file cannot be read: pair again",
+    },
+    "settings.outside_watch_guard_bad_url": {
+        "ar": "عنوان المراقب ليس https",
+        "en": "The observer's address is not https",
+    },
+    "settings.outside_watch_guard_off": {
+        "ar": "متوقفة",
+        "en": "Off",
+    },
+    "settings.outside_watch_guard_none": {
+        "ar": "لا سجل: لم يشغّل الحارس Kazma",
+        "en": "No record: Kazma was not started by the guard",
+    },
+    "settings.outside_watch_now": {
+        "ar": "الآن",
+        "en": "Now",
+    },
+    "settings.outside_watch_cond_up": {
+        "ar": "يعمل",
+        "en": "Up",
+    },
+    "settings.outside_watch_cond_maintenance": {
+        "ar": "صيانة مخطط لها",
+        "en": "Planned maintenance",
+    },
+    "settings.outside_watch_cond_machine_unreachable": {
+        "ar": "لا يمكن الوصول إلى الجهاز (الكهرباء أو الشبكة أو السكون)",
+        "en": "The machine is not reachable (power, network or sleep)",
+    },
+    "settings.outside_watch_cond_tunnel_down": {
+        "ar": "النفق متوقف؛ Kazma نفسه يعمل",
+        "en": "The tunnel is down; Kazma itself is running",
+    },
+    "settings.outside_watch_cond_kazma_restarting": {
+        "ar": "Kazma متوقف؛ الحارس يعيد تشغيله",
+        "en": "Kazma is down; the guard is restarting it",
+    },
+    "settings.outside_watch_cond_kazma_down": {
+        "ar": "Kazma متوقف",
+        "en": "Kazma is down",
+    },
+    "settings.outside_watch_cond_dependency_down": {
+        "ar": "Kazma يعمل؛ لكن أحد ما يعتمد عليه غائب",
+        "en": "Kazma is up; a dependency is away",
+    },
+    "settings.outside_watch_cond_guard_gone": {
+        "ar": "توقف الحارس؛ Kazma بلا مراقبة",
+        "en": "The guard stopped; Kazma is unsupervised",
+    },
+    "settings.outside_watch_cond_disk_critical": {
+        "ar": "القرص ممتلئ تقريباً",
+        "en": "The disk is almost full",
+    },
+    "settings.outside_watch_cond_observer_refused": {
+        "ar": "لا يستطيع المراقب عبور Cloudflare Access",
+        "en": "The observer cannot pass Cloudflare Access",
+    },
+    "settings.outside_watch_cond_unreachable": {
+        "ar": "لا يمكن الوصول إلى Kazma",
+        "en": "Kazma is not reachable",
+    },
+    "settings.outside_watch_week": {
+        "ar": "هذا الأسبوع",
+        "en": "This week",
+    },
+    "settings.outside_watch_up_pct": {
+        "ar": "يعمل {pct}% من الوقت",
+        "en": "Up {pct}% of the time",
+    },
+    "settings.outside_watch_no_readings": {
+        "ar": "لا قراءات بعد",
+        "en": "No readings yet",
+    },
+    "settings.outside_watch_incidents": {
+        "ar": "الأعطال هذا الأسبوع",
+        "en": "Incidents this week",
+    },
+    "settings.outside_watch_no_incidents": {
+        "ar": "لا شيء",
+        "en": "None",
+    },
+    "settings.outside_watch_started": {
+        "ar": "بدأ {when}",
+        "en": "began {when}",
+    },
+    "settings.outside_watch_ended": {
+        "ar": "انتهى {when}",
+        "en": "ended {when}",
+    },
+    "settings.outside_watch_ongoing": {
+        "ar": "ما زال مستمراً",
+        "en": "still going on",
+    },
+    "settings.outside_watch_observer_error": {
+        "ar": "لم يرد المراقب. سجل الحارس نفسه أعلاه.",
+        "en": "The observer did not answer. The guard's own record is above.",
+    },
+    "settings.outside_watch_load_error": {
+        "ar": "تعذّرت قراءة حالة المراقبة من الخارج.",
+        "en": "The outside watch could not be read.",
+    },
+    "settings.outside_watch_refresh": {
+        "ar": "تحقق مرة أخرى",
+        "en": "Check again",
+    },
     "settings.turn_timeout_env": {
         "ar": "هذه القيمة مضبوطة بالمتغير KAZMA_TURN_TIMEOUT_SECONDS في بيئة الخادم؛ غيّرها هناك.",
         "en": "Set by KAZMA_TURN_TIMEOUT_SECONDS in the server's environment; change it there.",
@@ -2392,6 +2568,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.turn_timeout_title": {
         "ar": "حد وقت الدور",
         "en": "Turn time limit",
+    },
+    "settings.turn_token_budget": {
+        "ar": "أوقف الدور إذا أنفق أكثر من (رمز)",
+        "en": "Stop a turn that spends more than (tokens)",
+    },
+    "settings.turn_token_budget_hint": {
+        "ar": "يُحسب كل استدعاء للنموذج في دور محادثة واحد. عند 70٪ يُطلب من النموذج أن ينهي بما لديه؛ وعند الحد يتوقف الدور ويقول ذلك، والرد بـ «كمل» يمنحه مرة ونصف الحد. الأمر /long يرفعه عن المحادثة. القيمة 0 تعني بلا حد؛ الافتراضي 500,000.",
+        "en": "Every model call of one chat turn counts. At 70% the model is asked to finish with what it has; at the limit the turn stops and says so, and replying “continue” gives it one and a half times the limit. /long lifts it for a chat. 0 means no limit; the default is 500,000.",
     },
     "settings.uninstall": {
         "ar": "إزالة",

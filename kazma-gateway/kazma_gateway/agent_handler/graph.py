@@ -612,9 +612,12 @@ def make_gateway_send_handler(manager: Any, store: Any):
             _outbound_attachments, text, platform, kwargs.get("attachments"),
         )
 
+        # Not durable in the chat outbox: the caller reads this answer and
+        # keeps its own retries (the scheduled jobs' outbox, the agent's
+        # tool); two outboxes would deliver it twice (resilience plan F3).
         outbound = OutboundMessage(
             target_id=target_id, text=out_text, context_metadata=out_ctx,
-            attachments=outbound_attachments,
+            attachments=outbound_attachments, durable=False,
         )
         if not await manager.send(outbound):
             return f"Error: {platform} did not take the message for {target_id}"
@@ -724,6 +727,12 @@ def create_graph_handler(
             register_chat_app_resumer(
                 CHAT_APP_PLATFORMS, make_timeout_resumer(graph, manager, _get_thread_lock),
             )
+            # A turn a restart cut off goes back to its chat (resilience plan C1).
+            from kazma_ui.turn_resume import register_chat_app_continuer
+
+            from .hitl import make_continue_resumer
+
+            register_chat_app_continuer(make_continue_resumer(graph, manager, _get_thread_lock))
         except ImportError:
             logger.warning("[agent-handler] chat-app timeout resume not registered", exc_info=True)
 

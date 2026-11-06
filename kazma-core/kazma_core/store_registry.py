@@ -201,6 +201,10 @@ STORES: dict[str, Store] = {
     "callbacks.db": Store(
         "chat-platform button callback tokens", "machine",
         reason="tokens expire within a day"),
+    "chat_outbox.db": Store(
+        "chat-app replies not yet taken by their platform (the chat outbox)", "machine",
+        reason="a reply is kept at most two hours, then its text is emptied; the rows "
+               "name this machine's chat-app addresses"),
     "registry.db": Store(
         "the skills hub registry (user level, outside the data dir)", "machine",
         reason="user-level hub state, not install data", ambiguous_name=True),
@@ -300,6 +304,8 @@ RETENTION: dict[str, str] = {
     "x_publications.db": "ended operations after 90 days, by the publication fire cycle (hourly)",
     "hitl_gates.db": "the gate retention sweep: decided gates after 90 days; a live one is kept",
     "run_incidents.db": "the run incident retention sweep",
+    "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
+                      "after 7 days",
     "vault.db": "kept: the install's secrets, until removed",
     "settings.db": "kept: the settings",
     "knowledge.db": "kept: the libraries, until the owner deletes one (a 1 GiB quota)",
@@ -411,6 +417,9 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "backups": DataDirEntry(
         "this machine's backups", "machine",
         reason="the target keeps its own; the source's history stays in its restic repository"),
+    "setup_record.json": DataDirEntry(
+        "what kazma setup postgres installed: the database service and its WAL archive", "machine",
+        reason="names this machine's service, ports and folders"),
     "install_id": DataDirEntry(
         "this install's identity", "machine",
         reason="two installs must never share one: shared-store peers and the "
@@ -688,14 +697,16 @@ def _under(path: Path, root: Path) -> bool:
 # Not databases, but the same rule and the same doors. The install's .env
 # holds the vault key, the database DSN and the provider keys; restic.pass
 # opens every offsite backup; the broker token commands the document worker
-# containers; a migration bundle's meta.env carries the vault key. Until
+# containers; a migration bundle's meta.env carries the vault key; the
+# observer's pairing key (observer.key, resilience plan B1) signs the guard's
+# heartbeats and reads the observer's view of this install. Until
 # 2026-11-02 only databases were refused, and file_read and file_search
 # (read tier, no card) returned the live install's .env and restic.pass
 # (audit 2026-11, FA-001).
 
 #: Secret files refused by name wherever they are.
 SECRET_FILE_NAMES: frozenset[str] = frozenset(
-    {"restic.pass", "document_broker.token", "meta.env"}
+    {"restic.pass", "document_broker.token", "meta.env", "observer.key", "postgres_superuser.pass"}
 )
 
 #: An env file with one of these endings is a template (``.env.example``),

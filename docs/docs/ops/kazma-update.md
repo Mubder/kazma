@@ -185,3 +185,54 @@ as you return to it; refresh to load the new version.
 Use normal git on feature branches. Do not rely on hard-reset update while
 mid-feature. When you want production main: `git checkout main` then
 `kazma update`, or `kazma update --sync-main`.
+
+## An update window for the machine's own updates
+
+Updating the machine's other programs (Docker Desktop, the database, Windows
+itself) stops what Kazma runs on for a while. Outside a window the guard
+treats that as an outage: it restarts Kazma and pages you. Put the work
+inside one:
+
+```bash
+kazma maintenance begin --reason "machine updates" --hours 2
+```
+
+It waits until no chat turn runs and pauses the guard under a maintenance
+reason. Kazma keeps running; the guard restarts and pages nothing, and the
+outside watch is told it is planned. The window closes by itself after
+`--hours`, so a forgotten one cannot become a silent outage. When the
+updates are done:
+
+```bash
+kazma maintenance end
+```
+
+It resumes the guard and waits up to five minutes for Kazma to be healthy
+(`/health/deep`); if it is not, it pages you.
+
+**topgrade** can open and close the window itself. In `topgrade.toml`:
+
+```toml
+[pre_commands]
+"Kazma maintenance" = "kazma maintenance begin --reason topgrade --hours 2"
+
+[post_commands]
+"Kazma maintenance" = "kazma maintenance end"
+```
+
+Two machine settings keep updates inside the window (set them once):
+
+- **Docker Desktop:** Settings → Software updates → turn off "Automatically
+  check for updates", so it updates through topgrade inside the window.
+- **Windows Update:** set active hours to your day, and turn on "Notify me
+  when a restart is required". After a restart, the boot task and the
+  database service bring everything back by themselves.
+
+## Deploying to a live install from a checkout
+
+`scripts/deploy_live.py --live <install>` pulls, runs the package update and
+the document image build when their files changed, reloads when idle, and
+checks the result: the new commit answering, ready and deep health, one test
+turn kept out of memory, and no error in the log since the boot. When a check
+fails it reverts the deployed commits on `main`, pulls the revert into the
+install, reloads it and pages you with the check that failed.

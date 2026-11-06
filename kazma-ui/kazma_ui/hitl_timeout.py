@@ -245,6 +245,13 @@ async def _watchdog_loop(
             await asyncio.sleep(_SCAN_INTERVAL_SECONDS)
             if is_shutting_down():
                 break
+            from kazma_core.db import availability
+
+            # An auto-deny resumes the turn from its checkpoint, which is the
+            # database's: during an outage it only fails. A card nobody
+            # answered is denied once the database answers again.
+            if await availability.wait_while_away():
+                break
 
             # Off the loop: a ConfigStore read (a Postgres round trip) plus a
             # YAML merge. This tick was the most frequent loop-stall site in

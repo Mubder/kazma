@@ -87,10 +87,15 @@ class ToolResult(TypedDict, total=False):
     is_error: bool
     duration_ms: float
     # Optional structured outcome honored by tool_loop_breaker.classify_tool_result
-    # (ok | empty | policy | user_deny | transient | hard | terminal). "terminal"
-    # marks a control-plane turn-ender (e.g. unresolved commitment clarify) —
-    # not tool death; forces RESPOND and does not credit the hard-failure breaker.
+    # (ok | empty | policy | user_deny | transient | hard | terminal | refused).
+    # "terminal" marks a control-plane turn-ender (e.g. unresolved commitment
+    # clarify) — not tool death; forces RESPOND and does not credit the
+    # hard-failure breaker.
     outcome: str
+    # True when the call was refused before it did anything (a wrong path, a
+    # missing argument, a policy that refused it): correctable, counted on
+    # its own allowance by the loop breaker, never as a hard failure.
+    refused: bool
 
 
 # ── Scratchpad merge reducer (context-integrity S1-1) ───────────────────
@@ -191,6 +196,18 @@ class SupervisorState(TypedDict, total=False):
     last_cost_usd: float
     """Dollar cost of the most recent LLM call."""
 
+    turn_tokens: int
+    """Tokens every model call of this turn spent so far (prompt + completion),
+    against ``agent.turn_token_budget`` (``agent/turn_token_budget.py``). A
+    continuation of a turn the budget stopped keeps counting."""
+
+    turn_budget_stopped: bool
+    """The turn ended because it reached its token budget; a reply that
+    continues it grants ``CONTINUE_FACTOR`` times the limit."""
+
+    turn_token_budget_granted: int
+    """The limit a continued turn runs under (0: the configured budget)."""
+
     _last_finish_reason: str
     """finish_reason of the most recent LLM call. ``"length"`` means the
     provider truncated the completion at max_tokens — tool-call JSON may be
@@ -235,6 +252,14 @@ class SupervisorState(TypedDict, total=False):
 
     circuit_breaker_tripped: bool
     """Flag indicating whether the tool execution circuit breaker has tripped."""
+
+    consecutive_refusals: int
+    """Tool rounds in a row that held a refusal before effect (and no OK
+    result); the breaker stops the turn at ``REFUSAL_ALLOWANCE``."""
+
+    refused_signatures: list[str]
+    """Signatures of calls refused this turn: the same call refused twice
+    stops the turn at once (``tool_loop_breaker.update_breaker``)."""
 
     tool_signatures: list[str]
     """Recent (tool_name, canonical-args) signatures for semantic-loop
@@ -430,6 +455,9 @@ def initial_supervisor_state(
         last_model="",
         last_tokens=0,
         last_cost_usd=0.0,
+        turn_tokens=0,
+        turn_budget_stopped=False,
+        turn_token_budget_granted=0,
         thread_id=thread_id or str(uuid.uuid4()),
         tenant_id=tenant_id,
         snapshot_id="",
@@ -438,6 +466,8 @@ def initial_supervisor_state(
         consecutive_tool_failures=0,
         test_fail_retries=0,
         circuit_breaker_tripped=False,
+        consecutive_refusals=0,
+        refused_signatures=[],
         tool_signatures=[],
         auto_continue=False,
         task_status=TaskStatus.IDLE,

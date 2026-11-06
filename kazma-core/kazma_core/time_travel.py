@@ -1483,6 +1483,12 @@ def start_snapshot_maintenance_loop(
                 if is_shutting_down():
                     logger.info("[TimeTravel] maintenance loop exiting (shutdown)")
                     return
+                from kazma_core.db import availability
+
+                # Its settings are in the settings store: a pass while the
+                # database is away fails and loses the day's prune.
+                if await availability.wait_while_away():
+                    return
                 cfg = await asyncio.to_thread(live_maintenance_config)
                 if not cfg["auto_maintain"]:
                     logger.debug("[TimeTravel] auto-maintain disabled; skipping")

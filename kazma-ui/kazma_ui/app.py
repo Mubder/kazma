@@ -1037,7 +1037,13 @@ class KazmaAppBuilder:
                 async def _heartbeat_loop() -> None:
                     import time as _time
 
+                    from kazma_core.db import availability
+
                     while True:
+                        # The stamp lives in the settings store: while the
+                        # database is away it can only fail.
+                        if await availability.wait_while_away():
+                            return
                         try:
                             from kazma_core.config_store import get_config_store
 
@@ -1108,6 +1114,12 @@ class KazmaAppBuilder:
             from kazma_gateway.stores import SQLiteSessionStore
 
             self.gateway = GatewayManager(max_queue_size=100)
+            # Every reply to a chat app is kept until the platform takes it
+            # (resilience plan F3, kazma_gateway.chat_outbox).
+            from kazma_core.paths import data_dir as _dd_outbox
+            from kazma_gateway.chat_outbox import ChatOutbox
+
+            self.gateway.set_outbox(ChatOutbox(_dd_outbox() / "chat_outbox.db"))
 
             # Telegram, Discord, Slack and the swarm bus's senders: one
             # builder for boot, Settings' Refresh and every saved setting
@@ -2031,6 +2043,24 @@ class KazmaAppBuilder:
             except Exception as exc:
                 logger.warning("[HITL] Failed to start approval-timeout watchdog: %s", exc)
 
+            # ── Turns a restart cut off (resilience plan C1) ───────
+            # A safe one continues by itself; one whose tool effect is
+            # unknown waits for the owner as a run (Continue / Close).
+            try:
+                from kazma_core.memory.worker_bootstrap import background_schedulers_enabled
+
+                if background_schedulers_enabled():
+                    from kazma_core.background import spawn_background
+
+                    from kazma_ui.turn_resume import resume_cut_turns
+
+                    spawn_background(resume_cut_turns(
+                        lambda: self._hitl_state.get("graph") or self._graph_holder.get("graph"),
+                        lambda: self._hitl_state.get("checkpointer"),
+                    ), name="turn-resume")
+            except ImportError as exc:
+                logger.warning("[turn_resume] the start-up pass was not started: %s", exc)
+
             # ── Turn-liveness invariant ────────────────────────────
             # A turn open with nothing working on it is impossible. Every
             # failure in this area so far reached the operator as a symptom
@@ -2347,10 +2377,23 @@ class KazmaAppBuilder:
 
     async def _on_shutdown(self) -> None:
         """Release only after teardown finishes; process death fences failures."""
-        await self._shutdown_services()
+        from kazma_core.shutdown import StopClock
+
+        self._stop_clock = StopClock()
+        try:
+            await self._shutdown_services()
+        finally:
+            self._stop_clock.mark("the chat apps")
+            self._stop_clock.report()
         lease = getattr(self, "_server_lease", None)
         if lease is not None:
             await asyncio.to_thread(lease.release)
+
+    def _mark_stop(self, label: str) -> None:
+        """The stop step *label* has ended (StopClock, resilience plan C3)."""
+        clock = getattr(self, "_stop_clock", None)
+        if clock is not None:
+            clock.mark(label)
 
     async def _shutdown_services(self) -> None:
         """Application shutdown: flag, cron, swarm, agent, stores, gateway."""
@@ -2386,6 +2429,7 @@ class KazmaAppBuilder:
         except Exception as e:  # noqa: BLE001 — teardown must not fail here
             logger.debug("[app] background loop stop failed: %s", e)
 
+        self._mark_stop("the stop's start (lifecycle, loops)")
         # 1) Stop cron FIRST, while the agent, the chat apps and the stores it
         # delivers through are all still up: no new fire starts, and a fire in
         # flight finishes within its bound (CronScheduler.stop drains with
@@ -2405,6 +2449,7 @@ class KazmaAppBuilder:
         except Exception as e:  # noqa: BLE001 — teardown must not fail here
             logger.warning("[app] cron stop failed: %s", e)
 
+        self._mark_stop("cron")
         # Join the watchdog's local statements before any stores close.
         from kazma_core.web_acquire.monitor import stop as stop_acquisition_monitor
 
@@ -2413,6 +2458,7 @@ class KazmaAppBuilder:
 
         await stop_crawl_canary()
 
+        self._mark_stop("the watchdog's statements")
         # Give retained background tasks (crawls, rebuilds, promotions) a
         # bounded chance to finish before the loop closes (audit F-07).
         try:
@@ -2423,6 +2469,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[app] background drain failed: %s", e)
 
+        self._mark_stop("background tasks")
         # Stop the HITL approval-timeout watchdog
         try:
             from kazma_ui.hitl_timeout import stop_hitl_timeout_watchdog
@@ -2447,6 +2494,7 @@ class KazmaAppBuilder:
         except (ImportError, RuntimeError) as e:
             logger.debug("[app] run supervisor stop: %s", e)
 
+        self._mark_stop("watchdogs and runs")
         # Stop document ingestion workers (drain in-flight stages) before
         # cron/agent teardown. Jobs are durable — pending rows resume on the
         # next boot via lease recovery. Best-effort; never blocks shutdown.
@@ -2515,6 +2563,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Documents] ingestion coordinator stop failed: %s", e)
 
+        self._mark_stop("documents and memory")
         # (Cron was stopped first, above.) Stop the scheduled-X fire loop so no
         # scheduled post fires mid-shutdown.
         try:
@@ -2524,6 +2573,7 @@ class KazmaAppBuilder:
         except Exception as e:  # noqa: BLE001
             logger.warning("[app] scheduled-X fire loop stop failed: %s", e)
 
+        self._mark_stop("the X loops")
         # 2) Drain swarm in-flight tasks
         try:
             engine = getattr(self, "swarm_engine", None) or getattr(self, "_swarm_engine", None)
@@ -2576,6 +2626,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[app] Temporal worker stop failed: %s", e)
 
+        self._mark_stop("the swarm")
         # 3) Shut down the agent (closes MCP processes, LLM clients)
         if self.agent is not None:
             try:
@@ -2593,6 +2644,7 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[app] Error during agent shutdown: %s", e)
 
+        self._mark_stop("the agent")
         # 4) Close app-level checkpointer / CheckpointManager if present
         try:
             cp = self._checkpointer
@@ -2614,6 +2666,7 @@ class KazmaAppBuilder:
             else:
                 logger.warning("[app] Error closing checkpointer: %s", e)
 
+        self._mark_stop("the checkpointer")
         # 5) Close all cached ModelRegistry clients -- of the registry this
         # process made, if it made one: shutdown closes what exists and
         # builds nothing (tests/test_shutdown_builds_nothing.py).
@@ -2633,6 +2686,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[app] Error closing http client during shutdown: %s", e)
 
+        self._mark_stop("the model clients")
         # 5b) Close auxiliary SQLite stores that previously lived for the
         # whole process with no close path (audit B.10): swarm task store,
         # LLM semantic cache, pipeline logger. Best-effort each so one bad
@@ -2667,6 +2721,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.debug("[app] LLM ledger close: %s", e)
 
+        self._mark_stop("the stores")
         # Stop the periodic alert health watchdog
         try:
             from kazma_core.observability.alerts import stop_health_watchdog
@@ -2675,6 +2730,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.debug("[app] alert watchdog stop: %s", e)
 
+        self._mark_stop("the alert watchdog")
         # 6) SessionManager close -- the one this process made, if any, off
         # the loop. get_session_manager() BUILT one here: every chat session
         # loaded from Postgres, on the event loop. A server nobody had opened
@@ -2690,6 +2746,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.debug("[app] SessionManager close: %s", e)
 
+        self._mark_stop("the chat sessions")
         # (VectorMemory close removed with the V1 stack.)
 
         from kazma_core.observability.ops_alerts import bind_server_loop

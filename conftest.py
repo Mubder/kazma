@@ -246,6 +246,21 @@ def pytest_configure(config):
             pass
 
 
+# ── Database availability (db/availability.py, plan A3) ─────────────────────
+# One process-wide "is Postgres answering?" state: a test that saw a refused
+# connection left the whole run "away" (every later pool refused at once),
+# and its prober signs in to the real database address. Each test starts
+# with the database answering and a prober that reaches nothing.
+@_pytest.fixture(autouse=True)
+def _reset_database_availability(monkeypatch):
+    from kazma_core.db import availability
+
+    availability.reset()
+    monkeypatch.setattr(availability, "_probe", lambda: (None, None))
+    yield
+    availability.reset()
+
+
 # ── Global shutdown-event reset ─────────────────────────────────────────────
 # Tests that call create_app() + uvicorn (e2e, pipeline_sandbox, …) fire the
 # app's lifespan shutdown → signal_shutdown(), setting the GLOBAL event for

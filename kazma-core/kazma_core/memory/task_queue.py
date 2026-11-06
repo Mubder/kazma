@@ -60,9 +60,25 @@ _BACKOFF_MAX_SEC = 3600.0
 MEMORY_LANE = frozenset({"post_turn_memory", "micro_consolidation", "entity_merge", "topic_summary_rebuild"})
 
 
+#: A task that failed because Postgres is away is tried again after this, its
+#: attempts untouched (plan A3).
+_OUTAGE_RETRY_S = 60.0
+
+
 def _retry_delay(attempts: int) -> float:
     """Seconds before a task that has failed *attempts* times runs again."""
     return min(_BACKOFF_MAX_SEC, _BACKOFF_BASE_SEC * 4 ** max(0, int(attempts) - 1))
+
+
+def _database_away(exc: BaseException | None = None) -> bool:
+    """Did this failure come from Postgres being away? An outage error says so
+    itself (and starts the database watch); any failure while the watch says
+    Postgres is away counts too: handlers catch their errors and return False."""
+    from kazma_core.db import availability
+
+    if exc is not None and availability.note_failure("memory_queue", exc):
+        return True
+    return availability.is_away()
 
 
 def _report_dead_letters(task_types: list[str], error: str | None) -> None:
@@ -421,12 +437,16 @@ class _MemoryWorker:
                     self._ack, task,
                     success=bool(success),
                     error=None if success else "handler returned False",
+                    # A handler that answered False while Postgres is away
+                    # failed for the database, not for itself (plan A3).
+                    outage=not success and _database_away(),
                 )
             except Exception as exc:
                 await asyncio.to_thread(
                     self._ack, task,
                     success=False,
                     error=f"{type(exc).__name__}: {exc}",
+                    outage=_database_away(exc),
                 )
         finally:
             self._leases.pop(task_id, None)
@@ -434,7 +454,8 @@ class _MemoryWorker:
                 self._busy[lane] = max(0, self._busy[lane] - 1)
                 self._wake.set()  # a slot is free: claim again now
 
-    def _ack(self, task: dict[str, Any], *, success: bool, error: str | None) -> None:
+    def _ack(self, task: dict[str, Any], *, success: bool, error: str | None,
+             outage: bool = False) -> None:
         """Mark a task completed (success) or retry/dead-letter (failure).
 
         The UPDATE is guarded by the claim's ``lease_token``: if the task was
@@ -442,6 +463,11 @@ class _MemoryWorker:
         rows and the newer lease keeps ownership — a stale handler can no
         longer finalize a row it lost. The token is cleared on finalize so a
         pending/failed row carries no stale lease.
+
+        ``outage``: the task failed because Postgres is away. It goes back to
+        pending without spending an attempt, to be tried again after
+        ``_OUTAGE_RETRY_S``: a two-hour outage dead-lettered every deep pass
+        and every backup of it (plan A3), and the operator had to retry each.
         """
         try:
             from kazma_core.config_store import apply_sqlite_pragmas
@@ -452,7 +478,17 @@ class _MemoryWorker:
                 apply_sqlite_pragmas(conn)
                 now = time.time()
                 token = task.get("lease_token")
-                if success:
+                if not success and outage:
+                    conn.execute(
+                        """UPDATE memory_task_queue
+                           SET status='pending', updated_at=?, error_log=?, lease_token=NULL,
+                               next_attempt_at=?
+                           WHERE id=? AND lease_token=?""",
+                        (now, ("waits for the database: " + (error or ""))[:1000],
+                         now + _OUTAGE_RETRY_S, task["id"], token),
+                    )
+                    logger.debug("[task_queue] %s waits for the database", task.get("task_type"))
+                elif success:
                     conn.execute(
                         """UPDATE memory_task_queue
                            SET status='completed', updated_at=?, lease_token=NULL

@@ -68,6 +68,7 @@
     {"source": "docs/docs/ops/smoke-matrix.md", "site": "ops/smoke-matrix"},
     {"source": "docs/docs/ops/disaster-recovery.md", "site": "ops/disaster-recovery"},
     {"source": "docs/docs/ops/document-processing.md", "site": "ops/document-processing"},
+    {"source": "docs/docs/ops/outside-watch.md", "site": "ops/outside-watch"},
     {"source": "docs/docs/ops/portability.md", "site": "ops/portability"},
     {"source": "docs/docs/ops/postgres-and-saas.md", "site": "ops/postgres-and-saas"},
     {"source": "docs/docs/ops/multi-replica-and-saas.md", "site": "ops/multi-replica-and-saas"},

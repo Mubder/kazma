@@ -1203,8 +1203,15 @@ class SwarmEngine:
         async def _loop() -> None:
             import asyncio as _aio
 
+            from kazma_core.db import availability
+
             while True:
                 await _aio.sleep(max(15.0, interval_seconds))
+                # A reap writes the task's ending and the breakers' shared
+                # state: while the database is away it would leave the ending
+                # unsaved. The outage is said once, by db.availability.
+                if await availability.wait_while_away():
+                    return
                 try:
                     await self.reap_stale_tasks_async()
                 except Exception:

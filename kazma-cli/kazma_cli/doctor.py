@@ -302,12 +302,64 @@ def _collect() -> list[tuple[str, str]]:
     return out
 
 
+def _database_service_rows() -> list[tuple[str, str]]:
+    """The database's OS service (resilience plan A1), when ``kazma setup
+    postgres`` set one up: installed, running, starting at boot, restarting on
+    failure, answering, and its WAL archive current. Each failure names the
+    command that fixes it. Read-only."""
+    from kazma_core import postgres_service as pgs
+
+    rec = pgs.read_record().get("postgres") or {}
+    if not rec:
+        return []
+    out: list[tuple[str, str]] = []
+    state = pgs.service_state(rec.get("os", ""), rec.get("service", ""), int(rec.get("port") or 5432))
+    fix = "kazma setup postgres"
+    port = rec.get("port")
+    checks = (
+        ("installed", "is installed", "is not installed", WARN),
+        ("running", "is running", "is NOT RUNNING", BAD),
+        ("at_boot", "starts at boot", "does not start at boot", WARN),
+        ("restarts", "restarts when it fails", "does not restart when it fails", WARN),
+        ("answers", f"answers on port {port}", f"does NOT ANSWER on port {port}", BAD),
+    )
+    for key, good, bad, level in checks:
+        if state.get(key):
+            out.append(_line(OK, f"the database service {good}"))
+        else:
+            out.append(_line(level, f"the database service {bad}", f"repair: {fix}"))
+    if rec.get("wal_archive_dir"):
+        from kazma_core.backup import wal_archive
+        from kazma_core.db.backend import get_database_url
+
+        dsn = get_database_url() or ""
+        try:
+            import psycopg
+        except ImportError:
+            problem = "could not be read (no Postgres driver)"
+        else:
+            try:
+                problem = wal_archive.archive_problem(wal_archive.archiver_status(dsn))
+            except (psycopg.Error, OSError, ValueError) as exc:
+                problem = f"could not be read ({type(exc).__name__})"
+        out.append(_line(WARN if problem else OK,
+                         "the WAL archive " + (problem or "is current"),
+                         f"repair: {fix}" if problem else ""))
+    return out
+
+
 def run(argv: list[str] | None = None) -> int:
     """Print the report. Exit 1 if anything is broken, 0 otherwise."""
     rows = collect()
     print("\nKazma doctor — provider & model resolution\n")
     for _status, rendered in rows:
         print(rendered)
+    db_rows = _database_service_rows()
+    if db_rows:
+        print("\nThe database service\n")
+        for _status, rendered in db_rows:
+            print(rendered)
+        rows = rows + db_rows
     worst = {s for s, _ in rows}
     if BAD in worst:
         print("\nOne or more checks FAILED — the next turn will likely error.\n")

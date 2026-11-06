@@ -406,6 +406,41 @@ class SettingsRouterBuilder:
                 "max": MAX_TURN_TIMEOUT_SECONDS,
             }
 
+        @router.get("/api/settings/turn-spending")
+        def api_get_turn_spending() -> dict[str, Any]:
+            """What one chat turn may spend in tokens (0 = no limit) and the
+            day's cost limit in US dollars (0 = none), each with its source
+            and bounds (kazma_core.agent.turn_token_budget)."""
+            from kazma_core.agent.turn_token_budget import (
+                DEFAULT_TURN_TOKEN_BUDGET,
+                MAX_DAILY_COST_LIMIT_USD,
+                MAX_TURN_TOKEN_BUDGET,
+                daily_cost_limit_setting,
+                turn_token_budget_setting,
+            )
+
+            budget = turn_token_budget_setting(config_store)
+            daily = daily_cost_limit_setting(config_store)
+            return {
+                "tokens": budget["tokens"],
+                "tokens_source": budget["source"],
+                "tokens_default": DEFAULT_TURN_TOKEN_BUDGET,
+                "tokens_max": MAX_TURN_TOKEN_BUDGET,
+                "daily_usd": daily["usd"],
+                "daily_source": daily["source"],
+                "daily_max": MAX_DAILY_COST_LIMIT_USD,
+            }
+
+        @router.get("/api/settings/outside-watch")
+        def api_get_outside_watch(fresh: bool = False) -> dict[str, Any]:
+            """The outside watch (resilience plan B1): paired or not, the
+            guard's record of its heartbeats and the observer's summary
+            (kazma_core.observability.outside_watch; blocking, so a plain
+            ``def`` FastAPI runs in its threadpool). Never the key."""
+            from kazma_core.observability.outside_watch import outside_status
+
+            return outside_status(fresh=fresh)
+
         @router.get("/api/settings/chat-reasoning")
         def api_get_chat_reasoning() -> dict[str, Any]:
             """How much the model reasons before a chat answer

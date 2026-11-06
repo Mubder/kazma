@@ -93,6 +93,32 @@ def _turn_timeout(value: Any) -> Any:
     return seconds
 
 
+def _turn_token_budget(value: Any) -> Any:
+    # What a chat turn may spend (agent/turn_token_budget.py); a value it
+    # cannot read would leave the default in force with only a warning.
+    from kazma_core.agent.turn_token_budget import MAX_TURN_TOKEN_BUDGET, parse_turn_token_budget
+
+    tokens = parse_turn_token_budget(value)
+    if tokens is None:
+        raise SettingRejected(
+            "The turn token budget is a whole number of tokens "
+            f"from 0 (no limit) to {MAX_TURN_TOKEN_BUDGET}."
+        )
+    return tokens
+
+
+def _daily_cost_limit(value: Any) -> Any:
+    from kazma_core.agent.turn_token_budget import MAX_DAILY_COST_LIMIT_USD, parse_daily_cost_limit
+
+    usd = parse_daily_cost_limit(value)
+    if usd is None:
+        raise SettingRejected(
+            "The daily cost limit is an amount in US dollars "
+            f"from 0 (no limit) to {int(MAX_DAILY_COST_LIMIT_USD)}."
+        )
+    return usd
+
+
 def _lifecycle_events(value: Any) -> Any:
     # Only events Kazma sends: a name it does not know would switch that
     # message off at the next boot without a word.
@@ -297,6 +323,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     package for every settings read."""
     from kazma_core.agent.chat_reasoning import CHAT_REASONING_KEY
     from kazma_core.agent.turn_budget import TURN_TIMEOUT_KEY
+    from kazma_core.agent.turn_token_budget import DAILY_COST_LIMIT_KEY, TURN_TOKEN_BUDGET_KEY
     from kazma_core.backup.universal import OFFSITE_KEEP_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
@@ -318,6 +345,8 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         TASK_RETENTION_KEY: (_task_retention, "swarm"),
         RETENTION_KEY: (_checkpoint_retention, "system"),
         TURN_TIMEOUT_KEY: (_turn_timeout, "agent"),
+        TURN_TOKEN_BUDGET_KEY: (_turn_token_budget, "agent"),
+        DAILY_COST_LIMIT_KEY: (_daily_cost_limit, "agent"),
         CHAT_REASONING_KEY: (_chat_reasoning, "agent"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
         RUNBOOKS_KEY: (validate_runbooks, None),

@@ -1,0 +1,52 @@
+{
+  // The outside observer (resilience plan B1): a Cloudflare Worker on the
+  // kazma.ai account that watches the owner's Kazma from outside the
+  // machine. Deployed by the owner from this folder (README.md):
+  //   npx wrangler deploy
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kazma-observer",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+
+  // One run a minute: the pull probe, the diagnosis, the pages.
+  "triggers": { "crons": ["* * * * *"] },
+
+  // status.kazma.ai: the heartbeat endpoint (/v1/*) and the status page (/).
+  "routes": [{ "pattern": "status.kazma.ai", "custom_domain": true }],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kazma-observer",
+      // Printed by: npx wrangler d1 create kazma-observer
+      "database_id": "REPLACE_WITH_THE_ID_WRANGLER_PRINTS"
+    }
+  ],
+
+  "vars": {
+    // The install to probe from outside (through its tunnel).
+    "PULL_URL": "https://my.kazma.ai",
+    // Cloudflare Access for the status page: the team's domain
+    // (<team>.cloudflareaccess.com) and the application's AUD tag. Unset,
+    // the status page refuses every request.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    // Email pages (optional): the sender address on kazma.ai's Email
+    // Routing; the recipient is the send_email binding's destination.
+    "EMAIL_FROM": "",
+    "EMAIL_TO": ""
+  },
+
+  // Secrets, set with `npx wrangler secret put <NAME>` (never in this file):
+  //   PAIRING_TOKEN         what `kazma observer pair` presents
+  //   TELEGRAM_BOT_TOKEN    the "Kazma Watch" bot's token
+  //   TELEGRAM_CHAT_ID      the owner's chat with that bot
+  //   ACCESS_CLIENT_ID      the Access service token for my.kazma.ai/health/*
+  //   ACCESS_CLIENT_SECRET
+  //   HEALTHCHECKS_URL      the Healthchecks.io ping URL (watches this Worker)
+
+  // Email pages: uncomment with the owner's verified address.
+  // "send_email": [{ "name": "EMAIL", "destination_address": "owner@example.com" }],
+
+  "observability": { "enabled": true }
+}

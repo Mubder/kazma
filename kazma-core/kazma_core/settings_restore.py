@@ -194,6 +194,9 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("agent.", SETTING, "how Kazma behaves: language, personality, commitment"),
     KeyRule("agent.turn_timeout_seconds", SETTING, "how long one running stretch of a turn may take "
             "(0: no limit; the environment's value wins)"),
+    KeyRule("agent.turn_token_budget", SETTING, "how many tokens one chat turn may spend (0: no limit)"),
+    KeyRule("agent.daily_cost_limit_usd", SETTING, "the most the model calls of one day may cost "
+            "(0: no limit)"),
     KeyRule("agent_skills.enabled.", SETTING, "Agent Skills switched on or off"),
     KeyRule("appearance.", SETTING, "the interface's look"),
     KeyRule("backups.", SETTING, "where and how often backups go"),

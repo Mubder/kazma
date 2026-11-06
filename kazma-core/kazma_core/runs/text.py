@@ -56,6 +56,7 @@ _ACTION = {
     "cancel": ("Cancel", "إلغاء"), "retry": ("Retry", "إعادة المحاولة"),
     "retry_checked": ("Retry (I checked its effects)", "إعادة المحاولة (تحقّقت من آثاره)"),
     "close": ("Close the turn", "إغلاق الدورة"), "dismiss": ("Dismiss", "تجاهل"),
+    "continue": ("Continue", "متابعة"),
     "diagnose": ("Ask Kazma to diagnose", "اطلب من كازما التشخيص"),
 }
 

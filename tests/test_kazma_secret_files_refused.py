@@ -29,6 +29,8 @@ SECRETS = (
     ".env.local",
     "restic.pass",
     ".kazma/document_broker.token",
+    ".kazma/observer.key",
+    ".kazma/postgres_superuser.pass",
     "kazma-data/backups/universal/1793549979/.env",
     "kazma-data/migrate/bundle/meta.env",
 )

@@ -84,7 +84,7 @@ def _what_ran(state: SupervisorState, messages: list[dict[str, Any]]) -> str:
         name = str(result.get("name") or m.get("name") or names.get(call_id) or "tool")
         result["name"] = name
         outcome = classify_tool_result(result)
-        not_run = (ToolOutcome.POLICY, ToolOutcome.USER_DENY, ToolOutcome.TERMINAL)
+        not_run = (ToolOutcome.POLICY, ToolOutcome.USER_DENY, ToolOutcome.TERMINAL, ToolOutcome.REFUSED)
         (refused if outcome in not_run else ran).append(name)
     parts = []
     if ran:
@@ -258,6 +258,11 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             iteration,
             len(messages),
         )
+        _needs_synthesis = False
+    if state.get("turn_budget_stopped"):
+        # The turn's token budget stopped it (agent/turn_token_budget.py): a
+        # synthesis is one more model call past the budget the owner set.
+        logger.info("[Respond] turn token budget reached — skipping synthesis")
         _needs_synthesis = False
     if _needs_synthesis:
         _llm = llm

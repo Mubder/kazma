@@ -115,6 +115,26 @@ def main() -> None:
 
         sys.exit(_run_acquisition(sys.argv[2:]))
 
+    elif cmd == "observer":
+        from kazma_cli.observer import run as _run_observer
+
+        sys.exit(_run_observer(sys.argv[2:]))
+
+    elif cmd == "setup":
+        from kazma_cli.setup import run as _run_setup
+
+        sys.exit(_run_setup(sys.argv[2:]))
+
+    elif cmd == "restore":
+        from kazma_cli.setup import run_restore as _run_restore
+
+        sys.exit(_run_restore(sys.argv[2:]))
+
+    elif cmd == "maintenance":
+        from kazma_cli.maintenance import run as _run_maintenance
+
+        sys.exit(_run_maintenance(sys.argv[2:]))
+
     elif cmd == "serve":
         port = int(sys.argv[2]) if len(sys.argv) > 2 else 9090
         _run_serve(port)
@@ -163,6 +183,10 @@ def main() -> None:
         print("  status     Show Kazma status")
         print("  doctor     Check provider/model resolution (which model, where, will it work)")
         print("  acquisition  Inspect cached crawler errors, usage and credits")
+        print("  observer   Pair with the outside observer (pair, status, unpair)")
+        print("  setup      Set up what Kazma runs on (setup postgres: PostgreSQL 16 as an OS service)")
+        print("  restore    Restore the database to a point in time (restore postgres --to TIME)")
+        print("  maintenance  An update window: begin (pause the guard when idle), end (resume and check)")
         print("  serve      Start the WebUI server (default port 9090)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")

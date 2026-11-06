@@ -857,6 +857,7 @@ class DiscordAdapter(BaseAdapter):
             from kazma_gateway.adapters.discord_commands import send
 
             return await send(self, outbound)
+        from kazma_gateway import send_report
         from kazma_gateway.adapters.discord_send import chunk_message, resolve_channel_id, sanitize_outbound
 
         # Fire typing indicator before sending
@@ -922,12 +923,16 @@ class DiscordAdapter(BaseAdapter):
 
                     resp.raise_for_status()
                     chunk_sent = True
+                    send_report.part_delivered()
                     break  # success — move to next chunk
                 except httpx.HTTPStatusError as exc:
                     logger.error("[discord] HTTP %d on send to %s: %s", exc.response.status_code, channel_id, exc.response.text[:200])
                     break
                 except Exception as exc:
                     logger.error("[discord] Send failed: %s: %s", type(exc).__name__, str(exc)[:200])
+                    # A read timeout after the request left: it may have
+                    # arrived (the chat outbox never sends it twice).
+                    send_report.part_failed(exc)
                     break
             if not chunk_sent:
                 if limited:
@@ -942,7 +947,9 @@ class DiscordAdapter(BaseAdapter):
             # is a failed send (audit 2026-10-26 AUD-032, §51); every
             # attachment is still tried.
             for att in outbound.attachments:
-                if not await self._send_attachment(channel_id, att):
+                if await self._send_attachment(channel_id, att):
+                    send_report.part_delivered()
+                else:
                     all_sent = False
             # Voice reply: if the inbound turn was transcribed audio and TTS
             # is enabled, synthesize the text and send it back as audio.

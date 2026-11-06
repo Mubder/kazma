@@ -683,9 +683,13 @@ async def maybe_heartbeat(
 _CONTINUATION_RE = re.compile(
     r"\b(?:proceed|continue|cont|go\s*on|keep\s*going|carry\s*on|"
     r"yes|yeah|yep|ok|okay|finish|wrap\s*up|wrapup|"
-    r"كمّل|كممل|اكمل|أكمل|تابع|نعم|يلا|زين)\b",
+    r"كمل|كممل|اكمل|أكمل|إكمل|تابع|نعم|يلا|زين)\b",
     re.IGNORECASE,
 )
+# Vowel marks (harakat, shadda, sukun, superscript alef) and the tatweel: a
+# reply is read with or without them. The budget stop asks for "كمل", and
+# only "كمّل" (with its shadda) was recognised (2026-11-05).
+_ARABIC_MARKS_RE = re.compile("[\u064b-\u065f\u0670\u0640]")
 
 
 def is_continuation_reply(text: str | None) -> bool:
@@ -695,13 +699,14 @@ def is_continuation_reply(text: str | None) -> bool:
     new instruction or a preference statement and MUST NOT trigger the
     continuation directive. Empty text (voice with no transcript, media
     captions) defaults to continuation — matching the pre-gating behavior.
+    Arabic is compared without its vowel marks.
     """
     t = (text or "").strip()
     if not t:
         return True
     if len(t.split()) > 8:
         return False
-    return bool(_CONTINUATION_RE.search(t))
+    return bool(_CONTINUATION_RE.search(_ARABIC_MARKS_RE.sub("", t)))
 
 
 async def pause_long_task_for_abort(thread_id: str | None) -> None:

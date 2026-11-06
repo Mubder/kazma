@@ -312,11 +312,17 @@ async def supervisor_node(
     # all subsequent turns (state persists in the checkpointer).
     breaker_reset = {}
     if iteration == 0:
-        if state.get("circuit_breaker_tripped", False) or state.get("consecutive_tool_failures", 0) > 0:
+        if (
+            state.get("circuit_breaker_tripped", False)
+            or state.get("consecutive_tool_failures", 0) > 0
+            or state.get("consecutive_refusals", 0) > 0
+        ):
             logger.info("[Supervisor] Resetting tool circuit breaker for new turn")
         breaker_reset = {
             "circuit_breaker_tripped": False,
             "consecutive_tool_failures": 0,
+            "consecutive_refusals": 0,
+            "refused_signatures": [],
             "tool_argument_rechecks": 0,
         }
         if cost_breaker and hasattr(cost_breaker, "record_user_interaction"):
@@ -346,6 +352,45 @@ async def supervisor_node(
                 }
             ],
         }
+
+    # ── The turn's token budget and the daily cost limit (plan E1) ─────
+    # agent/turn_token_budget.py: every model call of the turn counts; at 70 %
+    # the call carries a budget note, at the limit the turn stops with what it
+    # has. A turn that starts is refused once today's spend reached the daily
+    # limit. Both reads are settings/ledger I/O, so off the loop.
+    from kazma_core.agent import turn_token_budget as _ttb
+
+    _token_base = await asyncio.to_thread(
+        _ttb.resolve_turn_token_budget, str(state.get("thread_id") or "") or None
+    )
+    _turn_view: Any = state
+    if iteration == 0:
+        from kazma_core.agent.turn_input import extract_latest_user_text as _latest_text
+
+        _turn_user_text = _latest_text(messages, image_marker=False)
+        _turn_start = _ttb.start_of_turn(state, _turn_user_text, _token_base)
+        breaker_reset = {**breaker_reset, **_turn_start}
+        _turn_view = {**state, **_turn_start}
+        _daily = await asyncio.to_thread(_ttb.daily_limit_check)
+        if _daily.get("over"):
+            logger.warning(
+                "[Supervisor] daily cost limit reached ($%.2f of $%.2f) — turn refused",
+                float(_daily.get("spent") or 0.0), float(_daily.get("limit") or 0.0),
+            )
+            return {
+                **breaker_reset,
+                **_mission_carry,
+                "next_node": NodeName.RESPOND,
+                "messages": messages + [{
+                    "role": "assistant",
+                    "content": _ttb.daily_refusal_text(
+                        _turn_user_text, float(_daily.get("spent") or 0.0),
+                        float(_daily.get("limit") or 0.0),
+                    ),
+                }],
+            }
+    _token_limit = _ttb.effective_limit(_turn_view, _token_base)
+    _turn_tokens_used = int(_turn_view.get("turn_tokens") or 0)
 
     # Mid-turn LLM summarization removed. Oversized contexts are handled
     # later via deterministic trim_messages (after Working Memory is set).
@@ -534,6 +579,7 @@ async def supervisor_node(
                 _res = None
             if _res is not None and _res.ok and not _res.escalate:
                 return {
+                    **breaker_reset,
                     **intent_patch,
                     "messages": messages + [{"role": "assistant", "content": _res.message}],
                     "next_node": NodeName.RESPOND,
@@ -1337,6 +1383,8 @@ async def supervisor_node(
             "needs_compaction": False,
             "circuit_breaker_tripped": False,
             "consecutive_tool_failures": 0,
+            "consecutive_refusals": 0,
+            "refused_signatures": [],
         }
         logger.info(
             "[Supervisor] Deterministic trim applied: %d → %d messages (budget=%d)",
@@ -1529,6 +1577,29 @@ async def supervisor_node(
     except Exception:
         logger.exception("[Supervisor] steer gate/drain failed")
 
+    if _token_limit and _turn_tokens_used >= _token_limit:
+        from kazma_core.agent.turn_input import extract_latest_user_text as _latest_text
+
+        logger.warning(
+            "[Supervisor] turn token budget reached (%d of %d) — stopping the turn",
+            _turn_tokens_used, _token_limit,
+        )
+        return {
+            **breaker_reset,
+            **intent_patch,
+            **_mission_carry,
+            "next_node": NodeName.RESPOND,
+            "turn_budget_stopped": True,
+            "turn_tokens": _turn_tokens_used,
+            "turn_token_budget_granted": _token_limit,
+            "messages": messages + [{
+                "role": "assistant",
+                "content": _ttb.stop_text(
+                    _latest_text(messages, image_marker=False), _turn_tokens_used, _token_limit,
+                ),
+            }],
+        }
+
     start = time.monotonic()
     try:
         from kazma_core.llm_provider import LLMError
@@ -1554,6 +1625,9 @@ async def supervisor_node(
         _llm_attempts = 0
         _served_by: list[str] = []  # failover bookkeeping: [model] when a chain model answered
         _llm_messages = list(messages) + ([_budget_nudge] if _budget_nudge else [])
+        if _token_limit and _turn_tokens_used >= _token_limit * _ttb.WARN_FRACTION:
+            # Call-local, like the recheck below: never kept in the checkpoint.
+            _llm_messages.append(_ttb.budget_note(_turn_tokens_used, _token_limit))
         if iteration > 0 and state.get("tool_argument_rechecks") and not tools_ran_this_turn(messages):
             # Call-local guidance: do not make a synthetic user turn the new
             # active goal/language, or retain this reminder in future turns.
@@ -1819,6 +1893,8 @@ async def supervisor_node(
 
     duration_ms = (time.monotonic() - start) * 1000
     cost_breaker.record_cost(response.cost_usd)
+    _turn_tokens_used = _ttb.add_call_tokens(_turn_tokens_used, response.usage)
+    breaker_reset = {**breaker_reset, "turn_tokens": _turn_tokens_used}
 
     # Per-call ledger (observability §A): durable record of the success,
     # including failover attribution (failover_from = primary model).
@@ -1962,6 +2038,8 @@ async def supervisor_node(
                     model=routed_model,
                     **(await chat_reasoning_kwargs(turn_llm)),
                 )
+                _turn_tokens_used = _ttb.add_call_tokens(_turn_tokens_used, nudge_response.usage)
+                breaker_reset = {**breaker_reset, "turn_tokens": _turn_tokens_used}
                 if nudge_response.content and nudge_response.content.strip():
                     content = nudge_response.content.strip()
                     # The first (empty) attempt was still billed — fold its

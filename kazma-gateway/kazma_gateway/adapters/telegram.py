@@ -1705,9 +1705,13 @@ class TelegramAdapter(BaseAdapter):
             # A file the upload refused (a 413, ok=false) is a failed send:
             # send_file answered "File sent" over it (audit 2026-10-26
             # AUD-032, §51). Every attachment is still tried.
+            from kazma_gateway import send_report
+
             attachments_sent = True
             for att in outbound.attachments:
-                if not await self._send_attachment(chat_id, att, message_thread_id=topic_id):
+                if await self._send_attachment(chat_id, att, message_thread_id=topic_id):
+                    send_report.part_delivered()
+                else:
                     attachments_sent = False
             # Send TTS voice reply only when this turn was voice + Settings allow it
             try:

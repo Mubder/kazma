@@ -144,6 +144,8 @@ def test_the_maintenance_cadence_carries_the_retention_sweep():
         "tool receipt retention", "task ledger retention", "model-call retention", "ended YOLO windows",
         "task queue purge", "swarm task retention", "pipeline log retention", "swarm approval rows",
         "run incident retention",
+        "chat outbox retention",
+        "WAL archive",
         "checkpoint retention",
         "supervisor watch", "document worker broker", "guard dependencies",
         "malware signatures",

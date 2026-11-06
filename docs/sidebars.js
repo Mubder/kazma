@@ -98,6 +98,7 @@ const sidebars = {
         'ops/portability',
         'ops/migration',
         'ops/document-processing',
+        'ops/outside-watch',
       ],
     },
   ],

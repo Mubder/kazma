@@ -494,6 +494,10 @@ class InProcessWorker(SwarmWorker):
             executed_tools: dict[str, str] = {}  # Track "tool_name:sorted_json_args" -> result_content
             _circuit_breaker_tripped = False
             _consecutive_tool_failures = 0
+            # Refused before anything ran: counted on their own allowance
+            # (tool_loop_breaker.REFUSAL_ALLOWANCE), never as hard failures.
+            _consecutive_refusals = 0
+            _refused_signatures: list[str] = []
 
             for iteration in range(1, MAX_ITERATIONS + 1):
                 # Resilient LLM call: transient retries + model failover chain
@@ -558,7 +562,7 @@ class InProcessWorker(SwarmWorker):
                 messages.append(assistant_msg)
 
                 # Execute each tool call; score breaker once per round (batch).
-                from kazma_core.agent.tool_loop_breaker import update_breaker
+                from kazma_core.agent.tool_loop_breaker import tool_signature, update_breaker
 
                 batch_results: list[dict[str, Any]] = []
                 batch_meta: list[tuple[Any, dict[str, Any]]] = []
@@ -669,15 +673,30 @@ class InProcessWorker(SwarmWorker):
 
                 # 3. Typed breaker — max +1 hard credit per iteration batch
                 if batch_results and not _circuit_breaker_tripped:
+                    _keyed = [
+                        {**r, "tool_call_id": r.get("tool_call_id") or str(tc.id or i)}
+                        for i, (tc, r) in enumerate(batch_meta)
+                    ]
                     bstate, stamped = update_breaker(
-                        _consecutive_tool_failures, batch_results
+                        _consecutive_tool_failures,
+                        _keyed,
+                        previous_refusals=_consecutive_refusals,
+                        previous_refused_signatures=_refused_signatures,
+                        signatures_by_id={
+                            str(r["tool_call_id"]): tool_signature(tc.name, tc.arguments or {})
+                            for (tc, _), r in zip(batch_meta, _keyed, strict=True)
+                        },
                     )
                     _consecutive_tool_failures = bstate.consecutive_hard_rounds
+                    _consecutive_refusals = bstate.consecutive_refusal_rounds
+                    _refused_signatures = bstate.refused_signatures
                     if bstate.tripped:
                         logger.warning(
-                            "[InProcessWorker:%s] Circuit breaker tripped! %d consecutive hard rounds.",
+                            "[InProcessWorker:%s] Circuit breaker tripped (%s): %d hard rounds, %d refused rounds.",
                             self.name,
+                            bstate.tripped_by or "hard",
                             _consecutive_tool_failures,
+                            _consecutive_refusals,
                         )
                         _circuit_breaker_tripped = True
                     batch_results = stamped

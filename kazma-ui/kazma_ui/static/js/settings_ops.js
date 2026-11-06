@@ -700,6 +700,91 @@
             } catch (e) { /* keep defaults */ }
         },
 
+        async loadTurnSpending() {
+            try {
+                const data = await this._fetch('/api/settings/turn-spending');
+                if (data && typeof data.tokens === 'number') {
+                    this.turnSpending = {
+                        tokens: data.tokens,
+                        tokensMax: typeof data.tokens_max === 'number' ? data.tokens_max : 100000000,
+                        dailyUsd: typeof data.daily_usd === 'number' ? data.daily_usd : 0,
+                        dailyMax: typeof data.daily_max === 'number' ? data.daily_max : 1000000,
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+        },
+
+        // ── The outside watch (resilience plan B1) ──
+        async loadOutsideWatch(fresh) {
+            this.outsideWatch.failed = false;
+            try {
+                const data = await this._fetch('/api/settings/outside-watch' + (fresh ? '?fresh=1' : ''));
+                if (!data || typeof data.paired !== 'boolean') throw new Error('unexpected answer');
+                this.outsideWatch = Object.assign({ loaded: true, failed: false }, data);
+            } catch (e) {
+                this.outsideWatch.failed = true;
+            }
+        },
+
+        _OUTSIDE_CONDITIONS: {
+            up: ['settings.outside_watch_cond_up', 'Up'],
+            maintenance: ['settings.outside_watch_cond_maintenance', 'Planned maintenance'],
+            machine_unreachable: ['settings.outside_watch_cond_machine_unreachable', 'The machine is not reachable (power, network or sleep)'],
+            tunnel_down: ['settings.outside_watch_cond_tunnel_down', 'The tunnel is down; Kazma itself is running'],
+            kazma_restarting: ['settings.outside_watch_cond_kazma_restarting', 'Kazma is down; the guard is restarting it'],
+            kazma_down: ['settings.outside_watch_cond_kazma_down', 'Kazma is down'],
+            dependency_down: ['settings.outside_watch_cond_dependency_down', 'Kazma is up; a dependency is away'],
+            guard_gone: ['settings.outside_watch_cond_guard_gone', 'The guard stopped; Kazma is unsupervised'],
+            disk_critical: ['settings.outside_watch_cond_disk_critical', 'The disk is almost full'],
+            observer_refused: ['settings.outside_watch_cond_observer_refused', 'The observer cannot pass Cloudflare Access'],
+            unreachable: ['settings.outside_watch_cond_unreachable', 'Kazma is not reachable']
+        },
+
+        _OUTSIDE_GUARD: {
+            reached: ['settings.outside_watch_guard_reached', 'Delivered'],
+            reaching: ['settings.outside_watch_guard_reaching', 'Starting'],
+            unreachable: ['settings.outside_watch_guard_unreachable', 'The observer did not answer'],
+            rejected: ['settings.outside_watch_guard_rejected', 'The observer refused it: pair again'],
+            key_unprotected: ['settings.outside_watch_guard_key_unprotected', 'The key file could not be restricted to this account, so it is not used'],
+            key_invalid: ['settings.outside_watch_guard_key_invalid', 'The key file cannot be read: pair again'],
+            bad_url: ['settings.outside_watch_guard_bad_url', "The observer's address is not https"],
+            off: ['settings.outside_watch_guard_off', 'Off'],
+            none: ['settings.outside_watch_guard_none', 'No record: Kazma was not started by the guard']
+        },
+
+        outsideCondition(condition) {
+            const pair = this._OUTSIDE_CONDITIONS[condition];
+            return pair ? _t(pair[0], pair[1]) : String(condition || '');
+        },
+
+        outsideGuardState(guard) {
+            const pair = this._OUTSIDE_GUARD[(guard && guard.state) || 'none'];
+            return pair ? _t(pair[0], pair[1]) : String(guard.state);
+        },
+
+        outsideLastAck(guard) {
+            if (!guard || typeof guard.last_ack !== 'number') return _t('settings.outside_watch_never', 'None yet');
+            return window.KazmaFormat.relative(guard.last_ack * 1000);
+        },
+
+        outsideUptime(observer) {
+            if (!observer || typeof observer.up_7d_pct !== 'number') {
+                return _t('settings.outside_watch_no_readings', 'No readings yet');
+            }
+            return _t('settings.outside_watch_up_pct', 'Up {pct}% of the time',
+                { pct: window.KazmaFormat.number(observer.up_7d_pct) });
+        },
+
+        outsideIncidentWhen(incident) {
+            const began = _t('settings.outside_watch_started', 'began {when}',
+                { when: window.KazmaFormat.relative(incident.started_at * 1000) });
+            const end = incident.ended_at
+                ? _t('settings.outside_watch_ended', 'ended {when}',
+                    { when: window.KazmaFormat.relative(incident.ended_at * 1000) })
+                : _t('settings.outside_watch_ongoing', 'still going on');
+            return began + ', ' + end;
+        },
+
         async loadChatReasoning() {
             try {
                 const data = await this._fetch('/api/settings/chat-reasoning');
