@@ -4022,9 +4022,20 @@ password on a command line (the Windows installer's throwaway one aside,
 replaced at once through psql's stdin); the superuser's is kept in
 `<install>/.kazma/postgres_superuser.pass` (a Kazma secret file). `--check`
 and `--dry-run` change nothing; a second run repairs and never reinstalls;
-`--move-from-container NAME` copies the container's data in
+`--move-from-container NAME` switches Kazma in ONE run (`setup._MoveHold`):
+Kazma stopped through its guard once idle, the container's data copied in
 (`backup/pg_move.py`: dump inside the container, `pg_restore` as
-`kazma_app`, every Kazma table's row count compared) before `.env` changes.
+`kazma_app`, every Kazma table's row count compared), `.env` written, Kazma
+started on the new server and seen signed in there, the container stopped
+and kept. Live 2026-11-06 the first move copied while Kazma kept writing to
+the container and said "reload when idle": the next restart would have
+started Kazma on a copy missing everything since. A second run replaces an
+earlier copy only when Kazma never started on it (`pg_move._replace_refusal`:
+its `system.lifecycle.last_boot_epoch` not newer than the container's,
+nothing connected; `postgres_service.empty_database_steps`, after the dump),
+and after a failed copy into an emptied database `.env` names, Kazma stays
+stopped. Gates: `tests/test_postgres_move_switch.py` (the old setup fails
+all 16), and on real Postgres `tests/test_resilience_postgres.py`.
 `kazma doctor` checks the service from the record; the guard watches it
 (`DatabaseServiceWatch`: starts a stopped service once per outage, pages once
 at five minutes, once on recovery). Gates: `tests/test_setup_postgres.py`

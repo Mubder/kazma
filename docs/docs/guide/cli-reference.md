@@ -253,7 +253,7 @@ reinstalls.
 
 | Subcommand | Description |
 |---|---|
-| `kazma setup postgres` | PostgreSQL 16 as an OS service that starts at boot and restarts on failure, listening on this machine only, with the `kazma` database, the `kazma_app` role and WAL archiving. Writes `KAZMA_DATABASE_URL` into `.env` (never printed; `--no-env` leaves `.env` alone). `--port` picks the port (5432). `--move-from-container NAME` copies a Docker container's database in first and compares every Kazma table's row count before `.env` changes. Needs an elevated shell on Windows. |
+| `kazma setup postgres` | PostgreSQL 16 as an OS service that starts at boot and restarts on failure, listening on this machine only, with the `kazma` database, the `kazma_app` role and WAL archiving. Writes `KAZMA_DATABASE_URL` into `.env` (never printed; `--no-env` leaves `.env` alone). `--port` picks the port (5432). `--move-from-container NAME` switches Kazma off a Docker container in the same run: it stops Kazma through its guard once no chat turn runs, copies the container's database in and compares every Kazma table's row count, writes `.env`, starts Kazma on the new database and stops the container (kept). Run again, it replaces an earlier copy only if Kazma never started on it. Needs an elevated shell on Windows, except a move onto a healthy service `.env` already names. |
 | `kazma setup system` | Tesseract with Arabic and English, LibreOffice, ClamAV with a daily signature refresh, the Arabic fonts and Docker: checks each, installs only what is missing. |
 
 ```bash
