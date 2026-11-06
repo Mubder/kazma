@@ -192,7 +192,16 @@ def persist_reply(
         # Say what the store answered (FA-108): "persisted" was logged for a
         # write the store refused, so the log read as saved over a reply only
         # the checkpoint held.
-        if ok:
+        if ok and open_turn:
+            # A save while the reply streams: routine (750 lines a day, plan G1).
+            logger.debug(
+                "[turn] Reply persisted thread=%s turn=%s chars=%d interrupted=%s",
+                (thread_id or "")[:12],
+                reply_turn_id[:12],
+                len(str(content or "")),
+                interrupted,
+            )
+        elif ok:
             logger.info(
                 "[turn] Reply persisted thread=%s turn=%s chars=%d interrupted=%s",
                 (thread_id or "")[:12],

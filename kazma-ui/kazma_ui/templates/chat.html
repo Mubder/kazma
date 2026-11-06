@@ -98,6 +98,10 @@
     <div class="chat-input-area" id="chat-input-area">
       {# Pending attachments shown above the composer (not as placeholder text) #}
       <div id="chat-attachments" class="chat-attachments" hidden aria-live="polite"></div>
+      {# A new, empty chat: whether Kazma remembers it, chosen before its first
+         message (resilience plan I). chat.js shows it while the chat is empty. #}
+      <button id="chat-memory-choice" type="button" class="chat-memory-choice" aria-pressed="false" hidden
+              data-label="{{ t('chat.memory_choice') }}" data-label-set="{{ t('chat.memory_choice_set') }}">{{ t('chat.memory_choice') }}</button>
       <div class="composer-dock">
       <div class="composer-dock-top">
         {# chat-model-bar class kept (unique #model-selector lives here, not cloned).
@@ -393,6 +397,8 @@ function setupWall() {
     memory_on_body: {{ t('chat.memory_on_body') | tojson }},
     memory_on_confirm: {{ t('chat.memory_on_confirm') | tojson }},
     memory_on_done: {{ t('chat.memory_on_done') | tojson }},
+    memory_choice: {{ t('chat.memory_choice') | tojson }},
+    memory_choice_set: {{ t('chat.memory_choice_set') | tojson }},
     delete_chat_title: {{ t('chat.delete_chat_title') | tojson }},
     delete_chat_body: {{ t('chat.delete_chat_body') | tojson }},
     delete_chat_confirm: {{ t('chat.delete_chat_confirm') | tojson }},
@@ -518,6 +524,7 @@ function setupWall() {
     resuming: {{ t('chat.phase_resuming') | tojson }},
     stopping: {{ t('chat.phase_stopping') | tojson }},
     completed: {{ t('chat.phase_completed') | tojson }},
+    no_answer: {{ t('chat.phase_no_answer') | tojson }},
     failed: {{ t('chat.phase_failed') | tojson }},
     cancelled: {{ t('chat.phase_cancelled') | tojson }},
     recovering: {{ t('chat.phase_recovering') | tojson }},

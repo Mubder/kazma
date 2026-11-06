@@ -424,8 +424,8 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
     if not tweets:
         # The commonest state, and it was invisible. "Polled, nothing new" and
         # "never polled" are different problems with the same silence.
-        logger.info(
-            "[x-mentions] polled — no new mentions since %s",
+        logger.debug(
+            "[x-mentions] polled — no new mentions since %s",  # routine: plan G1
             since_id or stored_since or "(start)",
         )
         return []

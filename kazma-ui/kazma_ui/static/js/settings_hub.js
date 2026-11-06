@@ -830,7 +830,7 @@
 
         /** The one line under the pill: what the last test actually found. */
         providerStateDetail(p) {
-            if (!p) return '';
+            if (!p || p.enabled === false) return '';
             if (!p._test) return ProvidersManager.storedDetail(p);
             return ProvidersManager.describe(p._test).detail || '';
         },
@@ -869,7 +869,7 @@
         },
 
         providerChecks(p) {
-            return ProvidersManager.checksFor(p && p._test, p && p.health);
+            return ProvidersManager.checksFor(p && p._test, p && p.health, p && p.enabled);
         },
 
         /** One short line for the list row: what the last check measured. */

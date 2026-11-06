@@ -79,7 +79,8 @@ var ProvidersManager = window.ProvidersManager = {
      * @returns {string}
      */
     storedDetail(provider) {
-        if (this.cardState(provider, null) === 'untested') return '';
+        var state = this.cardState(provider, null);
+        if (state === 'untested' || state === 'off') return '';
         return this._t('settings.prov_from_last_check', 'Saved from the last check. Run the checks again for the details.');
     },
 
@@ -108,9 +109,14 @@ var ProvidersManager = window.ProvidersManager = {
      *
      * @param {Object} provider   The provider entry from /api/providers
      * @param {Object} [result]   A test result from this session, if any
-     * @returns {'working'|'chat_failing'|'unreachable'|'untested'}
+     * A switched-off provider is "off" and nothing else: its last health,
+     * or a test run before it was switched off, says nothing of a provider
+     * Kazma does not use (the live page showed old failures on them).
+     *
+     * @returns {'off'|'working'|'chat_failing'|'unreachable'|'untested'}
      */
     cardState(provider, result) {
+        if (provider && provider.enabled === false) return 'off';
         if (result) return this.stateOf(result);
         var health = (provider && provider.health) || '';
         if (health === 'healthy') return 'working';
@@ -121,6 +127,7 @@ var ProvidersManager = window.ProvidersManager = {
 
     /** Human label for a card state (English; see stateLabel). */
     STATE_LABELS: {
+        off: 'Off',
         working: 'Working',
         chat_failing: 'Chat failing',
         unreachable: 'Unreachable',
@@ -282,7 +289,8 @@ var ProvidersManager = window.ProvidersManager = {
      * @param {string} [health]  the provider's stored health
      * @returns {Array<{key: string, label: string, state: 'ok'|'fail'|'idle', detail: string}>}
      */
-    checksFor(result, health) {
+    checksFor(result, health, enabled) {
+        if (enabled === false) return [];
         var idle = { state: 'idle', detail: '' };
         if (!result) {
             var storedModels = 'idle';

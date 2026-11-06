@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**285** variables are read by the product code; **285** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**286** variables are read by the product code; **286** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -218,6 +218,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
 | `KAZMA_PUBLIC_URL` | `""` | `kazma_core.ide.env_context`, `kazma_core.migration.exporter`, `kazma_core.security.hardening` +6 | yes |
 | `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
+| `KAZMA_READ_ONLY_START` | (none) | `kazma_ui.read_only_mode` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |
 | `KAZMA_REMOTE_DAY_REQUESTS` | `"1024"` | `kazma_core.web_acquire.accounting` | yes |
 | `KAZMA_REMOTE_JOB_REQUESTS` | `"256"` | `kazma_core.web_acquire.accounting` | yes |

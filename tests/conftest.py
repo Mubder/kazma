@@ -230,6 +230,8 @@ def _isolated_guard_files(tmp_path, monkeypatch):
     # heartbeat; the tests of those features turn them on with fakes.
     monkeypatch.setenv("KAZMA_GUARD_DISK_WATCH", "off")
     monkeypatch.setenv("KAZMA_GUARD_OUTSIDE_WATCH", "off")
+    # Nor reads the power source (a laptop runner is on battery).
+    monkeypatch.setenv("KAZMA_GUARD_POWER_WATCH", "off")
 
 
 @pytest.fixture(autouse=True)

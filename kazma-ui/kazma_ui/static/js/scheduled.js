@@ -46,6 +46,11 @@ function statusClass(task) {
     return Object.prototype.hasOwnProperty.call(STATUS_CLASS, st) ? STATUS_CLASS[st] : 'attention';
 }
 
+// The tabs' rows and the counts beside them, from one list each (resilience
+// plan I): the page said "3 Completed" next to "History (4)" -- a cancelled
+// job was in the History tab and in no count.
+const HISTORY_CLASSES = ['done', 'failed', 'cancelled'];
+
 function scheduledPage() {
     return {
         tasks: [],
@@ -75,13 +80,20 @@ function scheduledPage() {
         cronTz: '',
 
         get counts() {
-            const c = { upcoming: 0, attention: 0, failed: 0, done: 0, cancelled: 0, overdue: 0 };
+            const c = { upcoming: 0, attention: 0, failed: 0, done: 0, cancelled: 0, overdue: 0,
+                        history: 0, upcomingTab: 0, ended: 0 };
             for (const task of this.tasks) {
                 const cls = statusClass(task);
                 if (Object.prototype.hasOwnProperty.call(c, cls)) c[cls]++;
                 else c.attention++;
                 if (cls === 'upcoming' && this.isOverdue(task)) c.overdue++;
+                if (HISTORY_CLASSES.includes(cls)) c.history++;
             }
+            // The Upcoming tab holds every row the History tab does not.
+            c.upcomingTab = this.tasks.length - c.history;
+            // Ended without failing: completed and cancelled. With the failed
+            // count it adds up to the History tab's.
+            c.ended = c.history - c.failed;
             return c;
         },
 
@@ -90,9 +102,9 @@ function scheduledPage() {
             if (this.filter === 'all') {
                 rows = this.tasks.slice();
             } else if (this.filter === 'history') {
-                rows = this.tasks.filter(task => ['done', 'failed', 'cancelled'].includes(statusClass(task)));
+                rows = this.tasks.filter(task => HISTORY_CLASSES.includes(statusClass(task)));
             } else {
-                rows = this.tasks.filter(task => ['upcoming', 'attention'].includes(statusClass(task)));
+                rows = this.tasks.filter(task => !HISTORY_CLASSES.includes(statusClass(task)));
             }
             const dir = this.sortDir === 'asc' ? 1 : -1;
             return rows.slice().sort((a, b) => {

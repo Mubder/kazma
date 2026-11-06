@@ -41,6 +41,9 @@
     RESUMING: 'resuming',
     STOPPING: 'stopping',
     COMPLETED: 'completed',
+    // Done, and no answer was written: not "Completed" (resilience plan I:
+    // an old OCR turn read "Completed" over nothing).
+    NO_ANSWER: 'no_answer',
     FAILED: 'failed',
     CANCELLED: 'cancelled',
     RECOVERING: 'recovering',
@@ -49,8 +52,17 @@
 
   /** A phase the turn cannot leave on its own. */
   var TERMINAL = {
-    completed: 1, failed: 1, cancelled: 1, interrupted: 1,
+    completed: 1, no_answer: 1, failed: 1, cancelled: 1, interrupted: 1,
   };
+
+  /** Whether the turn holds any answer text (a text part, or streamed text). */
+  function hasAnswer(doc) {
+    var parts = (doc && doc.parts) || [];
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i] && parts[i].type === 'text' && String(parts[i].text || '').trim()) return true;
+    }
+    return !!String((doc && (doc.stream || doc.content)) || '').trim();
+  }
 
   function isTerminal(phase) {
     return !!TERMINAL[String(phase || '')];
@@ -165,7 +177,7 @@
     if (facts.stopRequested && status !== 'done') return PHASE.STOPPING;
     if (facts.resuming) return PHASE.RESUMING;
 
-    if (status === 'done') return PHASE.COMPLETED;
+    if (status === 'done') return hasAnswer(doc) ? PHASE.COMPLETED : PHASE.NO_ANSWER;
     if (status === 'paused') {
       // Paused with no pending gate is not "approval required": the gate
       // settled and the graph has not reported back yet.
@@ -282,7 +294,7 @@
       ),
       canRetry: !!facts.retrySupported && (
         phase === PHASE.FAILED || phase === PHASE.INTERRUPTED
-        || phase === PHASE.CANCELLED
+        || phase === PHASE.CANCELLED || phase === PHASE.NO_ANSWER
       ),
       // The approval group owns the decision UI; the header only says a
       // decision is outstanding and how many.

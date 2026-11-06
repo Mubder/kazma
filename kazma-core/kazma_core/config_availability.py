@@ -151,6 +151,7 @@ def wait_for_settings_store(
     retry_s: float = BOOT_RETRY_S,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    on_wait: Callable[[float], None] | None = None,
 ) -> _T:
     """Open the settings store at boot, waiting for its database to answer.
 
@@ -167,6 +168,10 @@ def wait_for_settings_store(
     rewrites the boot-status file, which is how the guard knows the boot is
     waiting and not hung -- and without one ``BOOT_WAIT_S``. Past the budget
     the last error is raised, as before.
+
+    *on_wait* is told the seconds waited after each failed try; it may stop
+    the wait by raising (``read_only_mode.read_only_after``: the read-only
+    start from the settings' copy, resilience plan A4).
     """
     if budget_s is None:
         budget_s = math.inf if _boot_status_path() is not None else BOOT_WAIT_S
@@ -192,6 +197,8 @@ def wait_for_settings_store(
                 "database", since=since_wall,
                 reason=getattr(exc, "reason", None) or str(exc),
             ) or told_guard
+            if on_wait is not None:
+                on_wait(now - started)
             if reported_at is None or now - reported_at >= _BOOT_REPORT_S:
                 # The first time at WARNING; later reminders at INFO: the
                 # outage itself is said once by db.availability.

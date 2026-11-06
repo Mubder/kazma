@@ -597,6 +597,22 @@ def _outside_watch_line() -> str | None:
         return "Outside watch: could not be read"
 
 
+def _open_problems_line() -> str | None:
+    """The Dashboard's open problems (resilience plan G2), the same list:
+    how many, the first few by name. None when nothing is open."""
+    from kazma_core.observability.open_problems import open_problems
+
+    data = open_problems("en")
+    rows, unread = data["problems"], data["unreadable"]
+    if not rows and not unread:
+        return None
+    titles = "; ".join(str(r["title"])[:80] for r in rows[:5]) + ("; ..." if len(rows) > 5 else "")
+    line = f"Open problems: {len(rows)}" + (f" ({titles})" if titles else "")
+    if unread:
+        line += " -- could not read: " + ", ".join(unread)
+    return line
+
+
 def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     """Render the digest. A log or the approval registry that cannot be read
     is skipped and said, so a usable digest goes out regardless."""
@@ -631,6 +647,9 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     outside = _outside_watch_line()
     if outside:
         lines.append(outside)
+    problems = _open_problems_line()
+    if problems:
+        lines.append(problems)
 
     # Planned work: what the operator did on purpose. Context, never a fault.
     forgets = app.get("memory forgets", 0)

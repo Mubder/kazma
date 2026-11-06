@@ -192,7 +192,7 @@ GUARD_ACK_S = 20.0
 #   outside_watch -- the heartbeat to the outside observer (state
 #                 ``outside_watch``; see OutsideWatch).
 GUARD_FEATURES = ("pause_held", "document_broker", "dependencies", "boot_wait",
-                  "database_hold", "disk_watch", "outside_watch", "database_service")
+                  "database_hold", "disk_watch", "outside_watch", "database_service", "power_watch")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -3618,6 +3618,106 @@ def _power_state() -> dict | None:
     return None
 
 
+# -- power (resilience plan B2c) ------------------------------------------------
+#
+# A USB UPS shows itself to the OS as a battery. On battery the guard pages
+# once; at POWER_STOP_PERCENT it stops Kazma gracefully (a pause of its own:
+# turns finish or stop cleanly, the database is left consistent) before the
+# UPS runs dry; power back, it lifts its pause and Kazma starts as usual. A
+# machine with no battery (no UPS) is "none" and nothing happens.
+
+POWER_CHECK_EVERY_S = 30.0
+POWER_STOP_PERCENT = 30
+#: The pause reason the power watch writes; it lifts only its own.
+POWER_PAUSE_PREFIX = "power:"
+
+
+class PowerWatch:
+    """The power source, ticked from the guard's loop (see the section comment).
+    The reader is injectable for tests; never raises out of a tick."""
+
+    def __init__(self, guard: Guard, *, reader=None) -> None:
+        self.guard = guard
+        self.log = guard.log
+        self.reader = reader or _power_state
+        self._next_check = 0.0
+        self.state = "unknown"  # none | ac | battery | stopped | unknown
+        self.percent: int | None = None
+
+    def mode(self) -> str:
+        return "off" if (os.environ.get("KAZMA_GUARD_POWER_WATCH") or "").strip().lower() in (
+            "off", "0", "false", "no") else "auto"
+
+    def on_guard_start(self) -> None:
+        # Power came back while nothing ran (a reboot after the UPS ran dry):
+        # the pause this watch left is lifted at the next tick on AC power.
+        self._next_check = 0.0
+        self._write()
+
+    def tick(self) -> None:
+        _tick_safely(self._tick, lambda exc: self.log(
+            "error", "power.internal_error", error=f"{type(exc).__name__}: {exc}"[:300]))
+
+    @staticmethod
+    def _own_pause() -> bool:
+        pause = read_pause()
+        return bool(pause and str(pause.get("reason") or "").startswith(POWER_PAUSE_PREFIX))
+
+    def _tick(self) -> None:
+        if self.mode() == "off":
+            return
+        now = time.monotonic()
+        if now < self._next_check:
+            return
+        self._next_check = now + POWER_CHECK_EVERY_S
+        reading = self.reader()
+        before = self.state
+        if reading is None:
+            self.state, self.percent = "none", None
+            if self._own_pause():  # the battery is gone (unplugged UPS): nothing to wait for
+                clear_pause()
+            self._write()
+            return
+        self.percent = reading.get("percent")
+        pct = "?" if self.percent is None else f"{self.percent}%"
+        if not reading.get("on_battery"):
+            self.state = "ac"
+            if before in ("battery", "stopped") or self._own_pause():
+                stopped = self._own_pause()
+                if stopped:
+                    clear_pause()
+                self.log("info", "power.back", percent=self.percent, restarted=stopped)
+                self.guard._page("success", "Power is back",
+                                 f"The machine runs on mains power again ({pct} battery)."
+                                 + (" Kazma starts again." if stopped else ""),
+                                 fingerprint="power:back", force=True)
+            self._write()
+            return
+        low = self.percent is not None and self.percent <= POWER_STOP_PERCENT
+        if low and before != "stopped" and read_pause() is None:  # never over another pause
+            self.state = "stopped"
+            write_pause(f"{POWER_PAUSE_PREFIX} on battery at {pct}", 0)
+            self.log("warn", "power.stopping", percent=self.percent)
+            self.guard._page("critical", f"Stopping Kazma: battery at {pct}",
+                             "The machine has been on battery and the UPS is running low. "
+                             "Kazma is stopped cleanly now; it starts again when power is back.",
+                             fingerprint="power:stopped", force=True)
+        elif before not in ("battery", "stopped"):
+            self.state = "battery"
+            self.log("warn", "power.on_battery", percent=self.percent)
+            self.guard._page("warn", f"On battery power ({pct})",
+                             f"The machine lost mains power. Kazma keeps running; below "
+                             f"{POWER_STOP_PERCENT}% it is stopped cleanly and started again when power "
+                             "is back.", fingerprint="power:battery", force=True)
+        self._write()
+
+    def record(self) -> dict:
+        return {"state": self.state, "percent": self.percent, "updated": time.time()}
+
+    def _write(self) -> None:
+        _update_state(power=self.record())
+
+
 def heartbeat_body(snapshot: dict) -> bytes:
     """The heartbeat's JSON body, built from *snapshot* through an allowlist.
 
@@ -3957,6 +4057,8 @@ class Guard:
         self.outside = OutsideWatch(self)
         # The database's OS service (DatabaseServiceWatch).
         self.dbsvc = DatabaseServiceWatch(self)
+        # The power source: a UPS on battery (PowerWatch, plan B2c).
+        self.power = PowerWatch(self)
 
     # -- lifecycle ----------------------------------------------------
 
@@ -4245,6 +4347,9 @@ class Guard:
         dbsvc = getattr(self, "dbsvc", None)
         if dbsvc is not None:
             dbsvc.tick()
+        power = getattr(self, "power", None)
+        if power is not None:
+            power.tick()
 
     def _note_probe(self, result: object) -> None:
         """Remember the last readiness answer, for the outside watch."""
@@ -4423,6 +4528,7 @@ class Guard:
         self.broker.on_guard_start()
         self.deps.on_guard_start()
         self.disk.on_guard_start()
+        self.power.on_guard_start()
         self.outside.on_guard_start()
         self.dbsvc.on_guard_start()
 

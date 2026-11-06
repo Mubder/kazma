@@ -515,6 +515,19 @@ _watchdog_tasks: set[asyncio.Task] = set()
 from kazma_ui.sse_utils import sse_frame as _sse_frame
 
 
+def _paragraph_break(acc: str) -> str:
+    """What separates *acc* from the next model call's narration: a blank
+    line, so two narrations stay two paragraphs (resilience plan I).
+
+    The live path added it only when *acc* ended in no whitespace, so a
+    narration ending in one newline ran into the next one (Markdown joins
+    single newlines), and the resume leg after an approval added nothing.
+    """
+    if not acc or acc.endswith("\n\n"):
+        return ""
+    return "\n" if acc.endswith("\n") else "\n\n"
+
+
 async def _drive_graph_to_journal(
     graph: Any,
     input_state: dict[str, Any] | Any,
@@ -788,6 +801,7 @@ async def _stream_langgraph_events(
                 )
 
                 _resume_q: asyncio.Queue = asyncio.Queue(maxsize=2048)
+                _after_tool = False  # the next narration is a new model call's
                 _reg_q(thread_id, _resume_q)
                 _last_hb = time.monotonic()
                 try:
@@ -811,6 +825,13 @@ async def _stream_langgraph_events(
                                     else getattr(_chunk, "content", "")
                                 )
                                 if _txt:
+                                    if _after_tool:
+                                        # A model call after a tool: its own paragraph.
+                                        _after_tool = False
+                                        sep = _paragraph_break(content_acc)
+                                        if sep:
+                                            content_acc += sep
+                                            yield await emit_j("token", {"content": sep})
                                     content_acc += str(_txt)
                                     if _durable.text_is_due(
                                         content_acc, time.monotonic()
@@ -820,6 +841,7 @@ async def _stream_langgraph_events(
                                         "token", {"content": str(_txt)}
                                     )
                             elif _k == "on_tool_start":
+                                _after_tool = True
                                 _durable.note({
                                     "type": "tool",
                                     "name": str(_ev.get("name") or "tool"),
@@ -1074,7 +1096,7 @@ async def _stream_langgraph_events(
                                 if token_text:
                                     if _first_token_of_model_call:
                                         _first_token_of_model_call = False
-                                        if content_acc and not content_acc.endswith(("\n", " ", "\t")):
+                                        if _paragraph_break(content_acc):
                                             # Multi-iteration turns stream one
                                             # narration per LLM invocation; the
                                             # model frequently drops the
@@ -1086,7 +1108,7 @@ async def _stream_langgraph_events(
                                             # invocations only — mid-word
                                             # chunks belong to ONE invocation
                                             # and never hit this branch.
-                                            sep = "\n\n"
+                                            sep = _paragraph_break(content_acc)
                                             content_acc += sep
                                             yield await emit_j("token", {"content": sep})
                                     content_acc += token_text

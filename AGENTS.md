@@ -7369,6 +7369,16 @@ code) and Kazma ran with nobody supervising it.
   does: a CI runner has less than the low line). Gate:
   `tests/test_guard_disk_watch.py` (the rule without the margin and a guard
   without the watch as negative controls).
+- **The guard watches the power** (`PowerWatch`, resilience plan B2c). A USB
+  UPS is a battery to the OS (`_power_state`: `GetSystemPowerStatus`,
+  `/sys/class/power_supply`). Every 30 s: on battery, one page; at
+  `POWER_STOP_PERCENT` (30 %) on battery, a pause of its own (reason
+  `power:`, no expiry: it waits for the power, not a clock) so the guard
+  stops Kazma gracefully, one page -- never over another pause; power back
+  (also after a reboot), it lifts only its own pause and Kazma starts, one
+  page. No battery: nothing. `KAZMA_GUARD_POWER_WATCH=off` turns it off (the
+  root conftest does). Gate: `tests/test_guard_power_watch.py` (a guard
+  without the watch as the negative control).
 - **The guard sends a heartbeat to an outside observer once paired**
   (`OutsideWatch`, resilience plan B1). Nothing on this machine can say the
   machine is off, asleep or cut off. With `<install>/.kazma/observer.key` (32+
@@ -7723,6 +7733,23 @@ problem was its database. Each layer now holds on its own:
   `tests/test_database_availability.py` (planted loops and the turn-liveness
   loop without its wait as negative controls; a normal failure spending its
   attempt; a task fire running while answering).
+
+- **A start without the database is read-only, not silent** (resilience plan
+  A4, `kazma_core/settings_snapshot.py`, `kazma_ui/read_only_mode.py`). The
+  maintenance sweep "settings snapshot" writes the settings' local copy every
+  15 minutes (`<data dir>/settings_snapshot.yaml`, secrets as `vault://`
+  pointers). A minute into a boot with the database away and a copy present
+  (`wait_for_settings_store(on_wait=read_only_after)`), `create_app` serves
+  the read-only server: the chat apps, built from the copy, tell each chat
+  once that the database is away and keep every message (`chat_inbox.db`);
+  `/health/ready` answers not ready with the server's own watch
+  (`database_availability`, so the guard holds a restart); pages say since
+  when; writes answer 503 `database_away_read_only`; the copy refuses every
+  write (`SnapshotSettings`). When a sign-in to the database works, Kazma asks
+  the guard for a reload, and the normal start hands the kept messages to the
+  gateway in order (`drain_inbox`; a handed row keeps no text).
+  `KAZMA_READ_ONLY_START=0` turns it off. Gate: `tests/test_read_only_start.py`
+  (no copy: the boot keeps waiting, as the control).
 
 ### 45. The full audit's fixes (2026-09-30, `docs/audits/AUDIT_FULL_2026-09-30.md`)
 
@@ -9026,6 +9053,75 @@ is the reasoning setting below plus the tool count per turn (open).
   daily digest lists each unmet requirement and open advisory under "Needs
   attention" until it is gone. Gate for 11 and 12:
   `tests/test_dependency_notices_reach_the_owner.py`.
+
+### 58. Signals people can use (resilience plan Part G)
+
+- **Quiet logs** (G1, `observability/log_noise.py`). A live day (2026-11-05)
+  wrote 32,090 lines: 12,459 "Batch set" lines and 11,200 access lines of
+  polls. The settings store's batch line, the X mentions poll and a reply's
+  save while it streams are DEBUG; `QuietPolls` on `uvicorn.access` keeps the
+  answered requests of the polled routes (`POLLED_ROUTES`: the bell, pending
+  approvals, a chat's status, `/health/*`) out, never an error status. Gate:
+  `tests/test_quiet_logs.py` replays that day (`tests/fixtures/log_noise/live_day.json`,
+  shapes and counts only) against the code: no routine line more than 30
+  times an hour (the recorded day without the change as the negative control).
+- **One list of open problems** (G2, `observability/open_problems.py`): the
+  bell's open alerts, run incidents, research and crawl alerts, unmet install
+  requirements, open advisories and the observer's open incident, built each
+  time from where each lives, so a resolved problem leaves by itself. The
+  Dashboard's card (`GET /api/problems`, `static/js/problems_panel.js`) words
+  each in the page's language (`problems.source.*`, `problems.resolved.*`;
+  titles and details are the problems' own data); Acknowledge (until it
+  changes: a changed problem has another id) and Snooze (a day) are kept in
+  `system.problems.seen`, admin-only. A source that cannot be read is named.
+  The daily digest reads the same list (`_open_problems_line`). Gates:
+  `tests/test_open_problems.py`, `tests/e2e/test_problems_panel.py` (EN/AR,
+  reached by the sidebar).
+- **The weekly report against targets** (G3, `observability/weekly_targets.py`):
+  uptime (the observer's), turns that succeed, restarts not asked for, the
+  median time to recover, backups fresh every day, stops over budget and
+  alerts sent, each met or missed with the week before, measured from the
+  app's and the guard's logs (only the lines a target reads are kept). A
+  target with nothing to measure is "unknown", never met. It follows "Needs
+  a look" in the weekly message. Gate: `tests/test_weekly_targets.py` (a
+  recorded fortnight with a missed target).
+
+### 59. What the UI says must be true (resilience plan Part I)
+
+Each with its test (the old rule as the negative control):
+- **A row shows done only when its record says it ended** (`chat.js`
+  `_endedRows`): on a finished turn a row still "running" is drawn plain
+  (`info`), never with a check ("Kazma is thinking…" read as a step that
+  finished). `tests/js/test_rows_done_only_when_ended.js`.
+- **Two model calls' narrations stay two paragraphs** (`sse_chat/_streaming._paragraph_break`):
+  a blank line between them on the live path whatever the text ends with
+  (one newline joins in Markdown), and on the resume leg after an approval,
+  which added nothing. `tests/test_narration_paragraphs.py`.
+- **A finished turn with no answer says so** (`turn_presentation` phase
+  `no_answer`, "Ended without an answer", terminal, offers Retry), never
+  "Completed". `tests/js/test_turn_without_answer.js`.
+- **A new, empty chat offers "Don't remember this chat"** (`#chat-memory-choice`,
+  `chat.js` `_watchMemoryChoice`), applied to the chat's id at once, so the
+  first turn is kept out too. `tests/e2e/test_new_chat_memory_choice.py` (EN/AR,
+  by the sidebar).
+- **Every answer-quality row links to its chat or says it was deleted**
+  (`chat_deleted`). `tests/js/test_quality_rows_name_their_chat.js`.
+- **The Scheduled page's counts come from one place** (`HISTORY_CLASSES`):
+  Failed plus Ended is the History tab's count, and each tab's count is the
+  rows it lists. `tests/js/test_scheduled_counts.js`.
+- **A switched-off provider shows "Off" and nothing else** (`cardState`,
+  `checksFor`, `storedDetail`). `tests/js/test_provider_off_state.js`.
+- **A file_search query that reads like a file name is matched as a name
+  first** (`_named_like`, any extension, whatever the glob).
+  `tests/test_file_search_names_first.py`.
+
+**The weekly chaos drill** (plan J, `scripts/chaos_week.py`): the database
+stopped for two minutes, the server killed mid-turn, Docker stopped, the
+network cut, the disk filled to its floor, a reload under load -- each with
+its expected outcome read from the target's own answers, on a private
+install only (it refuses the live port, a folder without `.kazma/chaos-ok`,
+and the live `.env`). Where it runs (a VM or a separate PC) is the owner's
+choice. `tests/test_chaos_week.py`.
 
 ## UI Conventions (Web)
 
