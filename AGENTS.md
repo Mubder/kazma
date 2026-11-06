@@ -9157,12 +9157,21 @@ Each with its test (the old rule as the negative control):
   `tests/test_file_search_names_first.py`.
 
 **The weekly chaos drill** (plan J, `scripts/chaos_week.py`): the database
-stopped for two minutes, the server killed mid-turn, Docker stopped, the
-network cut, the disk filled to its floor, a reload under load -- each with
-its expected outcome read from the target's own answers, on a private
-install only (it refuses the live port, a folder without `.kazma/chaos-ok`,
-and the live `.env`). Where it runs (a VM or a separate PC) is the owner's
-choice. `tests/test_chaos_week.py`.
+stopped, the server killed, Docker stopped, the network cut, the disk filled
+to its floor, an operator reload -- each with its expected outcome read from
+the target's own answers and the guard's own record (its state file and
+`guard.log`), on a private install only (it refuses the live port, a folder
+without `.kazma/chaos-ok`, the live `.env`, a target that is not ready, and,
+on Windows, a shell that is not elevated). The database step stops what the
+install runs: the service `kazma setup postgres` recorded (and the guard must
+start it itself), else the container `--db-container` names. Docker is
+skipped when Kazma uses no container there. A command the drill could not
+run fails its step with the reason. It judged restarts by a `restarts` field
+the guard never writes and stopped a `kazma-db` container a service install
+lacks (2026-11-06): the drill reads only the state fields and log events the
+guard's source writes (`STATE_FIELDS`, `GUARD_EVENTS`; the gate in
+`tests/test_chaos_week.py`, the old drill as the negative control). Where it
+runs (a VM or a separate PC) is the owner's choice.
 
 ## UI Conventions (Web)
 
