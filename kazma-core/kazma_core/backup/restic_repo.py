@@ -197,6 +197,28 @@ def repo_paths() -> dict[str, str]:
     return {"local": local, "remote": remote}
 
 
+def configured_repos() -> dict[str, str]:
+    """The repositories a backup is copied into: the offsite one when it is
+    set, and the local one once restic is set up here (its repository
+    exists, or a passphrase does).
+
+    The local path alone is a default, not a choice. On a fresh install
+    nobody has set restic up, and a copy that cannot be made there is no
+    failure: on the drill VM (2026-11-06) every Postgres dump's copy failed
+    three times and was left as a failed task, with nothing to fix. A
+    repository that vanished while its passphrase stayed still counts, so
+    its copies fail and alert.
+    """
+    paths = repo_paths()
+    out: dict[str, str] = {}
+    local = paths.get("local") or ""
+    if local and ((Path(local) / "config").is_file() or ensure_password()[0]):
+        out["local"] = local
+    if paths.get("remote"):
+        out["remote"] = paths["remote"]
+    return out
+
+
 def ensure_password(*, create: bool = False) -> tuple[str, bool]:
     """Return ``(passphrase, was_created)``. Never generates unless asked.
 

@@ -1819,8 +1819,16 @@ async def _handle_native_pg_offsite(payload: dict[str, Any]) -> bool:
     """Retry restic copies of one dump file. False keeps the task pending."""
     from pathlib import Path
 
+    from kazma_core.backup.restic_repo import configured_repos
+
     raw = str((payload or {}).get("path") or "")
     path = Path(raw)
+    if not await asyncio.to_thread(configured_repos):
+        # Nothing to copy into: restic is not set up here. A task queued
+        # before that was known (or by an older build) ends, not retried.
+        logger.info("[memory_worker] pg offsite copy: no restic repository is set up; "
+                    "the dump stays in %s", path.parent)
+        return True
     if not path.is_file():
         await asyncio.to_thread(_alert_pg_offsite, ["missing-file"])
         return False
@@ -1852,20 +1860,22 @@ def _snapshot_pg_to_restic(path: Any) -> list[str]:
     """Copy the dump into each configured restic repo.
 
     Returns the destination names that failed. An empty list means every
-    configured destination accepted the file, or restic is not configured.
-    A missing password or a rejected upload is a failure. The caller retries
-    those copies without running ``pg_dump`` again.
+    configured destination accepted the file, or restic is not set up here
+    (``restic_repo.configured_repos``: a fresh install's default local path
+    is no destination). A missing password or a rejected upload is a
+    failure. The caller retries those copies without running ``pg_dump``
+    again.
     """
     failed: list[str] = []
     try:
         from kazma_core.backup.restic_repo import (
             backup,
+            configured_repos,
             ensure_password,
-            repo_paths,
             restic_available,
         )
 
-        paths = {name: repo for name, repo in repo_paths().items() if repo}
+        paths = configured_repos()
         if not paths:
             return []
         if not restic_available():

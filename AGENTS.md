@@ -6584,6 +6584,13 @@ recovery card fires once after an unhealthy kill (P1). A failed
 `native_pg_backup` pages (`backup.pg_dump`, with its reason) and so does a
 failed offsite copy of it (`backup.pg_offsite`); a success is counted by the
 weekly report, never paged (`docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md`).
+The copy goes only into a repository restic is set up for
+(`restic_repo.configured_repos`: the offsite one when set, the local one once
+its repository or a passphrase exists): the default local path is no
+destination, and on a fresh install with no restic every dump's copy failed
+three times and stayed a failed task (the drill VM, 2026-11-06). Set up and
+failing, it still fails and alerts. Gate: `tests/test_pg_offsite_fresh_install.py`
+(the old rule as the negative control).
 Do not invent a fourth notifier, mix ops pages into HITL cards, or page every
 backup success.
 
@@ -8758,7 +8765,13 @@ findings. Each fix has a gate that fails on the old code.
 - **Every advisory has a floor at its fix** (FA-258, §50):
   `tests/test_dependency_floors.py` holds pyproject to a recorded OSV answer
   (`tests/fixtures/osv_advisories.json`, refreshed with
-  `scripts/record_osv_advisories.py --python <live python> --write`). A
+  `scripts/record_osv_advisories.py --python <live python> --python
+  <this checkout's .venv python> --write`: what live runs AND what a fresh
+  install gets from the lock; rows only accumulate, so a floor an advisory
+  once needed stays held). Recorded from live alone, the drill VM's fresh
+  install (2026-11-06) got certifi, oauthlib and pypdf below their fixes
+  past a green gate. A `uv lock` upgrade that crosses a major version
+  (pypdf 7) is kept to the series the fix is in until it is tested. A
   default provider's imports are base dependencies with floors (FA-248:
   `edge-tts>=7.3.1`), and a failed voice reply on Telegram is a WARNING.
   Gate: `tests/test_default_voice_providers_declared.py`.
