@@ -84,7 +84,8 @@ class Step:
     """One step of the setup: a program and its arguments, or ``action`` for
     a step this module carries out itself (restart, wait). ``stdin`` is what
     the program reads -- where a password goes, never ``argv``. ``shown`` is
-    the step as printed (no secret)."""
+    the step as printed (no secret). ``dep`` names the system dependency a
+    step of ``kazma setup system`` is for (``system_deps.DEPENDENCIES``)."""
 
     title: str
     argv: tuple[str, ...] = ()
@@ -94,6 +95,7 @@ class Step:
     admin: bool = False
     ok_codes: tuple[int, ...] = (0,)
     action: str = ""
+    dep: str = ""
 
     def printable(self) -> str:
         return self.shown or " ".join(self.argv) or self.action
@@ -153,7 +155,9 @@ def _bin_dir(p: Platform) -> str:
 def _psql(p: Platform, *, port: int, database: str = "postgres") -> tuple[str, ...]:
     """psql as the server's superuser on this machine."""
     exe = str(Path(_bin_dir(p)) / ("psql.exe" if p.os == "windows" else "psql"))
-    common = ("-v", "ON_ERROR_STOP=1", "-X", "-q", "-p", str(port), "-d", database)
+    # -w: a refused password is an error, never a prompt on the console (psql
+    # asks there whatever its input is, and the setup waited for a key).
+    common = ("-w", "-v", "ON_ERROR_STOP=1", "-X", "-q", "-p", str(port), "-d", database)
     if p.os == "windows":
         return (exe, "-h", "127.0.0.1", "-U", "postgres", *common)
     if p.os in ("debian", "fedora"):
@@ -297,7 +301,7 @@ def _port_answers(port: int, host: str = "127.0.0.1", timeout: float = 2.0) -> b
 
 def _out(run: Runner, argv: list[str]) -> tuple[int, str]:
     try:
-        done = run(argv, capture_output=True, text=True, timeout=20, check=False)
+        done = run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20, check=False)
     except (OSError, subprocess.SubprocessError):
         return -1, ""
     return done.returncode, (done.stdout or "") + (done.stderr or "")

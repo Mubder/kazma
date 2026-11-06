@@ -72,7 +72,10 @@ kazma setup system --dry-run   # the plan; runs nothing
 kazma setup system             # asks, then installs what is missing (-y: no question)
 ```
 
-A second run finds nothing to do. `kazma doctor` shows the same checks and
+A download that is cut off is tried again (three times in all), and one
+dependency that still will not install does not stop the others: the end
+names what was not done, and running the command again finishes it. A
+second run finds nothing to do. `kazma doctor` shows the same checks and
 names this command for anything missing. Postgres as a service is
 `kazma setup postgres` (the operations guide, "Postgres as an OS service").
 

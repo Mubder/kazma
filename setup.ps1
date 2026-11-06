@@ -276,13 +276,16 @@ if ($IntroErrors -gt 0) {
     exit 1
 }
 
-$testOutput = Invoke-Native -StdoutOnly { & $VenvPython -m pytest tests/ --co -q } | Select-Object -Last 3
-$testLine = ($testOutput | Where-Object { $_ -match '\d+' } | Select-Object -Last 1)
-if ($testLine -match '(\d+)') {
+$testOutput = @(Invoke-Native { & $VenvPython -m pytest tests/ --co -q })
+$testLine = ($testOutput | Where-Object { $_ -match '(\d+) tests? collected' } | Select-Object -Last 1)
+if ($testLine -match '(\d+) tests? collected') {
     $testCount = $matches[1]
     Log-Ok "$testCount tests collected"
 } else {
-    Log-Warn "Could not collect tests (non-critical)"
+    # Say why: pytest's own last words (it refused to start on every fresh
+    # install while the dev extra lacked pytest-timeout).
+    $why = ($testOutput | Where-Object { "$_".Trim() } | Select-Object -Last 1)
+    Log-Warn "Could not collect tests (non-critical): $why"
 }
 
 # ── 4. Summary ───────────────────────────────────────────────────────────────
@@ -302,15 +305,14 @@ Write-Host ""
 # OCR with Arabic, LibreOffice, ClamAV and its daily refresh, the Arabic fonts
 # and Docker: the plan is shown first, and nothing is installed without a yes.
 Log-Header "5. System dependencies"
-& $VenvPython -m kazma_cli setup system --dry-run
 if ([Environment]::UserInteractive) {
-    $answer = Read-Host "Install what is missing now? (needs an elevated terminal) [y/N]"
-    if ($answer -match '^[Yy]') {
-        & $VenvPython -m kazma_cli setup system -y
-        if ($LASTEXITCODE -ne 0) { Log-Warn "Some system dependencies were not installed: run kazma setup system again" }
-    } else {
-        Log-Info "Later:          $VenvPython -m kazma_cli setup system"
-    }
+    # One run: it checks, shows the plan once, asks, and installs on a yes
+    # (from an elevated terminal: it says so before asking when it is not).
+    & $VenvPython -m kazma_cli setup system
+    if ($LASTEXITCODE -ne 0) { Log-Info "Later:          $VenvPython -m kazma_cli setup system" }
+} else {
+    & $VenvPython -m kazma_cli setup system --dry-run
+    Log-Info "To install them: $VenvPython -m kazma_cli setup system"
 }
 Write-Host ""
 $ScriptsDir = Split-Path $VenvPython

@@ -4081,10 +4081,32 @@ result beside the Postgres record (`record_system`, `setup_record.json`
 models come from a pinned tessdata_fast release, kept only when size and
 SHA-256 match (`TESSDATA`, `fetch_tessdata`). The signatures get a daily
 refresh of their own (a `KazmaFreshclam` scheduled task, a launchd job, the
-distribution's freshclam service). `setup.ps1`/`setup.sh` show the plan at
-the end and ask; `kazma doctor` lists each and names the command. A second
-run changes nothing. Gate: `tests/test_setup_system.py` (every package
-manager faked; nothing installed without a yes; a tampered model refused).
+distribution's freshclam service). `setup.ps1`/`setup.sh` run it once at
+the end (the plan shown once, one question); `kazma doctor` lists each and
+names the command. A second run changes nothing. Gate:
+`tests/test_setup_system.py` (every package manager faked; nothing installed
+without a yes; a tampered model refused).
+
+**A step that fails is tried again; one that would wait is given nothing**
+(the drill VM, 2026-11-06: winget answered 0x80004004 "Cancelled" 59 MB into
+LibreOffice, the setup stopped there with no ClamAV or Docker, its message
+was winget's progress bar read in the ANSI code page, and the owner had to
+press Enter for it to go on). Each step gets `_SYSTEM_ATTEMPTS` (3) tries,
+15 s apart; a failed install whose package a check finds is done
+(`system_deps.installs_package` / `package_is_in`); a dependency that still
+fails stops only its own later steps (`Step.dep`: Tesseract's models,
+ClamAV's schedule) and the end names what is not done. Output is read as
+UTF-8 with the progress lines dropped, an HRESULT shown in hex. Every
+program the setup modules start says its input (`stdin=DEVNULL` or the
+step's own), winget gets `--disable-interactivity`, and a Postgres client
+that connects to a host gets `-w`/`--no-password` (psql asks for a refused
+password on the console whatever its input is). Gates: the drill tests in
+`tests/test_setup_system.py` (one attempt, as before, as the negative
+control; planted calls for the input and prompt gates). **The `dev` extra
+holds `kazma[test]`**: pytest's addopts name `--timeout`, and without
+pytest-timeout pytest refused to start on every fresh install, `fast_test.py`
+too (`tests/test_setup_extras_run_the_suite.py`, the old `dev` list as the
+control); setup says pytest's own last line when it cannot collect.
 
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 

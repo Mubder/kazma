@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import io
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -212,3 +213,236 @@ def test_doctor_names_the_fix(machine):
     rows = _system_rows(sd.check_all(PLATFORMS["apt"], run=machine.run, which=machine.which, **machine.finders()))
     text = "\n".join(r for _, r in rows)
     assert "LibreOffice is not installed" in text and "kazma setup system" in text
+
+
+# ── a step that fails, or would wait (the drill VM, 2026-11-06) ───────
+#
+# winget answered 0x80004004 "Cancelled" 59 MB into LibreOffice's 358 MB, the
+# setup stopped there ("Nothing past this step was done": no ClamAV, no
+# Docker), its message was winget's progress bar read in the wrong code page,
+# and at one point the owner had to press Enter for the setup to go on.
+
+#: What winget wrote: its progress bar, one redraw a megabyte, then "Cancelled".
+_WINGET_CANCELLED = ("Found LibreOffice [TheDocumentFoundation.LibreOffice] Version 26.2.0.3\n"
+                     "Downloading https://download.documentfoundation.org/libreoffice/x86_64.msi\n"
+                     + "".join(f"  ████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  {mb}.0 MB /  358 MB\r" for mb in range(53, 60))
+                     + "\nCancelled\n")
+#: E_ABORT, as Python reads winget's exit code.
+_E_ABORT = 0x80004004
+
+
+def _windows(tmp_path, monkeypatch):
+    import kazma_core.postgres_service as pgs
+
+    monkeypatch.setenv("PROGRAMFILES", str(tmp_path))  # this machine's own programs are not the fake's
+    monkeypatch.setattr(pgs, "is_admin", lambda: True)
+    _record(tmp_path, monkeypatch)
+    return PLATFORMS["winget"]
+
+
+def _winget(machine, answers: dict[str, list[tuple[int, bool]]]):
+    """A runner whose ``winget install --id X`` answers in turn from
+    *answers[X]*: (exit code, whether the package is installed after it)."""
+    installs: list[str] = []
+    attribute = {"TheDocumentFoundation.LibreOffice": "soffice", "Docker.DockerDesktop": "docker"}
+
+    def run(argv, **kw):
+        if argv[:2] == ["winget", "install"]:
+            package = argv[argv.index("--id") + 1]
+            installs.append(package)
+            code, installed = answers[package].pop(0)
+            if installed and package in attribute:
+                setattr(machine, attribute[package], True)
+            elif installed and package == "UB-Mannheim.TesseractOCR":
+                machine.programs.add("tesseract")
+            return subprocess.CompletedProcess(argv, code, _WINGET_CANCELLED if code else "Successfully installed\n", "")
+        return machine.run(argv, **kw)
+
+    return run, installs
+
+
+def test_a_cancelled_download_is_tried_again(machine, tmp_path, monkeypatch, capsys):
+    from kazma_cli.setup import _setup_system
+
+    platform = _windows(tmp_path, monkeypatch)
+    machine.soffice = False
+    run, installs = _winget(machine, {"TheDocumentFoundation.LibreOffice": [(_E_ABORT, False), (0, True)]})
+    waits: list[float] = []
+    code = _setup_system(_options(yes=True), run=run, which=machine.which, platform=platform,
+                         finders=machine.finders(), sleep=waits.append)
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert installs == ["TheDocumentFoundation.LibreOffice"] * 2
+    assert waits == [15.0]
+    assert "0x80004004" in out and "trying again" in out
+
+
+def test_one_attempt_leaves_it_out(machine, tmp_path, monkeypatch, capsys):
+    """Negative control: one try, as before, and LibreOffice stays missing."""
+    import kazma_cli.setup as setup_mod
+
+    monkeypatch.setattr(setup_mod, "_SYSTEM_ATTEMPTS", 1)
+    platform = _windows(tmp_path, monkeypatch)
+    machine.soffice = False
+    run, installs = _winget(machine, {"TheDocumentFoundation.LibreOffice": [(_E_ABORT, False), (0, True)]})
+    code = setup_mod._setup_system(_options(yes=True), run=run, which=machine.which, platform=platform,
+                                   finders=machine.finders(), sleep=lambda s: None)
+    assert code == 1 and installs == ["TheDocumentFoundation.LibreOffice"]
+    assert "LibreOffice is not installed" in capsys.readouterr().out
+
+
+def test_an_install_that_failed_after_installing_counts_as_done(machine, tmp_path, monkeypatch, capsys):
+    from kazma_cli.setup import _setup_system
+
+    platform = _windows(tmp_path, monkeypatch)
+    machine.soffice = False
+    run, installs = _winget(machine, {"TheDocumentFoundation.LibreOffice": [(_E_ABORT, True)]})
+    code = _setup_system(_options(yes=True), run=run, which=machine.which, platform=platform,
+                         finders=machine.finders(), sleep=lambda s: None)
+    assert code == 0 and installs == ["TheDocumentFoundation.LibreOffice"], "installed: not run again"
+    assert "installed, though the installer answered exit 0x80004004" in capsys.readouterr().out
+
+
+def test_one_failed_dependency_does_not_stop_the_others(machine, tmp_path, monkeypatch, capsys):
+    """LibreOffice comes before Docker: before, a failed LibreOffice meant no Docker."""
+    from kazma_cli.setup import _setup_system
+
+    platform = _windows(tmp_path, monkeypatch)
+    machine.soffice = machine.docker = False
+    run, installs = _winget(machine, {"TheDocumentFoundation.LibreOffice": [(_E_ABORT, False)] * 3,
+                                      "Docker.DockerDesktop": [(0, True)]})
+    code = _setup_system(_options(yes=True), run=run, which=machine.which, platform=platform,
+                         finders=machine.finders(), sleep=lambda s: None)
+    out = capsys.readouterr().out
+    assert code == 1
+    assert installs == ["TheDocumentFoundation.LibreOffice"] * 3 + ["Docker.DockerDesktop"]
+    assert machine.docker, "Docker was installed after LibreOffice failed"
+    assert "Not done: install Office conversion (LibreOffice)." in out
+    assert "MB /" not in out, "the progress bar is not the failure's message"
+    assert "Cancelled" in out
+
+
+def test_a_dependency_s_later_steps_wait_for_its_install(machine, tmp_path, monkeypatch, capsys):
+    from kazma_cli.setup import _setup_system
+
+    platform = _windows(tmp_path, monkeypatch)
+    machine.programs.discard("tesseract")
+    fetched: list[str] = []
+    monkeypatch.setattr(sd, "fetch_tessdata", lambda lang, folder: fetched.append(lang))
+    run, installs = _winget(machine, {"UB-Mannheim.TesseractOCR": [(_E_ABORT, False)] * 3})
+    code = _setup_system(_options(yes=True), run=run, which=machine.which, platform=platform,
+                         finders=machine.finders(), sleep=lambda s: None)
+    out = capsys.readouterr().out
+    assert code == 1 and fetched == []
+    assert "download Tesseract's ara model: not done" in out
+
+
+def test_no_terminal_to_answer_from_means_no(machine, tmp_path, monkeypatch, capsys):
+    from kazma_cli.setup import _setup_system
+
+    _record(tmp_path, monkeypatch)
+    machine.soffice = False
+
+    def no_terminal(question):
+        raise EOFError
+
+    code = _setup_system(_options(), run=machine.run, which=machine.which, ask=no_terminal,
+                         platform=PLATFORMS["apt"], finders=machine.finders())
+    assert code == 1 and "Nothing was done." in capsys.readouterr().out
+    assert not any(a[:2] == ["sudo", "apt-get"] for a in machine.ran)
+
+
+def test_an_installers_output_is_read_as_it_wrote_it():
+    """A real child writing winget's bytes: UTF-8, its progress dropped, the
+    HRESULT in hex. Read in the ANSI code page (as before), the same bytes
+    are the mojibake the VM showed."""
+    from kazma_cli.setup import _exit_text, _run_step
+    from kazma_core.postgres_service import Step
+
+    payload = ("  ██▒▒▒▒  59.0 MB / 358 MB" + chr(13) + chr(10) + "Cancelled — try again" + chr(10)).encode("utf-8")
+    child = f"import sys; sys.stdout.buffer.write(bytes.fromhex('{payload.hex()}')); sys.exit(3)"
+    ok, detail = _run_step(Step("t", (sys.executable, "-I", "-c", child)), [])
+    assert not ok and detail == "exit 3: Cancelled — try again"
+    assert "â" in payload.decode("cp1252", errors="replace"), "the old read's view"
+    assert _exit_text(2147500036) == "0x80004004" and _exit_text(1) == "1"
+
+
+def test_a_step_reads_what_it_is_given_or_nothing():
+    """A real child that reads its input gets the end of it at once, never
+    the terminal (an installer handed the terminal waited for Enter)."""
+    from kazma_cli.setup import _run_step
+    from kazma_core.postgres_service import Step
+
+    child = "import sys; data = sys.stdin.read(); print('read', len(data))"
+    assert _run_step(Step("t", (sys.executable, "-I", "-c", child)), []) == (True, "exit 0: read 0")
+    assert _run_step(Step("t", (sys.executable, "-I", "-c", child), stdin="abc"), []) == (True, "exit 0: read 3")
+    seen: dict = {}
+
+    def record(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    _run_step(Step("t", ("x",)), [], run=record)
+    assert seen.get("stdin") is subprocess.DEVNULL and "input" not in seen
+
+
+#: The modules ``kazma setup`` runs programs from, at a terminal.
+_SETUP_MODULES = ("kazma-cli/kazma_cli/setup.py", "kazma-core/kazma_core/system_deps.py",
+                  "kazma-core/kazma_core/postgres_service.py", "kazma-core/kazma_core/backup/pg_move.py",
+                  "kazma-core/kazma_core/backup/wal_archive.py")
+
+
+def calls_on_the_terminal(source: str) -> list[int]:
+    """Lines of process calls that capture output but leave the input as the
+    terminal's: every call with ``capture_output``/``stdout`` must say its
+    ``stdin`` or ``input`` (``**feed`` counts as saying it)."""
+    import ast
+
+    lines = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            names = {k.arg for k in node.keywords}
+            if names & {"capture_output", "stdout"} and not names & {"stdin", "input", None}:
+                lines.append(node.lineno)
+    return lines
+
+
+def postgres_clients_that_can_prompt(source: str) -> list[int]:
+    """Lines of a Postgres client argv that connects to a host ("-h") with no
+    ``-w``/``--no-password``: psql and pg_restore ask for a refused password
+    on the console, whatever their input is. ``postgres_service._psql`` is
+    checked by what it returns (its flags come from a tuple it unpacks)."""
+    import ast
+
+    tree = ast.parse(source)
+    skip: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_psql":
+            skip |= {id(n) for n in ast.walk(node)}
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.List | ast.Tuple) and id(node) not in skip:
+            words = {e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+            if "-h" in words and not words & {"-w", "--no-password"}:
+                lines.append(node.lineno)
+    return lines
+
+
+def test_no_setup_program_waits_on_the_terminal():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    for module in _SETUP_MODULES:
+        source = (root / module).read_text(encoding="utf-8")
+        assert calls_on_the_terminal(source) == [], module
+        assert postgres_clients_that_can_prompt(source) == [], module
+    # Negative controls: the shapes of before.
+    assert calls_on_the_terminal("run(argv, capture_output=True, text=True, timeout=60)") == [1]
+    assert postgres_clients_that_can_prompt('run([pg_restore, "-h", "127.0.0.1", "-d", "kazma", dump])') == [1]
+
+
+def test_psql_never_asks_for_a_password():
+    from kazma_core.postgres_service import _psql
+
+    for platform in PLATFORMS.values():
+        assert "-w" in _psql(platform, port=5432), platform

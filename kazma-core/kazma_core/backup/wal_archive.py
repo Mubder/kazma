@@ -192,7 +192,7 @@ def _base_backup(record: dict[str, Any], superuser_password: str, *, run=subproc
     from kazma_core.security.child_env import tool_child_env
 
     env = {**tool_child_env(), "PGPASSWORD": superuser_password}
-    done = run(argv, capture_output=True, text=True, timeout=3600, check=False, env=env)
+    done = run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600, check=False, env=env)
     if done.returncode != 0:
         shutil.rmtree(partial, ignore_errors=True)
         said = ((done.stderr or done.stdout or "").strip().splitlines() or [""])[-1][:300]

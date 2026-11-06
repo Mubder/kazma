@@ -252,11 +252,14 @@ if [[ "$INTRO_ERRORS" -gt 0 ]]; then
     exit 1
 fi
 
-TEST_COUNT=$($VENV_PYTHON -m pytest tests/ --co -q 2>/dev/null | tail -1 | grep -oP '\d+' | head -1 || echo "0")
+TEST_OUTPUT=$($VENV_PYTHON -m pytest tests/ --co -q 2>&1 || true)
+TEST_COUNT=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+ tests? collected' | tail -1 | grep -oE '^[0-9]+' || true)
 if [[ -n "$TEST_COUNT" && "$TEST_COUNT" -gt 0 ]]; then
     log_ok "$TEST_COUNT tests collected"
 else
-    log_warn "Could not collect tests (non-critical)"
+    # Say why: pytest's own last words (it refused to start on every fresh
+    # install while the dev extra lacked pytest-timeout).
+    log_warn "Could not collect tests (non-critical): $(echo "$TEST_OUTPUT" | grep -v '^[[:space:]]*$' | tail -1)"
 fi
 
 # ── 4. Summary ──────────────────────────────────────────────────────────────
@@ -276,14 +279,12 @@ echo ""
 # OCR with Arabic, LibreOffice, ClamAV and its daily refresh, the Arabic fonts
 # and Docker: the plan is shown first, and nothing is installed without a yes.
 log_header "5. System dependencies"
-$VENV_PYTHON -m kazma_cli setup system --dry-run || true
 if [[ -t 0 ]]; then
-    read -r -p "Install what is missing now? [y/N] " answer
-    if [[ "$answer" =~ ^[Yy] ]]; then
-        $VENV_PYTHON -m kazma_cli setup system -y || log_warn "Some system dependencies were not installed: run kazma setup system again"
-    else
-        log_info "Later:          $VENV_PYTHON -m kazma_cli setup system"
-    fi
+    # One run: it checks, shows the plan once, asks, and installs on a yes.
+    $VENV_PYTHON -m kazma_cli setup system || log_info "Later:          $VENV_PYTHON -m kazma_cli setup system"
+else
+    $VENV_PYTHON -m kazma_cli setup system --dry-run || true
+    log_info "To install them: $VENV_PYTHON -m kazma_cli setup system"
 fi
 echo ""
 log_info "Configure:      edit .env (OPENAI_API_KEY or another provider)"
