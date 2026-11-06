@@ -38,7 +38,7 @@ def main() -> int:
         if args.command == "check":
             result = review_readiness(_read(args.report), _read(args.dataset),
                                      minimum_per_language=args.minimum_per_language)
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(json.dumps(result, ensure_ascii=True, indent=2))
             return 0 if result["ready_for_human_comparison"] else 1
         if args.output.exists():
             raise ValueError("Choose a new output file; preserve intake, reports and prior reviews.")

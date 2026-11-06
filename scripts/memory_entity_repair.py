@@ -43,16 +43,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.action == "size":
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
-            print(json.dumps(size_collapsed(conn), indent=1, ensure_ascii=False))
+            print(json.dumps(size_collapsed(conn), indent=1, ensure_ascii=True))
         finally:
             conn.close()
         return 0
     conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
-        print(json.dumps(size_collapsed(conn), indent=1, ensure_ascii=False))
+        print(json.dumps(size_collapsed(conn), indent=1, ensure_ascii=True))
         out = repair_collapsed(conn, queue=not args.no_queue)
-        print(json.dumps(out, indent=1, ensure_ascii=False))
+        print(json.dumps(out, indent=1, ensure_ascii=True))
     finally:
         conn.close()
     return 0

@@ -369,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.child:
         result = _child(json.loads(Path(args.child).read_text(encoding="utf-8")))
-        print("SOAK-RESULT " + json.dumps(result, ensure_ascii=False))
+        print("SOAK-RESULT " + json.dumps(result, ensure_ascii=True))
         return 0
 
     work = Path(tempfile.mkdtemp(prefix="kazma-memory-soak-"))
@@ -448,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
     report["held"] = _held(data_dir)
     summary = _summary(report, started, memory, data_dir, "passed" if not report["violations"] else "failed")
     _write_report(args.report, summary)
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    print(json.dumps(summary, indent=2, ensure_ascii=True))
     return 0 if summary["healthy"] else 1
 
 

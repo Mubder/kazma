@@ -1963,7 +1963,7 @@ def main(argv: list[str] | None = None) -> int:
         run.violations += run.cycle(_plan(cycle + 1, rng, args, run.state, run.soak_dir, final=True))
     report = finished(run.report("running"), not run.violations)
     _write_report(args.report, report)
-    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
     return 0 if report["healthy"] else 1
 
 

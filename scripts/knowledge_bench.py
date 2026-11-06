@@ -628,7 +628,7 @@ def _cmd_run(real: bool, chroma: bool, as_json: bool, details: bool) -> int:
         embedder = _replay()
     report = run_profiles(embedder=embedder, client=client, keep_results=details)
     if as_json:
-        print(json.dumps(report, ensure_ascii=False, indent=1))
+        print(json.dumps(report, ensure_ascii=True, indent=1))
         return 0
     for profile, part in report["profiles"].items():
         print(f"== {profile} ({part['chunks']} chunks)")

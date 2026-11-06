@@ -31,9 +31,9 @@ def main() -> int:
                 raise ValueError("Report exceeds two megabytes")
             report = json.loads(args.report.read_text(encoding="utf-8"))
             status = install_report(report) if args.install else evaluate_report(report, status["fingerprint"])
-        print(json.dumps(status, ensure_ascii=False, indent=2))
+        print(json.dumps(status, ensure_ascii=True, indent=2))
     except (ValueError, OSError, TypeError, KeyError) as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=True))
         return 1
     return 0
 

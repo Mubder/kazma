@@ -145,10 +145,10 @@ def main() -> int:
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.worker:
-        print(json.dumps(worker(json.load(sys.stdin)), ensure_ascii=False))
+        print(json.dumps(worker(json.load(sys.stdin)), ensure_ascii=True))
         return 0
     if args.summarize:
-        print(json.dumps(summarize(json.loads(args.summarize.read_text(encoding="utf-8"))), ensure_ascii=False, indent=2))
+        print(json.dumps(summarize(json.loads(args.summarize.read_text(encoding="utf-8"))), ensure_ascii=True, indent=2))
         return 0
     if not args.dataset:
         parser.error("Choose a dataset or --summarize report.json.")
@@ -169,7 +169,7 @@ def main() -> int:
 
     load_env_files()
     report = run_cases(document, provider=args.provider, model=args.model, output=args.output, timeout=args.timeout)
-    print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
+    print(json.dumps(report["summary"], ensure_ascii=True, indent=2))
     return 1 if any(result.get("error") for result in report["results"]) else 0
 
 

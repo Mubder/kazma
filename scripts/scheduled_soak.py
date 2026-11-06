@@ -1753,7 +1753,7 @@ def main(argv: list[str] | None = None) -> int:
         report["ledger"] = ledger_path
     finished(report, healthy)
     _write_report(args.report, report)
-    print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False, default=str))
+    print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True, default=str))
     return 0 if healthy else 1
 
 

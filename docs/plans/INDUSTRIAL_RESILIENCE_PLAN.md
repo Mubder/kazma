@@ -116,13 +116,23 @@ interrupted turn continues by itself).
 | D3 the answer checked against the turn's receipts | done | `4a780e0a8` |
 | D4 no duplicate writes or documents in one turn | done (identical re-reads were already counted by the stagnation guard) | `4a780e0a8` |
 | K2 `kazma setup system` | done (package managers faked in the tests) | `4a780e0a8` |
-| G1 quiet logs | done | this batch |
-| G2 one list of open problems | done | this batch |
-| G3 the weekly report against targets | done | this batch |
-| I the eight UI truths | done | this batch |
-| B2c the guard's power watch | done; the UPS and the BIOS setting are the owner's | this batch |
-| J the weekly chaos drill | built (`scripts/chaos_week.py`); where it runs is the owner's choice (item 13) | this batch |
-| A4 start read-only from the settings' copy | done | this batch |
+| G1 quiet logs | done | `2ec9e6208` |
+| G2 one list of open problems | done | `2ec9e6208` |
+| G3 the weekly report against targets | done | `2ec9e6208` |
+| I the eight UI truths | done | `2ec9e6208` |
+| B2c the guard's power watch | done; the UPS and the BIOS setting are the owner's | `2ec9e6208` |
+| J the weekly chaos drill | built (`scripts/chaos_week.py`); where it runs is the owner's choice (item 13) | `2ec9e6208` |
+| A4 start read-only from the settings' copy | done | `2ec9e6208` |
+| A2 a restore takes the base backup before its time | fixed: it took the newest base whatever the time | `e0fc34b03` |
+| C1 the start-up pass lists through the checkpoint manager | fixed: it failed on every live boot (the manager had no `alist`) | `3145744fc` |
+| The full suite on the final tree | 19,668 passed; the 15 real failures it found (gates the new code missed) fixed | `e0fc34b03` |
+| The Postgres suite on a throwaway postgres:16 | 527 passed, 0 failed (CI's Postgres job is billing-locked) | `e0fc34b03` |
+| J soak: Scheduled, 7 simulated days | passed, 0 violations (257 alerts, 3 raised again after a kill, 24 missed by design) | 2026-11-06 |
+| J soak: run supervision, 2,000 cycles | passed, 0 violations (667 runs, 31 restarts, 385 incidents, one card each) | 2026-11-06 |
+| J soak: swarm, 30 minutes | passed, 0 violations (about 9,900 tasks, 14 restarts, 59 bursts at the admission limit) | 2026-11-06 |
+| J soak: Time Travel, 30 minutes | passed, 0 violations (124 cycles, a restart each) | 2026-11-06 |
+| J soaks: documents 48-72 h, memory several days, Knowledge 72 h | not run: each needs days of machine time beside the live install; the owner's to schedule (item 13) | open |
+| Release 0.20.0 | deployed | `624d96b84` |
 
 ---
 

@@ -67,14 +67,14 @@ def main(argv: list[str] | None = None, *, keys_of=None) -> int:
     if args.action == "size":
         with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn, \
                 closing(sqlite3.connect(f"file:{ops_path}?mode=ro", uri=True)) as ops:
-            print(json.dumps(size_relabel(conn, ops, keys_of=keys_of), indent=1, ensure_ascii=False))
+            print(json.dumps(size_relabel(conn, ops, keys_of=keys_of), indent=1, ensure_ascii=True))
         return 0
     backup = _copy_first(path)
     with closing(sqlite3.connect(path, timeout=30)) as conn, closing(sqlite3.connect(ops_path, timeout=30)) as ops:
         ensure_ops_schema(ops)
-        print(json.dumps(size_relabel(conn, ops, keys_of=keys_of), indent=1, ensure_ascii=False))
+        print(json.dumps(size_relabel(conn, ops, keys_of=keys_of), indent=1, ensure_ascii=True))
         out = apply_relabel(conn, ops, keys_of=keys_of)
-    print(json.dumps({**out, "copy_before": backup}, indent=1, ensure_ascii=False))
+    print(json.dumps({**out, "copy_before": backup}, indent=1, ensure_ascii=True))
     return 0
 
 
