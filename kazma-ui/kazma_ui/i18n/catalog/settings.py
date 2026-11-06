@@ -3198,6 +3198,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.state_chat_failing": {"ar": "المحادثة تفشل", "en": "Chat failing"},
     "settings.state_unreachable": {"ar": "لا يمكن الوصول", "en": "Unreachable"},
     "settings.state_untested": {"ar": "لم يُختبر", "en": "Not tested"},
+    "settings.state_off": {"ar": "متوقف", "en": "Off"},
     "settings.state_models_ok_chat_failing": {
         "ar": "النماذج تعمل · المحادثة تفشل",
         "en": "models ok · chat failing",

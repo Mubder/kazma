@@ -151,6 +151,7 @@ def test_the_maintenance_cadence_carries_the_retention_sweep():
         "malware signatures",
         "dependency advisories",
         "model failover drill",
+        "settings snapshot",
         "forget convergence", "memory vector repair", "memory recovery", "retired knowledge promotions",
         "memory turn reconcile",
         "memory mirror sync", "memory topic summaries", "entity count repair",

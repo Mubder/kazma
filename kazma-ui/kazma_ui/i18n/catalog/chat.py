@@ -167,6 +167,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا تتذكر",
         "en": "Don't remember",
     },
+    "chat.memory_choice": {"ar": "لا تتذكر هذه المحادثة", "en": "Don't remember this chat"},
+    "chat.memory_choice_set": {
+        "ar": "لن يتذكر Kazma هذه المحادثة · تذكّرها",
+        "en": "Kazma won't remember this chat · Remember it",
+    },
     "chat.memory_off_done": {
         "ar": "لن يتذكر Kazma هذه المحادثة",
         "en": "Kazma won't remember this chat",
@@ -1232,6 +1237,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.phase_stopping": {
         "ar": "جارٍ الإيقاف…",
         "en": "Stopping…",
+    },
+    "chat.phase_no_answer": {
+        "ar": "انتهى دون إجابة",
+        "en": "Ended without an answer",
     },
     "chat.phase_completed": {
         "ar": "اكتمل",

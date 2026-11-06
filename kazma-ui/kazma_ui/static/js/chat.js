@@ -238,6 +238,7 @@
     if (!messagesEl) return; // not on chat page
 
     _paintBuildBadge();
+    _watchMemoryChoice();
 
     // Input handlers
     if (inputEl) {
@@ -4563,9 +4564,10 @@
       // used to draw every status row without running/failed/done as
       // running -- so a decided gate spun forever, live and after every
       // reload (2026-09-26). `info` is the step template's own default.
+      // Done only when the record says so; a row with no ending is plain.
       var state = row.state === 'running' ? 'running'
         : ((row.state === 'failed' || row.state === 'error') ? 'failed'
-          : (row.state === 'done' ? 'done' : (kind === 'status' ? 'info' : 'done')));
+          : (row.state === 'done' ? 'done' : (kind === 'status' || row.state === 'info' ? 'info' : 'done')));
       var rawTitle = String(row.title || '').trim() || '\u2026';
       var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
       // Same canonicalization as the live path: thinking heartbeats localized,
@@ -6766,6 +6768,61 @@
     });
   }
 
+  // The memory choice of a new, empty chat (resilience plan I): no chat in
+  // the sidebar yet, so no menu to choose from, and the first turn was
+  // remembered before anyone could say no. The choice goes to the chat's id
+  // at once; the memory writer asks under every id the chat has when it
+  // writes, so the first turn is kept out too.
+  var _memoryChoice = null;
+  var _memoryChoiceSession = null;
+  var _memoryChoiceOff = false;
+
+  function _paintMemoryChoice() {
+    var btn = _memoryChoice || (_memoryChoice = document.getElementById('chat-memory-choice'));
+    if (!btn) return;
+    var empty = !!(messagesEl && messagesEl.querySelector('.chat-welcome'));
+    if (_memoryChoiceSession !== chatSessionId) {
+      _memoryChoiceSession = chatSessionId;
+      _memoryChoiceOff = false;
+    }
+    btn.hidden = !empty;
+    btn.setAttribute('aria-pressed', _memoryChoiceOff ? 'true' : 'false');
+    // The page's own words, rendered with the button: after a sidebar
+    // navigation this can run before CHAT_I18N is set again.
+    btn.textContent = _memoryChoiceOff
+      ? (btn.getAttribute('data-label-set') || ti('memory_choice_set', "Kazma won't remember this chat \u00B7 Remember it"))
+      : (btn.getAttribute('data-label') || ti('memory_choice', "Don't remember this chat"));
+  }
+
+  async function _toggleMemoryChoice() {
+    if (!chatSessionId) {
+      chatSessionId = generateSessionId();
+      persistSessionId();
+    }
+    var off = !_memoryChoiceOff;
+    try {
+      var r = await window.kazmaSave('/api/memory/v2/chats/' + encodeURIComponent(chatSessionId) + '/memory',
+        { method: 'PUT', body: off ? { remember: false } : { remember: true } });
+      if (!r || !r.ok) throw new Error((r && r.error) || 'failed');
+      _memoryChoiceSession = chatSessionId;
+      _memoryChoiceOff = off;
+      _paintMemoryChoice();
+    } catch (e) {
+      KS.toast((e && e.message) || ti('memory_setting_failed', 'Memory setting failed'), 'error', 3000);
+    }
+  }
+
+  function _watchMemoryChoice() {
+    var btn = document.getElementById('chat-memory-choice');
+    if (!btn || !messagesEl || btn.__kazmaWired) return;
+    btn.__kazmaWired = true;
+    btn.addEventListener('click', _toggleMemoryChoice);
+    if (typeof MutationObserver === 'function') {
+      new MutationObserver(_paintMemoryChoice).observe(messagesEl, { childList: true });
+    }
+    _paintMemoryChoice();
+  }
+
   // Whether Kazma remembers this chat (plan U1). Turning it off also
   // forgets what the chat has left in memory: that is what "don't remember
   // this chat" means. The chat itself is never touched.
@@ -7689,19 +7746,25 @@
     });
     // A finished turn has nothing running. A step left "running" -- a status
     // line whose closing event never came -- showed a spinner on a finished
-    // turn, live and after every reload (2026-09-26).
-    if (doc && (doc.status === 'done' || doc.status === 'error')) {
-      rows = rows.map(function (r) {
-        if (!r || r.state !== 'running') return r;
-        var copy = {};
-        for (var k in r) {
-          if (Object.prototype.hasOwnProperty.call(r, k)) copy[k] = r[k];
-        }
-        copy.state = 'done';
-        return copy;
-      });
-    }
-    return rows;
+    // turn, live and after every reload (2026-09-26). Nor is it done: its
+    // record never said it ended, and "Kazma is thinking…" with a check read
+    // as a step that finished (resilience plan I). It is drawn plain.
+    return _endedRows(rows, doc);
+  }
+
+  /** On a finished turn, a row still "running" is plain (`info`): no spinner,
+   *  no check -- only a row whose own record says it ended is done. */
+  function _endedRows(rows, doc) {
+    if (!(doc && (doc.status === 'done' || doc.status === 'error'))) return rows;
+    return rows.map(function (r) {
+      if (!r || r.state !== 'running') return r;
+      var copy = {};
+      for (var k in r) {
+        if (Object.prototype.hasOwnProperty.call(r, k)) copy[k] = r[k];
+      }
+      copy.state = 'info';
+      return copy;
+    });
   }
 
 
@@ -7724,6 +7787,7 @@
     resuming: ['resuming', 'Resuming'],
     stopping: ['stopping', 'Stopping\u2026'],
     completed: ['completed', 'Completed'],
+    no_answer: ['no_answer', 'Ended without an answer'],
     failed: ['failed', 'Failed'],
     cancelled: ['cancelled', 'Cancelled'],
     recovering: ['recovering', 'Recovering\u2026'],
@@ -7734,7 +7798,7 @@
     queued: '\u25CB', working: '\u25CF', approval: '\u270B',
     resuming: '\u25B6', stopping: '\u25A0', completed: '\u2713',
     failed: '\u26A0', cancelled: '\u2298', recovering: '\u21BB',
-    interrupted: '\u26A0',
+    interrupted: '\u26A0', no_answer: '\u26A0',
   };
 
   /** The server facts the presentation model maps. Read-only snapshot. */

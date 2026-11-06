@@ -58,7 +58,7 @@ ok("a finished turn does not offer Stop",
 ok("a failed turn offers Retry",
   TP.header(doc({ status: "error" }), { retrySupported: true }).canRetry === true);
 ok("...and a completed one does not",
-  TP.header(doc({ status: "done" }), { retrySupported: true }).canRetry === false);
+  TP.header(doc({ status: "done", parts: [TEXT] }), { retrySupported: true }).canRetry === false);
 
 // ── A stop request is NOT a cancellation ───────────────────────────────
 // Plan §7: "Await server acknowledgement; do not prematurely mark

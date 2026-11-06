@@ -110,12 +110,19 @@ interrupted turn continues by itself).
 | C2 `scripts/deploy_live.py` | done | `824ceaec4` |
 | C3 every step of the stop timed | done | `824ceaec4` |
 | B2b `kazma maintenance begin/end` | done; topgrade and the two machine settings are the owner's | `824ceaec4` |
-| F1 Tavily after SearXNG, the SearXNG silence page | done; the key and the two policy variables are the owner's | this batch |
-| F2 the monthly backup-model drill | done; the second vendor's model and key are the owner's | this batch |
-| D2 a step's output limit follows its model | done (file_append, markdown_path and the write-in-parts refusal existed) | this batch |
-| D3 the answer checked against the turn's receipts | done | this batch |
-| D4 no duplicate writes or documents in one turn | done (identical re-reads were already counted by the stagnation guard) | this batch |
-| K2 `kazma setup system` | done (package managers faked in the tests) | this batch |
+| F1 Tavily after SearXNG, the SearXNG silence page | done; the key and the two policy variables are the owner's | `4a780e0a8` |
+| F2 the monthly backup-model drill | done; the second vendor's model and key are the owner's | `4a780e0a8` |
+| D2 a step's output limit follows its model | done (file_append, markdown_path and the write-in-parts refusal existed) | `4a780e0a8` |
+| D3 the answer checked against the turn's receipts | done | `4a780e0a8` |
+| D4 no duplicate writes or documents in one turn | done (identical re-reads were already counted by the stagnation guard) | `4a780e0a8` |
+| K2 `kazma setup system` | done (package managers faked in the tests) | `4a780e0a8` |
+| G1 quiet logs | done | this batch |
+| G2 one list of open problems | done | this batch |
+| G3 the weekly report against targets | done | this batch |
+| I the eight UI truths | done | this batch |
+| B2c the guard's power watch | done; the UPS and the BIOS setting are the owner's | this batch |
+| J the weekly chaos drill | built (`scripts/chaos_week.py`); where it runs is the owner's choice (item 13) | this batch |
+| A4 start read-only from the settings' copy | done | this batch |
 
 ---
 

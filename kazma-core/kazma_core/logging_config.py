@@ -427,6 +427,12 @@ def setup_logging(level: str | None = None) -> str:
         ul = logging.getLogger(uvicorn_logger_name)
         ul.handlers = []  # remove uvicorn's own handlers
         ul.propagate = True  # let records flow to root
+    # The pages' and the guard's polls answered: kept out of the log (plan G1).
+    from kazma_core.observability.log_noise import QuietPolls
+
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, QuietPolls) for f in access.filters):
+        access.addFilter(QuietPolls())
 
     logging.getLogger(__name__).info(
         "Logging initialised: level=%s format=%s file=%s rotation=daily retention=%dd",

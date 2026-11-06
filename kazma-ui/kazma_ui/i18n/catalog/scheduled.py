@@ -145,8 +145,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Running",
     },
     "scheduled.stat_done": {
-        "ar": "منتهية",
-        "en": "Completed",
+        "ar": "انتهت",
+        "en": "Ended",
     },
     "scheduled.stat_failed": {
         "ar": "فاشلة",

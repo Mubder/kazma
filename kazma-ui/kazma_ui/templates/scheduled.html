@@ -114,7 +114,7 @@
         <span>{{ t('scheduled.stat_failed') }}</span>
       </div>
       <div class="sched-stat">
-        <b x-text="counts.done"></b>
+        <b x-text="counts.ended"></b>
         <span>{{ t('scheduled.stat_done') }}</span>
       </div>
     </div>
@@ -128,11 +128,11 @@
   <div class="tabs" role="tablist">
     <button class="tab" :class="filter === 'upcoming' ? 'active' : ''" role="tab"
             :aria-selected="filter === 'upcoming'" @click="filter = 'upcoming'">
-      {{ t('scheduled.tab_upcoming') }} <span class="mono" x-text="'(' + (counts.upcoming + counts.attention) + ')'"></span>
+      {{ t('scheduled.tab_upcoming') }} <span class="mono" x-text="'(' + counts.upcomingTab + ')'"></span>
     </button>
     <button class="tab" :class="filter === 'history' ? 'active' : ''" role="tab"
             :aria-selected="filter === 'history'" @click="filter = 'history'">
-      {{ t('scheduled.tab_history') }} <span class="mono" x-text="'(' + (counts.failed + counts.done + counts.cancelled) + ')'"></span>
+      {{ t('scheduled.tab_history') }} <span class="mono" x-text="'(' + counts.history + ')'"></span>
     </button>
     <button class="tab" :class="filter === 'x' ? 'active' : ''" role="tab"
             :aria-selected="filter === 'x'" @click="showXActivity()">

@@ -74,6 +74,29 @@
     <div id="crawl-panel-body" style="font-size:0.85rem;" role="status" aria-live="polite"></div>
   </section>
 
+  <!-- ── Open problems (resilience plan G2, kazma_core.observability.open_problems) ── -->
+  <section id="problems-panel" class="card dash-pro-card runs-panel" aria-labelledby="problems-title"
+           style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
+    <div class="hitl-panel-head">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <h2 id="problems-title" style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
+          {{ t('problems.title') }}
+        </h2>
+      </div>
+      <div class="hitl-panel-tools">
+        <span class="hitl-panel-desc">{{ t('problems.description') }}</span>
+      </div>
+    </div>
+    <div class="runs-body">
+      <p id="problems-loading" class="runs-note">{{ t('problems.loading') }}</p>
+      <p id="problems-error" class="runs-note runs-error" role="alert" hidden></p>
+      <p id="problems-unreadable" class="runs-note runs-error" hidden></p>
+      <ul id="problems-list" class="problems-list"></ul>
+      <p id="problems-empty" class="runs-note" hidden>{{ t('problems.empty') }}</p>
+      <div><button id="problems-show-hidden" type="button" class="btn btn-sm btn-secondary" hidden>{{ t('problems.show_hidden') }}</button></div>
+    </div>
+  </section>
+
   <!-- ── Running work (run supervision, kazma_core.runs) ── -->
   {# The incident to show comes from the template (data-incident-id), never
      location.search: a soft navigation runs the script before the URL. #}
@@ -399,6 +422,7 @@
 <script src="/static/js/dashboard.js?v={{ js_version() }}"></script>
 <script src="/static/js/hitl_approval.js?v={{ js_version() }}"></script>
 <script src="/static/js/runs_panel.js?v={{ js_version() }}"></script>
+<script src="/static/js/problems_panel.js?v={{ js_version() }}"></script>
 <script src="/static/js/crawl_panel.js?v={{ js_version() }}"></script>
 <script>
 (function() {

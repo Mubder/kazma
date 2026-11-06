@@ -219,6 +219,12 @@
         link.href = '/chat?s=' + encodeURIComponent(row.session_id);
         link.textContent = window.tOr('dashboard.quality_open', 'Open chat');
         item.appendChild(link);
+      } else {
+        // Every row says where its chat is: a link, or that it was deleted.
+        var gone = document.createElement('span');
+        gone.className = 'muted';
+        gone.textContent = window.tOr('dashboard.quality_chat_deleted', 'Chat deleted');
+        item.appendChild(gone);
       }
       recent.appendChild(item);
     });

@@ -685,6 +685,40 @@ html[data-theme="light"] { color-scheme: only light; }
 .connector-checks li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
 .connector-checks li [translate="no"] { flex-basis: 100%; color: var(--text-secondary); line-height: 1.45; }
 
+/* ── A new chat's memory choice (resilience plan I) ── */
+.chat-memory-choice {
+  align-self: flex-start;
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.chat-memory-choice[aria-pressed="true"] { color: var(--warning, #f59e0b); border-color: var(--warning, #f59e0b); }
+
+/* ── Open problems (Dashboard card, resilience plan G2) ── */
+.problems-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.problems-item {
+  border: 1px solid var(--border-subtle);
+  border-inline-start: 3px solid var(--warning, #f59e0b);
+  border-radius: var(--radius-card, 10px);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.problems-critical { border-inline-start-color: var(--danger, #ef4444); }
+.problems-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.problems-source { font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
+.problems-title { color: var(--text-primary); overflow-wrap: anywhere; flex: 1 1 14rem; min-width: 0; }
+.problems-since, .problems-note { font-size: 0.78rem; color: var(--text-muted); }
+.problems-detail, .problems-fix, .problems-resolved { margin: 0; font-size: 0.85rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+.problems-resolved { color: var(--text-muted); font-size: 0.8rem; }
+.problems-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+
 /* ── Running work (Dashboard Runs card, run supervision) ── */
 .runs-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
 .runs-note { margin: 0; font-size: 0.82rem; color: var(--text-muted); }

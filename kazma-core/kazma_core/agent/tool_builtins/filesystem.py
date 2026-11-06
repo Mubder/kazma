@@ -154,6 +154,28 @@ def _walk(root: Path, *, max_depth: int | None = None) -> Iterator[tuple[Path, b
             yield Path(dirpath, name), False
 
 
+#: A query that reads like a file name: one token of letters, digits and
+#: ``-._`` with at least one of those separators ("backup-benefits",
+#: "report_v2", "notes.md"). Live, file_search("backup-benefits") searched
+#: the text of *.py files and answered "No matches" over docs/backup-benefits.md.
+_FILE_NAME_LIKE = re.compile(r"^[\w\u0600-\u06FF][\w\u0600-\u06FF.\-]*[\w\u0600-\u06FF]$")
+
+
+def _named_like(root: Path, pattern: str, cap: int) -> list[str]:
+    """Files under *root* (any extension) whose name holds *pattern*, when
+    *pattern* reads like a file name; [] otherwise."""
+    if not (_FILE_NAME_LIKE.match(pattern) and any(sep in pattern for sep in "-._")):
+        return []
+    needle = pattern.lower()
+    found: list[str] = []
+    for seen, file_path in enumerate(_search_candidates(root, _Glob("*", anywhere=True))):
+        if seen >= _SEARCH_MAX_FILES or len(found) >= cap:
+            break
+        if needle in file_path.name.lower():
+            found.append(str(file_path))
+    return found
+
+
 def _search_candidates(root: Path, matcher: _Glob) -> Iterator[Path]:
     """The files under *root* a search reads, in a stable order.
 
@@ -585,6 +607,16 @@ def register_filesystem_tools(registry: Any) -> None:
         cap = max(1, min(int(limit or 20), 500))
 
         def _run() -> str:
+            # A file-name-like query is matched as a name first, whatever
+            # the glob (the default *.py hid every other file).
+            named = _named_like(root, pattern, cap) if root.is_dir() else []
+            text = _search_text()
+            if not named:
+                return text
+            head = f"Files named like '{pattern}':\n" + "\n".join(named)
+            return head if text.startswith("No matches") else head + "\n\nLines that contain it:\n" + text
+
+        def _search_text() -> str:
             results: list[str] = []
             searched = 0
             if root.is_file():

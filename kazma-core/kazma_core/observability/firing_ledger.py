@@ -228,6 +228,9 @@ class LedgerReport:
     stall_blockers: dict[str, int] = field(default_factory=dict)
     #: Manifest mechanisms that leave no trace the ledger can count.
     blind: list[str] = field(default_factory=list)
+    #: The week against its targets (resilience plan G3): the "Targets"
+    #: sentence, or "" when they could not be measured.
+    targets: str = ""
 
     @property
     def fired(self) -> list[LedgerEntry]:
@@ -253,6 +256,7 @@ class LedgerReport:
             "suppressed_alerts": self.suppressed_alerts,
             "stall_blockers": dict(self.stall_blockers),
             "blind": list(self.blind),
+            "targets": self.targets,
             "error": self.error,
         }
 
@@ -512,9 +516,45 @@ def _stamp_last_run() -> None:
         logger.debug("[firing-ledger] last_run stamp failed: %s", exc)
 
 
+#: The lines the weekly targets read (weekly_targets), so the rest is skipped.
+_TARGET_APP_MARKS = ("[turn] Turn finished", "[universal-backup] complete:",
+                     "[shutdown] the stop ran over", "[ops_alert]")
+_TARGET_GUARD_MARKS = ("guard.restarting", "guard.supervising")
+
+
+def _targets_sentence(now: float | None = None) -> str:
+    """The week against its targets, from the logs of the last two weeks and
+    the observer's uptime (plan G3). "" when it cannot be measured."""
+    from kazma_core.observability.weekly_targets import measure_targets, render_targets
+
+    now = time.time() if now is None else now
+    cutoff = now - 2 * 7 * 86400
+    app: list[str] = []
+    guard: list[str] = []
+    for log in _log_paths():
+        try:
+            if log.stat().st_mtime < cutoff:
+                continue
+            is_guard = log.name.startswith("guard.log")
+            marks = _TARGET_GUARD_MARKS if is_guard else _TARGET_APP_MARKS
+            with log.open("r", encoding="utf-8", errors="replace") as fh:
+                # Only the lines a target reads: two weeks of log are not held.
+                (guard if is_guard else app).extend(line for line in fh if any(m in line for m in marks))
+        except OSError:
+            continue
+    from kazma_core.observability.outside_watch import outside_status
+
+    # Not paired, or the observer cannot say: uptime is unknown, never met.
+    observer = outside_status().get("observer") or {}
+    value = observer.get("up_7d_pct") if observer.get("ok") else None
+    uptime = float(value) if isinstance(value, (int, float)) else None
+    return render_targets(measure_targets(app, guard, now=now, uptime_now=uptime))
+
+
 def build_report(hours: float = 168.0) -> LedgerReport:
     """Scan, and cross-check against the manifest's own claims."""
     report = scan_log(hours)
+    report.targets = _targets_sentence()
     try:
         from kazma_core.observability.resilience_manifest import MECHANISMS
 
@@ -627,6 +667,8 @@ def render(report: LedgerReport) -> tuple[str, str]:
     lines: list[str] = []
     if look:
         lines.append("Needs a look: " + "; ".join(_named(e) for e in look) + ".")
+    if report.targets:
+        lines.append(report.targets)
     if report.stall_blockers:
         blockers = [f"{k} ×{n}" for k, n in list(report.stall_blockers.items())[:8]]
         if len(report.stall_blockers) > 8:

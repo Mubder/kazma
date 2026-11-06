@@ -1223,6 +1223,14 @@ def _dependency_advisories() -> None:
     advisory_sweep()
 
 
+def _settings_snapshot() -> None:
+    # Resilience plan A4: the settings' local copy, at most 15 minutes old,
+    # for a start without the database.
+    from kazma_core.settings_snapshot import snapshot_sweep
+
+    snapshot_sweep()
+
+
 def _model_failover_drill() -> None:
     # Resilience plan F2: once a month the failover chain is taken for real,
     # in a process of its own, and the result kept and logged for the weekly
@@ -1292,6 +1300,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("malware signatures", _malware_signatures),
     ("dependency advisories", _dependency_advisories),
     ("model failover drill", _model_failover_drill),
+    ("settings snapshot", _settings_snapshot),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),

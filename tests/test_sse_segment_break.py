@@ -27,7 +27,9 @@ def test_segment_break_emitted_between_model_calls() -> None:
     # …armed by on_chat_model_start…
     assert 'kind == "on_chat_model_start"' in _SSE
     assert "_first_token_of_model_call = True" in _SSE
-    # …only when the previous narration lacks trailing whitespace, and it
-    # streams as a real token so the client accumulates it identically.
-    assert 'content_acc.endswith(("\\n", " ", "\\t"))' in _SSE
+    # …as the blank line the text before still needs (resilience plan I:
+    # one newline joined two narrations in Markdown), and it streams as a
+    # real token so the client accumulates it identically.
+    assert "if _paragraph_break(content_acc):" in _SSE
+    assert "sep = _paragraph_break(content_acc)" in _SSE
     assert 'yield await emit_j("token", {"content": sep})' in _SSE

@@ -1,0 +1,278 @@
+{
+ "recorded": "the live install's kazma.log of 2026-11-05: line shapes and counts only (no content)",
+ "total_lines": 32090,
+ "lines": [
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 5718,
+   "method": "GET",
+   "path": "/api/alerts/recent",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 2903,
+   "method": "GET",
+   "path": "/health/ready",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 821,
+   "method": "GET",
+   "path": "/health/live",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 640,
+   "method": "GET",
+   "path": "/api/pending-approvals",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 556,
+   "method": "GET",
+   "path": "/api/chat/sessions/c0ffee00-0000-4000-8000-000000000000/messages",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 551,
+   "method": "GET",
+   "path": "/api/chat/sessions/c0ffee00-0000-4000-8000-000000000000/status",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 244,
+   "method": "GET",
+   "path": "/api/chat/sessions",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 107,
+   "method": "GET",
+   "path": "/api/dashboard/answer-quality",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 99,
+   "method": "GET",
+   "path": "/api/providers",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 89,
+   "method": "GET",
+   "path": "/api/provider/active",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 82,
+   "method": "GET",
+   "path": "/api/swarm/status",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 82,
+   "method": "GET",
+   "path": "/api/swarm/workers/metrics/all",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 74,
+   "method": "GET",
+   "path": "/api/runs",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 56,
+   "method": "GET",
+   "path": "/api/kb/outcomes",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 48,
+   "method": "GET",
+   "path": "/api/chat/capacity",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 44,
+   "method": "POST",
+   "path": "/api/chat/stream",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 42,
+   "method": "POST",
+   "path": "/api/chat/sessions",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 39,
+   "method": "GET",
+   "path": "/api/settings/appearance",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 34,
+   "method": "GET",
+   "path": "/api/auth/me",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 29,
+   "method": "GET",
+   "path": "/static/js/streaming.js",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 27,
+   "method": "GET",
+   "path": "/health/activity",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 26,
+   "method": "GET",
+   "path": "/api/models/saved",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 26,
+   "method": "GET",
+   "path": "/api/settings/voice",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 25,
+   "method": "GET",
+   "path": "/api/notifications/turn-complete",
+   "status": 200
+  },
+  {
+   "logger": "uvicorn.access",
+   "level": "INFO",
+   "count": 24,
+   "method": "GET",
+   "path": "/api/workspaces",
+   "status": 200
+  },
+  {
+   "logger": "kazma_core.config_store",
+   "level": "INFO",
+   "count": 12459,
+   "line": "Batch set: N keys updated atomically"
+  },
+  {
+   "logger": "kazma_core.x_api.mentions_fire",
+   "level": "INFO",
+   "count": 149,
+   "line": "[x-mentions] polled — no new mentions since N"
+  },
+  {
+   "logger": "kazma_core.llm_provider",
+   "level": "INFO",
+   "count": 126,
+   "line": "LLMProvider initialized: base_url=https://api.deepseek.com/vN model=deepseek-fla"
+  },
+  {
+   "logger": "kazma_core.agent.graph_tool_worker",
+   "level": "INFO",
+   "count": 101,
+   "line": "[ToolWorker] Executing N tool calls"
+  },
+  {
+   "logger": "kazma_ui.turn_runtime",
+   "level": "INFO",
+   "count": 101,
+   "line": "[turn] Reply persisted thread=cNcN-dNe turn=NaNeNeN chars=N interrupted=True"
+  },
+  {
+   "logger": "kazma_core.llm_provider",
+   "level": "INFO",
+   "count": 97,
+   "line": "[LLMProvider] prompt cache hit cached_tokens=N / prompt=N"
+  },
+  {
+   "logger": "kazma_core.agent.graph_supervisor",
+   "level": "INFO",
+   "count": 91,
+   "line": "[Supervisor] iteration=N messages=N"
+  },
+  {
+   "logger": "kazma_core.agent.graph_supervisor",
+   "level": "INFO",
+   "count": 91,
+   "line": "[Supervisor] live client model=deepseek-flash"
+  },
+  {
+   "logger": "kazma_core.tracing",
+   "level": "INFO",
+   "count": 91,
+   "line": "LLM call: model=deepseek-flash tokens=N cost=$N duration=Nms"
+  },
+  {
+   "logger": "kazma_core.agent.graph_supervisor",
+   "level": "INFO",
+   "count": 91,
+   "line": "[Supervisor] LLM responded: model=deepseek-flash tokens=N cost=$N duration=Nms t"
+  },
+  {
+   "logger": "kazma_ui.turn_runtime",
+   "level": "INFO",
+   "count": 88,
+   "line": "[turn] Reply persisted thread=N-beN turn=bNfNeNdNb chars=N interrupted=True"
+  },
+  {
+   "logger": "kazma_ui.turn_runtime",
+   "level": "INFO",
+   "count": 82,
+   "line": "[turn] Reply persisted thread=cNcN-dNe turn=NadNfNcdN chars=N interrupted=True"
+  }
+ ]
+}

@@ -2539,7 +2539,7 @@ class ConfigStore(_ChangeNotices):
                 except Exception:
                     conn.execute("ROLLBACK")
                     raise
-        logger.info("Batch set: %d keys updated atomically", len(prepared))
+        logger.debug("Batch set: %d keys updated atomically", len(prepared))  # routine: plan G1
         return len(prepared)
 
     @contextmanager

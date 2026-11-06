@@ -201,6 +201,10 @@ STORES: dict[str, Store] = {
     "callbacks.db": Store(
         "chat-platform button callback tokens", "machine",
         reason="tokens expire within a day"),
+    "chat_inbox.db": Store(
+        "chat-app messages kept while Kazma ran read-only with its database away", "machine",
+        reason="kept only until the next normal start answers them; the rows name this "
+               "machine's chat-app addresses"),
     "chat_outbox.db": Store(
         "chat-app replies not yet taken by their platform (the chat outbox)", "machine",
         reason="a reply is kept at most two hours, then its text is emptied; the rows "
@@ -306,6 +310,8 @@ RETENTION: dict[str, str] = {
     "run_incidents.db": "the run incident retention sweep",
     "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
                       "after 7 days",
+    "chat_inbox.db": "the next normal start: a message handed on keeps no text, and rows a week "
+                     "old are removed (read_only_mode.drain_inbox)",
     "vault.db": "kept: the install's secrets, until removed",
     "settings.db": "kept: the settings",
     "knowledge.db": "kept: the libraries, until the owner deletes one (a 1 GiB quota)",
@@ -417,6 +423,10 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "backups": DataDirEntry(
         "this machine's backups", "machine",
         reason="the target keeps its own; the source's history stays in its restic repository"),
+    "settings_snapshot.yaml": DataDirEntry(
+        "the settings' local copy for a start without the database (secrets as vault pointers)",
+        "machine", reason="rewritten every 15 minutes from the settings themselves; a bundle "
+                          "carries the settings"),
     "setup_record.json": DataDirEntry(
         "what kazma setup postgres installed: the database service and its WAL archive", "machine",
         reason="names this machine's service, ports and folders"),

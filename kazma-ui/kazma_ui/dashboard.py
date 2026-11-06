@@ -347,6 +347,9 @@ def answer_quality_status(request: Request) -> JSONResponse:
     result = snapshot()
     for row in result["recent"]:
         row["session_id"] = resolve_session_id(row["thread_id"])
+        # No chat holds the thread any more: the page says so (plan I: five
+        # of thirteen live rows had no link and no word why).
+        row["chat_deleted"] = not row["session_id"]
     return JSONResponse(result)
 
 

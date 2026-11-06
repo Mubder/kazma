@@ -52,6 +52,14 @@ _TEMPLATES_DIR = _PACKAGE_DIR / "templates"
 _STATIC_DIR = _PACKAGE_DIR / "static"
 
 
+def cookie_language(request: Request, fallback: str) -> str:
+    """The reader's choice of language (the ``kazma-lang`` cookie), else
+    *fallback*: the one read of the cookie, for this app's language
+    middleware and the read-only server's (``read_only_mode``)."""
+    lang = request.cookies.get("kazma-lang")
+    return lang if lang in ("ar", "en") else fallback
+
+
 def json_for_script(obj: object) -> str:
     """Serialize ``obj`` to JSON safe to embed inside a ``<script>`` block.
 
@@ -278,7 +286,11 @@ class KazmaAppBuilder:
         # that is away first (FA-259): a boot during an outage gave up after
         # five pool attempts and exited, and the guard's growing wait between
         # boots kept Kazma down 4.5 min after a 12-min outage had ended.
-        wait_for_settings_store(get_config_store)
+        from kazma_ui.read_only_mode import read_only_after
+
+        boot_wall = time.time()
+        wait_for_settings_store(get_config_store,
+                                on_wait=lambda waited: read_only_after(waited, since=boot_wall))
 
         # Ensure KAZMA_SECRET is configured
         import sys
@@ -866,11 +878,7 @@ class KazmaAppBuilder:
 
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):
-            cookie_lang = request.cookies.get("kazma-lang")
-            if cookie_lang in ("ar", "en"):
-                req_lang = cookie_lang
-            else:
-                req_lang = _startup_lang
+            req_lang = cookie_language(request, _startup_lang)
             self._current_lang.set(req_lang)
             # The one answer routes ask (``i18n.current_language``); they used
             # to read the cookie themselves with an English fallback.
@@ -1545,9 +1553,11 @@ class KazmaAppBuilder:
             self._init_errors.append({"subsystem": "x_reply_api", "error": str(e)})
 
         # ── Running work (the run supervisor's view and decisions) ──
+        from kazma_ui.problems_api import create_problems_router
         from kazma_ui.runs_api import create_runs_router
 
         self.app.include_router(create_runs_router())
+        self.app.include_router(create_problems_router())
 
         # ── Scheduled Tasks (universal page: cron jobs + scheduled X posts) ──
         try:
@@ -2139,6 +2149,11 @@ class KazmaAppBuilder:
                 # adapter and swarm sender, whoever saved it.
                 if self.chat_adapters is not None:
                     self.chat_adapters.start_watching()
+                # Messages kept while Kazma ran read-only (plan A4): answered now, in order.
+                from kazma_core.background import spawn_background
+                from kazma_ui.read_only_mode import drain_inbox
+
+                spawn_background(drain_inbox(self.gateway), name="read-only-inbox")
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
                 # Surface the most common boot failure (bad token, network)
@@ -2892,9 +2907,17 @@ class KazmaAppBuilder:
 
 
 def create_app(config_path: str | None = None) -> FastAPI:
-    """Create and configure the FastAPI application using KazmaAppBuilder."""
+    """Create and configure the FastAPI application using KazmaAppBuilder.
+
+    With the database away a minute into the boot and a copy of the settings
+    on this machine, the read-only server instead (resilience plan A4)."""
+    from kazma_ui.read_only_mode import ReadOnlyStart, create_read_only_app
+
     builder = KazmaAppBuilder(config_path)
-    return builder.build()
+    try:
+        return builder.build()
+    except ReadOnlyStart as start:
+        return create_read_only_app(start)
 
 
 def main() -> None:
