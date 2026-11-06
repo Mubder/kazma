@@ -6271,8 +6271,14 @@ One whose tool effect is unknown waits for the owner: listed by
 resumes it, and the effect journal still refuses to repeat the unknown call.
 The listing reads every checkpoint first and each state after (SQLite's
 saver holds its connection while it lists: reading a state inside the
-listing waited for good). Gate: `tests/test_turn_resume.py` (a real graph
-and SQLite saver; no start pass as the negative control).
+listing waited for good). It lists through the `CheckpointManager` the app
+hands it, which delegated no `alist` until 2026-11-06: the pass failed with
+NotImplementedError on every live boot (its tests used the bare saver).
+Every product `BaseCheckpointSaver` subclass implements the async calls a
+graph, a history, a listing and a delete make
+(`tests/test_checkpointer_wrappers.py`). Gate: `tests/test_turn_resume.py`
+(a real graph and SQLite saver, and the manager over it; no start pass, and
+the manager without its listing, as negative controls).
 
 **A plan feeds only the running turn.** `_paintTextSlot` paints every turn,
 finished ones on every reload; plan ingestion there logged progress on the

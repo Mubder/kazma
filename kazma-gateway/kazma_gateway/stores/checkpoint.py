@@ -215,6 +215,23 @@ class CheckpointManager(BaseCheckpointSaver):
         saver = await self._get_saver()
         return await saver.aget_tuple(config)
 
+    async def alist(
+        self,
+        config: dict[str, Any] | None,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: dict[str, Any] | None = None,
+        limit: int | None = None,
+    ) -> Any:
+        """The caller's tenant's checkpoints, newest first: the saver's own
+        listing. Without it the base class raised NotImplementedError, and the
+        start-up pass that continues turns a restart cut off
+        (``kazma_ui.turn_resume``) failed on every boot of the live server
+        (2026-11-06), which hands it this manager, not the saver."""
+        saver = await self._get_saver()
+        async for item in saver.alist(config, filter=filter, before=before, limit=limit):
+            yield item
+
     async def adelete_thread(self, thread_id: str) -> None:
         """Delete all checkpoints for a thread."""
         lock = self._get_lock(thread_id)
