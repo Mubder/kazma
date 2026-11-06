@@ -191,6 +191,99 @@ To undo, put the old address back in `.env` (and the memory mirror) and
 reload; the superuser can still use every table. Leave the `kazma`
 superuser in place: it is how you administer the server.
 
+## Postgres as an OS service
+
+A database in a Docker container lives and dies with Docker Desktop, a
+program that starts only when someone signs in. On 4 November 2026 an update
+tool stopped Docker Desktop and Kazma's database was gone for eleven hours;
+after a power cut with nobody signed in it would never have started at all.
+A database installed as an OS service starts at boot and is restarted by the
+OS when it dies.
+
+`kazma setup postgres` does it on every OS Kazma supports, with the OS's own
+package manager:
+
+| OS | Installed with | Started by | With nobody signed in |
+|---|---|---|---|
+| Windows 10/11 | `winget` (`PostgreSQL.PostgreSQL.16`, the EDB installer, unattended) | the Windows service `postgresql-x64-16`, start type Automatic, restarted on failure | yes |
+| macOS | Homebrew `postgresql@16` | `sudo brew services start postgresql@16` (a LaunchDaemon) | yes, unless FileVault is on (see below) |
+| Debian / Ubuntu | the PostgreSQL project's apt repository, `postgresql-16` | systemd, `Restart=on-failure` | yes |
+| Fedora / RHEL | the PostgreSQL project's dnf repository, `postgresql16-server` | systemd, `Restart=on-failure` | yes |
+| WSL 2 | as Debian/Ubuntu, inside the distro Kazma runs in, with `systemd=true` in `/etc/wsl.conf` | systemd in the distro (the distro itself is started at boot by the Windows task that runs Kazma) | while that task runs |
+
+What it does, in order (it prints the plan and asks first; `-y` skips the
+question, `--dry-run` prints the commands, `--check` only reports):
+
+1. Installs Postgres 16 as a service that starts at boot and restarts when it
+   fails, listening on this machine only (`listen_addresses = 'localhost'`),
+   with `scram-sha-256` sign-in.
+2. Creates the `kazma` database and the `kazma_app` role (not a superuser,
+   `deploy/postgres/kazma_app_role.sql`).
+3. Turns on WAL archiving (below).
+4. Writes `KAZMA_DATABASE_URL` into the install's `.env` (never printed; the
+   file restricted to your account), and signs in once as Kazma will.
+5. Records what it did in `kazma-data/setup_record.json`: `kazma doctor`
+   checks the service from it, and the guard watches the service (it starts a
+   service that stopped once per outage, and pages once if it stays down).
+
+The superuser's password is kept in `<install>/.kazma/postgres_superuser.pass`
+(your account only); no password is put on a command line, except the Windows
+installer's throwaway one, which the next step replaces. A second run checks
+and repairs, and never reinstalls. Run it from an elevated terminal on
+Windows.
+
+**Moving off the Docker container.** With Kazma idle and paused for
+maintenance (`python scripts/service/kazma_guard.py --pause --stop --reason
+"database move"`):
+
+```bash
+kazma setup postgres --port 5432 --move-from-container kazma-db-win
+```
+
+It sets up the new server, copies the container's database into it
+(`pg_dump` inside the container, `pg_restore` as `kazma_app`), compares the
+row count of every Kazma table, and only then writes the new address into
+`.env`. Then resume the guard (`--resume`) and Kazma reloads onto the new
+server. Point the memory mirror's address (`memory.backends.state.url`) at
+the same server if it has its own. The container is left as it was: it is the
+way back (put the old address back), and can be removed after 30 days.
+
+**Disks that ask for a password at boot.** A Mac with FileVault on, a Windows
+PC whose BitLocker asks for a PIN, and a Linux disk encrypted with LUKS that
+does not unlock by TPM all stop before the OS starts, so nothing starts until
+someone types it. A machine that must come back by itself after a power cut
+needs unlock by TPM (Windows, Linux), or FileVault off (or a planned restart
+with `fdesetup authrestart`) on a Mac.
+
+## WAL archiving and point-in-time restore
+
+The 6-hourly dump below can lose up to six hours. With write-ahead-log
+archiving every change is kept, and a restore can stop at any minute.
+`kazma setup postgres` turns it on: `archive_mode = on`, a segment at least
+every 5 minutes while anything is written (`archive_timeout = 300`), each
+finished segment copied into the archive folder (Windows
+`C:\ProgramData\Kazma\pg_wal_archive`, Debian
+`/var/lib/postgresql/16/wal_archive`, Fedora `/var/lib/pgsql/16/wal_archive`,
+macOS `kazma-data/backups/pg/wal`).
+
+The maintenance sweep "WAL archive" reads the server's own numbers
+(`pg_stat_archiver`): a failing archiver, or no segment archived for 15
+minutes, pages `backup.wal_archive_stale`. It takes a base backup every week
+(`pg_basebackup` into `kazma-data/backups/pg/base/`, two kept), prunes the
+archived WAL the older one no longer needs, and sends new segments and base
+backups to your offsite backup provider (the one the universal backup uses).
+`kazma doctor` says whether the archive is current.
+
+To restore to a time, into a new folder (the live database is never touched):
+
+```bash
+kazma restore postgres --to "2026-11-20 14:05" --into D:\pg-restore
+```
+
+It lays out the newest base backup, sets it to replay the archived WAL up to
+that time, and prints the steps left: start it on a spare port, check it,
+then switch.
+
 ## Backup & disaster recovery
 
 Kazma backs up its own Postgres tables automatically (added after the

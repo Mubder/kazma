@@ -900,6 +900,40 @@ async def _deliver_resume(
 CHAT_APP_PLATFORMS = frozenset({"telegram", "discord", "slack"})
 
 
+async def _resume_into_chat(
+    graph: Any, manager: Any, lock_getter: Any, *, resume_cmd: Any, resume_config: dict[str, Any],
+    thread_id: str, platform: str, target_id: str, notice: str, notice_first: bool,
+    fallback_text: str, failed_text: str, label: str,
+) -> None:
+    """Resume a chat app's turn under its thread lock and deliver what it adds
+    (and the card it pauses on next), with *notice* said before or after the
+    resume. One rule for the approval watchdog's resume and the continue
+    after a restart: a failure is logged and the chat is told to ask again;
+    a notice the platform did not take is a WARNING."""
+    import contextlib
+
+    async def tell(text: str) -> None:
+        if not await manager.send(OutboundMessage(target_id=target_id, text=text, context_metadata={})):
+            logger.warning("[%s] a notice did not reach %s (thread=%s)", label, platform, thread_id[:12])
+
+    try:
+        if notice_first:
+            await tell(notice)
+        lock = await lock_getter(thread_id) if lock_getter is not None else None
+        async with (lock if lock is not None else contextlib.AsyncExitStack()):
+            result_state, chained = await _run_resume(graph, resume_cmd, resume_config, thread_id)
+        if not notice_first:
+            await tell(notice)
+        await _deliver_resume(
+            manager, platform=platform, target_id=target_id, ctx={}, thread_id=thread_id,
+            result_state=result_state, chained=chained, fallback_text=fallback_text,
+        )
+    except Exception:
+        logger.exception("[%s] resuming thread=%s failed", label, thread_id[:12])
+        with contextlib.suppress(Exception):
+            await tell(failed_text)
+
+
 def make_timeout_resumer(graph: Any, manager: Any, lock_getter: Any):
     """The watchdog's way to finish a chat app's expired approval.
 
@@ -922,40 +956,48 @@ def make_timeout_resumer(graph: Any, manager: Any, lock_getter: Any):
         tool: str,
         timeout_s: float,
     ) -> None:
-        import contextlib
-
         notice = (
             f"⏱ The approval for {tool or 'the tool'} expired after "
             f"{count_noun(max(1, round(timeout_s / 60)), 'minute')} with no answer, "
             "so it was not run."
         )
-        try:
-            lock = await lock_getter(thread_id) if lock_getter is not None else None
-            async with (lock if lock is not None else contextlib.AsyncExitStack()):
-                result_state, chained = await _run_resume(
-                    graph, resume_cmd, resume_config, thread_id,
-                )
-            await manager.send(OutboundMessage(target_id=target_id, text=notice, context_metadata={}))
-            await _deliver_resume(
-                manager,
-                platform=platform,
-                target_id=target_id,
-                ctx={},
-                thread_id=thread_id,
-                result_state=result_state,
-                chained=chained,
-                fallback_text="Nothing else was run.",
-            )
-        except Exception:
-            logger.exception("[HITL] timeout resume failed for thread=%s", thread_id)
-            with contextlib.suppress(Exception):
-                await manager.send(OutboundMessage(
-                    target_id=target_id,
-                    text=notice + " Continuing the task failed; send your request again.",
-                    context_metadata={},
-                ))
+        await _resume_into_chat(
+            graph, manager, lock_getter, resume_cmd=resume_cmd, resume_config=resume_config,
+            thread_id=thread_id, platform=platform, target_id=target_id,
+            notice=notice, notice_first=False, fallback_text="Nothing else was run.",
+            failed_text=notice + " Continuing the task failed; send your request again.",
+            label="HITL timeout",
+        )
 
     return resume_after_timeout
+
+
+def make_continue_resumer(graph: Any, manager: Any, lock_getter: Any):
+    """Continue a chat app's turn a restart cut off (resilience plan C1):
+    say so in the chat (in their language), resume it from its checkpoint
+    under its thread lock, and deliver what it adds (and the card it pauses
+    on next) the way an approval's resume does."""
+
+    async def continue_after_restart(
+        *, thread_id: str, resume_config: dict[str, Any], platform: str, target_id: str, user_text: str = "",
+    ) -> None:
+        from kazma_core.language_lock import in_their_language
+
+        await _resume_into_chat(
+            graph, manager, lock_getter, resume_cmd=None, resume_config=resume_config,
+            thread_id=thread_id, platform=platform, target_id=target_id,
+            notice=in_their_language(
+                user_text,
+                "↻ Kazma restarted while it worked on your request; it continues now.",
+                "↻ أُعيد تشغيل Kazma أثناء عمله على طلبك؛ يتابع الآن.",
+            ),
+            notice_first=True, fallback_text="",
+            failed_text=in_their_language(user_text, "Continuing it failed; send your request again.",
+                                          "تعذّرت المتابعة؛ أرسل طلبك مرة أخرى."),
+            label="turn_resume",
+        )
+
+    return continue_after_restart
 
 
 def _approval_card_is_stale(msg: IncomingMessage, requested_gate: str, pending: dict[str, Any]) -> bool:

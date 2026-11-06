@@ -11,6 +11,8 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from kazma_gateway import send_report
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -271,6 +273,7 @@ async def send_chunks_with_retry(
                 result = resp.json()
                 if result.get("ok"):
                     chunk_sent = True
+                    send_report.part_delivered()
                     break
                 logger.error("[telegram] sendMessage not ok: %s", result)
                 chunk_sent = False
@@ -315,8 +318,11 @@ async def send_chunks_with_retry(
                 )
                 chunk_sent = False
                 break
-            except Exception:
+            except Exception as exc:
                 logger.exception("[telegram] Failed to send to %d", chat_id)
+                # A read timeout after the request left: it may have arrived
+                # (the chat outbox never sends such a reply twice).
+                send_report.part_failed(exc)
                 chunk_sent = False
                 break
 

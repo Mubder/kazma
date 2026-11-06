@@ -885,6 +885,10 @@ def test_dns_gate_catches_the_redirect_hop_shape():
 # names one; a call in an async body must go through asyncio.to_thread.
 
 _LOOP_STALL_HELPERS = frozenset({
+    # The outside watch (observability/outside_watch.py): the pairing file,
+    # the guard's state file and a signed request to the observer.
+    "outside_status", "_observer_summary", "outside_digest_line", "pair_with_observer",
+    "unpair_from_observer", "_read_pairing",
     # Outage pages owed a recovery note (observability/outage_pages.py): a
     # file in the data dir read and written whole.
     "note_outage_page", "outage_page_owed", "owed_outage_pages", "settle_outage_page",

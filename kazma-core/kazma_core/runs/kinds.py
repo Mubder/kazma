@@ -107,6 +107,8 @@ NOT_RUNS: dict[str, str] = {
     "entity_merges": "memory entity merge records (a ledger, not work)",
     "entity_merges_archive": "archived memory entity merge records",
     "hitl_gates": "approval decisions; their waiting turn is a chat_turn run",
+    "outbox": "the chat outbox's replies (kazma_gateway.chat_outbox): retried, and alerted when they "
+              "cannot be delivered, by the outbox itself (chat.reply_undeliverable)",
     "knowledge_vector_status": "the Knowledge vector sweep's coverage record",
     "llm_calls": "the model-call ledger (one row per finished call)",
     "run_incidents": "the run supervisor's own incidents about runs (a record, not work)",

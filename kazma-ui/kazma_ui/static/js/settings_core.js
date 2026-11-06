@@ -150,6 +150,7 @@
         turnSpendingSaving: false,
         chatReasoning: { level: 'default', applies: null, provider: '' },
         chatReasoningSaving: false,
+        outsideWatch: { loaded: false, failed: false, paired: false, guard: null, observer: null },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
         proxyTesting: false,
@@ -879,7 +880,7 @@
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadProxy(); await this.loadRestoreUndo(); break;
+                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadOutsideWatch(); await this.loadProxy(); await this.loadRestoreUndo(); break;
                 case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;

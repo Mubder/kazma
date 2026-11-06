@@ -71,6 +71,8 @@ session-artifacts/
 
 # Docusaurus (docs site)
 docs/node_modules/
+deploy/observer/node_modules/
+deploy/observer/.wrangler/
 docs/.docusaurus/
 docs/build/
 

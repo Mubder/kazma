@@ -2204,6 +2204,45 @@
             <button class="btn btn-primary" @click="saveChatReasoning()" :disabled="chatReasoningSaving">{{ t('settings.save_chat_reasoning') }}</button>
         </div>
 
+        <!-- The outside watch (kazma_core.observability.outside_watch, plan B1) -->
+        <div class="settings-group" id="outside-watch-section">
+            <h3>{{ t('settings.outside_watch_title') }}</h3>
+            <div class="form-hint">{{ t('settings.outside_watch_hint') }}</div>
+            <div class="form-hint" x-show="outsideWatch.failed" x-cloak style="color:var(--error)">{{ t('settings.outside_watch_load_error') }}</div>
+            <div x-show="outsideWatch.loaded && !outsideWatch.paired" x-cloak data-outside-not-paired>
+                <p>{{ t('settings.outside_watch_not_paired') }}</p>
+                <pre translate="no" dir="ltr"><code>kazma observer pair</code></pre>
+            </div>
+            <dl x-show="outsideWatch.loaded && outsideWatch.paired" x-cloak data-outside-paired style="display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:4px 16px;margin:8px 0">
+                <dt>{{ t('settings.outside_watch_observer') }}</dt>
+                <dd><bdi dir="ltr" translate="no" x-text="outsideWatch.url"></bdi></dd>
+                <dt>{{ t('settings.outside_watch_guard') }}</dt>
+                <dd x-text="outsideGuardState(outsideWatch.guard)"></dd>
+                <dt>{{ t('settings.outside_watch_last_heartbeat') }}</dt>
+                <dd x-text="outsideLastAck(outsideWatch.guard)"></dd>
+                <template x-if="outsideWatch.observer && outsideWatch.observer.ok">
+                    <div style="display:contents">
+                        <dt>{{ t('settings.outside_watch_now') }}</dt>
+                        <dd><span x-text="outsideCondition(outsideWatch.observer.condition)"></span>
+                            <span class="form-hint" translate="no" x-show="outsideWatch.observer.detail" x-text="outsideWatch.observer.detail"></span></dd>
+                        <dt>{{ t('settings.outside_watch_week') }}</dt>
+                        <dd x-text="outsideUptime(outsideWatch.observer)"></dd>
+                        <dt>{{ t('settings.outside_watch_incidents') }}</dt>
+                        <dd>
+                            <span x-show="outsideWatch.loaded && !(outsideWatch.observer.incidents_7d || []).length">{{ t('settings.outside_watch_no_incidents') }}</span>
+                            <ul x-show="(outsideWatch.observer.incidents_7d || []).length">
+                                <template x-for="(inc, i) in (outsideWatch.observer.incidents_7d || [])" :key="i">
+                                    <li><span x-text="outsideCondition(inc.cause)"></span>: <span x-text="outsideIncidentWhen(inc)"></span></li>
+                                </template>
+                            </ul>
+                        </dd>
+                    </div>
+                </template>
+            </dl>
+            <div class="form-hint" x-show="outsideWatch.loaded && outsideWatch.paired && outsideWatch.observer && !outsideWatch.observer.ok" x-cloak>{{ t('settings.outside_watch_observer_error') }}</div>
+            <button class="btn btn-secondary" x-show="outsideWatch.loaded && outsideWatch.paired" x-cloak @click="loadOutsideWatch(true)">{{ t('settings.outside_watch_refresh') }}</button>
+        </div>
+
         <!-- Proxy Provider -->
         <div class="settings-group">
             <h3>{{ t('settings.proxy_title') }}</h3>

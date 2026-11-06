@@ -451,6 +451,8 @@ DECLARED = {
         _NO_DATABASE + "Slack's socket",
     "kazma-gateway/kazma_gateway/adapters/slack.py::SlackAdapter._listen_polling":
         _NO_DATABASE + "Slack's HTTP polling",
+    "kazma-gateway/kazma_gateway/gateway.py::GatewayManager._outbox_loop":
+        _NO_DATABASE + "the chat outbox is SQLite (chat_outbox.db) and the chat apps",
     "kazma-gateway/kazma_gateway/adapters/telegram_send.py::send_chunks_with_retry":
         _NO_DATABASE + "Telegram's send retries",
     "kazma-core/kazma_core/agent/tool_builtins/system.py::register_system_tools.check_swarm_task":

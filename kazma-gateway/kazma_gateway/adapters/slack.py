@@ -402,6 +402,7 @@ class SlackAdapter(BaseAdapter):
             logger.error("[Slack] No channel_id in target: %s", outbound.target_id)
             return False
 
+        from kazma_gateway import send_report
         from kazma_gateway.adapters.slack_send import chunk_message, resolve_channel_id, sanitize_outbound
 
         channel_id = resolve_channel_id(outbound.context_metadata, outbound.target_id) or channel_id
@@ -426,7 +427,9 @@ class SlackAdapter(BaseAdapter):
                 self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), verify=shared_ssl_context())
             attachments_sent = True
             for att in outbound.attachments:
-                if not await self._send_attachment(channel_id, att, thread_ts):
+                if await self._send_attachment(channel_id, att, thread_ts):
+                    send_report.part_delivered()
+                else:
                     attachments_sent = False
             return attachments_sent
 
@@ -477,10 +480,13 @@ class SlackAdapter(BaseAdapter):
                     if data.get("ok"):
                         logger.info("[Slack] Sent chunk %d/%d to channel=%s (ts=%s)", 
                                    chunk_idx + 1, len(chunks), channel_id, data.get("ts", "?"))
+                        send_report.part_delivered()
                         # Deliver any media attachments after the first chunk.
                         if chunk_idx == 0:
                             for att in outbound.attachments:
-                                if not await self._send_attachment(channel_id, att, thread_ts):
+                                if await self._send_attachment(channel_id, att, thread_ts):
+                                    send_report.part_delivered()
+                                else:
                                     attachments_sent = False
                             # Voice reply: if the inbound was transcribed audio, reply
                             # with synthesized speech.
@@ -499,6 +505,9 @@ class SlackAdapter(BaseAdapter):
                     return False
                 except Exception as exc:
                     logger.exception("[Slack] Send exception: %s", exc)
+                    # A read timeout after the request left: it may have
+                    # arrived (the chat outbox never sends it twice).
+                    send_report.part_failed(exc)
                     return False
 
         return attachments_sent

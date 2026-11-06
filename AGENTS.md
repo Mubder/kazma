@@ -4009,6 +4009,42 @@ restarts in two seconds). Gate: `tests/test_sqlite_snapshot.py` (the copy
 finishes under a writer every 2 ms; `pages=100` as the negative control; no
 `.backup(` call outside the helper).
 
+**G. Postgres as an OS service** (resilience plan A1,
+`kazma_core/postgres_service.py`, `kazma_cli/setup.py`). A database in a
+container dies with Docker Desktop, which starts only when someone signs in
+(live 2026-11-04: eleven hours). `kazma setup postgres` installs Postgres 16
+with the OS's package manager (winget, Homebrew, apt, dnf; WSL as its distro)
+as a service that starts at boot and restarts on failure, `listen_addresses =
+'localhost'`, creates `kazma` and the `kazma_app` role (`kazma_app_role.sql`),
+turns on WAL archiving, writes `KAZMA_DATABASE_URL` into `.env` (never
+printed, restricted) and records it in `<data dir>/setup_record.json`. No
+password on a command line (the Windows installer's throwaway one aside,
+replaced at once through psql's stdin); the superuser's is kept in
+`<install>/.kazma/postgres_superuser.pass` (a Kazma secret file). `--check`
+and `--dry-run` change nothing; a second run repairs and never reinstalls;
+`--move-from-container NAME` copies the container's data in
+(`backup/pg_move.py`: dump inside the container, `pg_restore` as
+`kazma_app`, every Kazma table's row count compared) before `.env` changes.
+`kazma doctor` checks the service from the record; the guard watches it
+(`DatabaseServiceWatch`: starts a stopped service once per outage, pages once
+at five minutes, once on recovery). Gates: `tests/test_setup_postgres.py`
+(every package manager faked; a password on psql's command line as the
+negative control), `tests/test_guard_database_service.py`.
+
+**H. WAL archiving and point-in-time restore** (A2,
+`kazma_core/backup/wal_archive.py`). `archive_mode = on`, `archive_timeout =
+300`, each segment copied by the OS's own copy then renamed (the server's
+service account cannot run Kazma's Python). The maintenance sweep "WAL
+archive" reads `pg_stat_archiver` (a failing archiver, or none archived for
+15 minutes, pages `backup.wal_archive_stale`), takes a weekly base backup
+(`pg_basebackup -Ft -z -X fetch`, two kept, a failed one leaves no folder),
+prunes the WAL the older one no longer needs, and sends new segments and base
+backups offsite (`pgwal-*`, `pgbase-*`, in order; a failed upload stops the
+pass). `kazma restore postgres --to TIME --into DIR` lays a base backup into a
+new folder set to replay to TIME; the live database is never touched. Gate:
+`tests/test_setup_postgres.py` (retention, the archiver's numbers, restore,
+offsite order).
+
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
 Kazma is a first-class citizen of the open **agentskills.io** `SKILL.md`
@@ -6188,6 +6224,21 @@ reads run off the loop and ride out a store that cannot answer
 the stop, a continuation, a fresh message, the refusal; the supervisor without
 the limit and the old grant as negative controls).
 
+**A turn a restart cut off continues** (`kazma_ui/turn_resume.py`,
+resilience plan C1). At start (30 s in, once the chat apps connect), every
+chat whose newest checkpoint, written in the last 30 minutes, stops half way
+with no approval waiting is a cut turn. A safe one (no tool of the turn
+whose receipt has no result: `agent.effect_journal`) continues by itself: a
+web turn into its journal (`_drive_graph_to_journal`), a chat app's back to
+its chat with a line saying so (`make_continue_resumer`, in their language).
+One whose tool effect is unknown waits for the owner: listed by
+`runs_chat_turn` (native `cut`) with **Continue** and **Close**; Continue
+resumes it, and the effect journal still refuses to repeat the unknown call.
+The listing reads every checkpoint first and each state after (SQLite's
+saver holds its connection while it lists: reading a state inside the
+listing waited for good). Gate: `tests/test_turn_resume.py` (a real graph
+and SQLite saver; no start pass as the negative control).
+
 **A plan feeds only the running turn.** `_paintTextSlot` paints every turn,
 finished ones on every reload; plan ingestion there logged progress on the
 live turn and painted a "Kazma is thinking…" header under a finished answer
@@ -6313,6 +6364,9 @@ witness is archived in `docs/audits/evidence/browser_redirect_before_broker_2026
 
 Model fallbacks (§38) ride the second row plus the web banner
 (`AlertDispatcher.post_banner`, banner only) — not a fourth notifier.
+The outside observer (`deploy/observer`, §39) is not Kazma's notifier: it
+runs off the machine on the owner's Cloudflare account and pages through a
+bot of its own, so a fault in Kazma or its bot cannot silence it.
 Run incidents (§52) go to the chat the work started from through the chat
 apps' own send path (`send_message`, with buttons), else the second row, and
 to the bell — not a fourth notifier either.
@@ -7211,6 +7265,17 @@ code) and Kazma ran with nobody supervising it.
   `document_broker`, and `guard_code` lets `--status` say the running guard
   is older than its file -- a reload restarts Kazma, never the guard, so a
   guard change needs the task restarted once (ops doc, "Restart the guard").
+- **Every step of the stop is timed** (`shutdown.StopClock`, resilience plan
+  C3). `_on_shutdown` marks each step of `_shutdown_services` as it ends
+  (`_mark_stop`) and logs one line at the end: every step's time, or a WARNING
+  naming the three slowest when the stop ran over its budget
+  (`KAZMA_SHUTDOWN_BUDGET_S`; target zero). Gate: `tests/test_stop_clock.py`.
+- **An update window** (`kazma maintenance begin|end`, plan B2b): begin
+  pauses the guard (when idle, under a maintenance reason, expiring by itself)
+  so planned work restarts and pages nothing, and the heartbeat says
+  maintenance; end resumes, waits five minutes for `/health/deep`, and pages
+  (`kazma_guard.py --page`, the guard's own notifier) if Kazma is not healthy.
+  Gate: `tests/test_maintenance_window.py`.
 - **The guard starts what Kazma runs on** (`Dependencies`, 2026-11-04). Live
   2026-11-03 a topgrade update left Docker Desktop stopped; the database
   container was gone and the guard restarted Kazma 34 times over eleven hours.
@@ -7280,6 +7345,23 @@ code) and Kazma ran with nobody supervising it.
   `KAZMA_GUARD_OUTSIDE_WATCH=off` wins over a key. Gate:
   `tests/test_observer_heartbeat.py` (the snapshot sent as it is, and a guard
   without the watch, as negative controls).
+  **The observer** is `deploy/observer` (a Worker: `src/diagnose.js` the
+  table pull-probe x heartbeat -> condition, a heartbeat missing after 90 s;
+  `src/incidents.js` one page on the third failed minute, hourly reminders,
+  one recovery page, maintenance quiet, an unsent page retried; D1
+  `schema.sql`; the status page behind Access and the Worker's own check of
+  Access's token, closed when unset). **Kazma's side** is
+  `kazma_core/observability/outside_watch.py`: `kazma observer pair` writes
+  the pairing file as JSON (install id, key, the observer's address) only
+  after the observer accepted, restricted while still empty; the guard reads
+  the same file (`OutsideWatch._load_key`). Settings -> System -> Outside
+  watch (`GET /api/settings/outside-watch`, never the key) and the daily
+  digest's line read the observer's summary with a request signed by the
+  key. The pairing file is a Kazma secret file
+  (`store_registry.SECRET_FILE_NAMES`).
+  Gates: `tests/test_outside_watch.py` (the guard reads what pairing writes;
+  a refused pairing or an unrestrictable file leaves no key; it runs the
+  Worker's own `node --test` suite, a D1 stand-in over `node:sqlite`).
 - **Settings' "Restart server" asks the guard.** A server the guard started
   writes the guard's reload request (`supervisor_watch.request_guard_reload`;
   the guard hands the path over in `KAZMA_GUARD_RELOAD_FILE`, an older guard
@@ -8097,6 +8179,32 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   2026-10-02 fails it at seven sites. Behaviour: the backend's answer, the
   reminder, the post notice, the dispatcher tools, `send_file` with no bound
   chat, reads off the loop).
+- **A chat-app reply is kept until the platform takes it**
+  (`kazma_gateway/chat_outbox.py`, resilience plan F3). Live, 57 Slack
+  timeouts, about 65 Discord drops and 15 Telegram failures each lost a reply.
+  `GatewayManager.send` records every durable reply (`OutboundMessage.durable`,
+  the default) in `chat_outbox.db` as `sending`, tries it at once, and reads
+  the adapter's report (`kazma_gateway/send_report.py`): the adapters' send
+  loops call `part_delivered()` per accepted part and `part_failed(exc)` per
+  failed one, which decides from the exception whether it may have arrived
+  (a read timeout, a dropped connection: yes; a refused connection or a
+  write that failed: no). Taken -> `sent`. Nothing arrived -> `pending`,
+  tried again by the gateway's outbox loop after 30 s doubling to 15 minutes
+  for two hours, then `undeliverable` with one alert
+  (`chat.reply_undeliverable.<platform>`, never the text). Part arrived
+  (`partial`) or may have (`unknown`) -> never sent again: the next reply in
+  that chat opens with "an earlier message may not have reached you in full",
+  in their language. A row a dead process left `sending` is `unknown` at the
+  next start (`recover`). A reply sent more than a minute late says so. A
+  settled row keeps no text and is purged after seven days (maintenance
+  sweep "chat outbox retention"). **Not durable here:** an interaction's
+  answer (`native_reply_id`: its token expires) and
+  `make_gateway_send_handler`'s sends (`durable=False`): their callers read
+  the answer and keep their own retries (the scheduled jobs' outbox, §16E),
+  and two outboxes would deliver twice. Gate: `tests/test_chat_outbox.py` (a
+  real process killed before, during and after a send: one delivery or one
+  honest state; each adapter's report; the manager without an outbox as the
+  negative control).
 
 ### 52. Run supervision: every running task watched, incidents you act on (`kazma_core/runs/`, 2026-10-25)
 
@@ -8558,6 +8666,15 @@ has a gate that fails on the old code.
   `tests/test_document_reload_keeps_the_attempt.py`,
   `tests/test_fatal_error_exits_now.py`, `tests/test_bounded_cancel.py`,
   `tests/test_stuck_socket_does_not_freeze_the_stream.py`.
+- **Kazma refreshes stale malware signatures itself** (resilience plan H).
+  The maintenance sweep "malware signatures"
+  (`documents/malware.signature_alert_sweep`) runs freshclam
+  (`refresh_signatures`: on PATH or beside the scanner, with
+  `tool_child_env()`, at most every six hours) while the signatures are stale
+  or of unknown age, and alerts only when that did not bring them up to date,
+  saying what freshclam answered. The live install's were refreshed once, at
+  setup. Gate: `tests/test_malware_signatures_refresh.py` (stand-in ClamAV
+  programs; the sweep without the refresh as the negative control).
 - **Documents, research and runs.** A policy-rejected document is a failure
   with no Retry that pages nobody (`announced_by`, FA-247); the memory repair
   copies (`*.pre_*`) never travel in a bundle (`REPAIR_COPY_SUFFIXES`,
@@ -9284,6 +9401,17 @@ pull that changed document code also rebuilds the worker image:
 `--reload` also picks up a tool added to PATH while Kazma ran (§38). A
 new *guard* (its own code, or other OS-level variables) still needs the
 `KazmaAgent` task restarted.
+
+**`scripts/deploy_live.py` does all of the above and checks it** (resilience
+plan C2): pull (refused over modified tracked files), the update and image
+build when their files changed, reload when idle, then the new commit on
+`/health/live`, ready and deep health, one test turn ("Reply with the word
+OK", kept out of memory, the chat deleted) and no ERROR/CRITICAL line since
+the boot. A failed check reverts what `origin/main` gained (the live pull is
+a merge, so never the live HEAD range) on `main` here, pushes, pulls the
+revert into the live install, reloads and pages the owner naming the check
+(`--no-revert` pages only). Gate: `tests/test_deploy_live.py` (real git
+repositories, a stub server; a live checkout with its own commit).
 
 ## Testing & Validation
 

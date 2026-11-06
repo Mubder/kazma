@@ -85,6 +85,44 @@ def step_bound(own: float) -> float:
     return max(0.0, min(float(own), _shutdown_time_left()))
 
 
+class StopClock:
+    """How long each step of the stop took (resilience plan C3).
+
+    8 of 163 reloads ran past the guard's graceful stop, and the log could not
+    say which step held them. The app marks each step as it ends
+    (:meth:`mark`); :meth:`report` logs one line at the end: INFO with every
+    step's time, or WARNING naming the three slowest when the stop ran over
+    its budget (``KAZMA_SHUTDOWN_BUDGET_S``). The weekly report counts the
+    WARNINGs (target zero).
+    """
+
+    def __init__(self, now: Callable[[], float] = time.monotonic) -> None:
+        self._now = now
+        self.started = now()
+        self._last = self.started
+        self.steps: list[tuple[str, float]] = []
+
+    def mark(self, label: str) -> None:
+        """The step called *label* has just ended."""
+        now = self._now()
+        self.steps.append((label, now - self._last))
+        self._last = now
+
+    def report(self) -> bool:
+        """Log the stop's times. True when it ran over its budget."""
+        total = self._now() - self.started
+        budget = _shutdown_budget_s()
+        if total > budget:
+            slowest = sorted(self.steps, key=lambda step: step[1], reverse=True)[:3]
+            logger.warning("[shutdown] the stop ran over its %.0f s budget: %.1f s; slowest: %s",
+                           budget, total, "; ".join(f"{label} {secs:.1f} s" for label, secs in slowest))
+            return True
+        timed = ", ".join(f"{label} {secs:.1f} s" for label, secs in self.steps if secs >= 0.05)
+        logger.info("[shutdown] the stop took %.1f s of its %.0f s budget (%s)", total, budget,
+                    timed or "every step under 0.1 s")
+        return False
+
+
 def uvicorn_graceful_s() -> int:
     """uvicorn's graceful wait for open connections: a fifth of the stop's
     budget, 3 to 10 s. It was 15 s on its own, spent before the app's own

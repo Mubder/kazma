@@ -586,6 +586,17 @@ def _package_lines() -> list[str]:
     return lines
 
 
+def _outside_watch_line() -> str | None:
+    """The outside watch's line, or None when the install is not paired."""
+    from kazma_core.observability.outside_watch import outside_digest_line
+
+    try:
+        return outside_digest_line()
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.warning("[digest] the outside watch could not be read: %s", type(exc).__name__)
+        return "Outside watch: could not be read"
+
+
 def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     """Render the digest. A log or the approval registry that cannot be read
     is skipped and said, so a usable digest goes out regardless."""
@@ -615,6 +626,11 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     delivered = app.get("scheduled messages delivered", 0)
     if delivered:
         lines.append(f"Scheduled messages delivered: {delivered}")
+    # How the install looked from outside the machine this week (resilience
+    # plan B1), only once it is paired with the observer.
+    outside = _outside_watch_line()
+    if outside:
+        lines.append(outside)
 
     # Planned work: what the operator did on purpose. Context, never a fault.
     forgets = app.get("memory forgets", 0)

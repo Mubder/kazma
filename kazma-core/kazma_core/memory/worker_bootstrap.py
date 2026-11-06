@@ -1223,6 +1223,29 @@ def _dependency_advisories() -> None:
     advisory_sweep()
 
 
+def _wal_archive() -> None:
+    # WAL archiving (kazma_core.backup.wal_archive, resilience plan A2): the
+    # archiver's numbers, the weekly base backup, retention, offsite.
+    from kazma_core.backup.wal_archive import wal_sweep
+
+    wal_sweep()
+
+
+def _prune_chat_outbox() -> None:
+    # The chat outbox (kazma_gateway.chat_outbox, resilience plan F3): a
+    # settled reply's row (its text already emptied) goes after seven days.
+    from kazma_core.paths import data_dir
+
+    path = data_dir() / "chat_outbox.db"
+    if not path.exists():
+        return
+    from kazma_gateway.chat_outbox import ChatOutbox
+
+    removed = ChatOutbox(path).prune()
+    if removed:
+        logger.info("[maintenance] chat outbox: %d settled reply row(s) purged", removed)
+
+
 def _run_incident_retention() -> None:
     # Run supervision (kazma_core.runs): an incident nobody answered in a
     # week expires; finished ones are kept 30 days, then purged.
@@ -1251,6 +1274,8 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("pipeline log retention", _prune_pipeline_logs),
     ("swarm approval rows", _purge_swarm_approvals),
     ("run incident retention", _run_incident_retention),
+    ("chat outbox retention", _prune_chat_outbox),
+    ("WAL archive", _wal_archive),
     ("checkpoint retention", _prune_checkpoints),
     ("supervisor watch", _watch_supervisor),
     ("document worker broker", _document_broker),

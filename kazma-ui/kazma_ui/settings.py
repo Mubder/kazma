@@ -431,6 +431,16 @@ class SettingsRouterBuilder:
                 "daily_max": MAX_DAILY_COST_LIMIT_USD,
             }
 
+        @router.get("/api/settings/outside-watch")
+        def api_get_outside_watch(fresh: bool = False) -> dict[str, Any]:
+            """The outside watch (resilience plan B1): paired or not, the
+            guard's record of its heartbeats and the observer's summary
+            (kazma_core.observability.outside_watch; blocking, so a plain
+            ``def`` FastAPI runs in its threadpool). Never the key."""
+            from kazma_core.observability.outside_watch import outside_status
+
+            return outside_status(fresh=fresh)
+
         @router.get("/api/settings/chat-reasoning")
         def api_get_chat_reasoning() -> dict[str, Any]:
             """How much the model reasons before a chat answer

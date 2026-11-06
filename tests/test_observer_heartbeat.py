@@ -417,3 +417,30 @@ def test_the_shared_vector_is_hmac_sha256():
     mac = hmac.new(VECTOR["key"].encode(), f"{VECTOR['timestamp']}.".encode()
                    + VECTOR["body"].encode(), hashlib.sha256).hexdigest()
     assert VECTOR["signature"] == "v1=" + mac
+
+
+def test_the_pairing_file_names_the_install_and_the_observer(monkeypatch, tmp_path):
+    # kazma observer pair writes JSON: the id the observer knows this install
+    # by, the key and the observer's address. The guard sends under that id,
+    # to that address.
+    h = _Harness(monkeypatch, tmp_path, key=json.dumps({
+        "v": 1, "install": "0123456789abcdef", "key": KEY, "url": "https://watch.example"}))
+    h.tick()
+    req = h.opener.requests[0]
+    assert req.full_url == "https://watch.example/v1/heartbeat"
+    assert dict(req.header_items())["X-kazma-install"] == "0123456789abcdef"
+    assert json.loads(req.data)["install"] == "0123456789abcdef"
+    # The operator's address in the guard's environment still wins.
+    monkeypatch.setenv("KAZMA_GUARD_OUTSIDE_WATCH_URL", "https://other.example/v1/heartbeat")
+    assert guard._outside_watch_url("https://watch.example") == "https://other.example/v1/heartbeat"
+
+
+def test_a_pairing_file_that_is_not_json_or_has_no_key_is_refused(monkeypatch, tmp_path):
+    h = _Harness(monkeypatch, tmp_path, key='{"install": "0123456789abcdef"')
+    h.tick()
+    assert h.opener.requests == [] and h.watch.state == "key_invalid"
+    other = tmp_path / "other"
+    other.mkdir()
+    h2 = _Harness(monkeypatch, other, key=json.dumps({"install": "0123456789abcdef", "key": "short"}))
+    h2.tick()
+    assert h2.opener.requests == [] and h2.watch.state == "key_invalid"

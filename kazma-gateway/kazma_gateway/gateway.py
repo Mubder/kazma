@@ -41,6 +41,7 @@ import asyncio
 import dataclasses
 import logging
 import random
+import sqlite3
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -160,12 +161,18 @@ class OutboundMessage:
                      (sendPhoto/files.upload/etc.) in list order.
         context_metadata: The same dict from the IncomingMessage — the
                           adapter uses this to extract raw platform IDs.
+        durable:    Kept in the chat outbox and tried again until the
+                    platform takes it (``chat_outbox.py``). False for a send
+                    whose caller reads the answer and keeps its own retries
+                    (``make_gateway_send_handler``: scheduled deliveries, the
+                    agent's sends): two outboxes would deliver it twice.
     """
 
     target_id: str
     text: str
     attachments: list[Attachment] = field(default_factory=list)
     context_metadata: dict[str, Any] = field(default_factory=dict)
+    durable: bool = True
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -582,6 +589,54 @@ def _tool_hints(msg: Any, suggester: Any) -> list[str]:
 
     return detect_tool_intent(msg.text)
 
+#: How often the outbox loop tries again what the platforms did not take.
+_OUTBOX_POLL_S = 10.0
+#: A reply sent later than this after its first try says it is late.
+_LATE_AFTER_S = 60.0
+
+
+def _earlier_reply_notice(text: str) -> str:
+    """*text* opening with the line that an earlier reply may not have
+    reached the person in full, in their language (chat_outbox)."""
+    from kazma_core.language_lock import in_their_language
+
+    line = in_their_language(
+        text,
+        "(An earlier message may not have reached you in full.)",
+        "(ربما لم تصلك إحدى الرسائل السابقة كاملة.)",
+    )
+    return f"{line}\n\n{text}" if text else line
+
+
+def _late_reply_notice(text: str) -> str:
+    """*text* opening with the line that it is late, in their language."""
+    from kazma_core.language_lock import in_their_language
+
+    line = in_their_language(
+        text,
+        "(Sent late: Kazma could not reach the chat app earlier.)",
+        "(أُرسلت متأخرة: تعذّر على Kazma الوصول إلى تطبيق المحادثة قبل ذلك.)",
+    )
+    return f"{line}\n\n{text}" if text else line
+
+
+async def _alert_undeliverable(platform: str, error: str) -> None:
+    """One alert for a reply that could not be delivered in two hours (the
+    bell and the ops channels; ``ops_alerts`` keeps it to one per platform
+    inside its cooldown). Never the reply's text."""
+    from kazma_core.observability.ops_alerts import alert
+
+    label = _PLATFORM_LABELS.get(platform, platform)
+    logger.warning("[Gateway] a %s reply could not be delivered in two hours: %s", label, error)
+    await asyncio.to_thread(
+        alert, f"chat.reply_undeliverable.{platform}",
+        f"A {label} reply could not be delivered",
+        f"Kazma tried for two hours and {label} did not take it ({error or 'no answer'}). "
+        "The next reply in that chat says an earlier message may not have arrived.",
+        severity="warn",
+    )
+
+
 class GatewayManager:
     """Orchestrates all adapters and the unified message bus.
 
@@ -629,6 +684,15 @@ class GatewayManager:
         self._checkpointer: Any = None
         self._session_store_path: str = ""
         self._checkpointer_path: str = ""
+        # The chat outbox (chat_outbox.py, resilience plan F3): set by the
+        # app at startup; without one a reply is tried once, as before.
+        self._outbox: Any = None
+        self._outbox_task: asyncio.Task[None] | None = None
+
+    def set_outbox(self, outbox: Any) -> None:
+        """Keep every durable reply in *outbox* and try it again until the
+        platform takes it (``ChatOutbox``)."""
+        self._outbox = outbox
 
     def set_persistence(
         self,
@@ -732,6 +796,15 @@ class GatewayManager:
         for adapter in self.adapters:
             await adapter.start(self.queue, self._shutdown)
 
+        # The chat outbox: a reply a dead process was sending may have left,
+        # so it is never sent again; the rest are tried again in the loop.
+        if self._outbox is not None:
+            try:
+                await asyncio.to_thread(self._outbox.recover)
+            except (sqlite3.Error, OSError) as exc:
+                logger.warning("[Gateway] the chat outbox could not be read: %s", exc)
+            self._outbox_task = asyncio.create_task(self._outbox_loop(), name="gateway-outbox")
+
         # Start the consumer that dispatches to the Brain (always start,
         # even if no handler is registered — messages are dropped with a
         # warning instead of piling up and being silently lost)
@@ -784,7 +857,12 @@ class GatewayManager:
         if drained:
             logger.info("Drained %d undelivered messages from queue", drained)
 
-        # 4. Stop the consumer
+        # 4. Stop the consumer, and the outbox loop (its rows stay for the
+        # next start).
+        if self._outbox_task and not self._outbox_task.done():
+            from kazma_core.bounded_cancel import cancel_and_wait
+
+            await cancel_and_wait(self._outbox_task, what="gateway chat outbox")
         if self._consumer_task and not self._consumer_task.done():
             from kazma_core.bounded_cancel import cancel_and_wait
 
@@ -843,35 +921,111 @@ class GatewayManager:
             if as_lines != outbound.text:
                 outbound = dataclasses.replace(outbound, text=as_lines)
 
-        for adapter in self.adapters:
-            if adapter.name == platform:
-                try:
-                    ok = await adapter.send(outbound)
-                except TimeoutError:
-                    logger.warning(
-                        "[Gateway] Send timed out for %s (platform=%s)",
-                        outbound.target_id,
-                        platform,
-                    )
-                    await self.metrics.record_error()
-                    return False
-                except ConnectionError:
-                    logger.warning(
-                        "[Gateway] Connection issue for %s (platform=%s) — will retry",
-                        outbound.target_id,
-                        platform,
-                    )
-                    await self.metrics.record_error()
-                    return False
-                if ok:
-                    await self.metrics.record_outbound()
-                else:
-                    await self.metrics.record_error()
-                return ok
+        adapter = self.adapter_named(platform)
+        if adapter is None:
+            logger.error("No adapter for platform '%s'", platform)
+            await self.metrics.record_error()
+            return False
 
-        logger.error("No adapter for platform '%s'", platform)
+        outbox = self._outbox if self._keeps(outbound) else None
+        row_id = None
+        if outbox is not None:
+            try:
+                if await asyncio.to_thread(outbox.take_notice, outbound.target_id):
+                    outbound = dataclasses.replace(outbound, text=_earlier_reply_notice(outbound.text))
+                row_id = await asyncio.to_thread(outbox.begin, outbound)
+            except (sqlite3.Error, OSError) as exc:
+                logger.warning("[Gateway] the chat outbox could not keep a reply (sent once): %s", exc)
+        outcome, error = await self._attempt(adapter, outbound)
+        if row_id is not None:
+            await self._settle(row_id, outcome, error, platform)
+        return outcome == "sent"
+
+    @staticmethod
+    def _keeps(outbound: OutboundMessage) -> bool:
+        """Whether the outbox keeps this reply: a durable one with something
+        in it, never an interaction's answer (its token expires in minutes)."""
+        if not outbound.durable or not (outbound.text or outbound.attachments):
+            return False
+        return not (outbound.context_metadata or {}).get("native_reply_id")
+
+    async def _attempt(self, adapter: BaseAdapter, outbound: OutboundMessage) -> tuple[str, str]:
+        """One try. ``(outcome, error)``: ``sent``; ``not_sent`` (nothing
+        reached the platform); ``partial`` (part did); ``unknown`` (a part's
+        answer was lost: it may have arrived). From the adapter's report
+        (``send_report``)."""
+        from kazma_gateway import send_report
+
+        error = ""
+        with send_report.reporting() as report:
+            try:
+                ok = await adapter.send(outbound)
+            except TimeoutError:
+                ok, error = False, "timed out"
+                report.uncertain = True
+                logger.warning("[Gateway] Send timed out for %s (platform=%s)",
+                               outbound.target_id, adapter.name)
+            except ConnectionError as exc:
+                ok, error = False, type(exc).__name__
+                send_report.part_failed(exc)
+                logger.warning("[Gateway] Connection issue for %s (platform=%s)",
+                               outbound.target_id, adapter.name)
+        if ok:
+            await self.metrics.record_outbound()
+            return "sent", ""
         await self.metrics.record_error()
-        return False
+        if report.uncertain:
+            return "unknown", error or "an answer was lost"
+        if report.parts:
+            return "partial", error or "part of the reply was taken"
+        return "not_sent", error or "the platform did not take it"
+
+    async def _settle(self, row_id: str, outcome: str, error: str, platform: str) -> None:
+        """Record a try in the outbox, and say a reply that ran out of time."""
+        try:
+            state = await asyncio.to_thread(self._outbox.finish, row_id, outcome, None, error)
+        except (sqlite3.Error, OSError) as exc:
+            logger.warning("[Gateway] the chat outbox could not record a send: %s", exc)
+            return
+        if state == "pending":
+            logger.info("[Gateway] a %s reply was not taken; it is tried again shortly", platform)
+        elif state in ("unknown", "partial"):
+            logger.warning("[Gateway] a %s reply may not have arrived in full (%s); not sent again, "
+                           "the next reply says so", platform, outcome)
+        elif state == "undeliverable":
+            await _alert_undeliverable(platform, error)
+
+    async def _drain_outbox_once(self) -> int:
+        """Try every reply that is due again. Returns how many were tried."""
+        outbox = self._outbox
+        if outbox is None:
+            return 0
+        to_send, gave_up = await asyncio.to_thread(outbox.claim_due)
+        for row in gave_up:
+            await _alert_undeliverable(row["platform"], row["error"])
+        for row_id, outbound, first_tried in to_send:
+            platform = outbound.target_id.split(":", 1)[0]
+            adapter = self.adapter_named(platform)
+            if adapter is None:
+                await self._settle(row_id, "not_sent", f"no {platform} adapter", platform)
+                continue
+            if time.time() - first_tried > _LATE_AFTER_S:
+                outbound = dataclasses.replace(outbound, text=_late_reply_notice(outbound.text))
+            outcome, error = await self._attempt(adapter, outbound)
+            await self._settle(row_id, outcome, error, platform)
+        return len(to_send)
+
+    async def _outbox_loop(self) -> None:
+        """Every OUTBOX_POLL_S, try again what the platforms did not take."""
+        from kazma_core.shutdown import sleep_or_shutdown
+
+        while not self._shutdown.is_set():
+            try:
+                await self._drain_outbox_once()
+            except (sqlite3.Error, OSError) as exc:
+                logger.warning("[Gateway] the chat outbox pass failed: %s", exc)
+            if await sleep_or_shutdown(_OUTBOX_POLL_S):
+                return
 
     async def _consume(self) -> None:
         """Dequeue messages and dispatch to the registered handler."""
