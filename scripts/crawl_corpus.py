@@ -86,7 +86,7 @@ def main() -> int:
         return 0
     results = {site["name"]: asyncio.run(_replay(site, folder)) for site in chosen}
     if args.command == "show":
-        print(json.dumps(results, indent=2, ensure_ascii=False))
+        print(json.dumps(results, indent=2, ensure_ascii=True))
         return 0
     expected = cr.expected()
     expected.update(results)

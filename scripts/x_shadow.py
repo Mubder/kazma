@@ -203,10 +203,10 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.collect_worker:
-            print(json.dumps(_collection_worker(json.load(sys.stdin)), ensure_ascii=False))
+            print(json.dumps(_collection_worker(json.load(sys.stdin)), ensure_ascii=True))
             return 0
         if args.worker:
-            print(json.dumps(_worker(json.load(sys.stdin)), ensure_ascii=False))
+            print(json.dumps(_worker(json.load(sys.stdin)), ensure_ascii=True))
             return 0
         from kazma_core.env_files import load_env_files
         from kazma_core.tenant_context import tenant_scope
@@ -229,7 +229,7 @@ def main() -> int:
     except (ValueError, OSError, TypeError, KeyError, subprocess.TimeoutExpired) as exc:
         from kazma_core.errors import redact_secrets
 
-        print(json.dumps({"ok": False, "error": redact_secrets(str(exc))}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps({"ok": False, "error": redact_secrets(str(exc))}, ensure_ascii=True), file=sys.stderr)
         return 1
     return 0
 

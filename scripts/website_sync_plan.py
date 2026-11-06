@@ -584,7 +584,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     if args.json:
-        print(json.dumps(plan.__dict__, indent=2, ensure_ascii=False))
+        print(json.dumps(plan.__dict__, indent=2, ensure_ascii=True))
     else:
         print(render(plan, args.framework, args.site), end="")
     return 1 if args.check and plan.work() else 0

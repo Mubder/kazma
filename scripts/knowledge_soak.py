@@ -523,7 +523,7 @@ def _hardware(path: Path, name: str | None) -> dict[str, Any]:
 
 
 def _emit(prefix: str, payload: dict[str, Any]) -> None:
-    print(prefix + json.dumps(payload, ensure_ascii=False, default=str), flush=True)
+    print(prefix + json.dumps(payload, ensure_ascii=True, default=str), flush=True)
 
 
 def _ms(start: float) -> float:
@@ -1923,7 +1923,7 @@ def run_scale(args: argparse.Namespace) -> int:
     report["seconds"] = round(time.monotonic() - started, 1)
     finished(report, not report["violations"])
     _write_report(args.report, report)
-    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
     return 0 if report["healthy"] else 1
 
 
@@ -2014,7 +2014,7 @@ def run_breadth(args: argparse.Namespace) -> int:
     report["seconds"] = round(time.monotonic() - started, 1)
     finished(report, not report["violations"])
     _write_report(args.report, report)
-    print(json.dumps(report["summary"], indent=2, ensure_ascii=False, default=str))
+    print(json.dumps(report["summary"], indent=2, ensure_ascii=True, default=str))
     return 0 if report["healthy"] else 1
 
 
@@ -2699,7 +2699,7 @@ def _run_soak(args: argparse.Namespace) -> int:
     summary = _soak_summary(report, lat, started)
     finished(summary, not summary["violations"])
     _write_report(args.report, summary)
-    print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+    print(json.dumps(summary, indent=2, ensure_ascii=True, default=str))
     return 0 if summary["healthy"] else 1
 
 

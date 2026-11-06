@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             report["ocr_engines"][engine] = fidelity.run_corpus(
                 Path(work) / engine, cases=ocr, ocr_engine=engine)
-    print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
+    print(json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True))
     if args.lock:
         locked = fidelity.lock_thresholds(report, previous)
         THRESHOLDS.write_text(json.dumps(locked, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         for engine, section in report["ocr_engines"].items():
             floors = ((previous.get("ocr_engines") or {}).get(engine) or {}).get("thresholds", {})
             check(f"{engine}:", section["cases"], floors)
-    print(json.dumps({"regressions": regressions}, indent=2, ensure_ascii=False))
+    print(json.dumps({"regressions": regressions}, indent=2, ensure_ascii=True))
     return 1 if regressions else 0
 
 

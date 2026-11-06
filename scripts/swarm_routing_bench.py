@@ -176,7 +176,7 @@ def _cmd_run(real: bool, as_json: bool) -> int:
     dataset = load_dataset()
     report = {"router": score(dataset, embedder), "nearest_only": score(dataset, embedder, nearest_only=True)}
     if as_json:
-        print(json.dumps(report, ensure_ascii=False, indent=1))
+        print(json.dumps(report, ensure_ascii=True, indent=1))
     else:
         _print(report["router"])
         print("nearest worker, no floor (before SW-E10):")

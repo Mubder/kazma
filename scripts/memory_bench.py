@@ -960,7 +960,7 @@ def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
         with a, b:
             report = run_benchmark(keep_results=details)
     if as_json:
-        print(json.dumps(report, ensure_ascii=False, indent=1))
+        print(json.dumps(report, ensure_ascii=True, indent=1))
         return 0
     print(f"{report['memories']} memories, {report['overall']['questions']} questions")
     for name, row in report["categories"].items():
@@ -1107,7 +1107,7 @@ def _cmd_extraction() -> int:
     # The replies are recorded by scripts/memory_extraction_record.py, which
     # loads an install's .env to reach its model; this script stays env-free.
     replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8")) if LLM_REPLIES.is_file() else None
-    print(json.dumps(run_extraction_benchmark(llm_replies=replies), ensure_ascii=False, indent=1))
+    print(json.dumps(run_extraction_benchmark(llm_replies=replies), ensure_ascii=True, indent=1))
     return 0
 
 

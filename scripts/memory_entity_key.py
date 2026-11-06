@@ -59,18 +59,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.action == "size":
         with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
-            print(json.dumps(size_entity_key(conn), indent=1, ensure_ascii=False))
+            print(json.dumps(size_entity_key(conn), indent=1, ensure_ascii=True))
         return 0
     with closing(sqlite3.connect(path, timeout=30)) as conn:
         size = size_entity_key(conn)
-        print(json.dumps(size, indent=1, ensure_ascii=False))
+        print(json.dumps(size, indent=1, ensure_ascii=True))
         if size.get("keyed_by") != "id":
             print(json.dumps({"migrated": False, "keyed_by": size.get("keyed_by")}, indent=1))
             return 0
     backup = _copy_first(path)
     with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
         out = migrate_entity_key(conn)
-    print(json.dumps({**out, "copy_before": backup}, indent=1, ensure_ascii=False))
+    print(json.dumps({**out, "copy_before": backup}, indent=1, ensure_ascii=True))
     return 0
 
 
