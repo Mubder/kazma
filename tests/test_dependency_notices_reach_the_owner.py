@@ -54,6 +54,10 @@ def alerts(monkeypatch):
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(ops_alerts, "alert", lambda key, title, detail="", **_kw: sent.append((key, detail)) or True)
     monkeypatch.setattr(install_requirements, "unmet_requirements", lambda *_a, **_k: [])
+    # These advisories are made up (pkg0..., fixed versions this environment
+    # is past): every stored one counts as still installed. Closing one once
+    # the installed version is past its fix is tests/test_advisories_close_when_fixed.py.
+    monkeypatch.setattr(advisory_watch, "_still_open", lambda item: True)
     store = get_config_store()
     for key in (advisory_watch.ADVISORIES_KEY, install_requirements.REQUIREMENTS_KEY):
         store.delete(key)

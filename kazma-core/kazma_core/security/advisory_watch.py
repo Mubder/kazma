@@ -66,11 +66,42 @@ def _write_state(state: dict[str, Any]) -> None:
 
 
 def open_advisories() -> list[dict[str, Any]]:
-    """The advisories the last check found open (newest check), for the digest.
-    Raises what the settings store raises: the digest says it could not read."""
+    """The advisories the last check found open (newest check) that the
+    installed versions still have, for the digest and Open problems.
+    Raises what the settings store raises: the digest says it could not read.
+
+    The check runs once a day; an update in between installs the fix. Read
+    as stored, the advisories stayed on the Dashboard for up to a day under
+    "It closes when the installed version is past the fix" (the drill VM,
+    2026-11-07, after `kazma update`). Each is held against the version
+    installed now (:func:`_still_open`)."""
     state = _read_state()
     found = state.get("open")
-    return [dict(item) for item in found if isinstance(item, dict)] if isinstance(found, list) else []
+    if not isinstance(found, list):
+        return []
+    return [dict(item) for item in found if isinstance(item, dict) and _still_open(item)]
+
+
+def _still_open(item: dict[str, Any]) -> bool:
+    """Whether the installed version still has this advisory: a package no
+    longer installed, or one past the fixed version, has not. With no fixed
+    release, or a version that cannot be compared, it stays open."""
+    from importlib import metadata
+
+    from packaging.version import InvalidVersion, Version
+
+    package = str(item.get("package") or "")
+    try:
+        installed = metadata.version(package)
+    except (metadata.PackageNotFoundError, ValueError):
+        return False
+    fixed = item.get("fixed")
+    if not fixed:
+        return True
+    try:
+        return Version(installed) < Version(str(fixed))
+    except InvalidVersion:
+        return True
 
 
 def _fix_for(package: str, fixed: str | None, unmet: set[str], python: str, update: str) -> str:

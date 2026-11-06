@@ -44,7 +44,9 @@ Usage
 Configuration (all optional, env vars):
     KAZMA_GUARD_CMD             command to run       (default: serve.py)
     KAZMA_GUARD_CWD             working directory    (default: repo root)
-    KAZMA_GUARD_HEALTH_URL      health endpoint      (default: :9090/health/ready)
+    KAZMA_GUARD_HEALTH_URL      health endpoint      (default: the port the server
+                                binds, KAZMA_PORT from the environment or the
+                                install's .env, else :9090/health/ready)
     KAZMA_GUARD_START_TIMEOUT   seconds to first ready       (default: 900)
     KAZMA_GUARD_INTERVAL        seconds between probes       (default: 30)
     KAZMA_GUARD_FAILURES        consecutive fails = dead     (default: 3)
@@ -102,6 +104,61 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_HEALTH_URL = "http://127.0.0.1:9090/health/ready"
+
+
+def _env_files() -> list[Path]:
+    """The ``.env`` files the server reads its port from, in its order:
+    the install's, then ``KAZMA_ENV_FILE`` (the later wins)."""
+    files = [REPO_ROOT / ".env"]
+    named = (os.environ.get("KAZMA_ENV_FILE") or "").strip()
+    if named:
+        files.append(Path(named))
+    return files
+
+
+def install_port(env_files: list[Path] | None = None) -> int | None:
+    """``KAZMA_PORT`` as ``serve.py`` reads it: the environment, else the
+    install's ``.env``. One key is read from the file; the file is never
+    loaded into the guard's environment (every server inherits it, §33)."""
+    raw = (os.environ.get("KAZMA_PORT") or "").strip()
+    if not raw:
+        for path in env_files if env_files is not None else _env_files():
+            try:
+                text = path.read_text(encoding="utf-8-sig")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("export "):
+                    line = line[len("export "):].lstrip()
+                if line.startswith("KAZMA_PORT="):
+                    raw = line.split("=", 1)[1].split("#", 1)[0].strip().strip("'\"")
+    try:
+        port = int(raw)
+    except ValueError:
+        return None
+    return port if 1 <= port <= 65535 else None
+
+
+def health_url(*, of_running_guard: bool = False, env_files: list[Path] | None = None) -> str:
+    """The readiness URL, one answer for the guard and every command.
+
+    ``KAZMA_GUARD_HEALTH_URL`` when set; for a command (``of_running_guard``)
+    the URL the running guard recorded; else the port the server itself
+    binds (``KAZMA_PORT``); else 9090. The drill VM (2026-11-07) set its
+    port in .env and the guard's URL with ``setx``: ``--status`` probed the
+    built-in 9090 whatever was set and called a healthy Kazma "not
+    answering", and a shell without the variable did the same for every
+    command."""
+    explicit = (os.environ.get("KAZMA_GUARD_HEALTH_URL") or "").strip()
+    if explicit:
+        return explicit
+    if of_running_guard:
+        recorded = _read_state().get("health_url")
+        if isinstance(recorded, str) and recorded.startswith("http") and _guard_alive():
+            return recorded
+    port = install_port(env_files)
+    return f"http://127.0.0.1:{port}/health/ready" if port else DEFAULT_HEALTH_URL
 
 # Kazma's cold start is SLOW: it loads a local embedding model (bge-m3),
 # connects MCP servers, hydrates the config store and warms the graph. The
@@ -4073,7 +4130,7 @@ class Guard:
         )
         self.notify = Notifier(self.log, cwd=self.cwd, python=server_python)
         self.server_python = server_python
-        self.health_url = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+        self.health_url = health_url()
         self.once = once
         self.proc: subprocess.Popen | None = None
         self.restarts = 0
@@ -4585,6 +4642,7 @@ class Guard:
         # see as alive (the heartbeat; see HEARTBEAT_EVERY_S).
         _update_state(guard_pid=os.getpid(), guard_started=time.time(),
                       guard_features=list(GUARD_FEATURES), pause_held=None,
+                      health_url=self.health_url,
                       guard_code=_file_sha(Path(__file__).resolve()))
         self._beat(force=True)
 
@@ -5140,8 +5198,9 @@ def _cmd_page(title: str, detail: str) -> int:
 
 def _cmd_status() -> int:
     pause = read_pause()
-    holder = _port_holder_pid(_port_from_url(DEFAULT_HEALTH_URL))
-    result = probe(DEFAULT_HEALTH_URL, 5.0)
+    url = health_url(of_running_guard=True)
+    holder = _port_holder_pid(_port_from_url(url))
+    result = probe(url, 5.0)
     ok, detail = result
     if ok:
         word = "healthy"
@@ -5162,7 +5221,7 @@ def _cmd_status() -> int:
         print(f"  flag file : {_pause_path()}")
     print(f"server      : {word} ({detail})")
     if holder:
-        print(f"  port {_port_from_url(DEFAULT_HEALTH_URL)}  : held by pid {holder}")
+        print(f"  port {_port_from_url(url)}  : held by pid {holder}")
     state = _read_state()
     alive = _guard_alive()
     beat = state.get("heartbeat")
@@ -5234,7 +5293,7 @@ def _cmd_pause(
     # comes BEFORE the pause is written: the guard stops its child the
     # moment it sees one.
     if stop_now and when_idle:
-        health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+        health = health_url(of_running_guard=True)
         if not _wait_until_idle(health, idle_timeout_s, log, action="stopping", event="maintenance"):
             return 3
     rec = write_pause(reason, ttl)
@@ -5248,7 +5307,7 @@ def _cmd_pause(
     print(f"  file    : {_pause_path()}")
 
     if stop_now:
-        health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+        health = health_url(of_running_guard=True)
         if _guard_alive():
             # The guard stops its own child the moment it sees the pause, and
             # gracefully; this shell may not have the rights to (the same
@@ -5350,7 +5409,7 @@ def stop_for_maintenance(reason: str, *, ttl_s: float = DEFAULT_PAUSE_TTL_S,
     if not _guard_alive():
         return "no_guard"
     log = GuardLog(_default_log_path(), echo=False)  # the caller prints its own account
-    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+    health = health_url(of_running_guard=True)
     if current is None and probe(health, 5.0).answered and not _wait_until_idle(
         health, idle_timeout_s, log, action="stopping", event="maintenance",
     ):
@@ -5427,7 +5486,7 @@ def resume_after_maintenance(reason: str, *, wait: bool = True) -> str:
     if current.get("reason") != reason:
         return "not_ours"
     log = GuardLog(_default_log_path(), echo=False)
-    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+    health = health_url(of_running_guard=True)
     resumed_at = time.time()
     clear_pause()
     log("info", "maintenance.resume_requested", reason=reason)
@@ -5687,7 +5746,7 @@ def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> in
     A request no guard will act on is never left behind.
     """
     log = GuardLog(_default_log_path())
-    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+    health = health_url(of_running_guard=True)
     # --when-idle: a reload mid-turn drops the reply in flight (and on
     # 2026-09-24 a restart discarded a finished answer held only in memory).
     if when_idle and not _wait_until_idle(health, idle_timeout_s, log):
