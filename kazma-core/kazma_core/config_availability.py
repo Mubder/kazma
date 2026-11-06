@@ -40,6 +40,10 @@ _BOOT_REPORT_S = 60.0
 class ConfigStoreUnavailableError(RuntimeError):
     """No settings write was acknowledged; retry after storage recovers."""
 
+    #: True when the cause is Kazma's own missing Postgres driver: the
+    #: database may be fine, so this is never counted as an outage.
+    driver_missing = False
+
     def __init__(self, *, opening: bool = False, reason: str | None = None) -> None:
         self.backend = str(get_backend())
         self.reason = reason
@@ -48,6 +52,13 @@ class ConfigStoreUnavailableError(RuntimeError):
             if self.backend == "postgres"
             else "Check settings.db permissions, disk space and locks."
         )
+        if reason and reason.startswith("Kazma's Postgres driver is not installed"):
+            # postgres_pool.DRIVER_MISSING already says what to run, and
+            # "check connectivity" sent the drill VM's owner to a database
+            # that was fine (2026-11-06).
+            super().__init__(f"Kazma could not open its settings database ({self.backend}): {reason}.")
+            self.driver_missing = True  # no outage (db.availability._outage_one)
+            return
         if opening and reason:
             # The database's own answer (a refused password, a missing role):
             # "it may still be starting" hid one for 18 minutes (2026-11-03).

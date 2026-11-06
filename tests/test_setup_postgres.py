@@ -26,6 +26,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import sys
 import tarfile
 import time
 from pathlib import Path
@@ -226,6 +227,114 @@ def test_check_reports_the_service(install, capsys):
     assert _setup_postgres(_options(check=True), run=_Runner(installed=True)) == 0
     out = capsys.readouterr().out
     assert "ok   starts at boot" in out and "ok   restarts on failure" in out
+    assert "ok   Kazma's Postgres driver" in out
+
+
+# ── Kazma's own driver (the drill VM, 2026-11-06) ─────────────────────
+#
+# setup wrote KAZMA_DATABASE_URL into an environment without psycopg (the
+# setup scripts' exact uv sync never installed the postgres extra), and the
+# server waited for a database it could not reach.
+
+_UV = "C:/stand-in/uv.exe"
+
+
+def _driver_missing_here(monkeypatch):
+    import shutil
+
+    which = shutil.which
+    monkeypatch.setattr("kazma_core.db.postgres_pool.driver_missing",
+                        lambda modules=None: "Kazma's Postgres driver is not installed")
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **kw: _UV if name == "uv" else which(name, *a, **kw))
+
+
+class _DriverRunner(_Runner):
+    """The service manager as before; the driver's install answers *code*."""
+
+    def __init__(self, *, installed: bool, driver_code: int) -> None:
+        super().__init__(installed=installed)
+        self.driver_code = driver_code
+
+    def __call__(self, argv, **kw):
+        if list(argv[:3]) == [_UV, "pip", "install"]:
+            self.calls.append({"argv": list(argv), "stdin": kw.get("input"), "env": kw.get("env") or {}})
+            return subprocess.CompletedProcess(argv, self.driver_code, "", "")
+        return super().__call__(argv, **kw)
+
+
+def test_the_driver_is_installed_first_when_it_is_missing(install, monkeypatch):
+    from kazma_cli.setup import _setup_postgres
+
+    _driver_missing_here(monkeypatch)
+    runner = _DriverRunner(installed=False, driver_code=0)
+    assert _setup_postgres(_options(), run=runner) == 0
+    argvs = [c["argv"] for c in runner.calls]
+    driver = [i for i, a in enumerate(argvs) if a[:3] == [_UV, "pip", "install"]]
+    assert len(driver) == 1
+    args = argvs[driver[0]]
+    assert args[3:5] == ["--python", sys.executable], "into the environment Kazma runs in"
+    assert any(a.startswith("psycopg[binary,pool]") for a in args), args
+    assert any(a.startswith("langgraph-checkpoint-postgres") for a in args), args
+    winget = [i for i, a in enumerate(argvs) if a[:2] == ["winget", "install"]]
+    assert winget and driver[0] < winget[0], "the driver goes in before anything else"
+    assert (install / ".env").exists()
+
+
+def test_a_driver_that_does_not_install_writes_no_address(install, monkeypatch, capsys):
+    from kazma_cli.setup import _setup_postgres
+
+    _driver_missing_here(monkeypatch)
+    assert _setup_postgres(_options(), run=_DriverRunner(installed=False, driver_code=1)) == 1
+    assert not (install / ".env").exists(), "no KAZMA_DATABASE_URL Kazma cannot reach"
+    assert "Install Kazma's Postgres driver" in capsys.readouterr().out
+
+
+def test_without_the_driver_step_the_address_is_written_anyway(install, monkeypatch):
+    """Negative control: the plan of before, with the driver missing."""
+    import kazma_cli.setup as setup_mod
+    from kazma_cli.setup import _setup_postgres
+
+    _driver_missing_here(monkeypatch)
+    monkeypatch.setattr(setup_mod, "_driver_step", lambda: None)
+    assert _setup_postgres(_options(), run=_DriverRunner(installed=False, driver_code=1)) == 0
+    assert "KAZMA_DATABASE_URL" in (install / ".env").read_text(encoding="utf-8")
+
+
+def test_a_second_run_installs_a_driver_still_missing(install, monkeypatch):
+    """The drill VM's case: the service is set up; the driver never was."""
+    from kazma_cli.setup import _setup_postgres
+
+    assert _setup_postgres(_options(), run=_Runner(installed=False)) == 0
+    _driver_missing_here(monkeypatch)
+    runner = _DriverRunner(installed=True, driver_code=0)
+    assert _setup_postgres(_options(), run=runner) == 0
+    assert any(c["argv"][:3] == [_UV, "pip", "install"] for c in runner.calls)
+    assert not any(c["argv"][:1] == ["winget"] for c in runner.calls)
+
+
+def test_check_says_when_the_driver_is_missing(install, monkeypatch, capsys):
+    from kazma_cli.setup import _setup_postgres
+
+    _driver_missing_here(monkeypatch)
+    assert _setup_postgres(_options(check=True), run=_Runner(installed=True)) == 1
+    assert "NO   Kazma's Postgres driver" in capsys.readouterr().out
+
+
+def test_the_driver_step_installs_the_postgres_extra():
+    """One list: the step installs what pyproject's postgres extra names."""
+    import re
+    import tomllib
+
+    from kazma_cli.setup import _extra_requirements
+    from kazma_core.paths import get_project_root
+
+    data = tomllib.loads((get_project_root() / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = data["project"]["optional-dependencies"]["postgres"]
+
+    def name(req: str) -> str:
+        return re.split(r"[<>=!~\[ ;]", req, maxsplit=1)[0].lower()
+
+    assert sorted(map(name, _extra_requirements("postgres"))) == sorted(map(name, declared))
 
 
 @pytest.mark.parametrize("os_name, answers, want", [

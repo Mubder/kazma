@@ -76,20 +76,84 @@ def missing_for(extras: set[str], data: dict) -> set[str]:
     return needed_by_the_suite(data) - resolve(extras, optional, data["project"]["name"])
 
 
-def synced_extras(text: str) -> list[set[str]]:
-    """Each ``uv sync --extra ...`` a setup script runs."""
-    return [set(re.findall(r"--extra\s+([\w-]+)", m.group(0)))
-            for m in re.finditer(r"uv sync(?:\s+--extra\s+[\w-]+)+", text)]
+def default_extras(text: str) -> set[str]:
+    """The extras a setup script syncs on a fresh install (``$DefaultExtras``
+    in setup.ps1, ``DEFAULT_EXTRAS`` in setup.sh)."""
+    found = (re.search(r"\$DefaultExtras\s*=\s*@\(([^)]*)\)", text)
+             or re.search(r"^DEFAULT_EXTRAS=\(([^)]*)\)", text, re.M))
+    return set(re.findall(r"[\w-]+", found.group(1))) if found else set()
+
+
+#: What a ``kazma setup`` command configures Kazma to use, and the extra it
+#: needs: setup postgres writes KAZMA_DATABASE_URL (the drill VM, 2026-11-06:
+#: written into an environment without psycopg).
+EXTRAS_SETUP_CONFIGURES = {"postgres"}
 
 
 def test_every_sync_the_setup_scripts_run_holds_the_suite():
     data = _project()
-    found = 0
     for script in SETUP_SCRIPTS:
-        for extras in synced_extras((ROOT / script).read_text(encoding="utf-8")):
-            found += 1
-            assert not missing_for(extras, data), (script, sorted(extras), sorted(missing_for(extras, data)))
-    assert found >= 2, "each setup script syncs its extras with uv sync --extra"
+        extras = default_extras((ROOT / script).read_text(encoding="utf-8"))
+        assert extras, f"{script} names its default extras"
+        assert not missing_for(extras, data), (script, sorted(extras), sorted(missing_for(extras, data)))
+        assert EXTRAS_SETUP_CONFIGURES <= extras, (script, sorted(extras))
+
+
+#: A command line that runs uv sync (or tells the owner to): "uv sync" and
+#: an argument, never the word in "Sync Handshake (uv sync)" or "uv sync failed".
+_SYNC_COMMAND = re.compile(r"""uv sync(\s+(--?[\w-]+|@\w+|"?\$[{(\w]))""")
+
+
+def exact_syncs(text: str) -> list[int]:
+    """Lines of a shell or PowerShell script that run an exact ``uv sync``:
+    one that removes every package outside the extras it names. A line passes
+    with ``--inexact`` or the script's own sync arguments (``syncArgs`` /
+    ``SYNC_ARGS``, which start with it). Comments are not commands."""
+    lines = []
+    for number, line in enumerate(text.splitlines(), 1):
+        code = line.split("#", 1)[0] if not line.lstrip().startswith(("Log-", "log_")) else line
+        if line.lstrip().startswith("#"):
+            continue
+        if _SYNC_COMMAND.search(code) and "--inexact" not in code and not re.search(r"syncArgs|SYNC_ARGS", code):
+            lines.append(number)
+    return lines
+
+
+def _shipped_shell_scripts() -> list[Path]:
+    listed = subprocess.run(["git", "ls-files", "*.ps1", "*.sh"], cwd=ROOT, capture_output=True,
+                            text=True, timeout=60, check=True, stdin=subprocess.DEVNULL).stdout.split()
+    return [ROOT / name for name in listed]
+
+
+def test_no_shipped_script_runs_an_exact_sync():
+    """A re-run of setup removed every extra installed after its first run."""
+    scripts = _shipped_shell_scripts()
+    assert {p.name for p in scripts} >= {"setup.ps1", "setup.sh", "run.sh"}
+    for script in scripts:
+        assert exact_syncs(script.read_text(encoding="utf-8-sig")) == [], script.name
+    assert '$syncArgs = @("--inexact")' in (ROOT / "setup.ps1").read_text(encoding="utf-8-sig")
+    assert "SYNC_ARGS=(--inexact)" in (ROOT / "setup.sh").read_text(encoding="utf-8")
+    # Negative controls: the lines of before.
+    assert exact_syncs("uv sync --extra rag --extra dev --extra tui 2>&1 | tail -5\n") == [1]
+    assert exact_syncs('    Log-Info "Fix: uv sync --reinstall"\n') == [1]
+    assert exact_syncs('if uv sync --extra rag 2>&1 | tail -5; then\n') == [1]
+    assert exact_syncs('Log-Header "2. Sync Handshake (uv sync)"\nlog_fail "uv sync failed"\n# uv sync --all-extras\n') == []
+
+
+def test_a_rerun_syncs_the_extras_the_install_already_has(monkeypatch):
+    """Both scripts ask the venv which extras it holds, without the settings
+    store (it may be a Postgres that is not up while setup runs)."""
+    for script in SETUP_SCRIPTS:
+        assert "extras_in_this_environment" in (ROOT / script).read_text(encoding="utf-8-sig"), script
+    import kazma_core.config_store as config_store
+    from kazma_cli import update
+
+    def no_store():
+        raise AssertionError("setup must not open the settings store to read the extras")
+
+    monkeypatch.setattr(config_store, "get_config_store", no_store)
+    present = update.extras_in_this_environment()
+    assert "dev" in present, present  # pytest is installed here
 
 
 def test_the_dev_and_all_extras_hold_the_suite():

@@ -4022,7 +4022,23 @@ with the OS's package manager (winget, Homebrew, apt, dnf; WSL as its distro)
 as a service that starts at boot and restarts on failure, `listen_addresses =
 'localhost'`, creates `kazma` and the `kazma_app` role (`kazma_app_role.sql`),
 turns on WAL archiving, writes `KAZMA_DATABASE_URL` into `.env` (never
-printed, restricted) and records it in `<data dir>/setup_record.json`. No
+printed, restricted) and records it in `<data dir>/setup_record.json`.
+**Kazma's own driver first** (the drill VM, 2026-11-06: the address went into
+an environment without psycopg, and the server waited ten minutes on a
+database that was fine): when `postgres_pool.driver_missing()` says so, the
+plan's first step installs the `postgres` extra (`setup._extra_requirements`,
+read from the package's metadata) with `uv pip install --python
+<sys.executable>`, which adds and never removes; a second run on a set-up
+service does it too, and a failed install writes no `.env`. `--check` reports
+the driver. A missing driver is `PostgresDriverMissing`: the pool raises it
+at once, says it once at ERROR, its `reason` reaches the boot wait, the guard
+and the settings error (`DRIVER_MISSING`, what to run), and it is never an
+outage (`driver_missing` on the error, read first by
+`availability._outage_one`); a driver installed while the boot waits is found
+at the next try (import caches cleared). Gates:
+`tests/test_postgres_driver_missing.py`, the driver cases in
+`tests/test_setup_postgres.py` (the plan without the step as the negative
+control). No
 password on a command line (the Windows installer's throwaway one aside,
 replaced at once through psql's stdin); the superuser's is kept in
 `<install>/.kazma/postgres_superuser.pass` (a Kazma secret file). `--check`
@@ -4107,6 +4123,21 @@ holds `kazma[test]`**: pytest's addopts name `--timeout`, and without
 pytest-timeout pytest refused to start on every fresh install, `fast_test.py`
 too (`tests/test_setup_extras_run_the_suite.py`, the old `dev` list as the
 control); setup says pytest's own last line when it cannot collect.
+
+**A re-run of setup removes nothing** (the same day, the owner: "uv sync
+always removes what is there every time it is used again"). A plain `uv sync`
+makes the environment exactly the extras it names; `setup.ps1`/`setup.sh`
+ran one with rag, dev and tui, so a re-run removed whatever came after (the
+Postgres driver among it). Both now run `uv sync --inexact` with their
+defaults (`$DefaultExtras` / `DEFAULT_EXTRAS`: rag, dev, tui, postgres) plus
+every extra the venv already holds (`update.extras_in_this_environment`:
+import markers and the recorded file, never the settings store), and their
+fix-it hints repeat that same command. No shipped `.ps1`/`.sh` runs an exact
+sync, and the defaults hold the suite and what `kazma setup` configures:
+`tests/test_setup_extras_run_the_suite.py` (planted old lines as controls),
+and the 5.1 run in `tests/test_powershell_scripts_start.py` reads the
+arguments the stand-in uv received (`--inexact`, each extra once, one the
+venv held).
 
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 

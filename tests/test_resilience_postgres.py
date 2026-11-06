@@ -87,6 +87,28 @@ def test_its_own_sign_in_gets_in_and_names_a_refusal(monkeypatch):
     assert ok is False and reason
 
 
+def test_setup_sees_kazma_signed_in_on_the_new_server():
+    """``kazma setup postgres --move-from-container`` starts Kazma on the new
+    server and waits for its session there (``setup._kazma_signed_in``):
+    another session of the role counts, the check's own never does. The
+    negative control is the database with no other session."""
+    psycopg = pytest.importorskip("psycopg")
+    from kazma_cli import setup
+
+    dsn = _dsn()
+    name = f"kazma_signed_in_{uuid.uuid4().hex[:8]}"
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        admin.execute(f"CREATE DATABASE {name}")
+    url = _with_database(dsn, name)
+    try:
+        assert setup._kazma_signed_in(url, wait_s=0) is False, "its own session is not Kazma's"
+        with psycopg.connect(url, autocommit=True):
+            assert setup._kazma_signed_in(url, wait_s=0) is True
+    finally:
+        with psycopg.connect(dsn, autocommit=True) as admin:
+            admin.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
+
+
 # ── the move ──────────────────────────────────────────────────────────────
 
 

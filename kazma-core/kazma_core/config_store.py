@@ -3038,9 +3038,12 @@ def get_config_store() -> ConfigStore:
                     # During an outage the availability state has said it
                     # once (and pages after two minutes); every caller that
                     # tried meanwhile is not a new emergency.
+                    # A missing driver was said once, by the pool (it is no
+                    # outage, so the availability state does not say it).
+                    said = (getattr(last_exc, "driver_missing", False)
+                            or _availability.note_failure("settings", last_exc))
                     logger.log(
-                        logging.DEBUG if _availability.note_failure("settings", last_exc)
-                        else logging.CRITICAL,
+                        logging.DEBUG if said else logging.CRITICAL,
                         "ConfigStore initialization failed: %s", error,
                     )
                     # Leave the singleton unset. The guard's next boot, or

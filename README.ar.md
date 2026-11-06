@@ -89,7 +89,7 @@ docker compose up -d --build
 ```bash
 # uv
 uv venv --python 3.13
-uv sync --extra rag --extra dev --extra tui     # or: uv sync --all-extras
+uv sync --inexact --extra rag --extra dev --extra tui --extra postgres     # or: uv sync --all-extras
 
 # pip — Linux / macOS / WSL
 python3 -m venv .venv && source .venv/bin/activate

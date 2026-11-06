@@ -43,7 +43,7 @@ source .venv/bin/activate
 # Same extras as setup.sh / setup.ps1 (rag + tests + TUI).
 # There is no [cli] extra — kazma-cli is in the wheel.
 pip install -e ".[rag,dev,tui]"
-# or: uv sync --extra rag --extra dev --extra tui
+# or: uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
 ```
 
 `uv sync` here is for a **first install** into a fresh environment. On an

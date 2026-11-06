@@ -175,11 +175,27 @@ fi
 
 log_header "2. Sync Handshake (uv sync)"
 
-# rag = vector memory; dev = tests/lint; tui = kazma-tui.
+# rag = vector memory; dev = tests/lint; tui = kazma-tui; postgres = the
+# driver for the database `kazma setup postgres` sets up.
 # There is no [cli] extra — kazma-cli is a first-class package in the wheel.
-# Full set: uv sync --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
-if uv sync --extra rag --extra dev --extra tui 2>&1 | tail -5; then
-    log_ok "Environment synced from pyproject.toml (rag + dev + tui extras)"
+# Full set: uv sync --inexact --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
+#
+# --inexact, and every extra the install already has: a plain `uv sync`
+# makes the environment exactly the extras it names and removes the rest, so
+# a re-run of this script removed whatever was installed after the first run
+# (the drill VM, 2026-11-06: the Postgres driver, with KAZMA_DATABASE_URL set).
+DEFAULT_EXTRAS=(rag dev tui postgres)
+EXTRAS=("${DEFAULT_EXTRAS[@]}")
+if [[ -x .venv/bin/python ]]; then
+    PRESENT=$(.venv/bin/python -I -c "from kazma_cli.update import extras_in_this_environment as e; print(' '.join(e()))" 2>/dev/null || true)
+    for x in $PRESENT; do
+        [[ " ${EXTRAS[*]} " == *" $x "* ]] || EXTRAS+=("$x")
+    done
+fi
+SYNC_ARGS=(--inexact)
+for x in "${EXTRAS[@]}"; do SYNC_ARGS+=(--extra "$x"); done
+if uv sync "${SYNC_ARGS[@]}" 2>&1 | tail -5; then
+    log_ok "Environment synced from pyproject.toml (extras: ${EXTRAS[*]})"
 else
     SYNC_EXIT=$?
     log_fail "uv sync failed (exit code $SYNC_EXIT)"
@@ -221,7 +237,7 @@ log_header "3. Foundation Integrity Check"
 VENV_PYTHON=".venv/bin/python"
 if [[ ! -f "$VENV_PYTHON" ]]; then
     log_fail "Virtual environment not found at .venv/"
-    log_info "uv sync may have failed silently. Try: uv sync --verbose"
+    log_info "uv sync may have failed silently. Try: uv sync ${SYNC_ARGS[*]} --verbose"
     exit 1
 fi
 
@@ -248,7 +264,7 @@ check_import "textual"          "textual (TUI)"
 if [[ "$INTRO_ERRORS" -gt 0 ]]; then
     echo ""
     log_fail "$INTRO_ERRORS core import(s) failed"
-    log_info "Fix: uv sync --reinstall"
+    log_info "Fix: uv sync ${SYNC_ARGS[*]} --reinstall"
     exit 1
 fi
 
@@ -292,7 +308,7 @@ log_info "Run Web UI:     .venv/bin/kazma serve          # http://127.0.0.1:9090
 log_info "Run TUI:        .venv/bin/kazma-tui"
 log_info "Run tests:      .venv/bin/python scripts/fast_test.py"
 log_info "Watch/reload:   .venv/bin/python scripts/service/kazma_guard.py --install"
-log_info "Everything:     uv sync --all-extras"
+log_info "Everything:     uv sync --inexact --all-extras"
 log_info "Docs:           https://github.com/Mubder/kazma"
 echo ""
 echo -e "${GREEN}🇰🇼 كاظمه — Built to remember. Built to last.${NC}"

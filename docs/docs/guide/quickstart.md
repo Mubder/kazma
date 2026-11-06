@@ -50,7 +50,8 @@ chmod +x setup.sh
 ```
 
 The script: requires Python 3.11+, installs `uv` if missing, runs
-`uv sync --extra rag --extra dev --extra tui`, copies `.env.example` → `.env`
+`uv sync --inexact --extra rag --extra dev --extra tui --extra postgres` (plus
+every extra the install already has, so a re-run removes nothing), copies `.env.example` → `.env`
 when needed, and import-checks LangGraph / aiosqlite / textual. It does **not**
 install `[all]` (that pulls torch, Playwright, WeasyPrint, Temporal, E2B).
 
@@ -106,7 +107,7 @@ source .venv/bin/activate
 
 ```bash
 # Same extras as the bootstrap scripts:
-uv sync --extra rag --extra dev --extra tui
+uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
 # or:
 pip install -e ".[rag,dev,tui]"
 # Everything:
