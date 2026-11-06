@@ -4025,9 +4025,11 @@ and `--dry-run` change nothing; a second run repairs and never reinstalls;
 `--move-from-container NAME` switches Kazma in ONE run (`setup._MoveHold`):
 Kazma stopped through its guard once idle, the container's data copied in
 (`backup/pg_move.py`: dump inside the container, `pg_restore` as
-`kazma_app`, every Kazma table's row count compared), `.env` written, Kazma
-started on the new server and seen signed in there, the container stopped
-and kept. Live 2026-11-06 the first move copied while Kazma kept writing to
+`kazma_app`, every Kazma table's row count compared), `.env` written, the
+memory backends' own addresses that name the container repointed through
+the vault (`setup._repoint_memory_backends`: the mirror has no fallback to
+`KAZMA_DATABASE_URL`), Kazma started on the new server and seen signed in
+there, the container stopped and kept. Live 2026-11-06 the first move copied while Kazma kept writing to
 the container and said "reload when idle": the next restart would have
 started Kazma on a copy missing everything since. A second run replaces an
 earlier copy only when Kazma never started on it (`pg_move._replace_refusal`:

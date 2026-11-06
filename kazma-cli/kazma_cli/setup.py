@@ -360,6 +360,85 @@ def _kazma_signed_in(url: str, *, wait_s: float = _SIGN_IN_WAIT_S) -> bool:
         time.sleep(2.0)
 
 
+#: Memory backend addresses that keep their own copy of a database address
+#: (no fallback to KAZMA_DATABASE_URL): repointed when they name the container.
+_MEMORY_ADDRESS_KEYS = ("memory.backends.state.url", "memory.backends.vector.url")
+
+
+def _container_port(name: str, *, run=subprocess.run) -> int | None:
+    """The port on this machine the container publishes its Postgres on."""
+    from kazma_core.docker_cli import find_docker_cli
+
+    docker = find_docker_cli()
+    if not docker:
+        return None
+    try:
+        done = run([docker, "port", name, "5432/tcp"], capture_output=True, text=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in (done.stdout or "").splitlines() if done.returncode == 0 else []:
+        port = line.strip().rsplit(":", 1)[-1]
+        if port.isdigit():
+            return int(port)
+    return None
+
+
+def _names_container(address: str | None, port: int, database: str) -> bool:
+    """*address* is the container's database on this machine."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(address or "")
+        return (parts.scheme.startswith("postgres") and parts.hostname in ("127.0.0.1", "localhost", "::1")
+                and parts.port == port and (parts.path or "").lstrip("/") == database)
+    except ValueError:
+        return False
+
+
+def _repoint_memory_backends(container: str, new_url: str, *, run=subprocess.run) -> tuple[list[str], list[str]]:
+    """Each memory backend address that names the container's database,
+    pointed at the new server. ``(changed, by_hand)``: the keys changed in the
+    vault, and those stored in plain text that must be set in Settings.
+
+    The memory mirror keeps its own address (FA-218): left on the container,
+    it would write to a database nothing else reads, or fail once the
+    container is stopped. Read from the new server's own settings (the copy),
+    changed only through the vault, where Kazma keeps these addresses."""
+    import json
+    from urllib.parse import urlsplit
+
+    import psycopg
+
+    from kazma_core.security.vault import get_vault
+
+    port = _container_port(container, run=run)
+    if port is None:
+        return [], []
+    database = (urlsplit(new_url).path or "/kazma").lstrip("/")
+    vault = get_vault()
+    changed: list[str] = []
+    by_hand: list[str] = []
+    with psycopg.connect(new_url, connect_timeout=10, autocommit=True) as conn:
+        for key in _MEMORY_ADDRESS_KEYS:
+            row = conn.execute("SELECT value FROM kazma_settings WHERE key = %s", (key,)).fetchone()
+            if not row:
+                continue
+            try:
+                stored = json.loads(row[0])
+            except (TypeError, ValueError):
+                stored = row[0]
+            if not isinstance(stored, str):
+                continue
+            if stored.startswith("vault://") and vault is not None:
+                name = stored[len("vault://"):]
+                if _names_container(vault.retrieve(name), port, database):
+                    vault.store(name, new_url)
+                    changed.append(key)
+            elif _names_container(stored, port, database):
+                by_hand.append(key)
+    return changed, by_hand
+
+
 def _stop_container(name: str, *, run=subprocess.run) -> bool:
     """The container stopped and kept (never removed): it is the way back."""
     from kazma_core.docker_cli import find_docker_cli
@@ -478,6 +557,13 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
             hold.resume()
         return 1
     _say("-> Kazma signs in as kazma_app (not a superuser).")
+    if container and not options.no_env:
+        changed, by_hand = _repoint_memory_backends(container, url, run=run)
+        for key in changed:
+            _say(f"-> {key} pointed at the new server (it named the container)")
+        for key in by_hand:
+            _say(f"   {key} names the container and is stored in plain text: set it to the new server in "
+                 "Settings -> Memory.")
     pgs.write_record(pgs.PostgresRecord(
         os=platform.os, manager=platform.manager, service=service, port=options.port,
         bin_dir=pgs.bin_dir_for(platform), wal_archive_dir=str(archive_dir), installed_at=__import__("time").time()))

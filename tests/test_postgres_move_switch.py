@@ -81,6 +81,7 @@ def switched_once(install, monkeypatch):  # noqa: F811 - the imported fixture
     (install / ".env").write_text(f"KAZMA_DATABASE_URL={url}\n", encoding="utf-8")
     monkeypatch.setattr(pgs, "is_admin", lambda: False)  # a plain terminal
     monkeypatch.setattr("kazma_core.docker_cli.find_docker_cli", lambda: "docker")
+    monkeypatch.setattr("kazma_cli.setup._repoint_memory_backends", lambda container, url, **kw: ([], []))
     return install
 
 
@@ -101,6 +102,8 @@ def test_a_move_stops_kazma_before_the_copy_and_starts_it_on_the_new_database(sw
     events: list[str] = []
     monkeypatch.setattr(pg_move, "move_from_container", _fake_move(events))
     monkeypatch.setattr(setup, "_kazma_signed_in", lambda url, **kw: events.append("seen") or True)
+    monkeypatch.setattr(setup, "_repoint_memory_backends",
+                        lambda container, url, **kw: events.append("repoint") or (["memory.backends.state.url"], []))
     env_before = (switched_once / ".env").read_bytes()
     runner = _healthy_runner()
     hold = _Hold(events)
@@ -108,7 +111,8 @@ def test_a_move_stops_kazma_before_the_copy_and_starts_it_on_the_new_database(sw
     code = setup._setup_postgres(_options(move_from_container="kazma-db-win"), run=runner, hold=hold)
 
     assert code == 0, capsys.readouterr().out
-    assert events == ["stop", "copy", "resume", "seen"]
+    # The memory mirror's own address is repointed while Kazma is still stopped.
+    assert events == ["stop", "copy", "repoint", "resume", "seen"]
     # The container is stopped only after Kazma was seen on the new server, and kept.
     docker = [c["argv"] for c in runner.calls if c["argv"][:1] == ["docker"]]
     assert docker == [["docker", "update", "--restart=no", "kazma-db-win"], ["docker", "stop", "kazma-db-win"]]
@@ -284,3 +288,71 @@ def test_the_empty_steps_drop_without_force_and_hand_the_database_to_kazma_app()
     assert steps[1].stdin == "-- role" and steps[1].argv[-1] == "kazma"
     assert all(s.env == {"PGPASSWORD": "S-1"} and "S-1" not in " ".join(s.argv) for s in steps)
     assert not any(s.admin for s in steps)
+
+
+# -- the memory mirror keeps its own address: repointed when it names the container ---------------
+
+
+def test_an_address_names_the_container_by_its_published_port_and_database():
+    from kazma_cli.setup import _names_container
+
+    assert _names_container("postgresql://kazma_app:pw@127.0.0.1:5433/kazma", 5433, "kazma")
+    assert _names_container("postgres://u@localhost:5433/kazma", 5433, "kazma")
+    assert not _names_container("postgresql://kazma_app:pw@127.0.0.1:5432/kazma", 5433, "kazma")
+    assert not _names_container("postgresql://u@db.example.com:5433/kazma", 5433, "kazma")
+    assert not _names_container("postgresql://u@127.0.0.1:5433/other", 5433, "kazma")
+    assert not _names_container("bolt://localhost:7687", 5433, "kazma") and not _names_container(None, 5433, "kazma")
+
+
+def test_the_mirror_addresses_that_named_the_container_are_repointed_through_the_vault(monkeypatch):
+    """The live shape: state and vector URLs as vault pointers to the
+    container's port; a third stored in plain text is left for Settings."""
+    import json
+
+    psycopg = pytest.importorskip("psycopg")
+    from kazma_cli import setup
+
+    old = "postgresql://kazma_app:old-pw@127.0.0.1:5433/kazma"
+    new = pgs.database_url(NEW_URL_PW, 5432)
+    rows = {"memory.backends.state.url": json.dumps("vault://cfg:memory.backends.state.url"),
+            "memory.backends.vector.url": json.dumps(old)}
+    secrets = {"cfg:memory.backends.state.url": old}
+    stored: dict[str, str] = {}
+
+    class _Vault:
+        def retrieve(self, name):
+            return secrets.get(name)
+
+        def store(self, name, value, **kw):
+            stored[name] = value
+            return name
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, params=()):
+            value = rows.get(params[0]) if params else None
+            return type("R", (), {"fetchone": lambda self: (value,) if value is not None else None})()
+
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: _Conn())
+    monkeypatch.setattr("kazma_core.security.vault.get_vault", lambda: _Vault())
+    monkeypatch.setattr("kazma_core.docker_cli.find_docker_cli", lambda: "docker")
+
+    def run(argv, **kw):
+        assert argv[1:] == ["port", "kazma-db-win", "5432/tcp"]
+        return subprocess.CompletedProcess(argv, 0, "127.0.0.1:5433\n", "")
+
+    changed, by_hand = setup._repoint_memory_backends("kazma-db-win", new, run=run)
+    assert changed == ["memory.backends.state.url"] and stored == {"cfg:memory.backends.state.url": new}
+    assert by_hand == ["memory.backends.vector.url"]
+
+    # Pointing elsewhere already: nothing changes.
+    secrets["cfg:memory.backends.state.url"] = new
+    stored.clear()
+    rows.pop("memory.backends.vector.url")
+    assert setup._repoint_memory_backends("kazma-db-win", new, run=run) == ([], [])
+    assert stored == {}

@@ -254,9 +254,11 @@ Run again, the command replaces an earlier copy on the new server only if
 Kazma never started on it (its last start there is not newer than the
 container's) and nothing is connected to it; a database Kazma has started on
 is never written over. On a healthy service whose address `.env` already
-names, a second run is the move only and needs no elevated terminal. Point
-the memory mirror's address (`memory.backends.state.url`) at the same server
-if it has its own.
+names, a second run is the move only and needs no elevated terminal. The
+memory mirror keeps its own address (`memory.backends.state.url`, and
+`memory.backends.vector.url`): the move points each one that names the
+container at the new server, while Kazma is stopped. One stored in plain text
+instead of the vault is named, for you to change in Settings.
 
 **Disks that ask for a password at boot.** A Mac with FileVault on, a Windows
 PC whose BitLocker asks for a PIN, and a Linux disk encrypted with LUKS that
