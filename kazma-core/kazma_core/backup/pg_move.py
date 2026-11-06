@@ -144,7 +144,7 @@ def move_from_container(container: str, dest_url: str, *, port: int,
     # Which Kazma tables the container holds (a table a feature never made is not compared).
     listed = run([docker, "exec", container, "psql", "-U", user, "-d", database, "-At", "-c",
                   "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"],
-                 capture_output=True, text=True, timeout=120, check=False)
+                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, check=False)
     if listed.returncode != 0:
         say(f"The container's tables could not be listed (exit {listed.returncode}).")
         return False
@@ -163,7 +163,7 @@ def move_from_container(container: str, dest_url: str, *, port: int,
         if "kazma_settings" in present:
             stamp = run([docker, "exec", container, "psql", "-U", user, "-d", database, "-At", "-c",
                          f"SELECT value FROM kazma_settings WHERE key = '{BOOT_KEY}'"],
-                        capture_output=True, text=True, timeout=120, check=False)
+                        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, check=False)
             container_boot = _boot_time(stamp.stdout) if stamp.returncode == 0 else None
         refusal = _replace_refusal(container_boot, target_boot, others)
         if refusal:
@@ -178,7 +178,7 @@ def move_from_container(container: str, dest_url: str, *, port: int,
         say(f"-> Dumping {database} from container {container}")
         with dump.open("wb") as fh:
             done = run([docker, "exec", container, "pg_dump", "-U", user, "-d", database, "-Fc",
-                        "--no-owner", "--no-privileges"], stdout=fh, stderr=subprocess.PIPE,
+                        "--no-owner", "--no-privileges"], stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.PIPE,
                        timeout=3600, check=False)
         if done.returncode != 0 or dump.stat().st_size == 0:
             say(f"The dump failed (exit {done.returncode}).")
@@ -193,8 +193,8 @@ def move_from_container(container: str, dest_url: str, *, port: int,
         env = {**os.environ, "PGPASSWORD": unquote(parts.password or "")}
         done = run([pg_restore, "-h", "127.0.0.1", "-p", str(port), "-U", unquote(parts.username or ""),
                     "-d", (parts.path or "/kazma").lstrip("/"), "--no-owner", "--no-privileges",
-                    "--single-transaction", "--exit-on-error", str(dump)],
-                   capture_output=True, text=True, env=env, timeout=3600, check=False)
+                    "--single-transaction", "--exit-on-error", "--no-password", str(dump)],
+                   stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env, timeout=3600, check=False)
         if done.returncode != 0:
             said = ((done.stderr or "").strip().splitlines() or [""])[-1][:300]
             say(f"The restore failed (exit {done.returncode}): {said}")
@@ -205,7 +205,7 @@ def move_from_container(container: str, dest_url: str, *, port: int,
         return True
     sql = _count_sql(tables)
     source = run([docker, "exec", container, "psql", "-U", user, "-d", database, "-At", "-F", "|", "-c", sql],
-                 capture_output=True, text=True, timeout=600, check=False)
+                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600, check=False)
     import psycopg
 
     with psycopg.connect(dest_url, connect_timeout=10, autocommit=True) as conn:

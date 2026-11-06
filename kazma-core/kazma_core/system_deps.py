@@ -26,14 +26,15 @@ import shutil
 import subprocess
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from kazma_core.postgres_service import Platform, Step
 
 __all__ = ["DEPENDENCIES", "PACKAGES", "TESSDATA", "DepState", "check_all", "fetch_tessdata",
-           "freshclam_agent_plist", "install_plan", "record_system", "tessdata_folder"]
+           "freshclam_agent_plist", "install_plan", "installs_package", "package_is_in",
+           "record_system", "tessdata_folder"]
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -108,8 +109,8 @@ class DepState:
 
 def _out(run: Runner, argv: list[str], timeout: float = 30) -> tuple[int, str]:
     try:
-        done = run(argv, capture_output=True, text=True, timeout=timeout, check=False,
-                   encoding="utf-8", errors="replace")
+        done = run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
+                   check=False, encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError):
         return 127, ""
     return done.returncode, (done.stdout or "") + (done.stderr or "")
@@ -217,8 +218,10 @@ def check_all(platform: Platform, *, run: Runner = subprocess.run,
 def _install(platform: Platform, packages: tuple[str, ...]) -> tuple[str, ...]:
     manager = platform.manager
     if manager == "winget":
-        return ("winget", "install", "--exact", "--silent", "--accept-package-agreements",
-                "--accept-source-agreements", "--id", packages[0])
+        # --disable-interactivity: winget asks nothing (it has no keyboard here,
+        # kazma_cli.setup._run_step gives it none).
+        return ("winget", "install", "--exact", "--silent", "--disable-interactivity",
+                "--accept-package-agreements", "--accept-source-agreements", "--id", packages[0])
     if manager == "brew":
         return ("brew", "install", *packages)
     if manager == "apt":
@@ -229,6 +232,10 @@ def _install(platform: Platform, packages: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _freshclam_steps(platform: Platform) -> list[Step]:
+    return [replace(step, dep="malware") for step in _freshclam_commands(platform)]
+
+
+def _freshclam_commands(platform: Platform) -> list[Step]:
     if platform.os == "windows":
         exe = str(Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "ClamAV" / "freshclam.exe")
         return [Step("refresh the malware signatures daily",
@@ -257,18 +264,39 @@ def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
             steps.extend(_freshclam_steps(platform))
             continue
         if state.name == "ocr" and platform.manager == "winget" and state.missing != ["tesseract"]:
-            steps.extend(Step(f"download Tesseract's {lang} model", action=f"tessdata:{lang}")
+            steps.extend(Step(f"download Tesseract's {lang} model", action=f"tessdata:{lang}", dep="ocr")
                          for lang in state.missing if lang in TESSDATA)
             continue
         if packages is None:
             continue
         steps.append(Step(f"install {LABELS[state.name]}", _install(platform, packages),
-                          admin=platform.manager in ("winget",)))
+                          admin=platform.manager in ("winget",), dep=state.name))
         if state.name == "ocr" and platform.manager == "winget":
-            steps.extend(Step(f"download Tesseract's {lang} model", action=f"tessdata:{lang}") for lang in TESSDATA)
+            steps.extend(Step(f"download Tesseract's {lang} model", action=f"tessdata:{lang}", dep="ocr")
+                         for lang in TESSDATA)
         if state.name == "malware":
             steps.extend(_freshclam_steps(platform))
     return steps
+
+
+#: The name each check puts in ``missing`` while the dependency's own package
+#: is not installed (the models and the signature schedule come after it).
+_PACKAGE_MISSING = {"ocr": "tesseract", "office": "libreoffice", "malware": "clamav", "fonts": "fonts",
+                    "docker": "docker"}
+
+
+def installs_package(step: Step) -> bool:
+    """Whether *step* is the one that installs its dependency's package (not a
+    model download or the signature schedule that follows it)."""
+    return bool(step.dep) and step.title == f"install {LABELS.get(step.dep, step.dep)}"
+
+
+def package_is_in(state: DepState) -> bool:
+    """Whether the dependency's package is installed now, whatever is still
+    missing after it. An installer can fail after it installed (winget answers
+    a cancelled or interrupted run with an error), so a failed install step is
+    judged by a check, never by its exit code alone."""
+    return state.ok is not False or _PACKAGE_MISSING.get(state.name, state.name) not in state.missing
 
 
 def fetch_tessdata(lang: str, folder: Path, *, opener: Callable[..., Any] = urllib.request.urlopen) -> Path:

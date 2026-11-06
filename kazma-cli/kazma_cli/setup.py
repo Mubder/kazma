@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import secrets
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -119,15 +121,39 @@ def _role_sql() -> str:
     return (get_project_root() / "deploy" / "postgres" / "kazma_app_role.sql").read_text(encoding="utf-8")
 
 
+#: A line of an installer's progress display: bars, a spinner, "59.0 MB /
+#: 358 MB", "45%". winget redraws one such line per megabyte.
+_PROGRESS_LINE = re.compile(
+    r"^[\s▀-▟\-\\|/.]*"
+    r"(\d+(\.\d+)?\s*[KMGT]?i?B\s*/\s*\d+(\.\d+)?\s*[KMGT]?i?B|\d{1,3}(\.\d+)?\s*%)?[\s▀-▟]*$")
+
+
+def _readable(output: str) -> str:
+    """An installer's output without its progress display: what it SAID."""
+    lines = re.split(r"[\r\n]+", output)
+    return "\n".join(line.rstrip() for line in lines if not _PROGRESS_LINE.match(line)).strip()
+
+
+def _exit_text(code: int) -> str:
+    """An exit code as Windows documents it: an HRESULT (winget's are) in hex."""
+    return f"0x{code & 0xFFFFFFFF:08X}" if code >= 0x80000000 or code < -0x10000 else str(code)
+
+
 def _run_step(step, secrets_: list[str], *, run=subprocess.run) -> tuple[bool, str]:
     env = {**os.environ, **step.env}
+    # A step reads what it is given, or nothing: an installer handed the
+    # terminal waited for a key nobody knew it wanted (the drill VM,
+    # 2026-11-06: "I need to press enter to move to the next step").
+    feed = {"input": step.stdin} if step.stdin is not None else {"stdin": subprocess.DEVNULL}
     try:
-        done = run(list(step.argv), input=step.stdin, capture_output=True, text=True,
-                   env=env, timeout=1800, check=False)
+        # UTF-8: winget, apt and brew write it whatever the console's code page;
+        # read as the ANSI code page, winget's own messages came back garbled.
+        done = run(list(step.argv), **feed, capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", env=env, timeout=1800, check=False)
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"could not run: {type(exc).__name__}"
-    out = _scrub(((done.stdout or "") + (done.stderr or "")).strip(), secrets_)
-    return done.returncode in step.ok_codes, f"exit {done.returncode}" + (f": {out[-600:]}" if out else "")
+    out = _scrub(_readable((done.stdout or "") + "\n" + (done.stderr or "")), secrets_)
+    return done.returncode in step.ok_codes, f"exit {_exit_text(done.returncode)}" + (f": {out[-600:]}" if out else "")
 
 
 def _print_check(platform, record: dict, state: dict | None) -> int:
@@ -186,18 +212,43 @@ def _print_states(states) -> int:
     return problems
 
 
-def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platform=None, finders=None) -> int:
+#: How often ``kazma setup system`` tries a step, and how long it waits in
+#: between. A download can be cut off (live 2026-11-06, a fresh VM: winget
+#: answered 0x80004004 "Cancelled" at 59 of 358 MB of LibreOffice), and a
+#: second run usually goes through.
+_SYSTEM_ATTEMPTS = 3
+_SYSTEM_RETRY_WAIT_S = 15.0
+
+
+def _ask(ask, question: str) -> str:
+    try:
+        return ask(question)
+    except EOFError:  # no terminal to answer from: no
+        return ""
+
+
+def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platform=None, finders=None,
+                  sleep=time.sleep) -> int:
     """``kazma setup system`` (resilience plan K2): check, show the plan, ask,
-    install what is missing, record it. A second run finds nothing to do."""
+    install what is missing, record it. A second run finds nothing to do.
+
+    A failed step is tried again (:data:`_SYSTEM_ATTEMPTS`); a failed install
+    whose package is there after all counts as done (an installer can fail
+    after it installed). A dependency that still fails stops only its own
+    later steps (Tesseract's models, ClamAV's schedule): the others are
+    installed, and the end names what did not."""
     import shutil as _shutil
 
     from kazma_core import postgres_service as pgs
     from kazma_core.system_deps import (
+        LABELS,
         DepState,
         check_all,
         fetch_tessdata,
         freshclam_agent_plist,
         install_plan,
+        installs_package,
+        package_is_in,
         record_system,
         tessdata_folder,
     )
@@ -227,41 +278,68 @@ def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platfor
     if platform.os == "windows" and any(s.admin for s in steps) and not pgs.is_admin():
         _say("Run this from an elevated terminal (Run as administrator): installing needs it.")
         return 2
-    if not options.yes and ask("Go ahead? [y/N] ").strip().lower() not in ("y", "yes"):
+    if not options.yes and _ask(ask, "Install what is missing now? [y/N] ").strip().lower() not in ("y", "yes"):
         _say("Nothing was done.")
         return 1
-    for step in steps:
-        _say(f"-> {step.title}")
+
+    def do(step) -> tuple[bool, str]:
         if step.action.startswith("tessdata:"):
             folder = tessdata_folder(which)
             try:
                 if folder is None:
                     raise ValueError("tesseract was not found after its install")
                 fetch_tessdata(step.action.split(":", 1)[1], folder)
-                ok, detail = True, ""
+                return True, ""
             except (OSError, ValueError) as exc:
-                ok, detail = False, str(exc)
-        elif step.action == "freshclam_agent":
+                return False, str(exc)
+        if step.action == "freshclam_agent":
             freshclam = which("freshclam") or "/opt/homebrew/bin/freshclam"
             agent = Path.home() / "Library" / "LaunchAgents" / "ai.kazma.freshclam.plist"
             try:
                 agent.parent.mkdir(parents=True, exist_ok=True)
                 agent.write_text(freshclam_agent_plist(freshclam), encoding="utf-8")
-                ok, detail = _run_step(type(step)("load it", ("launchctl", "load", "-w", str(agent))), [], run=run)
+                return _run_step(type(step)("load it", ("launchctl", "load", "-w", str(agent))), [], run=run)
             except OSError as exc:
-                ok, detail = False, str(exc)
-        else:
-            ok, detail = _run_step(step, [], run=run)
+                return False, str(exc)
+        return _run_step(step, [], run=run)
+
+    def installed_anyway(step) -> bool:
+        if not installs_package(step):
+            return False
+        found = {s.name: s for s in check_all(platform, run=run, which=which, **(finders or {}))}
+        return step.dep in found and package_is_in(found[step.dep])
+
+    failed_deps: set[str] = set()
+    not_done: list[str] = []
+    for step in steps:
+        if step.dep in failed_deps:
+            _say(f"-> {step.title}: not done ({LABELS[step.dep]} did not install)")
+            not_done.append(step.title)
+            continue
+        _say(f"-> {step.title}")
+        ok, detail = False, ""
+        for attempt in range(1, _SYSTEM_ATTEMPTS + 1):
+            ok, detail = do(step)
+            if not ok and installed_anyway(step):
+                _say(f"   installed, though the installer answered {detail.split(':', 1)[0]}")
+                ok = True
+            if ok or attempt == _SYSTEM_ATTEMPTS:
+                break
+            _say(f"   failed ({detail.split(':', 1)[0]}); trying again in {_SYSTEM_RETRY_WAIT_S:.0f} s"
+                 f" (attempt {attempt + 1} of {_SYSTEM_ATTEMPTS})")
+            sleep(_SYSTEM_RETRY_WAIT_S)
         if not ok:
-            _say(f"   FAILED: {detail}")
-            _say("Nothing past this step was done. Fix it and run kazma setup system again.")
-            record_system(check_all(platform, run=run, which=which, **(finders or {})))
-            return 1
+            _say(f"   FAILED after {_SYSTEM_ATTEMPTS} attempts: {detail}")
+            not_done.append(step.title)
+            if step.dep:
+                failed_deps.add(step.dep)
     after = check_all(platform, run=run, which=which, **(finders or {}))
     record_system(after)
     _say("After the install:")
     left = _print_states(after)
-    return 0 if not left else 1
+    if not_done:
+        _say("Not done: " + "; ".join(not_done) + ". Run kazma setup system again to finish.")
+    return 0 if not left and not not_done else 1
 
 
 #: The pause ``--move-from-container`` asks Kazma's guard for while it copies.
@@ -373,7 +451,8 @@ def _container_port(name: str, *, run=subprocess.run) -> int | None:
     if not docker:
         return None
     try:
-        done = run([docker, "port", name, "5432/tcp"], capture_output=True, text=True, timeout=60, check=False)
+        done = run([docker, "port", name, "5432/tcp"], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                   timeout=60, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     for line in (done.stdout or "").splitlines() if done.returncode == 0 else []:
@@ -448,7 +527,7 @@ def _stop_container(name: str, *, run=subprocess.run) -> bool:
         return False
     for argv in ([docker, "update", "--restart=no", name], [docker, "stop", name]):
         try:
-            done = run(argv, capture_output=True, text=True, timeout=120, check=False)
+            done = run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, check=False)
         except (OSError, subprocess.SubprocessError):
             return False
         if done.returncode != 0:
