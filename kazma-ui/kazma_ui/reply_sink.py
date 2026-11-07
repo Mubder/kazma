@@ -117,6 +117,10 @@ CLIENT_ROW_FIELDS: tuple[str, ...] = (
 SERVER_ROW_FIELDS: dict[str, str] = {
     _LIFECYCLE: "the client reads the legacy `open` flag written beside it",
     "kind": "an instant turn's origin (a capacity reply); no client reads it",
+    "run_model": (
+        "the model the turn ran with; a client that names none continues with "
+        "it (sse_chat). `model` is the one that answered, shown on the reply"
+    ),
 }
 
 #: A turn's lifecycle is a JOIN-SEMILATTICE, not a field: it only ever moves
@@ -439,6 +443,7 @@ def upsert_reply(
     activity: list[dict[str, Any]] | None = None,
     parts: list[dict[str, Any]] | None = None,
     model: str | None = None,
+    run_model: str | None = None,
     tokens: int | None = None,
     cost: float | None = None,
     duration_ms: float | None = None,
@@ -540,6 +545,8 @@ def upsert_reply(
                 row["activity"] = list(activity)
             if model:
                 row["model"] = str(model)
+            if run_model:
+                row["run_model"] = str(run_model)
             if tokens is not None:
                 row["tokens"] = int(tokens or 0)
             if cost is not None:

@@ -706,14 +706,20 @@ def create_sse_chat_router(
             )
 
         # ── Per-turn model pin (does NOT mutate the process-wide registry)
+        # A client that names no model continues with the model the chat's
+        # last turn RAN with (``run_model``), never the one that answered it
+        # (``model``, FA-210): after a failover that is the backup, and the
+        # name a provider gives its answer need not be one Kazma can call.
+        # ``model`` alone on a row stored before the two were told apart.
         requested_model = (body.get("model") or "").strip()
         if not requested_model:
             try:
                 for _m in reversed(session.messages or []):
-                    if isinstance(_m, dict) and _m.get("role") == "assistant" and _m.get("model"):
-                        requested_model = str(_m.get("model") or "").strip()
-                        if requested_model:
-                            break
+                    if not (isinstance(_m, dict) and _m.get("role") == "assistant"):
+                        continue
+                    requested_model = str(_m.get("run_model") or _m.get("model") or "").strip()
+                    if requested_model:
+                        break
             except Exception:
                 pass
         if requested_model:
@@ -1197,7 +1203,8 @@ def create_sse_chat_router(
                     activity=activity_of(parts) or activity_log or None,
                     parts=parts,
                     streamed_text=streamed,
-                    model=_turn_model or None,
+                    model=turn_usage.get("model") or _turn_model or None,
+                    run_model=_turn_model or None,
                     thread_id=thread_id,
                 )
 
@@ -1324,6 +1331,11 @@ def create_sse_chat_router(
                             turn_usage["tokens"] = data.get("tokens")
                         if data.get("cost") is not None:
                             turn_usage["cost"] = data.get("cost")
+                        # The model that answered (FA-210). This save comes
+                        # after the pump's and replaced its model with the one
+                        # requested: live said "harness", reload "harness-model".
+                        if data.get("model"):
+                            turn_usage["model"] = str(data.get("model"))
                         # A turn that paused for approval is NOT finished —
                         # its row must stay open so the approve request can
                         # find it after a restart.
@@ -1377,7 +1389,8 @@ def create_sse_chat_router(
                         activity=activity_of(parts) or activity_log or None,
                         parts=parts,
                         streamed_text=content_acc,
-                        model=_turn_model or None,
+                        model=turn_usage.get("model") or _turn_model or None,
+                        run_model=_turn_model or None,
                         tokens=turn_usage.get("tokens"),
                         cost=turn_usage.get("cost"),
                         thread_id=thread_id,

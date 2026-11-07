@@ -8970,12 +8970,17 @@ has a gate that fails on the old code.
   unusable answer -- and lists only this turn's tools that ran
   (`graph_respond._stop_cause`, `plan_fence.running_turn`); a tool call cut
   off twice ends the turn. The `done` frame names the model that answered
-  (FA-210). Failover chains follow a provider change
+  (FA-210), and so does every save of the reply (`model`): the page's stream
+  saved it once more with the model it asked for, and a reload named another
+  model (2026-11-07). The row keeps the model the turn ran with apart
+  (`run_model`): a client that names no model continues with it, never with
+  the answering one (after a failover that is the backup). Failover chains follow a provider change
   (`ModelRegistry.generation`, `reset_failover_cache`, FA-106). Discovery
   returns a typed `DiscoveryResult`, the route answers 502 with the reason,
   the page says it (FA-107). Recall waits for an embedding slot inside its own
   deadline (FA-276). Gates: `tests/test_partial_result_says_what_happened.py`,
   `tests/test_stream_cut_off.py`, `tests/test_done_frame_names_the_answering_model.py`,
+  `tests/test_reply_keeps_the_answering_model.py`,
   `tests/test_failover_follows_provider_changes.py`,
   `tests/test_model_discovery_failure_is_said.py`,
   `tests/js/test_discovery_failure.js`,

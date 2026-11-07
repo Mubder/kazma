@@ -203,8 +203,10 @@ def _stored_reply(harness: Harness, client: Any, session_id: str) -> str:
 
 def test_waiting_for_an_approval_longer_than_the_limit_is_not_counted(monkeypatch, alerts) -> None:
     monkeypatch.setenv(ENV, str(LIMIT_S))
+    # The answer names the file it wrote: one that did not would get the
+    # turn's "Files written or sent" line (answer receipts, resilience D3).
     script = Script(steps=[Step(tool="file_write", args={}, narration="Writing the note.")],
-                    final="Note written.")
+                    final="Wrote note.md.")
     thinking = Thinking({})
     with unified_turn_server(script) as harness, slow_model(script, thinking):
         script.steps[0].args = {"path": os.path.join(harness.data_dir, "note.md"), "content": "hi"}
@@ -226,7 +228,7 @@ def test_waiting_for_an_approval_longer_than_the_limit_is_not_counted(monkeypatc
             assert ack.get("_status") == 200 and ack.get("ok") is True, ack
             with attach_stream(harness.base, session_id, last_seq, client) as resp:
                 frames = _read_until_terminal(resp, limit_s=60)
-            assert _done(frames)["content"] == "Note written."
+            assert _done(frames)["content"] == "Wrote note.md."
             assert "turn.timed_out" not in alerts
             assert os.path.exists(os.path.join(harness.data_dir, "note.md"))
 

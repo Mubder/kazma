@@ -141,6 +141,7 @@ def persist_reply(
     open_turn: bool | None = None,
     thread_id: str = "",
     model: str = "",
+    run_model: str = "",
     tokens: int | None = None,
     cost: float | None = None,
     duration_ms: float | None = None,
@@ -149,7 +150,11 @@ def persist_reply(
     streamed_text: str = "",
     allow_shrink: bool | None = None,
 ) -> bool:
-    """Write this turn's reply through the sink. Never raises."""
+    """Write this turn's reply through the sink. Never raises.
+
+    ``model`` is the model that answered (shown on the reply); ``run_model``
+    the one the turn ran with (a client naming none continues with it).
+    """
     if not session_id or not reply_turn_id:
         return False
     if open_turn is None:
@@ -179,6 +184,7 @@ def persist_reply(
             activity=derived_act,
             parts=parts,
             model=model or None,
+            run_model=run_model or None,
             tokens=tokens,
             cost=cost,
             duration_ms=duration_ms,
