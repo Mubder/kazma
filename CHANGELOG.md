@@ -18,6 +18,11 @@
   command go to `.kazma/install.log` (`--dry-run` still prints them). A key
   pressed before a question, such as an Enter left over from pasting the
   commands, no longer answers it.
+- **Kazma answers soon after the install.** Its meaning-search model (about
+  4 GB) is now downloaded by the install, as one of its steps; on a clean
+  Windows the first start downloaded it and did not answer for 5.5 minutes.
+  The install's wait for Kazma now ends at its limit (it counted only its
+  pauses, so 4 minutes became 5.5).
 
 ## 0.21.0 — Install Kazma in one run: Express, Full or Custom (2026-11-07)
 

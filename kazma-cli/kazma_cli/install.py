@@ -233,6 +233,16 @@ def _extras_present() -> set[str]:
     return {extra for extra, markers in _EXTRA_MARKERS.items() if any(_module_available(m) for m in markers)}
 
 
+def _embedding_model_downloaded() -> bool:
+    """The meaning-search model on disk, read from the local cache only."""
+    try:
+        from kazma_core.memory.embedder import local_model_downloaded
+
+        return local_model_downloaded()
+    except ImportError:  # the rag packages are not here: the part says so first
+        return False
+
+
 def _env_value(path: Path, key: str) -> str:
     from kazma_cli.setup import _env_file_value
 
@@ -303,7 +313,12 @@ def _check_parts(parts, machine: Machine, platform) -> tuple[dict[str, PartState
             continue
         detail = "; ".join(system[d].detail for d in part.system if d in system) or "installed"
         ok: bool | None = None if unsure_system else True
-        if part.id == "neural_ocr":
+        if part.id == "meaning_search":
+            # Its packages alone are not the part: the model comes on first use,
+            # and the server's first start waited for it (4.3 GB, 5.5 min).
+            ok, detail = (True, "installed, model downloaded") if _embedding_model_downloaded() else (
+                False, "the bge-m3 model is not downloaded")
+        elif part.id == "neural_ocr":
             from kazma_core.documents.ocr.neural_models import verify_model_directory
 
             status = verify_model_directory()
@@ -433,6 +448,11 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
         plan.append(PlannedStep(part, step, attempts=_SYSTEM_ATTEMPTS))
     root = machine.root
     python = machine.python
+    if "meaning_search" in todo_ids:
+        plan.append(PlannedStep("meaning_search", Step(
+            "download the meaning-search model (bge-m3, about 4 GB: a few minutes)",
+            (python, "-c", "from kazma_core.memory.embedder import download_local_model; download_local_model()")),
+            attempts=_SYSTEM_ATTEMPTS))
     if "neural_ocr" in todo_ids and root is not None and (root / "scripts" / "ocr_models.py").is_file():
         plan.append(PlannedStep("neural_ocr", Step("install the neural OCR models (downloaded and checked)",
                                                    (python, str(root / "scripts" / "ocr_models.py"), "install")),
@@ -952,10 +972,18 @@ def _finish(parts, found: dict[str, PartState], machine: Machine, options, say) 
         return
     if not machine.answers(url + "/health/live"):
         say(f"Waiting for Kazma to answer at {url} (its first start loads its models) ...")
-        waited = 0.0
-        while waited < ANSWER_WAIT_S and not machine.answers(url + "/health/live"):
+        # The time each try takes counts too: on Windows a refused connection
+        # to this machine takes about 2 s, and counting the sleeps alone made
+        # a 240 s wait last 325 s (the clean VM, 2026-11-07).
+        spent = 0.0
+        while spent < ANSWER_WAIT_S:
+            started = time.monotonic()
+            answered = machine.answers(url + "/health/live")
+            spent += time.monotonic() - started
+            if answered:
+                break
             machine.sleep(5.0)
-            waited += 5.0
+            spent += 5.0
     if not machine.answers(url + "/health/live"):
         say(f"Kazma has not answered yet. Open {url} in a minute; "
             "scripts/service/kazma_guard.py --status says what it is doing.")

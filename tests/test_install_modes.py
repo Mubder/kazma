@@ -208,6 +208,7 @@ class Box:
         self.langs: tuple[str, ...] | None = None
         self.soffice = self.clam = self.scheduled = self.docker = self.node = False
         self.models = self.chromium = self.service = self.kazma_up = self.pg = self.searxng = False
+        self.embedding_model = False
         self.container = False
         self.virtualization = _facts("Dell Inc. OptiPlex", True, True)
         self.wsl = True
@@ -270,6 +271,9 @@ class Box:
         if "ocr_models.py" in line:
             self.models = True
             return done()
+        if "download_local_model" in line:
+            self.embedding_model = True
+            return done()
         if "install_service.py" in line:
             self.service = True
             return done()
@@ -315,6 +319,7 @@ def box(tmp_path, monkeypatch):
     monkeypatch.delenv("KAZMA_PORT", raising=False)
     monkeypatch.setattr(install, "_extras_present", lambda: set(b.extras))
     monkeypatch.setattr(install, "_playwright_chromium", lambda: b.chromium)
+    monkeypatch.setattr(install, "_embedding_model_downloaded", lambda: b.embedding_model)
     monkeypatch.setattr(install, "_postgres_state", lambda platform, machine: (
         (True, "PostgreSQL 16") if b.pg else (False, "not set up")))
     monkeypatch.setattr(install, "_container_state", lambda machine, root: (
@@ -632,3 +637,50 @@ def test_the_setup_intro_says_what_kazma_is_in_its_own_words():
     line = sentence.replace("Kazma is the", "The", 1)
     for name in ("setup.ps1", "setup.sh"):
         assert line in (root / name).read_text(encoding="utf-8-sig"), (name, line)
+
+
+# -- the first start (the clean Windows VM, 2026-11-07) -------------------------------------
+
+
+def test_the_meaning_search_model_is_downloaded_by_the_install(box, capsys):
+    """The server's first start downloaded 4.3 GB before it answered at all
+    (5.5 minutes, nothing on screen). The meaning-search part is in place only
+    with its model on disk, and the install downloads it."""
+    from kazma_cli.install import install
+
+    box.extras = set(ic.extras_for(ic.components_for("express")))  # packages there, model not
+    assert install(_options(yes=True), _machine(box)) == 0
+    downloads = [a for a in box.ran if "download_local_model" in " ".join(a)]
+    assert len(downloads) == 1 and box.embedding_model
+    assert not [a for a in box.ran if "--extra" in a]  # no package step for it
+    record = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]
+    assert record["results"]["meaning_search"]["ok"] is True
+
+    # The negative control: with the model there, the part is done.
+    box.ran.clear()
+    assert install(_options(yes=True), _machine(box)) == 0
+    assert not [a for a in box.ran if "download_local_model" in " ".join(a)]
+
+
+def test_the_wait_for_kazma_counts_the_time_each_try_takes(monkeypatch):
+    """A refused connection to this machine takes about 2 s on Windows; the
+    wait counted only its 5 s sleeps, and 240 s became 325 s."""
+    from kazma_cli import install as inst
+    from kazma_cli.install import ANSWER_WAIT_S, Machine, PartState
+
+    clock = [0.0]
+
+    def slow_refusal(url):
+        clock[0] += 2.0  # each try takes 2 s, as on Windows
+        return False
+
+    monkeypatch.setattr(inst.time, "monotonic", lambda: clock[0])
+    sleeps: list[float] = []
+    machine = Machine(answers=slow_refusal, sleep=sleeps.append, interactive=lambda: False)
+    said: list[str] = []
+    inst._finish([ic.by_id("service")], {"service": PartState(True, "")}, machine,
+                 _options(no_browser=True), lambda text="", tone="": said.append(text))
+    tries = len(sleeps)
+    assert tries * 7.0 <= ANSWER_WAIT_S + 7.0, tries
+    assert tries < ANSWER_WAIT_S / 5.0  # the old count of sleeps alone: 48 tries
+    assert any("has not answered yet" in line for line in said)

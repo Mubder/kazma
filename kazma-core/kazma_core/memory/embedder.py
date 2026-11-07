@@ -680,6 +680,24 @@ def embedder_readiness() -> dict[str, Any]:
     return {"state": "open" if opened else "loaded", "ready": not opened}
 
 
+def local_model_downloaded(model_name: str = DEFAULT_MODEL) -> bool:
+    """Whether the local embedding model is on disk (no network)."""
+    return _model_in_hf_cache(model_name)
+
+
+def download_local_model(model_name: str = DEFAULT_MODEL) -> None:
+    """Download the local embedding model as the server will load it.
+
+    `kazma setup install` runs this for the meaning-search part, so the
+    model arrives during the install. Left to the server's first start, the
+    clean Windows VM (2026-11-07) waited 5.5 minutes for 4.3 GB before Kazma
+    answered at all, with nothing on screen saying why.
+    """
+    from sentence_transformers import SentenceTransformer
+
+    SentenceTransformer(model_name)
+
+
 def _model_in_hf_cache(model_name: str) -> bool:
     """Whether *model_name* resolves from the local HF cache (no network).
 
