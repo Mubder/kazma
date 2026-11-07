@@ -35,8 +35,8 @@
 
 ## البدء السريع
 
-**تحتاج إلى:** Python من 3.11 إلى 3.14 (يُنصح بـ 3.12 أو 3.13)، وGit، ونموذج
-واحد: مفتاح API من مزوّد (OpenAI أو Anthropic أو Google أو DeepSeek أو
+**تحتاج إلى:** Git ونموذج واحد (ويثبّت سكربت الإعداد Python من 3.11 إلى 3.14
+عبر uv إن لم يكن موجودًا): مفتاح API من مزوّد (OpenAI أو Anthropic أو Google أو DeepSeek أو
 OpenRouter و[غيرها](https://kazma.ai/ar/docs/configuration/))، أو نموذج يعمل
 محليًا في Ollama أو LM Studio.
 

@@ -36,13 +36,13 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~791K LOC** (628K Python code + 46K JS) | **20,094 tests** (1,538 test files) | **4,508+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~791K LOC** (628K Python code + 46K JS) | **20,094 tests** (1,538 test files) | **4,509+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
 ## Quick start
 
-**You need:** Python 3.11 to 3.14 (3.12 or 3.13 recommended), Git, and one model:
+**You need:** Git and one model (the setup script installs Python 3.11 to 3.14 through uv when there is none):
 an API key from a provider (OpenAI, Anthropic, Google, DeepSeek, OpenRouter and
 [others](https://kazma.ai/docs/configuration/)) or a model running locally in
 Ollama or LM Studio.

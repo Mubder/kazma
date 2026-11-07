@@ -6,6 +6,25 @@ description: Dated changes and links to the Kazma upgrade guides.
 
 > This page is published at [kazma.ai/docs/release-notes/](https://kazma.ai/docs/release-notes/) ([Arabic](https://kazma.ai/ar/docs/release-notes/)).
 
+## What's new (2026-11-07): 0.21.0
+
+| Area | Change |
+|---|---|
+| **Install in one run: Express, Full or Custom** | `setup.ps1` / `setup.sh` (or `kazma setup install`) ask how to install Kazma. **Express**, the default, is everything that needs no Docker: meaning search, document reading with OCR and its neural models, LibreOffice, the malware scan and its daily refresh, Node.js for MCP servers, and Kazma as a service. **Full** is every part, Docker, the locked document worker, private search and PostgreSQL among them. **Custom** is a checklist; each part says what Kazma lacks without it ([Quickstart](quickstart)). |
+| **Problems first, then one question** | Before anything is done the install lists every problem it can see: disk space, the network, an administrator terminal, and whether Docker can run here at all. A failed step is tried again; a part that still fails stops only what needs it; running setup again continues where it stopped (`.kazma/install.log` has everything). |
+| **Fewer manual steps** | On Windows setup opens its own administrator window; with no Python installed, uv downloads one; with the service installed, the browser opens on Kazma and the chat page asks for a provider key. |
+| **Fresh-install fixes** | A re-run of setup never removes an installed extra; `kazma setup postgres` installs Kazma's Postgres driver; nothing waits on the keyboard; a Kazma waiting for its provider key is never restarted for it; the guard probes the port Kazma uses; fixed advisories leave the Dashboard at once; an example's placeholder is never taken for a Telegram token. |
+
+## What's new (2026-11-06): 0.20.0
+
+| Area | Change |
+|---|---|
+| **Watched from outside** | An observer outside this machine checks Kazma every minute and pages its own bot when the machine is off, asleep or cut off, or Kazma or its database is away ([Outside watch](../ops/outside-watch)). The guard also watches free disk space, a UPS's battery, and the database's OS service. |
+| **The database** | `kazma setup postgres` installs PostgreSQL 16 as a service with point-in-time restore (`kazma restore postgres`). With the database away a minute into a start, Kazma runs read-only from a local copy of its settings, and the chat apps keep each message until it is back. |
+| **Nothing lost to a restart** | A turn a restart cut off continues by itself when that is safe; chat-app replies go through an outbox and are retried, never sent twice; every deploy is checked and undone if it fails. |
+| **Turns that finish** | A refusal no longer ends a turn; a turn has a token budget and an optional daily spend limit. |
+| **Docker comes back** | When an update leaves Docker stopped, the guard starts Docker Desktop again and then the containers Kazma uses. |
+
 ## What's new (2026-10-26)
 
 | Area | Change |
