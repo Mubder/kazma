@@ -60,6 +60,7 @@ DECLARED = {
     "kazma-cli/kazma_cli/doctor.py: {_cat_owner} offers": "a provider's name, then a verb",
     "kazma-cli/kazma_cli/doctor.py: {_host(base)} serves": "a host, then a verb",
     "kazma-cli/kazma_cli/update.py: {origin_url or '(unreadable)'} kazma update pulls": "a URL, then a verb",
+    "kazma-cli/kazma_cli/setup.py: {key} names": "a setting's name, then a verb",
     "kazma-cli/kazma_cli/update.py: {_IDLE_TIMEOUT_S / 60} minutes": (
         "a constant (15); the updater must run while kazma_core may not import, "
         "so it cannot call count_noun"

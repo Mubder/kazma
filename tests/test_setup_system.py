@@ -33,10 +33,13 @@ class _Machine:
     """A machine with some programs; ``run`` answers as they would."""
 
     def __init__(self, *, tesseract_langs=("ara", "eng", "osd"), clam=True, fonts=True, docker=True,
-                 freshclam_scheduled=True, soffice=True):
+                 freshclam_scheduled=True, soffice=True, node="v22.11.0"):
         self.programs = {"tesseract", "fc-list"} if tesseract_langs is not None else {"fc-list"}
         if clam:
             self.programs |= {"clamscan", "freshclam"}
+        if node:
+            self.programs |= {"node", "npx"}
+        self.node = node
         self.langs, self.fonts, self.docker = tesseract_langs, fonts, docker
         self.scheduled, self.soffice = freshclam_scheduled, soffice
         self.ran: list[list[str]] = []
@@ -57,6 +60,8 @@ class _Machine:
             return subprocess.CompletedProcess(argv, 0, "tesseract 5.3.0\n", "")
         if name == "fc-list":
             return subprocess.CompletedProcess(argv, 0, "Noto Naskh Arabic\n" if self.fonts else "DejaVu Sans\n", "")
+        if name == "node" and "--version" in argv:
+            return subprocess.CompletedProcess(argv, 0, f"{self.node}\n", "")
         if name in ("systemctl", "schtasks", "launchctl"):
             return subprocess.CompletedProcess(argv, 0 if self.scheduled else 1, "enabled" if self.scheduled else "", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -84,7 +89,7 @@ def test_each_manager_installs_the_table(machine, manager, tmp_path, monkeypatch
     states = sd.check_all(platform, run=machine.run, which=machine.which, **machine.finders())
     steps = sd.install_plan(platform, states)
     argvs = [" ".join(s.argv) for s in steps if s.argv]
-    for dep in ("ocr", "office", "malware", "docker"):
+    for dep in ("ocr", "office", "malware", "node", "docker"):
         packages = sd.PACKAGES[manager][dep]
         assert any(all(p in line for p in packages) for line in argvs), (dep, argvs)
     if manager in ("apt", "dnf"):

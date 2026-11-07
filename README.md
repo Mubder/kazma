@@ -16,7 +16,7 @@
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%E2%80%93%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 to 3.14"></a>
-    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-20%2C071-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-20%2C094-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="https://kazma.ai/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection measured"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
@@ -36,7 +36,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~789K LOC** (627K Python code + 46K JS) | **20,071 tests** (1,537 test files) | **4,507+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~791K LOC** (628K Python code + 46K JS) | **20,094 tests** (1,538 test files) | **4,508+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
@@ -72,9 +72,14 @@ kazma serve
 Open **http://127.0.0.1:9090**. On the first visit the chat page asks for a
 provider, its key and a model; after that, Kazma is ready to talk.
 
-The script installs [`uv`](https://docs.astral.sh/uv/) if it is missing,
-creates `.venv` with the `rag`, `dev` and `tui` extras, copies `.env.example`
-to `.env`, and checks the core imports.
+The script installs [`uv`](https://docs.astral.sh/uv/) if it is missing (and
+through it a Python, when there is none), then asks how to install Kazma:
+**Express** (the default: everything that needs no Docker), **Full** (every
+part, Docker and PostgreSQL among them) or **Custom** (a checklist; each part
+says what Kazma lacks without it). It checks everything first, shows one plan,
+asks once, and records what it did, so running it again continues where it
+stopped. With the service installed it opens the browser on Kazma. The parts:
+[Quickstart](https://kazma.ai/docs/quickstart/).
 
 ### 2. Docker Compose
 

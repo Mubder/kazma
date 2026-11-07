@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## 0.21.0 — Install Kazma in one run: Express, Full or Custom (2026-11-07)
+
+Found by installing Kazma on a fresh Windows virtual machine: a dozen manual
+steps and about ten fresh-install bugs, met one at a time.
+
+- **Three installs from one list of parts.** `setup.ps1` / `setup.sh` (or
+  `kazma setup install`) ask how to install. **Express**, the default, is the
+  least Kazma can lack with no Docker: meaning search, document reading with
+  OCR (neural OCR models included), LibreOffice, the malware scan and its
+  daily refresh, Node.js for MCP servers, and Kazma as a service. **Full** is
+  every part, Docker, the locked document worker, private search (SearXNG) and
+  PostgreSQL as a service among them. **Custom** is a checklist; each part
+  says what Kazma lacks without it. `kazma setup install --list` shows them
+  all. A part added to Kazma joins Full the day it is added.
+- **Everything is checked first.** Before anything is done the install says
+  every problem it can see: disk space, no network, an administrator terminal
+  needed, and whether Docker can run at all (virtualization off in the
+  firmware, or a virtual machine whose host does not pass it through). One
+  plan, one question.
+- **It finishes, or says what is left.** A step that fails is tried again; a
+  part that still fails stops only what needs it; the end names what Kazma
+  lacks for each part not installed. What was chosen and how each part ended
+  is recorded, so running setup again (after a restart, or to repair)
+  continues where it stopped. Everything said and every program's output is in
+  `.kazma/install.log`.
+- **Fewer manual steps.** On Windows setup opens its own administrator window;
+  with no Python installed, uv downloads one; when the service starts, the
+  browser opens on Kazma, and the chat page asks for a provider key.
+- **Fresh-install fixes from the same VM.** A re-run of setup never removes an
+  installed extra; `kazma setup postgres` installs Kazma's Postgres driver; a
+  cut-off download is retried and nothing waits on the keyboard; a Kazma
+  waiting for its provider key is up, never restarted for it; the guard and
+  `--status` probe the port Kazma actually uses; no failed offsite copy on a
+  fresh install; fixed advisories leave the Dashboard at once; an example's
+  placeholder is never taken for a Telegram token.
+
 ## 0.20.0 — Kazma keeps running, or tells you why (2026-11-06)
 
 The industrial resilience release (docs/plans/INDUSTRIAL_RESILIENCE_PLAN.md).

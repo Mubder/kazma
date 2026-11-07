@@ -139,7 +139,10 @@ def _exit_text(code: int) -> str:
     return f"0x{code & 0xFFFFFFFF:08X}" if code >= 0x80000000 or code < -0x10000 else str(code)
 
 
-def _run_step(step, secrets_: list[str], *, run=subprocess.run) -> tuple[bool, str]:
+def _run_step(step, secrets_: list[str], *, run=subprocess.run, cwd: str | None = None,
+              log=None) -> tuple[bool, str]:
+    """Run one step; its whole output (scrubbed) goes to *log* when given, the
+    last of it to the answer."""
     env = {**os.environ, **step.env}
     # A step reads what it is given, or nothing: an installer handed the
     # terminal waited for a key nobody knew it wanted (the drill VM,
@@ -149,10 +152,15 @@ def _run_step(step, secrets_: list[str], *, run=subprocess.run) -> tuple[bool, s
         # UTF-8: winget, apt and brew write it whatever the console's code page;
         # read as the ANSI code page, winget's own messages came back garbled.
         done = run(list(step.argv), **feed, capture_output=True, text=True,
-                   encoding="utf-8", errors="replace", env=env, timeout=1800, check=False)
+                   encoding="utf-8", errors="replace", env=env, timeout=1800, check=False,
+                   **({"cwd": cwd} if cwd else {}))
     except (OSError, subprocess.SubprocessError) as exc:
+        if log is not None:
+            log(f"could not run {step.printable()}: {exc}")
         return False, f"could not run: {type(exc).__name__}"
     out = _scrub(_readable((done.stdout or "") + "\n" + (done.stderr or "")), secrets_)
+    if log is not None and out:
+        log(out)
     return done.returncode in step.ok_codes, f"exit {_exit_text(done.returncode)}" + (f": {out[-600:]}" if out else "")
 
 
@@ -253,13 +261,20 @@ def run(args: list[str]) -> int:
     pg.add_argument("--move-from-container", metavar="NAME",
                     help="copy the data of this Docker container (Kazma's database today) into the new server")
     pg.add_argument("--no-env", action="store_true", help="do not write KAZMA_DATABASE_URL into .env")
-    system = sub.add_parser("system", help="OCR, LibreOffice, ClamAV, the Arabic fonts and Docker")
+    system = sub.add_parser("system", help="OCR, LibreOffice, ClamAV, the Arabic fonts, Node.js and Docker")
     system.add_argument("-y", "--yes", action="store_true", help="do not ask before acting")
     system.add_argument("--check", action="store_true", help="report only; change nothing")
     system.add_argument("--dry-run", action="store_true", help="print the plan; run nothing")
+    from kazma_cli.install import add_install_parser
+
+    add_install_parser(sub)
     options = parser.parse_args(args)
     if options.what == "system":
         return _setup_system(options)
+    if options.what == "install":
+        from kazma_cli.install import install
+
+        return install(options)
     return _setup_postgres(options)
 
 
@@ -289,6 +304,32 @@ def _ask(ask, question: str) -> str:
         return ""
 
 
+def run_system_step(step, *, which, run=subprocess.run, log=None) -> tuple[bool, str]:
+    """One step of a system install: a program, or the two this module
+    carries out itself (Tesseract's model download, the macOS signature job)."""
+    from kazma_core.system_deps import fetch_tessdata, freshclam_agent_plist, tessdata_folder
+
+    if step.action.startswith("tessdata:"):
+        folder = tessdata_folder(which)
+        try:
+            if folder is None:
+                raise ValueError("tesseract was not found after its install")
+            fetch_tessdata(step.action.split(":", 1)[1], folder)
+            return True, ""
+        except (OSError, ValueError) as exc:
+            return False, str(exc)
+    if step.action == "freshclam_agent":
+        freshclam = which("freshclam") or "/opt/homebrew/bin/freshclam"
+        agent = Path.home() / "Library" / "LaunchAgents" / "ai.kazma.freshclam.plist"
+        try:
+            agent.parent.mkdir(parents=True, exist_ok=True)
+            agent.write_text(freshclam_agent_plist(freshclam), encoding="utf-8")
+            return _run_step(type(step)("load it", ("launchctl", "load", "-w", str(agent))), [], run=run, log=log)
+        except OSError as exc:
+            return False, str(exc)
+    return _run_step(step, [], run=run, log=log)
+
+
 def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platform=None, finders=None,
                   sleep=time.sleep) -> int:
     """``kazma setup system`` (resilience plan K2): check, show the plan, ask,
@@ -302,17 +343,15 @@ def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platfor
     import shutil as _shutil
 
     from kazma_core import postgres_service as pgs
+    from kazma_core.english_count import count_noun
     from kazma_core.system_deps import (
         LABELS,
         DepState,
         check_all,
-        fetch_tessdata,
-        freshclam_agent_plist,
         install_plan,
         installs_package,
         package_is_in,
         record_system,
-        tessdata_folder,
     )
 
     which = which or _shutil.which
@@ -345,25 +384,7 @@ def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platfor
         return 1
 
     def do(step) -> tuple[bool, str]:
-        if step.action.startswith("tessdata:"):
-            folder = tessdata_folder(which)
-            try:
-                if folder is None:
-                    raise ValueError("tesseract was not found after its install")
-                fetch_tessdata(step.action.split(":", 1)[1], folder)
-                return True, ""
-            except (OSError, ValueError) as exc:
-                return False, str(exc)
-        if step.action == "freshclam_agent":
-            freshclam = which("freshclam") or "/opt/homebrew/bin/freshclam"
-            agent = Path.home() / "Library" / "LaunchAgents" / "ai.kazma.freshclam.plist"
-            try:
-                agent.parent.mkdir(parents=True, exist_ok=True)
-                agent.write_text(freshclam_agent_plist(freshclam), encoding="utf-8")
-                return _run_step(type(step)("load it", ("launchctl", "load", "-w", str(agent))), [], run=run)
-            except OSError as exc:
-                return False, str(exc)
-        return _run_step(step, [], run=run)
+        return run_system_step(step, which=which, run=run)
 
     def installed_anyway(step) -> bool:
         if not installs_package(step):
@@ -391,7 +412,7 @@ def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platfor
                  f" (attempt {attempt + 1} of {_SYSTEM_ATTEMPTS})")
             sleep(_SYSTEM_RETRY_WAIT_S)
         if not ok:
-            _say(f"   FAILED after {_SYSTEM_ATTEMPTS} attempts: {detail}")
+            _say(f"   FAILED after {count_noun(_SYSTEM_ATTEMPTS, 'attempt')}: {detail}")
             not_done.append(step.title)
             if step.dep:
                 failed_deps.add(step.dep)
@@ -457,7 +478,9 @@ class _MoveHold:
         if outcome == "held":
             self.held = True
             return True
-        _say({"busy": f"   A chat turn was still running after {_MOVE_IDLE_TIMEOUT_S / 60:.0f} minutes: "
+        from kazma_core.english_count import count_noun
+
+        _say({"busy": f"   A chat turn was still running after {count_noun(round(_MOVE_IDLE_TIMEOUT_S / 60), 'minute')}: "
                       "Kazma was not stopped.",
               "not_held": "   The guard did not stop Kazma in time."}.get(
             outcome, f"   The guard did not stop Kazma ({outcome})."))

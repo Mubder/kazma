@@ -49,15 +49,80 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-The script: requires Python 3.11+, installs `uv` if missing, runs
-`uv sync --inexact --extra rag --extra dev --extra tui --extra postgres` (plus
-every extra the install already has, so a re-run removes nothing), copies `.env.example` → `.env`
-when needed, and import-checks LangGraph / aiosqlite / textual. It does **not**
-install `[all]` (that pulls torch, Playwright, WeasyPrint, Temporal, E2B).
+The script installs `uv` when it is missing (and through it a Python, when
+this machine has none), Kazma's base packages, then asks **how to install
+Kazma** and hands over to `kazma setup install`:
 
-At the end it shows the plan of `kazma setup system` and asks whether to run
-it: the programs Kazma needs from the system itself, installed with the OS's
-package manager (winget, Homebrew, apt, dnf).
+| Install | What it is |
+|---|---|
+| **Express** (the default) | Everything that needs no Docker: the least Kazma can lack, in one run. |
+| **Full** | Every part, Docker, PostgreSQL and private search among them. Docker needs the CPU's virtualization; on Windows a restart may come in the middle. |
+| **Custom** | A checklist that starts from Express; each part says what Kazma lacks without it. |
+
+The parts, and what Kazma lacks without each (`kazma setup install --list`
+prints the same list):
+
+| Part | Express | Full | Without it |
+|---|---|---|---|
+| Meaning search (bge-m3) | yes | yes | memory recall and the Knowledge Library match words only |
+| Document reading and writing (PyMuPDF, PDFium, WeasyPrint) | yes | yes | PDFs are read by the simpler built-in readers (weaker on Arabic and tables) |
+| Kazma's test suite (pytest, ruff) | yes | yes | Kazma's tests cannot run here |
+| Code structure (tree-sitter) | yes | yes | the code index reads code by pattern only |
+| Database drivers (MySQL, MongoDB, Postgres) | yes | yes | the database tools reach SQLite files only |
+| Push notifications (Web Push) | yes | yes | no push notification when a task finishes (the chat still says it) |
+| Metrics for Prometheus | yes | yes | no Prometheus metrics (the Dashboard still shows Kazma's state) |
+| OCR with Arabic and English (Tesseract) | yes | yes | a scanned PDF or a photo of a page gives no text |
+| Neural OCR for Arabic (its models) | yes | yes | OCR reads with Tesseract only (weaker Arabic, no Arabic-Indic digits) |
+| Office documents (LibreOffice) | yes | yes | Office files cannot be read or converted |
+| Malware scan (ClamAV, refreshed daily) | yes | yes | documents are not scanned for malware |
+| Arabic fonts | yes | yes | Arabic text in documents may be drawn as boxes (Linux) |
+| Node.js | yes | yes | MCP servers that need npx cannot start (health reads degraded) |
+| Browser tools (Playwright and Chromium) |  | yes | no browser tools; pages are read without running their JavaScript |
+| Docling (the hardest PDFs) |  | yes | a PDF the main readers cannot read gets no second local try |
+| PostgreSQL 16 as a service |  | yes | SQLite: a restore goes back to the last backup (every 6 hours) |
+| Docker |  | yes | no containers (documents parse in a limited process; no private search) |
+| Locked document worker (a container per document) |  | yes | documents are read in a limited process on this machine (not qualified for hostile files) |
+| Private web search (SearXNG) |  | yes | web search uses public engines' pages directly (or Tavily with your key) |
+| E2B cloud sandbox |  | yes | no E2B sandbox for python_exec |
+| Temporal (durable swarm steps) |  | yes | swarm runs are not resumed through Temporal |
+| Neo4j memory graph driver |  | yes | the memory graph stays in SQLite |
+| Kazma as a service (its guard) | yes | yes | you start Kazma yourself (kazma serve), and nothing restarts it |
+
+How a run goes:
+
+- **Everything is checked first.** Before anything is done it lists every
+  problem it can see: too little disk space, no network, an administrator
+  terminal needed, and whether Docker can run here at all (virtualization off
+  in the firmware, or a Windows virtual machine whose host does not pass it
+  through). Then one plan and one question.
+- **An administrator window.** On Windows, system packages and the service
+  need administrator rights: `setup.ps1` opens an administrator window for
+  itself and goes on there (`-NoElevate` stays in the same window). On Linux
+  and macOS each step asks for `sudo` itself.
+- **It finishes, or says what is left.** A step that fails (a cut-off
+  download) is tried again, three times in all; a part that still fails stops
+  only what needs it, and the end names what Kazma lacks for each part not
+  installed. What was chosen and how each part ended is recorded in
+  `kazma-data/setup_record.json`; running setup again (after a restart, or to
+  repair) checks everything and continues where it stopped. Everything said,
+  and every program's output, goes to `.kazma/install.log`.
+- **Kazma opens.** With the service installed it waits for Kazma to answer and
+  opens the browser on it; the first visit asks for a provider key.
+
+```bash
+kazma setup install --list                     # every part, what Kazma lacks without it
+kazma setup install --check                    # what is there, what is missing; changes nothing
+kazma setup install --mode full --dry-run      # the plan; runs nothing
+kazma setup install --mode express -y          # no questions
+kazma setup install --with browser --without push
+```
+
+`setup.ps1` takes `-Mode express|full|custom` and `-Yes`; `setup.sh` takes
+`--mode` and `-y`. Without a terminal (a script, CI) setup installs Kazma's own
+packages for the mode and shows the rest as the plan; `-Yes` / `-y` installs
+everything.
+
+The system programs come from the OS's package manager:
 
 | What | Windows (winget) | macOS (Homebrew) | Debian / Ubuntu / WSL (apt) | Fedora (dnf) |
 |---|---|---|---|---|
@@ -65,19 +130,12 @@ package manager (winget, Homebrew, apt, dnf).
 | Office conversion | `TheDocumentFoundation.LibreOffice` | `--cask libreoffice` | `libreoffice-writer` | `libreoffice-writer` |
 | Malware scan | `Cisco.ClamAV`, plus a daily `freshclam` task | `clamav`, plus a daily `freshclam` launchd job | `clamav`, `clamav-freshclam` | `clamav`, `clamav-update` |
 | Arabic fonts | bundled with Kazma | bundled with Kazma | `fonts-noto-core` | `google-noto-sans-arabic-fonts` |
-| Docker | `Docker.DockerDesktop` | Docker Desktop (cask) | `docker.io` | `moby-engine` |
+| Node.js | `OpenJS.NodeJS.LTS` | `node` | `nodejs`, `npm` | `nodejs`, `npm` |
+| Docker (Full) | `Docker.DockerDesktop` (and WSL 2 first) | Docker Desktop (cask) | `docker.io` | `moby-engine` |
 
-```bash
-kazma setup system --check     # what is there, what is missing; changes nothing
-kazma setup system --dry-run   # the plan; runs nothing
-kazma setup system             # asks, then installs what is missing (-y: no question)
-```
-
-A download that is cut off is tried again (three times in all), and one
-dependency that still will not install does not stop the others: the end
-names what was not done, and running the command again finishes it. A
-second run finds nothing to do. `kazma doctor` shows the same checks and
-names this command for anything missing. Postgres as a service is
+`kazma setup system` installs these programs alone (`--check`, `--dry-run`,
+`-y` as above), and `kazma doctor` shows the same checks and names the command
+for anything missing. Postgres as a service on its own is
 `kazma setup postgres` (the operations guide, "Postgres as an OS service").
 
 ### Path B — Editable install (manual)
@@ -106,10 +164,10 @@ source .venv/bin/activate
 ```
 
 ```bash
-# Same extras as the bootstrap scripts:
-uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
+# The Python packages of an Express install, by hand:
+uv sync --inexact --extra rag --extra document-platform --extra dev --extra index --extra database --extra push --extra observability --extra ocr
 # or:
-pip install -e ".[rag,dev,tui]"
+pip install -e ".[rag,document-platform,dev,index,database,push,observability,ocr]"
 # Everything:
 # uv sync --all-extras
 # pip install -e ".[all]"

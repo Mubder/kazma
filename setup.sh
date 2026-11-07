@@ -13,6 +13,19 @@ if [[ "${DEBUG:-0}" == "1" ]]; then
     set -x
 fi
 
+# Options: --mode express|full|custom, -y/--yes (install without the question).
+MODE=""
+YES=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --mode) MODE="${2:-}"; shift 2 ;;
+        --mode=*) MODE="${1#*=}"; shift ;;
+        -y|--yes) YES=1; shift ;;
+        *) echo "unknown option: $1 (use --mode express|full|custom, -y)"; exit 2 ;;
+    esac
+done
+case "$MODE" in ""|express|full|custom) ;; *) echo "--mode is express, full or custom (not '$MODE')"; exit 2 ;; esac
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -61,9 +74,8 @@ if [[ -n "$PYTHON_CMD" ]]; then
     PY_VERSION=$("$PYTHON_CMD" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
     log_ok "Python $PY_VERSION detected ($PYTHON_CMD)"
 else
-    log_fail "Python 3.11+ required but not found"
-    log_info "Install: sudo apt install python3.11 (Ubuntu/Debian/WSL)"
-    exit 1
+    # uv downloads a Python for Kazma's environment (pyproject's requires-python).
+    log_warn "No Python 3.11+ here: uv will download one for Kazma"
 fi
 
 # 1b. uv package manager (pip-first, snap-fallback)
@@ -91,8 +103,8 @@ fi
 if [[ "$UV_INSTALLED" == "false" ]]; then
     log_warn "uv not found — installing via pip..."
 
-    # Priority 1: pip (works everywhere — WSL, Docker, bare metal)
-    if "$PYTHON_CMD" -m pip install --user uv 2>&1 | tail -1; then
+    # Priority 1: pip (works everywhere — WSL, Docker, bare metal), when there is a Python
+    if [[ -n "$PYTHON_CMD" ]] && "$PYTHON_CMD" -m pip install --user uv 2>&1 | tail -1; then
         export PATH="$HOME/.local/bin:$PATH"
         hash -r
         if command -v uv &>/dev/null && uv_works; then
@@ -175,27 +187,26 @@ fi
 
 log_header "2. Sync Handshake (uv sync)"
 
-# rag = vector memory; dev = tests/lint; tui = kazma-tui; postgres = the
-# driver for the database `kazma setup postgres` sets up.
+# Kazma's base packages here; the extras of the install chosen in step 4
+# (Express, Full or Custom) come from `kazma setup install`, which reads them
+# from one list of parts (kazma_core/install_components.py).
 # There is no [cli] extra — kazma-cli is a first-class package in the wheel.
-# Full set: uv sync --inexact --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
 #
 # --inexact, and every extra the install already has: a plain `uv sync`
 # makes the environment exactly the extras it names and removes the rest, so
 # a re-run of this script removed whatever was installed after the first run
 # (the drill VM, 2026-11-06: the Postgres driver, with KAZMA_DATABASE_URL set).
-DEFAULT_EXTRAS=(rag dev tui postgres)
-EXTRAS=("${DEFAULT_EXTRAS[@]}")
+EXTRAS=()
 if [[ -x .venv/bin/python ]]; then
     PRESENT=$(.venv/bin/python -I -c "from kazma_cli.update import extras_in_this_environment as e; print(' '.join(e()))" 2>/dev/null || true)
     for x in $PRESENT; do
-        [[ " ${EXTRAS[*]} " == *" $x "* ]] || EXTRAS+=("$x")
+        [[ " ${EXTRAS[*]:-} " == *" $x "* ]] || EXTRAS+=("$x")
     done
 fi
 SYNC_ARGS=(--inexact)
-for x in "${EXTRAS[@]}"; do SYNC_ARGS+=(--extra "$x"); done
+for x in "${EXTRAS[@]:-}"; do [[ -n "$x" ]] && SYNC_ARGS+=(--extra "$x"); done
 if uv sync "${SYNC_ARGS[@]}" 2>&1 | tail -5; then
-    log_ok "Environment synced from pyproject.toml (extras: ${EXTRAS[*]})"
+    log_ok "Environment synced from pyproject.toml${EXTRAS[*]:+ (kept extras: ${EXTRAS[*]})}"
 else
     SYNC_EXIT=$?
     log_fail "uv sync failed (exit code $SYNC_EXIT)"
@@ -268,48 +279,57 @@ if [[ "$INTRO_ERRORS" -gt 0 ]]; then
     exit 1
 fi
 
-TEST_OUTPUT=$($VENV_PYTHON -m pytest tests/ --co -q 2>&1 || true)
-TEST_COUNT=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+ tests? collected' | tail -1 | grep -oE '^[0-9]+' || true)
-if [[ -n "$TEST_COUNT" && "$TEST_COUNT" -gt 0 ]]; then
-    log_ok "$TEST_COUNT tests collected"
-else
-    # Say why: pytest's own last words (it refused to start on every fresh
-    # install while the dev extra lacked pytest-timeout).
-    log_warn "Could not collect tests (non-critical): $(echo "$TEST_OUTPUT" | grep -v '^[[:space:]]*$' | tail -1)"
-fi
-
-# ── 4. Summary ──────────────────────────────────────────────────────────────
-
-log_header "4. Setup Complete"
-
-echo ""
 if [[ ! -f .env && -f .env.example ]]; then
     cp .env.example .env
-    log_ok ".env created from .env.example — add a provider API key"
+    log_ok ".env created from .env.example"
 fi
 
-log_ok "Kazma is ready"
-echo ""
+# ── 4. Install: Express, Full or Custom ─────────────────────────────────────
+# One list of parts (kazma_core/install_components.py), three ways to take it:
+# Express (the default: everything that needs no Docker), Full (every part,
+# Docker and PostgreSQL among them) or Custom (a checklist; each part says
+# what Kazma lacks without it). It checks everything first, shows one plan,
+# asks once, installs, and records what it did: run setup again and it
+# continues where it stopped. Without a terminal it installs Kazma's own
+# packages and shows the rest as the plan (-y installs everything).
+log_header "4. Install (Express, Full or Custom)"
+INSTALL_ARGS=(-m kazma_cli setup install)
+[[ -n "$MODE" ]] && INSTALL_ARGS+=(--mode "$MODE")
+if [[ "$YES" == "1" ]]; then
+    INSTALL_ARGS+=(-y)
+elif [[ ! -t 0 ]]; then
+    INSTALL_ARGS+=(--packages-only)
+fi
+if ! $VENV_PYTHON "${INSTALL_ARGS[@]}"; then
+    log_warn "Not everything was installed: run ./setup.sh again to finish (it continues where it stopped)"
+    log_info "What happened is in .kazma/install.log"
+fi
 
-# ── 5. System dependencies (resilience plan K2) ─────────────────────────────
-# OCR with Arabic, LibreOffice, ClamAV and its daily refresh, the Arabic fonts
-# and Docker: the plan is shown first, and nothing is installed without a yes.
-log_header "5. System dependencies"
-if [[ -t 0 ]]; then
-    # One run: it checks, shows the plan once, asks, and installs on a yes.
-    $VENV_PYTHON -m kazma_cli setup system || log_info "Later:          $VENV_PYTHON -m kazma_cli setup system"
+if $VENV_PYTHON -c "import pytest" 2>/dev/null; then
+    TEST_OUTPUT=$($VENV_PYTHON -m pytest tests/ --co -q 2>&1 || true)
+    TEST_COUNT=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+ tests? collected' | tail -1 | grep -oE '^[0-9]+' || true)
+    if [[ -n "$TEST_COUNT" && "$TEST_COUNT" -gt 0 ]]; then
+        log_ok "$TEST_COUNT tests collected"
+    else
+        # Say why: pytest's own last words (it refused to start on every fresh
+        # install while the dev extra lacked pytest-timeout).
+        log_warn "Could not collect tests (non-critical): $(echo "$TEST_OUTPUT" | grep -v '^[[:space:]]*$' | tail -1)"
+    fi
 else
-    $VENV_PYTHON -m kazma_cli setup system --dry-run || true
-    log_info "To install them: $VENV_PYTHON -m kazma_cli setup system"
+    log_info "Kazma's tests are not installed (the tests part was not chosen)"
 fi
+
+# ── 5. Summary ──────────────────────────────────────────────────────────────
+
+log_header "5. Setup Complete"
 echo ""
-log_info "Configure:      edit .env (OPENAI_API_KEY or another provider)"
+log_info "First visit:    the chat page asks for a provider key (or edit .env)"
 log_info "Run Web UI:     .venv/bin/kazma serve          # http://127.0.0.1:9090"
 log_info "Run TUI:        .venv/bin/kazma-tui"
 log_info "Run tests:      .venv/bin/python scripts/fast_test.py"
-log_info "Watch/reload:   .venv/bin/python scripts/service/kazma_guard.py --install"
-log_info "Everything:     uv sync --inexact --all-extras"
-log_info "Docs:           https://github.com/Mubder/kazma"
+log_info "Parts:          .venv/bin/python -m kazma_cli setup install --list"
+log_info "Everything:     ./setup.sh --mode full"
+log_info "Docs:           https://kazma.ai/docs/"
 echo ""
 echo -e "${GREEN}🇰🇼 كاظمه — Built to remember. Built to last.${NC}"
 echo ""

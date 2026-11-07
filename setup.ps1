@@ -10,14 +10,23 @@
     Kazma (كاظمه) bootstrap script for Windows / PowerShell.
 
 .DESCRIPTION
-    Validates the environment (Python 3.11+, uv, kazma.yaml), syncs the
-    virtual environment from pyproject.toml, and runs a foundation
-    integrity check (core imports + test collection).
+    Installs uv (and through it Python, when this machine has none), Kazma's
+    packages, then hands over to `kazma setup install`: Express (the default),
+    Full or Custom, chosen from one list of parts. It checks everything first,
+    shows one plan, asks once, installs, and records what it did, so a second
+    run continues where the first stopped. A foundation check (core imports,
+    test collection) ends it.
+
+    Installing system packages and the service needs administrator rights: in
+    a terminal it opens an administrator window for itself (-NoElevate stays
+    in this one).
 
     Idempotent — safe to run multiple times.
 
 .EXAMPLE
     .\setup.ps1
+    .\setup.ps1 -Mode full
+    .\setup.ps1 -Mode express -Yes
     .\setup.ps1 -Debug
 #>
 
@@ -26,10 +35,23 @@
 # all ("A parameter with the name 'Debug' was defined multiple times").
 # tests/test_powershell_scripts_start.py holds every shipped script to that.
 param(
-    [switch]$Debug
+    [switch]$Debug,
+    [string]$Mode = "",
+    [switch]$Yes,
+    [switch]$NoElevate
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Mode -and @("express", "full", "custom") -notcontains $Mode.ToLower()) {
+    Write-Host "  -Mode is express, full or custom (not '$Mode')" -ForegroundColor Red
+    exit 2
+}
+
+# A person at a terminal: someone can answer a question (not -NonInteractive,
+# not a redirected input). Nothing is asked, and no window is opened, otherwise.
+$NonInteractiveFlag = @([Environment]::GetCommandLineArgs() | Where-Object { "$_" -like "-NonI*" }).Count -gt 0
+$Interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not $NonInteractiveFlag
 
 # ── Logging helpers ──────────────────────────────────────────────────────────
 
@@ -81,6 +103,37 @@ function Test-UvWorks {
 Write-Host "`n🇰🇼 Kazma (كاظمه) — Bootstrap v3 (PowerShell)`n" -ForegroundColor Green
 Write-Host "   Autonomous AI Agent Framework`n" -ForegroundColor Cyan
 
+# ── 0. An administrator window ──────────────────────────────────────────────
+# System packages (winget) and the service need administrator rights. Asked
+# in a plain terminal, the install used to stop half way and ask for an
+# elevated one (the drill VM, 2026-11-06). In a terminal, setup opens that
+# window for itself and goes on there; declined, it goes on here and lists
+# what needs the rights.
+$IsAdmin = $false
+try {
+    $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+} catch {
+    Write-Verbose "$_"
+}
+if ($Interactive -and -not $IsAdmin -and -not $NoElevate -and $env:OS -eq "Windows_NT") {
+    $forward = @()
+    if ($Mode) { $forward += "-Mode $Mode" }
+    if ($Yes) { $forward += "-Yes" }
+    if ($Debug) { $forward += "-Debug" }
+    $here = (Get-Location).Path -replace "'", "''"
+    $self = $PSCommandPath -replace "'", "''"
+    $command = "Set-Location -LiteralPath '$here'; & '$self' $($forward -join ' ')"
+    $shell = (Get-Process -Id $PID).Path
+    try {
+        Start-Process -FilePath $shell -Verb RunAs -ArgumentList "-NoExit -NoProfile -ExecutionPolicy Bypass -Command `"$command`""
+        Log-Info "Setup goes on in the administrator window it opened."
+        exit 0
+    } catch {
+        Log-Warn "No administrator window: system packages and the service are listed, not installed"
+    }
+}
+
 # ── 1. Environmental Guardrails ──────────────────────────────────────────────
 
 Log-Header "1. Environmental Guardrails"
@@ -109,9 +162,10 @@ foreach ($cmd in $PythonCandidates) {
 }
 
 if (-not $PythonCmd) {
-    Log-Fail "Python 3.11+ required but not found"
-    Log-Info "Install from: https://www.python.org/downloads/"
-    exit 1
+    # uv downloads a Python for Kazma's environment (pyproject's
+    # requires-python): a fresh Windows has none, and installing one by hand
+    # was the first manual step of every install.
+    Log-Warn "No Python 3.11+ here: uv will download one for Kazma"
 }
 
 # 1b. uv package manager
@@ -122,10 +176,12 @@ if (Test-UvWorks) {
     Log-Ok "uv detected: $uvVersion"
     $UvInstalled = $true
 } else {
-    Log-Warn "uv not found — installing via pip..."
+    Log-Warn "uv not found — installing it..."
 
-    # Priority 1: pip
-    Invoke-Native { & $PythonCmd -m pip install --user uv } | ForEach-Object { Write-Verbose $_ }
+    # Priority 1: pip (when there is a Python)
+    if ($PythonCmd) {
+        Invoke-Native { & $PythonCmd -m pip install --user uv } | ForEach-Object { Write-Verbose $_ }
+    }
     if (Test-UvWorks) {
         $uvVersion = Invoke-Native -StdoutOnly { uv --version }
         Log-Ok "uv installed via pip: $uvVersion"
@@ -182,18 +238,16 @@ if (Test-Path "pyproject.toml" -PathType Leaf) {
 
 Log-Header "2. Sync Handshake (uv sync)"
 
-# rag = vector memory; dev = tests/lint; tui = kazma-tui; postgres = the
-# driver for the database `kazma setup postgres` sets up.
+# Kazma's base packages here; the extras of the install chosen in step 5
+# (Express, Full or Custom) come from `kazma setup install`, which reads them
+# from one list of parts (kazma_core/install_components.py).
 # There is no [cli] extra — kazma-cli is a first-class package in the wheel.
-# Full set: uv sync --inexact --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
 #
 # --inexact, and every extra the install already has: a plain `uv sync`
 # makes the environment exactly the extras it names and removes the rest, so
 # a re-run of this script removed whatever was installed after the first run
 # (the drill VM, 2026-11-06: the Postgres driver, with KAZMA_DATABASE_URL set).
-$DefaultExtras = @("rag", "dev", "tui", "postgres")
 $extras = [System.Collections.Generic.List[string]]::new()
-foreach ($x in $DefaultExtras) { $extras.Add($x) }
 $existingPython = @(".venv\Scripts\python.exe", ".venv\bin\python") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($existingPython) {
     $present = Invoke-Native -StdoutOnly { & $existingPython -I -c "from kazma_cli.update import extras_in_this_environment as e; print(' '.join(e()))" }
@@ -203,10 +257,11 @@ if ($existingPython) {
 }
 $syncArgs = @("--inexact")
 foreach ($x in $extras) { $syncArgs += @("--extra", $x) }
-Log-Info "Installing Kazma's packages; the first run downloads PyTorch and can take several minutes"
+Log-Info "Installing Kazma's base packages"
 Invoke-Native { uv sync @syncArgs } | ForEach-Object { Write-Verbose $_ }
 if ($LASTEXITCODE -eq 0) {
-    Log-Ok "Environment synced from pyproject.toml (extras: $($extras -join ', '))"
+    $kept = if ($extras.Count) { " (kept extras: $($extras -join ', '))" } else { "" }
+    Log-Ok "Environment synced from pyproject.toml$kept"
 } else {
     $syncExit = $LASTEXITCODE
     Log-Fail "uv sync failed (exit code $syncExit)"
@@ -294,53 +349,60 @@ if ($IntroErrors -gt 0) {
     exit 1
 }
 
-$testOutput = @(Invoke-Native { & $VenvPython -m pytest tests/ --co -q })
-$testLine = ($testOutput | Where-Object { $_ -match '(\d+) tests? collected' } | Select-Object -Last 1)
-if ($testLine -match '(\d+) tests? collected') {
-    $testCount = $matches[1]
-    Log-Ok "$testCount tests collected"
-} else {
-    # Say why: pytest's own last words (it refused to start on every fresh
-    # install while the dev extra lacked pytest-timeout).
-    $why = ($testOutput | Where-Object { "$_".Trim() } | Select-Object -Last 1)
-    Log-Warn "Could not collect tests (non-critical): $why"
-}
-
-# ── 4. Summary ───────────────────────────────────────────────────────────────
-
-Log-Header "4. Setup Complete"
-
-Write-Host ""
 if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
     Copy-Item ".env.example" ".env"
-    Log-Ok ".env created from .env.example — add a provider API key"
+    Log-Ok ".env created from .env.example"
 }
 
-Log-Ok "Kazma is ready"
-Write-Host ""
+# ── 4. Install: Express, Full or Custom ─────────────────────────────────────
+# One list of parts (kazma_core/install_components.py), three ways to take it:
+# Express (the default: everything that needs no Docker), Full (every part,
+# Docker and PostgreSQL among them) or Custom (a checklist; each part says
+# what Kazma lacks without it). It checks everything first, shows one plan,
+# asks once, installs, and records what it did: run setup again and it
+# continues where it stopped. Without a terminal it installs Kazma's own
+# packages and shows the rest as the plan (-Yes installs everything).
+Log-Header "4. Install (Express, Full or Custom)"
+$installArgs = @("-m", "kazma_cli", "setup", "install")
+if ($Mode) { $installArgs += @("--mode", $Mode.ToLower()) }
+if ($Yes) { $installArgs += "-y" }
+elseif (-not $Interactive) { $installArgs += "--packages-only" }
+& $VenvPython @installArgs
+$installExit = $LASTEXITCODE
+if ($installExit -ne 0) {
+    Log-Warn "Not everything was installed: run .\setup.ps1 again to finish (it continues where it stopped)"
+    Log-Info "What happened is in .kazma\install.log"
+}
 
-# ── 5. System dependencies (resilience plan K2) ──────────────────────────────
-# OCR with Arabic, LibreOffice, ClamAV and its daily refresh, the Arabic fonts
-# and Docker: the plan is shown first, and nothing is installed without a yes.
-Log-Header "5. System dependencies"
-if ([Environment]::UserInteractive) {
-    # One run: it checks, shows the plan once, asks, and installs on a yes
-    # (from an elevated terminal: it says so before asking when it is not).
-    & $VenvPython -m kazma_cli setup system
-    if ($LASTEXITCODE -ne 0) { Log-Info "Later:          $VenvPython -m kazma_cli setup system" }
+$null = Invoke-Native { & $VenvPython -c "import pytest" }
+if ($LASTEXITCODE -eq 0) {
+    $testOutput = @(Invoke-Native { & $VenvPython -m pytest tests/ --co -q })
+    $testLine = ($testOutput | Where-Object { $_ -match '(\d+) tests? collected' } | Select-Object -Last 1)
+    if ($testLine -match '(\d+) tests? collected') {
+        $testCount = $matches[1]
+        Log-Ok "$testCount tests collected"
+    } else {
+        # Say why: pytest's own last words (it refused to start on every fresh
+        # install while the dev extra lacked pytest-timeout).
+        $why = ($testOutput | Where-Object { "$_".Trim() } | Select-Object -Last 1)
+        Log-Warn "Could not collect tests (non-critical): $why"
+    }
 } else {
-    & $VenvPython -m kazma_cli setup system --dry-run
-    Log-Info "To install them: $VenvPython -m kazma_cli setup system"
+    Log-Info "Kazma's tests are not installed (the tests part was not chosen)"
 }
+
+# ── 5. Summary ───────────────────────────────────────────────────────────────
+
+Log-Header "5. Setup Complete"
 Write-Host ""
 $ScriptsDir = Split-Path $VenvPython
-Log-Info "Configure:      edit .env (OPENAI_API_KEY or another provider)"
+Log-Info "First visit:    the chat page asks for a provider key (or edit .env)"
 Log-Info "Run Web UI:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve     # http://127.0.0.1:9090"
 Log-Info "Run TUI:        & '$(Join-Path $ScriptsDir 'kazma-tui.exe')'"
 Log-Info "Run tests:      $VenvPython scripts\fast_test.py"
-Log-Info "Watch/reload:   $VenvPython scripts\service\kazma_guard.py --install"
-Log-Info "Everything:     uv sync --inexact --all-extras"
-Log-Info "Docs:           https://github.com/Mubder/kazma"
+Log-Info "Parts:          $VenvPython -m kazma_cli setup install --list"
+Log-Info "Everything:     .\setup.ps1 -Mode full"
+Log-Info "Docs:           https://kazma.ai/docs/"
 Write-Host ""
 Write-Host "🇰🇼 كاظمه — Built to remember. Built to last." -ForegroundColor Green
 Write-Host ""

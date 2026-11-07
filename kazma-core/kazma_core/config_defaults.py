@@ -63,6 +63,15 @@ class RetiredDefault:
 RETIRED_DEFAULTS: tuple[RetiredDefault, ...] = (
     RetiredDefault(
         key="agent.version",
+        old=("0.20.0",),
+        since="2026-11-07",
+        why=(
+            "the version is the release's, not a setting: a stored value is the "
+            "shipped one of its day, and follows the release (0.21.0)"
+        ),
+    ),
+    RetiredDefault(
+        key="agent.version",
         old=("0.11.0",),
         since="2026-11-06",
         why=(

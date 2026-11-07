@@ -26,7 +26,7 @@ cd kazma
 git checkout -b feature/my-new-feature
 
 # 3. Install dependencies (Python 3.11+ required)
-#    Lighter (same as setup.sh): uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
+#    Lighter: uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
 uv sync --all-extras
 
 # 4. Activate the git hooks (once per clone — they do not fire until you do)
@@ -52,10 +52,10 @@ uv run pytest tests/ -v
 
 Kazma uses **uv** as the package manager (not pip or Poetry). There is no
 `[cli]` extra — `kazma-cli` is part of the wheel. Bootstrap scripts
-(`setup.ps1` / `setup.sh`) sync `rag` + `dev` + `tui`.
+(`setup.ps1` / `setup.sh`) install Express, Full or Custom (`kazma setup install`).
 
 ```bash
-# Same extras as setup.sh
+# A lighter set, by hand
 uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
 
 # Everything (torch, Playwright, WeasyPrint, Temporal, …)

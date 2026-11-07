@@ -2,8 +2,8 @@
 
 ``setup.ps1`` and ``setup.sh`` install uv and the Python packages only.
 Tesseract (with Arabic and English), LibreOffice, ClamAV and its signature
-updates, the Arabic fonts and Docker were installed by hand, and a missing
-one was found later, one failed document at a time. ``kazma setup system``
+updates, the Arabic fonts, Node.js and Docker were installed by hand, and a
+missing one was found later, one failed document at a time. ``kazma setup system``
 (``kazma_cli.setup``) does it the way ``kazma setup postgres`` does
 Postgres: check each one, show the plan, ask, run it, record it.
 
@@ -32,19 +32,20 @@ from typing import Any
 
 from kazma_core.postgres_service import Platform, Step
 
-__all__ = ["DEPENDENCIES", "PACKAGES", "TESSDATA", "DepState", "check_all", "fetch_tessdata",
-           "freshclam_agent_plist", "install_plan", "installs_package", "package_is_in",
-           "record_system", "tessdata_folder"]
+__all__ = ["DEPENDENCIES", "PACKAGES", "TESSDATA", "DepState", "DockerReadiness", "check_all",
+           "docker_readiness", "fetch_tessdata", "freshclam_agent_plist", "install_plan", "installs_package",
+           "package_is_in", "record_system", "tessdata_folder", "wsl_install_step"]
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
 #: What Kazma needs from the system, in install order.
-DEPENDENCIES = ("ocr", "office", "malware", "fonts", "docker")
+DEPENDENCIES = ("ocr", "office", "malware", "fonts", "node", "docker")
 LABELS = {
     "ocr": "OCR (Tesseract, Arabic and English)",
     "office": "Office conversion (LibreOffice)",
     "malware": "Malware scan (ClamAV and its daily signature refresh)",
     "fonts": "Arabic fonts",
+    "node": "Node.js (MCP servers started with npx)",
     "docker": "Docker (the document container, the sandbox, SearXNG)",
 }
 
@@ -56,6 +57,7 @@ PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
         "office": ("TheDocumentFoundation.LibreOffice",),
         "malware": ("Cisco.ClamAV",),
         "fonts": None,
+        "node": ("OpenJS.NodeJS.LTS",),
         "docker": ("Docker.DockerDesktop",),
     },
     "brew": {
@@ -63,6 +65,7 @@ PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
         "office": ("--cask", "libreoffice"),
         "malware": ("clamav",),
         "fonts": None,
+        "node": ("node",),
         "docker": ("--cask", "docker"),
     },
     "apt": {
@@ -70,6 +73,7 @@ PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
         "office": ("libreoffice-writer",),
         "malware": ("clamav", "clamav-freshclam"),
         "fonts": ("fonts-noto-core",),
+        "node": ("nodejs", "npm"),
         "docker": ("docker.io",),
     },
     "dnf": {
@@ -77,6 +81,7 @@ PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
         "office": ("libreoffice-writer",),
         "malware": ("clamav", "clamav-update"),
         "fonts": ("google-noto-sans-arabic-fonts",),
+        "node": ("nodejs", "npm"),
         "docker": ("moby-engine",),
     },
 }
@@ -186,6 +191,33 @@ def _check_fonts(os_name: str, run: Runner, which: Callable[[str], str | None]) 
     return DepState("fonts", False, "no Noto Arabic font", ["fonts"])
 
 
+#: The oldest Node.js major the MCP servers Kazma ships are run with.
+NODE_MIN_MAJOR = 18
+
+
+def _npx(which: Callable[[str], str | None]) -> str | None:
+    found = which("npx")
+    if found:
+        return found
+    # Installed in this run: Windows gives a new PATH to new processes only.
+    exe = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "nodejs" / "npx.cmd"
+    return str(exe) if os.name == "nt" and exe.is_file() else None
+
+
+def _check_node(run: Runner, which: Callable[[str], str | None]) -> DepState:
+    npx = _npx(which)
+    if not npx:
+        return DepState("node", False, "Node.js is not installed (no npx)", ["node"])
+    node = which("node") or str(Path(npx).with_name("node.exe" if os.name == "nt" else "node"))
+    code, text = _out(run, [node, "--version"])
+    match = re.match(r"v?(\d+)\.", text.strip())
+    if code != 0 or not match:
+        return DepState("node", None, f"npx is installed; node did not say its version (exit {code})")
+    if int(match.group(1)) < NODE_MIN_MAJOR:
+        return DepState("node", False, f"Node.js {text.strip()} is older than {NODE_MIN_MAJOR}", ["node"])
+    return DepState("node", True, f"Node.js {text.strip()}")
+
+
 def _check_docker(run: Runner, find: Callable[[], str | None]) -> DepState:
     exe = find()
     if not exe:
@@ -211,6 +243,7 @@ def check_all(platform: Platform, *, run: Runner = subprocess.run,
         _check_office(soffice),
         _check_malware(platform.os, run, which),
         _check_fonts(platform.os, run, which),
+        _check_node(run, which),
         _check_docker(run, docker),
     ]
 
@@ -282,7 +315,7 @@ def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
 #: The name each check puts in ``missing`` while the dependency's own package
 #: is not installed (the models and the signature schedule come after it).
 _PACKAGE_MISSING = {"ocr": "tesseract", "office": "libreoffice", "malware": "clamav", "fonts": "fonts",
-                    "docker": "docker"}
+                    "node": "node", "docker": "docker"}
 
 
 def installs_package(step: Step) -> bool:
@@ -355,3 +388,75 @@ def freshclam_agent_plist(freshclam: str) -> str:
 <key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
 </dict></plist>
 """
+
+
+#: Words in a computer's maker or model that say it is a virtual machine.
+_VM_MARKERS = ("virtual machine", "vmware", "virtualbox", "kvm", "qemu", "parallels", "xen")
+
+#: Asks Windows what it is and whether the CPU's virtualization is on, as one
+#: JSON line (CIM: no WMIC, which newer Windows no longer ships).
+_VIRTUALIZATION_QUERY = (
+    "$cs = Get-CimInstance Win32_ComputerSystem; "
+    "$p = Get-CimInstance Win32_Processor | Select-Object -First 1; "
+    "[pscustomobject]@{model = ($cs.Manufacturer + ' ' + $cs.Model); "
+    "hypervisor = [bool]$cs.HypervisorPresent; firmware = [bool]$p.VirtualizationFirmwareEnabled} "
+    "| ConvertTo-Json -Compress")
+
+
+@dataclass
+class DockerReadiness:
+    """Whether Docker can run here, asked before it is installed: ``ok``
+    True, False (it cannot: ``problem`` says why and what to do) or None
+    (cannot tell: ``note`` says what to check). ``wsl_missing``: Windows needs
+    WSL 2 first, and a restart after it."""
+
+    ok: bool | None
+    problem: str = ""
+    note: str = ""
+    wsl_missing: bool = False
+
+
+def docker_readiness(platform: Platform, *, run: Runner = subprocess.run) -> DockerReadiness:
+    """What stands between this machine and a running Docker engine.
+
+    On Windows Docker Desktop runs its engine in WSL 2, which needs the CPU's
+    virtualization: turned on in the firmware, and passed through by the host
+    when Windows is itself a virtual machine (the drill VM, 2026-11-07: no
+    WSL could start there, and Docker Desktop asked for one at every sign-in).
+    Elsewhere Docker runs on the kernel: nothing to ask before the install.
+    With a hypervisor running (Hyper-V on), Windows no longer reports the
+    firmware's switch, so only a switch reported off is a refusal."""
+    if platform.os != "windows":
+        return DockerReadiness(True)
+    import json
+
+    code, text = _out(run, ["powershell", "-NoProfile", "-NonInteractive", "-Command", _VIRTUALIZATION_QUERY])
+    facts: dict[str, Any] = {}
+    if code == 0:
+        lines = [line for line in text.splitlines() if line.strip().startswith("{")]
+        try:
+            facts = json.loads(lines[-1]) if lines else {}
+        except ValueError:
+            facts = {}
+    wsl_code, _ = _out(run, ["wsl", "--status"])
+    wsl_missing = wsl_code != 0
+    model = str(facts.get("model") or "").lower()
+    if any(marker in model for marker in _VM_MARKERS):
+        return DockerReadiness(None, note=(
+            "this Windows is a virtual machine: Docker runs here only when its host passes "
+            "virtualization through (Hyper-V, with the VM off: Set-VMProcessor -VMName <name> "
+            "-ExposeVirtualizationExtensions $true)"), wsl_missing=wsl_missing)
+    if facts and not facts.get("hypervisor") and facts.get("firmware") is False:
+        return DockerReadiness(False, problem=(
+            "virtualization is turned off in this computer's firmware (BIOS/UEFI): turn on Intel VT-x "
+            "or AMD-V there, then run setup again"), wsl_missing=wsl_missing)
+    if not facts:
+        return DockerReadiness(None, note="Windows did not say whether virtualization is on",
+                               wsl_missing=wsl_missing)
+    return DockerReadiness(True, wsl_missing=wsl_missing)
+
+
+def wsl_install_step() -> Step:
+    """WSL 2 for Docker Desktop (Windows asks for a restart after it)."""
+    return Step("install WSL 2 for Docker (restart Windows after it)", ("wsl", "--install", "--no-distribution"),
+                admin=True, dep="docker")

@@ -4088,7 +4088,8 @@ Postgres; a row lost in the move as the negative control).
 
 Resilience plan K2. `kazma setup system` (`kazma_cli.setup._setup_system`)
 checks Tesseract with Arabic and English, LibreOffice, ClamAV and its daily
-signature refresh, the Arabic fonts and Docker (`check_all`; the finders
+signature refresh, the Arabic fonts, Node.js (`npx`, version 18 or later:
+the shipped MCP filesystem server) and Docker (`check_all`; the finders
 `documents.binaries.find_soffice` and `docker_cli.find_docker_cli`), shows the
 plan for the missing ones only (`install_plan`, one table per package
 manager: `PACKAGES`), asks (`-y` for a script), runs it, and records the
@@ -4097,9 +4098,9 @@ result beside the Postgres record (`record_system`, `setup_record.json`
 models come from a pinned tessdata_fast release, kept only when size and
 SHA-256 match (`TESSDATA`, `fetch_tessdata`). The signatures get a daily
 refresh of their own (a `KazmaFreshclam` scheduled task, a launchd job, the
-distribution's freshclam service). `setup.ps1`/`setup.sh` run it once at
-the end (the plan shown once, one question); `kazma doctor` lists each and
-names the command. A second run changes nothing. Gate:
+distribution's freshclam service). `kazma setup install` (21c) runs the
+system steps of the parts it installs; `kazma doctor` lists each and names
+the command. A second run changes nothing. Gate:
 `tests/test_setup_system.py` (every package manager faked; nothing installed
 without a yes; a tampered model refused).
 
@@ -4128,16 +4129,56 @@ control); setup says pytest's own last line when it cannot collect.
 always removes what is there every time it is used again"). A plain `uv sync`
 makes the environment exactly the extras it names; `setup.ps1`/`setup.sh`
 ran one with rag, dev and tui, so a re-run removed whatever came after (the
-Postgres driver among it). Both now run `uv sync --inexact` with their
-defaults (`$DefaultExtras` / `DEFAULT_EXTRAS`: rag, dev, tui, postgres) plus
-every extra the venv already holds (`update.extras_in_this_environment`:
-import markers and the recorded file, never the settings store), and their
-fix-it hints repeat that same command. No shipped `.ps1`/`.sh` runs an exact
-sync, and the defaults hold the suite and what `kazma setup` configures:
-`tests/test_setup_extras_run_the_suite.py` (planted old lines as controls),
-and the 5.1 run in `tests/test_powershell_scripts_start.py` reads the
-arguments the stand-in uv received (`--inexact`, each extra once, one the
-venv held).
+Postgres driver among it). Both now run `uv sync --inexact` with every
+extra the venv already holds (`update.extras_in_this_environment`: import
+markers and the recorded file, never the settings store), and their fix-it
+hints repeat that same command; the install's own extras come from 21c's
+table, never from a list in a script. No shipped `.ps1`/`.sh` runs an exact
+sync, every mode's extras hold the suite, and the Postgres part holds the
+Postgres driver: `tests/test_setup_extras_run_the_suite.py` (planted old
+lines as controls), and the 5.1 run in `tests/test_powershell_scripts_start.py`
+reads the arguments the stand-in uv received (`--inexact`, each extra once,
+those the venv held).
+
+### 21c. Express, Full or Custom: one table of parts (`kazma_core/install_components.py`)
+
+The owner's three installs (2026-11-07, after the drill VM needed a dozen
+manual steps and met about ten fresh-install bugs one at a time). `COMPONENTS`
+is the one table: each part's extras, system dependencies (21b), the parts it
+`needs`, what it `gives` and what Kazma `lacks` without it, whether Express
+holds it. **Express** (the default) is the parts marked `express`: everything
+that needs no Docker. **Full** is the whole table (`full_ids`), never a list
+kept by hand, so a part added joins Full the day it is added. **Custom** is a
+checklist from Express (`toggle`: on brings what a part needs, off takes what
+needs it). Every extra in pyproject.toml belongs to a part or is declared in
+`EXTRA_ALIASES` with why.
+
+`kazma setup install` (`kazma_cli/install.py`) checks every part, then lists
+every problem it can see before anything is done (`_preflight`: disk space,
+the network, an administrator terminal, and `system_deps.docker_readiness`:
+virtualization off in the firmware refuses Docker and what needs it; a
+Windows virtual machine is told what its host must pass through; WSL 2
+missing is installed first and a restart asked for), shows one plan, asks
+once (`-y` asks nothing, the mode included), and runs it: a step is tried
+again, a part that still fails stops only what needs it, and the end says
+what Kazma lacks for each part not installed. The extras step is `uv sync
+--inexact --project <checkout>` in a checkout (the lock's versions) and each
+extra's own requirements with `uv pip` elsewhere -- never `kazma[...]` by
+name (AUD-029). The choice and each part's outcome are recorded
+(`setup_record.json` "install"): a second run takes the recorded mode, and
+a recorded Custom choice, and continues where the first stopped. Every line
+said and every program's output go to `<install>/.kazma/install.log`. With
+the service part installed it waits for Kazma and opens the browser (the
+chat page asks for a provider key). `setup.ps1` opens its own administrator
+window in a terminal (`-NoElevate`), lets uv download a Python when the
+machine has none, syncs the base and hands over (`-Mode`, `-Yes`;
+`setup.sh`: `--mode`, `-y`); without a terminal it passes `--packages-only`.
+Gates: `tests/test_install_modes.py` (a fake Windows machine: Express end to
+end and a second run that does nothing, problems said first, Full where
+Docker cannot run, WSL before Docker, a failing part and what needs it, an
+administrator terminal, Custom kept on a re-run; every extra covered with a
+planted one as the control; Express needs no Docker; the quickstart's table
+equal to `COMPONENTS`).
 
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
