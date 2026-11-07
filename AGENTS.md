@@ -7729,6 +7729,17 @@ Test on every adapter; Telegram and Slack had the same blind spots.
   read) and only after a turn that used no tool -- the handler records the
   turn's tools (`context_metadata["turn_tools"]`). "I can read and summarize
   that" came under a swarm's summary. Gate: `tests/test_gateway_tool_hints.py`.
+- **An example's placeholder is no token** (2026-11-07). setup copies
+  `.env.example` to `.env`, and it shipped
+  `TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here`: every fresh install
+  started Telegram with it and logged "Bot token validation failed" at every
+  start (the drill VM's only errors besides npx). The example sets no
+  credential now, and the chat apps' token variables
+  (`env_files.CHAT_TOKEN_VARIABLES`) are read only through
+  `env_files.env_credential`, which treats a placeholder (`your_...`,
+  `..._here`, `<...>`, `changeme`) as unset and says so once. Gate:
+  `tests/test_env_placeholders.py` (the shipped line and a direct read as
+  negative controls).
 - **No chat app shows a markdown table**: `GatewayManager.send` rewrites
   tables outside code fences as lines (`kazma_gateway/chat_tables.py`) for
   Telegram, Discord and Slack alike. `tests/test_chat_tables.py`.

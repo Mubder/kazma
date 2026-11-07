@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from typing import Any
 
@@ -17,6 +16,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from kazma_core.config_store import ConfigStore, is_vault_ref
+from kazma_core.env_files import env_credential
 from kazma_core.errors import safe_error
 from kazma_core.model_registry import get_model_registry
 from kazma_core.security.url_credentials import (
@@ -244,7 +244,7 @@ def _slack_test_settings(config_store: ConfigStore) -> dict[str, Any]:
 
     app_token = str(config_store.get("connectors.slack.app_token", "") or "").strip()
     if not app_token or _is_masked_placeholder(app_token) or is_vault_ref(app_token):
-        app_token = os.environ.get("SLACK_APP_TOKEN", "").strip()
+        app_token = env_credential("SLACK_APP_TOKEN")
     return {
         "app_token": app_token,
         "channel_id": str(config_store.get("connectors.slack.swarm_channel_id", "") or "").strip(),
@@ -861,14 +861,11 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         ).strip()
         # Match gateway boot: fall back to env when ConfigStore has no token.
         if not token and name == "telegram":
-            token = (
-                os.environ.get("TELEGRAM_BOT_TOKEN", "")
-                or os.environ.get("TELEGRAM_TOKEN", "")
-            ).strip()
+            token = env_credential("TELEGRAM_BOT_TOKEN") or env_credential("TELEGRAM_TOKEN")
         if not token and name == "discord":
-            token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+            token = env_credential("DISCORD_BOT_TOKEN")
         if not token and name == "slack":
-            token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+            token = env_credential("SLACK_BOT_TOKEN")
         if not token:
             return {
                 "success": False,

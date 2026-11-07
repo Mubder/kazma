@@ -224,13 +224,13 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
                 return ""
             try:
                 from kazma_core.config_store import get_config_store
-                import os
+                from kazma_core.env_files import env_credential
                 cs = get_config_store()
                 token = ""
                 if cs:
                     token = cs.get("connectors.telegram.token", "")
                 if not token:
-                    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+                    token = env_credential("TELEGRAM_BOT_TOKEN")
                 return token
             except Exception:
                 return ""

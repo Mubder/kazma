@@ -29,6 +29,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from kazma_core.env_files import env_credential
 from kazma_gateway.allowlists import apply_adapter_allowlists, split_ids
 from kazma_gateway.gateway import BaseAdapter, GatewayManager
 
@@ -143,7 +144,7 @@ def _read_platform_settings(config_store: Any, platform: str) -> _PlatformSettin
         return _PlatformSettings(
             platform,
             enabled,
-            token=_text(config_store, prefix + "token") or os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
+            token=_text(config_store, prefix + "token") or env_credential("TELEGRAM_BOT_TOKEN"),
             webhook_secret=(
                 _text(config_store, prefix + "webhook_secret")
                 or os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
@@ -155,7 +156,7 @@ def _read_platform_settings(config_store: Any, platform: str) -> _PlatformSettin
         return _PlatformSettings(
             platform,
             enabled,
-            token=_text(config_store, prefix + "token") or os.environ.get("DISCORD_BOT_TOKEN", "").strip(),
+            token=_text(config_store, prefix + "token") or env_credential("DISCORD_BOT_TOKEN"),
             swarm_target=_text(config_store, prefix + "swarm_channel_id"),
             allowlists=allowlists,
         )
@@ -167,8 +168,8 @@ def _read_platform_settings(config_store: Any, platform: str) -> _PlatformSettin
         return _PlatformSettings(
             platform,
             enabled,
-            token=bot if bot.startswith("xoxb-") else os.environ.get("SLACK_BOT_TOKEN", "").strip(),
-            app_token=app if app.startswith("xapp-") else os.environ.get("SLACK_APP_TOKEN", "").strip(),
+            token=bot if bot.startswith("xoxb-") else env_credential("SLACK_BOT_TOKEN"),
+            app_token=app if app.startswith("xapp-") else env_credential("SLACK_APP_TOKEN"),
             swarm_target=_text(config_store, prefix + "swarm_channel_id"),
             allowlists=allowlists,
         )
