@@ -40,7 +40,7 @@ source .venv/bin/activate
 ```
 
 ```bash
-# Same extras as setup.sh / setup.ps1 (rag + tests + TUI).
+# A lighter set, by hand (rag + tests + TUI); setup.sh / setup.ps1 install Express, Full or Custom.
 # There is no [cli] extra — kazma-cli is in the wheel.
 pip install -e ".[rag,dev,tui]"
 # or: uv sync --inexact --extra rag --extra dev --extra tui --extra postgres

@@ -254,9 +254,12 @@ reinstalls.
 | Subcommand | Description |
 |---|---|
 | `kazma setup postgres` | PostgreSQL 16 as an OS service that starts at boot and restarts on failure, listening on this machine only, with the `kazma` database, the `kazma_app` role and WAL archiving. Writes `KAZMA_DATABASE_URL` into `.env` (never printed; `--no-env` leaves `.env` alone). `--port` picks the port (5432). `--move-from-container NAME` switches Kazma off a Docker container in the same run: it stops Kazma through its guard once no chat turn runs, copies the container's database in and compares every Kazma table's row count, writes `.env`, starts Kazma on the new database and stops the container (kept). Run again, it replaces an earlier copy only if Kazma never started on it. Needs an elevated shell on Windows, except a move onto a healthy service `.env` already names. |
-| `kazma setup system` | Tesseract with Arabic and English, LibreOffice, ClamAV with a daily signature refresh, the Arabic fonts and Docker: checks each, installs only what is missing. A step that fails is tried three times, 15 seconds apart; one that still fails holds back only its own later steps, and the end names what was not done. |
+| `kazma setup install` | Kazma installed as **Express** (the default: everything that needs no Docker), **Full** (every part) or **Custom** (a checklist; each part says what Kazma lacks without it), from one list of parts ([Quickstart](quickstart)). `--mode express\|full\|custom`, `--with` / `--without` PART (comma-separated), `--list` (every part), `--check` (changes nothing), `--dry-run` (the plan), `-y` (no questions), `--packages-only` (Kazma's Python packages for the mode, the rest shown as the plan), `--no-browser`. It lists every problem it can see before doing anything (disk space, the network, an administrator terminal, whether Docker can run here), asks once, retries a failed step, and stops only what needs a part that failed. The choice and each part's outcome are recorded in `kazma-data/setup_record.json` (a second run continues where the first stopped); the output goes to `.kazma/install.log`. With the service installed it opens the browser on Kazma. `setup.ps1` and `setup.sh` run it. |
+| `kazma setup system` | Tesseract with Arabic and English, LibreOffice, ClamAV with a daily signature refresh, the Arabic fonts, Node.js and Docker: checks each, installs only what is missing. A step that fails is tried three times, 15 seconds apart; one that still fails holds back only its own later steps, and the end names what was not done. |
 
 ```bash
+kazma setup install --list
+kazma setup install --mode full --dry-run
 kazma setup postgres --check
 kazma setup system -y
 ```

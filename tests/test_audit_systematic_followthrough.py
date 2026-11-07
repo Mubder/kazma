@@ -83,6 +83,9 @@ def test_pg_offsite_handler_stays_failed_until_the_copy_works(monkeypatch, tmp_p
 
     dump = tmp_path / "pg.dump"
     dump.write_bytes(b"PGDMP")
+    # A restic repository is set up (with none there is nothing to copy into,
+    # and the task ends: tests/test_pg_offsite_fresh_install.py).
+    monkeypatch.setattr("kazma_core.backup.restic_repo.configured_repos", lambda: ["remote"])
     monkeypatch.setattr(wb, "_snapshot_pg_to_restic", lambda _path: ["remote"])
 
     async def _to_thread(fn, *args, **kwargs):

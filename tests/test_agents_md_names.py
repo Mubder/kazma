@@ -62,6 +62,7 @@ NOT_CODE: dict[str, str] = {
     "health.dependency_down": "a guard event in guard.log",
     "health.needs_setup": "a guard event in guard.log",
     "health.setup_done": "a guard event in guard.log",
+    "install.requirements_unmet": "an ops-alert key (not the kazma_cli.install module)",
     "turn.stuck_open": "an ops-alert key",
     "turn.timed_out": "an ops-alert key",
     "notify.failed": "a guard event (the pager)",

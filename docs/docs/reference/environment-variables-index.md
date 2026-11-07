@@ -210,7 +210,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PG_POOL_TIMEOUT` | `"5"` | `kazma_core.db.postgres_pool` | yes |
 | `KAZMA_PG_RESTORE_REHEARSAL` | (none) | `kazma_core.backup.restore_rehearsal` | yes |
 | `KAZMA_PLAN_MODE` | (none) | `kazma_core.agent.plan_mode` | yes |
-| `KAZMA_PORT` | `"9090"` | `kazma_cli.gateway`, `kazma_cli.main`, `kazma_cli.update` +7 | yes |
+| `KAZMA_PORT` | `"9090"` | `kazma_cli.gateway`, `kazma_cli.install`, `kazma_cli.main` +8 | yes |
 | `KAZMA_PROCESS_PRIORITY` | (none) | `kazma_core.process_priority` | yes |
 | `KAZMA_PRODUCTION` | `""` | `kazma_core.agent.tool_builtins.system`, `kazma_core.documents.config`, `kazma_core.mcp.manager` +10 | yes |
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
@@ -238,7 +238,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | `kazma_core.tools.research_synthesize`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESTIC_PASSWORD` | `""` | `kazma_core.backup.restic_repo` | yes |
 | `KAZMA_RUNTIME_HA` | `"0"` | `kazma_core.runtime_ownership`, `kazma_core.stores.workspaces` | yes |
-| `KAZMA_SEARXNG_URL` | (none) | `kazma_core.guard_dependencies`, `kazma_core.tools.research_readiness`, `kazma_core.tools.web_search` +1 | yes |
+| `KAZMA_SEARXNG_URL` | (none) | `kazma_cli.install`, `kazma_core.guard_dependencies`, `kazma_core.tools.research_readiness` +2 | yes |
 | `KAZMA_SECRET` | `""` | `kazma_cli.main`, `kazma_core.config_store`, `kazma_core.runtime.local_api` +4 | yes |
 | `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | yes |
 | `KAZMA_SEMANTIC_CACHE` | (none) | `kazma_ui.app` | yes |

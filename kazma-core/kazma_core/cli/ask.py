@@ -773,7 +773,7 @@ def handle_acp_request(
 
             version = get_version()
         except Exception:
-            version = "0.20.0"
+            version = "0.21.0"
         return {
             "jsonrpc": "2.0",
             "id": msg_id,

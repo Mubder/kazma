@@ -30,7 +30,7 @@ kazma/
 ├── pyproject.toml       # Single hatchling build (6 packages in the wheel)
 ├── Dockerfile           # Main agent image
 ├── docker-compose.yml   # Host 9090 → container 8000
-├── setup.ps1            # Windows bootstrap (uv sync --inexact rag+dev+tui+postgres)
+├── setup.ps1            # Windows bootstrap (kazma setup install: Express, Full or Custom)
 ├── setup.sh             # Linux / macOS / WSL bootstrap
 └── run.sh               # Minimal E2E reproduction
 ```
@@ -64,7 +64,7 @@ source .venv/bin/activate
 ```
 
 ```bash
-# Same extras as setup.sh / setup.ps1:
+# A lighter set, by hand:
 pip install -e ".[rag,dev,tui]"
 # or: uv sync --inexact --extra rag --extra dev --extra tui --extra postgres
 ```
@@ -74,7 +74,7 @@ There is **no `[cli]` extra** and no `[tracing]` extra. Full extra table: [Quick
 ### 2.2 Windows
 
 ```powershell
-.\setup.ps1            # Python 3.11+, uv, uv sync --inexact rag+dev+tui+postgres, import check
+.\setup.ps1            # uv (and Python), Kazma's packages, kazma setup install (Express, Full or Custom), import check
 ```
 
 ### 2.3 uv (used by `setup.sh` / `run.sh`)

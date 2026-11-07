@@ -448,12 +448,13 @@ def test_setup_script_gets_past_uv_sync_on_windows_powershell(shell, tmp_path):
     assert "Environment synced" in output, output
     assert "aiosqlite not importable" in output, output
     assert done.returncode == 1, output
-    # What uv was asked: remove nothing, and sync the defaults (the Postgres
-    # driver among them) plus what the install already held, each once.
+    # What uv was asked: remove nothing, and keep what the install already
+    # held, each once (the install's own extras come from `kazma setup
+    # install`, from one table: tests/test_install_modes.py).
     calls = (tmp_path / "now-bin" / "uv-args.txt").read_text(encoding="utf-8").split()
     assert calls[:2] == ["sync", "--inexact"], calls
     named = [calls[i + 1] for i, word in enumerate(calls) if word == "--extra"]
-    assert named == ["rag", "dev", "tui", "postgres", "web"], named
+    assert named == ["web", "rag"], named
 
     # The negative control: the uv sync line as it was ends the script at
     # the stand-in's first stderr line.

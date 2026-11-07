@@ -7,10 +7,13 @@ plugin, so pytest refused to start ("unrecognized arguments") on every fresh
 install -- and so did ``scripts/fast_test.py``, which setup tells the owner to
 run. CI installs the ``test`` extra, which had it, so nothing failed there.
 
-Each extra the setup scripts sync, resolved through its self-references
-(``kazma[test]``), must hold every requirement of the ``test`` extra and every
-plugin the pytest configuration needs; a pytest without the plugin is shown
-refusing the real addopts, and the old ``dev`` list is the negative control.
+The extras an install takes come from one table since 2026-11-07
+(``kazma_core.install_components``: Express, Full, Custom); the scripts sync
+Kazma's base and hand over to ``kazma setup install``. The extras of each
+mode, resolved through their self-references (``kazma[test]``), must hold
+every requirement of the ``test`` extra and every plugin the pytest
+configuration needs; a pytest without the plugin is shown refusing the real
+addopts, and the old ``dev`` list is the negative control.
 """
 
 from __future__ import annotations
@@ -77,26 +80,34 @@ def missing_for(extras: set[str], data: dict) -> set[str]:
 
 
 def default_extras(text: str) -> set[str]:
-    """The extras a setup script syncs on a fresh install (``$DefaultExtras``
-    in setup.ps1, ``DEFAULT_EXTRAS`` in setup.sh)."""
+    """The extras a setup script names of its own (``$DefaultExtras`` in
+    setup.ps1, ``DEFAULT_EXTRAS`` in setup.sh, as they were until 2026-11-07)."""
     found = (re.search(r"\$DefaultExtras\s*=\s*@\(([^)]*)\)", text)
              or re.search(r"^DEFAULT_EXTRAS=\(([^)]*)\)", text, re.M))
     return set(re.findall(r"[\w-]+", found.group(1))) if found else set()
 
 
-#: What a ``kazma setup`` command configures Kazma to use, and the extra it
-#: needs: setup postgres writes KAZMA_DATABASE_URL (the drill VM, 2026-11-06:
+#: The part that sets Kazma up to use a service, and the extra it needs:
+#: setup postgres writes KAZMA_DATABASE_URL (the drill VM, 2026-11-06:
 #: written into an environment without psycopg).
-EXTRAS_SETUP_CONFIGURES = {"postgres"}
+EXTRAS_SETUP_CONFIGURES = {"postgres": "postgres"}
 
 
-def test_every_sync_the_setup_scripts_run_holds_the_suite():
+def test_every_install_mode_holds_the_suite_and_the_scripts_name_no_extras():
+    from kazma_core.install_components import by_id, components_for, extras_for
+
     data = _project()
+    for mode in ("express", "full", "custom"):
+        extras = set(extras_for(components_for(mode)))
+        assert not missing_for(extras, data), (mode, sorted(missing_for(extras, data)))
+    for part, extra in EXTRAS_SETUP_CONFIGURES.items():
+        assert extra in by_id(part).extras, part
     for script in SETUP_SCRIPTS:
-        extras = default_extras((ROOT / script).read_text(encoding="utf-8"))
-        assert extras, f"{script} names its default extras"
-        assert not missing_for(extras, data), (script, sorted(extras), sorted(missing_for(extras, data)))
-        assert EXTRAS_SETUP_CONFIGURES <= extras, (script, sorted(extras))
+        text = (ROOT / script).read_text(encoding="utf-8-sig")
+        assert default_extras(text) == set(), f"{script}: the extras come from the install table"
+        assert "kazma_cli setup install" in text or "setup install" in text, script
+    # Negative control: the lines they had.
+    assert default_extras('$DefaultExtras = @("rag", "dev", "tui", "postgres")\n') == {"rag", "dev", "tui", "postgres"}
 
 
 #: A command line that runs uv sync (or tells the owner to): "uv sync" and

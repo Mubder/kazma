@@ -4,12 +4,12 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.11.x  | :white_check_mark: |
-| 0.9.x   | :white_check_mark: (critical security fixes only) |
-| < 0.9   | :x:                |
+| 0.21.x  | :white_check_mark: |
+| 0.20.x  | :white_check_mark: (critical security fixes only) |
+| < 0.20  | :x:                |
 
-Only the latest **0.11.x** release receives feature work and routine security
-patches. **0.9.x** may receive critical fixes for a limited window. Upgrade to
+Only the latest **0.21.x** release receives feature work and routine security
+patches. **0.20.x** may receive critical fixes for a limited window. Upgrade to
 the latest supported version when possible.
 
 ## Threat Model (operator)

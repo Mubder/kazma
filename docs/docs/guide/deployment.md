@@ -283,13 +283,19 @@ Cross-platform path policy and data layout: **[Portability](../ops/portability)*
 
 `setup.ps1` is the deterministic, fail-fast, idempotent Windows bootstrap (PowerShell 5.0+). It:
 
-1. Validates the environment (Python 3.11+, `uv`, `kazma.yaml`).
-2. Syncs the virtual environment from `pyproject.toml`.
-3. Runs a foundation integrity check (core imports + test collection).
+1. Opens an administrator window for itself in a terminal (`-NoElevate` stays).
+2. Installs `uv` when it is missing, and through it a Python when there is none.
+3. Syncs Kazma's base packages from `pyproject.toml`.
+4. Runs `kazma setup install`: Express (the default), Full or Custom
+   ([Quickstart](quickstart)): every problem first, one plan, one question,
+   a record that lets the next run continue where this one stopped.
+5. Runs a foundation integrity check (core imports + test collection).
 
 ```powershell
 .\setup.ps1
-.\setup.ps1 -Debug     # verbose
+.\setup.ps1 -Mode full
+.\setup.ps1 -Mode express -Yes   # no questions
+.\setup.ps1 -Debug               # verbose
 ```
 
 > **PowerShell rule (from AGENTS):** never chain commands with `&&` or `||`. Use `;` and check `$LASTEXITCODE`. The Bash tool in this environment uses Git Bash, not PowerShell.

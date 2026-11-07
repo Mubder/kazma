@@ -63,7 +63,12 @@ def test_setup_scripts_do_not_use_removed_cli_extra():
         text = (_ROOT / rel).read_text(encoding="utf-8")
         assert "--extra cli" not in text, rel
         assert ".[dev,cli" not in text, rel
-        assert "--extra rag" in text, rel
+    # The extras an install takes come from one table (2026-11-07), which
+    # names no [cli] extra and holds the rag extra.
+    from kazma_core.install_components import COMPONENTS
+
+    extras = {e for c in COMPONENTS for e in c.extras}
+    assert "cli" not in extras and "rag" in extras
 
 
 def test_update_cli_knows_every_pyproject_extra():
