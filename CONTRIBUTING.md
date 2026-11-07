@@ -52,7 +52,8 @@ uv run pytest tests/ -v
 
 Kazma uses **uv** as the package manager (not pip or Poetry). There is no
 `[cli]` extra — `kazma-cli` is part of the wheel. Bootstrap scripts
-(`setup.ps1` / `setup.sh`) install Express, Full or Custom (`kazma setup install`).
+(`setup.cmd`, which runs `setup.ps1`, on Windows / `setup.sh`) install Express,
+Full or Custom (`kazma setup install`).
 
 ```bash
 # A lighter set, by hand

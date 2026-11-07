@@ -23,11 +23,15 @@
 
     Idempotent — safe to run multiple times.
 
+    Start it with setup.cmd, beside it: a fresh Windows refuses to run
+    PowerShell script files ("running scripts is disabled on this system"),
+    and setup.cmd runs this one with the policy bypassed for that one process.
+
 .EXAMPLE
-    .\setup.ps1
-    .\setup.ps1 -Mode full
-    .\setup.ps1 -Mode express -Yes
-    .\setup.ps1 -Debug
+    .\setup.cmd
+    .\setup.cmd -Mode full
+    .\setup.cmd -Mode express -Yes
+    .\setup.cmd -Debug
 #>
 
 # No [CmdletBinding()]: it would make this an advanced script, which gets
@@ -222,7 +226,7 @@ if (Test-Path "kazma.yaml") {
     Log-Ok "kazma.yaml found"
 } else {
     Log-Fail "kazma.yaml not found in current directory"
-    Log-Info "Run this script from the Kazma project root: cd kazma; .\setup.ps1"
+    Log-Info "Run it from the Kazma project root: cd kazma; .\setup.cmd"
     exit 1
 }
 
@@ -370,7 +374,7 @@ elseif (-not $Interactive) { $installArgs += "--packages-only" }
 & $VenvPython @installArgs
 $installExit = $LASTEXITCODE
 if ($installExit -ne 0) {
-    Log-Warn "Not everything was installed: run .\setup.ps1 again to finish (it continues where it stopped)"
+    Log-Warn "Not everything was installed: run .\setup.cmd again to finish (it continues where it stopped)"
     Log-Info "What happened is in .kazma\install.log"
 }
 
@@ -397,11 +401,12 @@ Log-Header "5. Setup Complete"
 Write-Host ""
 $ScriptsDir = Split-Path $VenvPython
 Log-Info "First visit:    the chat page asks for a provider key (or edit .env)"
-Log-Info "Run Web UI:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve     # http://127.0.0.1:9090"
+Log-Info "Kazma:          runs as a service when that part is installed (http://127.0.0.1:9090)"
+Log-Info "Without it:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve"
 Log-Info "Run TUI:        & '$(Join-Path $ScriptsDir 'kazma-tui.exe')'"
 Log-Info "Run tests:      $VenvPython scripts\fast_test.py"
 Log-Info "Parts:          $VenvPython -m kazma_cli setup install --list"
-Log-Info "Everything:     .\setup.ps1 -Mode full"
+Log-Info "Everything:     .\setup.cmd -Mode full"
 Log-Info "Docs:           https://kazma.ai/docs/"
 Write-Host ""
 Write-Host "🇰🇼 كاظمه — Built to remember. Built to last." -ForegroundColor Green

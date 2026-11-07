@@ -48,29 +48,31 @@ OpenRouter و[غيرها](https://kazma.ai/ar/docs/configuration/))، أو نم�
 git clone https://github.com/Mubder/kazma.git
 cd kazma
 ./setup.sh
-source .venv/bin/activate
-kazma serve
 ```
 
-**على Windows (PowerShell)**
+**على Windows (PowerShell أو موجّه الأوامر)**
 
 ```powershell
 git clone https://github.com/Mubder/kazma.git
 cd kazma
-.\setup.ps1
-.venv\Scripts\Activate.ps1
-kazma serve
+.\setup.cmd
 ```
 
-افتح **http://127.0.0.1:9090**. في الزيارة الأولى تطلب صفحة المحادثة مزوّدًا
-ومفتاحه ونموذجًا، وبعدها تصبح كاظمه جاهزة للحديث.
+يشغّل `setup.cmd` الملف `setup.ps1` نيابةً عنك: نسخة Windows الجديدة ترفض
+تشغيل سكربتات PowerShell، و`setup.cmd` يتجاوز ذلك لهذا التشغيل وحده دون أن
+يغيّر أي إعداد.
+
+يثبّت الإعداد كاظمه خدمةً، وحين تجيب يفتح **http://127.0.0.1:9090**. في
+الزيارة الأولى تطلب صفحة المحادثة مزوّدًا ومفتاحه ونموذجًا، وبعدها تصبح كاظمه
+جاهزة للحديث. وإن لم تختر الخدمة (في المخصّص) فشغّل كاظمه بنفسك:
+`.venv/bin/kazma serve` (وعلى Windows: `.venv\Scripts\kazma serve`).
 
 يثبّت السكربت [`uv`](https://docs.astral.sh/uv/) إن لم يكن موجودًا (ومعه
 Python إن لم يكن على الجهاز)، ثم يسأل كيف تُثبَّت كاظمه: **السريع** (الافتراضي:
 كل ما لا يحتاج Docker)، أو **الكامل** (كل الأجزاء، ومنها Docker وPostgreSQL)،
 أو **المخصّص** (قائمة تختار منها، ويقول كل جزء ما تفقده كاظمه من دونه). يفحص
 كل شيء أولًا، ويعرض خطة واحدة، ويسأل مرة واحدة، ويسجّل ما فعله، فإذا شغّلته
-مرة أخرى أكمل من حيث توقف. وإذا ثُبّتت الخدمة فتح المتصفح على كاظمه. الأجزاء:
+مرة أخرى أكمل من حيث توقف. الأجزاء:
 [البدء السريع](https://kazma.ai/ar/docs/quickstart/).
 
 ### 2. Docker Compose

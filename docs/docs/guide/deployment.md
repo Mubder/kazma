@@ -281,7 +281,11 @@ and [force-deletion warning](https://kubernetes.io/docs/tasks/run-application/fo
 
 Cross-platform path policy and data layout: **[Portability](../ops/portability)**.
 
-`setup.ps1` is the deterministic, fail-fast, idempotent Windows bootstrap (PowerShell 5.0+). It:
+`setup.ps1` is the deterministic, fail-fast, idempotent Windows bootstrap (PowerShell 5.0+).
+Start it with `setup.cmd`, beside it: a fresh Windows refuses to run PowerShell
+script files ("running scripts is disabled on this system"), and `setup.cmd`
+runs `setup.ps1` with the policy bypassed for that one process, from
+PowerShell or Command Prompt, changing no setting. It:
 
 1. Opens an administrator window for itself in a terminal (`-NoElevate` stays).
 2. Installs `uv` when it is missing, and through it a Python when there is none.
@@ -292,10 +296,10 @@ Cross-platform path policy and data layout: **[Portability](../ops/portability)*
 5. Runs a foundation integrity check (core imports + test collection).
 
 ```powershell
-.\setup.ps1
-.\setup.ps1 -Mode full
-.\setup.ps1 -Mode express -Yes   # no questions
-.\setup.ps1 -Debug               # verbose
+.\setup.cmd
+.\setup.cmd -Mode full
+.\setup.cmd -Mode express -Yes   # no questions
+.\setup.cmd -Debug               # verbose
 ```
 
 > **PowerShell rule (from AGENTS):** never chain commands with `&&` or `||`. Use `;` and check `$LASTEXITCODE`. The Bash tool in this environment uses Git Bash, not PowerShell.

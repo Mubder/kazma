@@ -4180,6 +4180,20 @@ administrator terminal, Custom kept on a re-run; every extra covered with a
 planted one as the control; Express needs no Docker; the quickstart's table
 equal to `COMPONENTS`).
 
+**Windows setup starts from `setup.cmd`** (the clean drill VM, 2026-11-07):
+a Windows client's PowerShell execution policy is Restricted until someone
+changes it, so the README's `.\setup.ps1` was refused before its first line
+("running scripts is disabled on this system"). `setup.cmd` is a batch file,
+which the policy does not cover: it changes to its own folder and starts
+Windows PowerShell with `-ExecutionPolicy Bypass` for that one process,
+passing arguments and the exit code through; no setting is changed, and a
+Group Policy still wins. Every published instruction (README in both
+languages, the docs, setup.ps1's own messages) names `setup.cmd`, and
+`*.cmd` is checked out CRLF whatever the clone's `core.autocrlf` says. Gate:
+`tests/test_windows_setup_command.py` (run under a Restricted process policy;
+`powershell -File setup.ps1` refused there, and a setup.cmd that does not
+change folder, as the negative controls).
+
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
 Kazma is a first-class citizen of the open **agentskills.io** `SKILL.md`

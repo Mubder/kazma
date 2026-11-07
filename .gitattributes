@@ -19,6 +19,12 @@
 # a file at a time, is what produced the phantom diffs above.
 * text=auto
 
+# Command Prompt reads a batch file with LF endings wrongly in places (labels,
+# lines split mid-command), whatever the clone's own core.autocrlf says;
+# setup.cmd is the first command a Windows user runs.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
 # Binary — never convert. No churn: these were never being converted.
 *.png binary
 *.jpg binary

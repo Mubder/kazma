@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased
+
+- **A fresh Windows can run setup.** A Windows client refuses to run
+  PowerShell script files until someone changes its policy, so the README's
+  `.\setup.ps1` stopped before its first line on a clean Windows 11 ("running
+  scripts is disabled on this system"). The Windows command is now
+  `.\setup.cmd`, from PowerShell or Command Prompt: it runs `setup.ps1` with
+  the policy bypassed for that one run and changes no setting. The README
+  (English and Arabic) and the docs say so, and no longer tell you to start
+  Kazma by hand after setup has installed it as a service.
+
 ## 0.21.0 — Install Kazma in one run: Express, Full or Custom (2026-11-07)
 
 Found by installing Kazma on a fresh Windows virtual machine: a dozen manual

@@ -144,7 +144,7 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 - **IDE:** open Web `/ide` or TUI editor; workspace root = active WorkspaceStore / pin / `KAZMA_WORKSPACE` / project `kazma-data/workspace`. MCP filesystem rebinds to the same root on Switch Repo (`workspace_bound`). Clones go to `~/kazma-repos` (or `KAZMA_CLONE_DIR`).
 - **Switch model:** Settings UI or `set_active_model` path — **always change provider with model**.
 - **YOLO / unattended danger:** production disables YOLO unless explicitly allowed; prefer HITL.
-- **Install:** `uv sync` / `pip install -e ".[rag,dev]"`; Windows `setup.ps1`; Docker `docker compose up`.
+- **Install:** `uv sync` / `pip install -e ".[rag,dev]"`; Windows `setup.cmd` (runs `setup.ps1` past a fresh Windows' script policy); Docker `docker compose up`.
 - **Portability:** same code on Windows/Linux/macOS/WSL; project DBs under `kazma-data/`.
 
 ### Tool selection (avoid wasted rounds)

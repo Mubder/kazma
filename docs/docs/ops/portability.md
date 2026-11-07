@@ -50,5 +50,5 @@ Project root is **not** “wherever you happened to `cd`” when a parent direct
 | Target | How |
 |--------|-----|
 | Linux / macOS | `setup.sh` or `uv sync` / `pip install -e ".[rag]"` then `kazma serve` |
-| Windows native | `setup.ps1` + `.venv\Scripts\Activate.ps1` + `kazma serve` |
+| Windows native | `setup.cmd` (runs `setup.ps1`; Kazma then runs as a service, or `.venv\Scripts\kazma serve` without it) |
 | WSL2 | Unix install inside WSL; optional [fixed Windows access](wsl-fixed-access) for host browser |

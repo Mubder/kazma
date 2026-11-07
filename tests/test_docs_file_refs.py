@@ -60,7 +60,6 @@ NOT_REPOSITORY_FILES = {
     "rules.yaml": "created in a project by kazma project init",
     "personality.yaml": "created in a project by kazma project init",
     "tools.yaml": "created in a project by kazma project init",
-    "Activate.ps1": "a virtual environment's activation script",
     "settings.json": "an editor's settings file",
     ".config/zed/settings.json": "Zed's settings file",
     "claude_desktop_config.json": "Claude Desktop's settings file",
