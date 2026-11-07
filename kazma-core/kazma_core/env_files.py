@@ -24,11 +24,39 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["env_file_ladder", "load_env_files"]
+__all__ = ["CHAT_TOKEN_VARIABLES", "env_credential", "env_file_ladder", "load_env_files"]
+
+#: The chat apps' token variables: read only through :func:`env_credential`
+#: (``tests/test_env_placeholders.py``).
+CHAT_TOKEN_VARIABLES = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_TOKEN", "DISCORD_BOT_TOKEN",
+                        "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN")
+
+#: A value that is plainly an example's placeholder, never a credential.
+_PLACEHOLDER = re.compile(r"(?i)^(your[-_].*|.*[-_]here|<[^>]*>|changeme|placeholder|x{4,})$")
+_PLACEHOLDERS_SAID: set[str] = set()
+
+
+def env_credential(name: str) -> str:
+    """The credential variable *name* from the environment, stripped; "" when
+    unset or when it holds an example's placeholder (said once, at INFO).
+
+    setup copies ``.env.example`` to ``.env``, and the example shipped
+    ``TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here``: every fresh install
+    started the Telegram adapter with it and logged "Bot token validation
+    failed" at every start (the drill VM, 2026-11-07). The example is fixed;
+    installs made from it already hold the placeholder."""
+    value = (os.environ.get(name) or "").strip()
+    if value and _PLACEHOLDER.match(value):
+        if name not in _PLACEHOLDERS_SAID:
+            _PLACEHOLDERS_SAID.add(name)
+            logger.info("[env] %s holds an example placeholder, not a credential: treated as not set", name)
+        return ""
+    return value
 
 
 def env_file_ladder(*, include_cwd: bool = True) -> list[Path]:

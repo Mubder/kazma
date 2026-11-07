@@ -35,6 +35,7 @@ import httpx
 
 from kazma_core.background import spawn_background
 from kazma_core.english_count import count_noun
+from kazma_core.env_files import env_credential
 from kazma_gateway.adapters.slack_parse import is_new_message
 from kazma_gateway.adapters.slack_receive import SLACK_REASONS, drop_reason, event_key, where_of
 from kazma_gateway.gateway import (
@@ -94,13 +95,12 @@ class SlackAdapter(BaseAdapter):
         allowed_users: list[str] | None = None,
         allow_all: bool = False,
     ) -> None:
-        import os
 
         super().__init__()
         self.name = "slack"
 
-        self._bot_token = bot_token or os.environ.get("SLACK_BOT_TOKEN", "")
-        self._app_token = app_token or os.environ.get("SLACK_APP_TOKEN", "")
+        self._bot_token = bot_token or env_credential("SLACK_BOT_TOKEN")
+        self._app_token = app_token or env_credential("SLACK_APP_TOKEN")
         self._allowed_teams: set[str] = set(allowed_teams or [])
         self._allowed_channels: set[str] = set(allowed_channels or [])
         # Audit G2c: per-user allowlist (parity with Telegram/Discord). Empty
