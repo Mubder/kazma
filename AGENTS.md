@@ -4211,6 +4211,16 @@ off a terminal or with `NO_COLOR`; the log is plain. Gates in
 question answered by code as the control, the colours, the scripts' fading
 colours with the old ones as the control, the intro read from the page).
 
+**The install downloads the meaning-search model** (the clean VM's first
+start downloaded 4.3 GB before Kazma answered at all: 5.5 minutes, nothing
+on screen). The `meaning_search` part is in place only with its model on
+disk (`embedder.local_model_downloaded`, local cache only), and the plan
+downloads it (`embedder.download_local_model`, the server's own loader).
+The end's wait for Kazma counts the time each try takes (`_finish`: a
+refused connection takes about 2 s on Windows, and 240 s became 325 s).
+Gates: `tests/test_install_modes.py` (the model there as the control; the
+old count of 48 tries).
+
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
 Kazma is a first-class citizen of the open **agentskills.io** `SKILL.md`
